@@ -443,3 +443,70 @@ test("migration 0033 applies on the earlier Layer B schema with rows already pre
     await upgrade.mf.dispose();
   }
 }, 60000);
+
+test("an ineligible page cannot starve later reward claims and each batch stays bounded", async () => {
+  const parse = await seedParse(950, "mobile-suica", "mobile-suica-sf-history", "sf-history");
+  for (let index = 0; index < 3; index++) {
+    await seedBalance(parse, "mobile-suica:other", "sf_balance_after_transaction", 1, "JPY", {});
+    await seedBalance(parse, "mobile-suica:sf", "sf_balance_after_transaction", 1, "USD", {});
+    await seedBalance(parse, "mobile-suica:sf", "unrelated_measure", 1, "JPY", {});
+  }
+  const first = await seedBalance(
+    parse,
+    "mobile-suica:sf",
+    "sf_balance_after_transaction",
+    2,
+    "JPY",
+    {},
+  );
+  const second = await seedBalance(
+    parse,
+    "mobile-suica:sf",
+    "sf_balance_after_transaction",
+    3,
+    "JPY",
+    {},
+  );
+  await publishParse(env.DB, parse);
+  const one = await promoteRewardClaims(env.DB, { limit: 1 });
+  expect(one).toMatchObject({ scanned: 1, promoted: 1, skipped: 0, cursor: first });
+  const two = await promoteRewardClaims(env.DB, { limit: 1 });
+  expect(two).toMatchObject({ scanned: 1, promoted: 1, skipped: 0, cursor: second });
+  expect(await promoteRewardClaims(env.DB, { limit: 1 })).toMatchObject({
+    scanned: 0,
+    promoted: 0,
+  });
+});
+
+test("a lower-id observation published later is promoted without replaying completed claims", async () => {
+  const delayed = await seedParse(951, "v-point", "v-point-balance-info", "balance-info");
+  const low = await seedBalance(
+    delayed,
+    "v-point:common:delayed",
+    "available_point_bucket",
+    2,
+    "V_POINT",
+    {},
+  );
+  const current = await seedParse(952, "v-point", "v-point-balance-info", "balance-info");
+  const high = await seedBalance(
+    current,
+    "v-point:common:current",
+    "available_point_bucket",
+    3,
+    "V_POINT",
+    {},
+  );
+  await publishParse(env.DB, current);
+  expect(await promoteRewardClaims(env.DB)).toMatchObject({ promoted: 1, cursor: high });
+  await publishParse(env.DB, delayed);
+  expect(await promoteRewardClaims(env.DB)).toMatchObject({ scanned: 1, promoted: 1 });
+  expect(
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM reward_bucket_claims WHERE source_fact_kind='balance' AND source_fact_id IN (?,?) AND promotion_release=?",
+    )
+      .bind(low, high, REWARD_PROMOTION_RELEASE)
+      .first<number>("n"),
+  ).toBe(2);
+  expect(await promoteRewardClaims(env.DB)).toMatchObject({ scanned: 0, promoted: 0 });
+});

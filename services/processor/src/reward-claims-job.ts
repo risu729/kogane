@@ -18,7 +18,7 @@ import { validTemporalValue, type TemporalValue } from "../../../packages/domain
 
 /** Bump to re-promote every published row under new mapping rules. */
 export const REWARD_PROMOTION_RELEASE = "reward-promotion-v1";
-/** Rows examined per sweep; the cursor is the highest promoted source fact id. */
+/** Eligible, unpromoted rows examined per sweep. */
 export const REWARD_PROMOTION_BATCH = 500;
 
 interface D1Like {
@@ -128,6 +128,30 @@ interface CandidateRow {
 // `parser_name` on a parse run carries no version suffix; the eligibility
 // filter is the publication projection plus the same successful-run predicate
 // every other reader uses (docs/publication-gate.md).
+// Apply the same source/parser/measure/account/unit eligibility before LIMIT.
+// Otherwise an all-ineligible page never writes a claim and the derived cursor
+// cannot advance. Values come from the mapping rules and remain SQL bindings.
+const candidateBindings: string[] = [];
+const candidateScope = PROMOTION_RULES.map((rule) => {
+  const parameter = (value: string) => {
+    candidateBindings.push(value);
+    return `?${candidateBindings.length + 2}`;
+  };
+  const clauses = [
+    `a.source_id=${parameter(rule.sourceId)}`,
+    `p.parser_name=${parameter(rule.parserName)}`,
+    `b.metric=${parameter(rule.metric)}`,
+  ];
+  if (rule.sourceAccountPrefix) {
+    const prefix = parameter(rule.sourceAccountPrefix);
+    clauses.push(`substr(b.source_account,1,length(${prefix}))=${prefix}`);
+  }
+  if (rule.sourceAccountEquals)
+    clauses.push(`b.source_account=${parameter(rule.sourceAccountEquals)}`);
+  if (rule.unitRef === "JPY") clauses.push(`b.instrument=${parameter("JPY")}`);
+  return `(${clauses.join(" AND ")})`;
+}).join(" OR ");
+
 const CANDIDATE_SQL = `SELECT b.id,b.parse_run_id,a.source_id,p.parser_name,b.source_account,b.metric,
  b.instrument,b.observed_at,b.as_of,b.extra_json,
  d.status AS decimal_status,d.coefficient,d.scale
@@ -138,7 +162,12 @@ const CANDIDATE_SQL = `SELECT b.id,b.parse_run_id,a.source_id,p.parser_name,b.so
  JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
  LEFT JOIN observation_decimal_values d
    ON d.kind='balance' AND d.observation_id=b.id AND d.policy_version='decimal-v1'
- WHERE f.status='success' AND f.failure_count=0 AND b.id>?1
+ WHERE f.status='success' AND f.failure_count=0 AND (${candidateScope})
+ AND NOT EXISTS (
+   SELECT 1 FROM reward_bucket_claims claimed
+   WHERE claimed.source_fact_kind='balance' AND claimed.source_fact_id=b.id
+     AND claimed.promotion_release=?1
+ )
  ORDER BY b.id LIMIT ?2`;
 
 const CURSOR_SQL = `SELECT COALESCE(MAX(source_fact_id),0) AS cursor FROM reward_bucket_claims
@@ -232,7 +261,13 @@ export async function promoteRewardClaims(
   const now = options.now ?? new Date().toISOString();
   const start = await db.prepare(CURSOR_SQL).bind(release).first<{ cursor: number }>();
   const from = start?.cursor ?? 0;
-  const rows = await db.prepare(CANDIDATE_SQL).bind(from, limit).all<CandidateRow>();
+  // Claims are the durable completion record. A lower-id observation may
+  // become published after a higher-id one, so a high-water id cannot decide
+  // eligibility; the indexed anti-join also makes retries idempotent.
+  const rows = await db
+    .prepare(CANDIDATE_SQL)
+    .bind(release, limit, ...candidateBindings)
+    .all<CandidateRow>();
   const statements: D1PreparedStatement[] = [];
   let cursor = from;
   let promoted = 0;
