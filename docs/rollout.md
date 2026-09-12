@@ -260,9 +260,10 @@ rename, because that would make the move unreviewable.
       commit that is not on the default branch. Required reviewers are optional.
 - [ ] Environment **secret** `CLOUDFLARE_API_TOKEN`, scoped to the account that
       holds the Workers, with `Workers Scripts: Edit`, `D1: Edit`,
-      `Workers R2 Storage: Read`, `Containers: Edit` and
+      `Workers R2 Storage: Read`, `Containers: Edit`, `Connectivity Directory: Admin` and
       `Account Settings: Read`. The Container permission is required by the
-      GlobalPass and SBI Shinsei deployments. Add `Queues: Edit` or
+      GlobalPass and SBI Shinsei deployments; Connectivity Directory Admin is
+      required by their existing direct Tunnel VPC bindings. Add `Queues: Edit` or
       `Workers R2 Storage: Edit` **only** when a deployment must create one;
       existing R2 bindings need Read for Wrangler's metadata check. No Workers KV, no
       Tail, no zone permissions.
