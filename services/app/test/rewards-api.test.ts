@@ -1,3 +1,4 @@
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 // /api/v2/rewards behind the rewardsV2 capability (A11). Synthetic data only.
 // The simulation route is a query: these tests prove it writes nothing and
 // performs no exchange, and that the route group is absent while the flag is
@@ -196,6 +197,14 @@ async function get(path: string, enabled = true, method = "GET") {
     } as unknown as Env,
   );
 }
+
+it("serves holdings and legacy expiry in the browser's validated contract", async () => {
+  for (const path of ["/api/v2/rewards/holdings", "/api/v2/rewards/expiry"]) {
+    const response = await get(path);
+    expect(response.status).toBe(200);
+    expect(validApiResponse(path, await response.json())).toBe(true);
+  }
+});
 
 describe("reward reads", () => {
   it("is absent while the flag is off, and /api/meta says so", async () => {
