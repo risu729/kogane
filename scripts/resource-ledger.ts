@@ -31,9 +31,9 @@ export const ACCOUNT_ID = "59ea63cc00914b30ca410b062ae2bb7f";
 /**
  * Live Cloudflare inventory, read 2026-09-13 from account `risu`.
  *
- * Queues, Durable Object namespaces, Email routes and cron triggers are not
- * listable through the API this was read with, so they are derived from the
- * configs instead and marked `unverified-live` in the ledger.
+ * Worker, bucket, D1, KV and Queue existence was checked against the account.
+ * Detailed Durable Object, Email and cron configuration is still derived
+ * from the repository and marked `unverified-live` where appropriate.
  */
 /**
  * Queues a config declares that do not exist in the account yet. They are
