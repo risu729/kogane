@@ -30,17 +30,12 @@ says what has to be true before something on the shorter list is.
 | P8  | The 17 deployed Workers, their DO classes and migration tags, Queue names, crons and the Email route | Cloudflare account `59ea63cc00914b30ca410b062ae2bb7f`                                                                                                                                                                                                                                                                                                                                                         | 07 §1: runtime resource identities never change with a directory rename. 07 §6: a collector is not deleted because no import points at it — its cron, Queue or Email route still starts it (G0-06, G0-07, G0-12).                                   | Per resource, after the ledger shows zero references and zero unprocessed work. `docs/legacy-retirement.md` §3 and §4 are the checklists for `kogane-ingest` and `kogane-collector-r2-importer`, the two that the programme superseded.        |
 | P9  | Synthetic fixtures, byte for byte                                                                    | repository                                                                                                                                                                                                                                                                                                                                                                                                    | Moved with `git mv` and a SHA-256 parity check; excluded from the formatter (G0-04).                                                                                                                                                                | U04 performs the move and proves the bytes.                                                                                                                                                                                                    |
 
-`kogane-globalpass-container-probe-20260827` is live in the account and has **no config in this
-repository**. It cannot be redeployed from here, so deleting it is not reversible by any release of
-this repository; the resource ledger lists it under `liveWorkersWithoutConfig` and
-`scripts/resource-ledger.test.ts` asserts that list by name, so it cannot be forgotten by silence.
-
-**Disposition (U15): delete manually after the owner confirms.** U15 did not delete it and could
-not: nothing here can show what it binds, what calls it or whether it holds state, and a probe
-being named for a date is a strong hint, not evidence. `docs/legacy-retirement.md` §7 has the two
-read-only commands that produce the evidence, and the deletion command to run only afterwards. If
-it turns out to matter, the right action is the opposite one — add its configuration here so it
-stops being invisible.
+The unconfigured experiment `kogane-globalpass-container-probe-20260827` and
+its Container application were retired on 2026-09-13 after owner authorization
+and account/deployed-code verification. No original-data binding or active
+Container instance belonged to it. The production GlobalPass Worker, its
+Container and the shared network were retained. See
+[the retirement record](../docs/legacy-retirement.md#7-retired-globalpass-experiment--2026-09-13).
 
 ## 2. May be rebuilt, and only inside READ
 

@@ -4,7 +4,7 @@ Generated from the `wrangler*.jsonc` files under `apps/`, `experiments/`, `poc/`
 `scripts/resource-ledger.ts`. Do not edit by hand: `scripts/resource-ledger.test.ts`
 regenerates it and fails when this file and the configs disagree.
 
-Live column: Cloudflare account `59ea63cc00914b30ca410b062ae2bb7f`, read 2026-09-11.
+Live column: Cloudflare account `59ea63cc00914b30ca410b062ae2bb7f`, read 2026-09-13.
 Queues, Durable Object namespaces, cron triggers and Email routes are not listable through that
 API, so they are derived from the configs and are **unverified against the live account**.
 
@@ -16,7 +16,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 - Wrangler configs: 40
 - Distinct Workers that exist in the account: 17
-- Live Workers with no config in this repository: kogane-globalpass-container-probe-20260827
+- Live Workers with no config in this repository: —
 - Live R2 buckets no config references: —
 - Workers with an `email()` handler (Email routes are configured outside this repository): kogane-vpoint-collector-poc
 
@@ -52,7 +52,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 | queue | producers | consumers | dead letter | exists |
 | --- | --- | --- | --- | --- |
-| kogane-collection-terminals | — | kogane-observation-pipeline | kogane-collection-terminals-dlq | to be created by the first deploy (U08) |
+| kogane-collection-terminals | — | kogane-observation-pipeline | kogane-collection-terminals-dlq | declared (unverified) |
 | kogane-r2-outbox-reconciler | kogane-collector-r2-importer | kogane-collector-r2-importer | kogane-r2-outbox-reconciler-dlq | declared (unverified) |
 | kogane-vpass-raw-evidence-import | kogane-vpass-collector-poc | kogane-vpass-collector-poc | kogane-vpass-raw-evidence-import-dlq | declared (unverified) |
 
