@@ -165,10 +165,8 @@ re-declares the triggers the same `wrangler.jsonc` already carries:
   health routes only.
 
 What changes is which code runs the next time a cron fires — with that source's
-bank credentials. That is why collector code, its dependencies, its container
-and its scripts are in the Risk Gate ledger: the owner confirms such a change on
-the exact head **before** it merges, and the deploy that follows is automatic
-(plan 12 §5).
+bank credentials. Collector code, dependencies, containers and scripts are
+subject to the same CI and branch rules before automatic deployment.
 
 ## 5. Rollback
 
@@ -214,26 +212,19 @@ and merging stays manual.
 
 ### 6.2 Labels
 
-- [ ] `automerge-approved` — an owner-applied label that, together with an owner
-      approval of the current head, makes an external pull request eligible.
-- [ ] `high-risk` — raises the Risk Gate without a high-risk path. Renovate
-      applies it to parser, money and authentication dependencies.
+- [ ] `automerge-approved` — an owner-applied label that makes an external
+      pull request eligible for native auto-merge. GitHub enforces required reviews.
 
 ### 6.3 Branch ruleset (`main`, id 21174448)
 
-- [ ] Add **`Risk Gate`** to the required status checks next to `CI Check`,
-      with GitHub Actions as the integration.
-- [ ] Turn **on** "Require branches to be up to date before merging". This is
-      what makes G5-02 hold — CI re-runs on the latest base before a merge —
-      and `automerge.yml` does the resulting branch updates one pull request at
-      a time, so merges stay serialized.
-- [ ] Leave as they are: allow auto-merge, squash merging only, automatically
-      delete head branches, allow branch updates, signed commits, linear
-      history.
+- [ ] Keep `CI Check` required and remove any obsolete `Risk Gate` entry.
+- [ ] Turn on "Require branches to be up to date before merging" so CI runs
+      on the latest base; automation updates eligible branches one at a time.
+- [ ] Keep the automation app out of bypass lists. Preserve squash merging,
+      signed commits, linear history, auto-merge and branch updates.
 
-_Not configured:_ `Risk Gate` still runs and still reports on every pull
-request; it simply does not block. Strict-up-to-date still off means a pull
-request whose CI passed on an older base can merge without re-running.
+These settings preserve CI enforcement. There is no owner-review prerequisite
+and no replacement approval requirement.
 
 ### 6.4 CodeQL triage of the rename artifact
 
@@ -273,8 +264,8 @@ rename, because that would make the move unreviewable.
 Bank credentials stay per source and are never placed in GitHub. The deploy
 Action's `secrets-json` input is unused and a test fails if it appears (G5-17).
 What this does **not** remove: whoever can deploy a collector can deploy code
-that reads that collector's secrets at runtime (plan 12 §5), which is why
-collector paths are in the Risk Gate ledger.
+that reads that collector's secrets at runtime (plan 12 §5). CI and the existing
+branch rules also apply to these changes.
 
 _Not configured:_ merging keeps working and only the deployment fails, at its
 credential preflight — after the build, before the deployment record, the

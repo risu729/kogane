@@ -427,10 +427,8 @@ jobs:
       # `scheduled` event is triggered by a deploy, so a release never starts a
       # collection, a re-authentication or a backfill (docs/ci-cd.md, G5-14).
       # Two of them build a container image, so the runner needs Docker — the
-      # same requirement `mise run dry-run` already has. A change to what a
-      # collector bundles needs the owner's approval on the head before it can
-      # merge (infra/risk-paths.json), which is where a credential-consuming
-      # change is confirmed; the upload itself is automatic.
+      # same requirement `mise run dry-run` already has. Native branch rules
+      # govern reviews of collector changes; the upload itself is automatic.
       - name: Deploy the GlobalPass collector
         id: deploy-globalpass-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker')

@@ -20,14 +20,6 @@
       groupName: "typescript",
     },
     {
-      // Parsers, money handling and authentication decide what the evidence
-      // browser shows and who may see it. These updates keep automerge, but
-      // the label makes the Risk Gate require the owner's approval on the exact
-      // head (infra/risk-paths.json), instead of blocking automerge globally.
-      matchPackageNames: ["parse5", "jsonc-parser", "jose", "zod", "drizzle-orm"],
-      addLabels: ["high-risk"],
-    },
-    {
       matchFileNames: ["services/**", "packages/**"],
       addLabels: ["deployed"],
     },

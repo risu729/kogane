@@ -143,7 +143,7 @@ any tracked file calls a package script.
 - Ruff checks and formats Python probes without executing them. Typos and hk
   hygiene checks cover spelling, whitespace, merge markers, and file integrity.
 - `ci:root` runs the guards under `tasks/_lib/` and `scripts/`: the manifest
-  and task-runner guard, the auto-merge and risk-gate decisions of
+  and task-runner guard, the auto-merge decisions of
   [CI/CD automation](ci-cd.md), the publication-gate predicate allow-list, and
   the import boundaries of
   [package layout](package-layout.md) (no deployed or shared module may import

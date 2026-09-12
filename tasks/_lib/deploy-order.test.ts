@@ -210,7 +210,7 @@ describe("consumers deploy before producers (G5-14)", () => {
   test("every collector is a CD target, and only the experiments are not", () => {
     // Deploying a collector replaces its script; it starts no collection, no
     // re-authentication and no backfill, and a change to what one bundles
-    // needs the owner's approval before it merges (infra/risk-paths.json).
+    // passes CI and the existing branch rules before it merges.
     // What stays out of CD is the probe role: the experiments and the
     // bootstrap, audit and test-harness configurations.
     const producers = order.workers.filter((worker) => worker.role === "producer");

@@ -13,10 +13,6 @@ on:
       - synchronize
       - labeled
       - unlabeled
-  pull_request_review:
-    types:
-      - submitted
-      - dismissed
   # A merge moves main, so every armed pull request is behind the ruleset's
   # up-to-date requirement; the sweep updates the oldest eligible one (G5-02).
   push:

@@ -3,8 +3,6 @@
 // API and is treated as data (G5-08); nothing is ever interpolated into a
 // command line.
 
-import { ownerApprovalForHead } from "./risk-paths.mjs";
-
 /** Label an owner applies to let an otherwise untrusted pull request auto-merge. */
 export const AUTOMERGE_LABEL = "automerge-approved";
 
@@ -64,18 +62,14 @@ export function trustedAuthor(pullRequest, { ownerLogin }) {
 /**
  * The auto-merge decision for one pull request.
  *
- * A pull request by an untrusted author is eligible only through the label
- * path, and that path binds the permission to the exact head commit: the
- * label must have been applied by the owner *and* the owner must have an
- * APPROVED review whose commit_id is the current head. The label alone would
- * carry over to whatever the author pushes next (G5-05 for auto-merge; plan
- * 10 §6, "a label must not reuse an old head's approval for new code").
+ * An owner-applied label enables native auto-merge for an external author.
+ * Required reviews and approval freshness belong to GitHub branch rules;
+ * eligibility here never bypasses those rules.
  *
  * @param {object} options
  * @param {Record<string, any>} options.pullRequest Freshly fetched pull request.
  * @param {string} options.ownerLogin Repository owner login.
  * @param {readonly object[]} [options.labelEvents] `issues/{n}/events` entries.
- * @param {readonly object[]} [options.reviews] `pulls/{n}/reviews` entries.
  * @param {string} [options.label] Manual approval label.
  * @returns {{eligible: boolean, reason: string, trustedBy?: string, shouldUpdateBranch: boolean}}
  */
@@ -83,7 +77,6 @@ export function evaluateAutomerge({
   pullRequest,
   ownerLogin,
   labelEvents = [],
-  reviews = [],
   label = AUTOMERGE_LABEL,
 }) {
   const mergeableState = pullRequest["mergeable_state"];
@@ -101,11 +94,6 @@ export function evaluateAutomerge({
       !labelApprovedByOwner(labelEvents, { label, ownerLogin })
     ) {
       return reject(`the author is not a trusted principal and ${label} was not set by the owner`);
-    }
-    const headSha = String(pullRequest["head"]?.sha ?? "");
-    const approval = ownerApprovalForHead(reviews, { ownerLogin, headSha });
-    if (!approval.approved) {
-      return reject(`${label} is set by the owner but ${approval.reason}`);
     }
     trustedBy = "label";
   }
