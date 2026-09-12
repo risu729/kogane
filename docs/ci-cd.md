@@ -596,12 +596,13 @@ The integrator cannot create any of these. The repository owner must, once:
    scoped to the account that holds the Workers, with:
    - `Workers Scripts: Edit` — upload the Workers;
    - `D1: Edit` — apply the migrations;
+   - `Workers R2 Storage: Read` — Wrangler checks existing bucket metadata before upload;
    - `Containers: Edit` — publish the GlobalPass and SBI Shinsei container images and deployments;
    - `Account Settings: Read` — Wrangler reads the account.
 
    Add `Queues: Edit` or `Workers R2 Storage: Edit` **only** if a deployment
-   must create a queue or a bucket; binding to ones that already exist does
-   not need them. Do not give the token Workers KV, Tail or zone permissions.
+   must create a queue or a bucket; existing R2 bindings still require the
+   read permission above. Do not give the token Workers KV, Tail or zone permissions.
    This token is the whole of CD's Cloudflare authority: a Worker's own
    runtime secrets are set out of band and are never written by a workflow.
 
