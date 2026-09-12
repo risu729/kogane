@@ -1,3 +1,4 @@
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 // The reward routes served from the READ database (unified plan 04 §2, 05 §7;
 // U16), over HTTP, with both sets of migrations applied to local D1s.
 //
@@ -240,6 +241,7 @@ describe("the reward routes over the READ database", () => {
 
     // Read again: the same published snapshot, the same rows. Nothing was
     // recomputed from the wall clock between the two requests.
+    expect(validApiResponse("/api/v2/rewards/expiry", first)).toBe(true);
     const again = (await (await call("/api/v2/rewards/expiry")).json()) as ExpiryPage;
     expect(again).toEqual(first);
   });

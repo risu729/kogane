@@ -1,3 +1,13 @@
+import { validQuantity } from "../../domain/src/values.ts";
+import { validTemporalValue, validInstantText, validLocalDateText } from "../../domain/src/time.ts";
+import type {
+  RewardBucketRow,
+  RewardHoldingRow,
+  RewardExpiryRow,
+  RewardReadExpiryRow,
+  RewardPage,
+  RewardReadExpiryPage,
+} from "./reward-contract.ts";
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
@@ -530,10 +540,138 @@ const balanceHistoryPage: Check<BalanceHistoryPage> = (value): value is BalanceH
   withoutNetWorth(value) &&
   value.items.length <= value.page.limit;
 
+const rewardBucket = object<RewardBucketRow>({
+  bucketRef: text,
+  kind: text,
+  restrictionRefs: array(text),
+  unitRef: text,
+  quantity: validQuantity,
+  observedExpiry: nullable(validTemporalValue),
+  observedAt: validTemporalValue,
+  sourceFactRefs: array(text),
+});
+const rewardHolding = object<RewardHoldingRow>({
+  programId: text,
+  programRef: text,
+  institutionRef: text,
+  sourceId: text,
+  holdingRef: text,
+  holdingKind: literal("reward-points", "prepaid-balance"),
+  unitRef: text,
+  termsEvidenceRefs: array(text),
+  consumable: validQuantity,
+  byKind: array(
+    object<RewardHoldingRow["byKind"][number]>({
+      kind: text,
+      quantity: validQuantity,
+      bucketRefs: array(text),
+    }),
+  ),
+  excluded: array(
+    object<RewardHoldingRow["excluded"][number]>({ bucketRef: text, kind: text, reasonCode: text }),
+  ),
+  buckets: array(rewardBucket),
+  qualificationMeasures: array(
+    object<RewardHoldingRow["qualificationMeasures"][number]>({
+      measureRef: text,
+      metricRef: text,
+      quantity: validQuantity,
+      period: validTemporalValue,
+      consumable: literal(false),
+    }),
+  ),
+  membership: array(
+    object<RewardHoldingRow["membership"][number]>({
+      tier: text,
+      valid: validTemporalValue,
+      source: text,
+      evidenceRefs: array(text),
+    }),
+  ),
+  valueModel: object<RewardHoldingRow["valueModel"]>({
+    netAssetEligible: literal(false),
+    cashLikeRedemptionEstimate: (v): v is null => v === null,
+    reasonCode: text,
+  }),
+});
+const rewardState = literal("computed", "partial", "conflict", "needs-rule-verification");
+const rewardBasis = literal("provider-observed", "policy-estimated", "unknown");
+const rewardExpiry = object<RewardExpiryRow>({
+  holdingRef: text,
+  programId: text,
+  ruleRef: text,
+  family: text,
+  verification: text,
+  state: rewardState,
+  uncertaintyCodes: array(text),
+  deadlineZone: text,
+  deadlineZoneBasis: text,
+  rows: array(
+    object<RewardExpiryRow["rows"][number]>({
+      bucketRef: text,
+      quantity: validQuantity,
+      deadline: validTemporalValue,
+      basis: rewardBasis,
+      providerObserved: nullable(validTemporalValue),
+      policyEstimated: nullable(validTemporalValue),
+      reasonCodes: array(text),
+    }),
+  ),
+  sourceExpiryRefs: array(text),
+});
+function rewardPage<T>(row: Check<T>): Check<RewardPage<T>> {
+  return object<RewardPage<T>>({
+    rows: array(row),
+    coverage: object<RewardPage<T>["coverage"]>({
+      limit: identifier,
+      truncated: boolean,
+      nextOffset: nullableIdentifier,
+    }),
+  });
+}
+const rewardReadExpiry = object<RewardReadExpiryRow>({
+  holdingRef: text,
+  programId: text,
+  bucketRef: text,
+  bucketKind: text,
+  ruleRef: text,
+  state: rewardState,
+  basis: rewardBasis,
+  expiresOn: nullable(validLocalDateText),
+  quantity: validQuantity,
+  providerObserved: nullable(validTemporalValue),
+  policyEstimated: nullable(validTemporalValue),
+  reasonCodes: array(text),
+  uncertaintyCodes: array(text),
+  basisRefs: array(text),
+});
+const rewardReadPage = object<RewardReadExpiryPage>({
+  rows: array(rewardReadExpiry),
+  page: object<RewardReadExpiryPage["page"]>({
+    limit: identifier,
+    hasMore: boolean,
+    nextCursor: nullableText,
+  }),
+  snapshot: object<RewardReadExpiryPage["snapshot"]>({
+    snapshotId: hash,
+    evaluatedAt: validInstantText,
+    evaluationCalendar: text,
+    ruleSetDigest: hash,
+    ruleCount: identifier,
+    claimsRelease: text,
+    claimsHighWater: identifier,
+    release: text,
+  }),
+});
+
 // A response may say which interpretation it was computed under; when it does,
 // the context must be well-formed.
 const context = optional(validInterpretationContext);
 const endpoints: Record<string, Check<unknown>> = {
+  "/api/v2/rewards/holdings": rewardPage(rewardHolding),
+  "/api/v2/rewards/expiry": (value): value is unknown =>
+    record(value) &&
+    ("snapshot" in value ? rewardReadPage(value) : rewardPage(rewardExpiry)(value)),
   "/api/meta": metadata,
   "/api/overview": overview,
   "/api/transactions": object<{

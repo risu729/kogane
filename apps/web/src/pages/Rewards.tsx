@@ -15,6 +15,8 @@ import {
   useRewardExpiry,
   useRewardHoldings,
   type RewardExpiryRow,
+  type RewardReadExpiryRow,
+  type RewardExpiryPage,
   type RewardHoldingRow,
   type RewardQuantity,
   type RewardTime,
@@ -281,6 +283,69 @@ function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
   );
 }
 
+function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
+  return (
+    <Panel
+      title={`${row.programId} ／ ${BUCKET_LABELS[row.bucketKind] ?? row.bucketKind}`}
+      note={
+        <>
+          判定: {STATE_LABELS[row.state] ?? row.state} ／ 規約: {row.ruleRef}
+        </>
+      }
+    >
+      <dl>
+        <dt>数量</dt>
+        <dd>
+          <Quantity quantity={row.quantity} />
+        </dd>
+        <dt>期限</dt>
+        <dd>{row.expiresOn ?? "期限未確認"}</dd>
+        <dt>根拠</dt>
+        <dd>{BASIS_LABELS[row.basis] ?? row.basis}</dd>
+        <dt>取得元の表示</dt>
+        <dd>
+          <Time time={row.providerObserved} />
+        </dd>
+        <dt>規約からの算定</dt>
+        <dd>
+          <Time time={row.policyEstimated} />
+        </dd>
+      </dl>
+      <Codes codes={[...new Set([...row.reasonCodes, ...row.uncertaintyCodes])]} />
+    </Panel>
+  );
+}
+
+/** The READ endpoint returns one row per bucket, not the legacy grouped DTO. */
+export function RewardExpiryResults({ data }: { data: RewardExpiryPage }): ReactNode {
+  if ("snapshot" in data)
+    return (
+      <>
+        <p className="footnote">
+          判定時点: {data.snapshot.evaluatedAt} ／ 暦の基準: {data.snapshot.evaluationCalendar}
+        </p>
+        {data.rows.map((row) => (
+          <ReadExpiry key={`${row.holdingRef}:${row.ruleRef}:${row.bucketRef}`} row={row} />
+        ))}
+        {data.page.hasMore ? (
+          <p className="footnote">表示は先頭 {data.page.limit} 件です。残りは取得していません。</p>
+        ) : null}
+      </>
+    );
+  return (
+    <>
+      {data.rows.map((row) => (
+        <Expiry key={`${row.holdingRef}:${row.ruleRef}`} row={row} />
+      ))}
+      {data.coverage.truncated ? (
+        <p className="footnote">
+          表示は先頭 {data.coverage.limit} 件です。残りは取得していません。
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 export function RewardsPage(): ReactNode {
   const holdings = useRewardHoldings();
   const expiry = useRewardExpiry();
@@ -320,9 +385,7 @@ export function RewardsPage(): ReactNode {
       >
         {(data) => (
           <>
-            {data.rows.map((row) => (
-              <Expiry key={`${row.holdingRef}${row.ruleRef}`} row={row} />
-            ))}
+            <RewardExpiryResults data={data} />
             <p className="footnote">
               期限が確認できない残高も一覧から外さず「期限未確認」として残しています。
               交換の可否や必要な手続きは、この画面では実行できません。
