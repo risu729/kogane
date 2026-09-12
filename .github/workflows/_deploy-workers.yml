@@ -396,30 +396,6 @@ jobs:
           config: wrangler.demo.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      - name: Deploy the legacy ingest adapter
-        id: deploy-ingest
-        # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
-        # from the job's `steps` context to record, per Worker, what happened.
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'ingest')
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
-        with:
-          mode: production
-          working-directory: services/raw-evidence
-          config: wrangler.jsonc
-          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      - name: Deploy the collector importer
-        id: deploy-importer
-        # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
-        # from the job's `steps` context to record, per Worker, what happened.
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'importer')
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
-        with:
-          mode: production
-          working-directory: services/collector-r2-importer
-          config: wrangler.jsonc
-          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # The collectors, in the ledger's order, after every consumer of the
       # shared contract (unified plan 11 §4). Uploading a collector replaces
       # its script and nothing else: its crons stay as its configuration
@@ -551,7 +527,7 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Postcheck the public health routes
         # The Workers this run deployed whose health route needs no
-        # authentication: the ingest adapter and every collector with a
+        # authentication: every collector with a
         # `/health`. 200 is not enough on its own — the answer must carry the
         # identity field the ledger names, so an edge error page or an empty
         # body is a failure rather than a pass (unified plan 11 §6,
