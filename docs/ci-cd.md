@@ -484,7 +484,7 @@ a writer starts using it. The five consumers come first, then every collector:
 | 9     | `kogane-myjcb-collector-poc`      | `services/collector-myjcb`          | `/health`                   | unauthenticated |
 | 10    | `kogane-sbi-collector-poc`        | `services/collector-sbi-securities` | `/health`                   | unauthenticated |
 | 11    | `kogane-sbi-shinsei-...-poc`      | `services/collector-sbi-shinsei`    | `/health`                   | unauthenticated |
-| 12    | `kogane-sbi-vc-session-poc`       | `services/collector-sbi-vc-trade`   | `/health`                   | unauthenticated |
+| 12    | `kogane-sbi-vc-session-poc`       | `services/collector-sbi-vc-trade`   | `/healthz`                  | unauthenticated |
 | 13    | `kogane-smbc-direct-backfill-poc` | `services/collector-smbc-direct`    | none                        | —               |
 | 14    | `kogane-sony-bank-collector-poc`  | `services/collector-sony-bank`      | `/health`                   | unauthenticated |
 | 15    | `kogane-vpass-collector-poc`      | `services/collector-vpass`          | `/health`                   | unauthenticated |
@@ -552,10 +552,11 @@ the route, `healthAuth` is how CD authenticates it (`access` or `none`), and
 with an empty `healthPath` is not requested at all, and the ledger says so
 rather than pretending to check something.
 
-**The public half.** `kogane-ingest` and every collector with a `/health` are
+**The public half.** `kogane-ingest` and each declared public health route are
 requested over their `workers.dev` hostname, unauthenticated, and must answer
 200 **with** the identity field the ledger names (`schemaVersion` for most,
-`service` for Vpass, `waitingForHuman` for SBI VC Trade). 200 alone is not a
+`service` for Vpass). SBI VC Trade uses `/healthz`, a static liveness answer;
+its existing `/health` remains protected by the collector admin token. 200 alone is not a
 pass: an edge error page and an empty body are both 200-shaped.
 
 **The authenticated half.** The App authenticates every request through
@@ -667,12 +668,16 @@ The integrator cannot create any of these. The repository owner must, once:
    scoped to the account that holds the Workers, with:
    - `Workers Scripts: Edit` — upload the Workers;
    - `D1: Edit` — apply the migrations;
+   - `Workers R2 Storage: Read` — Wrangler checks existing bucket metadata before upload;
    - `Containers: Edit` — publish the GlobalPass and SBI Shinsei container images and deployments;
+   - `Connectivity Directory: Admin` — deploy their existing direct Tunnel VPC bindings;
    - `Account Settings: Read` — Wrangler reads the account.
 
    Add `Queues: Edit` or `Workers R2 Storage: Edit` **only** if a deployment
-   must create a queue or a bucket; binding to ones that already exist does
-   not need them. Do not give the token Workers KV, Tail or zone permissions.
+   must create a queue or a bucket; existing R2 bindings still require the
+   read permission above. Do not give the token Workers KV, Tail or zone permissions.
+   Direct Tunnel bindings require Admin rather than Bind
+   ([Cloudflare VPC roles](https://developers.cloudflare.com/workers-vpc/api/#required-roles)).
    This token is the whole of CD's Cloudflare authority: a Worker's own
    runtime secrets are set out of band and are never written by a workflow.
 
