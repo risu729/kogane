@@ -26,6 +26,12 @@ are recorded with the rollout PR. Collection target activation does not itself
 start a provider login, and does not prove every source's next scheduled run.
 Legacy retirement and a destructive READ-loss exercise remain separate work.
 
+Initial production observation also exposed a reward-promotion stall: an
+ineligible first page never advanced the claim-derived cursor. The job now
+selects eligible, unpromoted facts before applying its batch limit. Stored
+claims are the completion record, including for facts published out of ID
+order; no migration or claim rewrite is needed.
+
 The table below retains the original **safe default** column for rollback; the
 production settings in `services/*/wrangler.jsonc` are the deployment authority.
 
