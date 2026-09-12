@@ -33,19 +33,19 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 | bucket | live | bound by |
 | --- | --- | --- |
-| kogane-globalpass-collector-poc | yes | kogane-collector-r2-importer<br>kogane-global-pass-layer-b-audit-local<br>kogane-globalpass-collector-poc |
-| kogane-mobile-suica-collector-poc | yes | kogane-collector-r2-importer<br>kogane-mobile-suica-collector-poc |
-| kogane-moneyforward-collector-poc | yes | kogane-collector-r2-importer<br>kogane-moneyforward-collector-poc<br>kogane-moneyforward-layer-b-audit-local<br>kogane-moneyforward-r2-contract-audit-local |
-| kogane-myjcb-collector-poc | yes | kogane-collector-r2-importer<br>kogane-myjcb-collector-poc<br>kogane-myjcb-r2-layer-b-audit-local |
+| kogane-globalpass-collector-poc | yes | kogane-collector-r2-importer<br>kogane-global-pass-layer-b-audit-local |
+| kogane-mobile-suica-collector-poc | yes | kogane-collector-r2-importer |
+| kogane-moneyforward-collector-poc | yes | kogane-collector-r2-importer<br>kogane-moneyforward-layer-b-audit-local<br>kogane-moneyforward-r2-contract-audit-local |
+| kogane-myjcb-collector-poc | yes | kogane-collector-r2-importer<br>kogane-myjcb-r2-layer-b-audit-local |
 | kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-ingest<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-smbc-direct-backfill-poc<br>kogane-sony-bank-collector-poc<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
-| kogane-sbi-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-collector-poc |
-| kogane-sbi-shinsei-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-shinsei-r2-layer-b-audit-local |
-| kogane-sbi-vc-trade-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-vc-r2-layer-b-audit-local<br>kogane-sbi-vc-session-poc |
-| kogane-smbc-direct-backfill-poc | yes | kogane-collector-r2-importer<br>kogane-smbc-direct-backfill-poc<br>kogane-smbc-direct-r2-contract-audit-local<br>kogane-smbc-direct-r2-layer-b-audit-local |
-| kogane-sony-bank-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sony-bank-collector-poc<br>kogane-sony-bank-r2-layer-b-audit-local |
-| kogane-vpass-collector-poc | yes | kogane-collector-r2-importer<br>kogane-vpass-collector-poc<br>kogane-vpass-identity-backfill-local<br>kogane-vpass-r2-layer-b-audit-local |
-| kogane-vpoint-collector-poc | yes | kogane-collector-r2-importer<br>kogane-vpoint-collector-poc<br>kogane-vpoint-r2-contract-audit-local |
-| kogane-vpoint-pay-collector-poc | yes | kogane-collector-r2-importer<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc<br>kogane-vpoint-pay-email-r2-contract-audit-local<br>kogane-vpoint-pay-r2-layer-b-audit-local<br>kogane-vpoint-r2-contract-audit-local |
+| kogane-sbi-collector-poc | yes | kogane-collector-r2-importer |
+| kogane-sbi-shinsei-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-shinsei-r2-layer-b-audit-local |
+| kogane-sbi-vc-trade-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-vc-r2-layer-b-audit-local |
+| kogane-smbc-direct-backfill-poc | yes | kogane-collector-r2-importer<br>kogane-smbc-direct-r2-contract-audit-local<br>kogane-smbc-direct-r2-layer-b-audit-local |
+| kogane-sony-bank-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sony-bank-r2-layer-b-audit-local |
+| kogane-vpass-collector-poc | yes | kogane-collector-r2-importer<br>kogane-vpass-identity-backfill-local<br>kogane-vpass-r2-layer-b-audit-local |
+| kogane-vpoint-collector-poc | yes | kogane-collector-r2-importer<br>kogane-vpoint-r2-contract-audit-local |
+| kogane-vpoint-pay-collector-poc | yes | kogane-collector-r2-importer<br>kogane-vpoint-pay-email-r2-contract-audit-local<br>kogane-vpoint-pay-r2-layer-b-audit-local<br>kogane-vpoint-r2-contract-audit-local |
 | test | no | kogane-evidence-browser-test |
 
 ## Queues
@@ -54,7 +54,6 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | --- | --- | --- | --- | --- |
 | kogane-collection-terminals | — | kogane-observation-pipeline | kogane-collection-terminals-dlq | declared (unverified) |
 | kogane-r2-outbox-reconciler | kogane-collector-r2-importer | kogane-collector-r2-importer | kogane-r2-outbox-reconciler-dlq | declared (unverified) |
-| kogane-vpass-raw-evidence-import | kogane-vpass-collector-poc | kogane-vpass-collector-poc | kogane-vpass-raw-evidence-import-dlq | declared (unverified) |
 
 ## Durable Object classes and migration tags
 
@@ -308,14 +307,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-globalpass
 - Required verification: keep Container, relay, browser diagnostics and resource identity
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-globalpass-collector-poc; buckets=kogane-globalpass-collector-poc,kogane-raw-evidence)
+- Live resources: LIVE(workers=kogane-globalpass-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-globalpass-collector-poc` — `services/collector-globalpass/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-globalpass-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: COLLECTOR_CONTAINER → GlobalPassCollectorContainer
@@ -323,10 +322,10 @@ No wrangler config.
 - Containers: GlobalPassCollectorContainer (./Dockerfile, basic, max 2)
 - Browser binding: BROWSER
 - VPC networks: MESH → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33<br>CF_EGRESS → cf1:network
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `17 18 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
 
 ### `services/collector-mobile-suica`
@@ -334,14 +333,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-mobile-suica
 - Required verification: contract tests, live/secret/resource mapping confirmed
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-mobile-suica-collector-poc; buckets=kogane-mobile-suica-collector-poc,kogane-raw-evidence)
+- Live resources: LIVE(workers=kogane-mobile-suica-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-mobile-suica-collector-poc` — `services/collector-mobile-suica/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-mobile-suica-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -349,10 +348,10 @@ No wrangler config.
 - Containers: —
 - Browser binding: BROWSER
 - VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `10 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>JRE_ID_CREDENTIAL_JSON
 
 ### `services/collector-moneyforward`
@@ -360,14 +359,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-moneyforward
 - Required verification: collector/importer/CORE mapping and resource identity kept
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-moneyforward-collector-poc; buckets=kogane-moneyforward-collector-poc,kogane-raw-evidence)
+- Live resources: LIVE(workers=kogane-moneyforward-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-moneyforward-collector-poc` — `services/collector-moneyforward/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-moneyforward-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -375,10 +374,10 @@ No wrangler config.
 - Containers: —
 - Browser binding: —
 - VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `15 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-myjcb`
@@ -386,14 +385,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-myjcb
 - Required verification: keep the Browser Run login and fetch boundary
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc,kogane-raw-evidence)
+- Live resources: LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-myjcb-collector-poc` — `services/collector-myjcb/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-myjcb-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -401,10 +400,10 @@ No wrangler config.
 - Containers: —
 - Browser binding: BROWSER
 - VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-r2-importer`
@@ -704,14 +703,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-securities
 - Required verification: contract tests and resource identity; secret material is not moved
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-raw-evidence,kogane-sbi-collector-poc)
+- Live resources: LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-sbi-collector-poc` — `services/collector-sbi-securities/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-sbi-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -719,10 +718,10 @@ No wrangler config.
 - Containers: —
 - Browser binding: —
 - VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-sbi-shinsei`
@@ -730,14 +729,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-shinsei
 - Required verification: keep the container/relay/credential operation contract
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sbi-shinsei-collector-poc; buckets=kogane-raw-evidence,kogane-sbi-shinsei-collector-poc)
+- Live resources: LIVE(workers=kogane-sbi-shinsei-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-sbi-shinsei-collector-poc` — `services/collector-sbi-shinsei/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-sbi-shinsei-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: COLLECTOR_CONTAINER → SbiShinseiCollectorContainer
@@ -745,10 +744,10 @@ No wrangler config.
 - Containers: SbiShinseiCollectorContainer (./Dockerfile, basic, max 2)
 - Browser binding: —
 - VPC networks: MESH → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
 
 ### `services/collector-sbi-vc-trade`
@@ -756,14 +755,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-vc-trade
 - Required verification: keep the client dependency and the resource identity
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-raw-evidence,kogane-sbi-vc-trade-poc)
+- Live resources: LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-sbi-vc-session-poc` — `services/collector-sbi-vc-trade/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-sbi-vc-trade-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: SESSION_STATE → SbiVcSessionState
@@ -771,10 +770,10 @@ No wrangler config.
 - Containers: —
 - Browser binding: —
 - VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `*/15 * * * *`<br>`5 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-smbc-direct`
@@ -782,14 +781,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-smbc-direct
 - Required verification: keep the human-required boundary; never turn it into unattended re-authentication
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-smbc-direct-backfill-poc; buckets=kogane-raw-evidence,kogane-smbc-direct-backfill-poc)
+- Live resources: LIVE(workers=kogane-smbc-direct-backfill-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-smbc-direct-backfill-poc` — `services/collector-smbc-direct/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-smbc-direct-backfill-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: BACKFILL_SESSION → SmbcBackfillSession
@@ -797,10 +796,10 @@ No wrangler config.
 - Containers: —
 - Browser binding: —
 - VPC networks: TAMIA → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: —
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION<br>DEFAULT_BACKFILL_FROM<br>SMBC_DIRECT_BASE_URL<br>SMBC_DIRECT_LOGIN_BASE_URL
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>DEFAULT_BACKFILL_FROM<br>SMBC_DIRECT_BASE_URL<br>SMBC_DIRECT_LOGIN_BASE_URL
 - Required secrets (names only): —
 
 ### `services/collector-sony-bank`
@@ -808,14 +807,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sony-bank
 - Required verification: keep the sanitize/HTML/CSV contract and the resource identity
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sony-bank-collector-poc; buckets=kogane-raw-evidence,kogane-sony-bank-collector-poc)
+- Live resources: LIVE(workers=kogane-sony-bank-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-sony-bank-collector-poc` — `services/collector-sony-bank/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-sony-bank-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -823,10 +822,10 @@ No wrangler config.
 - Containers: —
 - Browser binding: —
 - VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-vpass`
@@ -834,25 +833,25 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-vpass
 - Required verification: keep the Worker name and the R2/cron/auth contract
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-raw-evidence,kogane-vpass-collector-poc)
+- Live resources: LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-vpass-collector-poc` — `services/collector-vpass/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-vpass-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
-- Queues: produce RAW_EVIDENCE_QUEUE → kogane-vpass-raw-evidence-import<br>consume kogane-vpass-raw-evidence-import (dlq kogane-vpass-raw-evidence-import-dlq)
+- Queues: —
 - Durable Objects: —
 - DO migration tags: —
 - Containers: —
 - Browser binding: —
 - VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET
+- Vars (names only): —
 - Required secrets (names only): —
 
 ### `services/collector-vpoint`
@@ -860,14 +859,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint
 - Required verification: keep the Email route and the DO class/tag/storage
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-raw-evidence,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)
+- Live resources: LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-vpoint-collector-poc` — `services/collector-vpoint/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts; has an `email()` handler
 - D1: —
-- R2: SNAPSHOTS → kogane-vpoint-collector-poc<br>VPOINT_PAY_SNAPSHOTS → kogane-vpoint-pay-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: VPOINT_SESSION → VPointSession
@@ -875,10 +874,10 @@ No wrangler config.
 - Containers: —
 - Browser binding: —
 - VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Service bindings: —
 - Crons: `15 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_EMAIL_FORWARD_TO<br>VPOINT_EMAIL_RECIPIENT<br>VPOINT_MEMBER_NUMBER
 
 ### `services/collector-vpoint-pay`
@@ -886,14 +885,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint-pay
 - Required verification: confirm the Email/collection entry point and the resource identity
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-raw-evidence,kogane-vpoint-pay-collector-poc)
+- Live resources: LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-raw-evidence)
 
 #### `kogane-vpoint-pay-collector-poc` — `services/collector-vpoint-pay/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-vpoint-pay-collector-poc<br>DATA → kogane-raw-evidence
+- R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: VPOINT_PAY_STATE → VPointPayCredentialState
@@ -904,7 +903,7 @@ No wrangler config.
 - Service bindings: —
 - Crons: —
 - Assets: —
-- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_PAY_DEVICE_UUID<br>VPOINT_PAY_REFRESH_TOKEN
 
 ### `services/processor`

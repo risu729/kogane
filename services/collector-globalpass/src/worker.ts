@@ -1,10 +1,11 @@
+import { Container, getContainer } from "@cloudflare/containers";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   createDiagnostics,
   safeErrorDetails,
 } from "../../../packages/collector-diagnostics/src/index";
+import { runGlobalPassBrowserProbe } from "./browser-probe";
 import { logEvent, relayRunId, withRunId } from "./log-context";
-import { Container, getContainer } from "@cloudflare/containers";
-import { createHash, timingSafeEqual } from "node:crypto";
 import {
   artifactFilename,
   assertCanonicalMonths,
@@ -12,8 +13,8 @@ import {
   GLOBALPASS_MEDIA_TYPE,
   GLOBALPASS_PAGINATION_STATUS,
   GLOBALPASS_SCHEMA_VERSION,
-  parseMode,
   parseContainerProbeVariant,
+  parseMode,
   runPrefix,
   safeMonth,
   selectedMonthsForMode,
@@ -25,9 +26,6 @@ import {
   type ContainerRecord,
   type StoredArtifact,
 } from "./model";
-import { runGlobalPassBrowserProbe } from "./browser-probe";
-import { collectionTarget } from "./collection-target";
-import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import type { RawEvidenceImportResult } from "./raw-evidence-types";
 import { sanitizeGlobalPassActivityHtml } from "./sanitize";
 import {
@@ -37,7 +35,6 @@ import {
   type SharedCapture,
   type SharedRunSummary,
 } from "./shared-collection";
-
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const TURNSTILE_HOST = "challenges.cloudflare.com";
 const TURNSTILE_HELPER_HOST = "brunhild.challenges.cloudflare.com";
@@ -66,22 +63,18 @@ const STOPPABLE_CONTAINER_IDS = new Map([
   ["v20", CONTAINER_ID],
   ["chromium-timezone", CHROMIUM_TIMEZONE_PROBE_ID],
 ]);
-
 export class GlobalPassCollectorContainer extends Container<Env> {
   override defaultPort = 8080;
   override requiredPorts = [8080];
   override sleepAfter = "30s";
   override enableInternet = true;
   override envVars = { TZ: "Asia/Tokyo" };
-
   override onStart(): void {
     console.log(JSON.stringify({ event: "globalpass-container-start" }));
   }
-
   override onStop(): void {
     console.log(JSON.stringify({ event: "globalpass-container-stop" }));
   }
-
   override onError(error: unknown): void {
     logEvent(
       "error",
@@ -92,7 +85,6 @@ export class GlobalPassCollectorContainer extends Container<Env> {
     );
   }
 }
-
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
@@ -158,35 +150,6 @@ export default {
       await container.stop();
       return Response.json({ stopped: instance });
     }
-    if (request.method === "GET" && url.pathname === "/latest-manifest") {
-      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      try {
-        return await latestManifestResponse(env.SNAPSHOTS, url.searchParams.get("date"));
-      } catch (error) {
-        return Response.json({ error: redactError(error).slice(0, 300) }, { status: 400 });
-      }
-    }
-    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
-      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      if (url.searchParams.get("limit") !== "1") {
-        return Response.json({ error: "limit_must_be_one" }, { status: 400 });
-      }
-      const cursor = url.searchParams.get("cursor") ?? undefined;
-      if (cursor !== undefined && !safeBackfillCursor(cursor)) {
-        return Response.json({ error: "cursor_invalid" }, { status: 400 });
-      }
-      try {
-        return Response.json(await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor), {
-          headers: { "cache-control": "no-store" },
-        });
-      } catch {
-        return Response.json({ error: "raw_evidence_backfill_failed" }, { status: 502 });
-      }
-    }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
@@ -209,7 +172,6 @@ export default {
       return Response.json({ error: "globalpass_collection_failed" }, { status: 502 });
     }
   },
-
   async scheduled(_controller, env): Promise<void> {
     const result = await runCollection(env, "daily");
     if (result.status !== "success") {
@@ -217,36 +179,6 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
-
-async function latestManifestResponse(
-  bucket: R2Bucket,
-  requestedDate: string | null,
-): Promise<Response> {
-  const date = requestedDate ?? new Date().toISOString().slice(0, 10);
-  if (!/^20\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u.test(date)) {
-    throw new Error("date must use YYYY-MM-DD");
-  }
-  const prefix = `raw/prestia-globalpass/${date.replaceAll("-", "/")}/`;
-  const listed = await bucket.list({ prefix, limit: 1_000 });
-  const latest = listed.objects
-    .filter((object) => object.key.endsWith("/manifest.json"))
-    .sort((left, right) => right.uploaded.getTime() - left.uploaded.getTime())[0];
-  if (!latest) {
-    return Response.json({ error: "No manifest for date" }, { status: 404 });
-  }
-  const object = await bucket.get(latest.key);
-  if (!object) {
-    return Response.json({ error: "Manifest disappeared" }, { status: 404 });
-  }
-  return new Response(object.body, {
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      "x-manifest-key": latest.key,
-    },
-  });
-}
-
 async function runContainerProbe(env: Env, variant: ContainerProbeVariant): Promise<Response> {
   const containerId =
     variant === "chromium-native-all-tamia" ? CHROMIUM_TIMEZONE_PROBE_ID : CONTAINER_ID;
@@ -274,7 +206,6 @@ async function runContainerProbe(env: Env, variant: ContainerProbeVariant): Prom
     },
   });
 }
-
 type CollectionResult = CollectionManifest & {
   manifestKey: string;
   /** Legacy mode only: the central importer's answer. */
@@ -282,19 +213,19 @@ type CollectionResult = CollectionManifest & {
   /** Shared mode only: what `persistRun` did in the DATA bucket. */
   shared?: SharedRunSummary;
 };
-
 async function runCollection(
   env: Env,
   mode: CollectionMode,
   // The hook U06's operations API fills in when it dispatches a run: the
   // operation it accepted. It ends up in the shared terminal so a run can be
   // traced back to its request.
-  identity: { operationId?: string } = {},
+  identity: {
+    operationId?: string;
+  } = {},
 ): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
-
   const diagnostics = createDiagnostics("prestia-globalpass", runId);
   try {
     const result = await collectWithContainer(
@@ -336,7 +267,6 @@ async function runCollection(
     }
   }
 }
-
 async function collectWithContainer(
   env: Env,
   mode: CollectionMode,
@@ -344,7 +274,9 @@ async function collectWithContainer(
   startedAt: string,
   runId: string,
   diagnostics: ReturnType<typeof createDiagnostics>,
-  identity: { operationId?: string },
+  identity: {
+    operationId?: string;
+  },
 ): Promise<CollectionResult> {
   const prefix = runPrefix(startedAt, runId);
   const attemptId = `attempt-${crypto.randomUUID()}`;
@@ -352,7 +284,7 @@ async function collectWithContainer(
   // staging bucket is not written at all — and skips the central upload
   // (plan 00: one canonical copy; G1-15). `legacy` is byte-for-byte the path
   // this collector has always taken.
-  const target = collectionTarget(env.COLLECTION_TARGET);
+  const target = "shared";
   const artifacts: StoredArtifact[] = [];
   // The sanitized page of every month admitted to the run, kept in memory for
   // the shared-mode terminal. The unredacted page is never retained.
@@ -365,7 +297,6 @@ async function collectWithContainer(
   let containerErrorSeen = false;
   let streamStarted = false;
   const attemptedMonths = new Set<string>();
-
   try {
     await diagnostics.step("container-start", () => container.startAndWaitForPorts());
     const response = await diagnostics.step("container-request", async () => {
@@ -390,7 +321,6 @@ async function collectWithContainer(
       return result;
     });
     streamStarted = true;
-
     for await (const record of readNdjson(response.body!)) {
       if (record.type === "metadata") {
         if (metadataSeen || containerErrorSeen) throw new CollectionContractError();
@@ -448,13 +378,9 @@ async function collectWithContainer(
       }
       try {
         artifacts.push(
-          target === "shared"
-            ? // The manifest entry only: the bytes reach DATA content-addressed
-              // when the terminal is written, and nothing is staged.
-              (await describeHtml(prefix, month, sanitizedHtml)).record
-            : await diagnostics.step("artifact-write", () =>
-                storeHtml(env.SNAPSHOTS, prefix, runId, month, sanitizedHtml),
-              ),
+          // The manifest entry only: the bytes reach DATA content-addressed
+          // when the terminal is written, and nothing is staged.
+          (await describeHtml(prefix, month, sanitizedHtml)).record,
         );
         captures.push({ month, sanitizedHtml });
       } catch (error) {
@@ -471,7 +397,6 @@ async function collectWithContainer(
       ),
     );
   }
-
   if (!metadataSeen && failures.length === 0) {
     failures.push(
       collectionFailure("contract", new CollectionContractError(), "container_contract_invalid"),
@@ -510,7 +435,7 @@ async function collectWithContainer(
     failures,
   };
   const manifestJson = JSON.stringify(manifest);
-  if (target === "shared") {
+  {
     // U09: the run's completion record is the terminal this Worker writes into
     // DATA, after the content-addressed objects; the staging bucket is not
     // written and the central upload is skipped, so exactly one copy exists
@@ -554,37 +479,7 @@ async function collectWithContainer(
     if (!sharedRunPersisted(shared)) throw new Error("globalpass_shared_persist_incomplete");
     return { ...manifest, manifestKey, shared };
   }
-  const manifestKey = `${prefix}/manifest.json`;
-  await diagnostics.step("manifest-write", () =>
-    env.SNAPSHOTS.put(manifestKey, manifestJson, {
-      httpMetadata: { contentType: "application/json; charset=utf-8" },
-      customMetadata: { source: manifest.source, status, runId },
-    }),
-  );
-  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
-  logEvent(
-    "log",
-    JSON.stringify({
-      event: "globalpass-collection-stored",
-      runId,
-      mode,
-      status,
-      artifactCount: artifacts.length,
-      failureCount: failures.length,
-      manifestKey,
-      collectionTarget: target,
-      centralStatus: central.status,
-      ...(central.status === "sealed"
-        ? { centralRunId: central.centralRunId }
-        : {
-            centralDeferredReason: central.reason,
-            centralNextOffset: central.nextOffset,
-          }),
-    }),
-  );
-  return { ...manifest, manifestKey, central };
 }
-
 /**
  * The manifest entry of one month's page — hashed and keyed inside its run —
  * without writing it anywhere. `storeHtml` is this plus the staging put; in
@@ -595,7 +490,10 @@ async function describeHtml(
   prefix: string,
   month: string,
   html: string,
-): Promise<{ record: StoredArtifact; body: Uint8Array }> {
+): Promise<{
+  record: StoredArtifact;
+  body: Uint8Array;
+}> {
   const body = new TextEncoder().encode(html);
   const sha256 = hex(await crypto.subtle.digest("SHA-256", body));
   const key = `${prefix}/${artifactFilename(month)}`;
@@ -611,27 +509,6 @@ async function describeHtml(
     body,
   };
 }
-
-async function storeHtml(
-  bucket: R2Bucket,
-  prefix: string,
-  runId: string,
-  month: string,
-  html: string,
-): Promise<StoredArtifact> {
-  const { record, body } = await describeHtml(prefix, month, html);
-  await bucket.put(record.key, body, {
-    httpMetadata: { contentType: "text/html; charset=utf-8" },
-    customMetadata: {
-      source: "prestia-globalpass",
-      runId,
-      dataset: GLOBALPASS_DATASET,
-      sha256: record.sha256,
-    },
-  });
-  return record;
-}
-
 async function* readNdjson(stream: ReadableStream<Uint8Array>): AsyncGenerator<ContainerRecord> {
   const reader = stream.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -666,7 +543,6 @@ async function* readNdjson(stream: ReadableStream<Uint8Array>): AsyncGenerator<C
     reader.releaseLock();
   }
 }
-
 function parseContainerRecord(line: string): ContainerRecord {
   const value: unknown = JSON.parse(line);
   if (typeof value !== "object" || value === null || !("type" in value)) {
@@ -727,7 +603,6 @@ function parseContainerRecord(line: string): ContainerRecord {
   }
   throw new Error("GLOBAL PASS container returned an invalid record shape");
 }
-
 async function relayTcp(
   request: Request,
   env: Env,
@@ -746,7 +621,6 @@ async function relayTcp(
   if (network !== "tamia" && network !== "cf-gateway") {
     return Response.json({ error: "Network denied" }, { status: 403 });
   }
-
   const runId = relayRunId(url);
   const relayId = crypto.randomUUID();
   let peerClosed = false;
@@ -758,7 +632,6 @@ async function relayTcp(
   const socket = (binding as VpcNetworkBinding).connect({ hostname, port });
   const writer = socket.writable.getWriter();
   let writeChain = Promise.resolve();
-
   ctx.waitUntil(
     (async () => {
       const reader = socket.readable.getReader();
@@ -788,7 +661,6 @@ async function relayTcp(
       }
     })(),
   );
-
   server.addEventListener("message", (event) => {
     writeChain = writeChain.then(async () => {
       await writer.write(await websocketBytes(event.data));
@@ -820,13 +692,11 @@ async function relayTcp(
   });
   return new Response(null, { status: 101, webSocket: client });
 }
-
 async function websocketBytes(data: string | ArrayBuffer | Blob): Promise<Uint8Array> {
   if (typeof data === "string") return new TextEncoder().encode(data);
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   return new Uint8Array(await data.arrayBuffer());
 }
-
 async function validBearer(request: Request, expected: string | undefined): Promise<boolean> {
   if (!expected || expected.length < 32) return false;
   const authorization = request.headers.get("authorization") ?? "";
@@ -835,16 +705,13 @@ async function validBearer(request: Request, expected: string | undefined): Prom
   const expectedHash = createHash("sha256").update(expected).digest();
   return timingSafeEqual(providedHash, expectedHash);
 }
-
 interface VpcNetworkBinding extends Fetcher {
   connect(address: SocketAddress | string, options?: SocketOptions): Socket;
 }
-
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
 }
-
 function collectionFailure(
   operation: CollectionFailure["operation"],
   error: unknown,
@@ -858,16 +725,13 @@ function collectionFailure(
     ...(artifactKey ? { artifactKey } : {}),
   };
 }
-
 function safeErrorType(error: unknown): string {
   const candidate = error instanceof Error ? error.name : "UnknownError";
   return /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(candidate) ? candidate : "UnknownError";
 }
-
 function sameStrings(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
-
 function exactKeys(
   value: Record<string, unknown>,
   required: string[],
@@ -878,10 +742,6 @@ function exactKeys(
   return (
     keys.every((key) => allowed.has(key)) && required.every((key) => Object.hasOwn(value, key))
   );
-}
-
-export function safeBackfillCursor(value: string): boolean {
-  return value.length > 0 && value.length <= 12_000 && !/[\x00-\x20\x7f]/u.test(value);
 }
 
 function publicCollectionResult(result: CollectionResult): object {
@@ -923,22 +783,18 @@ function publicCollectionResult(result: CollectionResult): object {
       : {}),
   };
 }
-
 class CollectionContractError extends Error {
   constructor() {
     super("GLOBAL PASS container contract invalid");
     this.name = "CollectionContractError";
   }
 }
-
 function hex(value: ArrayBuffer): string {
   return [...new Uint8Array(value)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
-
 function redactError(error: unknown): string {
   return redactText(error instanceof Error ? error.message : "Unknown error");
 }
-
 function redactText(value: string): string {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/giu, "Bearer [redacted]")

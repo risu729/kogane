@@ -1,12 +1,9 @@
-import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { DurableObject } from "cloudflare:workers";
+import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { collectSbiVcTrade } from "./collector";
 import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
 import { applySessionUpdates, cookieHeader, parseGatewayMeta, parseSession } from "./session";
-import { describeArtifact, runPrefix, storeArtifact, storeManifest } from "./storage";
-import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
-import { collectionTarget } from "./collection-target";
 import {
   blockedErrorCode,
   blockedRunManifest,
@@ -17,6 +14,7 @@ import {
   type SharedCapture,
   type SharedRunSummary,
 } from "./shared-collection";
+import { describeArtifact, runPrefix } from "./storage";
 import type {
   CollectionFailure,
   CollectionManifest,
@@ -26,11 +24,9 @@ import type {
   SessionMaterial,
   StoredArtifact,
 } from "./types";
-
 const ORIGIN = "https://simple.sbivc.co.jp";
 const TRADE_URL = `${ORIGIN}/api/cccmdipresen/gw/trade`;
 const MAX_RESPONSE_BYTES = 64 * 1024;
-const MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS = 11;
 const KEEPALIVE_CRON = "*/15 * * * *";
 const COLLECTION_CRON = "5 21 * * *";
 const INITIAL_HEALTH: HealthState = {
@@ -47,17 +43,14 @@ const INITIAL_HEALTH: HealthState = {
   lastReauthErrorCode: null,
 };
 const REAUTH_COOLDOWN_MS = 6 * 60 * 60 * 1000;
-
 export class SbiVcSessionState extends DurableObject<Env> {
   #running: Promise<HealthState> | null = null;
   #reauthRunning: Promise<HealthState> | null = null;
   #collectionRunning: Promise<CollectionSummary> | null = null;
   #operationTail: Promise<void> = Promise.resolve();
-
   async getHealth(): Promise<HealthState> {
     return { ...INITIAL_HEALTH, ...(await this.ctx.storage.get<HealthState>("health")) };
   }
-
   async runKeepAlive(): Promise<HealthState> {
     if (this.#running) return this.#running;
     this.#running = this.#exclusive(() => this.#performKeepAlive());
@@ -67,7 +60,6 @@ export class SbiVcSessionState extends DurableObject<Env> {
       this.#running = null;
     }
   }
-
   async runReauthenticate(force = false): Promise<HealthState> {
     if (this.#reauthRunning) return this.#reauthRunning;
     this.#reauthRunning = this.#exclusive(() => this.#performReauthenticate(force));
@@ -77,7 +69,6 @@ export class SbiVcSessionState extends DurableObject<Env> {
       this.#reauthRunning = null;
     }
   }
-
   async runCollection(): Promise<CollectionSummary> {
     if (this.#collectionRunning) return this.#collectionRunning;
     this.#collectionRunning = this.#exclusive(() => this.#performCollection());
@@ -87,7 +78,6 @@ export class SbiVcSessionState extends DurableObject<Env> {
       this.#collectionRunning = null;
     }
   }
-
   /**
    * U09: record a collection that could not start because the session was
    * unusable. In legacy mode nothing is written — the caller's 502 and the
@@ -97,7 +87,6 @@ export class SbiVcSessionState extends DurableObject<Env> {
    * act (G3-10, G3-11). No login is retried here.
    */
   async recordBlockedCollection(): Promise<SharedRunSummary | null> {
-    if (collectionTarget(this.env.COLLECTION_TARGET) !== "shared") return null;
     const health = await this.getHealth();
     const startedAt = new Date().toISOString();
     const runId = crypto.randomUUID();
@@ -132,18 +121,18 @@ export class SbiVcSessionState extends DurableObject<Env> {
     );
     return summary;
   }
-
   /**
    * The generation of the stored session, as an opaque id. It is minted when a
    * session is established and rotated when a new one replaces it; cookie
    * rotation inside a live session keeps the same generation. Only the id ever
    * leaves the Durable Object — never the session itself (12 §4).
    */
-  async #acquisitionSessionRef(): Promise<{ acquisitionSessionRef?: string }> {
+  async #acquisitionSessionRef(): Promise<{
+    acquisitionSessionRef?: string;
+  }> {
     const stored = await this.ctx.storage.get<string>("sessionRef");
     return stored === undefined ? {} : { acquisitionSessionRef: stored };
   }
-
   async #performCollection(): Promise<CollectionSummary> {
     const startedAt = new Date().toISOString();
     const runId = crypto.randomUUID();
@@ -155,7 +144,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
       // staging bucket is not written at all — and skips the central upload
       // (plan 00: one canonical copy; G1-15). `legacy` is byte-for-byte the
       // path this collector has always taken.
-      const target = collectionTarget(this.env.COLLECTION_TARGET);
+
       const artifacts: StoredArtifact[] = [];
       // The sanitized body of every artifact admitted to the run, kept in
       // memory for the shared-mode terminal.
@@ -182,19 +171,10 @@ export class SbiVcSessionState extends DurableObject<Env> {
             onArtifact: async (artifact) => {
               operation = `r2_${artifact.dataset}`;
               artifacts.push(
-                target === "shared"
-                  ? // The manifest entry only: the bytes reach DATA
-                    // content-addressed when the terminal is written, and
-                    // nothing is staged.
-                    (await describeArtifact({ prefix, artifact })).record
-                  : await diagnostic.step("artifact-write", () =>
-                      storeArtifact({
-                        bucket: this.env.SNAPSHOTS,
-                        prefix,
-                        runId,
-                        artifact,
-                      }),
-                    ),
+                // The manifest entry only: the bytes reach DATA
+                // content-addressed when the terminal is written, and
+                // nothing is staged.
+                (await describeArtifact({ prefix, artifact })).record,
               );
               captures.push({ dataset: artifact.dataset, body: artifact.body });
               operation = "collect";
@@ -217,7 +197,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         artifacts,
         failures,
       };
-      if (target === "shared") {
+      {
         // U09: the run's completion record is the terminal this Durable Object
         // writes into DATA, after the content-addressed objects; the staging
         // bucket is not written and the central upload is skipped, so exactly
@@ -263,48 +243,11 @@ export class SbiVcSessionState extends DurableObject<Env> {
           shared,
         };
       }
-      const manifestKey = await diagnostic.step("manifest-write", () =>
-        storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest }),
-      );
-      const central =
-        artifacts.length <= MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS
-          ? await diagnostic.step("central-import", () =>
-              importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey),
-            )
-          : {
-              deferred: true as const,
-              reason: "worker-invocation-chain-limit" as const,
-              artifactCount: artifacts.length + 1,
-            };
-      console.log(
-        JSON.stringify({
-          message: "sbi_vc_collection",
-          runId,
-          status,
-          artifactCount: artifacts.length,
-          failureCount: failures.length,
-          manifestKey,
-          collectionTarget: "legacy",
-          ...("deferred" in central
-            ? { centralDeferred: true, centralDeferredReason: central.reason }
-            : { centralRunId: central.centralRunId, centralSealed: central.sealed }),
-        }),
-      );
-      diagnostic.finish(status);
-      return {
-        runId,
-        status,
-        artifactCount: artifacts.length,
-        failureCount: failures.length,
-        manifestKey,
-        central,
-      };
     } catch (error) {
       diagnostic.finish("failed");
       throw error;
     }
   }
-
   async #performReauthenticate(force: boolean): Promise<HealthState> {
     const previous = await this.getHealth();
     const attemptAt = new Date().toISOString();
@@ -348,7 +291,6 @@ export class SbiVcSessionState extends DurableObject<Env> {
       return health;
     }
   }
-
   async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.#operationTail;
     let release!: () => void;
@@ -362,7 +304,6 @@ export class SbiVcSessionState extends DurableObject<Env> {
       release();
     }
   }
-
   async #performKeepAlive(): Promise<HealthState> {
     const attemptAt = new Date().toISOString();
     const previous = await this.getHealth();
@@ -432,7 +373,6 @@ export class SbiVcSessionState extends DurableObject<Env> {
       return await this.recordFailure(previous, attemptAt, null, code);
     }
   }
-
   private async loadSession(initializedAt: string): Promise<SessionMaterial> {
     const encrypted = await this.ctx.storage.get<EncryptedSession>("session");
     if (encrypted) return decryptSession(encrypted, this.env.SESSION_ENCRYPTION_KEY);
@@ -469,7 +409,6 @@ export class SbiVcSessionState extends DurableObject<Env> {
     }
     return session;
   }
-
   private async recordFailure(
     previous: HealthState,
     attemptAt: string,
@@ -493,7 +432,6 @@ export class SbiVcSessionState extends DurableObject<Env> {
     return health;
   }
 }
-
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
@@ -503,20 +441,6 @@ export default {
       return Response.json({ status: "ok", schemaVersion: env.COLLECTOR_SCHEMA_VERSION });
     }
     if (!(await isAuthorized(request, env.ADMIN_TOKEN))) return new Response(null, { status: 404 });
-    if (request.method === "POST" && path === "/backfill-raw-evidence") {
-      try {
-        const cursor = url.searchParams.get("cursor") ?? undefined;
-        const limit = parseBackfillLimit(url.searchParams.get("limit"));
-        return Response.json(
-          await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, {
-            ...(cursor ? { cursor } : {}),
-            ...(limit ? { limit } : {}),
-          }),
-        );
-      } catch (error) {
-        return Response.json({ error: safeError(error) }, { status: 502 });
-      }
-    }
     const stub = env.SESSION_STATE.getByName("singleton");
     if (request.method === "POST" && path === "/run")
       return Response.json(await stub.runKeepAlive());
@@ -550,7 +474,6 @@ export default {
     }
     return new Response(null, { status: 404 });
   },
-
   async scheduled(controller, env): Promise<void> {
     const stub = env.SESSION_STATE.getByName("singleton");
     if (controller.cron === KEEPALIVE_CRON) {
@@ -573,19 +496,6 @@ export default {
     throw new Error("unknown_cron_trigger");
   },
 } satisfies ExportedHandler<Env>;
-
-function parseBackfillLimit(value: string | null): number | undefined {
-  if (value === null) return undefined;
-  if (value !== "1") throw new Error("backfill_limit_must_be_one");
-  return 1;
-}
-
-function safeError(error: unknown): string {
-  const message = error instanceof Error ? error.message : "request_failed";
-  const match = message.match(/(?:^|: )([a-z0-9_-]{1,100})$/u);
-  return match?.[1] ?? "request_failed";
-}
-
 async function ensureHealthySession(
   stub: DurableObjectStub<SbiVcSessionState>,
 ): Promise<HealthState> {
@@ -603,7 +513,6 @@ async function ensureHealthySession(
   }
   return health;
 }
-
 function shouldReauthenticate(health: HealthState): boolean {
   return (
     health.lastHttpStatus === 401 ||
@@ -612,7 +521,6 @@ function shouldReauthenticate(health: HealthState): boolean {
     health.lastErrorCode === "load_session_missing_session_seed"
   );
 }
-
 function classifyError(error: unknown): string {
   if (error instanceof Error && /^[a-z0-9_-]+$/u.test(error.message)) {
     return error.message.replaceAll("-", "_");
@@ -622,7 +530,6 @@ function classifyError(error: unknown): string {
   if (error instanceof TypeError) return "type_error";
   return "unexpected_error";
 }
-
 function classifyCryptoError(error: unknown): string {
   if (!(error instanceof DOMException)) return "session_encrypt_failed";
   switch (error.name) {
@@ -638,7 +545,6 @@ function classifyCryptoError(error: unknown): string {
       return "crypto_error";
   }
 }
-
 async function isAuthorized(request: Request, expected: string): Promise<boolean> {
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) return false;
@@ -655,7 +561,6 @@ async function isAuthorized(request: Request, expected: string): Promise<boolean
   }
   return difference === 0;
 }
-
 async function readBoundedText(response: Response, limit: number): Promise<string> {
   if (!response.body) throw new Error("missing_response_body");
   const reader = response.body.getReader();

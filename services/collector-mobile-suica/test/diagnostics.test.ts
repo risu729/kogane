@@ -1,3 +1,4 @@
+import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import worker from "../src/worker";
 import { collectMobileSuica } from "../src/mobile-suica";
@@ -20,33 +21,16 @@ function capture() {
 
 test("configuration failure remains distinguishable from manifest and central import outcomes", async () => {
   const records = capture();
-  let storedManifest: Record<string, unknown> | undefined;
+  const data = new FakeR2Bucket();
   const env = {
     COLLECTOR_SCHEMA_VERSION: "mobile-suica-worker-poc-v2",
-    SNAPSHOTS: {
-      put: async (_key: string, body: string) => {
-        storedManifest = JSON.parse(body);
-      },
-    },
-    RAW_EVIDENCE_IMPORTER: {
-      fetch: async (request: Request) => {
-        const { manifestKey } = (await request.json()) as { manifestKey: string };
-        return Response.json({
-          source: "mobile-suica",
-          manifestKey,
-          status: "sealed",
-          centralRunId: 1,
-          artifactCount: 1,
-          sealed: true,
-          finalChunkAllObjectsReused: false,
-        });
-      },
-    },
+    DATA: data,
   } as unknown as Env;
   await expect(worker.scheduled({} as ScheduledController, env)).rejects.toThrow(
     "collection incomplete",
   );
-  expect(storedManifest?.status).toBe("failed");
+  const terminal = [...data.entries].find(([key]) => key.endsWith("/terminal.json"));
+  expect(JSON.parse(new TextDecoder().decode(terminal![1].bytes)).providerOutcome).toBe("failed");
   expect(records).toContainEqual(
     expect.objectContaining({
       stage: "configuration",
@@ -55,11 +39,9 @@ test("configuration failure remains distinguishable from manifest and central im
     }),
   );
   expect(records).toContainEqual(
-    expect.objectContaining({ stage: "manifest-write", outcome: "success" }),
+    expect.objectContaining({ stage: "terminal-write", outcome: "success" }),
   );
-  expect(records).toContainEqual(
-    expect.objectContaining({ stage: "central-import", outcome: "success" }),
-  );
+  expect(records).not.toContainEqual(expect.objectContaining({ stage: "central-import" }));
   expect(records).toContainEqual(expect.objectContaining({ stage: "terminal", outcome: "failed" }));
   expect(
     new Set(
@@ -72,18 +54,21 @@ test("configuration failure remains distinguishable from manifest and central im
 
 test("R2 failure records its own stage without leaking error text", async () => {
   const records = capture();
-  const error = new Error("secret-cookie user@example.test provider-body");
-  const env = {
-    SNAPSHOTS: {
-      put: async () => {
-        throw error;
-      },
+  const data = new FakeR2Bucket();
+  data.faults = {
+    beforePut: () => {
+      throw new Error("secret-cookie provider-body");
     },
+  };
+  const env = {
+    DATA: data,
+    COLLECTOR_SCHEMA_VERSION: "mobile-suica-worker-poc-v2",
   } as unknown as Env;
-  await expect(worker.scheduled({} as ScheduledController, env)).rejects.toBe(error);
-  expect(records).toContainEqual(
-    expect.objectContaining({ stage: "manifest-write", outcome: "failed" }),
+  await expect(worker.scheduled({} as ScheduledController, env)).rejects.toThrow(
+    "collection incomplete",
   );
+  expect(data.putKeys.some((key) => key.endsWith("/terminal.json"))).toBe(false);
+
   expect(records).not.toContainEqual(expect.objectContaining({ stage: "central-import" }));
   expect(JSON.stringify(records)).not.toMatch(/secret|example|provider-body/u);
 });

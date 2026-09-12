@@ -1,3 +1,4 @@
+import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { describe, expect, spyOn, test } from "bun:test";
 import worker from "../src/worker";
 
@@ -9,7 +10,12 @@ async function trigger(manifestWriteFails = false) {
     spyOn(console, "log").mockImplementation(unavailable),
     spyOn(console, "error").mockImplementation(unavailable),
   ];
-  let storedManifest = "";
+  const data = new FakeR2Bucket();
+  data.faults = {
+    beforePut: () => {
+      if (manifestWriteFails) throw new Error("storage unavailable");
+    },
+  };
   let imports = 0;
   try {
     const response = await worker.fetch(
@@ -21,17 +27,7 @@ async function trigger(manifestWriteFails = false) {
         ADMIN_TRIGGER_TOKEN: "synthetic-admin",
         COLLECTOR_SCHEMA_VERSION: "sony-bank-worker-poc-v2",
         // Missing credential deliberately fails before any provider request.
-        SNAPSHOTS: {
-          put: async (key: string, bytes: Uint8Array, options: R2PutOptions) => {
-            if (manifestWriteFails) throw new Error("storage unavailable");
-            storedManifest = new TextDecoder().decode(bytes);
-            return {
-              key,
-              size: bytes.byteLength,
-              checksums: { sha256: (options.sha256 as Uint8Array).slice().buffer },
-            };
-          },
-        },
+        DATA: data,
         RAW_EVIDENCE_IMPORTER: {
           fetch: async () => {
             imports++;
@@ -48,7 +44,9 @@ async function trigger(manifestWriteFails = false) {
     return {
       response,
       result: (await response.json()) as { status?: string; error?: string },
-      storedManifest,
+      storedManifest: [...data.entries.values()]
+        .map((entry) => new TextDecoder().decode(entry.bytes))
+        .join("\n"),
       imports,
     };
   } finally {
@@ -61,15 +59,15 @@ describe("Sony logging remains best effort", () => {
     const { response, result, storedManifest, imports } = await trigger();
     expect(response.status).toBe(502);
     expect(result.status).toBe("failed");
-    expect(imports).toBe(1);
-    expect(JSON.parse(storedManifest).failures[0].message).toContain("stage=credential");
+    expect(imports).toBe(0);
+    expect(JSON.parse(storedManifest).safeErrorCode).toBe("collector_failed");
     expect(storedManifest).not.toContain("logger");
   });
 
   test("logger errors cannot replace the manifest write failure", async () => {
     const { response, result, imports } = await trigger(true);
-    expect(response.status).toBe(400);
-    expect(result.error).toBe("manifest_write_failed");
+    expect(response.status).toBe(502);
+    expect(result.status).toBe("failed");
     expect(imports).toBe(0);
   });
 });

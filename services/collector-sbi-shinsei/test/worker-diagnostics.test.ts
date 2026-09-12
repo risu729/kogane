@@ -1,3 +1,4 @@
+import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 let handoff = "";
@@ -40,7 +41,7 @@ async function trigger(loggingFails = false) {
     spyOn(console, "warn").mockImplementation(capture),
     spyOn(console, "log").mockImplementation(capture),
   ];
-  const stored: Array<{ key: string; body: Uint8Array }> = [];
+  const data = new FakeR2Bucket();
   try {
     const response = await worker.fetch(
       new Request("https://worker.invalid/trigger", {
@@ -58,31 +59,24 @@ async function trigger(loggingFails = false) {
         RELAY_PUBLIC_URL: "wss://worker.invalid/tcp",
         COLLECTOR_SCHEMA_VERSION: "sbi-shinsei-worker-poc-v1",
         COLLECTOR_CONTAINER: {},
-        SNAPSHOTS: {
-          put: async (key: string, value: string | Uint8Array, options: R2PutOptions) => {
-            const body = typeof value === "string" ? new TextEncoder().encode(value) : value;
-            stored.push({ key, body });
-            return {
-              key,
-              size: body.byteLength,
-              checksums: { sha256: (options.sha256 as Uint8Array).slice().buffer },
-            };
-          },
-        },
-        RAW_EVIDENCE_IMPORTER: {
-          fetch: async (request: Request) =>
-            Response.json({
-              source: "sbi-shinsei",
-              manifestKey: ((await request.json()) as { manifestKey: string }).manifestKey,
-              sealed: true,
-            }),
-        },
+        DATA: data,
       } as unknown as Env,
       {} as ExecutionContext,
     );
+    const result = (await response.json()) as {
+      runId: string;
+      status: string;
+      manifestKey: string;
+    };
+    const stored = [...data.entries]
+      .filter(([key]) => !key.startsWith("runs/"))
+      .map(([key, entry]) => ({ key, body: entry.bytes }));
+    stored.sort(
+      (a, b) => Number(a.key === result.manifestKey) - Number(b.key === result.manifestKey),
+    );
     return {
       response,
-      result: (await response.json()) as { runId: string; status: string },
+      result,
       logs,
       stored,
     };
@@ -114,7 +108,7 @@ describe("Shinsei Worker failure logging", () => {
     expect(new URL(relayUrl).searchParams.get("runId")).toBe(result.runId);
     expect(JSON.stringify(logs)).not.toContain("synthetic-secret");
     const manifest = JSON.parse(new TextDecoder().decode(stored.at(-1)!.body));
-    expect(manifest.failures[0].message).toContain("stage=security-connect-timeout");
+    expect(manifest.failures[0].message).toBe("collector_request_failed");
     expect(manifest.failures[0].diagnostics).toBeUndefined();
   });
 
@@ -168,7 +162,7 @@ describe("Shinsei Worker failure logging", () => {
     const manifest = JSON.parse(new TextDecoder().decode(stored.at(-1)!.body));
     expect(Object.keys(manifest.failures[0]).sort()).toEqual(["errorType", "message", "operation"]);
     expect(manifest.failures[0].errorType).toBe("ContainerResponseError");
-    expect(manifest.failures[0].message).toContain("responseReason=startup-failed");
+    expect(manifest.failures[0].message).toBe("collector_request_failed");
     expect(JSON.stringify(logs)).not.toContain("synthetic-secret");
     expect(JSON.stringify(manifest)).not.toContain("synthetic-secret");
   });
@@ -244,7 +238,7 @@ describe("Shinsei logging remains best effort", () => {
     expect(result.status).toBe("failed");
     expect(destroyCalls).toBe(1);
     const manifest = JSON.parse(new TextDecoder().decode(stored.at(-1)!.body));
-    expect(manifest.failures[0].message).toContain("stage=security-connect-timeout");
+    expect(manifest.failures[0].message).toBe("collector_request_failed");
     expect(manifest.failures[0].message).not.toContain("logger");
   });
 

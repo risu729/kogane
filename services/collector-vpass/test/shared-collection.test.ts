@@ -16,7 +16,6 @@ import {
   terminalKey,
   verifyReferencedObjects,
 } from "../../../packages/collection/src/index";
-import { collectionTarget } from "../src/collection-target";
 import { sanitizedEnvelopeBytes, VpassSanitizeError } from "../src/sanitize";
 import {
   persistCardRun,
@@ -77,15 +76,6 @@ function run(overrides: Partial<VpassCardRun> = {}): VpassCardRun {
     ...overrides,
   };
 }
-
-describe("COLLECTION_TARGET selects the store", () => {
-  test("only the exact string 'shared' leaves the legacy path", () => {
-    expect(collectionTarget(undefined)).toBe("legacy");
-    expect(collectionTarget("legacy")).toBe("legacy");
-    expect(collectionTarget("Shared")).toBe("legacy");
-    expect(collectionTarget("shared")).toBe("shared");
-  });
-});
 
 describe("G3-07/G3-08 the sanitizer runs before anything is stored", () => {
   test("session material and card references never reach the stored bytes", () => {

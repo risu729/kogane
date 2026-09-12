@@ -10,7 +10,6 @@ import {
   readTerminal,
   terminalKey,
 } from "../../../packages/collection/src/index";
-import { collectionTarget, sharedCollectionEnabled } from "../src/collection-target";
 import {
   buildSharedRunPlan,
   persistSharedRun,
@@ -72,17 +71,6 @@ function inputOf(manifest: CollectionManifest) {
     identity: IDENTITY,
   };
 }
-
-describe("COLLECTION_TARGET", () => {
-  test("defaults to legacy and only the exact string selects shared", () => {
-    expect(collectionTarget(undefined)).toBe("legacy");
-    expect(collectionTarget("shared")).toBe("shared");
-    for (const value of ["Shared", " shared", "shared ", "legacy", ""]) {
-      expect(collectionTarget(value)).toBe("legacy");
-      expect(sharedCollectionEnabled(value)).toBe(false);
-    }
-  });
-});
 
 describe("G1-08/G1-09 run outcome", () => {
   test("a successful run still declares partial coverage", () => {

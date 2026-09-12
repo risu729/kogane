@@ -4,7 +4,6 @@ import worker, {
   parseGlobalPassLegacyEmptyAllowlist,
 } from "../src/worker";
 import { ImportError } from "../src/error";
-import { backfillStoredRuns } from "../../../services/collector-mobile-suica/src/raw-evidence";
 
 describe("collector R2 importer routes", () => {
   test("the GLOBAL PASS legacy empty allowlist is exact and bounded", () => {
@@ -1089,7 +1088,7 @@ describe("collector R2 importer routes", () => {
     });
   });
 
-  test("the Mobile Suica backfill response passes the collector contract validator", async () => {
+  test("the Mobile Suica backfill response preserves the repair-page contract", async () => {
     const bucket = {
       list: async () =>
         ({
@@ -1098,10 +1097,16 @@ describe("collector R2 importer routes", () => {
         }) as unknown as R2Objects,
     } as unknown as R2Bucket;
     const env = environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket);
-    const importer = {
-      fetch: (request: Request) => worker.fetch(request as Parameters<typeof worker.fetch>[0], env),
-    } as Fetcher;
-    await expect(backfillStoredRuns(importer)).resolves.toEqual({
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/mobile-suica/backfill-page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()) as Record<string, unknown>).toEqual({
       source: "mobile-suica",
       scannedObjectCount: 1,
       importedManifestCount: 0,

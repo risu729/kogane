@@ -15,7 +15,6 @@ import {
   terminalKey,
   verifyReferencedObjects,
 } from "../../../packages/collection/src/index";
-import { collectionTarget } from "../src/collection-target";
 import { redactedStatementHtml } from "../src/parsers";
 import { assertRedactedHtml } from "../src/redaction";
 import {
@@ -85,15 +84,6 @@ function input(overrides: Partial<SharedRunInput> = {}): SharedRunInput {
     ...overrides,
   };
 }
-
-describe("COLLECTION_TARGET selects the store", () => {
-  test("only the exact string 'shared' leaves the legacy path", () => {
-    expect(collectionTarget(undefined)).toBe("legacy");
-    expect(collectionTarget("legacy")).toBe("legacy");
-    expect(collectionTarget("shared\n")).toBe("legacy");
-    expect(collectionTarget("shared")).toBe("shared");
-  });
-});
 
 describe("G1-02/G1-16 shared mode persists each connection's pages and then the terminal", () => {
   test("objects, units and the terminal describe what is stored", async () => {

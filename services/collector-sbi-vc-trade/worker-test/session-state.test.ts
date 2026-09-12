@@ -46,25 +46,25 @@ describe("SbiVcSessionState", () => {
     const runId = crypto.randomUUID();
     const prefix = runPrefix("2026-08-31T12:00:00.000Z", runId);
     const stored = await storeArtifact({
-      bucket: env.SNAPSHOTS,
+      bucket: env.DATA,
       prefix,
       runId,
       artifact: { dataset: "synthetic", body: JSON.stringify({ ok: true }) },
     });
-    const object = await env.SNAPSHOTS.get(stored.key);
+    const object = await env.DATA.get(stored.key);
     expect(object).not.toBeNull();
     expect(await object!.json()).toEqual({ ok: true });
     expect(stored.sha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(object!.checksums.sha256).toBeInstanceOf(ArrayBuffer);
     await expect(
       storeArtifact({
-        bucket: env.SNAPSHOTS,
+        bucket: env.DATA,
         prefix,
         runId,
         artifact: { dataset: "synthetic", body: JSON.stringify({ overwritten: true }) },
       }),
     ).rejects.toThrow("artifact_key_already_exists");
-    await env.SNAPSHOTS.delete(stored.key);
+    await env.DATA.delete(stored.key);
   });
 });
 

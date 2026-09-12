@@ -1,9 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
-import { collectionTarget } from "./collection-target";
 import { credentialFromSecrets, inspectCredential, type CredentialStatus } from "./credentials";
 import { persistVPointPayRun } from "./shared-run";
-import { collectVPointPay } from "./vpoint-pay";
-import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type {
   CollectionFailure,
   CollectionManifest,
@@ -11,21 +8,18 @@ import type {
   RawArtifact,
   VPointPayCredential,
 } from "./types";
-
+import { collectVPointPay } from "./vpoint-pay";
 const REFRESH_TOKEN_KEY = "refresh-token";
 const DEVICE_UUID_KEY = "device-uuid";
-
 export class VPointPayCredentialState extends DurableObject<Env> {
   private collectionInFlight: Promise<CollectionResult> | null = null;
   private readonly state: DurableObjectState;
   private readonly environment: Env;
-
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
     this.state = state;
     this.environment = env;
   }
-
   async runCollection(): Promise<CollectionResult> {
     if (this.collectionInFlight) return await this.collectionInFlight;
     this.collectionInFlight = this.runCollectionOnce();
@@ -35,7 +29,6 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       this.collectionInFlight = null;
     }
   }
-
   async credentialStatus(): Promise<CredentialStatus> {
     const [refreshToken, deviceUuid] = await Promise.all([
       this.state.storage.get<string>(REFRESH_TOKEN_KEY),
@@ -52,8 +45,9 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       "worker-secrets",
     );
   }
-
-  async resetFromSecrets(): Promise<{ status: "reset" }> {
+  async resetFromSecrets(): Promise<{
+    status: "reset";
+  }> {
     const credential = credentialFromSecrets(this.environment);
     await this.state.storage.put({
       [REFRESH_TOKEN_KEY]: credential.refreshToken,
@@ -61,7 +55,6 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     });
     return { status: "reset" };
   }
-
   private async credential(): Promise<VPointPayCredential> {
     const [refreshToken, deviceUuid] = await Promise.all([
       this.state.storage.get<string>(REFRESH_TOKEN_KEY),
@@ -75,13 +68,11 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     });
     return seeded;
   }
-
   private async runCollectionOnce(): Promise<CollectionResult> {
-    const target = collectionTarget(this.environment.COLLECTION_TARGET);
     const startedAt = new Date().toISOString();
     const runId = crypto.randomUUID();
-    const prefix = runPrefix(startedAt, runId);
-    const artifacts = [];
+
+    const artifacts: CollectionManifest["artifacts"] = [];
     const collected: RawArtifact[] = [];
     const failureCodes: string[] = [];
     const failures: CollectionFailure[] = [];
@@ -89,7 +80,6 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     let latestMonth: string | null = null;
     let transactionMonthCount = 0;
     let transactionCount = 0;
-
     try {
       const credential = await this.credential();
       const collection = await collectVPointPay({
@@ -102,32 +92,16 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       latestMonth = collection.latestMonth;
       transactionMonthCount = collection.transactionMonthCount;
       transactionCount = collection.transactionCount;
-      if (target === "shared") {
+      {
         // One terminal-last run replaces the per-artifact writes below.
         collected.push(...collection.artifacts);
-      } else {
-        for (const artifact of collection.artifacts) {
-          try {
-            artifacts.push(
-              await storeArtifact({
-                bucket: this.environment.SNAPSHOTS,
-                prefix,
-                artifact,
-              }),
-            );
-          } catch (error) {
-            failures.push(failure(`r2:${artifact.dataset}`, error));
-            failureCodes.push(safeFailureCode(error));
-          }
-        }
       }
     } catch (error) {
       failures.push(failure("collect", error));
       failureCodes.push(safeFailureCode(error));
     }
-
     const completedAt = new Date().toISOString();
-    const storedCount = target === "shared" ? collected.length : artifacts.length;
+    const storedCount = collected.length;
     const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
     const manifest: CollectionManifest = {
       schemaVersion: this.environment.COLLECTOR_SCHEMA_VERSION,
@@ -143,7 +117,7 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       artifacts,
       failures,
     };
-    if (target === "shared") {
+    {
       const persisted = await persistVPointPayRun(this.environment.DATA, {
         runId,
         producerVersion: this.environment.COLLECTOR_SCHEMA_VERSION,
@@ -179,29 +153,8 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       }
       return { ...manifest, target: "shared", manifestKey: persisted.terminalKey };
     }
-    const manifestKey = await storeManifest({
-      bucket: this.environment.SNAPSHOTS,
-      prefix,
-      manifest,
-    });
-    console.log(
-      JSON.stringify({
-        event: "vpoint-pay-collection-stored",
-        runId,
-        status,
-        earliestMonth,
-        latestMonth,
-        transactionMonthCount,
-        transactionCount,
-        artifactCount: artifacts.length,
-        failureCount: failures.length,
-        manifestKey,
-      }),
-    );
-    return { ...manifest, target: "legacy", manifestKey };
   }
 }
-
 /**
  * The machine code a terminal may carry. Deliberately not `publicError`: that
  * is a redacted provider message, and a terminal states codes only (12 §6).
@@ -214,7 +167,6 @@ function safeFailureCode(error: unknown): string {
   if (name.includes("Http")) return "provider_http_failed";
   return "operation_failed";
 }
-
 function failure(operation: string, error: unknown): CollectionFailure {
   return {
     operation,
@@ -222,7 +174,6 @@ function failure(operation: string, error: unknown): CollectionFailure {
     message: publicError(error),
   };
 }
-
 function publicError(error: unknown): string {
   const value = error instanceof Error ? error.message : "Unknown error";
   return value

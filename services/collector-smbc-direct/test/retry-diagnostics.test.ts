@@ -62,7 +62,7 @@ test("an unavailable logging sink does not suppress the existing retry alarm", a
   const session = new SmbcBackfillSession(state, {
     SESSION_ENCRYPTION_KEY: key,
     SMBC_CREDENTIAL_JSON: JSON.stringify({ user: "1234567-12345", password: "synthetic-only" }),
-  } as Env);
+  } as unknown as Env);
   await session.alarm();
   expect(alarms).toHaveLength(1);
   expect(values.get("progress")).toMatchObject({
@@ -167,25 +167,12 @@ test("a normalized write fault preserves raw evidence and the next alarm repairs
     logout: async () => undefined,
   } as unknown as DirectProfile);
   restores.push(() => profile.mockRestore());
-  const importer = {
-    fetch: async () =>
-      Response.json({
-        source: "smbc-direct",
-        manifestKey: `${prefix}/manifest.json`,
-        status: "sealed",
-        centralRunId: 1,
-        artifactCount: 4,
-        sealed: true,
-        finalChunkAllObjectsReused: false,
-      }),
-  } as unknown as Fetcher;
   const session = new SmbcBackfillSession(state, {
     SESSION_ENCRYPTION_KEY: key,
     SMBC_CREDENTIAL_JSON: JSON.stringify({ user: "1234567-12345", password: "synthetic-only" }),
     COLLECTOR_SCHEMA_VERSION: "smbc-direct-backfill-worker-poc-v1",
-    RAW_EVIDENCE_IMPORTER: importer,
-    SNAPSHOTS: bucket,
-  } as Env);
+    DATA: bucket,
+  } as unknown as Env);
 
   await session.alarm();
   expect(values.get("progress")).toMatchObject({ phase: "running", retryCount: 1 });

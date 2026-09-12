@@ -1,5 +1,4 @@
 import type { GatewayMeta, SessionMaterial } from "./types";
-
 const COOKIE_NAMES = [
   "vct_bff_sid",
   "JSESSIONID",
@@ -10,7 +9,6 @@ const COOKIE_NAMES = [
   "AWSALB",
   "AWSALBCORS",
 ] as const;
-
 export function parseSession(value: unknown): SessionMaterial {
   if (!isRecord(value) || !isRecord(value.cookies) || typeof value.secureKey !== "string") {
     throw new Error("invalid_session_seed");
@@ -41,7 +39,6 @@ export function parseSession(value: unknown): SessionMaterial {
   validateSession(parsed);
   return parsed;
 }
-
 export function cookieHeader(session: SessionMaterial): string {
   return [
     `vct_bff_sid=${session.cookies.vctBffSid}`,
@@ -51,12 +48,14 @@ export function cookieHeader(session: SessionMaterial): string {
     `AWSALBCORS=${session.cookies.awsAlbCors}`,
   ].join("; ");
 }
-
 export function applySessionUpdates(
   session: SessionMaterial,
   setCookieHeaders: readonly string[],
   meta: GatewayMeta,
-): { session: SessionMaterial; updateCount: number } {
+): {
+  session: SessionMaterial;
+  updateCount: number;
+} {
   const next = structuredClone(session);
   let updateCount = 0;
   for (const header of setCookieHeaders) {
@@ -76,7 +75,6 @@ export function applySessionUpdates(
   validateSession(next);
   return { session: next, updateCount };
 }
-
 export function parseGatewayMeta(value: unknown): GatewayMeta {
   if (!isRecord(value) || !isRecord(value.meta) || typeof value.meta.status !== "string") {
     throw new Error("invalid_gateway_envelope");
@@ -86,7 +84,6 @@ export function parseGatewayMeta(value: unknown): GatewayMeta {
     ...(typeof value.meta.secureKey === "string" ? { secureKey: value.meta.secureKey } : {}),
   };
 }
-
 function setCookie(session: SessionMaterial, name: string, value: string): boolean {
   switch (name) {
     case "vct_bff_sid":
@@ -131,13 +128,11 @@ function setCookie(session: SessionMaterial, name: string, value: string): boole
     }
   }
 }
-
 function replace(current: () => string, assign: (value: string) => void, value: string): boolean {
   if (current() === value) return false;
   assign(value);
   return true;
 }
-
 function validateSession(session: SessionMaterial): void {
   const values = [
     session.secureKey,
@@ -151,7 +146,6 @@ function validateSession(session: SessionMaterial): void {
     throw new Error("invalid_session_seed");
   }
 }
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

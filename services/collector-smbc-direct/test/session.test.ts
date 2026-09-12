@@ -1,6 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { isResumable } from "../src/progress";
-import { classifyError } from "../src/session";
+mock.module("cloudflare:workers", () => ({
+  DurableObject: class {
+    constructor(
+      readonly ctx: DurableObjectState,
+      readonly env: Env,
+    ) {}
+  },
+}));
+const { classifyError } = await import("../src/session");
 import type { BackfillProgress } from "../src/types";
 
 const progress = (phase: BackfillProgress["phase"]): BackfillProgress => ({

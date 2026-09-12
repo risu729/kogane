@@ -1,7 +1,9 @@
-import { startTcpRelay } from "./tcp-relay";
+import { Container, getContainer, type StopParams } from "@cloudflare/containers";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { collectSbiShinsei } from "./collector";
 import {
-  ContainerResponseError,
   containerLifecycleDetails,
+  ContainerResponseError,
   containerResponseReason,
   containerStopDetails,
   emitDiagnostic,
@@ -9,21 +11,16 @@ import {
   safeErrorType,
   stageDiagnostics,
 } from "./diagnostics";
-import { Container, getContainer, type StopParams } from "@cloudflare/containers";
-import { createHash, timingSafeEqual } from "node:crypto";
-import { collectSbiShinsei } from "./collector";
-import { collectionTarget } from "./collection-target";
 import { liveReadsEnabled } from "./read-allowlist";
-import { backfillRawEvidence, importRawEvidence, RawEvidenceImportError } from "./raw-evidence";
 import {
   dataBucket,
   persistSharedRun,
   sharedRunPersisted,
   type SharedRunSummary,
 } from "./shared-collection";
-import { describeArtifact, runPrefix, storeArtifact, storeManifest } from "./storage";
+import { describeArtifact, runPrefix } from "./storage";
+import { startTcpRelay } from "./tcp-relay";
 import type { CollectionFailure, CollectionManifest, CollectionResult, RawArtifact } from "./types";
-
 const MAX_CONTAINER_RESPONSE_BYTES = 10 * 1024 * 1024;
 const RELAY_HOSTS = new Set([
   "bk.web.sbishinseibank.co.jp",
@@ -32,18 +29,15 @@ const RELAY_HOSTS = new Set([
   "diproxy.cafisbrain.com",
   "platform-websdk.transmitsecurity.io",
 ]);
-
 export class SbiShinseiCollectorContainer extends Container<Env> {
   override defaultPort = 8080;
   override requiredPorts = [8080];
   override sleepAfter = "30s";
   override enableInternet = true;
   override envVars = { TZ: "Asia/Tokyo" };
-
   override onStart(): void {
     emitDiagnostic("log", { event: "sbi-shinsei-container-start" });
   }
-
   override onStop(params: StopParams): void {
     const details = containerStopDetails(params);
     emitDiagnostic(details.exitCode === 0 ? "log" : "warn", {
@@ -51,7 +45,6 @@ export class SbiShinseiCollectorContainer extends Container<Env> {
       ...details,
     });
   }
-
   override onError(error: unknown): void {
     emitDiagnostic("error", {
       event: "sbi-shinsei-container-error",
@@ -59,7 +52,6 @@ export class SbiShinseiCollectorContainer extends Container<Env> {
     });
   }
 }
-
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
@@ -74,32 +66,6 @@ export default {
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket" && url.pathname === "/tcp") {
       return relayTcp(request, env, ctx, url);
     }
-    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
-      if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      try {
-        const cursor = url.searchParams.get("cursor") ?? undefined;
-        const limit = parseBackfillLimit(url.searchParams.get("limit"));
-        return Response.json(
-          await backfillRawEvidence({
-            importer: env.RAW_EVIDENCE_IMPORTER,
-            ...(cursor ? { cursor } : {}),
-            ...(limit ? { limit } : {}),
-          }),
-        );
-      } catch (error) {
-        return Response.json(
-          {
-            error:
-              error instanceof RawEvidenceImportError
-                ? "raw_evidence_import_failed"
-                : "backfill_request_invalid",
-          },
-          { status: error instanceof RawEvidenceImportError ? 502 : 400 },
-        );
-      }
-    }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
@@ -112,20 +78,15 @@ export default {
         { status: 400 },
       );
     }
-
     try {
       const result = await runCollection(env);
       return Response.json(publicResult(result), {
         status: result.status === "failed" ? 503 : 200,
       });
     } catch (error) {
-      return Response.json(
-        { error: publicError(error) },
-        { status: error instanceof RawEvidenceImportError ? 502 : 400 },
-      );
+      return Response.json({ error: publicError(error) }, { status: 400 });
     }
   },
-
   async scheduled(_controller, env): Promise<void> {
     const result = await runCollection(env);
     if (result.status === "failed") {
@@ -133,13 +94,14 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
-
 async function runCollection(
   env: Env,
   // The hook U06's operations API fills in when it dispatches a run: the
   // operation it accepted and the attempt this invocation is. Both end up in
   // the shared terminal so a run can be traced back to its request.
-  identity: { operationId?: string } = {},
+  identity: {
+    operationId?: string;
+  } = {},
 ): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
@@ -150,14 +112,13 @@ async function runCollection(
   // staging bucket is not written at all — and skips the central upload
   // (plan 00: one canonical copy; G1-15). `legacy` is byte-for-byte the path
   // this collector has always taken.
-  const target = collectionTarget(env.COLLECTION_TARGET);
+  const target = "shared";
   const artifacts = [];
   // Every artifact admitted to this run, kept in memory for the shared-mode
   // terminal; they never include the container handoff.
   const collected: RawArtifact[] = [];
   const failures: CollectionFailure[] = [];
   const container = getContainer(env.COLLECTOR_CONTAINER, `run-${runId}`);
-
   let stage = "credential-validation";
   try {
     const output = await diagnostic.step(
@@ -214,18 +175,9 @@ async function runCollection(
     for (const artifact of output.artifacts) {
       try {
         artifacts.push(
-          target === "shared"
-            ? // The manifest entry only: the bytes reach DATA content-addressed
-              // when the terminal is written, and nothing is staged.
-              (await describeArtifact({ prefix, artifact })).record
-            : await diagnostic.step("staging-write", () =>
-                storeArtifact({
-                  bucket: env.SNAPSHOTS,
-                  prefix,
-                  runId,
-                  artifact,
-                }),
-              ),
+          // The manifest entry only: the bytes reach DATA content-addressed
+          // when the terminal is written, and nothing is staged.
+          (await describeArtifact({ prefix, artifact })).record,
         );
         collected.push(artifact);
       } catch (error) {
@@ -269,7 +221,6 @@ async function runCollection(
       });
     }
   }
-
   const completedAt = new Date().toISOString();
   const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
   const manifest: CollectionManifest = {
@@ -285,7 +236,7 @@ async function runCollection(
   };
   let manifestKey: string;
   let shared: SharedRunSummary | undefined;
-  if (target === "shared") {
+  {
     // U09: the run's completion record is the terminal this Worker writes into
     // DATA, after the content-addressed objects; the staging bucket is not
     // written and the central upload is skipped, so exactly one copy exists
@@ -317,42 +268,6 @@ async function runCollection(
     // The collector manifest lives in DATA, content-addressed, like every
     // other artifact of the run.
     manifestKey = shared.manifestObjectKey;
-  } else {
-    manifestKey = await diagnostic
-      .step("manifest-write", () =>
-        storeManifest({
-          bucket: env.SNAPSHOTS,
-          prefix,
-          manifest,
-        }),
-      )
-      .catch(() => {
-        emitDiagnostic("error", {
-          event: "sbi-shinsei-manifest-write-failed",
-          runId,
-          phase: "manifest-write",
-        });
-        diagnostic.terminal("failed");
-        throw new Error("manifest_write_failed");
-      });
-    // Source collection and central import are separate outcomes.
-    diagnostic.terminal(status);
-    try {
-      await diagnostic.step("raw-evidence-import", () =>
-        importRawEvidence({
-          importer: env.RAW_EVIDENCE_IMPORTER,
-          manifestKey,
-        }),
-      );
-    } catch (error) {
-      emitDiagnostic("error", {
-        event: "sbi-shinsei-raw-evidence-import-failed",
-        runId,
-        phase: "raw-evidence-import",
-        errorCode: "raw_evidence_import_failed",
-      });
-      throw error;
-    }
   }
   emitDiagnostic("log", {
     event: "sbi-shinsei-collection-stored",
@@ -367,7 +282,6 @@ async function runCollection(
   });
   return { ...manifest, manifestKey };
 }
-
 async function readBoundedText(response: Response, maximumBytes: number): Promise<string> {
   const declared = response.headers.get("content-length");
   if (declared && Number(declared) > maximumBytes) {
@@ -395,7 +309,6 @@ async function readBoundedText(response: Response, maximumBytes: number): Promis
     reader.releaseLock();
   }
 }
-
 function authorized(request: Request, expected: string | undefined): boolean {
   const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
   if (!provided || !expected) return false;
@@ -403,7 +316,6 @@ function authorized(request: Request, expected: string | undefined): boolean {
   const right = new TextEncoder().encode(expected);
   return left.byteLength === right.byteLength && timingSafeEqual(left, right);
 }
-
 async function relayTcp(
   request: Request,
   env: Env,
@@ -418,7 +330,6 @@ async function relayTcp(
   if (!RELAY_HOSTS.has(hostname) || port !== 443) {
     return Response.json({ error: "Target denied" }, { status: 403 });
   }
-
   // Only the collector-generated UUID is eligible for correlation, never a URL/token.
   const runIdValue = url.searchParams.get("runId");
   const runId =
@@ -453,16 +364,13 @@ async function validRelayBearer(request: Request, expected: string | undefined):
   const expectedHash = createHash("sha256").update(expected).digest();
   return timingSafeEqual(providedHash, expectedHash);
 }
-
 interface VpcNetworkBinding extends Fetcher {
   connect(address: SocketAddress | string, options?: SocketOptions): Socket;
 }
-
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
 }
-
 function publicError(error: unknown): string {
   const value = error instanceof Error ? error.message : "Unknown error";
   return value
@@ -473,7 +381,6 @@ function publicError(error: unknown): string {
     )
     .slice(0, 300);
 }
-
 function publicResult(result: CollectionResult): object {
   return {
     runId: result.runId,
@@ -483,10 +390,4 @@ function publicResult(result: CollectionResult): object {
     failureCount: result.failures.length,
     manifestKey: result.manifestKey,
   };
-}
-
-function parseBackfillLimit(value: string | null): number | undefined {
-  if (value === null) return undefined;
-  if (value !== "1") throw new Error("backfill_limit_must_be_one");
-  return 1;
 }

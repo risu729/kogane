@@ -1,7 +1,4 @@
-import {
-  createDiagnostics,
-  safeErrorDetails,
-} from "../../../packages/collector-diagnostics/src/index";
+import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import {
   AUTH_KEY_SHA256,
   CONFIG_KEY_SHA256,
@@ -9,13 +6,6 @@ import {
   buildConfigAuth,
   buildFirstLoginAuth,
 } from "./mobile-auth";
-import { collectionTarget } from "./collection-target";
-import {
-  backfillStoredRuns,
-  continueStoredRecord,
-  enqueueStoredRecord,
-  type VpassImportJob,
-} from "./raw-evidence";
 import {
   persistCardRun,
   persistFailedRun,
@@ -24,7 +14,6 @@ import {
   sharedRunPersisted,
   type VpassMonthCapture,
 } from "./shared-collection";
-
 const AUTH_URL = "https://spap.smbc-card.com/api/v3/Fauth";
 const CONFIG_URL = "https://spap.smbc-card.com/api/v3/common/Config";
 const MEMBER_BASE_URL = "https://www.smbc-card.com";
@@ -38,14 +27,9 @@ const MOBILE_UA =
   `com.smbc_card.vpass.android_v${APP_VERSION} ` +
   "Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP3A.241105.008; wv) " +
   "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36";
-
 interface Env {
-  SNAPSHOTS: R2Bucket;
   /** The central bucket; written only when COLLECTION_TARGET is `shared`. */
   DATA: R2Bucket;
-  COLLECTION_TARGET: string;
-  RAW_EVIDENCE_IMPORTER: Fetcher;
-  RAW_EVIDENCE_QUEUE: Queue<VpassImportJob>;
   VPASS_ID: string;
   VPASS_PASSWORD: string;
   VPASS_DEVICE_ID: string;
@@ -53,14 +37,11 @@ interface Env {
   VPASS_CONFIG_PUBLIC_KEY_B64: string;
   ADMIN_TRIGGER_TOKEN: string;
 }
-
 type JsonObject = Record<string, unknown>;
-
 interface RawJsonResponse {
   rawText: string;
   json: JsonObject;
 }
-
 interface RunSummary {
   runId: string;
   startedAt: string;
@@ -72,7 +53,6 @@ interface RunSummary {
   transactionCount: number;
   objectCount: number;
 }
-
 interface AllCardsRunSummary {
   runId: string;
   startedAt: string;
@@ -85,26 +65,27 @@ interface AllCardsRunSummary {
   transactionCount: number;
   objectCount: number;
 }
-
 interface VpassSession {
   cookies: CookieBag;
   cardList: RawJsonResponse;
   cards: string[];
 }
-
 interface MonthCapture {
-  pages: Array<{ kind: "top" | "answer"; index: number; rawJson: string }>;
+  pages: Array<{
+    kind: "top" | "answer";
+    index: number;
+    rawJson: string;
+  }>;
   transactionCount: number;
 }
-
 /** The captures a card collected, in the shape the shared plan reads. */
 type SharedMonths = Record<string, VpassMonthCapture>;
-
 class CookieBag {
   readonly #values = new Map<string, string>();
-
   absorb(headers: Headers): void {
-    const extended = headers as Headers & { getSetCookie?: () => string[] };
+    const extended = headers as Headers & {
+      getSetCookie?: () => string[];
+    };
     const sources = extended.getSetCookie?.() ?? splitSetCookie(headers.get("set-cookie"));
     for (const source of sources) {
       const pair = source.split(";", 1)[0]?.trim();
@@ -113,27 +94,22 @@ class CookieBag {
       this.#values.set(pair.slice(0, separator), pair.slice(separator + 1));
     }
   }
-
   header(): string {
     return [...this.#values].map(([name, value]) => `${name}=${value}`).join("; ");
   }
-
   get size(): number {
     return this.#values.size;
   }
 }
-
 function splitSetCookie(value: string | null): string[] {
   if (!value) return [];
   // Expires contains a comma, while the next cookie begins after a comma followed
   // by a token and '='. Modern Workers exposes getSetCookie(); this is a fallback.
   return value.split(/,(?=\s*[^;,=\s]+=[^;,]*)/g);
 }
-
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
 function objectAt(value: unknown, ...path: string[]): JsonObject | null {
   let current: unknown = value;
   for (const key of path) {
@@ -142,7 +118,6 @@ function objectAt(value: unknown, ...path: string[]): JsonObject | null {
   }
   return isObject(current) ? current : null;
 }
-
 function arrayAt(value: unknown, ...path: string[]): unknown[] {
   let current: unknown = value;
   for (const key of path) {
@@ -151,7 +126,6 @@ function arrayAt(value: unknown, ...path: string[]): unknown[] {
   }
   return Array.isArray(current) ? current : [];
 }
-
 function pairMonths(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -160,7 +134,6 @@ function pairMonths(value: unknown): string[] {
     return typeof month === "string" && /^\d{6}$/.test(month) ? [month] : [];
   });
 }
-
 function cardKeys(response: unknown): string[] {
   const list = objectAt(response, "body", "content", "DropdownListInitDisplayServiceBean")?.[
     "multiCardInfoList"
@@ -172,7 +145,6 @@ function cardKeys(response: unknown): string[] {
     return typeof value === "string" && value.length > 0 ? [value] : [];
   });
 }
-
 function availableMonths(response: unknown): string[] {
   const content = objectAt(response, "body", "content");
   if (!content) return [];
@@ -183,43 +155,33 @@ function availableMonths(response: unknown): string[] {
   ];
   return [...new Set(sources.flatMap(pairMonths))].sort().reverse();
 }
-
 function integer(value: unknown): number | null {
   if (typeof value === "number" && Number.isInteger(value)) return value;
   if (typeof value === "string" && /^\d+$/.test(value)) return Number.parseInt(value, 10);
   return null;
 }
-
 function adler32(value: string): number {
   let a = 1;
   let b = 0;
   for (const byte of new TextEncoder().encode(value)) {
-    a = (a + byte) % 65_521;
-    b = (b + a) % 65_521;
+    a = (a + byte) % 65521;
+    b = (b + a) % 65521;
   }
   return ((b << 16) | a) >>> 0;
 }
-
 function requestBody(path: string, content: JsonObject): string {
   return JSON.stringify({
     header: { requestHash: adler32(path), requestTimestamp: Date.now(), corpCode: "" },
     body: { content },
   });
 }
-
 function safeRunId(now = new Date()): string {
   return now.toISOString().replaceAll(":", "-").replace(".", "-");
 }
-
 function requireSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
 }
-
-function errorMessage(error: unknown): string {
-  return JSON.stringify(safeErrorDetails(error));
-}
-
 async function jsonResponse(response: Response, label: string): Promise<RawJsonResponse> {
   const rawText = await response.text();
   if (!response.ok)
@@ -235,7 +197,6 @@ async function jsonResponse(response: Response, label: string): Promise<RawJsonR
   if (!isObject(parsed)) throw new Error(`${label} returned non-object JSON`);
   return { rawText, json: parsed };
 }
-
 async function authenticate(env: Env, cookies: CookieBag): Promise<void> {
   const authKey = Buffer.from(
     requireSecret(env.VPASS_AUTH_PUBLIC_KEY_B64, "VPASS_AUTH_PUBLIC_KEY_B64"),
@@ -247,7 +208,6 @@ async function authenticate(env: Env, cookies: CookieBag): Promise<void> {
   );
   assertPublicKeyHash(authKey, AUTH_KEY_SHA256, "auth public key");
   assertPublicKeyHash(configKey, CONFIG_KEY_SHA256, "Config public key");
-
   const deviceId = requireSecret(env.VPASS_DEVICE_ID, "VPASS_DEVICE_ID");
   const commonHeaders = {
     accept: "application/json",
@@ -257,7 +217,6 @@ async function authenticate(env: Env, cookies: CookieBag): Promise<void> {
     "x-app-version": APP_VERSION,
     "x-os-version": "15",
   };
-
   const configResponse = await fetch(CONFIG_URL, {
     method: "POST",
     redirect: "manual",
@@ -276,7 +235,6 @@ async function authenticate(env: Env, cookies: CookieBag): Promise<void> {
   if (configStatus !== 200 || !sessionTime) {
     throw new Error(`Config rejected the session (application status ${String(configStatus)})`);
   }
-
   const loginId = requireSecret(env.VPASS_ID, "VPASS_ID");
   const password = requireSecret(env.VPASS_PASSWORD, "VPASS_PASSWORD");
   const authResponse = await fetch(AUTH_URL, {
@@ -304,7 +262,6 @@ async function authenticate(env: Env, cookies: CookieBag): Promise<void> {
     throw new Error(`Fauth rejected the login (application status ${String(authStatus)})`);
   }
 }
-
 async function memberPost(
   cookies: CookieBag,
   path: string,
@@ -329,7 +286,6 @@ async function memberPost(
   }
   return result;
 }
-
 async function openSession(env: Env): Promise<VpassSession> {
   const cookies = new CookieBag();
   await authenticate(env, cookies);
@@ -340,47 +296,12 @@ async function openSession(env: Env): Promise<VpassSession> {
   if (cards.length === 0) throw new Error("Vpass returned no selectable cards");
   return { cookies, cardList, cards };
 }
-
-async function putJson(env: Env, key: string, rawText: string): Promise<void> {
-  await env.SNAPSHOTS.put(key, rawText, {
-    httpMetadata: { contentType: "application/json; charset=utf-8" },
-  });
-}
-
-async function putCardError(
-  env: Env,
-  prefix: string,
-  runId: string,
-  started: Date,
-  selectedCardZeroBased: number,
-  error: unknown,
-): Promise<void> {
-  await putJson(
-    env,
-    `${prefix}/error.json`,
-    JSON.stringify(
-      {
-        runId,
-        startedAt: started.toISOString(),
-        failedAt: new Date().toISOString(),
-        status: "error",
-        message: errorMessage(error),
-        selectedCardIndex: selectedCardZeroBased + 1,
-        objectCount: 1,
-      },
-      null,
-      2,
-    ),
-  );
-}
-
 async function collectMonth(cookies: CookieBag, month: string): Promise<MonthCapture> {
   // The Android app always supplies p03=1 for the first finalized-statement
   // page. Omitting p03 returns only the display/header bean with zero rows.
   let current = await memberPost(cookies, MEISAI_TOP_PATH, { p01: month, p03: "1" });
   const content = objectAt(current.json, "body", "content");
   if (!content) throw new Error(`${month} response has no content`);
-
   if (objectAt(content, "WebMeisaiTopDisplayServiceBean")) {
     let transactions = 0;
     const seen = new Set<string>();
@@ -408,7 +329,6 @@ async function collectMonth(cookies: CookieBag, month: string): Promise<MonthCap
     }
     throw new Error(`${month} exceeded ${MAX_PAGES_PER_MONTH} pages`);
   }
-
   const customized = objectAt(content, "CustomizedMeisaiAnsDisplayServiceBean");
   if (!customized) throw new Error(`${month} returned an unknown statement shape`);
   let transactions = arrayAt(customized, "meisaiList").length;
@@ -446,7 +366,6 @@ async function collectMonth(cookies: CookieBag, month: string): Promise<MonthCap
   }
   return { pages, transactionCount: transactions };
 }
-
 async function captureCard(
   env: Env,
   session: VpassSession,
@@ -455,7 +374,7 @@ async function captureCard(
   runId: string,
 ): Promise<RunSummary> {
   const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
-  const prefix = `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
+
   const { cookies, cardList, cards } = session;
   const diagnostic = createDiagnostics("vpass", runId);
   let stage = "card-selection";
@@ -466,7 +385,6 @@ async function captureCard(
         `Requested card ${selectedCardZeroBased + 1}, but Vpass returned ${cards.length} cards`,
       );
     }
-
     const selection = await memberPost(cookies, CARD_SELECT_PATH, {
       cardIdentifyKey: selectedCard,
     });
@@ -474,10 +392,15 @@ async function captureCard(
     const top = await memberPost(cookies, MEISAI_TOP_PATH, {});
     const months = availableMonths(top.json);
     if (months.length === 0) throw new Error(`${cardLabel} returned no available statement months`);
-
     let pageCount = 0;
     let transactionCount = 0;
-    const monthResults: Record<string, { pages: number; transactions: number }> = {};
+    const monthResults: Record<
+      string,
+      {
+        pages: number;
+        transactions: number;
+      }
+    > = {};
     const captures: Record<string, MonthCapture> = {};
     for (const month of months) {
       stage = "statement-collection";
@@ -490,7 +413,6 @@ async function captureCard(
       pageCount += result.pages.length;
       transactionCount += result.transactionCount;
     }
-
     const summary: RunSummary = {
       runId,
       startedAt: started.toISOString(),
@@ -502,7 +424,7 @@ async function captureCard(
       transactionCount,
       objectCount: 2,
     };
-    if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
+    {
       // The shared target stores the sanitized artifact set directly and
       // writes the terminal last; nothing goes to the per-source bucket and
       // the importer is never called (G1-15).
@@ -522,54 +444,19 @@ async function captureCard(
       if (!sharedRunPersisted(outcome)) throw new Error("shared_persist_incomplete");
       return summary;
     }
-    stage = "artifact-write";
-    await putJson(
-      env,
-      `${prefix}/snapshot.json`,
-      JSON.stringify({
-        format: "kogane-vpass-r2-snapshot/v1",
-        runId,
-        selectedCardIndex: selectedCardZeroBased + 1,
-        cardListRawJson: cardList.rawText,
-        selectCardRawJson: selection.rawText,
-        webMeisaiTopRawJson: top.rawText,
-        months: captures,
-      }),
-    );
-    stage = "manifest-write";
-    await putJson(
-      env,
-      `${prefix}/manifest.json`,
-      JSON.stringify({ ...summary, status: "success", months: monthResults }, null, 2),
-    );
-    stage = "central-import";
-    await enqueueStoredRecord(env.RAW_EVIDENCE_QUEUE, `${prefix}/manifest.json`);
-    return summary;
   } catch (error) {
     diagnostic.failure(stage, error);
-    if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
+    {
       // A card that collected nothing is a failed run with no artifact, never
       // an empty success (G1-09). A persist failure here is reported as the
       // original failure: the terminal is simply absent.
       if (stage !== "shared-persist") {
-        await persistFailedCard(env, runId, cardLabel, started).catch(() => {
-          // The card failure below is the outcome that matters.
-        });
+        await persistFailedCard(env, runId, cardLabel, started).catch(() => {});
       }
       throw error;
     }
-    if (stage !== "central-import") {
-      await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
-      try {
-        await enqueueStoredRecord(env.RAW_EVIDENCE_QUEUE, `${prefix}/error.json`);
-      } catch {
-        // The immutable source record remains available for the explicit backfill.
-      }
-    }
-    throw error;
   }
 }
-
 /** The failed-run terminal for one card or, with `run`, for a session that
  * failed before a card was selected. */
 async function persistFailedCard(
@@ -586,7 +473,6 @@ async function persistFailedCard(
   });
   console.log(JSON.stringify(sharedRunDiagnostic(runId, unitKey, outcome)));
 }
-
 async function collectOneCard(
   env: Env,
   selectedCardZeroBased: number,
@@ -595,26 +481,17 @@ async function collectOneCard(
   const started = new Date(scheduledTime);
   const runId = safeRunId(started);
   const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
-  const prefix = `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
+
   const diagnostic = createDiagnostics("vpass", runId);
   let session: VpassSession;
   try {
     session = await diagnostic.step("session-open", () => openSession(env));
   } catch (error) {
     diagnostic.finish("failed");
-    if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
-      await persistFailedCard(env, runId, cardLabel, started).catch(() => {
-        // The session failure below is the outcome that matters.
-      });
+    {
+      await persistFailedCard(env, runId, cardLabel, started).catch(() => {});
       throw error;
     }
-    await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
-    try {
-      await enqueueStoredRecord(env.RAW_EVIDENCE_QUEUE, `${prefix}/error.json`);
-    } catch {
-      // The immutable source record remains available for the explicit backfill.
-    }
-    throw error;
   }
   try {
     const result = await diagnostic.step("card-collection", () =>
@@ -627,47 +504,21 @@ async function collectOneCard(
     throw error;
   }
 }
-
 async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCardsRunSummary> {
   const started = new Date(scheduledTime);
   const runId = safeRunId(started);
-  const runPrefix = `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}`;
+
   const diagnostic = createDiagnostics("vpass", runId);
   let session: VpassSession;
   try {
     session = await diagnostic.step("session-open", () => openSession(env));
   } catch (error) {
     diagnostic.finish("failed");
-    if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
-      await persistFailedCard(env, runId, "run", started).catch(() => {
-        // The session failure below is the outcome that matters.
-      });
+    {
+      await persistFailedCard(env, runId, "run", started).catch(() => {});
       throw error;
     }
-    await putJson(
-      env,
-      `${runPrefix}/error.json`,
-      JSON.stringify(
-        {
-          runId,
-          startedAt: started.toISOString(),
-          failedAt: new Date().toISOString(),
-          status: "error",
-          message: errorMessage(error),
-          objectCount: 1,
-        },
-        null,
-        2,
-      ),
-    );
-    try {
-      await enqueueStoredRecord(env.RAW_EVIDENCE_QUEUE, `${runPrefix}/error.json`);
-    } catch {
-      // The immutable source record remains available for the explicit backfill.
-    }
-    throw error;
   }
-
   const summaries: RunSummary[] = [];
   const failures: number[] = [];
   for (let index = 0; index < session.cards.length; index += 1) {
@@ -681,7 +532,6 @@ async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCard
       failures.push(index + 1);
     }
   }
-
   const summary: AllCardsRunSummary = {
     runId,
     startedAt: started.toISOString(),
@@ -703,58 +553,14 @@ async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCard
   }
   return summary;
 }
-
 export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     await collectAllCards(env, controller.scheduledTime);
   },
-
-  async queue(batch: MessageBatch<VpassImportJob>, env: Env): Promise<void> {
-    if (batch.messages.length !== 1) throw new Error("raw_evidence_import_batch_invalid");
-    await continueStoredRecord(
-      env.RAW_EVIDENCE_IMPORTER,
-      env.RAW_EVIDENCE_QUEUE,
-      batch.messages[0]!.body,
-    );
-  },
-
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ ok: true, service: "kogane-vpass-collector-poc" });
-    }
-    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
-      if (!(await authorized(request, env.ADMIN_TRIGGER_TOKEN))) {
-        return new Response("Unauthorized", { status: 401 });
-      }
-      if (
-        [...url.searchParams.keys()].some((key) => key !== "cursor" && key !== "limit") ||
-        url.searchParams.getAll("cursor").length > 1 ||
-        url.searchParams.getAll("limit").length > 1 ||
-        (url.searchParams.has("limit") && url.searchParams.get("limit") !== "1")
-      ) {
-        return Response.json({ error: "invalid backfill query" }, { status: 400 });
-      }
-      const cursor = url.searchParams.get("cursor") ?? undefined;
-      if (
-        cursor !== undefined &&
-        (cursor.length === 0 || cursor.length > 24_000 || /[\x00-\x20\x7f]/u.test(cursor))
-      ) {
-        return Response.json({ error: "invalid backfill cursor" }, { status: 400 });
-      }
-      try {
-        return Response.json(await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor), {
-          headers: { "cache-control": "no-store" },
-        });
-      } catch {
-        return Response.json(
-          { error: "raw evidence backfill failed" },
-          {
-            status: 502,
-            headers: { "cache-control": "no-store" },
-          },
-        );
-      }
     }
     if (
       request.method !== "POST" ||
@@ -775,8 +581,7 @@ export default {
     const summary = await collectOneCard(env, requestedCard - 1);
     return Response.json(summary);
   },
-} satisfies ExportedHandler<Env, VpassImportJob>;
-
+} satisfies ExportedHandler<Env>;
 async function authorized(request: Request, configured: string | undefined): Promise<boolean> {
   const token = requireSecret(configured, "ADMIN_TRIGGER_TOKEN");
   const expected = new TextEncoder().encode(`Bearer ${token}`);

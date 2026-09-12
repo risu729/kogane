@@ -1,44 +1,36 @@
-import { logAuthTrace } from "./diagnostics";
 import { DurableObject } from "cloudflare:workers";
 import {
   beginVPointEmailLogin,
   completeVPointEmailLogin,
   type VPointEmailChallengeState,
 } from "./auth";
-
+import { logAuthTrace } from "./diagnostics";
 const SESSION_KEY = "session-cookie";
 const PENDING_KEY = "email-challenge";
 const CHALLENGE_TTL_MS = 2 * 60 * 1000;
-
 export interface EmailChallengeResult {
   status: "created" | "pending";
   requestedAt: string;
 }
-
 export class VPointSession extends DurableObject<Env> {
   private authInFlight: Promise<EmailChallengeResult> | null = null;
   private readonly state: DurableObjectState;
   private readonly environment: Env;
-
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
     this.state = state;
     this.environment = env;
   }
-
   async getSession(): Promise<string | null> {
     return (await this.state.storage.get<string>(SESSION_KEY)) ?? null;
   }
-
   async invalidateSession(): Promise<void> {
     await this.state.storage.delete(SESSION_KEY);
   }
-
   async hasPendingChallenge(): Promise<boolean> {
     const pending = await this.state.storage.get<VPointEmailChallengeState>(PENDING_KEY);
     return Boolean(pending && isFresh(pending.requestedAt));
   }
-
   async ensureEmailChallenge(runId = crypto.randomUUID()): Promise<EmailChallengeResult> {
     const existing = await this.state.storage.get<VPointEmailChallengeState>(PENDING_KEY);
     if (existing && isFresh(existing.requestedAt)) {
@@ -52,11 +44,12 @@ export class VPointSession extends DurableObject<Env> {
       this.authInFlight = null;
     }
   }
-
   async completeEmailCode(
     code: string,
     runId = crypto.randomUUID(),
-  ): Promise<{ status: "authenticated" }> {
+  ): Promise<{
+    status: "authenticated";
+  }> {
     const pending = await this.state.storage.get<VPointEmailChallengeState>(PENDING_KEY);
     if (!pending || !isFresh(pending.requestedAt)) {
       await this.state.storage.delete(PENDING_KEY);
@@ -76,7 +69,6 @@ export class VPointSession extends DurableObject<Env> {
       throw error;
     }
   }
-
   private async createEmailChallenge(runId: string): Promise<EmailChallengeResult> {
     await this.state.storage.delete(PENDING_KEY);
     const memberNumber = this.environment.VPOINT_MEMBER_NUMBER;
@@ -91,7 +83,6 @@ export class VPointSession extends DurableObject<Env> {
     return { status: "created", requestedAt: challenge.requestedAt };
   }
 }
-
 function isFresh(requestedAt: string): boolean {
   const timestamp = Date.parse(requestedAt);
   return Number.isFinite(timestamp) && Date.now() - timestamp < CHALLENGE_TTL_MS;

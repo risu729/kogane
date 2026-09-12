@@ -12,7 +12,7 @@ export default defineConfig({
       miniflare: {
         compatibilityDate: "2026-08-31",
         compatibilityFlags: ["nodejs_compat"],
-        r2Buckets: ["DATA", "SNAPSHOTS"],
+        r2Buckets: ["DATA"],
       },
     }),
   ],

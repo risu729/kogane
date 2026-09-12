@@ -10,7 +10,6 @@ import {
   readTerminal,
   terminalKey,
 } from "../../../packages/collection/src/index";
-import { collectionTarget, sharedCollectionEnabled } from "../src/collection-target";
 import {
   baseMediaType,
   buildSharedRunPlan,
@@ -114,17 +113,6 @@ function inputOf(manifest: BackfillManifest) {
     identity: IDENTITY,
   };
 }
-
-describe("COLLECTION_TARGET", () => {
-  test("defaults to legacy and only the exact string selects shared", () => {
-    expect(collectionTarget(undefined)).toBe("legacy");
-    expect(collectionTarget("shared")).toBe("shared");
-    for (const value of ["Shared", " shared", "legacy", ""]) {
-      expect(collectionTarget(value)).toBe("legacy");
-      expect(sharedCollectionEnabled(value)).toBe(false);
-    }
-  });
-});
 
 describe("terminal field derivation", () => {
   test("a media type loses its charset parameter, never its identity", () => {
