@@ -3,14 +3,11 @@
 Unified plan **U15** (chapter 13 §U15 and §3, 15 §5, 03 §7, 11 §7); acceptance
 tests **G0-10**, **G0-12**, **G5-18**.
 
-Five things outlive the change programme: the legacy ingest Worker
-`kogane-ingest`, the legacy importer `kogane-collector-r2-importer`, the twelve
-per-source R2 buckets, the CORE projection tables of migration `0030`, and one
-live Worker with no configuration in this repository. None of them is deleted
-here, and **no command on this page has been run**. Retiring a live resource is
-an operational decision that follows live verification (15 §5), so what U15
-produced is this: for each one, the evidence that has to exist first, the exact
-query or command that produces that evidence, and the order the steps go in.
+The legacy ingest Worker `kogane-ingest`, importer
+`kogane-collector-r2-importer`, twelve per-source R2 buckets, and CORE projection
+tables remain. Their retirement still requires the checks below. The unrelated
+GlobalPass experiment was verified and deleted on 2026-09-13; section 7 records
+that completed action. The other deletion commands here have not been run.
 
 Read it together with:
 
@@ -45,13 +42,12 @@ Read it together with:
 
 ## 1. What is still deployed, and what replaced it
 
-| Legacy thing                                 | What now does the work                                                              | Still needed because                                                                         |
-| -------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `kogane-ingest` (`services/raw-evidence`)    | `packages/storage-d1` + `packages/application`, in process in the Processor         | The importer still calls it over its service binding; twelve sources still import through it |
-| `kogane-collector-r2-importer`               | The Processor's `legacy-import` adapters and the shared-R2 registration             | Only `vpass` has a reviewed shared-R2 mapping; the other eleven buckets are importer-only    |
-| The twelve per-source buckets                | The shared DATA bucket `kogane-raw-evidence`, key layout `objects/<2 hex>/<sha256>` | They are the only copy of everything collected before the switch                             |
-| CORE `0030` projection tables                | The READ database `kogane-read` when `READ_PROJECTION_ENABLED` is on                | The flag is off; with it off the CORE tables are the live projection                         |
-| `kogane-globalpass-container-probe-20260827` | Nothing; it is a finished probe                                                     | It has no configuration here, so nothing in this repository can prove what it is             |
+| Legacy thing                              | What now does the work                                                              | Still needed because                                                                         |
+| ----------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `kogane-ingest` (`services/raw-evidence`) | `packages/storage-d1` + `packages/application`, in process in the Processor         | The importer still calls it over its service binding; twelve sources still import through it |
+| `kogane-collector-r2-importer`            | The Processor's `legacy-import` adapters and the shared-R2 registration             | Only `vpass` has a reviewed shared-R2 mapping; the other eleven buckets are importer-only    |
+| The twelve per-source buckets             | The shared DATA bucket `kogane-raw-evidence`, key layout `objects/<2 hex>/<sha256>` | They are the only copy of everything collected before the switch                             |
+| CORE `0030` projection tables             | The READ database `kogane-read` when `READ_PROJECTION_ENABLED` is on                | READ is enabled; CORE projections remain the supported rollback target                       |
 
 `services/raw-evidence` and `services/collector-r2-importer` keep their
 `retire-after-verification` disposition in `scripts/resource-ledger.ts`, which
@@ -517,31 +513,42 @@ READ leaves CORE untouched) still holding afterwards, which it cannot if CORE no
 longer has the tables. That is the argument for keeping them well past the
 first release.
 
-## 7. `kogane-globalpass-container-probe-20260827`
+## 7. Retired GlobalPass experiment — 2026-09-13
 
-Live in the account — created 2026-08-26 and last modified 2026-08-27 according
-to the account's Worker listing of 2026-09-11, which is not something the
-repository can re-check — with **no configuration in this repository**. `infra/resources.json` lists it under
-`liveWorkersWithoutConfig`, and `scripts/resource-ledger.test.ts` asserts that
-list against the inventory in `scripts/resource-ledger.ts`, so it cannot drop
-out of sight.
+`kogane-globalpass-container-probe-20260827` was deleted using the WSL repo's
+Wrangler after the owner authorized removal of unused Cloudflare resources.
+Its separate Container application
+`a032015d-4350-46d2-9a8b-724d8ac1f5cd` was also deleted. This was the dated
+experiment, not the production `kogane-globalpass-collector-poc`.
 
-- It cannot be redeployed from here: deleting it is not reversible by any
-  release of this repository.
-- Nothing here can prove what it binds, what calls it, or whether it holds
-  state. A probe named for a date is very likely finished, but "very likely" is
-  not the standard this page uses for a live resource.
-- **Disposition: delete manually after the owner confirms.** Before that:
+Pre-deletion account and deployed-code checks established:
 
-```sh
-wrangler deployments list --name kogane-globalpass-container-probe-20260827
-wrangler tail kogane-globalpass-container-probe-20260827 --format json   # over a full day
-# then, only after the owner confirms:
-wrangler delete kogane-globalpass-container-probe-20260827
-```
+- No other Kogane Worker service binding referred to the probe; no tracked
+  runtime/config reference, cron schedule or custom domain referred to it.
+- It held no D1 or R2 binding and no secret bindings. The deployed handler
+  required `PROBE_TOKEN` to start the experiment; that binding was absent.
+- The Container application had no running instances. The probe's only Durable
+  Object binding was its Container lifecycle class, alongside the existing
+  `TAMIA` network binding. The shared network binding was retained.
+- The September 6–12 invocation aggregate was two requests, zero errors and
+  zero subrequests; this was not treated as zero traffic. The disabled handler,
+  absence of instances and lack of callers established that collection was inactive.
+- The deployed Worker bundle was retained locally for the retirement record.
 
-If it turns out to matter, the opposite action is the right one: add its
-configuration to this repository so that it stops being invisible.
+A fresh account listing verified 17 remaining Kogane Workers and no live Worker
+without repository configuration. Both production Container applications remain.
+
+## 7.1 Legacy paths remain in use
+
+All twelve collectors now use `COLLECTION_TARGET=shared`, and App/Processor
+READ flags are enabled. That switch does not erase old evidence or remove the
+legacy handlers. Account inspection on 2026-09-13 still found the importer as
+consumer of `kogane-r2-outbox-reconciler`, with old buckets as producers, and
+Vpass's legacy import Queue still bound. The ingest service is still bound by
+the importer. Those resources, credentials, handlers and original buckets are
+therefore retained; the eight-day observation window and byte reconciliation
+in sections 3–5 are not yet complete. CORE projections remain a supported flag
+rollback target. No applied migration, original object or database table was deleted.
 
 ## 8. Late work after the old path stops (G5-18)
 

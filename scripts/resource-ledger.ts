@@ -15,7 +15,7 @@
 // disagree, so a rename cannot slip through as "just a directory move"
 // (acceptance tests G0-06, G0-07, G0-12).
 //
-// The live column comes from a read of the Cloudflare account on 2026-09-11;
+// The live column comes from a read of the Cloudflare account on 2026-09-13;
 // it is recorded here as data, not fetched, so the check stays offline.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -29,7 +29,7 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const ACCOUNT_ID = "59ea63cc00914b30ca410b062ae2bb7f";
 
 /**
- * Live Cloudflare inventory, read 2026-09-11 from account `risu`.
+ * Live Cloudflare inventory, read 2026-09-13 from account `risu`.
  *
  * Queues, Durable Object namespaces, Email routes and cron triggers are not
  * listable through the API this was read with, so they are derived from the
@@ -44,15 +44,12 @@ export const ACCOUNT_ID = "59ea63cc00914b30ca410b062ae2bb7f";
  * A name leaves this list when the queue exists; nothing else about the
  * ledger changes, because a queue's identity never does (G0-06).
  */
-export const QUEUES_TO_CREATE: Readonly<Record<string, string>> = {
-  // U08: R2 event notifications for `runs/*/terminal.json` on the shared DATA
-  // bucket reach the Processor through it. See docs/processor.md.
-  "kogane-collection-terminals": "to be created by the first deploy (U08)",
-  "kogane-collection-terminals-dlq": "to be created by the first deploy (U08)",
-};
+// The shared collection queue and DLQ were provisioned on 2026-09-12;
+// account reads on 2026-09-13 confirmed the producer and consumer bindings.
+export const QUEUES_TO_CREATE: Readonly<Record<string, string>> = {};
 
 export const LIVE_INVENTORY = {
-  readAt: "2026-09-11",
+  readAt: "2026-09-13",
   accountId: ACCOUNT_ID,
   /** Worker scripts that exist in the account. */
   workers: [
@@ -60,7 +57,6 @@ export const LIVE_INVENTORY = {
     "kogane-demo",
     "kogane-evidence-browser",
     "kogane-globalpass-collector-poc",
-    "kogane-globalpass-container-probe-20260827",
     "kogane-ingest",
     "kogane-mobile-suica-collector-poc",
     "kogane-moneyforward-collector-poc",
@@ -100,13 +96,8 @@ export const LIVE_INVENTORY = {
   ],
   /** KV namespaces: none exist. */
   kvNamespaces: [] as string[],
-  /**
-   * Live Workers with no config in this repository. Nothing here can redeploy
-   * them, so deleting one is not reversible by any release of this repository.
-   * Disposition (U15): delete manually after the owner confirms — see
-   * `docs/legacy-retirement.md` §7 and `infra/protection.md` §1.
-   */
-  workersWithoutConfig: ["kogane-globalpass-container-probe-20260827"],
+  /** No unconfigured Kogane Worker remains after the verified probe retirement. */
+  workersWithoutConfig: [] as string[],
 } as const;
 
 export interface Disposition {
