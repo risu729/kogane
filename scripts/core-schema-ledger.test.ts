@@ -124,18 +124,8 @@ describe("G0-01 CORE schema ledger", () => {
       expect(ledger.summary.byClassification["read-candidate"]).not.toContain(name);
   });
 
-  test("only the tables chapter 04 §2 places in READ are READ candidates", () => {
-    expect(ledger.summary.byClassification["read-candidate"]).toEqual([
-      "balance_read_snapshots",
-      // The active snapshot pointer of migration 0038 belongs to the same
-      // rebuildable set: it names which snapshot the read model publishes, and
-      // it moves to READ with them in U11.
-      "balance_snapshot_pointer",
-      "conversion_simulations",
-      "current_balance_projection",
-      "expiry_estimates",
-      "scope_relations",
-    ]);
+  test("retired CORE projections are no longer READ candidates", () => {
+    expect(ledger.summary.byClassification["read-candidate"]).toEqual([]);
   });
 
   test("every table is STRICT and the append-only guards are recorded per table", () => {
@@ -193,23 +183,10 @@ describe("G0-09 READ schema ledger", () => {
       // U16: the reward second stage of 04 §2, in the same database.
       "0002_reward_read.sql",
     ]);
-    // No CORE table can appear here, and no READ table in the CORE ledger.
     const core = new Set(ledger.tables.map((table) => table.name));
     expect(
       readLedger.tables.filter((table) => core.has(table.name)).map((table) => table.name),
-    ).toEqual([
-      // These three names exist in both databases on purpose while U11 is
-      // behind its flag: CORE still carries the projection of migration 0030,
-      // and READ carries the snapshot-scoped rebuild of it. They are different
-      // tables in different databases, and nothing joins them (04 §1).
-      "balance_read_snapshots",
-      "balance_snapshot_pointer",
-      // CORE's `conversion_simulations` and `expiry_estimates` of migration
-      // 0033 keep their names; the READ tables of U16 are named apart
-      // (`reward_*`) precisely so the two are never mistaken for each other.
-      "current_balance_projection",
-      "scope_relations",
-    ]);
+    ).toEqual([]);
   });
 
   test("every READ table is classified, STRICT, and free of foreign keys to CORE", () => {

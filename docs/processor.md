@@ -4,9 +4,10 @@ Unified plan U08 (chapters 02 §1-3 and §5, 03 §4-§7, 05 §6, 15 §2). What t
 Processor (`services/processor`, Worker `kogane-observation-pipeline`)
 does with a collection run that a collector persisted into the shared DATA
 bucket, how it stays exactly-once, what it records per stage, and what it took
-over from `services/collector-r2-importer`.
+over from the retired importer.
 
-Everything new here is behind a flag that is **off**. Merged is not enabled.
+Production enables the current lanes. Collection is shared-only and projections
+use READ exclusively; see [rollout.md](rollout.md).
 
 ## 1. What the terminal is, and is not
 
@@ -250,41 +251,13 @@ and pending rather than silently completed or dropped.
 A failed dispatch never deletes the request. An import whose terminal is not
 in the bucket is retried, not failed: the collector may still be running.
 
-## 8. Legacy import
+## 8. Retired legacy import
 
-`services/collector-r2-importer` keeps running unchanged until U15. U08 moved
-its source-agnostic half into `src/legacy-import/`:
-
-- `reconciler.ts` — the Queue message schema, the source table
-  (`RECONCILER_SOURCES`) and the bounded repair walk;
-- `adapters/contract.ts` — the import contract, now generic over the Worker
-  environment;
-- `adapters/registry.ts` — route indexing, one import step, the Queue
-  continuation mapping, the registry consistency check;
-- `error.ts` — `ImportError`.
-
-The importer imports them back through re-export shims at the old paths, so
-there is one implementation rather than two, and its wrangler config, routes,
-queue and behaviour are untouched. Its twelve per-source adapters stay with it
-because each binds that Worker's own R2 bindings and secrets; giving the
-Processor twelve legacy bucket bindings is exactly what plan 02 §1 says not to
-do.
-
-`legacy-import/index.ts` matches the `LEGACY_ADAPTERS` of
-`packages/collection` against `RECONCILER_SOURCES` rather than describing the
-old buckets a second time: a key must satisfy both the reconciler's terminal
-pattern and the adapter's matcher. **Only vpass is covered.** The other
-eleven legacy sources — `global-pass`, `mobile-suica`, `moneyforward`,
-`myjcb`, `sbi-securities`, `sbi-shinsei`, `sbi-vc-trade`, `smbc-direct`,
-`sony-bank`, `v-point`, `v-point-pay-email` — are listed by
-`uncoveredLegacySources()`, and **their legacy buckets stay importer-only
-until U15**: a run that exists only in one of those buckets is imported by
-`services/collector-r2-importer` exactly as today, and the Processor neither
-reads those buckets nor re-persists their runs. Each needs its own reviewed
-mapping from its own manifest shape, and a guessed one would make a terminal
-claim something the collector never said. That is also the path a late
-notification takes after the old Workers stop (G5-18): the key is still
-recognised and its bucket named, so unprocessed work is recoverable.
+The importer and ingest Workers, old Queues and per-source buckets have been
+removed. The Processor registers shared terminals directly through the
+application layer. Original evidence and repair outcomes are preserved in
+[the retirement record](legacy-retirement.md); there is no legacy adapter tree
+or old-bucket binding in the Processor.
 
 ## 9. Flags
 
@@ -327,7 +300,7 @@ The Queue **does not exist yet**. `infra/resources.md` says so per queue
    It is not a migration: it creates no schema, and it is applied by an
    operator, not by CD. No token is generated — the client registers in
    process through `directRegistrationPort` and cannot authenticate to the
-   legacy ingest Worker, which is intended. To retire a route, set its
+   retired HTTP ingest Worker. To retire a route, set its
    `active` to `false`, re-render and re-apply; the Processor then answers
    `retryable` with `inactive_ingest_route` for that source.
 
@@ -337,54 +310,30 @@ as a stage rather than blocking the run.
 
 ## 11. Deploy order and rollback
 
-1. **Schema.** Apply CORE `0039_collection_runs.sql`. Additive and inert: no
-   existing table, view, trigger or row changes, and a Worker that predates it
-   never reads or writes what it adds.
-2. **Processor.** Deploy `kogane-observation-pipeline` with the new consumer
-   and lanes, flags still off. This creates the queue. The consumer must exist
-   **before** any collector is switched to the shared layout (U09): the plan's
-   rule is consumer before producer (13 §U08→U09).
-3. **Queue and notification rule**, if the deploy did not create them.
-4. **Ingest client, producers and routes**: apply
-   `infra/bootstrap/ingest-clients.sql` (§10, step 3). Safe to apply before
-   any collector is switched, and safe to re-apply.
-5. **Turn `SHARED_R2_INGEST_ENABLED` on.** With no collector writing the
-   shared layout yet, the scan lists nothing and the consumer receives
-   nothing; this is the safe way to prove the lane runs.
-6. **U09** switches one collector at a time.
+GitHub Actions applies CORE then READ migrations and deploys consumers before
+collectors. The current collection Queue, notification rule and 13 registration
+routes are configured. Deploying a Worker does not invoke a collector.
 
-`OPS_DISPATCH_ENABLED` is independent and can be turned on once the
-operations API (U06) is enabled on the App.
-
-**Rollback:** set the flag back to `"false"` (a var change plus a redeploy),
-or redeploy the previous Worker revision. Both are immediate and lose nothing:
-the terminals stay in R2, the `collection_runs` rows stay, and re-enabling
-continues from where the scan stopped. The migration is **not** rolled back —
-it is additive, and rolling it back would drop the record of which runs were
-already registered.
+Turning a lane flag off pauses its work; terminals and recorded progress remain.
+Projections use READ only. Select only code compatible with the current schema
+and retained resources for rollback. See [rollout.md](rollout.md) and
+[legacy-retirement.md](legacy-retirement.md).
 
 ## 12. Verified locally / not verified
 
 Verified with synthetic data only
 (`services/processor/test/collection.test.ts`,
-`operation-dispatch.test.ts`, `legacy-import.test.ts`, `lanes.test.ts`;
+`operation-dispatch.test.ts`, `lanes.test.ts`;
 `packages/storage-d1/test/migrations.test.ts`;
 `scripts/config-bootstrap.test.ts`): the acceptance rows of §3 and §4, the
 budget-bounded resume, failed and mapped-source terminals, per-unit runs
 sharing one acquisition session, the lane order with flags off and on, the
-append-only triggers, the importer's reconcile logic through its shims, the
+append-only triggers, the
 bootstrap SQL applied twice to a fresh CORE, and `wrangler deploy --dry-run`.
 
-Not verified against a real collector: the producer ids in
-`config/ingest-clients.json` follow the `collector-<collector id>` convention
-U09 states; a collector that names itself differently answers
-`inactive_ingest_route` (retryable) until the declaration is corrected.
-
-Not verified: the queue and the R2 event-notification rule (they do not exist,
-and the notification body is checked against the documented shape rather than
-a live delivery), the CPU and D1 cost of a scan page on a real bucket, and
-anything about production. No production resource was created, read or
-changed.
+Production deployment, resource identity and migration verification are recorded
+in [legacy-retirement.md](legacy-retirement.md). These checks do not establish
+every source's next scheduled run or the cost of every future scan.
 
 ## 13. Internal health and the release postcheck
 
@@ -432,6 +381,5 @@ in this route writes, runs a lane, moves a cursor or contacts a provider.
   (`awaiting_collector_dispatch`).
 - **U11** (READ projection): the `projected` stage of `collection_runs` and of
   `ops_request_stages` is unwritten; the projection publisher completes it.
-- **U15** (retiring the old Workers): the importer's shims and its per-source
-  adapters are what is left to remove; `uncoveredLegacySources()` is the list
-  of sources still reachable only through it.
+- **U15** completed the legacy resource and source retirement; historical
+  originals remain recoverable through the central archive mapping.

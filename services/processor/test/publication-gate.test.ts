@@ -418,7 +418,8 @@ test("migrations 0026, 0028 and 0036 apply on the earlier schema with existing r
         !name.startsWith("0026_") &&
         !name.startsWith("0028_") &&
         !name.startsWith("0036_") &&
-        !name.startsWith("0038_"),
+        !name.startsWith("0038_") &&
+        name < "0042",
     ),
   );
   try {

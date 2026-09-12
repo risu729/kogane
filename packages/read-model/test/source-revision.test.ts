@@ -111,16 +111,8 @@ test("G2-04: checkpoint, job and projection-output tables never move the revisio
     expect(covered.has(table)).toBe(false);
   }
 
-  // A build recording its own progress must not invalidate itself: that is an
-  // endless rebuild, not a change of the data (05 §2).
+  // Checkpoint progress is operational state, not a change to projection input.
   const before = revision(db).source_revision;
-  db.exec(
-    `INSERT INTO balance_read_snapshots(snapshot_id,created_at,input_manifest_json,status,row_count,projection_release)
-     VALUES('${"b".repeat(64)}','2026-09-12T00:00:00Z','{}','building',0,'balance-projection-v1')`,
-  );
-  db.exec(
-    `UPDATE balance_read_snapshots SET build_cursor='42' WHERE snapshot_id='${"b".repeat(64)}'`,
-  );
   db.exec("UPDATE observation_scan_state SET cursor=cursor+11 WHERE id=1");
   expect(revision(db).source_revision).toBe(before);
   db.close();
@@ -261,17 +253,6 @@ test("G2-03: a write in each dependency family moves the matching revision", () 
          '{"kind":"unknown","reasonCode":"probe"}','provider','[]','2026-09-12T00:00:00Z')`,
     ),
   ).toEqual({ source: 1, visibility: 0 });
-  // The reward projection's own output stays outside the ledger: a build that
-  // recorded its result must not invalidate itself (05 §2).
-  expect(
-    moved(
-      `INSERT INTO expiry_estimates(holding_ref,rule_id,rule_version,context_id,state,
-        expiring_buckets_json,uncertainty_codes_json,source_expiry_refs_json,policy_release,
-        computed_at)
-       VALUES('holding:probe','rule:probe','v1','context:probe','computed','[]','[]','[]',
-         'reward-model-v1','2026-09-12T00:00:00Z')`,
-    ),
-  ).toEqual({ source: 0, visibility: 0 });
   // `fetch_run_seals` is in the ledger too; sealing needs a registered Layer A
   // run, so it is exercised against the real registration path in
   // services/processor/test/projection-input.test.ts.

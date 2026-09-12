@@ -38,16 +38,10 @@ exactly this reason; use the READ configuration only for the READ database.
 The rebuild is done with the writer stopped, so a half-built snapshot from the
 old deployment cannot be mistaken for the new one.
 
-```sh
-# Processor: stop writing to READ.
-wrangler deploy --config services/processor/wrangler.jsonc \
-  --var READ_PROJECTION_ENABLED:false
-```
-
-The `balance_projection` lane keeps running against the CORE tables of migration
-0030 while this flag is off, so the projection does not stop existing; only the
-READ copy does. If the CORE path is not wanted either, set
-`BALANCE_PROJECTION_ENABLED=0` as well and the lane reports `skipped(flag_off)`.
+Set Processor `BALANCE_PROJECTION_ENABLED=0` and
+`REWARD_READ_PROJECTION_ENABLED=false` in its Wrangler configuration and deploy
+through GitHub Actions. Both READ writers must be paused before emptying READ.
+No CORE projection fallback exists after migration 0042.
 
 The App can stay as it is: with no published snapshot it answers
 `503 read_model_unavailable` on the v2 balance routes, which is the intended
@@ -98,10 +92,8 @@ expire instead of being answered from new rows.
 
 ## 3. Rebuild
 
-```sh
-wrangler deploy --config services/processor/wrangler.jsonc \
-  --var READ_PROJECTION_ENABLED:true
-```
+Set Processor `BALANCE_PROJECTION_ENABLED=1` and
+`REWARD_READ_PROJECTION_ENABLED=true`, then release through GitHub Actions.
 
 The next cron tick:
 
@@ -136,12 +128,8 @@ until the pointer switches.
   `infra/schema/core-ledger.md` and the CORE tables are not part of this
   procedure at all.
 
-Then re-enable the reader if it was turned off:
-
-```sh
-wrangler deploy --config services/app/wrangler.jsonc \
-  --var READ_PROJECTION_ENABLED:true
-```
+If the App feature gates were paused, re-enable `BALANCE_PROJECTION_ENABLED=1`
+and `REWARDS_V2_ENABLED=true` through the normal Actions release.
 
 ## 5. What to tell people
 

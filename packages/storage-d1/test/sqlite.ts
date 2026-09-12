@@ -17,6 +17,7 @@ import type { D1Like, D1RunResultLike, D1StatementLike } from "../src/d1.ts";
 /** The Layer A tables the later migrations reference, as the pipeline harness
  * declares them. Synthetic only; no provider ever appears here. */
 const LAYER_A = `CREATE TABLE sources(id TEXT PRIMARY KEY,provider TEXT);
+CREATE TABLE ingest_clients(id TEXT PRIMARY KEY,active INTEGER);
 CREATE TABLE producers(id TEXT PRIMARY KEY);
 CREATE TABLE fetch_runs(id INTEGER PRIMARY KEY,source_id TEXT,acquisition_session_id INTEGER,producer_id TEXT,first_recorded_at_ms INTEGER,source_run_key TEXT DEFAULT 'default');
 CREATE TABLE fetch_run_annotations(fetch_run_id INTEGER,annotation_kind TEXT);

@@ -77,6 +77,7 @@ beforeAll(async () => {
   assertDb(binding);
   db = binding;
   await db.exec(`CREATE TABLE sources(id TEXT PRIMARY KEY,provider TEXT);
+CREATE TABLE ingest_clients(id TEXT PRIMARY KEY,active INTEGER);
 CREATE TABLE producers(id TEXT PRIMARY KEY);
 CREATE TABLE fetch_runs(id INTEGER PRIMARY KEY,source_id TEXT,acquisition_session_id INTEGER,producer_id TEXT,first_recorded_at_ms INTEGER);
 CREATE TABLE fetch_run_annotations(fetch_run_id INTEGER,annotation_kind TEXT);

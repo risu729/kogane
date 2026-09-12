@@ -69,46 +69,30 @@ const COLLECTOR_IDENTITIES_BEFORE_THE_PROMOTIONS = [
  * this item neither moves nor touches.
  */
 const WORKER_CONFIGS_BEFORE_THE_PROMOTIONS = [
-  "kogane-collector-r2-importer wrangler.jsonc",
   "kogane-demo wrangler.demo.jsonc",
   "kogane-evidence-browser wrangler.jsonc",
   "kogane-evidence-browser-test wrangler.test.jsonc",
-  "kogane-global-pass-layer-b-audit-local wrangler.audit-global-pass-layer-b.jsonc",
   "kogane-globalpass-collector-poc wrangler.jsonc",
-  "kogane-ingest wrangler.jsonc",
   "kogane-mobile-suica-collector-poc wrangler.jsonc",
   "kogane-moneyforward-collector-poc wrangler.jsonc",
-  "kogane-moneyforward-layer-b-audit-local wrangler.audit-moneyforward-layer-b.jsonc",
-  "kogane-moneyforward-r2-contract-audit-local wrangler.audit-moneyforward.jsonc",
   "kogane-myjcb-collector-poc wrangler.jsonc",
-  "kogane-myjcb-r2-layer-b-audit-local wrangler.audit-myjcb.jsonc",
   "kogane-observation-ops-local wrangler.ops.jsonc",
   "kogane-observation-pipeline wrangler.jsonc",
   "kogane-observation-read-diagnostic wrangler.diagnostic.jsonc",
   "kogane-read-migrations wrangler.read-migrations.jsonc",
   "kogane-sbi-collector-poc wrangler.jsonc",
   "kogane-sbi-shinsei-collector-poc wrangler.jsonc",
-  "kogane-sbi-shinsei-r2-layer-b-audit-local wrangler.audit-sbi-shinsei.jsonc",
-  "kogane-sbi-vc-r2-layer-b-audit-local wrangler.audit-sbi-vc.jsonc",
   "kogane-sbi-vc-session-poc wrangler.jsonc",
   "kogane-smbc-direct-backfill-poc wrangler.jsonc",
-  "kogane-smbc-direct-r2-contract-audit-local wrangler.audit-smbc-direct.jsonc",
-  "kogane-smbc-direct-r2-layer-b-audit-local wrangler.audit-smbc-direct-layer-b.jsonc",
   "kogane-sony-bank-collector-poc wrangler.jsonc",
-  "kogane-sony-bank-r2-layer-b-audit-local wrangler.audit-sony-layer-b.jsonc",
   "kogane-tamia-tcp-bridge-20260825 wrangler.bootstrap.jsonc",
   "kogane-tamia-tcp-bridge-20260825 wrangler.jsonc",
   "kogane-vpass-browser-run-20260825 wrangler.bootstrap.jsonc",
   "kogane-vpass-browser-run-20260825 wrangler.jsonc",
   "kogane-vpass-collector-poc wrangler.jsonc",
-  "kogane-vpass-identity-backfill-local wrangler.identity-backfill.jsonc",
-  "kogane-vpass-r2-layer-b-audit-local wrangler.audit-vpass-layer-b.jsonc",
   "kogane-vpass-runtime-probe-20260825 wrangler.jsonc",
   "kogane-vpoint-collector-poc wrangler.jsonc",
   "kogane-vpoint-pay-collector-poc wrangler.jsonc",
-  "kogane-vpoint-pay-email-r2-contract-audit-local wrangler.audit-v-point-pay-email.jsonc",
-  "kogane-vpoint-pay-r2-layer-b-audit-local wrangler.audit-v-point-pay-layer-b.jsonc",
-  "kogane-vpoint-r2-contract-audit-local wrangler.audit-v-point.jsonc",
 ];
 
 describe("JSONC reader", () => {
@@ -207,7 +191,6 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
         live: true,
         bindings: [
           "kogane-evidence-browser",
-          "kogane-ingest",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
         ],
@@ -373,7 +356,7 @@ describe("G0-06/G0-07/G5-15 a moved directory keeps its resource identities", ()
       expect([worker, byWorker.get(worker)]).toEqual([worker, directory]);
   });
 
-  test("no Worker config is added, dropped or renamed by a directory move", () => {
+  test("all remaining Worker configs are accounted for after legacy retirement", () => {
     expect(
       ledger.directories
         .flatMap((entry) =>

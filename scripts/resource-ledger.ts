@@ -53,11 +53,9 @@ export const LIVE_INVENTORY = {
   accountId: ACCOUNT_ID,
   /** Worker scripts that exist in the account. */
   workers: [
-    "kogane-collector-r2-importer",
     "kogane-demo",
     "kogane-evidence-browser",
     "kogane-globalpass-collector-poc",
-    "kogane-ingest",
     "kogane-mobile-suica-collector-poc",
     "kogane-moneyforward-collector-poc",
     "kogane-myjcb-collector-poc",
@@ -72,21 +70,7 @@ export const LIVE_INVENTORY = {
     "kogane-vpoint-pay-collector-poc",
   ],
   /** R2 buckets that exist in the account (kogane ones only). */
-  buckets: [
-    "kogane-globalpass-collector-poc",
-    "kogane-mobile-suica-collector-poc",
-    "kogane-moneyforward-collector-poc",
-    "kogane-myjcb-collector-poc",
-    "kogane-raw-evidence",
-    "kogane-sbi-collector-poc",
-    "kogane-sbi-shinsei-collector-poc",
-    "kogane-sbi-vc-trade-poc",
-    "kogane-smbc-direct-backfill-poc",
-    "kogane-sony-bank-collector-poc",
-    "kogane-vpass-collector-poc",
-    "kogane-vpoint-collector-poc",
-    "kogane-vpoint-pay-collector-poc",
-  ],
+  buckets: ["kogane-raw-evidence"],
   /** D1 databases that exist in the account. */
   d1Databases: [
     { name: "kogane-raw-evidence", id: "b335a887-250d-45c9-bd72-af83f35fdc60" },
@@ -220,15 +204,7 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "services/collector-r2-importer": {
-    source: "plan 07 §1 + decision D2",
-    proposedAction: "absorb-into-processor",
-    proposedTarget: "services/processor (queue consumer and adapters, U08)",
-    requiredVerification:
-      "the Worker keeps running until U15; old protocol still readable; no double cron",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
+
   "services/collector-sbi-securities": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
@@ -306,15 +282,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_RENAME",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "services/raw-evidence": {
-    source: "plan 07 §1 + decision D2/D3",
-    proposedAction: "keep-as-legacy-adapter",
-    proposedTarget: "packages/storage-d1 + packages/application (U05); migrations move in U05",
-    requiredVerification:
-      "kogane-ingest stays deployed until U15; migration filenames and bytes unchanged",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
 };
 
 export interface CompletedDisposition {
@@ -340,6 +307,22 @@ export interface CompletedDisposition {
  * (acceptance test G0-12).
  */
 export const COMPLETED_DISPOSITIONS: readonly CompletedDisposition[] = [
+  {
+    source: "services/raw-evidence",
+    proposedAction: "retire-legacy-service",
+    result: "packages/application in-process registration; central R2 retirement archive",
+    lastCommit: "bdee142d49f840f8c53603702d783d2421eda5e6",
+    liveResourceCheck:
+      "2026-09-13: old Worker, old queues and per-source buckets deleted and absence verified; 2989 original objects preserved and hash-verified in central R2",
+  },
+  {
+    source: "services/collector-r2-importer",
+    proposedAction: "retire-legacy-service",
+    result: "packages/application in-process registration; central R2 retirement archive",
+    lastCommit: "bdee142d49f840f8c53603702d783d2421eda5e6",
+    liveResourceCheck:
+      "2026-09-13: old Worker, old queues and per-source buckets deleted and absence verified; 2989 original objects preserved and hash-verified in central R2",
+  },
   {
     source: "poc/camoufox-container-probe",
     proposedAction: "retire-candidate",

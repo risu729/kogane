@@ -105,10 +105,14 @@ test("the retired target flag cannot enable CORE projection writes", async () =>
     READ_PROJECTION_ENABLED: "false",
   } as unknown as Env);
   expect(result).toMatchObject({ status: "retryable", reasonCode: "read_binding_missing" });
-  expect(await coreCount("SELECT count(*) AS n FROM balance_read_snapshots")).toBe(0);
+  expect(
+    await coreCount(
+      "SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='balance_read_snapshots'",
+    ),
+  ).toBe(0);
 });
 
-test("a build writes the snapshot to READ, publishes it, and leaves CORE's projection empty", async () => {
+test("a build writes the snapshot to READ, publishes it, with no CORE projection tables", async () => {
   await seedBalances(env, ["smbc:read-a", "smbc:read-b"]);
   const revision = await currentCoreRevision(env.DB);
   const built = await runBalanceProjection(on());
@@ -141,12 +145,22 @@ test("a build writes the snapshot to READ, publishes it, and leaves CORE's proje
     ),
   ).toBe(1);
   expect(await readCount("SELECT count(*) AS n FROM current_balance_projection")).toBe(2);
-  // The CORE-side tables of migration 0030 are untouched: the same build under
-  // the flag off would have written them, and turning the flag back off must
-  // find them exactly as they were.
-  expect(await coreCount("SELECT count(*) AS n FROM balance_read_snapshots")).toBe(0);
-  expect(await coreCount("SELECT count(*) AS n FROM current_balance_projection")).toBe(0);
-  expect(await coreCount("SELECT count(*) AS n FROM balance_snapshot_pointer")).toBe(0);
+  // Retired CORE projections are absent, including after a successful build.
+  expect(
+    await coreCount(
+      "SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='balance_read_snapshots'",
+    ),
+  ).toBe(0);
+  expect(
+    await coreCount(
+      "SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='current_balance_projection'",
+    ),
+  ).toBe(0);
+  expect(
+    await coreCount(
+      "SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='balance_snapshot_pointer'",
+    ),
+  ).toBe(0);
   // The fixed input is CORE's record and DATA's object, exactly as in U10.
   const record = await readInputRecord(env.DB, built.inputDigest!);
   expect(record?.job_id).toBe(built.snapshotId!);

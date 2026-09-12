@@ -601,6 +601,9 @@ describe("proposals never change adopted state (AT68)", () => {
 
 describe("the UI and an agent share one path (AT72)", () => {
   it("returns identical data, adopted sets and result references", async () => {
+    // Both requests must evaluate the same instant, including across a second boundary.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
     const environment = grants({ "agent-principal": FULL_GRANT });
     const ui = await call("/api/v2/query?intent=coverage", { environment });
     const agent = await call("/api/agent/v1/financial.query", {
@@ -614,6 +617,7 @@ describe("the UI and an agent share one path (AT72)", () => {
     expect(uiBody.result.coverage).toEqual(agentBody.result.coverage);
     expect(uiBody.resultRef).toBe(agentBody.resultRef);
     expect(uiBody.contextId).toBe(agentBody.contextId);
+    vi.useRealTimers();
   });
 
   it("gives a narrower grant different figures without naming what it hides", async () => {

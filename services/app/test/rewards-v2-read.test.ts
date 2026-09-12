@@ -151,23 +151,6 @@ beforeAll(async () => {
          'policy:synthetic:processing',3,'policy:synthetic:rounding',0,'down','[]','verified',
          '2026-09-09T00:00:00.000Z')`,
     ),
-    env.DB.prepare(
-      `INSERT INTO conversion_simulations(input_digest,plan_json,search_coverage,policy_release,computed_at)
-       VALUES(?1,?2,'bounded','conversion-search-v1','2026-09-09T00:00:00.000Z')`,
-    ).bind(
-      "a".repeat(64),
-      JSON.stringify({
-        request: {
-          offerId: "offer:read-synthetic",
-          offerVersion: "v1",
-          quantity: { coefficient: "1000", scale: 0, unitRef: "points:v-point" },
-        },
-      }),
-    ),
-    env.DB.prepare(
-      `INSERT INTO conversion_simulations(input_digest,plan_json,search_coverage,policy_release,computed_at)
-       VALUES(?1,'{"offerRef":"offer:forgotten@v1"}','bounded','conversion-search-v1','2026-09-09T00:00:00.000Z')`,
-    ).bind("b".repeat(64)),
   ]);
 });
 

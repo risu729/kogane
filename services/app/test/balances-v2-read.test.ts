@@ -150,14 +150,16 @@ describe("the v2 balance routes over the READ database", () => {
   it("serves a page from READ and advertises which store answered", async () => {
     await seedProjection(3);
     expect((await build()).status).toBe("complete");
-    // The rows are in READ; CORE's projection tables stayed empty.
+    // The rows are in READ; CORE's retired projection tables are absent.
     expect(
       (await env.READ.prepare("SELECT count(*) AS n FROM current_balance_projection").first<{
         n: number;
       }>())!.n,
     ).toBe(3);
     expect(
-      (await env.DB.prepare("SELECT count(*) AS n FROM current_balance_projection").first<{
+      (await env.DB.prepare(
+        "SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='current_balance_projection'",
+      ).first<{
         n: number;
       }>())!.n,
     ).toBe(0);

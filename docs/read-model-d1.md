@@ -140,8 +140,9 @@ The CORE tables of migration 0033 are read, never written by this lane, and
 `reward_bucket_claims` and `membership_state_claims` stay in CORE as 04 §2
 requires — they are versioned reference claims and provider claims, not a
 projection. CORE migration 0041 adds them to the dependency ledger of 0038 so
-the r0/r1 capture can see a rule or claim change; the two CORE projection
-tables (`expiry_estimates`, `conversion_simulations`) stay outside it.
+the r0/r1 capture can see a rule or claim change. Migration 0042 removes the
+two obsolete CORE projection tables. New reward inputs contain no legacy
+simulation cache; archived inputs retain their captured replay semantics.
 
 ## Publication
 
@@ -208,19 +209,16 @@ stopped working. Two details of its semantics:
 | Flag                             | Where          | Default | Effect                                                                         |
 | -------------------------------- | -------------- | ------- | ------------------------------------------------------------------------------ |
 | `BALANCE_PROJECTION_ENABLED`     | processor, app | `0`     | The existing A07 gate: nothing builds or reads the projection while it is off. |
-| `READ_PROJECTION_ENABLED`        | processor      | `false` | The build writes the `READ` binding instead of the CORE tables of 0030.        |
-| `READ_PROJECTION_ENABLED`        | app            | `false` | The v2 routes read the `READ` binding instead of the CORE tables.              |
 | `REWARD_READ_PROJECTION_ENABLED` | processor      | `false` | The `reward_read_projection` lane runs and builds the reward snapshot (U16).   |
-| `REWARD_READ_PROJECTION_ENABLED` | app            | `false` | The reward routes read the published reward snapshot (U16).                    |
 
-All of them are off everywhere. Merged is not enabled.
+Production enables the remaining flags. Both writers and App readers use READ
+exclusively; there is no storage-target switch.
 
 ## The resource
 
 One D1 database named **`kogane-read`**, id
 `320ebe31-a031-48a1-985f-0e6fabbd517a` (account `risu`, region APAC). It was
-created **empty** on 2026-09-11: no migration has been applied to it, and none
-is applied by anything but the deploy step below. It is bound as `READ` in:
+created on 2026-09-11 and has READ migrations through 0002 applied by CD. It is bound as `READ` in:
 
 - `services/processor/wrangler.jsonc`;
 - `services/processor/wrangler.read-migrations.jsonc` (also
@@ -237,43 +235,21 @@ processor has a second configuration used only for the READ migration step. It
 has no `main`, deploys nothing, and is listed in `infra/workers-ci.json` under
 `excluded` with that reason. The deploy order ledger of U14
 (`infra/deploy-order.json`, `schema.read`) is where the CD job is expected to
-find this configuration; it is not on this branch yet.
+find this configuration.
 
-## Deploy order
+## Deploy order and incident controls
 
-1. **Create the database.** Done: `kogane-read` exists, empty, and its id is
-   in the three configs above.
-2. **Apply the READ migrations.**
-   `wrangler d1 migrations apply kogane-read --remote --config services/processor/wrangler.read-migrations.jsonc`.
-   The database is empty afterwards: `read_instance` has no row yet, because a
-   migration cannot generate an identity. The first build claims it.
-3. **Deploy the processor.** Both flags still off; it writes nothing new.
-4. **Deploy the app.** Both flags still off; every caller sees today's answers.
-5. **Enable on the processor.** `READ_PROJECTION_ENABLED=true` with
-   `BALANCE_PROJECTION_ENABLED=1`. The next cron tick captures an input, builds
-   a snapshot in READ and publishes it. Watch the `balance_projection` line of
-   the scheduled log for `status`, `written` and `active`.
-6. **Enable on the app.** `READ_PROJECTION_ENABLED=true` once a snapshot is
-   published. `/api/meta` reports `balancesV2ReadModel: "read-d1"`, and open
-   cursors from the CORE path expire with `410` — which is the honest answer,
-   since their positions belong to another database.
-7. **The reward second stage, separately** (U16). Apply CORE `0041` and READ
-   `0002`, deploy both Workers, then
-   `REWARD_READ_PROJECTION_ENABLED=true` on the processor (with
-   `REWARD_CLAIMS_ENABLED` on, since the lane reads promoted claims) and only
-   afterwards on the app. Rolling it back is the same flag off in the reverse
-   order; see [rewards.md](rewards.md#read-second-stage).
+GitHub Actions applies schema migrations, deploys Processor before App and
+checks both through authenticated health. Writers need a compatible READ schema;
+readers need a published snapshot. Production has both balance and reward
+writers enabled. CORE migration 0042 retires the old projection tables after a
+verified READ-only release.
 
-## Rollback
-
-Set `READ_PROJECTION_ENABLED=false` on the app, then on the processor. The v2
-routes go back to the CORE projection of migration 0030, which is still being
-maintained by the same job under the same flag, and cursors issued by READ
-expire. Nothing in CORE has to be undone, and READ can be left alone or dropped
-entirely; no observation, parse, publication, decision or receipt depends on it.
-
-Dropping READ while the flag is on is the total-loss case below, not a
-rollback.
+Pause the Processor with `BALANCE_PROJECTION_ENABLED=0` and
+`REWARD_READ_PROJECTION_ENABLED=false`. The App can hide balance or reward routes
+with its corresponding feature flag. No flag restores a CORE projection path.
+Choose schema-compatible releases for code rollback; reconstruct READ using
+[the rebuild runbook](read-rebuild-runbook.md).
 
 ## Losing the whole database
 

@@ -1,17 +1,5 @@
-// The registration port: the operations a producer performs to register a run,
-// independent of how it reaches CORE.
-//
-// Two implementations exist. `services/collector-r2-importer/src/central.ts`
-// speaks the legacy `kogane-ingest` HTTP protocol over a service binding and
-// is what every collector still uses; `directRegistrationPort` below performs
-// the same operations against CORE in-process, which is what the Processor
-// will use once it absorbs the importer (U08). The port is what makes those
-// two interchangeable without a second copy of the registration logic — the
-// point of U05 (unified plan 02 §3).
-//
-// It is deliberately the *existing* operation set, in the existing order, with
-// the existing return values: a port that "improved" the protocol here would
-// break the byte-for-byte compatibility the ingest API's tests prove.
+// In-process registration operations used by the Processor to register shared runs.
+// The application layer owns validation, authorization and idempotency.
 import type {
   AddPageGroupRequest,
   AddRunRangeRequest,
@@ -39,13 +27,11 @@ export interface RunRegistrationPort {
   addRunRange(runId: number, input: AddRunRangeRequest): Promise<void>;
   addPageGroup(runId: number, input: AddPageGroupRequest): Promise<number>;
   addUnitReport(unitId: number, input: AddUnitReportRequest): Promise<void>;
-  /** True when the bytes were already stored (the legacy API's 200 vs 201). */
+  /** True when the bytes were already stored. */
   uploadObject(runId: number, sha256: string, bytes: Uint8Array): Promise<boolean>;
   /**
    * Registers bytes that are already in the object store, without sending or
-   * writing any. Present only on the in-process port: the legacy HTTP
-   * protocol has no such operation, and the collectors that speak it upload
-   * their bytes. A shared-R2 run takes this path, so registering it never
+   * writing any. A shared-R2 run takes this path, so registering it never
    * copies an object (U08, acceptance G1-15).
    */
   adoptObject?(runId: number, sha256: string, byteSize: number): Promise<void>;
@@ -81,9 +67,7 @@ function body(input: object): RecordValue {
 }
 
 /**
- * Registration straight into CORE, with no HTTP hop. Every call runs the same
- * use case the legacy Worker's route runs, so guards, conflicts and
- * idempotency are identical by construction rather than by agreement.
+ * Registration straight into CORE, through the guarded application use cases.
  */
 export function directRegistrationPort(env: IngestEnv, clientId: string): RunRegistrationPort {
   return activeClientOnly(env, clientId, {

@@ -170,7 +170,7 @@ test("migration 0033 seeds only programmes with a documented unit and refuses an
   ).rejects.toThrow();
 });
 
-test("reference and claim tables are append-only; the projections are not", async () => {
+test("reference and claim tables are append-only; retired CORE projections are absent", async () => {
   for (const sql of [
     "UPDATE reward_programs SET unit_ref='x' WHERE program_id='program:v-point'",
     "DELETE FROM reward_programs WHERE program_id='program:v-point'",
@@ -178,18 +178,10 @@ test("reference and claim tables are append-only; the projections are not", asyn
     "DELETE FROM expiry_rules WHERE rule_id='rule:v-point:regular-inactivity'",
   ])
     await expect(env.DB.prepare(sql).run()).rejects.toThrow();
-  await env.DB.prepare(
-    `INSERT INTO expiry_estimates(holding_ref,rule_id,rule_version,context_id,state,
-     expiring_buckets_json,uncertainty_codes_json,source_expiry_refs_json,policy_release,computed_at)
-     VALUES('holding:x','rule:v-point:regular-inactivity','v1','ctx:1','partial','[]','["history_incomplete"]','[]','reward-model-v1','2026-09-09')`,
-  ).run();
-  // A projection is rebuildable, so it may be replaced in place.
-  await env.DB.prepare(
-    "UPDATE expiry_estimates SET state='computed' WHERE holding_ref='holding:x'",
-  ).run();
-  await env.DB.prepare("DELETE FROM expiry_estimates WHERE holding_ref='holding:x'").run();
   expect(
-    await env.DB.prepare("SELECT count(*) AS n FROM expiry_estimates").first<number>("n"),
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='expiry_estimates'",
+    ).first<number>("n"),
   ).toBe(0);
 });
 
@@ -398,7 +390,7 @@ test("migration 0033 applies on the earlier Layer B schema with rows already pre
   // be applied before 0033 creates them; the upgrade applies the pair in
   // order below.
   const earlier = layerBMigrations().filter(
-    (name) => !name.startsWith("0033_") && !name.startsWith("0041_"),
+    (name) => name < "0042" && !name.startsWith("0033_") && !name.startsWith("0041_"),
   );
   const upgrade = await startPipeline(earlier);
   try {

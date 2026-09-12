@@ -82,10 +82,6 @@ export const VISIBILITY_REVISION_LEDGER = [
  * is sealed and its parse published, and both of those are in the ledger.
  */
 export const REVISION_EXCLUDED_TABLES = [
-  "balance_read_snapshots",
-  "current_balance_projection",
-  "scope_relations",
-  "balance_snapshot_pointer",
   "projection_input_records",
   "decision_outbox",
   "operation_receipts",
@@ -105,12 +101,6 @@ export const REVISION_EXCLUDED_TABLES = [
   // its stage log say what was asked, never what the projection reads.
   "ops_requests",
   "ops_request_stages",
-  // The reward projection's own output in CORE (migration 0033). Bumping the
-  // revision when a build records its result would make every build stale the
-  // moment it finished; U16 moves these to READ behind a flag and CORE keeps
-  // the tables it has.
-  "expiry_estimates",
-  "conversion_simulations",
 ] as const;
 
 export type LedgerTable =
