@@ -667,6 +667,7 @@ The integrator cannot create any of these. The repository owner must, once:
    scoped to the account that holds the Workers, with:
    - `Workers Scripts: Edit` — upload the Workers;
    - `D1: Edit` — apply the migrations;
+   - `Containers: Edit` — publish the GlobalPass and SBI Shinsei container images and deployments;
    - `Account Settings: Read` — Wrangler reads the account.
 
    Add `Queues: Edit` or `Workers R2 Storage: Edit` **only** if a deployment
