@@ -43,7 +43,7 @@
     // array of the tokens' common names (their Client IDs). Empty means none:
     // then only the operator's own session can read it and CD's postcheck
     // fails, which is the intended direction for a list that grants access.
-    "HEALTH_PROBE_TOKENS": ""
+    "HEALTH_PROBE_TOKENS": "[\"32f6a8d0612c6a657eb74dc066cefbcf.access\"]"
   },
   // The Processor is published on no hostname (`workers_dev: false`, no
   // routes), so this binding is also how the release postcheck reaches its

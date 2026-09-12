@@ -259,8 +259,9 @@ rename, because that would make the move unreviewable.
       Deployment branch rules may be left open: the workflow already refuses a
       commit that is not on the default branch. Required reviewers are optional.
 - [ ] Environment **secret** `CLOUDFLARE_API_TOKEN`, scoped to the account that
-      holds the Workers, with `Workers Scripts: Edit`, `D1: Edit` and
-      `Account Settings: Read`. Add `Queues: Edit` or
+      holds the Workers, with `Workers Scripts: Edit`, `D1: Edit`, `Containers: Edit` and
+      `Account Settings: Read`. The Container permission is required by the
+      GlobalPass and SBI Shinsei deployments. Add `Queues: Edit` or
       `Workers R2 Storage: Edit` **only** when a deployment must create one;
       binding to an existing resource does not need them. No Workers KV, no
       Tail, no zone permissions.
