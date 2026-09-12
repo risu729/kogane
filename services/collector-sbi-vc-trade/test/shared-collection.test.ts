@@ -10,7 +10,6 @@ import {
   readTerminal,
   terminalKey,
 } from "../../../packages/collection/src/index";
-import { collectionTarget, sharedCollectionEnabled } from "../src/collection-target";
 import {
   blockedErrorCode,
   blockedRunManifest,
@@ -72,17 +71,6 @@ function inputOf(manifest: CollectionManifest) {
     identity: IDENTITY,
   };
 }
-
-describe("COLLECTION_TARGET", () => {
-  test("defaults to legacy and only the exact string selects shared", () => {
-    expect(collectionTarget(undefined)).toBe("legacy");
-    expect(collectionTarget("shared")).toBe("shared");
-    for (const value of ["Shared", " shared", "legacy", ""]) {
-      expect(collectionTarget(value)).toBe("legacy");
-      expect(sharedCollectionEnabled(value)).toBe(false);
-    }
-  });
-});
 
 describe("G3-10/G3-11 a session only a person can fix", () => {
   test("a failed re-authentication is human-required, not a retry", () => {

@@ -25,14 +25,14 @@ const RANGE = { start: "2099-01-01", end: "2099-01-31" };
 
 async function stage(): Promise<StoredArtifact[]> {
   const raw = await storeBytes({
-    bucket: env.SNAPSHOTS,
+    bucket: env.DATA,
     key: `${PREFIX}/transactions/20990101-20990131.raw.json.sjis`,
     bytes: new TextEncoder().encode('{"rows":[]}'),
     mediaType: "application/json; charset=Shift_JIS",
     artifact: { dataset: "transactions-raw", range: RANGE, transactionCount: 0 },
   });
   const normalized = await storeJson({
-    bucket: env.SNAPSHOTS,
+    bucket: env.DATA,
     key: `${PREFIX}/transactions/20990101-20990131.normalized.json`,
     value: { range: RANGE, transactions: [] },
     artifact: { dataset: "transactions-normalized", range: RANGE, transactionCount: 0 },
@@ -59,7 +59,7 @@ describe("SMBC Direct shared DATA bucket", () => {
       logoutSucceeded: true,
     };
 
-    const bytesByKey = await readStagedArtifacts(dataBucket(env.SNAPSHOTS), manifest);
+    const bytesByKey = await readStagedArtifacts(dataBucket(env.DATA), manifest);
     expect(bytesByKey.size).toBe(2);
     for (const artifact of artifacts) {
       expect(await sha256Hex(bytesByKey.get(artifact.key)!)).toBe(artifact.sha256);

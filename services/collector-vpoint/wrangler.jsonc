@@ -31,26 +31,11 @@
   },
   "r2_buckets": [
     {
-      "binding": "SNAPSHOTS",
-      "bucket_name": "kogane-vpoint-collector-poc"
-    },
-    {
-      "binding": "VPOINT_PAY_SNAPSHOTS",
-      "bucket_name": "kogane-vpoint-pay-collector-poc"
-    },
-    {
       "binding": "DATA",
       "bucket_name": "kogane-raw-evidence"
     }
   ],
-  "services": [
-    {
-      "binding": "RAW_EVIDENCE_IMPORTER",
-      "service": "kogane-collector-r2-importer"
-    }
-  ],
   "vars": {
-    "COLLECTION_TARGET": "shared",
     "COLLECTOR_SCHEMA_VERSION": "vpoint-worker-poc-v2",
     "VPOINT_PAY_EMAIL_RECIPIENT": "vpointpay@takuk.me"
   },

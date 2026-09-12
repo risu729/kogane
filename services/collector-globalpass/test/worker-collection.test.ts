@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import type { CollectionManifest } from "../src/model";
 
 let container: {
@@ -10,7 +11,7 @@ mock.module("@cloudflare/containers", () => ({
   Container: class {},
   getContainer: () => container,
 }));
-const { default: worker, safeBackfillCursor } = await import("../src/worker");
+const { default: worker } = await import("../src/worker");
 const spies: ReturnType<typeof spyOn>[] = [];
 afterEach(() => {
   for (const spy of spies.splice(0)) spy.mockRestore();
@@ -43,7 +44,6 @@ async function run(
   options: {
     httpStatus?: number;
     teardownError?: boolean;
-    centralDeferred?: boolean;
     loggerThrows?: boolean;
   } = {},
 ) {
@@ -59,7 +59,7 @@ async function run(
   let destroyed = 0;
   let sentBody: Record<string, string> = {};
   let manifest: CollectionManifest | undefined;
-  const stored = new Map<string, unknown>();
+  const data = new FakeR2Bucket();
   container = {
     async startAndWaitForPorts() {},
     async fetch(request) {
@@ -80,33 +80,7 @@ async function run(
     RELAY_TOKEN: "private-relay-token",
     RELAY_PUBLIC_URL: "wss://relay.test/tcp?network=tamia",
     COLLECTOR_CONTAINER: {},
-    SNAPSHOTS: {
-      async put(key: string, body: unknown) {
-        stored.set(key, body);
-        if (key.endsWith("/manifest.json")) manifest = JSON.parse(String(body));
-      },
-    },
-    RAW_EVIDENCE_IMPORTER: {
-      async fetch(request: Request) {
-        const { manifestKey } = (await request.json()) as { manifestKey: string };
-        return Response.json(
-          {
-            source: "prestia-globalpass",
-            manifestKey,
-            artifactCount: stored.size,
-            ...(options.centralDeferred
-              ? { status: "deferred", reason: "worker_invocation_limit", nextOffset: 0 }
-              : {
-                  status: "sealed",
-                  centralRunId: 1,
-                  sealed: true,
-                  finalChunkAllObjectsReused: false,
-                }),
-          },
-          { status: options.centralDeferred ? 202 : 200 },
-        );
-      },
-    },
+    DATA: data,
   };
   const response = await worker.fetch(
     new Request("https://collector.test/trigger", {
@@ -116,39 +90,32 @@ async function run(
     env as unknown as Env,
     {} as ExecutionContext,
   );
+  const result = (await response.json()) as Record<string, unknown>;
+  const saved = data.entries.get(String(result.manifestKey));
+  if (saved) manifest = JSON.parse(new TextDecoder().decode(saved.bytes));
   return {
     response,
-    result: (await response.json()) as Record<string, unknown>,
+    result,
     manifest,
     logs,
     destroyed,
     sentBody,
-    stored,
+    stored: new Map([...data.entries].map(([key, entry]) => [key, entry.bytes])),
   };
 }
 
 describe("GLOBAL PASS diagnostics preserve the current collection contract", () => {
-  test("accepts staged importer cursors at the collector boundary", () => {
-    expect(safeBackfillCursor("a".repeat(569))).toBe(true);
-    expect(safeBackfillCursor("a".repeat(12_000))).toBe(true);
-    expect(safeBackfillCursor("a".repeat(12_001))).toBe(false);
-    expect(safeBackfillCursor("has space")).toBe(false);
-  });
-
-  test("retains sanitized partial evidence and a deferred central result", async () => {
-    const r = await run(
-      [
-        metadata,
-        artifact,
-        {
-          type: "error",
-          operation: "browser-collection",
-          errorType: "Error",
-          errorCode: "browser_collection_failed",
-        },
-      ],
-      { centralDeferred: true },
-    );
+  test("retains sanitized partial evidence with a completed shared terminal", async () => {
+    const r = await run([
+      metadata,
+      artifact,
+      {
+        type: "error",
+        operation: "browser-collection",
+        errorType: "Error",
+        errorCode: "browser_collection_failed",
+      },
+    ]);
     expect(r.response.status).toBe(502);
     expect(r.manifest?.schemaVersion).toBe("globalpass-browser-poc-v2");
     expect(r.manifest?.status).toBe("partial");
@@ -157,11 +124,7 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
       "browser_collection_failed",
       "selected_month_missing",
     ]);
-    expect(r.result.central).toMatchObject({
-      status: "deferred",
-      reason: "worker_invocation_limit",
-      nextOffset: 0,
-    });
+    expect(r.result).not.toHaveProperty("central");
     expect(new TextDecoder().decode([...r.stored.values()][0] as Uint8Array)).not.toContain(
       "private-state",
     );

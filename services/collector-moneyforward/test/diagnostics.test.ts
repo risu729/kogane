@@ -1,3 +1,4 @@
+import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
   logFailure,
@@ -34,12 +35,12 @@ function trigger() {
     headers: { authorization: "Bearer test-admin" },
   }) as Parameters<typeof worker.fetch>[0];
 }
-function fixture(secret: string, put: (key: string, body: string) => Promise<void>) {
+function fixture(secret: string, data: FakeR2Bucket) {
   return Object.assign({} as Env, {
     ADMIN_TRIGGER_TOKEN: "test-admin",
     MONEYFORWARD_CREDENTIAL_JSON: secret,
     COLLECTOR_SCHEMA_VERSION: "test",
-    SNAPSHOTS: { put },
+    DATA: data,
   });
 }
 
@@ -131,103 +132,39 @@ describe("Money Forward safe stage diagnostics", () => {
     expect(calls).toBe(1);
   });
 
-  test("configuration failure remains failed even when logging fails", async () => {
-    let manifest = "";
+  test("configuration failure still records a failed shared terminal when logging fails", async () => {
+    const data = new FakeR2Bucket();
     spyOn(console, "log").mockImplementation(() => {
       throw new Error(PRIVATE);
     });
     spyOn(console, "error").mockImplementation(() => {
       throw new Error(PRIVATE);
     });
-    const response = await worker.fetch(
-      trigger(),
-      fixture(PRIVATE, async (_key, body) => {
-        manifest = body;
-      }),
-    );
+    const response = await worker.fetch(trigger(), fixture(PRIVATE, data));
     expect(response.status).toBe(502);
-    expect(await response.json()).not.toHaveProperty("manifestKey");
-    expect(JSON.parse(manifest).failures[0]).toMatchObject({
-      stage: "credential-load",
-      failureCode: "credential_configuration_required",
-    });
-    expect(manifest).not.toContain(PRIVATE);
+    const result = (await response.json()) as { terminalKey: string; persistence: string };
+    expect(result.persistence).toBe("persisted");
+    const terminal = data.entries.get(result.terminalKey);
+    expect(JSON.parse(new TextDecoder().decode(terminal!.bytes)).providerOutcome).toBe("failed");
+    const contents = [...data.entries.values()]
+      .map((e) => new TextDecoder().decode(e.bytes))
+      .join("\n");
+    expect(contents).toContain("collector_failed");
+    expect(contents).not.toContain(PRIVATE);
   });
 
-  test("partial artifact storage preserves outcome with correlated safe failure record", async () => {
+  test("failed shared upload publishes no terminal and keeps diagnostics safe", async () => {
     const logs = captureLogs();
-    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
-      "sign",
-      "verify",
-    ]);
-    const keyValue = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString(
-      "base64url",
-    );
-    spyOn(globalThis, "fetch").mockImplementation(
-      Object.assign(
-        async (input: string | URL | Request) => {
-          const url = new URL(String(input));
-          if (url.pathname === "/sign_in")
-            return new Response(`<meta name="csrf-token" content="${PRIVATE}">`);
-          if (url.pathname === "/webauthn/assertion/options")
-            return Response.json({ challenge: "dGVzdA", rpId: "id.moneyforward.com" });
-          if (url.pathname === "/webauthn/assertion") return Response.json({ redirectPath: "/me" });
-          if (url.pathname === "/me") return new Response("signed-in");
-          if (url.pathname === "/accounts")
-            return new Response('<a href="/accounts/show/test-account">account</a>');
-          if (url.pathname === "/accounts/show/test-account")
-            return new Response(
-              `<meta name="csrf-token" content="${PRIVATE}"><input name="account[id_hash]" value="${PRIVATE}"><input name="service[id]" value="1">`,
-            );
-          return new Response(PRIVATE);
-        },
-        { preconnect: globalThis.fetch.preconnect },
-      ),
-    );
-    let manifest = "";
-    const env = fixture(JSON.stringify({ ...credential, keyValue }), async (key, body) => {
-      if (key.endsWith("/accounts.html")) throw new Error(PRIVATE);
-      if (key.endsWith("/manifest.json")) manifest = body;
+    const data = new FakeR2Bucket({
+      beforePut: () => {
+        throw new Error(PRIVATE);
+      },
     });
-    const response = await worker.fetch(trigger(), env);
-    expect(response.status).toBe(200);
-    expect(await response.json()).not.toHaveProperty("manifestKey");
-    const parsed = JSON.parse(manifest);
-    expect(parsed.status).toBe("partial");
-    expect(parsed.monthlyFragmentCount).toBe(12);
-    expect(parsed.failures[0]).toMatchObject({
-      stage: "artifact-store",
-      failureCode: "operation_failed",
-    });
-    const failures = logs
-      .map((line) => JSON.parse(line))
-      .filter((line) => line.event === "collector-stage-failed");
-    expect(failures).toHaveLength(1);
-    expect(failures[0].runId).toBe(parsed.runId);
-    const stored = logs
-      .map((line) => JSON.parse(line))
-      .find((line) => line.event === "moneyforward-collection-stored");
-    expect(stored).not.toHaveProperty("manifestKey");
-    expect(logs.join()).not.toContain(PRIVATE);
-    expect(logs.join()).not.toContain(keyValue);
-    expect(manifest).not.toContain(PRIVATE);
-  });
-
-  test("manifest storage failure logs correlation without persisting a manifest", async () => {
-    const logs = captureLogs();
-    await expect(
-      worker.fetch(
-        trigger(),
-        fixture(PRIVATE, async () => {
-          throw new Error(PRIVATE);
-        }),
-      ),
-    ).rejects.toThrow("manifest storage failed");
-    const failures = logs
-      .map((line) => JSON.parse(line))
-      .filter((line) => line.event === "collector-stage-failed");
-    expect(failures.map((item) => item.stage)).toEqual(["credential-load", "manifest-store"]);
-    expect(failures[0].runId).toBe(failures[1].runId);
+    const response = await worker.fetch(trigger(), fixture(PRIVATE, data));
+    expect(response.status).toBe(502);
+    const result = (await response.json()) as { persistence: string };
+    expect(result.persistence).toBe("incomplete");
+    expect([...data.entries.keys()].some((key) => key.endsWith("/terminal.json"))).toBe(false);
     expect(logs.join()).not.toContain(PRIVATE);
   });
 });

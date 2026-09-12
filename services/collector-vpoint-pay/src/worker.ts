@@ -1,8 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { VPointPayCredentialState } from "./state";
-
 export { VPointPayCredentialState };
-
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
@@ -40,18 +38,15 @@ export default {
     }
     return Response.json({ error: "Not found" }, { status: 404 });
   },
-
   async scheduled(): Promise<void> {
     console.log(
       JSON.stringify({ event: "vpoint-pay-app-collection-disabled", reason: "email_only" }),
     );
   },
 } satisfies ExportedHandler<Env>;
-
 function stateStub(env: Env): DurableObjectStub<VPointPayCredentialState> {
   return env.VPOINT_PAY_STATE.get(env.VPOINT_PAY_STATE.idFromName("primary"));
 }
-
 function authorized(request: Request, expected: string | undefined): boolean {
   const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
   if (!provided || !expected) return false;

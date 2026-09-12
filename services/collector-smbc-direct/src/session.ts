@@ -1,7 +1,15 @@
-import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { DurableObject } from "cloudflare:workers";
+import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { decryptJson, encryptJson, parseCredentials } from "./crypto";
 import { japanToday, monthRanges, validateDate } from "./dates";
+import { isResumable } from "./progress";
+import {
+  dataBucket,
+  manifestBytes,
+  persistSharedRun,
+  readStagedArtifacts,
+  sharedRunPersisted,
+} from "./shared-collection";
 import {
   ApprovalNotCompletedError,
   DirectProfile,
@@ -11,16 +19,6 @@ import {
   type DirectOrigins,
 } from "./smbc";
 import { runPrefix, storeBytes, storeJson, storeManifest } from "./storage";
-import { isResumable } from "./progress";
-import { importStoredRun } from "./raw-evidence";
-import { collectionTarget } from "./collection-target";
-import {
-  dataBucket,
-  manifestBytes,
-  persistSharedRun,
-  readStagedArtifacts,
-  sharedRunPersisted,
-} from "./shared-collection";
 import type {
   AuthenticatedSession,
   BackfillManifest,
@@ -31,7 +29,6 @@ import type {
   StartChallengeResult,
   StoredArtifact,
 } from "./types";
-
 const INITIAL_PROGRESS: BackfillProgress = {
   phase: "idle",
   createdAt: null,
@@ -53,14 +50,11 @@ const INITIAL_PROGRESS: BackfillProgress = {
 };
 const CHUNKS_PER_ALARM = 3;
 const MAX_RETRIES = 3;
-
 export class SmbcBackfillSession extends DurableObject<Env> {
   #operationTail: Promise<void> = Promise.resolve();
-
   async getStatus(): Promise<BackfillProgress> {
     return { ...INITIAL_PROGRESS, ...(await this.ctx.storage.get<BackfillProgress>("progress")) };
   }
-
   async startChallenge(): Promise<StartChallengeResult> {
     return this.#exclusive(async () => {
       const progress = await this.getStatus();
@@ -74,7 +68,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           expiresAt: existing.expiresAt,
         };
       }
-
       const { state, qrSvgDataUrl } = await startLogin(
         this.#origins(),
         this.#credentials(),
@@ -112,7 +105,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       };
     });
   }
-
   async finishAndStart(): Promise<FinishChallengeResult> {
     return this.#exclusive(async () => {
       const current = await this.getStatus();
@@ -122,7 +114,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       const ranges = monthRanges(from, to);
       const challenge = await this.#loadChallenge();
       if (!challenge) throw new Error("challenge_missing");
-
       let profile: DirectProfile;
       try {
         profile = await finishLogin(
@@ -145,7 +136,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         }
         throw error;
       }
-
       if (
         isResumable(current) &&
         current.from === from &&
@@ -179,7 +169,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         await this.ctx.storage.setAlarm(Date.now());
         return { phase: resumed.phase, progress: resumed };
       }
-
       const startedAt = new Date().toISOString();
       const runId = crypto.randomUUID();
       const diagnostic = createDiagnostics("smbc-direct", runId);
@@ -215,7 +204,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         upsertArtifact(
           artifacts,
           await storeBytes({
-            bucket: this.env.SNAPSHOTS,
+            bucket: this.env.DATA,
             key: `${prefix}/balance.raw.json.sjis`,
             bytes: balance.rawBytes,
             mediaType: balance.rawContentType,
@@ -225,7 +214,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         upsertArtifact(
           artifacts,
           await storeJson({
-            bucket: this.env.SNAPSHOTS,
+            bucket: this.env.DATA,
             key: `${prefix}/balance.normalized.json`,
             value: {
               observedAt: startedAt,
@@ -237,7 +226,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         );
         progress.artifactCount = artifacts.length;
         progress.manifestKey = await storeManifest(
-          this.env.SNAPSHOTS,
+          this.env.DATA,
           prefix,
           this.#manifest(progress, artifacts, []),
         );
@@ -250,7 +239,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       }
     });
   }
-
   override async alarm(): Promise<void> {
     await this.#exclusive(async () => {
       let progress = await this.getStatus();
@@ -271,7 +259,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         await this.#fail(progress, artifacts, [...failureCodes, "session_missing"]);
         return;
       }
-
       const profile = DirectProfile.import(
         this.#origins(),
         this.#credentials(),
@@ -290,7 +277,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           const rangeName = `${range.start.replaceAll("-", "")}-${range.end.replaceAll("-", "")}`;
           stage = "artifact-write";
           const rawArtifact = await storeBytes({
-            bucket: this.env.SNAPSHOTS,
+            bucket: this.env.DATA,
             key: `${prefix}/transactions/${rangeName}.raw.json.sjis`,
             bytes: result.rawBytes,
             mediaType: result.rawContentType,
@@ -306,7 +293,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           // raw object that no strict importer can accept.
           upsertArtifact(artifacts, rawArtifact);
           const normalizedArtifact = await storeJson({
-            bucket: this.env.SNAPSHOTS,
+            bucket: this.env.DATA,
             key: `${prefix}/transactions/${rangeName}.normalized.json`,
             value: {
               range,
@@ -338,13 +325,12 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           });
           stage = "manifest-write";
           progress.manifestKey = await storeManifest(
-            this.env.SNAPSHOTS,
+            this.env.DATA,
             prefix,
             this.#manifest(progress, artifacts, failureCodes),
           );
           await this.ctx.storage.put("progress", progress);
         }
-
         if (progress.completedChunks >= ranges.length) {
           let logoutSucceeded = false;
           try {
@@ -361,7 +347,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             logoutSucceeded,
           };
           completed.manifestKey = await storeManifest(
-            this.env.SNAPSHOTS,
+            this.env.DATA,
             prefix,
             this.#manifest(completed, artifacts, failureCodes),
           );
@@ -382,7 +368,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           );
           return;
         }
-
         await this.ctx.storage.setAlarm(Date.now());
       } catch (error) {
         if (stage !== "transactions-collection") diagnostic.failure(stage, error);
@@ -396,14 +381,13 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         });
         diagnostic.retry(stage, retryCount, retryCount <= MAX_RETRIES);
         if (retryCount <= MAX_RETRIES) {
-          await this.ctx.storage.setAlarm(Date.now() + 2 ** retryCount * 2_000);
+          await this.ctx.storage.setAlarm(Date.now() + 2 ** retryCount * 2000);
           return;
         }
         await this.#fail(retrying, artifacts, [...failureCodes, errorCode], profile);
       }
     });
   }
-
   async #fail(
     progress: BackfillProgress,
     artifacts: StoredArtifact[],
@@ -431,7 +415,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     if (failed.startedAt && failed.runId) {
       const prefix = runPrefix(failed.startedAt, failed.runId);
       failed.manifestKey = await storeManifest(
-        this.env.SNAPSHOTS,
+        this.env.DATA,
         prefix,
         this.#manifest(failed, artifacts, failureCodes),
       );
@@ -455,7 +439,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       }),
     );
   }
-
   #manifest(
     progress: BackfillProgress,
     artifacts: StoredArtifact[],
@@ -488,25 +471,21 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       logoutSucceeded: progress.logoutSucceeded,
     };
   }
-
   async #loadChallenge(): Promise<ChallengeState | null> {
     const encrypted = await this.ctx.storage.get<EncryptedPayload>("challenge");
     return encrypted
       ? decryptJson<ChallengeState>(encrypted, this.env.SESSION_ENCRYPTION_KEY)
       : null;
   }
-
   #origins(): DirectOrigins {
     return {
       baseURL: this.env.SMBC_DIRECT_BASE_URL,
       loginURL: this.env.SMBC_DIRECT_LOGIN_BASE_URL,
     };
   }
-
   #credentials() {
     return parseCredentials(this.env.SMBC_CREDENTIAL_JSON);
   }
-
   /**
    * U09: finish the run where `COLLECTION_TARGET` says. In legacy mode this is
    * the central importer call, unchanged. In shared mode the run's own bytes
@@ -521,15 +500,11 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     failureCodes: string[],
   ): Promise<void> {
     if (!progress.manifestKey || !progress.runId || !progress.startedAt) return;
-    if (collectionTarget(this.env.COLLECTION_TARGET) !== "shared") {
-      await this.#importRawEvidence(progress.manifestKey, progress.runId);
-      return;
-    }
     const manifest = this.#manifest(progress, artifacts, failureCodes);
     const prefix = runPrefix(progress.startedAt, progress.runId);
     const acquisitionSessionRef = await this.ctx.storage.get<string>("runSessionRef");
     try {
-      const staging = dataBucket(this.env.SNAPSHOTS);
+      const staging = dataBucket(this.env.DATA);
       const summary = await persistSharedRun(dataBucket(this.env.DATA), {
         manifest,
         manifestBytes: manifestBytes(manifest),
@@ -566,32 +541,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       );
     }
   }
-
-  async #importRawEvidence(manifestKey: string, runId: string): Promise<void> {
-    try {
-      const result = await importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey);
-      console.log(
-        JSON.stringify({
-          message: "smbc_raw_evidence_import",
-          runId,
-          centralStatus: result.status,
-          artifactCount: result.artifactCount,
-          ...(result.status === "sealed"
-            ? { centralRunId: result.centralRunId }
-            : { centralDeferredReason: result.reason, centralNextOffset: result.nextOffset }),
-        }),
-      );
-    } catch {
-      console.error(
-        JSON.stringify({
-          message: "smbc_raw_evidence_import_failed",
-          runId,
-          errorCode: "raw_evidence_import_failed",
-        }),
-      );
-    }
-  }
-
   async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.#operationTail;
     let release!: () => void;
@@ -606,7 +555,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     }
   }
 }
-
 const FIXED_COLLECTION_FAILURE_CODES = new Set([
   "_formid_field_missing",
   "_token_field_missing",
@@ -638,7 +586,6 @@ const FIXED_COLLECTION_FAILURE_CODES = new Set([
 ]);
 const COLLECTION_HTTP_FAILURE_CODE =
   /^(?:account_detail|balance|continue_session|transactions)_http_[1-5][0-9]{2}$/u;
-
 export function classifyError(error: unknown): string {
   if (error instanceof DOMException) return "crypto_error";
   if (error instanceof SyntaxError) return "json_parse_failed";
@@ -651,13 +598,11 @@ export function classifyError(error: unknown): string {
   }
   return "unexpected_error";
 }
-
 /** Only an allowlisted machine code ever reaches a log line. */
 function safeSharedErrorCode(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   return /^[a-z0-9_]{1,64}$/u.test(message) ? message : "shared_persist_failed";
 }
-
 function upsertArtifact(artifacts: StoredArtifact[], artifact: StoredArtifact): void {
   const index = artifacts.findIndex((candidate) => candidate.key === artifact.key);
   if (index === -1) artifacts.push(artifact);

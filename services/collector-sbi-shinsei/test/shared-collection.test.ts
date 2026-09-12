@@ -11,7 +11,6 @@ import {
   readTerminal,
   terminalKey,
 } from "../../../packages/collection/src/index";
-import { collectionTarget, sharedCollectionEnabled } from "../src/collection-target";
 import {
   buildSharedRunPlan,
   persistSharedRun,
@@ -43,18 +42,6 @@ function manifestOf(overrides: Partial<CollectionManifest> = {}): CollectionMani
 const PROVIDER_BODY = JSON.stringify({
   header: { adapterResultCode: "0", newToken: "synthetic-next-csrf-token" },
   responseParam: { totalCreditBalance: "300000" },
-});
-
-describe("COLLECTION_TARGET", () => {
-  test("defaults to legacy and only the exact string selects shared", () => {
-    expect(collectionTarget(undefined)).toBe("legacy");
-    expect(collectionTarget("legacy")).toBe("legacy");
-    expect(collectionTarget("shared")).toBe("shared");
-    for (const value of ["Shared", "SHARED", " shared", "shared ", "sharedx", ""]) {
-      expect(collectionTarget(value)).toBe("legacy");
-      expect(sharedCollectionEnabled(value)).toBe(false);
-    }
-  });
 });
 
 describe("G3-07/G3-08 sanitization before DATA", () => {
@@ -343,13 +330,13 @@ async function trigger(target: string | undefined) {
 }
 
 describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () => {
-  test("legacy mode still uploads to the importer and writes nothing to DATA", async () => {
+  test("an unset retired target variable still writes only to DATA", async () => {
     const { response, result, data, importerCalls, staged } = await trigger(undefined);
     expect(response.status).toBe(200);
     expect(result.status).toBe("success");
-    expect(importerCalls).toHaveLength(1);
-    expect(staged.length).toBeGreaterThan(0);
-    expect(data.putKeys).toEqual([]);
+    expect(importerCalls).toEqual([]);
+    expect(staged).toEqual([]);
+    expect(data.putKeys.length).toBeGreaterThan(0);
   });
 
   test("shared mode writes one copy: DATA only, no staging, no central upload", async () => {

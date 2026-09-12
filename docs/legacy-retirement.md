@@ -19,6 +19,25 @@ Read it together with:
 - [infra/resources.md](../infra/resources.md) — the generated ledger; every
   directory below carries its disposition there.
 
+## Shared-only cutover (2026-09-13)
+
+The owner authorized retirement of the legacy code, Workers, Queues, buckets and
+CORE projection fallback. Original evidence is retained in central DATA with a
+verified SHA-256 mapping before any source object is removed.
+
+The first release removes the collector-side legacy persistence branches,
+importer routes and bindings, and Vpass's legacy Queue handler. All twelve
+collectors now always write shared runs; `COLLECTION_TARGET` is retired. SMBC
+Direct stages resumable runs in DATA under its existing `raw/smbc-direct/` keys.
+Its old staged objects must be copied to those same keys and verified before
+this release is deployed, so existing Durable Object progress stays resumable.
+
+The ingest and importer Workers remain deployed during the full repair pass.
+A later release removes them from CD after the pass is audited. CORE tables
+are dropped only after a READ-only App and Processor release is live, because
+CD applies migrations before uploading Worker code. The historical checklist
+below records the old dependencies; it does not override this cutover order.
+
 ## 0. The rules this page does not bend
 
 1. **Nothing is deleted because nothing imports it.** A collector is started by

@@ -1,3 +1,4 @@
+import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import worker from "../src/worker";
 const restores: Array<() => void> = [];
@@ -13,13 +14,9 @@ test("scheduled login failure produces a correlated terminal record and safe R2 
     );
     restores.push(() => spy.mockRestore());
   }
-  let saved: Record<string, unknown> | undefined;
+  const data = new FakeR2Bucket();
   const env = {
-    SNAPSHOTS: {
-      put: async (_key: string, body: string) => {
-        saved = JSON.parse(body);
-      },
-    },
+    DATA: data,
   } as unknown as Parameters<typeof worker.scheduled>[1];
   await expect(
     worker.scheduled(
@@ -42,8 +39,7 @@ test("scheduled login failure produces a correlated terminal record and safe R2 
       runId: "2026-09-05T00-00-00-000Z",
     }),
   );
-  expect(JSON.parse(String(saved?.message))).toEqual({
-    category: "configuration",
-    errorType: "Error",
-  });
+  const terminal = [...data.entries].find(([key]) => key.endsWith("/terminal.json"));
+  expect(terminal).toBeDefined();
+  expect(JSON.parse(new TextDecoder().decode(terminal![1].bytes)).providerOutcome).toBe("failed");
 });

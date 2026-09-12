@@ -1,3 +1,4 @@
+import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { logAuthTrace, safeFailure } from "../src/diagnostics";
 import { collectVPoint } from "../src/vpoint";
@@ -17,31 +18,12 @@ function captureLogs() {
   });
   return lines;
 }
-function fixture(session: object, snapshots: object) {
+function fixture(session: object, data: FakeR2Bucket) {
   return Object.assign({} as Env, {
     ADMIN_TRIGGER_TOKEN: "admin-test-only",
     COLLECTOR_SCHEMA_VERSION: "test",
     VPOINT_SESSION: { idFromName: () => "test-id", get: () => session },
-    SNAPSHOTS: snapshots,
-    VPOINT_PAY_SNAPSHOTS: {
-      list: async () => ({ objects: [], truncated: false }),
-      put: async () => null,
-    },
-    RAW_EVIDENCE_IMPORTER: {
-      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = new Request(input, init);
-        const body = (await request.json()) as { manifestKey: string };
-        return Response.json({
-          source: "v-point",
-          manifestKey: body.manifestKey,
-          status: "sealed",
-          centralRunId: 1,
-          artifactCount: 1,
-          sealed: true,
-          allObjectsReused: false,
-        });
-      },
-    },
+    DATA: data,
   });
 }
 function trigger() {
@@ -110,70 +92,36 @@ describe("V Point safe diagnostics", () => {
     expect(logs.join()).not.toContain(PRIVATE);
   });
 
-  test("partial R2 failure is correlated, preserves partial outcome and redacts failure manifest", async () => {
-    const logs = captureLogs();
-    let manifest = "";
-    const env = fixture(
-      { getSession: async () => `session=${PRIVATE}` },
-      {
-        put: async (key: string, body: string) => {
-          if (key.endsWith("/balance-info.json")) throw new Error(PRIVATE);
-          if (key.endsWith("/manifest.json")) manifest = body;
+  for (const uploadFails of [false, true]) {
+    test(`failed collection keeps safe diagnostics; upload failure=${uploadFails}`, async () => {
+      const logs = captureLogs();
+      const data = new FakeR2Bucket({
+        beforePut: () => {
+          if (uploadFails) throw new Error(PRIVATE);
         },
-      },
-    );
-    spyOn(globalThis, "fetch").mockImplementation(
-      Object.assign(
-        async (input: string | URL | Request) => {
-          const path = new URL(String(input)).pathname;
-          return Response.json({
-            status: { code: "0000" },
-            results: path.endsWith("tpoint_history") ? { history: [], total: 0 } : {},
-            privateBody: PRIVATE,
-          });
+      });
+      const env = fixture(
+        {
+          getSession: async () => {
+            throw new Error(PRIVATE);
+          },
         },
-        { preconnect: globalThis.fetch.preconnect },
-      ),
-    );
-    const response = await worker.fetch(trigger(), env);
-    expect(response.status).toBe(200);
-    const parsed = JSON.parse(manifest);
-    expect(parsed.status).toBe("partial");
-    expect(parsed.failures[0]).toMatchObject({
-      stage: "artifact-store",
-      failureCode: "operation_failed",
+        data,
+      );
+      const response = await worker.fetch(trigger(), env);
+      expect(response.status).toBe(502);
+      const result = (await response.json()) as {
+        terminal: { persisted: boolean; terminalKey: string };
+      };
+      expect(result.terminal.persisted).toBe(!uploadFails);
+      if (!uploadFails) {
+        const bytes = data.entries.get(result.terminal.terminalKey)!.bytes;
+        expect(JSON.parse(new TextDecoder().decode(bytes)).providerOutcome).toBe("failed");
+      } else
+        expect([...data.entries.keys()].some((key) => key.endsWith("/terminal.json"))).toBe(false);
+      expect(logs.join()).not.toContain(PRIVATE);
     });
-    const failures = logs
-      .map((line) => JSON.parse(line))
-      .filter((line) => line.event === "collector-stage-failed");
-    expect(failures).toHaveLength(1);
-    expect(failures[0].runId).toBe(parsed.runId);
-    expect(logs.join()).not.toContain(PRIVATE);
-    expect(manifest).not.toContain(PRIVATE);
-  });
-
-  test("terminal manifest write failure has a safe correlated error even without a saved manifest", async () => {
-    const logs = captureLogs();
-    const env = fixture(
-      {
-        getSession: async () => {
-          throw new Error(PRIVATE);
-        },
-      },
-      {
-        put: async () => {
-          throw new Error(PRIVATE);
-        },
-      },
-    );
-    await expect(worker.fetch(trigger(), env)).rejects.toThrow("manifest storage failed");
-    const failures = logs
-      .map((line) => JSON.parse(line))
-      .filter((line) => line.event === "collector-stage-failed");
-    expect(failures.map((failure) => failure.stage)).toEqual(["session-load", "manifest-store"]);
-    expect(failures[0].runId).toBe(failures[1].runId);
-    expect(logs.join()).not.toContain(PRIVATE);
-  });
+  }
 
   test("forwarding failure is logged once with safe message and no email address or body", async () => {
     const logs = captureLogs();
@@ -197,9 +145,9 @@ describe("V Point safe diagnostics", () => {
     expect(logs.join()).not.toContain(PRIVATE);
   });
 
-  test("archives a V Point Pay notification and imports the pair without blocking forwarding", async () => {
+  test("archives a V Point Pay notification in DATA and still forwards it", async () => {
     const logs = captureLogs();
-    const puts: string[] = [];
+    const data = new FakeR2Bucket();
     const importerPaths: string[] = [];
     const pending: Promise<unknown>[] = [];
     let forwards = 0;
@@ -207,13 +155,8 @@ describe("V Point safe diagnostics", () => {
       VPOINT_EMAIL_RECIPIENT: "collector@example.invalid",
       VPOINT_PAY_EMAIL_RECIPIENT: "pay@example.invalid",
       VPOINT_EMAIL_FORWARD_TO: "mailbox@example.invalid",
-      VPOINT_PAY_SNAPSHOTS: {
-        head: async () => null,
-        put: async (key: string) => {
-          puts.push(key);
-          return null;
-        },
-      },
+      DATA: data,
+      COLLECTOR_SCHEMA_VERSION: "test",
       RAW_EVIDENCE_IMPORTER: {
         fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
           const request = new Request(input, init);
@@ -260,8 +203,9 @@ describe("V Point safe diagnostics", () => {
     } as unknown as ExecutionContext;
     await worker.email(message, env, ctx);
     await Promise.all(pending);
-    expect(puts).toHaveLength(2);
-    expect(importerPaths).toEqual(["/v1/v-point-pay-email/import-run"]);
+    expect(data.putKeys.filter((key) => key.startsWith("objects/"))).toHaveLength(2);
+    expect(data.putKeys.at(-1)).toEndWith("/terminal.json");
+    expect(importerPaths).toEqual([]);
     expect(forwards).toBe(1);
     expect(logs.join()).not.toContain("raw/v-point-pay-email/");
   });

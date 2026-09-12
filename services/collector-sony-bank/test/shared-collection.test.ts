@@ -16,7 +16,6 @@ import {
   terminalKey,
   verifyReferencedObjects,
 } from "../../../packages/collection/src/index";
-import { collectionTarget } from "../src/collection-target";
 import {
   artifactRole,
   assertCentralSafe,
@@ -75,17 +74,6 @@ function input(overrides: Partial<SharedRunInput> = {}): SharedRunInput {
     ...overrides,
   };
 }
-
-describe("COLLECTION_TARGET selects the store", () => {
-  test("only the exact string 'shared' leaves the legacy path", () => {
-    expect(collectionTarget(undefined)).toBe("legacy");
-    expect(collectionTarget("")).toBe("legacy");
-    expect(collectionTarget("legacy")).toBe("legacy");
-    expect(collectionTarget("Shared")).toBe("legacy");
-    expect(collectionTarget("shared ")).toBe("legacy");
-    expect(collectionTarget("shared")).toBe("shared");
-  });
-});
 
 describe("G1-02 shared mode persists every artifact and then the terminal", () => {
   test("objects, roles and the terminal describe what is stored", async () => {
