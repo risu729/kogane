@@ -496,9 +496,13 @@ export class SbiVcSessionState extends DurableObject<Env> {
 
 export default {
   async fetch(request, env): Promise<Response> {
-    if (!(await isAuthorized(request, env.ADMIN_TOKEN))) return new Response(null, { status: 404 });
     const url = new URL(request.url);
     const path = url.pathname;
+    // CD liveness only: no session, storage, credentials or provider calls.
+    if (request.method === "GET" && path === "/healthz") {
+      return Response.json({ status: "ok", schemaVersion: env.COLLECTOR_SCHEMA_VERSION });
+    }
+    if (!(await isAuthorized(request, env.ADMIN_TOKEN))) return new Response(null, { status: 404 });
     if (request.method === "POST" && path === "/backfill-raw-evidence") {
       try {
         const cursor = url.searchParams.get("cursor") ?? undefined;
