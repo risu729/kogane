@@ -536,7 +536,9 @@ Pre-deletion account and deployed-code checks established:
 - The deployed Worker bundle was retained locally for the retirement record.
 
 A fresh account listing verified 17 remaining Kogane Workers and no live Worker
-without repository configuration. Both production Container applications remain.
+without repository configuration. Both production Container applications remain. The probe namespace was absent
+from a fresh Durable Object namespace listing, and deleting its 15 dedicated
+image tags left no probe image in the registry.
 
 ## 7.1 Legacy paths remain in use
 
