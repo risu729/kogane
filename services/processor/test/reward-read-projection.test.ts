@@ -273,38 +273,15 @@ test("G2-19: the same instant rebuilds the same snapshot, a later one builds a n
   expect(pointer).toMatchObject({ snapshot_id: later.snapshotId!, evaluated_at: LATER });
 });
 
-test("G2-20: a saved simulation is replayed only when its request was retained", async () => {
+test("fresh captures ignore the retired CORE simulation cache", async () => {
   const built = await run("2026-10-02T00:00:00.000Z");
   expect(["complete", "unchanged"]).toContain(built.status);
-  const rows = await readAll<{
-    request_digest: string;
-    reproducibility: string;
-    reason_code: string | null;
-    result_json: string | null;
-    offer_id: string | null;
-  }>(
-    `SELECT request_digest,reproducibility,reason_code,result_json,offer_id
-     FROM reward_conversion_simulations WHERE snapshot_id=?1 ORDER BY row_seq`,
-    built.snapshotId,
-  );
-  expect(rows.length).toBe(2);
-  const retained = rows.find((row) => row.request_digest === "a".repeat(64))!;
-  const digestOnly = rows.find((row) => row.request_digest === "b".repeat(64))!;
-  expect(retained).toMatchObject({ reproducibility: "reproduced", offer_id: "offer:synthetic" });
-  // The replay used the offer the request named, and the plan is a plan, not
-  // an exchange: 1,000 points at 1:2 is 500 yen received.
-  const plan = JSON.parse(retained.result_json!) as {
-    use: { value: { value: { coefficient: string } } };
-    receive: { unitRef: string; value: { value: { coefficient: string } } };
-  };
-  expect(plan.use.value.value.coefficient).toBe("1000");
-  expect(plan.receive.unitRef).toBe("JPY");
-  expect(plan.receive.value.value.coefficient).toBe("500");
-  expect(digestOnly).toMatchObject({
-    reproducibility: "not_reproducible",
-    reason_code: "simulation_input_not_retained",
-    result_json: null,
-  });
+  expect(
+    await readAll(
+      "SELECT * FROM reward_conversion_simulations WHERE snapshot_id=?1",
+      built.snapshotId,
+    ),
+  ).toEqual([]);
 });
 
 test("a bounded invocation publishes nothing: building rows are invisible", async () => {

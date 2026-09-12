@@ -198,8 +198,8 @@ async function get(path: string, enabled = true, method = "GET") {
   );
 }
 
-it("serves holdings and legacy expiry in the browser's validated contract", async () => {
-  for (const path of ["/api/v2/rewards/holdings", "/api/v2/rewards/expiry"]) {
+it("serves holdings in the browser's validated contract", async () => {
+  for (const path of ["/api/v2/rewards/holdings"]) {
     const response = await get(path);
     expect(response.status).toBe(200);
     expect(validApiResponse(path, await response.json())).toBe(true);
@@ -290,55 +290,10 @@ describe("reward reads", () => {
     expect(body.coverage).toEqual({ limit: 200, truncated: false, nextOffset: null });
   });
 
-  it("returns an expiry estimate per rule with its state, reasons and both dates", async () => {
-    const body = (await (await get("/api/v2/rewards/expiry?program=program:v-point")).json()) as {
-      rows: {
-        ruleRef: string;
-        family: string;
-        verification: string;
-        state: string;
-        uncertaintyCodes: string[];
-        deadlineZone: string;
-        deadlineZoneBasis: string;
-        rows: {
-          bucketRef: string;
-          deadline: { kind: string };
-          basis: string;
-          providerObserved: unknown;
-          policyEstimated: unknown;
-        }[];
-      }[];
-    };
-    const inactivity = body.rows.find((row) =>
-      row.ruleRef.startsWith("rule:v-point:regular-inactivity"),
-    )!;
-    // No observed activity can be classified as qualifying today, so the
-    // estimate is partial rather than a deadline computed from the newest row.
-    expect(inactivity.state).toBe("partial");
-    expect(inactivity.uncertaintyCodes).toContain("history_completeness_unknown");
-    expect(inactivity.uncertaintyCodes).toContain("no_qualifying_activity_observed");
-    expect(inactivity.uncertaintyCodes).toContain("deadline_zone_assumed");
-    expect(inactivity.deadlineZone).toBe("Asia/Tokyo");
-    expect(inactivity.deadlineZoneBasis).toBe("assumed");
-    // Every bucket keeps a row, including the one with no confirmed deadline.
-    expect(inactivity.rows.map((row) => row.bucketRef).sort()).toEqual([
-      "program:v-point:v-point:common:bucket-0",
-      "program:v-point:v-point:store-limited:group-0:item-0",
-    ]);
-    const unknownDeadline = inactivity.rows.find(
-      (row) => row.bucketRef === "program:v-point:v-point:common:bucket-0",
-    )!;
-    expect(unknownDeadline.deadline.kind).toBe("unknown");
-    expect(unknownDeadline.basis).toBe("unknown");
-
-    const fixedLot = body.rows.find((row) =>
-      row.ruleRef.startsWith("rule:v-point:fixed-expiry-lot"),
-    )!;
-    const observed = fixedLot.rows.find(
-      (row) => row.bucketRef === "program:v-point:v-point:store-limited:group-0:item-0",
-    )!;
-    expect(observed.basis).toBe("provider-observed");
-    expect(observed.policyEstimated).toBeNull();
+  it("requires a published READ snapshot for expiry even when CORE has holdings", async () => {
+    const response = await get("/api/v2/rewards/expiry?program=program:v-point");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: "reward_read_model_unavailable" });
   });
 
   it("simulates a conversion as a pure query: 2,500 uses 2,000 and receives 1,000", async () => {

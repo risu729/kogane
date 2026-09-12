@@ -14,11 +14,11 @@ import {
   withRewardsV2,
   type ApiCapabilities,
 } from "../../../packages/observation-shared/src/api-schema";
-import { projectionFlagOn, readProjectionFlagOn, readTarget } from "./balances-v2";
+import { projectionFlagOn, readTarget } from "./balances-v2";
 import { commandsEnabled } from "./command-api";
 import { eventsV2Available, flagOn } from "./events-api";
 import { opsApiEnabled } from "./ops-api";
-import { rewardReadContext, rewardReadFlagOn } from "./rewards-read";
+import { rewardReadContext } from "./rewards-read";
 
 /** A11 reward reads. Off unless explicitly on; anything else, including absent, is off. */
 export function rewardsV2Enabled(env: Env): boolean {
@@ -41,9 +41,7 @@ export async function centralStoreCapabilities(env: Env): Promise<ApiCapabilitie
   // serveable, so `/api/meta` never advertises snapshot-backed rows the
   // Worker would answer 503 for.
   const rewardReadModel =
-    rewards && rewardReadFlagOn(env) && !("unavailable" in (await rewardReadContext(env)))
-      ? "read-d1"
-      : "none";
+    rewards && !("unavailable" in (await rewardReadContext(env))) ? "read-d1" : "none";
   const base: ApiCapabilities = withRewardsV2(
     {
       ...CENTRAL_STORE_CAPABILITIES,
@@ -57,11 +55,11 @@ export async function centralStoreCapabilities(env: Env): Promise<ApiCapabilitie
     rewards,
     rewardReadModel,
   );
-  if (!projectionFlagOn(env)) return base;
+  if (!projectionFlagOn(env) || !(env as unknown as { READ?: D1Database }).READ) return base;
   const target = await readTarget(env);
   // A READ database of another baseline publishes nothing to this contract.
   const snapshot = target.contractMismatch ? null : await target.reader.currentSnapshot();
   // Which store answered is part of the capability: a client that holds a
   // cursor needs to know it belongs to a rebuildable database (U11).
-  return withBalancesV2(base, snapshot !== null, readProjectionFlagOn(env) ? "read-d1" : "core-d1");
+  return withBalancesV2(base, snapshot !== null, "read-d1");
 }

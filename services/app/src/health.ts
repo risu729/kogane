@@ -27,7 +27,6 @@
 // works once an unrelated flag is on is not a postcheck. It accepts no query
 // string and no body.
 import { centralStoreCapabilities } from "./capabilities";
-import { flagOn } from "./events-api";
 import { accessIdentity } from "./auth";
 import { grantsUsable, principalFor } from "./grants";
 import { HttpError, json } from "./http";
@@ -225,11 +224,7 @@ export async function healthBody(env: Env): Promise<{ status: number; body: unkn
   const read = await d1Health(env.READ);
   const data = await bucketHealth(env.EVIDENCE);
   const processor = await processorHealth(env);
-  // The flags that decide whether READ has to be there. Read from the
-  // variables rather than from a helper typed on `Env`, because a deployment
-  // may have the binding without the flag.
-  const readRequired =
-    flagOn(env.READ_PROJECTION_ENABLED) || flagOn(env.REWARD_READ_PROJECTION_ENABLED);
+  const readRequired = true;
   let capabilities: unknown = null;
   try {
     capabilities = await centralStoreCapabilities(env);

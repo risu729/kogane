@@ -363,8 +363,7 @@
             "AGENT_GRANTS",
             "BALANCE_PROJECTION_ENABLED",
             "OPERATOR_SUBJECTS",
-            "OPS_API_ENABLED",
-            "READ_PROJECTION_ENABLED"
+            "OPS_API_ENABLED"
           ],
           "requiredSecretNames": [],
           "unextractedKeys": []
@@ -428,10 +427,8 @@
             "HEALTH_PROBE_TOKENS",
             "OPERATOR_SUBJECTS",
             "OPS_API_ENABLED",
-            "READ_PROJECTION_ENABLED",
             "RELEASE_SHA",
             "REWARDS_V2_ENABLED",
-            "REWARD_READ_PROJECTION_ENABLED",
             "SESSION_REFRESH_POLICY"
           ],
           "requiredSecretNames": [],
@@ -491,10 +488,8 @@
             "HEALTH_PROBE_TOKENS",
             "OPERATOR_SUBJECTS",
             "OPS_API_ENABLED",
-            "READ_PROJECTION_ENABLED",
             "RELEASE_SHA",
             "REWARDS_V2_ENABLED",
-            "REWARD_READ_PROJECTION_ENABLED",
             "SESSION_REFRESH_POLICY"
           ],
           "requiredSecretNames": [],
@@ -1859,7 +1854,6 @@
             "COLLECTION_DATA_BUCKET",
             "COLLECTION_INGEST_CLIENT",
             "OPS_DISPATCH_ENABLED",
-            "READ_PROJECTION_ENABLED",
             "RECONCILIATION_ENABLED",
             "RELEASE_CANDIDATES_ENABLED",
             "RELEASE_SHA",

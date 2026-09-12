@@ -21,7 +21,6 @@ import {
   currentCoreRevision,
   runBalanceProjection,
 } from "../src/balance-projection-job.ts";
-import { readProjectionEnabled } from "../src/read-projection.ts";
 import { inputObjectKey, readInputRecord } from "../src/projection-input.ts";
 import type { OutboxRow } from "../src/decision-outbox.ts";
 import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations.ts";
@@ -99,12 +98,14 @@ async function outboxRow(): Promise<OutboxRow> {
   };
 }
 
-test("the flag is off by default and the CORE path stays the target", () => {
-  expect(readProjectionEnabled(env)).toBe(false);
-  expect(
-    readProjectionEnabled({ ...env, READ_PROJECTION_ENABLED: "false" } as unknown as Env),
-  ).toBe(false);
-  expect(readProjectionEnabled(on())).toBe(true);
+test("the retired target flag cannot enable CORE projection writes", async () => {
+  const { READ: _read, ...missing } = on();
+  const result = await runBalanceProjection({
+    ...missing,
+    READ_PROJECTION_ENABLED: "false",
+  } as unknown as Env);
+  expect(result).toMatchObject({ status: "retryable", reasonCode: "read_binding_missing" });
+  expect(await coreCount("SELECT count(*) AS n FROM balance_read_snapshots")).toBe(0);
 });
 
 test("a build writes the snapshot to READ, publishes it, and leaves CORE's projection empty", async () => {

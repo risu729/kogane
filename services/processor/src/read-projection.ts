@@ -1,5 +1,5 @@
 // The balance projection written into the READ database (unified plan 04, 05;
-// U11), behind `READ_PROJECTION_ENABLED`.
+// U11). READ is the only projection target.
 //
 // Nothing about the *input* changes: the same capture protocol of 05 §3 runs
 // against CORE, the canonical bytes go to the same DATA bucket, the same
@@ -65,18 +65,6 @@ import type {
 const WRITE_CHUNK = 100;
 /** How long one invocation holds a build, shorter than the cron period. */
 const WRITER_LEASE_MS = 60_000;
-
-/**
- * The target flag. Off by default and off everywhere until a deployment turns
- * it on: with it off, `runBalanceProjection` keeps writing the CORE tables of
- * migration 0030 exactly as before.
- */
-export function readProjectionEnabled(env: Env): boolean {
-  // Widened to `string` on purpose: the binding type pins the default, and a
-  // configuration that does not declare the var at all reads as off.
-  const flag: string | undefined = env.READ_PROJECTION_ENABLED;
-  return flag === "1" || flag === "true";
-}
 
 /**
  * The READ binding, when the deployment has one. A configuration that turned

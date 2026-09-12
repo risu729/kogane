@@ -18,7 +18,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
-  activePointerStatement,
   balanceProjectionOutboxProcessor,
   currentCoreRevision,
   runBalanceProjection,
@@ -105,12 +104,19 @@ async function seedDecision(target: Env = env): Promise<string> {
 }
 
 const count = async (sql: string, ...args: unknown[]): Promise<number> =>
-  (await env.DB.prepare(sql)
+  (await (
+    /\b(balance_read_snapshots|current_balance_projection|scope_relations|balance_snapshot_pointer)\b/u.test(
+      sql,
+    )
+      ? env.READ
+      : env.DB
+  )
+    .prepare(sql)
     .bind(...args)
     .first<{ n: number }>())!.n;
 
 const pointer = async (target: Env = env) =>
-  await target.DB.prepare(
+  await target.READ.prepare(
     "SELECT snapshot_id,source_revision FROM balance_snapshot_pointer WHERE id=1",
   ).first<{ snapshot_id: string; source_revision: number }>();
 
@@ -170,7 +176,7 @@ test("G2-03: sealing a Layer A run moves the revision, and the first build recor
   expect(built.sourceRevision).toBe(after.source_revision);
   expect(built.inputDigest).toMatch(/^[0-9a-f]{64}$/u);
   // The snapshot carries its identity, and the pointer publishes it.
-  const snapshot = await env.DB.prepare(
+  const snapshot = await env.READ.prepare(
     "SELECT input_digest,source_revision,core_epoch,read_instance_id FROM balance_read_snapshots WHERE snapshot_id=?1",
   )
     .bind(built.snapshotId)
@@ -179,7 +185,7 @@ test("G2-03: sealing a Layer A run moves the revision, and the first build recor
     input_digest: built.inputDigest,
     source_revision: after.source_revision,
     core_epoch: after.core_epoch,
-    read_instance_id: "core-d1",
+    read_instance_id: expect.any(String),
   });
   expect((await pointer())?.snapshot_id).toBe(built.snapshotId!);
 }, 60000);
@@ -307,7 +313,7 @@ test("G2-05: the same input under a new build digest builds a new snapshot from 
     inputDigest: current.inputDigest,
   });
   expect(
-    await env.DB.prepare("SELECT input_digest FROM balance_read_snapshots WHERE snapshot_id=?1")
+    await env.READ.prepare("SELECT input_digest FROM balance_read_snapshots WHERE snapshot_id=?1")
       .bind(redeployed.snapshotId)
       .first<{ input_digest: string }>(),
   ).toEqual({ input_digest: current.inputDigest! });
@@ -336,7 +342,7 @@ test("G2-09/G2-14: a writer that lost the lease seals nothing and leaves nothing
   );
 
   // Another writer takes the build over with a live lease.
-  await env.DB.prepare(
+  await env.READ.prepare(
     `UPDATE balance_read_snapshots SET writer_lease='writer-b',writer_lease_until_ms=?2,
       writer_fence=writer_fence+1 WHERE snapshot_id=?1`,
   )
@@ -374,61 +380,7 @@ test("G2-09/G2-14: a writer that lost the lease seals nothing and leaves nothing
   expect((await pointer())?.snapshot_id).toBe(finished.snapshotId!);
 }, 120000);
 
-test("G2-10: the active pointer never moves back to an older revision", async () => {
-  const current = await pointer();
-  const older = await env.DB.prepare(
-    `SELECT snapshot_id,source_revision FROM balance_read_snapshots
-     WHERE status='complete' AND snapshot_id<>?1 AND source_revision<?2
-     ORDER BY source_revision DESC LIMIT 1`,
-  )
-    .bind(current!.snapshot_id, current!.source_revision)
-    .first<{ snapshot_id: string; source_revision: number }>();
-  expect(older).not.toBeNull();
-
-  // The statement the job runs when a build completes, for a build that was
-  // captured earlier: it matches no row, so the published snapshot stays.
-  const late = await activePointerStatement(
-    env.DB,
-    older!.snapshot_id,
-    older!.source_revision,
-    (await currentCoreRevision(env.DB)).core_epoch,
-    "2026-09-12T00:00:00Z",
-  ).run();
-  expect(late.meta.changes).toBe(0);
-  expect(await pointer()).toEqual(current!);
-  // The statement names only a complete snapshot: run for a build that is
-  // still building — a writer whose lease was taken between its last chunk and
-  // its seal — it matches no row rather than tripping the pointer trigger, so
-  // the seal batch reports the lost fence (G2-09) instead of aborting.
-  const unsealed = "d".repeat(64);
-  await env.DB.prepare(
-    `INSERT INTO balance_read_snapshots(snapshot_id,created_at,input_manifest_json,status,row_count,
-      projection_release) VALUES(?1,'2026-09-12T00:00:00Z','{}','building',0,'balance-projection-v1')`,
-  )
-    .bind(unsealed)
-    .run();
-  const early = await activePointerStatement(
-    env.DB,
-    unsealed,
-    current!.source_revision + 1000,
-    (await currentCoreRevision(env.DB)).core_epoch,
-    "2026-09-12T00:00:00Z",
-  ).run();
-  expect(early.meta.changes).toBe(0);
-  expect(await pointer()).toEqual(current!);
-  await env.DB.prepare(
-    "UPDATE balance_read_snapshots SET status='retired',sealed_at='2026-09-12T00:00:00Z' WHERE snapshot_id=?1",
-  )
-    .bind(unsealed)
-    .run();
-  // And a writer that bypasses the statement is refused by the trigger.
-  await expect(
-    env.DB.prepare("UPDATE balance_snapshot_pointer SET source_revision=1 WHERE id=1").run(),
-  ).rejects.toThrow(/never moves backwards/u);
-  await expect(
-    env.DB.prepare("DELETE FROM balance_snapshot_pointer WHERE id=1").run(),
-  ).rejects.toThrow(/switched, never removed/u);
-}, 60000);
+// READ pointer fencing is covered by read-projection.test.ts and storage-d1/read tests.
 
 test("G2-07/G2-08: a re-sent chunk is a no-op or a conflict, and a failing chunk rolls back its checkpoint", async () => {
   const local = { env: await extraPipeline() };
@@ -436,7 +388,7 @@ test("G2-07/G2-08: a re-sent chunk is a no-op or a conflict, and a failing chunk
     await seedBalances(local.env, ["smbc:chunk-a", "smbc:chunk-b", "smbc:chunk-c", "smbc:chunk-d"]);
     const first = await runBalanceProjection(on(local.env), { writeBudget: 2 });
     expect(first.status).toBe("building");
-    const written = await local.env.DB.prepare(
+    const written = await local.env.READ.prepare(
       "SELECT count(*) AS n FROM current_balance_projection WHERE snapshot_id=?1",
     )
       .bind(first.snapshotId)
@@ -445,14 +397,14 @@ test("G2-07/G2-08: a re-sent chunk is a no-op or a conflict, and a failing chunk
     // Re-send the same chunk: the checkpoint is rewound, so the next
     // invocation writes exactly the rows that are already there. Same content,
     // so nothing changes and the build carries on.
-    const rewind = local.env.DB.prepare(
-      "UPDATE balance_read_snapshots SET build_cursor=NULL WHERE snapshot_id=?1",
+    const rewind = local.env.READ.prepare(
+      "DELETE FROM read_build_checkpoints WHERE snapshot_id=?1 AND stage='rows'",
     ).bind(first.snapshotId);
     await rewind.run();
     const resent = await runBalanceProjection(on(local.env), { writeBudget: 2 });
     expect(resent.status).toBe("building");
     expect(
-      await local.env.DB.prepare(
+      await local.env.READ.prepare(
         "SELECT count(*) AS n FROM current_balance_projection WHERE snapshot_id=?1",
       )
         .bind(first.snapshotId)
@@ -461,31 +413,31 @@ test("G2-07/G2-08: a re-sent chunk is a no-op or a conflict, and a failing chunk
 
     // Different content for a row that already exists is a conflict, not a row
     // quietly kept out by INSERT OR IGNORE.
-    await local.env.DB.prepare(
-      "UPDATE current_balance_projection SET row_digest='0' WHERE snapshot_id=?1 AND row_seq=0",
+    await local.env.READ.prepare(
+      "UPDATE current_balance_projection SET row_digest='0000000000000000000000000000000000000000000000000000000000000000' WHERE snapshot_id=?1 AND row_seq=0",
     )
       .bind(first.snapshotId)
       .run();
     await rewind.run();
-    const cursorBefore = await local.env.DB.prepare(
-      "SELECT build_cursor FROM balance_read_snapshots WHERE snapshot_id=?1",
+    const cursorBefore = await local.env.READ.prepare(
+      "SELECT position FROM read_build_checkpoints WHERE snapshot_id=?1 AND stage='rows'",
     )
       .bind(first.snapshotId)
-      .first<{ build_cursor: string | null }>();
+      .first<{ position: string | null }>();
     await expect(runBalanceProjection(on(local.env), { writeBudget: 2 })).rejects.toThrow(
       /projection chunk conflict/u,
     );
     // G2-08: the chunk and its checkpoint are one batch, so the failure rolled
     // both back — the cursor did not move and no row of the chunk was written.
     expect(
-      await local.env.DB.prepare(
-        "SELECT build_cursor FROM balance_read_snapshots WHERE snapshot_id=?1",
+      await local.env.READ.prepare(
+        "SELECT position FROM read_build_checkpoints WHERE snapshot_id=?1 AND stage='rows'",
       )
         .bind(first.snapshotId)
-        .first<{ build_cursor: string | null }>(),
+        .first<{ position: string | null }>(),
     ).toEqual(cursorBefore!);
     expect(
-      await local.env.DB.prepare(
+      await local.env.READ.prepare(
         "SELECT count(*) AS n FROM current_balance_projection WHERE snapshot_id=?1",
       )
         .bind(first.snapshotId)
@@ -494,13 +446,13 @@ test("G2-07/G2-08: a re-sent chunk is a no-op or a conflict, and a failing chunk
 
     // Leave the store usable for the next case: the tampered build is retired
     // the way a rebuild retires a superseded one.
-    await local.env.DB.prepare(
-      `UPDATE balance_read_snapshots SET status='retired',sealed_at='2026-09-12T00:00:00Z'
+    await local.env.READ.prepare(
+      `UPDATE balance_read_snapshots SET status='retired',completed_at='2026-09-12T00:00:00Z'
        WHERE snapshot_id=?1`,
     )
       .bind(first.snapshotId)
       .run();
-    await local.env.DB.prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
+    await local.env.READ.prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
       .bind(first.snapshotId)
       .run();
   }
@@ -537,7 +489,7 @@ test("G2-06: a declared budget that overflows refuses the build instead of trunc
       snapshotId: null,
     });
     expect(
-      await local.env.DB.prepare(
+      await local.env.READ.prepare(
         "SELECT count(*) AS n FROM balance_read_snapshots WHERE status='complete'",
       ).first<{ n: number }>(),
     ).toEqual({ n: 0 });

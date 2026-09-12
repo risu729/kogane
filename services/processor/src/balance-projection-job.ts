@@ -23,32 +23,8 @@
 // complete (05 §5); a lost response converges on the next tick by re-reading
 // the active pointer instead of rebuilding.
 
-import { canonicalJson, sha256Hex } from "../../../packages/domain/src/context.ts";
 import { snapshotEligibility, type CoverageClaim } from "../../../packages/domain/src/coverage.ts";
-import {
-  authorityRank,
-  BALANCE_PROJECTION_RELEASE,
-  buildBalanceProjection,
-  CORE_READ_INSTANCE_ID,
-  createBalanceProjectionReader,
-  createD1ObservationReader,
-  d1Executor,
-  DECIMAL_POLICY_RELEASE,
-  ResultLimitExceededError,
-  LATEST_IDENTITY_RELEASE,
-  organizationSql,
-  projectionBuildDigest,
-  projectionInputManifest,
-  scopeRelationsFromEntityRelations,
-  snapshotIdentity,
-  type CoreRevisionRow,
-  type DerivedScopeRelation,
-  type EntityRelationRow,
-  type ProjectionCandidate,
-  type ProjectionInputs,
-  type ProjectionRow,
-  type SubjectStatus,
-} from "../../../packages/read-model/src/index";
+import type { BalanceRow } from "../../../packages/observation-shared/src/api-contract.ts";
 import {
   projectBalanceRows,
   type BalanceProjectionInput,
@@ -58,7 +34,23 @@ import {
   validNormalizedDecimal,
   type NormalizedDecimal,
 } from "../../../packages/observation-shared/src/normalized-decimal.ts";
-import type { BalanceRow } from "../../../packages/observation-shared/src/api-contract.ts";
+import {
+  authorityRank,
+  createCoreProjectionSource,
+  createD1ObservationReader,
+  d1Executor,
+  DECIMAL_POLICY_RELEASE,
+  LATEST_IDENTITY_RELEASE,
+  organizationSql,
+  projectionBuildDigest,
+  projectionInputManifest,
+  ResultLimitExceededError,
+  type CoreRevisionRow,
+  type EntityRelationRow,
+  type ProjectionCandidate,
+  type ProjectionInputs,
+  type SubjectStatus,
+} from "../../../packages/read-model/src/index";
 import {
   blockedOutcome,
   completedOutcome,
@@ -69,49 +61,28 @@ import {
 // The structural D1 binding the shared CORE package uses (U05); a real
 // `D1Database` satisfies it, and typing the projection against it is what
 // lets `balanceProjectionOutboxProcessor` be an `OutboxProcessor`.
-import {
-  runBatch,
-  type D1Like,
-  type D1StatementLike,
-} from "../../../packages/storage-d1/src/d1.ts";
+import { type D1Like } from "../../../packages/storage-d1/src/d1.ts";
 import {
   captureDigest,
   fixedInput,
-  insertInputRecord,
-  loadProjectionInput,
-  readInputRecord,
-  restoreProjectionInput,
-  storeProjectionInput,
   type CapturedProjectionInput,
-  type FixedProjectionInput,
   type ProjectionInputStore,
 } from "./projection-input.ts";
-import {
-  readProjectionEnabled,
-  readPublishedSnapshotAt,
-  runReadProjection,
-} from "./read-projection.ts";
+import { readPublishedSnapshotAt, runReadProjection } from "./read-projection.ts";
 
 /** The 5,000 candidate bound of the read model; a larger set is refused, never cut. */
 const CANDIDATE_LIMIT = 5001;
 const CANDIDATE_BOUND = 5000;
 /** Rows written per invocation, so one cron tick is bounded whatever the size. */
 export const PROJECTION_WRITE_BUDGET = 1000;
-const WRITE_CHUNK = 100;
 const ORGANIZATION_CHUNK = 500;
 const DECIMAL_CHUNK = 80;
 /** Coverage claims read per build; enough for every published container dataset. */
 const COVERAGE_CLAIM_LIMIT = 5000;
 /** Declared relations read per build, and derived relations stored per build. */
 const RELATION_ROW_BOUND = 5000;
-const RELATION_WRITE_BOUND = 5000;
 /** Optimistic input captures before the job yields and waits for a quiet tick. */
 const CAPTURE_ATTEMPTS = 3;
-/** How long one invocation holds the build. Shorter than the cron period, so a
- * writer that crashed is taken over on the next tick rather than blocking. */
-const WRITER_LEASE_MS = 60_000;
-/** Complete snapshots kept besides the newest one, so an open cursor survives a rebuild. */
-const RETAINED_SNAPSHOTS = 2;
 
 /**
  * A declared budget was exceeded. Every one of these is fail-closed: the build
@@ -585,7 +556,7 @@ export async function collectCandidates(db: D1Like): Promise<ProjectionCandidate
  * window.
  */
 export async function currentProjectionInputs(db: D1Like): Promise<ProjectionInputs> {
-  const row = await createBalanceProjectionReader(d1Executor(db)).projectionInputs();
+  const row = await createCoreProjectionSource(d1Executor(db)).projectionInputs();
   return {
     publishedHighWaterParseRunId: row.published_high_water,
     visibleFetchRunCount: row.visible_runs,
@@ -599,7 +570,7 @@ export async function currentProjectionInputs(db: D1Like): Promise<ProjectionInp
 
 /** The CORE change detector; one read, one definition for builder and reader. */
 export async function currentCoreRevision(db: D1Like): Promise<CoreRevisionRow> {
-  return await createBalanceProjectionReader(d1Executor(db)).coreRevision();
+  return await createCoreProjectionSource(d1Executor(db)).coreRevision();
 }
 
 export type CaptureOutcome =
@@ -668,317 +639,18 @@ export async function captureFixedInput(
  * The snapshot id a fresh capture would produce. Only the flag-off and
  * diagnostic paths need it: a build takes the id from the input it fixed.
  */
-export async function currentSnapshotId(db: D1Like): Promise<string> {
-  const capture = await captureFixedInput(db);
-  if (!capture.ok) throw new ProjectionBudgetError(capture.code);
-  return await snapshotIdentity(capture.captured.digest, await projectionBuildDigest());
-}
-
-/**
- * One projection row. `row_digest` is what makes a re-sent chunk decidable:
- * the same content is an ignored duplicate, different content for a row that
- * already exists raises `projection chunk conflict` in the trigger of
- * migration 0038 instead of being hidden by OR IGNORE (05 §4).
- */
-function insertRow(db: D1Like, snapshotId: string, row: ProjectionRow, digest: string) {
-  return db
-    .prepare(
-      `INSERT OR IGNORE INTO current_balance_projection(
-        snapshot_id,scope_key,subject_scope_key,row_seq,representative_observation_ref,
-        member_evidence_refs_json,member_metrics_json,evidence_count,metric_id,definition_release,
-        quantity_coefficient,quantity_scale,value_status,unit_ref,state,reason_code,
-        as_of_role,as_of_kind,as_of_value,temporal_json,freshness,freshness_reason,sort_as_of,
-        source_id,source_account,metric,instrument,parser,observation_id,parse_run_id,
-        fetch_artifact_id,amount_minor,amount_text,as_of,observed_at,measure_view,latest_in_group,
-        row_digest)
-      VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,
-        ?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38)`,
-    )
-    .bind(
-      snapshotId,
-      row.scopeKey,
-      row.subjectScopeKey,
-      row.rowSeq,
-      row.representativeObservationRef,
-      JSON.stringify(row.memberEvidence),
-      JSON.stringify(row.memberMetrics),
-      row.evidenceCount,
-      row.metricId,
-      row.definitionRelease,
-      row.quantityCoefficient,
-      row.quantityScale,
-      row.valueStatus,
-      row.unitRef,
-      row.state,
-      row.reasonCode,
-      row.asOfRole,
-      row.asOfKind,
-      row.asOfValue,
-      JSON.stringify(row.temporal),
-      row.freshness,
-      row.freshnessReason,
-      row.sortAsOf,
-      row.sourceId,
-      row.sourceAccount,
-      row.metric,
-      row.instrument,
-      row.parser,
-      row.observationId,
-      row.parseRunId,
-      row.fetchArtifactId,
-      row.amountMinor,
-      row.amountText,
-      row.asOf,
-      row.observedAt,
-      row.measureView,
-      row.latestInGroup ? 1 : 0,
-      digest,
-    );
-}
-
-/** Content digest of every row of a build, keyed by its position. */
-async function rowDigests(rows: readonly ProjectionRow[]): Promise<Map<number, string>> {
-  const digests = new Map<number, string>();
-  for (const row of rows) digests.set(row.rowSeq, await sha256Hex(canonicalJson(row)));
-  return digests;
-}
-
-/**
- * What was written is what the build produced: the same number of rows, a
- * dense sequence in the contract order, and the same content digest for every
- * position (05 §5). A build that cannot prove this does not seal.
- */
-async function writtenRowsMatch(
-  db: D1Like,
-  snapshotId: string,
-  rows: readonly ProjectionRow[],
-  digests: ReadonlyMap<number, string>,
-): Promise<boolean> {
-  const stored = await db
-    .prepare(
-      `SELECT row_seq,row_digest FROM current_balance_projection
-       WHERE snapshot_id=?1 ORDER BY row_seq`,
-    )
-    .bind(snapshotId)
-    .all<{ row_seq: number; row_digest: string | null }>();
-  if (stored.results.length !== rows.length) return false;
-  return stored.results.every(
-    (row, index) => row.row_seq === index && row.row_digest === digests.get(index),
-  );
-}
-
-async function writeRelations(
-  db: D1Like,
-  relations: readonly DerivedScopeRelation[],
-  now: string,
-): Promise<void> {
-  // Policy relations are reproducible from the policy release recorded in the
-  // manifest, so only evidence-backed claims are stored.
-  const stored = relations.filter((relation) => relation.source !== "policy");
-  if (stored.length > RELATION_WRITE_BOUND)
-    throw new ProjectionBudgetError("scope_relation_budget_exceeded");
-  for (let start = 0; start < stored.length; start += WRITE_CHUNK) {
-    await runBatch(
-      db,
-      stored.slice(start, start + WRITE_CHUNK).map((relation) =>
-        db
-          .prepare(
-            `INSERT INTO scope_relations(from_scope_key,to_scope_key,relation,source,
-              decision_revision_id,release,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)
-             ON CONFLICT(from_scope_key,to_scope_key,release) DO UPDATE SET
-              relation=excluded.relation,source=excluded.source,
-              decision_revision_id=excluded.decision_revision_id`,
-          )
-          .bind(
-            relation.fromScopeKey,
-            relation.toScopeKey,
-            relation.relation,
-            relation.source,
-            relation.decisionRevisionId,
-            relation.release,
-            now,
-          ),
-      ),
-    );
-  }
-}
-
-/** Retire and delete builds older than the retained window; a reader on an
- * older cursor gets `context_expired` rather than a silently different list. */
-async function retireOldSnapshots(db: D1Like, keep: string, now: string): Promise<number> {
-  const stale = await db
-    .prepare(
-      `SELECT snapshot_id FROM balance_read_snapshots
-       WHERE snapshot_id <> ?1 AND status IN ('complete','building')
-         AND snapshot_id <> coalesce((SELECT p.snapshot_id FROM balance_snapshot_pointer p
-           WHERE p.id=1),'')
-       ORDER BY created_at DESC, snapshot_id DESC LIMIT 50 OFFSET ${RETAINED_SNAPSHOTS - 1}`,
-    )
-    .bind(keep)
-    .all<{ snapshot_id: string }>();
-  for (const row of stale.results) {
-    // A retired build keeps a sealing time: the 0030 check pairs 'building'
-    // with a null `sealed_at`, so an abandoned build needs one to leave.
-    await db
-      .prepare(
-        `UPDATE balance_read_snapshots SET status='retired',sealed_at=coalesce(sealed_at,?2)
-         WHERE snapshot_id=?1`,
-      )
-      .bind(row.snapshot_id, now)
-      .run();
-    await db
-      .prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
-      .bind(row.snapshot_id)
-      .run();
-  }
-  return stale.results.length;
-}
-
-export interface BalanceProjectionOptions {
-  /** Rows written in this invocation; the rest continue on the next tick. */
-  writeBudget?: number;
-  now?: () => string;
-  /** The writer's fence token; a fresh one per invocation unless a test pins it. */
-  writerToken?: string;
-  /**
-   * Test seam only: a concurrent writer landing between the two revision reads
-   * of the capture protocol. Production never passes it.
-   */
-  duringCapture?: (attempt: number) => Promise<void>;
-  /**
-   * Test seam only: the build digest of a different deployment, so a test can
-   * show the same input building a new snapshot after a code change. The
-   * production build digest is `projectionBuildDigest()`.
-   */
-  buildDigest?: string;
-}
-
-/**
- * The DATA bucket of the shared collection layout (03 §1) when the deployment
- * binds one. The pipeline's `EVIDENCE` binding names the same physical bucket
- * today, so a configuration without the new binding stores the same bytes in
- * the same place instead of losing the input.
- */
 function projectionInputBucket(env: Env): ProjectionInputStore {
   const bound = (env as unknown as { DATA?: ProjectionInputStore }).DATA;
   return bound ?? (env.EVIDENCE as unknown as ProjectionInputStore);
 }
 
-interface FixedBuild {
-  snapshotId: string;
-  inputDigest: string;
-  input: FixedProjectionInput;
-}
-
-type ResumeOutcome =
-  | { kind: "none" }
-  | { kind: "build"; build: FixedBuild }
-  | { kind: "failure"; code: string };
-
-/**
- * Continue the oldest unfinished build from the input it fixed. This is the
- * whole point of the input record: an invocation that re-read CORE here would
- * write rows from a context the earlier invocations never saw (05 §3, G2-05).
- */
-async function resumeFixedBuild(
-  db: D1Like,
-  store: ProjectionInputStore,
-  now: string,
-): Promise<ResumeOutcome> {
-  const building = await db
-    .prepare(
-      `SELECT snapshot_id,input_digest FROM balance_read_snapshots WHERE status='building'
-       ORDER BY created_at, snapshot_id LIMIT 1`,
-    )
-    .first<{ snapshot_id: string; input_digest: string | null }>();
-  if (!building) return { kind: "none" };
-  const record =
-    building.input_digest === null ? null : await readInputRecord(db, building.input_digest);
-  if (!record) {
-    // A build started before migration 0038 has no fixed input and cannot be
-    // resumed without re-reading CORE. It is retired; the next tick captures a
-    // fresh input and builds a new snapshot from it.
-    await db
-      .prepare(
-        `UPDATE balance_read_snapshots SET status='retired',sealed_at=coalesce(sealed_at,?2)
-         WHERE snapshot_id=?1 AND status='building'`,
-      )
-      .bind(building.snapshot_id, now)
-      .run();
-    await db
-      .prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
-      .bind(building.snapshot_id)
-      .run();
-    return { kind: "failure", code: "projection_input_missing" };
-  }
-  const input = await loadProjectionInput(store, record);
-  if (!input) return { kind: "failure", code: "projection_input_unreadable" };
-  return {
-    kind: "build",
-    build: { snapshotId: building.snapshot_id, inputDigest: record.input_digest, input },
-  };
-}
-
-/**
- * Switch the active pointer to a snapshot, if it is at least as current as the
- * one published now. A build that finishes late is complete but not published:
- * the read model never moves back to an older context (05 §5). Exported so the
- * test that proves it runs the statement the job runs.
- *
- * The statement only names a complete snapshot. In the seal batch it follows
- * the guarded seal, so a writer whose lease was taken between the last chunk
- * and the seal matches no row here either — the batch then reports the lost
- * fence instead of the pointer trigger aborting it. The trigger stays as the
- * defence against a writer that bypasses this statement.
- */
-export function activePointerStatement(
-  db: D1Like,
-  snapshotId: string,
-  sourceRevision: number,
-  coreEpoch: string,
-  now: string,
-): D1StatementLike {
-  return db
-    .prepare(
-      `INSERT INTO balance_snapshot_pointer(id,snapshot_id,source_revision,read_instance_id,
-        core_epoch,switched_at)
-       SELECT 1,?1,?2,?3,?4,?5 WHERE EXISTS(SELECT 1 FROM balance_read_snapshots s
-         WHERE s.snapshot_id=?1 AND s.status='complete')
-       ON CONFLICT(id) DO UPDATE SET snapshot_id=excluded.snapshot_id,
-         source_revision=excluded.source_revision,read_instance_id=excluded.read_instance_id,
-         core_epoch=excluded.core_epoch,switched_at=excluded.switched_at
-       WHERE excluded.source_revision>=balance_snapshot_pointer.source_revision`,
-    )
-    .bind(snapshotId, sourceRevision, CORE_READ_INSTANCE_ID, coreEpoch, now);
-}
-
-/**
- * The snapshot the read model publishes, when it covers `required`, whichever
- * database publishes it. With the READ flag on the answer comes from the READ
- * pointer under this CORE epoch; a restored CORE is another context, so its
- * revision numbers alone never complete a decision (05 §2, G3-02).
- */
 async function publishedSnapshotFor(
   env: Env,
   db: D1Like,
   required: number | null,
 ): Promise<string | null> {
-  if (!readProjectionEnabled(env)) return await activeSnapshotAt(db, required);
   const revision = await currentCoreRevision(db);
   return await readPublishedSnapshotAt(env, required, revision.core_epoch);
-}
-
-/** The snapshot the CORE read model publishes, when it covers `required`. */
-async function activeSnapshotAt(db: D1Like, required: number | null): Promise<string | null> {
-  const row = await db
-    .prepare(
-      `SELECT p.snapshot_id AS snapshot_id FROM balance_snapshot_pointer p
-       JOIN balance_read_snapshots s ON s.snapshot_id=p.snapshot_id AND s.status='complete'
-       WHERE p.id=1 AND (?1 IS NULL OR p.source_revision>=?1)`,
-    )
-    .bind(required)
-    .first<{ snapshot_id: string }>();
-  return row?.snapshot_id ?? null;
 }
 
 /**
@@ -1009,243 +681,16 @@ async function projectionStep(
   options: BalanceProjectionOptions,
 ): Promise<BalanceProjectionResult> {
   if (!projectionFlagOn(env)) return skipped("flag_off");
-  const db = env.DB;
-  const store = projectionInputBucket(env);
-  const budget = options.writeBudget ?? PROJECTION_WRITE_BUDGET;
-  const now = (options.now ?? (() => new Date().toISOString()))();
-  const lease = options.writerToken ?? crypto.randomUUID();
-
-  // The READ database is the target when the deployment says so (U11). The
-  // capture protocol, the input digest, the budgets and the four outcomes are
-  // the ones below; only the rows land in another physical database, so
-  // turning the flag off puts this deployment back on the CORE tables.
-  if (readProjectionEnabled(env))
-    return await runReadProjection(
-      env,
-      {
-        capture: captureFixedInput,
-        buildDigest: async () => options.buildDigest ?? (await projectionBuildDigest()),
-      },
-      options,
-      store,
-      budget,
-    );
-
-  // 1. An unfinished build continues from its own input, never from CORE.
-  const resumed = await resumeFixedBuild(db, store, now);
-  if (resumed.kind === "failure") return halted("retryable", resumed.code);
-  let build: FixedBuild;
-  if (resumed.kind === "build") build = resumed.build;
-  else {
-    const capture = await captureFixedInput(db, options);
-    if (!capture.ok) return halted(capture.status, capture.code);
-    const snapshotId = await snapshotIdentity(
-      capture.captured.digest,
-      options.buildDigest ?? (await projectionBuildDigest()),
-    );
-    const existing = await db
-      .prepare("SELECT status,row_count FROM balance_read_snapshots WHERE snapshot_id=?1")
-      .bind(snapshotId)
-      .first<{ status: string; row_count: number }>();
-    if (existing?.status === "complete") {
-      // The content is unchanged, so this is the same snapshot; what moved is
-      // how current it is. The pointer carries that watermark, so a decision
-      // that did not change a single row still reaches "the published snapshot
-      // covers your revision" instead of waiting for a rebuild that has
-      // nothing to build (05 §5).
-      const refreshed = await activePointerStatement(
-        db,
-        snapshotId,
-        capture.captured.input.sourceRevision,
-        capture.captured.input.coreEpoch,
-        now,
-      ).run();
-      return {
-        enabled: true,
-        snapshotId,
-        status: "unchanged",
-        written: 0,
-        rowCount: existing.row_count,
-        retired: 0,
-        reasonCode: null,
-        sourceRevision: capture.captured.input.sourceRevision,
-        inputDigest: capture.captured.digest,
-        active: refreshed.meta.changes === 1 || (await activeSnapshotAt(db, null)) === snapshotId,
-      };
-    }
-    if (existing?.status === "retired") return skipped("snapshot_retired");
-    if (existing?.status === "building")
-      return halted("retryable", "projection_build_in_progress", snapshotId);
-    // The input exists before the build that references it: a crash the other
-    // way round would leave a build whose input cannot be read. The same input
-    // may already be on record from a build under an earlier build digest;
-    // that record is shared, and its object is written back if it is gone.
-    const record = await readInputRecord(db, capture.captured.digest);
-    if (!record) await storeProjectionInput(store, capture.captured);
-    else if (!(await loadProjectionInput(store, record)))
-      await restoreProjectionInput(store, record, capture.captured.input.content, now);
-    await runBatch(db, [
-      db
-        .prepare(
-          `INSERT INTO balance_read_snapshots(snapshot_id,created_at,input_manifest_json,status,
-            row_count,projection_release,build_cursor,sealed_at,input_digest,source_revision,
-            visibility_revision,core_epoch,read_instance_id)
-           VALUES(?1,?2,?3,'building',0,?4,NULL,NULL,?5,?6,?7,?8,?9)`,
-        )
-        .bind(
-          snapshotId,
-          now,
-          JSON.stringify(capture.captured.input.content.manifest),
-          BALANCE_PROJECTION_RELEASE,
-          capture.captured.digest,
-          capture.captured.input.sourceRevision,
-          capture.captured.input.visibilityRevision,
-          capture.captured.input.coreEpoch,
-          CORE_READ_INSTANCE_ID,
-        ),
-      ...(record ? [] : [insertInputRecord(db, capture.captured, snapshotId, now)]),
-    ]);
-    build = {
-      snapshotId,
-      inputDigest: capture.captured.digest,
-      input: capture.captured.input,
-    };
-  }
-
-  // 2. Take the lease and raise the fence. Another writer holding a live lease
-  //    keeps it; when it expires the next invocation takes the build over, and
-  //    the displaced writer can no longer seal or publish (05 §4).
-  const nowMs = Date.now();
-  const claim = await db
-    .prepare(
-      `UPDATE balance_read_snapshots SET writer_lease=?2,writer_lease_until_ms=?3,
-        writer_fence=writer_fence+1
-       WHERE snapshot_id=?1 AND status='building'
-         AND (writer_lease IS NULL OR writer_lease=?2 OR writer_lease_until_ms<=?4)`,
-    )
-    .bind(build.snapshotId, lease, nowMs + WRITER_LEASE_MS, nowMs)
-    .run();
-  if (claim.meta.changes !== 1)
-    return halted("retryable", "writer_lease_unavailable", build.snapshotId);
-  try {
-    return await buildStep(db, build, { budget, lease, now });
-  } finally {
-    // The step is over: hand the build back so the next invocation can take
-    // it without waiting out the lease. A sealed snapshot is not building any
-    // more, so this is a no-op there.
-    await db
-      .prepare(
-        `UPDATE balance_read_snapshots SET writer_lease=NULL,writer_lease_until_ms=0
-         WHERE snapshot_id=?1 AND status='building' AND writer_lease=?2`,
-      )
-      .bind(build.snapshotId, lease)
-      .run();
-  }
-}
-
-interface StepContext {
-  budget: number;
-  lease: string;
-  now: string;
-}
-
-/** The write, verify and publish half of one step, under a held lease. */
-async function buildStep(
-  db: D1Like,
-  build: FixedBuild,
-  { budget, lease, now }: StepContext,
-): Promise<BalanceProjectionResult> {
-  const projection = buildBalanceProjection(
-    build.input.content.candidates,
-    scopeRelationsFromEntityRelations(build.input.content.relations),
+  return await runReadProjection(
+    env,
+    {
+      capture: captureFixedInput,
+      buildDigest: async () => options.buildDigest ?? (await projectionBuildDigest()),
+    },
+    options,
+    projectionInputBucket(env),
+    options.writeBudget ?? PROJECTION_WRITE_BUDGET,
   );
-  const digests = await rowDigests(projection.rows);
-  const cursor = await db
-    .prepare("SELECT build_cursor FROM balance_read_snapshots WHERE snapshot_id=?1")
-    .bind(build.snapshotId)
-    .first<{ build_cursor: string | null }>();
-  const resumeAt =
-    cursor?.build_cursor === null || cursor?.build_cursor === undefined
-      ? -1
-      : Number(cursor.build_cursor);
-  const pending = projection.rows.filter((row) => row.rowSeq > resumeAt);
-  const slice = pending.slice(0, budget);
-  let written = 0;
-  for (let start = 0; start < slice.length; start += WRITE_CHUNK) {
-    const chunk = slice.slice(start, start + WRITE_CHUNK);
-    // Chunk and checkpoint commit together: a statement error rolls both back,
-    // so a checkpoint can never claim rows that are not there (05 §4, G2-08).
-    const results = await runBatch(db, [
-      ...chunk.map((row) => insertRow(db, build.snapshotId, row, digests.get(row.rowSeq) ?? "")),
-      db
-        .prepare(
-          `UPDATE balance_read_snapshots SET build_cursor=?2
-           WHERE snapshot_id=?1 AND status='building' AND writer_lease=?3`,
-        )
-        .bind(build.snapshotId, String(chunk[chunk.length - 1]!.rowSeq), lease),
-    ]);
-    if (results[results.length - 1]!.meta.changes !== 1)
-      return halted("retryable", "writer_lease_lost", build.snapshotId, written);
-    written += chunk.length;
-  }
-  if (slice.length < pending.length)
-    return {
-      enabled: true,
-      snapshotId: build.snapshotId,
-      status: "building",
-      written,
-      rowCount: projection.rows.length,
-      retired: 0,
-      reasonCode: null,
-      sourceRevision: build.input.sourceRevision,
-      inputDigest: build.inputDigest,
-      active: false,
-    };
-  await writeRelations(db, projection.relations, now);
-
-  // 3. Verify what was written, then seal and switch the pointer in one batch.
-  //    A writer that lost the fence stops here: the guarded seal matches no
-  //    row, and the pointer trigger refuses a snapshot that is not complete.
-  if (!(await writtenRowsMatch(db, build.snapshotId, projection.rows, digests)))
-    return halted("retryable", "projection_rows_unverified", build.snapshotId, written);
-  const held = await db
-    .prepare(
-      `SELECT 1 AS held FROM balance_read_snapshots
-       WHERE snapshot_id=?1 AND status='building' AND writer_lease=?2`,
-    )
-    .bind(build.snapshotId, lease)
-    .first<{ held: number }>();
-  if (!held) return halted("retryable", "writer_lease_lost", build.snapshotId, written);
-  const sealed = await runBatch(db, [
-    db
-      .prepare(
-        `UPDATE balance_read_snapshots SET status='complete',sealed_at=?2,row_count=?3
-         WHERE snapshot_id=?1 AND status='building' AND writer_lease=?4`,
-      )
-      .bind(build.snapshotId, now, projection.rows.length, lease),
-    activePointerStatement(
-      db,
-      build.snapshotId,
-      build.input.sourceRevision,
-      build.input.coreEpoch,
-      now,
-    ),
-  ]);
-  if (sealed[0]!.meta.changes !== 1)
-    return halted("retryable", "writer_lease_lost", build.snapshotId, written);
-  const retired = await retireOldSnapshots(db, build.snapshotId, now);
-  return {
-    enabled: true,
-    snapshotId: build.snapshotId,
-    status: "complete",
-    written,
-    rowCount: projection.rows.length,
-    retired,
-    reasonCode: null,
-    sourceRevision: build.input.sourceRevision,
-    inputDigest: build.inputDigest,
-    active: sealed[1]!.meta.changes === 1,
-  };
 }
 
 /**
@@ -1300,4 +745,23 @@ export function balanceProjectionOutboxProcessor(
         return pendingOutcome("projection_flag_off");
     }
   };
+}
+
+export interface BalanceProjectionOptions {
+  /** Rows written in this invocation; the rest continue on the next tick. */
+  writeBudget?: number;
+  now?: () => string;
+  /** The writer's fence token; a fresh one per invocation unless a test pins it. */
+  writerToken?: string;
+  /**
+   * Test seam only: a concurrent writer landing between the two revision reads
+   * of the capture protocol. Production never passes it.
+   */
+  duringCapture?: (attempt: number) => Promise<void>;
+  /**
+   * Test seam only: the build digest of a different deployment, so a test can
+   * show the same input building a new snapshot after a code change. The
+   * production build digest is `projectionBuildDigest()`.
+   */
+  buildDigest?: string;
 }

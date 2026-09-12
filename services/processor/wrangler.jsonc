@@ -20,7 +20,6 @@
     // U11: with this off the balance projection keeps writing the CORE tables
     // of migration 0030; with it on the same build writes the READ database
     // below and completes the CORE job only after READ is published.
-    "READ_PROJECTION_ENABLED": "true",
     "RELEASE_CANDIDATES_ENABLED": "true",
     // U08: the queue, R2 notification rule and ingest-client routes are live.
     // The shared layout is consumed before collectors switch their target.
