@@ -61,12 +61,9 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-ingest",
       "role": "consumer",
-      "deploy": true,
-      "healthPath": "/health",
-      "healthAuth": "none",
-      "healthIdentity": "schemaVersion",
-      "bundleTask": "ingest:bundle",
-      "bundleDir": "dist/ingest"
+      "deploy": false,
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer",
@@ -74,11 +71,9 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-collector-r2-importer",
       "role": "consumer",
-      "deploy": true,
+      "deploy": false,
       "healthPath": "",
-      "healthAuth": "none",
-      "bundleTask": "importer:bundle",
-      "bundleDir": "dist/importer"
+      "healthAuth": "none"
     },
     {
       "name": "app-test",
