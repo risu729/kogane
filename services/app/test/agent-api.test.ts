@@ -78,7 +78,10 @@ beforeEach(() => {
     return Response.json(jwks);
   });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 async function token(subject = "agent-principal") {
   return new SignJWT({ type: "app" })
@@ -343,6 +346,11 @@ describe("scope isolation (SC18)", () => {
   });
 
   it("an explanation for a row outside the grant is refused like a row that does not exist", async () => {
+    // The response requestId includes the evaluation second. Compare the
+    // two refusals at one instant so a second boundary cannot change only
+    // that identifier and make the scope-isolation assertion flaky.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-12T00:00:00.000Z"));
     const environment = grants({
       "agent-principal": { ...FULL_GRANT, scopes: { sources: ["other-test"], accounts: "*" } },
     });
