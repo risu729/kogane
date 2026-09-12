@@ -14,35 +14,12 @@
 // refused rather than reinterpreted.
 
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
+import { metricById, resolveMetric, UNKNOWN_METRIC } from "../../../packages/domain/src/metrics.ts";
 import {
   KEYSET_PAGINATION_VERSION,
   SNAPSHOT_PAGE_SCHEMA_VERSION,
 } from "../../../packages/domain/src/paging.ts";
-import {
-  checkReadCursor,
-  createReadProjectionReader,
-  decodeReadCursor,
-  encodeReadCursor,
-} from "../../../packages/storage-d1/src/read/index.ts";
 import { addDecimals, integerDecimal } from "../../../packages/domain/src/values.ts";
-import { metricById, resolveMetric, UNKNOWN_METRIC } from "../../../packages/domain/src/metrics.ts";
-import {
-  createBalanceProjectionReader,
-  d1Executor,
-  DEFAULT_PROJECTION_PAGE_LIMIT,
-  KNOWN_ASSETS_POLICY,
-  knownAssetMetricIds,
-  PROJECTION_PAGE_LIMITS,
-  temporalReferenceFor,
-  type BalanceProjectionReader,
-  type BalanceSnapshotRow,
-  type ProjectionPageRow,
-} from "../../../packages/read-model/src/index";
-import {
-  BALANCE_INTERPRETATION_POLICY_VERSION,
-  classifyBalance,
-} from "../../../packages/observation-shared/src/balance-semantics.ts";
-import { minorUnitExponent } from "../../../packages/parsers/src/money.ts";
 import type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
@@ -56,14 +33,34 @@ import type {
   ObservedQuantityWire,
   SnapshotDataCoverage,
 } from "../../../packages/observation-shared/src/api-contract.ts";
+import {
+  BALANCE_INTERPRETATION_POLICY_VERSION,
+  classifyBalance,
+} from "../../../packages/observation-shared/src/balance-semantics.ts";
+import { minorUnitExponent } from "../../../packages/parsers/src/money.ts";
 import type { IdentityReadMode } from "../../../packages/read-model/src/index";
 import {
+  d1Executor,
+  DEFAULT_PROJECTION_PAGE_LIMIT,
+  KNOWN_ASSETS_POLICY,
+  knownAssetMetricIds,
+  PROJECTION_PAGE_LIMITS,
+  temporalReferenceFor,
+  type BalanceProjectionReader,
+  type BalanceSnapshotRow,
+  type ProjectionPageRow,
+} from "../../../packages/read-model/src/index";
+import {
+  checkReadCursor,
+  createReadProjectionReader,
+  decodeReadCursor,
+  encodeReadCursor,
   READ_CONTRACT_VERSION,
   type PointerRow,
   type ReadProjectionReader,
 } from "../../../packages/storage-d1/src/read/index.ts";
-import { decimalRows } from "./normalized-decimals";
 import { HttpError, json } from "./http";
+import { decimalRows } from "./normalized-decimals";
 import { organizationContext, organizeRows } from "./observation-organization";
 
 export const V2_LATEST_PATH = "/api/v2/balances/latest";
@@ -73,16 +70,6 @@ export const V2_HISTORY_PATH = "/api/v2/balances/history";
 export function projectionFlagOn(env: Env): boolean {
   const flag: string = env.BALANCE_PROJECTION_ENABLED;
   return flag === "1";
-}
-
-/**
- * Which store the projection is read from (unified plan 04 §1, U11). Off keeps
- * every read on the CORE tables of migration 0030; on reads the separate READ
- * database, which the processor publishes under the same flag name.
- */
-export function readProjectionFlagOn(env: Env): boolean {
-  const flag: string | undefined = env.READ_PROJECTION_ENABLED;
-  return (flag === "1" || flag === "true") && readBinding(env) !== null;
 }
 
 /** The READ binding, when this deployment has one. */
@@ -97,19 +84,17 @@ function readBinding(env: Env): D1Database | null {
  * be joined (04 §1).
  */
 export function balanceProjectionReader(env: Env): BalanceProjectionReader {
-  const read = readProjectionFlagOn(env) ? readBinding(env) : null;
-  return read === null
-    ? createBalanceProjectionReader(d1Executor(env.DB))
-    : createReadProjectionReader(d1Executor(env.DB), d1Executor(read));
+  const read = readBinding(env);
+  if (!read) throw new HttpError(503, "read_model_unavailable");
+  return createReadProjectionReader(d1Executor(env.DB), d1Executor(read));
 }
 
 /** The reader plus the physical read model a cursor has to name. */
 export interface ReadTarget {
   reader: BalanceProjectionReader;
-  mode: "core" | "read";
-  /** The READ instance id, or null on the CORE projection. */
+  /** The READ instance id. */
   instanceId: string | null;
-  /** The READ pointer, for the refusal checks; null on the CORE projection. */
+  /** The READ pointer, or null before publication. */
   pointer: PointerRow | null;
   /**
    * The bound database has the shape of another baseline (06 §2). Nothing in
@@ -120,15 +105,12 @@ export interface ReadTarget {
 
 export async function readTarget(env: Env): Promise<ReadTarget> {
   const reader = balanceProjectionReader(env);
-  if (!readProjectionFlagOn(env))
-    return { reader, mode: "core", instanceId: null, pointer: null, contractMismatch: false };
   const read = reader as ReadProjectionReader;
   const [instance, pointer] = await Promise.all([read.readInstance(), read.readPointer()]);
   // A READ database nobody has built into yet has no identity and no
   // published snapshot; the request is `unavailable`, never an empty list.
   return {
     reader,
-    mode: "read",
     instanceId: instance?.read_instance_id ?? "read-unclaimed",
     pointer,
     contractMismatch: instance !== null && instance.contract_version !== READ_CONTRACT_VERSION,
@@ -199,19 +181,6 @@ function pageLimit(url: URL): number {
   if (!(PROJECTION_PAGE_LIMITS as readonly number[]).includes(limit))
     throw new HttpError(400, "invalid_limit");
   return limit;
-}
-
-/**
- * How "there is nothing to read" is reported. On the CORE projection it is
- * today's `404 not_found`, unchanged. On the READ database it is `503` with a
- * code: the projection is a separate, rebuildable database, and "it is being
- * rebuilt" must never look like an empty success (05 §7, G3-01).
- */
-function unavailableStatus(target: ReadTarget): number {
-  return target.mode === "read" ? 503 : 404;
-}
-function unavailableCode(target: ReadTarget): string {
-  return target.mode === "read" ? "read_model_unavailable" : "not_found";
 }
 
 /**
@@ -521,7 +490,7 @@ async function continuation(
     // the CORE projection this deployment no longer serves — expires. Snapshot
     // ids are digests of content and repeat across rebuilds, so the instance
     // is what says which database answered (U11, G3-03).
-    readInstanceId: target.mode === "read" ? target.instanceId : null,
+    readInstanceId: target.instanceId,
     snapshotReadable: snapshot !== null,
   });
   if (rejection === "cursor_mismatch") throw new HttpError(400, "cursor_mismatch");
@@ -585,8 +554,8 @@ export async function latestBalancePage(
   const resolved = await continuation(target, url, digest);
   // No published snapshot at all: the read model is unavailable, which is a
   // different answer from "you hold no balances" (05 §7, G3-01).
-  if (!resolved) throw new HttpError(unavailableStatus(target), unavailableCode(target));
-  const refusal = target.mode === "read" ? await snapshotRefusal(target, resolved.snapshot) : null;
+  if (!resolved) throw new HttpError(503, "read_model_unavailable");
+  const refusal = await snapshotRefusal(target, resolved.snapshot);
   if (refusal !== null) throw new HttpError(503, refusal);
   const rows = await reader.latestPage(
     resolved.snapshot.snapshot_id,
@@ -630,7 +599,7 @@ export async function latestBalancePage(
         hasMore && last
           ? encodeReadCursor({
               snapshotId: resolved.snapshot.snapshot_id,
-              readInstanceId: target.mode === "read" ? target.instanceId : null,
+              readInstanceId: target.instanceId,
               filterDigest: digest,
               sortKey: last.sort_as_of,
               position: last.row_seq,
@@ -670,8 +639,8 @@ export async function balanceHistoryPage(
   const limit = pageLimit(url);
   const digest = await filterDigest(V2_HISTORY_PATH, scope, limit, mode);
   const resolved = await continuation(target, url, digest);
-  if (!resolved) throw new HttpError(unavailableStatus(target), unavailableCode(target));
-  const refusal = target.mode === "read" ? await snapshotRefusal(target, resolved.snapshot) : null;
+  if (!resolved) throw new HttpError(503, "read_model_unavailable");
+  const refusal = await snapshotRefusal(target, resolved.snapshot);
   if (refusal !== null) throw new HttpError(503, refusal);
   const rows = await reader.historyPage(
     highWaterOf(resolved.snapshot),
@@ -737,7 +706,7 @@ export async function balanceHistoryPage(
         hasMore && last
           ? encodeReadCursor({
               snapshotId: resolved.snapshot.snapshot_id,
-              readInstanceId: target.mode === "read" ? target.instanceId : null,
+              readInstanceId: target.instanceId,
               filterDigest: digest,
               sortKey: last.sort_key,
               position: last.id,

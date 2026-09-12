@@ -26,7 +26,6 @@ import {
   latestBalancePage,
   legacyLatestFromProjection,
   projectionFlagOn,
-  readProjectionFlagOn,
   V2_HISTORY_PATH,
   V2_LATEST_PATH,
 } from "./balances-v2";
@@ -91,7 +90,7 @@ export async function observationApi(
   // has no such route" (05 §7, G3-01). `/api/meta` still reports the capability
   // as false until a snapshot is actually published: the route existing and
   // the route being able to answer are different statements.
-  const routing = readProjectionFlagOn(env)
+  const routing = projectionFlagOn(env)
     ? withBalancesV2(capabilities, true, "read-d1")
     : capabilities;
   if (

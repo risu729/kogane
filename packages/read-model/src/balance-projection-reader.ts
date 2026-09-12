@@ -2,24 +2,16 @@
 // this package: every read the API can run is a named method with a typed
 // input, and no caller ever hands the reader SQL text.
 
+import type { BalanceHistoryRow } from "../../../packages/observation-shared/src/api-contract";
 import {
-  ACTIVE_POINTER_SQL,
   balanceHistoryKeysetSql,
-  CURRENT_SNAPSHOT_SQL,
   PROJECTION_INPUTS_SQL,
-  projectionCoverageSql,
-  projectionLegacyPageSql,
-  projectionPageSql,
-  projectionSubtotalSql,
-  SNAPSHOT_READABLE_SQL,
-  SUBTOTAL_ROW_BOUND,
   type ProjectionInputsRow,
   type ProjectionPageRow,
 } from "./balance-projection-sql";
-import { CORE_REVISION_SQL, type CoreRevisionRow } from "./source-revision";
-import type { BalanceHistoryRow } from "../../../packages/observation-shared/src/api-contract";
-import type { CollectionScope } from "./scope";
 import type { SqlExecutor } from "./reader";
+import type { CollectionScope } from "./scope";
+import { CORE_REVISION_SQL, type CoreRevisionRow } from "./source-revision";
 
 export interface BalanceSnapshotRow {
   snapshot_id: string;
@@ -108,7 +100,9 @@ export interface BalanceProjectionReader {
   ): Promise<(BalanceHistoryRow & { sort_key: string })[]>;
 }
 
-export function createBalanceProjectionReader(sql: SqlExecutor): BalanceProjectionReader {
+export function createCoreProjectionSource(
+  sql: SqlExecutor,
+): Pick<BalanceProjectionReader, "projectionInputs" | "coreRevision" | "historyPage"> {
   return {
     async projectionInputs() {
       return (
@@ -132,33 +126,6 @@ export function createBalanceProjectionReader(sql: SqlExecutor): BalanceProjecti
           core_epoch: "unknown",
         }
       );
-    },
-    async activePointer() {
-      return await sql.first<ActivePointerRow>(ACTIVE_POINTER_SQL, []);
-    },
-    async currentSnapshot() {
-      return await sql.first<BalanceSnapshotRow>(CURRENT_SNAPSHOT_SQL, []);
-    },
-    async snapshot(snapshotId) {
-      return await sql.first<BalanceSnapshotRow>(SNAPSHOT_READABLE_SQL, [snapshotId]);
-    },
-    async latestPage(snapshotId, scope, limit, afterRowSeq) {
-      const page = projectionPageSql(snapshotId, scope, limit, afterRowSeq);
-      return await sql.all<ProjectionPageRow>(page.sql, page.args);
-    },
-    async legacyLatestPage(snapshotId, scope, offset, limit) {
-      const page = projectionLegacyPageSql(snapshotId, scope, offset, limit);
-      return await sql.all<ProjectionPageRow>(page.sql, page.args);
-    },
-    async coverage(snapshotId, scope) {
-      const query = projectionCoverageSql(snapshotId, scope);
-      return await sql.all<ProjectionCoverageRow>(query.sql, query.args);
-    },
-    async summableQuantities(snapshotId, scope, metricIds) {
-      if (metricIds.length === 0) return [];
-      const query = projectionSubtotalSql(snapshotId, scope, metricIds);
-      const rows = await sql.all<SubtotalRow>(query.sql, query.args);
-      return rows.length > SUBTOTAL_ROW_BOUND ? null : rows;
     },
     async historyPage(highWaterParseRunId, scope, limit, cursor) {
       const query = balanceHistoryKeysetSql(highWaterParseRunId, scope, limit, cursor);

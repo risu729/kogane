@@ -35,20 +35,12 @@ import {
   type RewardSimulationRow,
   type RewardSnapshotRow,
 } from "../../../packages/storage-d1/src/read/index.ts";
-import { createBalanceProjectionReader, d1Executor } from "../../../packages/read-model/src/index";
+import { createCoreProjectionSource, d1Executor } from "../../../packages/read-model/src/index";
 import { HttpError, json } from "./http";
 
 /** Rows per page; the same shape of limit the v2 balance routes accept. */
 export const REWARD_READ_PAGE_LIMITS = [25, 50, 100, 200] as const;
 export const DEFAULT_REWARD_READ_PAGE_LIMIT = 50;
-
-/** Reader-side flag. Off keeps the reward routes on today's CORE code path. */
-export function rewardReadFlagOn(env: Env): boolean {
-  // Widened to `string` on purpose: the binding type pins the default, and a
-  // configuration that does not declare the var reads as off.
-  const flag: string | undefined = env.REWARD_READ_PROJECTION_ENABLED;
-  return (flag === "1" || flag === "true") && rewardReadBinding(env) !== null;
-}
 
 /** The READ binding, when this deployment has one. */
 export function rewardReadBinding(env: Env): D1Like | null {
@@ -92,7 +84,7 @@ async function snapshotRefusal(
   read: D1Like,
   snapshot: RewardSnapshotRow,
 ): Promise<string | null> {
-  const revision = await createBalanceProjectionReader(d1Executor(env.DB)).coreRevision();
+  const revision = await createCoreProjectionSource(d1Executor(env.DB)).coreRevision();
   const pointer = await rewardPointer(read);
   const vouched =
     pointer !== null && pointer.snapshot_id === snapshot.snapshot_id

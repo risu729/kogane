@@ -7,7 +7,6 @@ import type { Miniflare } from "miniflare";
 import {
   balanceProjectionOutboxProcessor,
   currentCoreRevision,
-  currentSnapshotId,
   runBalanceProjection,
 } from "../src/balance-projection-job.ts";
 import {
@@ -73,7 +72,14 @@ async function outboxRow(): Promise<OutboxRow> {
 }
 
 const count = async (sql: string, ...args: unknown[]): Promise<number> =>
-  (await env.DB.prepare(sql)
+  (await (
+    /\b(balance_read_snapshots|current_balance_projection|scope_relations|balance_snapshot_pointer)\b/u.test(
+      sql,
+    )
+      ? env.READ
+      : env.DB
+  )
+    .prepare(sql)
     .bind(...args)
     .first<{ n: number }>())!.n;
 
@@ -95,7 +101,7 @@ test("a build seals one snapshot and records every candidate with its state", as
   const result = await runBalanceProjection(on());
   expect(result).toMatchObject({ enabled: true, status: "complete", rowCount: 2 });
   expect(result.snapshotId).toMatch(/^[0-9a-f]{64}$/u);
-  const rows = await env.DB.prepare(
+  const rows = await env.READ.prepare(
     `SELECT scope_key,state,reason_code,metric_id,quantity_coefficient,unit_ref,row_seq,
             evidence_count,as_of_kind,freshness,latest_in_group
      FROM current_balance_projection WHERE snapshot_id=?1 ORDER BY row_seq`,
@@ -129,25 +135,25 @@ test("the same inputs rebuild to the same snapshot id and do no work twice", asy
 }, 30000);
 
 test("a sealed snapshot is immutable and its rows cannot be edited or deleted", async () => {
-  const snapshot = await env.DB.prepare(
+  const snapshot = await env.READ.prepare(
     "SELECT snapshot_id FROM balance_read_snapshots WHERE status='complete' LIMIT 1",
   ).first<{ snapshot_id: string }>();
   await expect(
-    env.DB.prepare("UPDATE current_balance_projection SET state='adopted' WHERE snapshot_id=?1")
+    env.READ.prepare("UPDATE current_balance_projection SET state='adopted' WHERE snapshot_id=?1")
       .bind(snapshot!.snapshot_id)
       .run(),
-  ).rejects.toThrow(/sealed balance snapshot is immutable/u);
+  ).rejects.toThrow(/sealed read snapshot is immutable/u);
   await expect(
-    env.DB.prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
+    env.READ.prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
       .bind(snapshot!.snapshot_id)
       .run(),
   ).rejects.toThrow(/retire the snapshot/u);
   // A complete snapshot never goes back to building.
   await expect(
-    env.DB.prepare("UPDATE balance_read_snapshots SET status='building' WHERE snapshot_id=?1")
+    env.READ.prepare("UPDATE balance_read_snapshots SET status='building' WHERE snapshot_id=?1")
       .bind(snapshot!.snapshot_id)
       .run(),
-  ).rejects.toThrow(/invalid balance snapshot transition/u);
+  ).rejects.toThrow(/invalid read snapshot transition/u);
 }, 30000);
 
 test("a new publication makes a new snapshot and retires the oldest builds", async () => {
@@ -173,7 +179,7 @@ test("a new publication makes a new snapshot and retires the oldest builds", asy
   expect(
     await count("SELECT count(*) AS n FROM balance_read_snapshots WHERE status='complete'"),
   ).toBeLessThanOrEqual(2);
-  const retired = await env.DB.prepare(
+  const retired = await env.READ.prepare(
     "SELECT snapshot_id FROM balance_read_snapshots WHERE status='retired'",
   ).all<{ snapshot_id: string }>();
   for (const row of retired.results)
@@ -196,10 +202,10 @@ test("a build is bounded per invocation and resumes from its cursor", async () =
   const first = await runBalanceProjection(on(), { writeBudget: 2 });
   expect(first.status).toBe("building");
   expect(first.written).toBe(2);
-  // A building snapshot is never a read target: it has no sealed_at.
+  // A building snapshot is never a read target: it has no completed_at.
   expect(
     await count(
-      "SELECT count(*) AS n FROM balance_read_snapshots WHERE snapshot_id=?1 AND status='building' AND sealed_at IS NULL",
+      "SELECT count(*) AS n FROM balance_read_snapshots WHERE snapshot_id=?1 AND status='building' AND completed_at IS NULL",
       first.snapshotId!,
     ),
   ).toBe(1);
@@ -225,7 +231,7 @@ test("a build is bounded per invocation and resumes from its cursor", async () =
 test("a published decision rebuilds the projection through the outbox, once", async () => {
   const before = await runBalanceProjection(on());
   expect(before.status).toBe("unchanged");
-  const beforeId = await currentSnapshotId(env.DB);
+  const beforeRevision = (await currentCoreRevision(env.DB)).source_revision;
 
   // One accepted `same_account` relation, recorded the way a command does.
   await env.DB.batch([
@@ -244,12 +250,14 @@ test("a published decision rebuilds the projection through the outbox, once", as
   ]);
 
   // The adopted relations are a declared input, so the context has moved.
-  const afterId = await currentSnapshotId(env.DB);
-  expect(afterId).not.toBe(beforeId);
+  expect((await currentCoreRevision(env.DB)).source_revision).toBeGreaterThan(beforeRevision);
 
   const processor = balanceProjectionOutboxProcessor(on());
   const row = await outboxRow();
   const first = await processor(env.DB, row);
+  const afterId = (await env.READ.prepare(
+    "SELECT snapshot_id FROM balance_snapshot_pointer WHERE id=1",
+  ).first<{ snapshot_id: string }>())!.snapshot_id;
   // Completed carries the evidence: the snapshot the read model publishes,
   // not "a rebuild was started".
   expect(first).toEqual({

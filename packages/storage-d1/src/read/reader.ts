@@ -27,7 +27,7 @@ import {
   type ProjectionPageRow,
 } from "../../../read-model/src/balance-projection-sql.ts";
 import {
-  createBalanceProjectionReader,
+  createCoreProjectionSource,
   type ActivePointerRow,
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
@@ -72,7 +72,7 @@ export function createReadProjectionReader(
 ): ReadProjectionReader {
   // CORE keeps answering for history, the revision and the input summary; the
   // shared implementation is reused rather than restated.
-  const coreReader = createBalanceProjectionReader(core);
+  const coreReader = createCoreProjectionSource(core);
   return {
     async readInstance(): Promise<ReadInstanceRow | null> {
       return await read.first<ReadInstanceRow>(READ_INSTANCE_SQL, []);

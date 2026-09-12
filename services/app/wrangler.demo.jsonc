@@ -17,12 +17,11 @@
     // all, so it grants no subject anything. An empty list is the deny-all
     // state, not an unconfigured one (docs/change-lifecycle.md §Grants).
     "OPERATOR_SUBJECTS": "",
-    "AGENT_GRANTS": "",
+    "AGENT_GRANTS": ""
     // The demo has no database binding at all, by design: it answers from a
     // committed synthetic snapshot. The READ flag is declared to state that it
     // is off, and no READ binding is added — a public demo is not given a
     // handle on the production read model (U11, docs/read-model-d1.md).
-    "READ_PROJECTION_ENABLED": "false"
   },
   "assets": {
     "directory": "../../apps/web/dist",

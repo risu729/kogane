@@ -7,8 +7,6 @@
   "preview_urls": false,
   "vars": {
     "BALANCE_PROJECTION_ENABLED": "0",
-    "READ_PROJECTION_ENABLED": "false",
-    "REWARD_READ_PROJECTION_ENABLED": "false",
     "REWARDS_V2_ENABLED": "false",
     "EVIDENCE_SOURCE_ID": "sony-bank",
     "EVENTS_V2_ENABLED": "0",

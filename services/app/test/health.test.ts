@@ -297,9 +297,8 @@ describe("what the postcheck reads", () => {
     expect(response.json.core).toMatchObject({ bound: true, ok: true, migrationsTable: true });
     expect(response.json.core.migrationsApplied.length).toBeGreaterThan(0);
     expect(response.json.core.latestMigration).toBe(response.json.core.migrationsApplied.at(-1));
-    // READ is bound in this deployment and reported; it is only *required*
-    // once a READ flag is on (docs/rollout.md §4).
-    expect(response.json.read).toMatchObject({ bound: true, ok: true, required: false });
+    // READ is the required projection store for this deployment.
+    expect(response.json.read).toMatchObject({ bound: true, ok: true, required: true });
     // The DATA probe is one `head` of a fixed key and never requires it to be
     // there. The marker is absent in a fresh test bucket.
     expect(response.json.data).toMatchObject({ bound: true, ok: true, markerPresent: false });

@@ -11,51 +11,33 @@
 // the caller named an offer (addendum 08 §7).
 import {
   availableForOffer,
-  estimateExpiry,
-  findConversionPaths,
   cashLikeRedemptionEstimate,
+  CONVERSION_SEARCH_RELEASE,
+  findConversionPaths,
+  REWARD_POLICY_RELEASE,
   simulateConversion,
   summarizeHolding,
-  REWARD_POLICY_RELEASE,
-  CONVERSION_SEARCH_RELEASE,
-  type ActivityHistory,
   type ConversionOffer,
-  type ExpiryEstimate,
   type MembershipState,
   type Quantity,
   type RewardBucket,
 } from "../../../packages/domain/src/index.ts";
 import {
-  createRewardReader,
-  REWARD_PAGE_LIMIT,
-  UNCLASSIFIED_REWARD_HISTORY,
-  type Page,
-  type RewardHoldingView,
-} from "../../../packages/read-model/src/index";
-import { d1Executor } from "../../../packages/read-model/src/d1";
-import {
   CENTRAL_STORE_CAPABILITIES,
   isRewardPath,
   rewardQueryParameters,
 } from "../../../packages/observation-shared/src/api-schema";
-import { rewardsV2Enabled } from "./capabilities";
+import { d1Executor } from "../../../packages/read-model/src/d1";
 import {
-  rewardExpiryFromRead,
-  rewardReadContext,
-  rewardReadFlagOn,
-  rewardSimulationsFromRead,
-} from "./rewards-read";
+  createRewardReader,
+  type Page,
+  type RewardHoldingView,
+} from "../../../packages/read-model/src/index";
+import { rewardsV2Enabled } from "./capabilities";
 import { HttpError, json } from "./http";
+import { rewardExpiryFromRead, rewardReadContext, rewardSimulationsFromRead } from "./rewards-read";
 
 export const REWARDS_PREFIX = "/api/v2/rewards";
-
-/**
- * The reward activity history a real V Point holding has today: none that can
- * be classified (docs/sources/v-point.md §4.2, SC12). It lives in
- * `packages/read-model` since U16, because the READ build has to evaluate the
- * rules under exactly the same history this route does.
- */
-const UNCLASSIFIED_HISTORY: ActivityHistory = UNCLASSIFIED_REWARD_HISTORY;
 
 interface BucketDto {
   bucketRef: string;
@@ -123,29 +105,6 @@ function holdingDto(view: RewardHoldingView, membership: readonly MembershipStat
     },
     release: REWARD_POLICY_RELEASE,
   };
-}
-
-interface ExpiryDto {
-  holdingRef: string;
-  programId: string;
-  ruleRef: string;
-  family: string;
-  verification: string;
-  state: ExpiryEstimate["state"];
-  uncertaintyCodes: string[];
-  deadlineZone: string;
-  deadlineZoneBasis: string;
-  rows: {
-    bucketRef: string;
-    quantity: Quantity;
-    deadline: unknown;
-    basis: string;
-    providerObserved: unknown;
-    policyEstimated: unknown;
-    reasonCodes: string[];
-  }[];
-  sourceExpiryRefs: string[];
-  release: string;
 }
 
 function offsetOf(url: URL): number {
@@ -219,76 +178,12 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
     });
   }
 
-  // U16: with a reward snapshot published, the deadlines come from it —
-  // every row carrying the instant it was evaluated at — instead of being
-  // recomputed from "now" on each request (04 §2, G2-19).
   if (path === `${REWARDS_PREFIX}/expiry` || path === `${REWARDS_PREFIX}/simulations`) {
-    const context = rewardReadFlagOn(env) ? await rewardReadContext(env) : null;
-    if (context !== null && !("unavailable" in context)) {
-      return path === `${REWARDS_PREFIX}/expiry`
-        ? await rewardExpiryFromRead(context, url, program)
-        : await rewardSimulationsFromRead(context, url);
-    }
-    // A saved simulation exists only inside a snapshot: without one there is
-    // nothing to report, and "being rebuilt" is never an empty success.
-    if (path === `${REWARDS_PREFIX}/simulations`)
-      throw new HttpError(503, context?.unavailable ?? "reward_read_model_unavailable");
-    if (context !== null) throw new HttpError(503, context.unavailable);
-    // Without the read model a cursor names a snapshot this deployment does
-    // not have; it is refused rather than reinterpreted as an offset.
-    if (url.searchParams.get("cursor") !== null) throw new HttpError(400, "cursor_unsupported");
-  }
-
-  if (path === `${REWARDS_PREFIX}/expiry`) {
-    const offset = offsetOf(url);
-    const rules = await reader.expiryRules(program);
-    const membership = await reader.membership(program);
-    const holdings = await reader.holdings({
-      ...(program === undefined ? {} : { programId: program }),
-      offset,
-    });
-    const now = new Date().toISOString().slice(0, 10);
-    const clock = {
-      kind: "local-date" as const,
-      value: now,
-      zone: null,
-      basis: "derived" as const,
-    };
-    const rows: ExpiryDto[] = [];
-    for (const view of holdings.rows) {
-      const applicable = rules.filter((rule) => rule.programId === view.program.programId);
-      for (const rule of applicable) {
-        const estimate = estimateExpiry(
-          rule,
-          view.holding,
-          UNCLASSIFIED_HISTORY,
-          membership,
-          clock,
-          `context:rewards:${REWARD_POLICY_RELEASE}`,
-        );
-        rows.push({
-          holdingRef: estimate.holdingRef,
-          programId: view.program.programId,
-          ruleRef: estimate.ruleRef,
-          family: rule.family,
-          verification: rule.verification,
-          state: estimate.state,
-          uncertaintyCodes: estimate.uncertaintyCodes,
-          deadlineZone: rule.deadlineCalendar.zone,
-          deadlineZoneBasis: rule.deadlineCalendar.zoneBasis,
-          // Every bucket keeps a row, including one with no confirmed
-          // deadline: a deadline-ordered list never drops the unknowns.
-          rows: estimate.expiringBuckets,
-          sourceExpiryRefs: estimate.sourceExpiryRefs,
-          release: estimate.release,
-        });
-      }
-    }
-    return json({
-      rows,
-      coverage: holdings.coverage,
-      interpretation: { release: REWARD_POLICY_RELEASE, limit: REWARD_PAGE_LIMIT },
-    });
+    const context = await rewardReadContext(env);
+    if ("unavailable" in context) throw new HttpError(503, context.unavailable);
+    return path === `${REWARDS_PREFIX}/expiry`
+      ? await rewardExpiryFromRead(context, url, program)
+      : await rewardSimulationsFromRead(context, url);
   }
 
   // /offers/simulate — a pure query. No exchange is performed anywhere in this

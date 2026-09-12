@@ -136,15 +136,6 @@ export interface CoreRevisionRow {
 export const CORE_REVISION_SQL =
   "SELECT source_revision, visibility_revision, core_epoch FROM core_source_revision WHERE id=1";
 
-/**
- * The physical read model the current rows were built for. The balance
- * projection still lives in CORE (migration 0030); U11 moves it to the READ
- * database and replaces this constant with that binding's instance id. It is
- * recorded on every snapshot so rows built for one instance are never read as
- * if they belonged to another.
- */
-export const CORE_READ_INSTANCE_ID = "core-d1";
-
 /** The shape of the stored input; a change of shape is a change of identity. */
 export const PROJECTION_INPUT_CONTRACT_VERSION = "projection-input-v1";
 

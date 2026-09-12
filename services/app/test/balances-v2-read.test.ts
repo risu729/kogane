@@ -220,17 +220,13 @@ describe("the v2 balance routes over the READ database", () => {
     expect(expired.status).toBe(410);
     expect(((await expired.json()) as { error: string }).error).toBe("context_expired");
 
-    // And the rollback case: the flag goes back to the CORE projection, which
-    // has its own snapshot of the same evidence. The cursor this database
-    // issued expires there rather than being continued over CORE's rows, whose
-    // positions mean something else.
-    expect((await build({ read: false })).status).toBe("complete");
-    const rolledBack = await call(
+    // The retired storage flag cannot switch this cursor back to CORE.
+    expect((await build({ read: false })).status).toBe("unchanged");
+    const continued = await call(
       `/api/v2/balances/latest?limit=50&cursor=${encodeURIComponent(first.page.nextCursor!)}`,
       { read: false },
     );
-    expect(rolledBack.status).toBe(410);
-    expect(((await rolledBack.json()) as { error: string }).error).toBe("context_expired");
+    expect(continued.status).toBe(200);
   });
 
   it("G3-02: a CORE restored under a new epoch invalidates the published snapshot", async () => {

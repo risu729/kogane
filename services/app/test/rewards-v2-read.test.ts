@@ -199,24 +199,9 @@ describe("the reward routes over the READ database", () => {
     expect(expiry.status).toBe(503);
   });
 
-  it("with the reader flag off the reward routes answer from CORE exactly as before", async () => {
-    const expiry = await call("/api/v2/rewards/expiry", { read: false });
-    expect(expiry.status).toBe(200);
-    const body = (await expiry.json()) as { rows: { holdingRef: string }[]; coverage: unknown };
-    expect(body.rows.length).toBeGreaterThan(0);
-    expect(body.coverage).toBeDefined();
-    // A saved simulation lives only in a snapshot: without the read model the
-    // route is unavailable, never an empty list.
-    expect((await call("/api/v2/rewards/simulations", { read: false })).status).toBe(503);
-    // A cursor names a snapshot this deployment does not read; it is refused
-    // rather than reinterpreted as an offset.
-    const cursor = await call("/api/v2/rewards/expiry?cursor=abc", { read: false });
-    expect(cursor.status).toBe(400);
-    expect(((await cursor.json()) as { error: string }).error).toBe("cursor_unsupported");
-    const meta = (await (await call("/api/meta", { read: false })).json()) as {
-      capabilities: { rewardsV2ReadModel: string };
-    };
-    expect(meta.capabilities.rewardsV2ReadModel).toBe("none");
+  it("the retired reader flag cannot fall back to CORE before READ is built", async () => {
+    for (const path of ["/api/v2/rewards/expiry", "/api/v2/rewards/simulations"])
+      expect((await call(path, { read: false })).status).toBe(503);
   });
 
   it("G2-19: a published snapshot answers with the instant it was evaluated at", async () => {
@@ -246,19 +231,13 @@ describe("the reward routes over the READ database", () => {
     expect(again).toEqual(first);
   });
 
-  it("G2-20: a saved simulation reports whether it could be reproduced", async () => {
+  it("fresh snapshots do not import the retired CORE simulation cache", async () => {
     await build();
-    const page = (await (await call("/api/v2/rewards/simulations")).json()) as SimulationPage;
+    const response = await call("/api/v2/rewards/simulations");
+    expect(response.status).toBe(200);
+    const page = (await response.json()) as SimulationPage;
     expect(page.snapshot.evaluatedAt).toBe(EVALUATED_AT);
-    const retained = page.rows.find((row) => row.requestDigest === "a".repeat(64))!;
-    const digestOnly = page.rows.find((row) => row.requestDigest === "b".repeat(64))!;
-    expect(retained.reproducibility).toBe("reproduced");
-    expect(retained.result).not.toBeNull();
-    expect(digestOnly).toMatchObject({
-      reproducibility: "not_reproducible",
-      reasonCode: "simulation_input_not_retained",
-      result: null,
-    });
+    expect(page.rows).toEqual([]);
   });
 
   it("G3-03: pages with a cursor, and refuses one from another query or another instance", async () => {

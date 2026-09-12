@@ -106,7 +106,6 @@ export {
   temporalReferenceFor,
 } from "./balance-projection";
 export {
-  CORE_READ_INSTANCE_ID,
   CORE_REVISION_SQL,
   type CoreRevisionRow,
   type LedgerTable,
@@ -118,7 +117,6 @@ export {
   VISIBILITY_REVISION_LEDGER,
 } from "./source-revision";
 export {
-  ACTIVE_POINTER_SQL,
   DEFAULT_PROJECTION_PAGE_LIMIT,
   PROJECTION_PAGE_LIMITS,
   type ProjectionPageLimit,
@@ -138,7 +136,7 @@ export {
   type BalanceSnapshotRow,
   type ProjectionCoverageRow,
   type SubtotalRow,
-  createBalanceProjectionReader,
+  createCoreProjectionSource,
 } from "./balance-projection-reader";
 export {
   conversionOffer,

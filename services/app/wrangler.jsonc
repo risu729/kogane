@@ -12,12 +12,10 @@
     // U11: with this off the v2 balance routes read the CORE projection of
     // migration 0030; with it on they read the READ database below, and a
     // cursor from the other store is refused rather than reinterpreted.
-    "READ_PROJECTION_ENABLED": "true",
     "REWARDS_V2_ENABLED": "true",
     // U16: with this off the reward routes answer from CORE's rules and claims
     // at request time; with it on they read the reward snapshot published in
     // the READ database, and `/api/v2/rewards/simulations` is served.
-    "REWARD_READ_PROJECTION_ENABLED": "true",
     "EVIDENCE_SOURCE_ID": "sony-bank",
     "EVENTS_V2_ENABLED": "true",
     "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",

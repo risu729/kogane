@@ -110,8 +110,8 @@ interface LatestPage {
 }
 
 describe("v2 balance read model", () => {
-  it("advertises the v2 routes only once a snapshot exists, and 404s them otherwise", async () => {
-    // Before any build: the capability is off and the routes do not exist.
+  it("advertises the v2 routes only once a snapshot exists, and reports rebuilding otherwise", async () => {
+    // Before any build: the capability is off and the routes report rebuilding.
     const before = (await (await call("/api/meta")).json()) as {
       capabilities: {
         balancesV2: boolean;
@@ -121,7 +121,7 @@ describe("v2 balance read model", () => {
     };
     expect(before.capabilities.balancesV2).toBe(false);
     expect(before.capabilities.balancesV2Pagination).toBe("none");
-    expect((await call("/api/v2/balances/latest")).status).toBe(404);
+    expect((await call("/api/v2/balances/latest")).status).toBe(503);
 
     const run = await seedRun({ count: 1, source: "other-test" });
     const parse = await parseRun(run.artifacts[0].id, "v2-fixture");
@@ -291,10 +291,12 @@ describe("v2 balance read model", () => {
 
     // The snapshot the cursor names is retired and dropped: the reader is
     // told the context expired, never moved silently to a newer list.
-    await env.DB.prepare("UPDATE balance_read_snapshots SET status='retired' WHERE snapshot_id=?1")
+    await env.READ.prepare(
+      "UPDATE balance_read_snapshots SET status='retired' WHERE snapshot_id=?1",
+    )
       .bind(first.page.snapshotId)
       .run();
-    await env.DB.prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
+    await env.READ.prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
       .bind(first.page.snapshotId)
       .run();
     const expired = await call(`/api/v2/balances/latest?limit=50&cursor=${cursor}`);

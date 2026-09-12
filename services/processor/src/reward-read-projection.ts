@@ -28,9 +28,8 @@
 // `not_reproducible`; nothing here recomputes it against today's offers and
 // calls it the same simulation (G2-20).
 //
-// The CORE tables of migration 0033 are read, never written: the reference
-// claims, the provider claims and CORE's own `expiry_estimates` /
-// `conversion_simulations` keep working exactly as they do with the flag off.
+// Reference and provider claims remain canonical CORE inputs. Derived rows
+// are stored only in READ; fresh captures never read the retired CORE caches.
 import {
   abandonRewardSnapshot,
   activeRewardSnapshot,
@@ -109,7 +108,6 @@ const CAPTURE_ATTEMPTS = 3;
  */
 const RULE_BOUND = 200;
 const OFFER_BOUND = 200;
-const SIMULATION_BOUND = 200;
 
 /**
  * The instant one capture evaluates against: the start of the captured day in
@@ -128,8 +126,6 @@ export function evaluationInstant(now: string): string {
 /** The reward claim window a capture reads; the reader's release. */
 const PROMOTION_RELEASE = REWARD_PROJECTION_PROMOTION_RELEASE;
 
-const SAVED_SIMULATIONS_SQL = `SELECT input_digest, plan_json, search_coverage, policy_release,
-    computed_at FROM conversion_simulations ORDER BY input_digest LIMIT ?1`;
 const CLAIMS_HIGH_WATER_SQL = `SELECT coalesce(max(id),0) AS high_water
   FROM reward_bucket_claims WHERE promotion_release=?1`;
 
@@ -247,11 +243,9 @@ export async function captureRewardInput(
     const offers = await sql.all<ConversionOfferSqlRow>(CONVERSION_OFFERS_SQL, [null, 0]);
     if (offers.length > OFFER_BOUND)
       return { ok: false, status: "refused", code: "offer_set_too_large" };
-    const simulations = await sql.all<SavedSimulationSqlRow>(SAVED_SIMULATIONS_SQL, [
-      SIMULATION_BOUND + 1,
-    ]);
-    if (simulations.length > SIMULATION_BOUND)
-      return { ok: false, status: "refused", code: "simulation_set_too_large" };
+    // No runtime path persists simulations. Historical captured inputs remain
+    // replayable, but fresh captures no longer depend on the retired CORE cache.
+    const simulations: SavedSimulationSqlRow[] = [];
     const highWater = await db
       .prepare(CLAIMS_HIGH_WATER_SQL)
       .bind(PROMOTION_RELEASE)
