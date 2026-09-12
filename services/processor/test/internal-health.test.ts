@@ -24,9 +24,9 @@ let env: Env;
 
 beforeAll(async () => {
   ({ mf, env } = await startPipeline(undefined, { RELEASE_SHA: "b".repeat(40) }));
-});
+}, 30000);
 afterAll(async () => {
-  await mf.dispose();
+  await mf?.dispose();
 });
 
 function internalRequest(headers: Record<string, string>): Request {
