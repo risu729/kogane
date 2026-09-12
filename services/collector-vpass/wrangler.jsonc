@@ -49,7 +49,7 @@
     ]
   },
   "vars": {
-    "COLLECTION_TARGET": "legacy"
+    "COLLECTION_TARGET": "shared"
   },
   "triggers": {
     "crons": ["0 21 * * *"]

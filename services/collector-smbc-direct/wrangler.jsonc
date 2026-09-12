@@ -44,7 +44,7 @@
   "vars": {
     // "legacy" (default) keeps the per-source bucket plus the central importer
     // upload; "shared" writes the run to DATA and skips the importer (D12).
-    "COLLECTION_TARGET": "legacy",
+    "COLLECTION_TARGET": "shared",
     "COLLECTOR_SCHEMA_VERSION": "smbc-direct-backfill-worker-poc-v1",
     "SMBC_DIRECT_BASE_URL": "https://direct3.smbc.co.jp",
     "SMBC_DIRECT_LOGIN_BASE_URL": "https://direct.smbc.co.jp",

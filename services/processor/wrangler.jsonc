@@ -10,22 +10,22 @@
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
-    "RECONCILIATION_ENABLED": "0",
-    "REWARD_CLAIMS_ENABLED": "false",
+    "RECONCILIATION_ENABLED": "true",
+    "REWARD_CLAIMS_ENABLED": "true",
     // U16: with this off the reward lane does not run and nothing is written
     // to the READ database; CORE's reward tables keep working unchanged.
-    "REWARD_READ_PROJECTION_ENABLED": "false",
-    "REPORTS_ENABLED": "false",
-    "BALANCE_PROJECTION_ENABLED": "0",
+    "REWARD_READ_PROJECTION_ENABLED": "true",
+    "REPORTS_ENABLED": "true",
+    "BALANCE_PROJECTION_ENABLED": "1",
     // U11: with this off the balance projection keeps writing the CORE tables
     // of migration 0030; with it on the same build writes the READ database
     // below and completes the CORE job only after READ is published.
-    "READ_PROJECTION_ENABLED": "false",
-    "RELEASE_CANDIDATES_ENABLED": "false",
-    // U08. Off: the queue below must exist and a collector must be writing
-    // the shared layout (U09) before this does anything. See docs/processor.md.
-    "SHARED_R2_INGEST_ENABLED": "false",
-    "OPS_DISPATCH_ENABLED": "false",
+    "READ_PROJECTION_ENABLED": "true",
+    "RELEASE_CANDIDATES_ENABLED": "true",
+    // U08: the queue, R2 notification rule and ingest-client routes are live.
+    // The shared layout is consumed before collectors switch their target.
+    "SHARED_R2_INGEST_ENABLED": "true",
+    "OPS_DISPATCH_ENABLED": "true",
     // The shared DATA bucket is the existing central bucket; the name is
     // declared so a notification about another bucket is refused.
     "COLLECTION_DATA_BUCKET": "kogane-raw-evidence",
@@ -42,12 +42,8 @@
     // just uploaded.
     "RELEASE_SHA": ""
   },
-  // Queue `kogane-collection-terminals` DOES NOT EXIST YET: it is created by
-  // the first deploy that carries this config (`wrangler queues create`, or
-  // the deploy workflow), together with its dead-letter queue and the R2
-  // event-notification rule on `kogane-raw-evidence` filtered to the prefix
-  // `runs/` and the suffix `/terminal.json`. Nothing is consumed until
-  // SHARED_R2_INGEST_ENABLED is turned on. See docs/processor.md.
+  // Provisioned 2026-09-12 with its DLQ and the central R2 object-creation
+  // notification rule (prefix runs/, suffix /terminal.json).
   "queues": {
     "consumers": [
       {

@@ -8,30 +8,29 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "BALANCE_PROJECTION_ENABLED": "0",
+    "BALANCE_PROJECTION_ENABLED": "1",
     // U11: with this off the v2 balance routes read the CORE projection of
     // migration 0030; with it on they read the READ database below, and a
     // cursor from the other store is refused rather than reinterpreted.
-    "READ_PROJECTION_ENABLED": "false",
-    "REWARDS_V2_ENABLED": "false",
+    "READ_PROJECTION_ENABLED": "true",
+    "REWARDS_V2_ENABLED": "true",
     // U16: with this off the reward routes answer from CORE's rules and claims
     // at request time; with it on they read the reward snapshot published in
     // the READ database, and `/api/v2/rewards/simulations` is served.
-    "REWARD_READ_PROJECTION_ENABLED": "false",
+    "REWARD_READ_PROJECTION_ENABLED": "true",
     "EVIDENCE_SOURCE_ID": "sony-bank",
-    "EVENTS_V2_ENABLED": "0",
+    "EVENTS_V2_ENABLED": "true",
     "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "20cc9cb6173e2755bc3ffd5f43a9adf45b0c2ad8451a1b2d330cc2b75f0d85c8",
-    "COMMANDS_ENABLED": "",
+    "COMMANDS_ENABLED": "true",
     // The command/operations allow-lists (docs/change-lifecycle.md §Grants).
-    // Both are JSON arrays of verified Access subjects and both are empty
-    // here, which is the intended shipped state: nobody can approve or commit
-    // until a deployment names its operator in `OPERATOR_SUBJECTS`, and a
-    // subject in neither list is refused with `subject_not_granted`.
-    "OPERATOR_SUBJECTS": "",
+    // JSON arrays of verified Access subjects. The sole operator is risu,
+    // verified in the account Access user directory on 2026-09-12. Agents
+    // remain ungranted until individually named; unknown subjects are refused.
+    "OPERATOR_SUBJECTS": "[\"2c440753-9011-502c-a22d-bb013593c11a\"]",
     "AGENT_GRANTS": "",
     "AGENT_API_GRANTS": "",
-    "OPS_API_ENABLED": "",
+    "OPS_API_ENABLED": "true",
     "SESSION_REFRESH_POLICY": "",
     // U14 postcheck (plan 11 §6, docs/ci-cd.md). The release stamps the
     // deployed commit into this variable before the upload

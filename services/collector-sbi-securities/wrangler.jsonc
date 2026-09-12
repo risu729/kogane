@@ -32,7 +32,7 @@
     }
   ],
   "vars": {
-    "COLLECTION_TARGET": "legacy",
+    "COLLECTION_TARGET": "shared",
     "COLLECTOR_SCHEMA_VERSION": "sbi-worker-poc-v1"
   },
   "triggers": {

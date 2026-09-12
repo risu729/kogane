@@ -39,7 +39,7 @@
     "remote": true
   },
   "vars": {
-    "COLLECTION_TARGET": "legacy",
+    "COLLECTION_TARGET": "shared",
     "COLLECTOR_SCHEMA_VERSION": "mobile-suica-worker-poc-v2"
   },
   "triggers": {

@@ -50,7 +50,7 @@
     }
   ],
   "vars": {
-    "COLLECTION_TARGET": "legacy",
+    "COLLECTION_TARGET": "shared",
     "COLLECTOR_SCHEMA_VERSION": "vpoint-worker-poc-v2",
     "VPOINT_PAY_EMAIL_RECIPIENT": "vpointpay@takuk.me"
   },
