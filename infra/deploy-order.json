@@ -305,9 +305,9 @@
       "worker": "kogane-sbi-vc-session-poc",
       "role": "producer",
       "deploy": true,
-      "healthPath": "/health",
+      "healthPath": "/healthz",
       "healthAuth": "none",
-      "healthIdentity": "waitingForHuman",
+      "healthIdentity": "schemaVersion",
       "bundleTask": "sbi-vc-trade-worker:bundle",
       "bundleDir": "dist/sbi-vc-trade-worker"
     },

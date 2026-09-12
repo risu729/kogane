@@ -416,7 +416,7 @@ a writer starts using it. The five consumers come first, then every collector:
 | 9     | `kogane-myjcb-collector-poc`      | `services/collector-myjcb`          | `/health`                   | unauthenticated |
 | 10    | `kogane-sbi-collector-poc`        | `services/collector-sbi-securities` | `/health`                   | unauthenticated |
 | 11    | `kogane-sbi-shinsei-...-poc`      | `services/collector-sbi-shinsei`    | `/health`                   | unauthenticated |
-| 12    | `kogane-sbi-vc-session-poc`       | `services/collector-sbi-vc-trade`   | `/health`                   | unauthenticated |
+| 12    | `kogane-sbi-vc-session-poc`       | `services/collector-sbi-vc-trade`   | `/healthz`                  | unauthenticated |
 | 13    | `kogane-smbc-direct-backfill-poc` | `services/collector-smbc-direct`    | none                        | —               |
 | 14    | `kogane-sony-bank-collector-poc`  | `services/collector-sony-bank`      | `/health`                   | unauthenticated |
 | 15    | `kogane-vpass-collector-poc`      | `services/collector-vpass`          | `/health`                   | unauthenticated |
@@ -481,10 +481,11 @@ the route, `healthAuth` is how CD authenticates it (`access` or `none`), and
 with an empty `healthPath` is not requested at all, and the ledger says so
 rather than pretending to check something.
 
-**The public half.** `kogane-ingest` and every collector with a `/health` are
+**The public half.** `kogane-ingest` and each declared public health route are
 requested over their `workers.dev` hostname, unauthenticated, and must answer
 200 **with** the identity field the ledger names (`schemaVersion` for most,
-`service` for Vpass, `waitingForHuman` for SBI VC Trade). 200 alone is not a
+`service` for Vpass). SBI VC Trade uses `/healthz`, a static liveness answer;
+its existing `/health` remains protected by the collector admin token. 200 alone is not a
 pass: an edge error page and an empty body are both 200-shaped.
 
 **The authenticated half.** The App authenticates every request through
