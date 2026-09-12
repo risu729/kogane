@@ -2,14 +2,13 @@
   "generatedBy": "scripts/resource-ledger.ts",
   "plan": "unified plan U01; chapters 07 §1 and §6; acceptance tests G0-06, G0-07, G0-12",
   "liveInventory": {
-    "readAt": "2026-09-11",
+    "readAt": "2026-09-13",
     "accountId": "59ea63cc00914b30ca410b062ae2bb7f",
     "workers": [
       "kogane-collector-r2-importer",
       "kogane-demo",
       "kogane-evidence-browser",
       "kogane-globalpass-collector-poc",
-      "kogane-globalpass-container-probe-20260827",
       "kogane-ingest",
       "kogane-mobile-suica-collector-poc",
       "kogane-moneyforward-collector-poc",
@@ -50,9 +49,7 @@
       }
     ],
     "kvNamespaces": [],
-    "workersWithoutConfig": [
-      "kogane-globalpass-container-probe-20260827"
-    ]
+    "workersWithoutConfig": []
   },
   "completedDispositions": [
     {
@@ -2211,7 +2208,7 @@
         "deadLetterQueues": [
           "kogane-collection-terminals-dlq"
         ],
-        "toCreate": "to be created by the first deploy (U08)"
+        "toCreate": ""
       },
       {
         "queue": "kogane-r2-outbox-reconciler",
@@ -2469,9 +2466,7 @@
     "emailWorkers": [
       "kogane-vpoint-collector-poc"
     ],
-    "liveWorkersWithoutConfig": [
-      "kogane-globalpass-container-probe-20260827"
-    ],
+    "liveWorkersWithoutConfig": [],
     "liveBucketsWithoutConfig": []
   }
 }
