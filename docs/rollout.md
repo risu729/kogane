@@ -8,9 +8,26 @@ paragraph to their own document. This page is the single table those paragraphs
 add up to, plus the one-time GitHub and Cloudflare settings the repository
 owner has to create by hand.
 
-Nothing on this page has been enabled. Every flag below is off in the
-configuration that is committed, and every deploy this repository has ever run
-has run with it off.
+## Production enablement — 2026-09-12
+
+The owner requested activation of every feature flag. Production configurations
+now enable all boolean App/Processor flags and set the twelve collectors to
+`COLLECTION_TARGET=shared`. Safe fallbacks for absent flags remain in code.
+The Access user directory identifies the sole human operator; agent grants stay
+empty and session refresh remains `human` until a source has a demonstrated
+unattended renewal path. These are identity/policy settings, not boolean flags.
+
+Prerequisites verified: CORE through 0041, READ through 0002, both collection
+queues, the R2 terminal notification rule, and all 13 ingest-client routes.
+The existing publication repair reconciled 540 legacy-only pointers with
+append-only repair events; the resulting consistency check had zero mismatches.
+Writer activation precedes App reader activation; snapshot and CD verification
+are recorded with the rollout PR. Collection target activation does not itself
+start a provider login, and does not prove every source's next scheduled run.
+Legacy retirement and a destructive READ-loss exercise remain separate work.
+
+The table below retains the original **safe default** column for rollback; the
+production settings in `services/*/wrangler.jsonc` are the deployment authority.
 
 ## 1. How a flag is read
 
@@ -91,13 +108,13 @@ identity, not switches, and changing them changes who can read at all.
 None of these is created by merging anything. Four exist or are created once;
 the deploy that carries the configuration creates the queues.
 
-| Resource                                                                  | State today                                           | Created by                                                                                                                                                                                                                               |
-| ------------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1 `kogane-read` (`320ebe31-a031-48a1-985f-0e6fabbd517a`, APAC)           | exists, **empty**; no migration applied               | already created; the READ migrations are applied by the deploy step, never by hand                                                                                                                                                       |
-| READ migrations (`packages/storage-d1/migrations/read`)                   | not applied                                           | `wrangler d1 migrations apply kogane-read --remote --config services/processor/wrangler.read-migrations.jsonc`                                                                                                                           |
-| Queue `kogane-collection-terminals` and `kogane-collection-terminals-dlq` | **do not exist**                                      | the first deploy that carries `services/processor/wrangler.jsonc`, or `wrangler queues create`                                                                                                                                           |
-| R2 event-notification rule on `kogane-raw-evidence`                       | does not exist                                        | object-creation rule, prefix `runs/`, suffix `/terminal.json`, delivering to `kogane-collection-terminals`                                                                                                                               |
-| Ingest client, producers and routes                                       | declared in `config/ingest-clients.json`, not applied | `mise run bootstrap:ingest-clients`, then `wrangler d1 execute kogane-raw-evidence --remote --file infra/bootstrap/ingest-clients.sql --config services/processor/wrangler.jsonc`. Idempotent, safe to re-apply, and **not** a migration |
+| Resource                                                                  | State today                             | Created by                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1 `kogane-read` (`320ebe31-a031-48a1-985f-0e6fabbd517a`, APAC)           | exists; migrations through 0002 applied | already created; the READ migrations are applied by the deploy step, never by hand                                                                                                                                                       |
+| READ migrations (`packages/storage-d1/migrations/read`)                   | applied through 0002                    | `wrangler d1 migrations apply kogane-read --remote --config services/processor/wrangler.read-migrations.jsonc`                                                                                                                           |
+| Queue `kogane-collection-terminals` and `kogane-collection-terminals-dlq` | exist (verified 2026-09-12)             | the first deploy that carries `services/processor/wrangler.jsonc`, or `wrangler queues create`                                                                                                                                           |
+| R2 event-notification rule on `kogane-raw-evidence`                       | exists (verified 2026-09-12)            | object-creation rule, prefix `runs/`, suffix `/terminal.json`, delivering to `kogane-collection-terminals`                                                                                                                               |
+| Ingest client, producers and routes                                       | applied; all 13 routes verified active  | `mise run bootstrap:ingest-clients`, then `wrangler d1 execute kogane-raw-evidence --remote --file infra/bootstrap/ingest-clients.sql --config services/processor/wrangler.jsonc`. Idempotent, safe to re-apply, and **not** a migration |
 
 The bootstrap SQL creates no schema and issues no credential: the Processor's
 client registers in process and cannot authenticate to the legacy ingest

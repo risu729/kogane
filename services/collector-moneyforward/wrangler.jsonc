@@ -33,7 +33,7 @@
   ],
   "vars": {
     "COLLECTOR_SCHEMA_VERSION": "moneyforward-worker-poc-v1",
-    "COLLECTION_TARGET": "legacy"
+    "COLLECTION_TARGET": "shared"
   },
   "triggers": {
     "crons": ["15 21 * * *"]
