@@ -199,7 +199,12 @@ caller ever drops it again.
    **before anything from that commit is checked out**. A manual dispatch
    cannot put a pull request, branch or fork commit into production, and no
    file of an unconfirmed commit — not `mise.toml`, not a script — is ever
-   read or run. An API error fails the step.
+   read or run. An API error fails the step. The current workflow then checks
+   that the target includes the production compatibility floor before checkout:
+   it must equal or descend from `87da571c7aa35dd76f9b00737a886ac41e6d3491`
+   ([#207](https://github.com/risu729/kogane/pull/207)). The comparison must
+   return `identical` or `ahead`; any other status or API error fails closed.
+   This applies to manual releases as well as every rollback subset.
 3. **Checks out that exact commit** (`persist-credentials: false`,
    `fetch-depth: 0`), then asserts `git rev-parse HEAD` is the requested sha. A
    branch tip is never used: the branch moves between the CI run and this one
@@ -565,11 +570,36 @@ recorded release's own sha is the older commit while the others are still at
 the newer one): a target recorded ahead of the commit is rolled back, one
 already at it is left alone, and one recorded behind it or never recorded at
 all refuses the run, because that would be a roll forward and a roll forward
-goes through `deploy.yml`. It also refuses unless the commit's CORE migration
-list is a **prefix** of the deployed one: migrations are additive and are never reverted,
-so an older commit may run against a database that has more migrations applied
-than it knows about, but never against one that is missing migrations it needs.
-The rollback applies no migration and restores no database.
+goes through `deploy.yml`.
+
+Before any target code is checked out, the current trusted workflow also requires
+that the target equal or descend from `87da571c7aa35dd76f9b00737a886ac41e6d3491`
+([#207](https://github.com/risu729/kogane/pull/207)). This is the oldest supported
+production code, including for a one-Worker rollback:
+
+- [#206](https://github.com/risu729/kogane/pull/206), commit
+  `49d5d65e511101923127e874dcb16129237bfd9d`, removed the legacy ingestion
+  Workers; migration `0042` removed obsolete CORE projection tables. Earlier
+  releases can require resources or tables that no longer exist.
+- #207 removed the public demo Worker and shared synthetic rendering;
+  migration `0043` removed audited synthetic bootstrap metadata. #206 alone
+  is therefore still too old. The floor includes both retirements.
+
+A migration-list prefix alone does not prove compatibility after a destructive
+retirement. The existing prefix check remains an additional requirement: the
+target may not require migrations absent from the deployed database. Rollback
+applies no migration and restores no database. Both the floor and the existing
+ledger/manifest checks must pass; release mode and a narrowed `targets` list
+cannot bypass the floor.
+
+Dispatch the current `rollback.yml` from `main`, specifying the old commit only
+in `sha`. The floor is embedded in the trusted workflow rather than read from
+the old checkout, which may not know the retirement exists. Compatible commits
+that predate the mise automation layout still use the legacy adapter. Historical
+workflow reruns do not acquire new workflow protections and are not a supported
+rollback procedure. Future retirements must establish an immutable compatible commit boundary and
+activate its workflow floor before irreversible production cleanup. Never lower
+the floor to make an old release pass.
 
 Its record is per target: the Workers it rolled back are recorded at the older
 commit and the others keep the commit the previous record gave them. So the next
@@ -738,26 +768,26 @@ reachable, and that the `workflow_run` chain actually starts after a merge.
 decision functions in `tasks/_lib/ci/automerge-policy.mjs` against fixtures. The workflow wiring itself
 cannot be proven offline and is verified on the first live pull request.
 
-| Acceptance | Covered by                                                                                                                                                                                                                                                     |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| G5-01      | Tests: pending/blocked states are left to the ruleset. Live: a failing `CI Check` keeps auto-merge waiting.                                                                                                                                                    |
-| G5-02      | Tests: a `behind` branch stays eligible and requests an update; the sweep picks the oldest armed one. Live: strict up-to-date + update starts CI before the merge.                                                                                             |
-| G5-03      | Tests: owner and `renovate[bot]` eligibility. Live: the app merges without a bypass entry.                                                                                                                                                                     |
-| G5-04      | Tests: draft, closed, merged and `dirty` pull requests are refused.                                                                                                                                                                                            |
-| G5-05      | The former owner-approval requirement is removed; no replacement approval gate is added.                                                                                                                                                                       |
-| G5-06      | Live only: the App token update starts CI, no human approval loop. Not provable offline.                                                                                                                                                                       |
-| G5-07      | Live only: the merge push starts `CI`, whose successful run on `main` starts `Deploy` (push event, this repository, `main`). Proven by the first merge after enabling CD.                                                                                      |
-| G5-08      | Workflows pass pull request strings through `env` only; zizmor, ghalint and actionlint enforce the shape. Tests: pagination fails closed.                                                                                                                      |
-| G5-09      | CI runs the deploy Action in `dry-run` mode with no account or token, and the release job builds and dry-runs before any credential is in scope. Both asserted.                                                                                                |
-| G5-10      | Tests: no workflow declares an environment other than `production`, uses a preview mode or a preview alias. The deploy ledger carries no preview target.                                                                                                       |
-| G5-11      | Tests: a changed lockfile, configuration, migration or bundle is reported by field name. The workflow re-verifies the manifest immediately before the first upload.                                                                                            |
-| G5-12      | Tests: a commit every Worker is already recorded at stops without deploying, a partial record resumes with the missing Workers only, a Worker at a newer commit is left alone, and a diverged history fails. Live: the Deployments API is the record it reads. |
-| G5-13      | `production-deploy` with `cancel-in-progress: false` on both callers, and a migration step that only a run holding that group can reach. Live only.                                                                                                            |
-| G5-14      | Tests: the ledger is ordered consumer-before-producer and the workflow's deploy steps follow it. The PoC collectors stay `deploy: false` until U09.                                                                                                            |
-| G5-15      | Tests: every ledger entry still carries the Wrangler `name` its configuration declares, so a directory move cannot create a new resource.                                                                                                                      |
-| G5-16      | Tests: the rollback refuses a target that is not an ancestor, or whose migration list is not a prefix; its record keeps the deployed migration list and is per target. No workflow restores a database.                                                        |
-| G5-17      | Tests: only the credential preflight, the migration steps and the deploy steps reference the Cloudflare token, `secrets-json` is never used, and no collector secret name appears in an Actions file.                                                          |
-| G5-18      | Completed: legacy Workers and notification paths were retired after archival and empty-backlog verification; see legacy-retirement.md.                                                                                                                         |
+| Acceptance | Covered by                                                                                                                                                                                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G5-01      | Tests: pending/blocked states are left to the ruleset. Live: a failing `CI Check` keeps auto-merge waiting.                                                                                                                                                                             |
+| G5-02      | Tests: a `behind` branch stays eligible and requests an update; the sweep picks the oldest armed one. Live: strict up-to-date + update starts CI before the merge.                                                                                                                      |
+| G5-03      | Tests: owner and `renovate[bot]` eligibility. Live: the app merges without a bypass entry.                                                                                                                                                                                              |
+| G5-04      | Tests: draft, closed, merged and `dirty` pull requests are refused.                                                                                                                                                                                                                     |
+| G5-05      | The former owner-approval requirement is removed; no replacement approval gate is added.                                                                                                                                                                                                |
+| G5-06      | Live only: the App token update starts CI, no human approval loop. Not provable offline.                                                                                                                                                                                                |
+| G5-07      | Live only: the merge push starts `CI`, whose successful run on `main` starts `Deploy` (push event, this repository, `main`). Proven by the first merge after enabling CD.                                                                                                               |
+| G5-08      | Workflows pass pull request strings through `env` only; zizmor, ghalint and actionlint enforce the shape. Tests: pagination fails closed.                                                                                                                                               |
+| G5-09      | CI runs the deploy Action in `dry-run` mode with no account or token, and the release job builds and dry-runs before any credential is in scope. Both asserted.                                                                                                                         |
+| G5-10      | Tests: no workflow declares an environment other than `production`, uses a preview mode or a preview alias. The deploy ledger carries no preview target.                                                                                                                                |
+| G5-11      | Tests: a changed lockfile, configuration, migration or bundle is reported by field name. The workflow re-verifies the manifest immediately before the first upload.                                                                                                                     |
+| G5-12      | Tests: a commit every Worker is already recorded at stops without deploying, a partial record resumes with the missing Workers only, a Worker at a newer commit is left alone, and a diverged history fails. Live: the Deployments API is the record it reads.                          |
+| G5-13      | `production-deploy` with `cancel-in-progress: false` on both callers, and a migration step that only a run holding that group can reach. Live only.                                                                                                                                     |
+| G5-14      | Tests: the ledger is ordered consumer-before-producer and the workflow's deploy steps follow it. The PoC collectors stay `deploy: false` until U09.                                                                                                                                     |
+| G5-15      | Tests: every ledger entry still carries the Wrangler `name` its configuration declares, so a directory move cannot create a new resource.                                                                                                                                               |
+| G5-16      | Tests: the trusted pre-checkout floor rejects pre-retirement targets and API failures; rollback also refuses a target that is not an ancestor or whose migration list is not a prefix; its record keeps the deployed migration list and is per target. No workflow restores a database. |
+| G5-17      | Tests: only the credential preflight, the migration steps and the deploy steps reference the Cloudflare token, `secrets-json` is never used, and no collector secret name appears in an Actions file.                                                                                   |
+| G5-18      | Completed: legacy Workers and notification paths were retired after archival and empty-backlog verification; see legacy-retirement.md.                                                                                                                                                  |
 
 ## Renovate
 
