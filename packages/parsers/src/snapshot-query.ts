@@ -301,7 +301,6 @@ export function snapshotCtes(
       SELECT 1 FROM ${relations.parseRuns} complete_parse
       WHERE complete_parse.fetch_artifact_id = fa.id
         AND complete_parse.parser_name = container_policy.parser_name
-        AND complete_parse.status = 'ok'
         AND EXISTS (SELECT 1 FROM ${relations.publishedParseRuns} published
                     WHERE published.parse_run_id = complete_parse.id)
         AND ${coverageV1Membership("complete_parse", "fa", "container_policy", claims)}
