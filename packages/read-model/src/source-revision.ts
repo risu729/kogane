@@ -39,6 +39,7 @@ export const SOURCE_REVISION_LEDGER = [
   // Accepted judgements: which scopes overlap, and why.
   "entity_relations",
   "decision_revisions",
+  "card_settlement_decisions",
   // Identity: which provider account a measurement belongs to.
   "account_mappings",
   "instrument_mappings",
@@ -101,6 +102,7 @@ export const REVISION_EXCLUDED_TABLES = [
   // its stage log say what was asked, never what the projection reads.
   "ops_requests",
   "ops_request_stages",
+  "card_settlement_scan_cursor",
 ] as const;
 
 export type LedgerTable =

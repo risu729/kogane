@@ -17,6 +17,8 @@
 import { expectedRevisionsSql, type SqlWrite } from "../core/operations.ts";
 
 export interface ReceiptReservation {
+  /** Trusted domain predicate; never caller-provided SQL. */
+  precondition?: SqlWrite;
   operationId: string;
   principal: string;
   operationKind: string;
@@ -42,7 +44,7 @@ export function receiptReservationWrite(input: ReceiptReservation): SqlWrite {
         AND EXISTS(SELECT 1 FROM change_plans WHERE plan_id=?5 AND status IN ('planned','approved') AND expires_at>?7)
         AND EXISTS(SELECT 1 FROM approvals WHERE approval_id=?8 AND plan_id=?5 AND plan_digest=?5
           AND approver_actor=?2 AND uses_remaining>0 AND expires_at>?7)
-        AND ${expectedRevisionsSql("?9")}`,
+        AND ${expectedRevisionsSql("?9")}${input.precondition ? ` AND (${input.precondition.sql})` : ""}`,
     binds: [
       input.operationId,
       input.principal,
@@ -53,6 +55,7 @@ export function receiptReservationWrite(input: ReceiptReservation): SqlWrite {
       input.now,
       input.approvalId,
       input.expectedRevisionsJson,
+      ...(input.precondition?.binds ?? []),
     ],
   };
 }

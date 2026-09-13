@@ -198,6 +198,22 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     planRow:
       "parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out)",
   },
+  card_settlement_candidates: {
+    classification: "core-keep",
+    planRow: "card settlement evidence and decisions",
+  },
+  card_settlement_decisions: {
+    classification: "core-keep",
+    planRow: "card settlement evidence and decisions",
+  },
+  card_settlement_allocation_withdrawals: {
+    classification: "core-keep",
+    planRow: "card settlement evidence and decisions",
+  },
+  card_settlement_scan_cursor: {
+    classification: "operational-mutable",
+    planRow: "bounded card settlement scan progress",
+  },
   // reconciliation_proposals → CORE
   reconciliation_proposals: { classification: "core-keep", planRow: "reconciliation proposals" },
   // economic_event_revisions, legs, allocations, obligations, settlements → CORE

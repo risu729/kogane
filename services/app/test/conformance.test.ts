@@ -199,6 +199,7 @@ describe("shared contract pin", () => {
       // running Worker actually serves.
       rewardsV2: false,
       commands: false,
+      cardSettlementReconciliation: false,
       eventsV2: false,
       opsApi: false,
     });

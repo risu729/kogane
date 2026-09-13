@@ -26,6 +26,7 @@ different rules.
 - [The READ database](docs/read-model-d1.md)
 - [Runbook: rebuilding the READ database](docs/read-rebuild-runbook.md)
 - [Economic events, allocations and reconciliation](docs/economic-events.md)
+- [Card statement settlement review](docs/card-settlements.md)
 - [Points, miles and prepaid balances](docs/rewards.md)
 - [Prices, calculation policies and report artifacts](docs/calculation-and-reports.md)
 - [Read model (`packages/read-model`)](docs/read-model.md)
@@ -60,10 +61,12 @@ Financial product development continues: existing schemas, READ projections and
 pure calculation functions do not yet provide complete transaction matching,
 portfolio valuation, cost basis, P&L or tax reporting.
 
-The next major milestone connects **Vpass/MyJCB purchases and statements to
-bank debits**, separating purchase recognition from settlement and explaining
-the balance impact without counting an expense twice. It builds on the current
-Vpass pending/posted matcher; MyJCB and cross-source matching remain to implement.
+The first [card settlement review](docs/card-settlements.md) connects authoritative
+**Vpass/MyJCB statement totals to SMBC bank debits**. Operators can review,
+accept, reject and withdraw a correspondence while preserving evidence and
+history. Unknown ownership or stale evidence blocks acceptance; payment allocation
+adds no duplicate cash movement or purchase expense. Complete purchase-event
+recognition, other bank adapters, partial payments and refunds remain to implement.
 
 The [roadmap](docs/roadmap.md) records the current implementation limits,
 development order and acceptance criteria. Its main sequence is identity and

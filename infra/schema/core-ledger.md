@@ -10,28 +10,28 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `c62cf12fa235c852d78a7806d95b82f380baeb0b1730dcdf04f5847edc635c69`
+Schema digest: `a46f882344e3bb6c7640f9f276df65e86da3a60a35a9008a76af60d1bb3b560f`
 
 ## Summary
 
-- Migrations applied: 43
-- Tables: 102 (all `STRICT`: yes)
-- Views: 31
-- Triggers: 375
-- Explicit indexes: 104
+- Migrations applied: 45
+- Tables: 106 (all `STRICT`: yes)
+- Views: 37
+- Triggers: 387
+- Explicit indexes: 106
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
 | classification | count | tables |
 | --- | --- | --- |
-| `core-keep` | 92 | account_connection_reviews, account_mappings, accounts, acquisition_sessions, active_releases, allocations, approvals, artifact_email_metadata, artifact_file_metadata, artifact_http_metadata, artifact_ranges, artifact_relations, artifact_storage_metadata, artifact_transform_steps, balance_observations, calculation_policies, calculation_results, calculation_runs, change_plans, collection_run_stages, collection_runs, conversion_offers, core_source_revision, decision_operations, decision_outbox, decision_revisions, economic_event_revisions, economic_legs, entity_relations, evidence_use_restrictions, expiry_rules, fetch_artifacts, fetch_page_groups, fetch_run_ranges, fetch_run_reports, fetch_run_seals, fetch_runs, fetch_unit_reports, fetch_units, http_scope_rules, identity_instrument_uses, identity_observations, identity_run_policies, identity_run_seals, identity_runs, identity_vpass_bindings, ingest_client_producers, ingest_client_routes, ingest_clients, ingestion_attempts, instrument_identifiers, instrument_mappings, instruments, membership_state_claims, metadata_projection_inputs, metadata_projections, obligation_revisions, observation_decimal_values, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_coverage_claims, parse_input_references, parse_run_candidates, parse_runs, parser_releases, position_observations, price_observations, producer_sources, producers, projection_input_records, publication_events, published_parse_runs, raw_object_verification_events, raw_objects, reconciliation_proposals, release_activation_events, release_comparisons, report_artifacts, report_events, retention_classes, reward_bucket_claims, reward_programs, run_inventories, run_inventory_items, settlement_relations, source_accounts, source_external_ids, sources, transaction_observations, valuation_observations |
+| `core-keep` | 95 | account_connection_reviews, account_mappings, accounts, acquisition_sessions, active_releases, allocations, approvals, artifact_email_metadata, artifact_file_metadata, artifact_http_metadata, artifact_ranges, artifact_relations, artifact_storage_metadata, artifact_transform_steps, balance_observations, calculation_policies, calculation_results, calculation_runs, card_settlement_allocation_withdrawals, card_settlement_candidates, card_settlement_decisions, change_plans, collection_run_stages, collection_runs, conversion_offers, core_source_revision, decision_operations, decision_outbox, decision_revisions, economic_event_revisions, economic_legs, entity_relations, evidence_use_restrictions, expiry_rules, fetch_artifacts, fetch_page_groups, fetch_run_ranges, fetch_run_reports, fetch_run_seals, fetch_runs, fetch_unit_reports, fetch_units, http_scope_rules, identity_instrument_uses, identity_observations, identity_run_policies, identity_run_seals, identity_runs, identity_vpass_bindings, ingest_client_producers, ingest_client_routes, ingest_clients, ingestion_attempts, instrument_identifiers, instrument_mappings, instruments, membership_state_claims, metadata_projection_inputs, metadata_projections, obligation_revisions, observation_decimal_values, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_coverage_claims, parse_input_references, parse_run_candidates, parse_runs, parser_releases, position_observations, price_observations, producer_sources, producers, projection_input_records, publication_events, published_parse_runs, raw_object_verification_events, raw_objects, reconciliation_proposals, release_activation_events, release_comparisons, report_artifacts, report_events, retention_classes, reward_bucket_claims, reward_programs, run_inventories, run_inventory_items, settlement_relations, source_accounts, source_external_ids, sources, transaction_observations, valuation_observations |
 | `read-candidate` | 0 | — |
-| `operational-mutable` | 5 | collection_scan_state, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_work_items |
+| `operational-mutable` | 6 | card_settlement_scan_cursor, collection_scan_state, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_work_items |
 | `unclassified-keep` | 5 | dataset_snapshot_policies, fetch_run_annotations, observation_artifact_metadata, observation_scan_state, parse_issues |
 
 Tables without both an append-only `*_no_update` and `*_no_delete` guard (mutable by design —
 pointers, checkpoints, leases, configuration, and the READ-side projections):
 
-active_releases, allocations, approvals, calculation_runs, change_plans, collection_runs, collection_scan_state, core_source_revision, dataset_snapshot_policies, decision_outbox, economic_event_revisions, http_scope_rules, ingest_client_producers, ingest_client_routes, ingest_clients, obligation_revisions, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_scan_state, observation_work_items, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_run_candidates, parse_runs, producer_sources, producers, published_parse_runs, reconciliation_proposals, retention_classes, settlement_relations, source_external_ids, sources
+active_releases, allocations, approvals, calculation_runs, card_settlement_scan_cursor, change_plans, collection_runs, collection_scan_state, core_source_revision, dataset_snapshot_policies, decision_outbox, economic_event_revisions, http_scope_rules, ingest_client_producers, ingest_client_routes, ingest_clients, obligation_revisions, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_scan_state, observation_work_items, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_run_candidates, parse_runs, producer_sources, producers, published_parse_runs, reconciliation_proposals, retention_classes, settlement_relations, source_external_ids, sources
 
 ## Tables
 
@@ -55,6 +55,10 @@ active_releases, allocations, approvals, calculation_runs, change_plans, collect
 | `calculation_policies` | core-keep | prices and calculation policies | yes | no | yes | calculation_policies_no_update | calculation_policies_no_delete | 7 | 0 | 1 | 5 |
 | `calculation_results` | core-keep | calculation runs and reports | yes | no | yes | calculation_results_no_update | calculation_results_no_delete | 10 | 1 | 1 | 3 |
 | `calculation_runs` | core-keep | calculation runs and reports | yes | no | no | — | calculation_runs_no_delete | 8 | 0 | 1 | 3 |
+| `card_settlement_allocation_withdrawals` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_allocation_withdrawals_no_update | card_settlement_allocation_withdrawals_no_delete | 3 | 2 | 0 | 3 |
+| `card_settlement_candidates` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_candidates_no_update | card_settlement_candidates_no_delete | 11 | 4 | 2 | 3 |
+| `card_settlement_decisions` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_decisions_no_update | card_settlement_decisions_no_delete | 8 | 3 | 0 | 6 |
+| `card_settlement_scan_cursor` | operational-mutable | bounded card settlement scan progress | yes | no | no | — | — | 2 | 0 | 0 | 0 |
 | `change_plans` | core-keep | change plans, approvals and receipts | yes | no | no | — | change_plans_no_delete | 10 | 0 | 1 | 3 |
 | `collection_run_stages` | core-keep | acquisition and fetch history | yes | no | yes | collection_run_stages_no_update | collection_run_stages_no_delete | 7 | 1 | 2 | 2 |
 | `collection_runs` | core-keep | acquisition and fetch history | yes | no | no | — | collection_runs_no_delete | 14 | 2 | 3 | 3 |
@@ -150,9 +154,15 @@ Full column, foreign-key, index and trigger detail per table is in
 | `active_ingest_client_producers` | ingest_client_id, producer_id |
 | `active_ingest_routes` | ingest_client_id, producer_id, source_id |
 | `active_manual_overrides` | id, subject_kind, subject_ref, revision, decision_kind, method, actor_id, operation_id, reason, evidence_refs_json, previous_revision, superseded_by, created_at |
+| `card_bank_debit_facts` | id, parse_run_id, source_account, unit_ref, source_id, as_of, external_id, status, extra_json, value_status, coefficient, scale, bank_key, position |
+| `card_settlement_fact_ownership` | kind, observation_id, account_id, owner_ref, evidence_refs_json |
+| `card_settlement_readiness` | id, statement_current, bank_current, ownership_current, allocation_available |
+| `card_settlement_reviews` | id, statement_key, bank_key, statement_observation_id, statement_parse_run_id, bank_observation_id, bank_parse_run_id, policy_release, facts_json, proposal_digest, created_at, revision, status, decision_revision_id, event_id, obligation_id, settlement_id |
+| `card_statement_facts` | id, parse_run_id, source_account, unit_ref, source_id, value_status, coefficient, scale, payment_date, period, statement_key, position |
 | `current_account_connection_reviews` | id, producer_id, connection_key, revision, label, status, related_source_id, direct_producer_id, reason, verifier_version, detail_artifact_id, direct_artifact_id, branch_artifact_id, direct_reference_ids_json, created_at, evidence_eligible |
 | `current_account_mappings` | id, source_account_id, revision, account_id, method, reason, policy_version, created_at, label, status |
 | `current_allocations` | id, source_component_ref, target_effect_ref, role, unit_ref, coefficient, scale, decision_revision_id, superseded_by, created_at |
+| `current_card_settlement_allocations` | id, source_component_ref, target_effect_ref, role, unit_ref, coefficient, scale, decision_revision_id, superseded_by, created_at |
 | `current_economic_events` | event_id, revision, kind, state, unknown_reason, effective_time_json, basis, evidence_support_json, decision_revision_id, superseded_by, created_at |
 | `current_identity_observations` | id, identity_run_id, kind, observation_id, source_account_id, account_mapping_id, issues_json, policy_version, parse_run_id |
 | `current_instrument_mappings` | id, identifier_id, revision, instrument_id, method, reason, policy_version, created_at, label, status |
@@ -213,5 +223,7 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0038_source_revision.sql` | 101 | core_source_revision |
 | `0039_collection_runs.sql` | 14 | collection_scan_state |
 | `0043_remove_synthetic_bootstrap.sql` | 36 | _synthetic_cleanup_runs |
+| `0044_card_statement_settlements.sql` | 27 | card_settlement_scan_cursor |
+| `0045_expand_card_settlement_commands.sql` | 34 | approvals_expanded, change_plans_expanded, decision_outbox_expanded, operation_receipts_expanded |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql
