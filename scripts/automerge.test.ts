@@ -1,7 +1,7 @@
 // Unit tests for the trusted auto-merge decisions (U13,
 // acceptance G5-01, G5-03, G5-04, G5-08). The workflows themselves are
 // verified on the first live pull request; everything decidable offline is
-// decided by the pure modules under .github/scripts and tested here.
+// decided by the pure modules under tasks/_lib/ci and tested here.
 import { describe, expect, test } from "bun:test";
 import {
   AUTOMERGE_LABEL,
@@ -11,8 +11,8 @@ import {
   labelApprovedByOwner,
   pickBranchUpdate,
   trustedAuthor,
-} from "../.github/scripts/automerge-policy.mjs";
-import { nextLink, paginate } from "../.github/scripts/github-api.mjs";
+} from "../tasks/_lib/ci/automerge-policy.mjs";
+import { nextLink, paginate } from "../tasks/_lib/ci/github-api.mjs";
 import renovate from "../.github/renovate.json5";
 
 const OWNER = "risu729";

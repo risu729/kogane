@@ -5,6 +5,21 @@ reaches Cloudflare afterwards, and what stops it when it should.
 [Continuous integration](ci.md) covers the checks themselves; this document
 covers the automation around them and the deployment that follows.
 
+Automation implementations live in `tasks/_lib/ci/`; executable mise entrypoints
+live in `tasks/automation/`. Workflows call `mise run --no-deps automation:automerge`,
+`automation:release-ledger`, `automation:release-manifest` and `automation:release-sha`, passing their
+arguments and existing environment values unchanged. The dependency-free ledger
+and auto-merge stages select only the pinned Node tool with `MISE_ENABLE_TOOLS`.
+`--no-deps` prevents a package install before a release decision or while an
+automation token is in scope. These production/account-changing tasks never join
+the development validation graph described in [CI](ci.md). The separate
+`automation:` namespace also keeps them out of the current `ci:*` discovery.
+For rollback commits that predate these tasks, the release workflow selects the
+legacy `.github/scripts/release-*.mjs` entrypoint from the same verified commit.
+Selection is by file layout, never a fallback after a failed command; no release
+or rollback decision is skipped. The adapter remains until every supported
+rollback target contains the new tasks.
+
 ## Auto-merge
 
 `.github/workflows/automerge.yml` runs on `pull_request_target` and pushes
@@ -12,7 +27,7 @@ to `main`. It uses a GitHub App installation token to register native
 auto-merge (squash) and update branches that are behind.
 
 The workflow checks out only the repository default branch and runs its
-reviewed `.github/scripts/` code. Pull request strings are passed as data
+reviewed `tasks/_lib/ci/` code through the `automation:automerge` mise task. Pull request strings are passed as data
 through the environment, never interpolated into shell commands (G5-08).
 Node is installed from the trusted checkout's mise lockfile with caching off.
 
@@ -365,7 +380,7 @@ digest; the version id is one dashboard lookup away when a human needs it.
 
 ### The release manifest, and what it can and cannot prove (G5-11)
 
-`.github/scripts/release-manifest.mjs` records, for one commit: the digest of
+`tasks/_lib/ci/release-manifest.mjs` records, for one commit: the digest of
 the root `bun.lock`, of every Wrangler configuration in the deploy ledger, of
 every CORE (and later READ) migration file in order, of the parser build
 identity file, and of every emitted bundle — plus the _names_ of the secrets
@@ -523,7 +538,7 @@ synthetic is written to a financial view.
 **How the sha gets in.** A Worker cannot know its own commit: the value comes
 from the variable `RELEASE_SHA`, which is empty in the repository and stamped
 into the App's and the Processor's configuration by
-`.github/scripts/release-sha.mjs` in the runner's checkout — the pinned deploy
+`tasks/_lib/ci/release-sha.mjs` in the runner's checkout — the pinned deploy
 Action exposes `mode`, `working-directory`, `config`, `environment`,
 `preview-alias`, the two credentials and `secrets-json`, and no input for a
 variable. The stamp runs **before** the manifest is computed, so the manifest
@@ -721,7 +736,7 @@ reachable, and that the `workflow_run` chain actually starts after a merge.
 ## Acceptance coverage
 
 `scripts/automerge.test.ts` (run by `mise run ci:root`) unit-tests the
-decision functions in `.github/scripts/automerge-policy.mjs` against fixtures. The workflow wiring itself
+decision functions in `tasks/_lib/ci/automerge-policy.mjs` against fixtures. The workflow wiring itself
 cannot be proven offline and is verified on the first live pull request.
 
 | Acceptance | Covered by                                                                                                                                                                                                                                                     |

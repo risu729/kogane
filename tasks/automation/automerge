@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run the reviewed automerge automation entrypoint."
+set -euo pipefail
+exec node "${MISE_PROJECT_ROOT}/tasks/_lib/ci/automerge.mjs" "$@"

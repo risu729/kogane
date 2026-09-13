@@ -349,7 +349,7 @@ export function readDeployOrder(root: string = REPO_ROOT): DeployOrder {
 
 /** Tracked Actions files (workflows and automation scripts) with their text. */
 export function automationFiles(root: string = REPO_ROOT): { file: string; text: string }[] {
-  return trackedFiles(".github/workflows", ".github/scripts").map((file) => ({
+  return trackedFiles(".github/workflows", "tasks/_lib/ci", "tasks/automation").map((file) => ({
     file,
     text: readFileSync(`${root}/${file}`, "utf8"),
   }));

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run the reviewed release-sha automation entrypoint."
+set -euo pipefail
+exec node "${MISE_PROJECT_ROOT}/tasks/_lib/ci/release-sha.mjs" "$@"

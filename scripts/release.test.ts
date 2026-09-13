@@ -1,7 +1,7 @@
 // Unit tests for the trusted release decisions (U14, acceptance G5-11, G5-12,
 // G5-16, G5-17). The workflow wiring and the live Cloudflare upload cannot be
 // proven offline; everything the release refuses on is decided by the pure
-// modules under .github/scripts and is decided here — the ledger interlock
+// modules under tasks/_lib/ci and is decided here — the ledger interlock
 // against a real git history in a temporary repository, and the manifest
 // against a fixture tree.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -19,7 +19,7 @@ import {
   releaseRecord,
   requiredSecretNames,
   sameMigrations,
-} from "../.github/scripts/release-manifest.mjs";
+} from "../tasks/_lib/ci/release-manifest.mjs";
 import {
   decideRelease,
   describeRecord,
@@ -31,7 +31,7 @@ import {
   recordedWorkerShas,
   releaseProgress,
   undeployedWorkers,
-} from "../.github/scripts/release-ledger.mjs";
+} from "../tasks/_lib/ci/release-ledger.mjs";
 
 const temporary: string[] = [];
 

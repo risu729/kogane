@@ -29,7 +29,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJsonc } from "../../scripts/jsonc.ts";
+import { parseJsonc } from "../../../scripts/jsonc.ts";
 
 // v2 records one entry per deployable Worker with the commit it is at; v1
 // listed Worker names only (see `normalizeRecord` in release-ledger.mjs).

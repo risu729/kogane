@@ -50,10 +50,6 @@ jobs:
         with:
           # Trusted code only. The pull request head is never fetched here.
           ref: ${{ github.event.repository.default_branch }}
-          sparse-checkout: |
-            .github/scripts
-            mise.toml
-            mise.lock
           persist-credentials: false
       - name: Install mise
         if: steps.config.outputs.configured == 'true'
@@ -80,11 +76,12 @@ jobs:
           permission-pull-requests: write
       - name: Register native auto-merge
         if: steps.config.outputs.configured == 'true'
-        run: node .github/scripts/automerge.mjs
+        run: mise run --no-deps automation:automerge
         env:
           # Pull request metadata reaches the script only as environment values.
           # PR_NUMBER is empty on push, which selects the sweep mode.
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          MISE_ENABLE_TOOLS: node
           AUTOMATION_APP_SLUG: ${{ steps.token.outputs.app-slug }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY_OWNER: ${{ github.event.repository.owner.login }}
