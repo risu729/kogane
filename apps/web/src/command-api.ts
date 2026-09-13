@@ -79,6 +79,11 @@ export class CommandError extends Error {
 
 /** Fixed messages per error code; a server message is never shown verbatim. */
 const MESSAGES: Record<string, string> = {
+  incomplete_evidence:
+    "選択した原本や口座の根拠が不足しています。原本と現在の対応を確認してください。",
+  needs_scope_resolution:
+    "口座や保有者の対応が未解決です。照合候補と口座の整理を確認してください。",
+  invalid_payload: "入力した識別名、理由、根拠を確認してください。",
   commands_disabled: "この接続先では確認操作が有効になっていません。",
   approval_required: "承認は人による認証経路が必要です。この権限では実行できません。",
   stale_context: "対象が変更されました。再試算した新しい計画で確認し直してください。",

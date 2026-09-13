@@ -8,6 +8,8 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFeatures } from "../api.ts";
+import { useCardOwnership } from "../card-ownership-api.ts";
+import { CardOwnershipDetails, OWNERSHIP_ROLES, ownerLabel } from "../card-ownership-display.tsx";
 import { useCardSettlement } from "../reconciliation-api.ts";
 import { CardSettlementDetails } from "../reconciliation-display.tsx";
 import { Link } from "../router.tsx";
@@ -81,6 +83,40 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       ? settlementTarget.subjectRef.slice("card-settlement:".length)
       : null;
   const settlement = useCardSettlement(settlementProposalId);
+  const ownershipTarget = report.data?.simulation.targets.find((target) =>
+    /^relation:(liable_party|beneficial_owner)\|account:/u.test(target.subjectRef),
+  );
+  const ownershipMatch = ownershipTarget
+    ? /^relation:(liable_party|beneficial_owner)\|account:([^|]+)\|(party:[^|]+)$/u.exec(
+        ownershipTarget.subjectRef,
+      )
+    : null;
+  const requiresOwnership =
+    report.data?.simulation.invalidations.includes("review:card-ownership") === true;
+  const ownershipProposalId =
+    requiresOwnership && settlementTarget
+      ? settlementTarget.subjectRef.slice("card-settlement:".length)
+      : null;
+  const ownership = useCardOwnership(ownershipProposalId);
+  const ownershipSide = ownership.data?.sides.find(
+    (side) => side.role === ownershipMatch?.[1] && side.accountId === ownershipMatch?.[2],
+  );
+  const ownershipReady =
+    !requiresOwnership ||
+    (features.cardOwnershipReview &&
+      ownership.data !== undefined &&
+      ownershipSide !== undefined &&
+      ownershipSide.blockers.length === 0 &&
+      ownershipMatch !== null &&
+      ownership.data.revision ===
+        report.data?.expectedRevisions[`card-settlement:${ownershipProposalId}`] &&
+      ownershipSide.mappingRevision ===
+        report.data?.expectedRevisions[`account_mapping:${ownershipSide.sourceAccountId}`] &&
+      ownershipSide.ownershipRevision ===
+        report.data?.expectedRevisions[
+          `ownership:${ownershipSide.role}|${ownershipSide.accountId}`
+        ]);
+
   const settlementRevisionMatches =
     !requiresSettlement ||
     (settlement.data != null &&
@@ -153,7 +189,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
     );
   const data = report.data;
   const stale = data.stale;
-  const canAct = features.known && features.commands && !stale && settlementReady;
+  const canAct = features.known && features.commands && !stale && settlementReady && ownershipReady;
 
   return (
     <>
@@ -192,6 +228,46 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
         ) : null}
       </Panel>
 
+      {requiresOwnership ? (
+        <Panel id="ownership-review" title="口座の保有者の判断">
+          {ownership.isPending ? (
+            <Loading label="保有者の根拠" />
+          ) : ownership.isError ? (
+            <ErrorState
+              error={ownership.error}
+              label="保有者の根拠"
+              onRetry={() => void ownership.refetch()}
+            />
+          ) : ownershipSide && ownershipMatch ? (
+            <>
+              <p>
+                <strong>{OWNERSHIP_ROLES[ownershipSide.role]}</strong>:{" "}
+                {ownerLabel(ownershipMatch[3]!)} の関係を
+                {data.simulation.kind === "relation.reject" ? "却下" : "採用"}します。
+              </p>
+              <CardOwnershipDetails side={ownershipSide} />
+              <p>
+                選択した原本・解析版・口座の対応を根拠として、期間を限定しない関係を記録します。識別名だけで保有者を証明するものではありません。
+              </p>
+            </>
+          ) : (
+            <p role="alert">計画した口座と根拠の詳細を取得できません。</p>
+          )}
+          {!ownershipReady && ownership.isSuccess ? (
+            <p role="alert">
+              口座または保有者の記録が計画作成後に変わっています。新しい計画で確認し直してください。
+            </p>
+          ) : null}
+          <p className="panel-note">
+            保有者の判断を保存してもカード決済は採用されません。次の定期処理で新しい照合候補が作成された後、請求と銀行引落を別に確認してください。
+          </p>
+          {ownershipProposalId ? (
+            <Link to={`/reconciliation/${ownershipProposalId}/ownership`}>
+              口座の保有者の確認に戻る
+            </Link>
+          ) : null}
+        </Panel>
+      ) : null}
       {requiresSettlement ? (
         <Panel id="settlement-review" title="請求・銀行原本と金額の確認">
           {!features.cardSettlementReconciliation ? (
@@ -235,7 +311,9 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
           <EmptyState>対象がありません。</EmptyState>
         ) : (
           <div className="table-scroll">
-            <table className={requiresSettlement ? "settlement-targets" : undefined}>
+            <table
+              className={requiresSettlement || requiresOwnership ? "settlement-targets" : undefined}
+            >
               <thead>
                 <tr>
                   <th scope="col">対象</th>

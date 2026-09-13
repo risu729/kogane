@@ -4,7 +4,7 @@ import { useFeatures } from "../api.ts";
 import { useCardSettlements, type CardSettlementReview } from "../reconciliation-api.ts";
 import { CardSettlementDetails } from "../reconciliation-display.tsx";
 import { postCommand, type ChangePlanView } from "../command-api.ts";
-import { navigate } from "../router.tsx";
+import { Link, navigate } from "../router.tsx";
 import { EmptyState, ErrorState, Loading, Panel } from "../ui.tsx";
 
 function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode {
@@ -125,6 +125,13 @@ export function ReconciliationPage(): ReactNode {
             title={`${review.facts.statement.sourceId === "vpass" ? "Vpass" : "MyJCB"} の請求と銀行引落`}
           >
             <CardSettlementDetails review={review} />
+            {features.cardOwnershipReview && review.status === "proposed" ? (
+              <p>
+                <Link to={`/reconciliation/${review.proposalId}/ownership`}>
+                  口座の保有者と根拠を確認
+                </Link>
+              </p>
+            ) : null}
             <ReviewActions review={review} />
           </Panel>
         ))

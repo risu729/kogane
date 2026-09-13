@@ -158,4 +158,38 @@ describe("card settlement review boundary", () => {
   it("does not turn a missing candidate into an empty successful detail", async () => {
     expect((await call(PATH + "?proposalId=missing")).status).toBe(404);
   });
+
+  it("ownership context shows both current account reviews without inventing an owner", async () => {
+    const response = await call(PATH + "/ownership?proposalId=card-settlement-synthetic");
+    expect(response.status).toBe(200);
+    const data = (await response.json()) as {
+      sides: { role: string; accountId: string | null; claims: unknown[]; blockers: string[] }[];
+    };
+    expect(data.sides.map((side) => side.role)).toEqual(["liable_party", "beneficial_owner"]);
+    expect(
+      data.sides.every(
+        (side) =>
+          side.claims.length === 0 &&
+          side.accountId === null &&
+          side.blockers.includes("account_mapping_unresolved"),
+      ),
+    ).toBe(true);
+    expect(await env.DB.prepare("SELECT count(*) AS count FROM entity_relations").first()).toEqual({
+      count: 0,
+    });
+  });
+  it("ownership context requires exact proposal and verified operator and refuses mutations", async () => {
+    const path = PATH + "/ownership?proposalId=card-settlement-synthetic";
+    for (const [subject, status] of [
+      [null, 401],
+      ["ungranted", 403],
+      ["synthetic-agent", 403],
+    ] as const)
+      expect((await call(path, { subject })).status).toBe(status);
+    expect((await call(path, { enabled: false })).status).toBe(404);
+    expect((await call(path, { method: "POST" })).status).toBe(405);
+    expect((await call(PATH + "/ownership")).status).toBe(400);
+    expect((await call(path + "&offset=0")).status).toBe(400);
+    expect((await call(PATH + "/ownership?proposalId=missing")).status).toBe(404);
+  });
 });

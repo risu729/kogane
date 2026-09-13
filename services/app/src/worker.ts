@@ -10,7 +10,11 @@ import { healthApi } from "./health";
 import { observationApi } from "./observation-api";
 import { rewardsApi } from "./rewards-api";
 import { eventsApi } from "./events-api";
-import { cardSettlementsApi, CARD_SETTLEMENT_PATH } from "./card-settlements-api";
+import {
+  cardSettlementsApi,
+  CARD_SETTLEMENT_PATH,
+  CARD_OWNERSHIP_PATH,
+} from "./card-settlements-api";
 import { identityApi } from "./identity-api";
 import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
@@ -23,7 +27,8 @@ function classify(path: string): string {
   const ops = classifyOpsPath(path);
   if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
-  if (path === CARD_SETTLEMENT_PATH) return "card_settlement_review";
+  if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
+    return "card_settlement_review";
   if (path === `${PREFIX}/meta`) return "meta";
   if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";

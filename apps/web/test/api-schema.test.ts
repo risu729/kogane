@@ -117,6 +117,7 @@ describe("shared API schema", () => {
       rewardsV2: false,
       commands: false,
       cardSettlementReconciliation: false,
+      cardOwnershipReview: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -143,6 +144,7 @@ describe("shared API schema", () => {
       rewardsV2: false,
       commands: false,
       cardSettlementReconciliation: false,
+      cardOwnershipReview: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -308,6 +310,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       // The change lifecycle is a deployment flag, not a shared constant.
       commands: false,
       cardSettlementReconciliation: false,
+      cardOwnershipReview: false,
     });
     expect(clientFeatures(withBalancesV2(CENTRAL_STORE_CAPABILITIES, true)).balanceReadModel).toBe(
       true,
@@ -331,6 +334,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       rewards: false,
       commands: false,
       cardSettlementReconciliation: false,
+      cardOwnershipReview: false,
     });
   });
 });

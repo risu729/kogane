@@ -8,10 +8,17 @@
 import { commandKey, type MutationInput, type MutationWrites } from "../command/contract.ts";
 import { relationPayload, relationSubjectRef } from "./sql.ts";
 
+import { ownershipReviewRequested } from "../../../domain/src/ownership-review.ts";
+import { prepareOwnershipReview } from "./ownership-review.ts";
+
 export async function relationMutation(input: MutationInput): Promise<MutationWrites | null> {
   const { plan, principal, operationId, now, guard } = input;
   if (plan.kind !== "relation.accept" && plan.kind !== "relation.reject") return null;
   const relation = relationPayload(plan.payload);
+  const ownership = ownershipReviewRequested(relation.evidenceRefs)
+    ? await prepareOwnershipReview(input.store, relation)
+    : null;
+  if (ownership && !ownership.ok) return null;
   const subjectRef = relationSubjectRef(relation);
   const revision = (plan.expectedRevisions[subjectRef] ?? 0) + 1;
   const decisionId = await commandKey("dr", ["command", operationId]);
@@ -19,6 +26,7 @@ export async function relationMutation(input: MutationInput): Promise<MutationWr
   const accept = plan.kind === "relation.accept";
   const evidence = JSON.stringify(relation.evidenceRefs);
   return {
+    ...(ownership?.ok ? { precondition: ownership.review.precondition } : {}),
     decisionRevisionId: decisionId,
     result: {
       relationId,
@@ -49,7 +57,7 @@ export async function relationMutation(input: MutationInput): Promise<MutationWr
       {
         sql: `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
           SELECT ?1,'relation',?2,?3,?4,'manual',?5,?6,?7,json(?8),?9,NULL,?10 FROM decision_operations op
-          WHERE op.operation_id=?6 AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?1)`,
+          WHERE op.operation_id=?6 AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?1) AND ${guard.sql}`,
         binds: [
           decisionId,
           relationId,
@@ -61,12 +69,13 @@ export async function relationMutation(input: MutationInput): Promise<MutationWr
           evidence,
           revision > 1 ? revision - 1 : null,
           now,
+          ...guard.binds,
         ],
       },
       {
         sql: `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
           SELECT ?1,?2,?3,?4,?5,?6,?7,?8,json(?9),?10 FROM decision_revisions d
-          WHERE d.id=?8 AND NOT EXISTS(SELECT 1 FROM entity_relations WHERE id=?1)`,
+          WHERE d.id=?8 AND NOT EXISTS(SELECT 1 FROM entity_relations WHERE id=?1) AND ${guard.sql}`,
         binds: [
           relationId,
           relation.relationKind,
@@ -78,6 +87,7 @@ export async function relationMutation(input: MutationInput): Promise<MutationWr
           decisionId,
           evidence,
           now,
+          ...guard.binds,
         ],
       },
     ],

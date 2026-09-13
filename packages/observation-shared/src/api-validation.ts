@@ -13,6 +13,7 @@ import type {
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
 import { validFinancialResult } from "../../domain/src/result.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
+import { validCardOwnershipReview } from "./card-ownership-contract.ts";
 import { validCardSettlementReviewPage } from "./card-settlement-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
@@ -183,6 +184,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   commands: boolean,
   eventsV2: boolean,
   cardSettlementReconciliation: optional(boolean),
+  cardOwnershipReview: optional(boolean),
   opsApi: boolean,
 });
 const metadata = object<ApiMetadata>({
@@ -723,6 +725,8 @@ export function validSharedQueryResponse(value: unknown): boolean {
 
 /** Additive fields are allowed; required fields and their nullability are checked. */
 export function validApiResponse(path: string, value: unknown): boolean {
+  if (path === "/api/v2/reconciliation/card-settlements/ownership")
+    return validCardOwnershipReview(value);
   if (path === "/api/v2/reconciliation/card-settlements")
     return validCardSettlementReviewPage(value);
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);

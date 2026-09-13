@@ -41,9 +41,33 @@ approves and commits the pinned plan. Agents do not acquire acceptance rights.
 Acceptance also requires explicit ownership evidence: the card account's
 `liable_party` and bank account's `beneficial_owner` must identify the same
 party through current accepted decisions. A login, matching account labels,
-amounts or dates do not establish ownership. Resolve missing ownership through
-the existing evidence-backed relation decision lifecycle; do not infer it while
-collecting or generating candidates.
+amounts or dates do not establish ownership.
+
+From a proposed candidate, `口座の保有者と根拠を確認` opens an operator-only
+review of both current account mappings and recorded ownership claims. Each
+side starts without a selected owner. The operator supplies a stable identifier
+(or explicitly selects a previously recorded one), confirms the source evidence
+and account mapping, and explains the decision. The same identifier names the
+same party; the identifier alone is not proof, and no party is derived from the
+login. The UI adds the internal `party:` prefix; there is no new party registry.
+
+The existing `relation.accept` / `relation.reject` lifecycle then plans,
+simulates, obtains verified human approval and commits the decision. The
+candidate marker, observation, parse revision and current account mapping are
+mandatory evidence. The plan pins the candidate revision, mapping revision and
+the count of all ownership claims for that account and role, so a competing
+party claim also invalidates the plan. Commit checks these and both source facts
+atomically. Missing, ambiguous or changed mappings require a fresh candidate;
+the review does not silently repair them.
+
+This review only records timeless ownership relations. Period-specific or
+joint ownership is not inferred. A correction appends a rejection or a new
+explicit claim and retains prior evidence. Saving ownership does **not** accept
+a settlement: the next scheduled reconciliation pass (normally every five
+minutes) creates a fresh immutable candidate with the new evidence. Refreshing
+the page only reads that state. The operator must review and separately approve
+the resulting settlement candidate. Agents cannot approve these financial
+decisions.
 
 The commit rechecks the source publication/currentness, ownership, allocation
 availability and expected candidate revision in the same database batch that
