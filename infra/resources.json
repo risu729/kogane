@@ -576,7 +576,7 @@
         "source": "Mizuho direct collector integration, 2026-09-13",
         "proposedAction": "promoted-to-service",
         "proposedTarget": "services/collector-mizuho",
-        "requiredVerification": "Production release enabled; owner-session trigger only, no cron. Provision trigger token out of band; verify authenticated cloud read separately. Unattended renewal is not implemented.",
+        "requiredVerification": "Daily 06:25 JST login and collection with Worker secrets; additional authentication stops without retry. Provision credentials out of band and verify password login/cloud collection separately. Explicit-session trigger remains available.",
         "executionStatus": "DEPLOYMENT_ENABLED",
         "planLiveResourceStatus": "DEPLOYMENT_PENDING_VERIFICATION",
         "liveResourceStatus": "LIVE(buckets=kogane-raw-evidence)"
@@ -588,7 +588,9 @@
           "main": "src/worker.ts",
           "role": "not-deployed",
           "liveWorker": false,
-          "crons": [],
+          "crons": [
+            "25 21 * * *"
+          ],
           "emailHandler": false,
           "d1": [],
           "r2": [
@@ -611,7 +613,9 @@
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [
-            "ADMIN_TRIGGER_TOKEN"
+            "ADMIN_TRIGGER_TOKEN",
+            "MIZUHO_CUSTOMER_NUMBER",
+            "MIZUHO_LOGIN_PASSWORD"
           ],
           "unextractedKeys": []
         }
@@ -1500,6 +1504,11 @@
         "worker": "kogane-globalpass-collector-poc",
         "cron": "17 18 * * *",
         "live": true
+      },
+      {
+        "worker": "kogane-mizuho-collector",
+        "cron": "25 21 * * *",
+        "live": false
       },
       {
         "worker": "kogane-mobile-suica-collector-poc",

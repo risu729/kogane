@@ -72,6 +72,15 @@ export interface MizuhoArtifact {
   partial: boolean;
 }
 export const MIZUHO_CLIENT_ERROR_CODES = [
+  "mizuho-credentials-missing",
+  "invalid-login-credentials",
+  "login-required",
+  "login-challenge-required",
+  "login-unrecognized-page",
+  "login-redirect-rejected",
+  "login-timeout",
+  "login-network-error",
+  "login-http-error",
   "invalid-session-origin",
   "invalid-session-referer",
   "invalid-form-state",
@@ -233,7 +242,7 @@ export function extractMizuhoForm(html: string): MizuhoFormState {
   validateForm(result);
   return result;
 }
-function encodeForm(fields: Record<string, string>): string {
+export function encodeForm(fields: Record<string, string>): string {
   const encode = (value: string) => {
     const bytes = iconv.encode(value, "shift_jis");
     if (iconv.decode(bytes, "shift_jis") !== value) fail("unencodable-form-state");
@@ -329,7 +338,7 @@ export function parseSession(value: string): MizuhoSession {
     form: { name: input.form.name, fields: { ...input.form.fields } },
   };
 }
-function absorbCookies(cookies: Map<string, string>, response: Response, origin: string): void {
+export function absorbCookies(cookies: Map<string, string>, response: Response, origin: string): void {
   const headers = response.headers as Headers & { getSetCookie?: () => string[] };
   const combined = response.headers.get("set-cookie");
   const values =
