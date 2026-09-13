@@ -10,6 +10,7 @@ import { healthApi } from "./health";
 import { observationApi } from "./observation-api";
 import { rewardsApi } from "./rewards-api";
 import { eventsApi } from "./events-api";
+import { cardSettlementsApi, CARD_SETTLEMENT_PATH } from "./card-settlements-api";
 import { identityApi } from "./identity-api";
 import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
@@ -22,6 +23,7 @@ function classify(path: string): string {
   const ops = classifyOpsPath(path);
   if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
+  if (path === CARD_SETTLEMENT_PATH) return "card_settlement_review";
   if (path === `${PREFIX}/meta`) return "meta";
   if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
@@ -59,6 +61,8 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     throw new HttpError(405, "method_not_allowed");
   const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url, subject));
   if (sharedQueryResponse) return sharedQueryResponse;
+  const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
+  if (settlementResponse) return settlementResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   // Fixed report artifacts (A12). Re-display only; recomputing and sharing a

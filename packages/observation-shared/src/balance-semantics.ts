@@ -54,7 +54,11 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
   });
   const matches = (source: string, parser: string, metrics: string[]) =>
     input.sourceId === source && input.parserName === parser && metrics.includes(input.metric);
-  if (matches("myjcb", "myjcb-credit-past-month-balances", ["credit_statement_payment_amount"]))
+  if (
+    matches("myjcb", "myjcb-credit-past-month-balances", ["credit_statement_payment_amount"]) ||
+    matches("myjcb", "myjcb-credit-statement-total", ["credit_statement_payment_amount"]) ||
+    matches("vpass", "vpass-statement-page", ["credit_statement_payment_amount"])
+  )
     return result(
       "statement",
       "請求額",

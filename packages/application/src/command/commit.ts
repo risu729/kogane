@@ -33,6 +33,7 @@ import { commandError, type CommandResult } from "./errors.ts";
 import { loadPlan } from "./plan.ts";
 import { currentRevisions } from "./simulate.ts";
 import { expectedRevisionsJson } from "../operations/sql.ts";
+import { resolveAndSimulate } from "../operations/targets.ts";
 import {
   approvalConsumptionWrite,
   outboxWrite,
@@ -182,7 +183,16 @@ export async function commit(
     now: input.now,
     guard,
   });
-  if (!mutation) return commandError("commit_failed", [plan.planId]);
+  if (!mutation)
+    return failureReason(
+      store,
+      plan,
+      approval.approval_id,
+      principal.id,
+      operationId,
+      payloadDigest,
+      input.now,
+    );
 
   const outboxTargets = plan.simulation.outboxTargets ?? ["identity-projection"];
   const receipt: CommandReceipt = {
@@ -212,6 +222,7 @@ export async function commit(
       now: input.now,
       approvalId: approval.approval_id,
       expectedRevisionsJson: expectedJson,
+      ...(mutation.precondition ? { precondition: mutation.precondition } : {}),
     }),
     ...mutation.writes,
     approvalConsumptionWrite(approval.approval_id, operationId, principal.id),
@@ -271,6 +282,10 @@ async function failureReason(
   );
   if (stored && stored.status !== "planned" && stored.status !== "approved")
     return commandError("plan_not_open", [plan.planId]);
+  if (plan.kind === "card-settlement.accept") {
+    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
+    if (!eligibility.ok) return eligibility;
+  }
   // The operation id is taken by another principal: the key namespace is
   // global, so the caller must choose a new one rather than reuse this.
   const taken = await store.first<{ operation_id: string }>(

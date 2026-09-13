@@ -638,6 +638,40 @@
         }
       ],
       "sha256": "e124cfe411701cc295d310f0aac3d61d4b14d707898cd1e69cc421b935e4037d"
+    },
+    {
+      "file": "0044_card_statement_settlements.sql",
+      "statementCount": 27,
+      "insertStatements": [
+        {
+          "table": "card_settlement_scan_cursor",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "b4a24fa391b4c560678092e61f78aefc7fa4b8522321828044d7055e6a2d7a9b"
+    },
+    {
+      "file": "0045_expand_card_settlement_commands.sql",
+      "statementCount": 34,
+      "insertStatements": [
+        {
+          "table": "change_plans_expanded",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "approvals_expanded",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "operation_receipts_expanded",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "decision_outbox_expanded",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "8c7ddc06e2d3a7329ebdc532c26307697965cb6f62b6b398f23cf4e76481febc"
     }
   ],
   "tables": [
@@ -1396,7 +1430,7 @@
         "approvals_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "e879d8d83e2314ef"
+      "sqlSha256": "e5be941c66518d39"
     },
     {
       "name": "artifact_email_metadata",
@@ -2623,6 +2657,352 @@
       "sqlSha256": "7e2fb2705ac4c799"
     },
     {
+      "name": "card_settlement_allocation_withdrawals",
+      "classification": "core-keep",
+      "planRow": "card settlement evidence and decisions",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "settlement_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "decision_revision_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "settlement_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "decision_revision_id",
+          "references": "decision_revisions(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "settlement_id",
+          "references": "allocations(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "card_settlement_allocation_withdrawals_guard",
+        "card_settlement_allocation_withdrawals_no_delete",
+        "card_settlement_allocation_withdrawals_no_update"
+      ],
+      "noUpdateTriggers": [
+        "card_settlement_allocation_withdrawals_no_update"
+      ],
+      "noDeleteTriggers": [
+        "card_settlement_allocation_withdrawals_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "313c7dc15d74eeec"
+    },
+    {
+      "name": "card_settlement_candidates",
+      "classification": "core-keep",
+      "planRow": "card settlement evidence and decisions",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "statement_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bank_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "statement_observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "statement_parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bank_observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bank_parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "policy_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "facts_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "proposal_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "bank_observation_id",
+          "references": "transaction_observations(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "bank_parse_run_id",
+          "references": "parse_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "statement_observation_id",
+          "references": "balance_observations(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "statement_parse_run_id",
+          "references": "parse_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "card_settlement_candidates_bank",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "bank_key"
+          ]
+        },
+        {
+          "name": "card_settlement_candidates_statement",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "statement_key"
+          ]
+        }
+      ],
+      "triggers": [
+        "card_settlement_candidates_no_delete",
+        "card_settlement_candidates_no_replace",
+        "card_settlement_candidates_no_update"
+      ],
+      "noUpdateTriggers": [
+        "card_settlement_candidates_no_update"
+      ],
+      "noDeleteTriggers": [
+        "card_settlement_candidates_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "a8b096a2533c3501"
+    },
+    {
+      "name": "card_settlement_decisions",
+      "classification": "core-keep",
+      "planRow": "card settlement evidence and decisions",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "proposal_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "decision_revision_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "obligation_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "settlement_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "proposal_id",
+        "revision"
+      ],
+      "foreignKeys": [
+        {
+          "column": "decision_revision_id",
+          "references": "decision_revisions(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "proposal_id",
+          "references": "card_settlement_candidates(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "settlement_id",
+          "references": "allocations(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "card_settlement_decisions_bump_revision_delete",
+        "card_settlement_decisions_bump_revision_insert",
+        "card_settlement_decisions_bump_revision_update",
+        "card_settlement_decisions_guard",
+        "card_settlement_decisions_no_delete",
+        "card_settlement_decisions_no_update"
+      ],
+      "noUpdateTriggers": [
+        "card_settlement_decisions_no_update"
+      ],
+      "noDeleteTriggers": [
+        "card_settlement_decisions_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "1b8d2ad647ee3063"
+    },
+    {
+      "name": "card_settlement_scan_cursor",
+      "classification": "operational-mutable",
+      "planRow": "bounded card settlement scan progress",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "singleton",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "last_statement_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "singleton"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "08e5b6137f4cae9e"
+    },
+    {
       "name": "change_plans",
       "classification": "core-keep",
       "planRow": "change plans, approvals and receipts",
@@ -2725,7 +3105,7 @@
         "change_plans_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "e030ea4e3a970d72"
+      "sqlSha256": "18f26f845a6d8bed"
     },
     {
       "name": "collection_run_stages",
@@ -3754,7 +4134,7 @@
         "decision_outbox_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "85ae93c904a0c7d7"
+      "sqlSha256": "8a6f3e75bf67be32"
     },
     {
       "name": "decision_revisions",
@@ -8333,7 +8713,7 @@
         "operation_receipts_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "208c40006d2eff16"
+      "sqlSha256": "d254a61c3269acbb"
     },
     {
       "name": "ops_request_stages",
@@ -11992,6 +12372,90 @@
       "sqlSha256": "9d162a1f37abd68d"
     },
     {
+      "name": "card_bank_debit_facts",
+      "columns": [
+        "id",
+        "parse_run_id",
+        "source_account",
+        "unit_ref",
+        "source_id",
+        "as_of",
+        "external_id",
+        "status",
+        "extra_json",
+        "value_status",
+        "coefficient",
+        "scale",
+        "bank_key",
+        "position"
+      ],
+      "sqlSha256": "1387875bba151f32"
+    },
+    {
+      "name": "card_settlement_fact_ownership",
+      "columns": [
+        "kind",
+        "observation_id",
+        "account_id",
+        "owner_ref",
+        "evidence_refs_json"
+      ],
+      "sqlSha256": "4ed129fabd3013bb"
+    },
+    {
+      "name": "card_settlement_readiness",
+      "columns": [
+        "id",
+        "statement_current",
+        "bank_current",
+        "ownership_current",
+        "allocation_available"
+      ],
+      "sqlSha256": "7a76a7fa25f181f7"
+    },
+    {
+      "name": "card_settlement_reviews",
+      "columns": [
+        "id",
+        "statement_key",
+        "bank_key",
+        "statement_observation_id",
+        "statement_parse_run_id",
+        "bank_observation_id",
+        "bank_parse_run_id",
+        "policy_release",
+        "facts_json",
+        "proposal_digest",
+        "created_at",
+        "revision",
+        "status",
+        "decision_revision_id",
+        "event_id",
+        "obligation_id",
+        "settlement_id"
+      ],
+      "sqlSha256": "065560a23692efe3"
+    },
+    {
+      "name": "card_statement_facts",
+      "columns": [
+        "id",
+        "parse_run_id",
+        "source_account",
+        "unit_ref",
+        "source_id",
+        "fetched_at",
+        "value_status",
+        "coefficient",
+        "scale",
+        "payment_date",
+        "period",
+        "statement_key",
+        "position"
+      ],
+      "sqlSha256": "5cd2680fcf78f6ee"
+    },
+    {
       "name": "current_account_connection_reviews",
       "columns": [
         "id",
@@ -12043,7 +12507,23 @@
         "superseded_by",
         "created_at"
       ],
-      "sqlSha256": "c1dabeb6156405b0"
+      "sqlSha256": "0499c33f62accc89"
+    },
+    {
+      "name": "current_card_settlement_allocations",
+      "columns": [
+        "id",
+        "source_component_ref",
+        "target_effect_ref",
+        "role",
+        "unit_ref",
+        "coefficient",
+        "scale",
+        "decision_revision_id",
+        "superseded_by",
+        "created_at"
+      ],
+      "sqlSha256": "18d022872e04f7ed"
     },
     {
       "name": "current_economic_events",
@@ -12963,6 +13443,90 @@
       "timing": "BEFORE",
       "event": "UPDATE OF STATUS",
       "sqlSha256": "c01baa60705e79d6"
+    },
+    {
+      "name": "card_settlement_allocation_withdrawals_guard",
+      "table": "card_settlement_allocation_withdrawals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "40a479fd4a0bc5ca"
+    },
+    {
+      "name": "card_settlement_allocation_withdrawals_no_delete",
+      "table": "card_settlement_allocation_withdrawals",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "198a751a610abb7b"
+    },
+    {
+      "name": "card_settlement_allocation_withdrawals_no_update",
+      "table": "card_settlement_allocation_withdrawals",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "19bbecfd3b84125f"
+    },
+    {
+      "name": "card_settlement_candidates_no_delete",
+      "table": "card_settlement_candidates",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "0c3218303a396f23"
+    },
+    {
+      "name": "card_settlement_candidates_no_replace",
+      "table": "card_settlement_candidates",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "f4889aabb64ff5ca"
+    },
+    {
+      "name": "card_settlement_candidates_no_update",
+      "table": "card_settlement_candidates",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "628137b883071435"
+    },
+    {
+      "name": "card_settlement_decisions_bump_revision_delete",
+      "table": "card_settlement_decisions",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "aaa42a983b4721e5"
+    },
+    {
+      "name": "card_settlement_decisions_bump_revision_insert",
+      "table": "card_settlement_decisions",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "caff2de65e861d31"
+    },
+    {
+      "name": "card_settlement_decisions_bump_revision_update",
+      "table": "card_settlement_decisions",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "41d950aa3d235a98"
+    },
+    {
+      "name": "card_settlement_decisions_guard",
+      "table": "card_settlement_decisions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "8cd6c48672df8551"
+    },
+    {
+      "name": "card_settlement_decisions_no_delete",
+      "table": "card_settlement_decisions",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "79210e794b12fb73"
+    },
+    {
+      "name": "card_settlement_decisions_no_update",
+      "table": "card_settlement_decisions",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "e73898e7453e7bd1"
     },
     {
       "name": "change_plans_no_delete",
@@ -15060,6 +15624,16 @@
       "sqlSha256": "d1ea79e43a286823"
     },
     {
+      "name": "card_settlement_candidates_bank",
+      "table": "card_settlement_candidates",
+      "sqlSha256": "b481b789f02d61ad"
+    },
+    {
+      "name": "card_settlement_candidates_statement",
+      "table": "card_settlement_candidates",
+      "sqlSha256": "f77a383fb344ed34"
+    },
+    {
       "name": "change_plans_status",
       "table": "change_plans",
       "sqlSha256": "6d550e9d16f24464"
@@ -15546,10 +16120,10 @@
     }
   ],
   "summary": {
-    "tableCount": 102,
-    "viewCount": 31,
-    "triggerCount": 375,
-    "explicitIndexCount": 104,
+    "tableCount": 106,
+    "viewCount": 37,
+    "triggerCount": 387,
+    "explicitIndexCount": 106,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -15570,6 +16144,9 @@
         "calculation_policies",
         "calculation_results",
         "calculation_runs",
+        "card_settlement_allocation_withdrawals",
+        "card_settlement_candidates",
+        "card_settlement_decisions",
         "change_plans",
         "collection_run_stages",
         "collection_runs",
@@ -15647,6 +16224,7 @@
       ],
       "read-candidate": [],
       "operational-mutable": [
+        "card_settlement_scan_cursor",
         "collection_scan_state",
         "observation_lane_state",
         "observation_parse_jobs",
@@ -15666,6 +16244,7 @@
       "allocations",
       "approvals",
       "calculation_runs",
+      "card_settlement_scan_cursor",
       "change_plans",
       "collection_runs",
       "collection_scan_state",
@@ -15736,8 +16315,10 @@
       "0035_observation_job_lanes.sql",
       "0038_source_revision.sql",
       "0039_collection_runs.sql",
-      "0043_remove_synthetic_bootstrap.sql"
+      "0043_remove_synthetic_bootstrap.sql",
+      "0044_card_statement_settlements.sql",
+      "0045_expand_card_settlement_commands.sql"
     ],
-    "schemaSha256": "c62cf12fa235c852d78a7806d95b82f380baeb0b1730dcdf04f5847edc635c69"
+    "schemaSha256": "b0bab16f796dabc97e55e31602856a6520612254881d75ea94bf5920e360647c"
   }
 }

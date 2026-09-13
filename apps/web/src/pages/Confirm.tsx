@@ -8,6 +8,9 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFeatures } from "../api.ts";
+import { useCardSettlement } from "../reconciliation-api.ts";
+import { CardSettlementDetails } from "../reconciliation-display.tsx";
+import { Link } from "../router.tsx";
 import { Badge, EmptyState, ErrorState, Kv, KvRow, Loading, Panel } from "../ui.tsx";
 import {
   CommandError,
@@ -22,6 +25,9 @@ const KIND_LABELS: Record<string, string> = {
   "identity.release-override": "手動確定の解除（自動方針に戻す）",
   "relation.accept": "関係の採用",
   "relation.reject": "関係の却下",
+  "card-settlement.accept": "カード請求と銀行引落の対応付けを採用",
+  "card-settlement.reject": "カード決済の照合候補を却下",
+  "card-settlement.withdraw": "カード決済の採用を解除",
 };
 
 const RECEIPT_STATE: Record<string, { tone: "ok" | "warn" | "bad"; label: string; note: string }> =
@@ -52,6 +58,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
   const client = useQueryClient();
   const [approval, setApproval] = useState<ApprovalView | null>(null);
   const [receipt, setReceipt] = useState<ReceiptView | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
   // One operation id per approval: a resend of the same confirmation is the
   // same operation, so a lost response never commits twice (addendum 10 §6).
   const [operationId, setOperationId] = useState<string | null>(null);
@@ -64,6 +71,34 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       ),
     retry: false,
   });
+
+  const requiresSettlement = report.data?.simulation.kind.startsWith("card-settlement.") === true;
+  const settlementTarget = report.data?.simulation.targets.find((target) =>
+    target.subjectRef.startsWith("card-settlement:"),
+  );
+  const settlementProposalId =
+    requiresSettlement && settlementTarget
+      ? settlementTarget.subjectRef.slice("card-settlement:".length)
+      : null;
+  const settlement = useCardSettlement(settlementProposalId);
+  const settlementRevisionMatches =
+    !requiresSettlement ||
+    (settlement.data != null &&
+      settlementTarget !== undefined &&
+      settlement.data.revision === report.data?.expectedRevisions[settlementTarget.subjectRef]);
+  const settlementActionAllowed =
+    !requiresSettlement ||
+    (settlement.data != null &&
+      (report.data?.simulation.kind === "card-settlement.accept"
+        ? settlement.data.status === "proposed" && settlement.data.acceptanceBlockers.length === 0
+        : report.data?.simulation.kind === "card-settlement.reject"
+          ? settlement.data.status === "proposed"
+          : report.data?.simulation.kind === "card-settlement.withdraw" &&
+            settlement.data.status === "accepted"));
+  const settlementReady =
+    (!requiresSettlement || features.cardSettlementReconciliation) &&
+    settlementRevisionMatches &&
+    settlementActionAllowed;
 
   const approveMutation = useMutation({
     mutationFn: async (digest: string) => {
@@ -97,11 +132,18 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
 
   const refreshReceipt = useCallback(() => {
     if (operationId === null) return;
+    setReceiptError(null);
     void postCommand<{ receipt: ReceiptView }>(
       "operation",
       { operationId },
       new AbortController().signal,
-    ).then((value) => setReceipt(value.receipt));
+    )
+      .then((value) => setReceipt(value.receipt))
+      .catch(() =>
+        setReceiptError(
+          "反映状況を確認できませんでした。受理済みの判断を再送せず、状況確認をやり直してください。",
+        ),
+      );
   }, [operationId]);
 
   if (report.isPending) return <Loading label="確認内容" />;
@@ -111,7 +153,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
     );
   const data = report.data;
   const stale = data.stale;
-  const canAct = features.known && features.commands && !stale;
+  const canAct = features.known && features.commands && !stale && settlementReady;
 
   return (
     <>
@@ -150,12 +192,50 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
         ) : null}
       </Panel>
 
+      {requiresSettlement ? (
+        <Panel id="settlement-review" title="請求・銀行原本と金額の確認">
+          {!features.cardSettlementReconciliation ? (
+            <p role="alert">照合の詳細を取得できない接続先のため、承認・確定できません。</p>
+          ) : settlement.isPending ? (
+            <Loading label="照合の根拠" />
+          ) : settlement.isError ? (
+            <ErrorState
+              error={settlement.error}
+              label="照合の根拠"
+              onRetry={() => void settlement.refetch()}
+            />
+          ) : settlement.data ? (
+            <CardSettlementDetails review={settlement.data} />
+          ) : (
+            <p role="alert">対象の照合候補が見つかりません。</p>
+          )}
+          {!settlementRevisionMatches && settlement.isSuccess ? (
+            <p role="alert">
+              候補の判断が計画作成後に更新されています。新しい計画で確認し直してください。
+            </p>
+          ) : null}
+          {!settlementActionAllowed && settlement.isSuccess ? (
+            <p role="alert">
+              この候補では計画した操作を実行できません。条件と根拠を一覧で確認し直してください。
+            </p>
+          ) : null}
+          {data.simulation.kind === "card-settlement.withdraw" ? (
+            <p className="panel-note">
+              解除するのは請求と引落の対応付けです。銀行の出金原本は残り、現金が返却されたことにはなりません。
+            </p>
+          ) : null}
+          <p>
+            <Link to="/reconciliation">照合候補に戻る</Link>
+          </p>
+        </Panel>
+      ) : null}
+
       <Panel id="plan-targets" title="対象" count={data.simulation.targets.length}>
         {data.simulation.targets.length === 0 ? (
           <EmptyState>対象がありません。</EmptyState>
         ) : (
           <div className="table-scroll">
-            <table>
+            <table className={requiresSettlement ? "settlement-targets" : undefined}>
               <thead>
                 <tr>
                   <th scope="col">対象</th>
@@ -186,7 +266,11 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       <Panel
         id="plan-diff"
         title="サーバーが計算した差分"
-        note="件数と対象の識別子のみです。金額はこの画面では扱いません。"
+        note={
+          requiresSettlement
+            ? "変更計画には件数と対象の識別子を記録します。照合の金額は上の原本・決済情報で確認します。"
+            : "件数と対象の識別子のみです。金額はこの画面では扱いません。"
+        }
       >
         <Kv>
           <KvRow label="対応付けが変わる明細">
@@ -280,7 +364,10 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
               <code>{receipt.decisionRevisionId}</code>
             </KvRow>
           </Kv>
-          <p className="panel-note">{RECEIPT_STATE[receipt.status]?.note ?? ""}</p>
+          <p className="panel-note" role="status">
+            {RECEIPT_STATE[receipt.status]?.note ?? ""}
+          </p>
+          {receiptError ? <p role="alert">{receiptError}</p> : null}
           {receipt.status === "accepted" ? (
             <div className="button-row">
               <button className="button" type="button" onClick={refreshReceipt}>

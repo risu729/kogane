@@ -2,18 +2,12 @@
 // review 09 section 2: matching and its explanation before any net-worth
 // screen).
 //
-// Chosen pair: **pending against posted inside one source**, on the Vpass
-// statement page. That parser emits two provider displays of the same card and
-// the same statement month -- the `customized` family with provider status
-// `unconfirmed` (a pending authorisation) and the `web` family with `posted`
-// (the statement line) -- under one `vpass:<card>` source account. It is the
-// only pair in the deployed parser set where both sides of a pending/posted
-// revision exist in one identifier namespace, so no cross-source ownership has
-// to be established first (UC13, SC03). MyJCB's credit ledger has the same
-// shape (`unconfirmed` and `confirmed` for one connection and period) and is
-// the next entry to add to `RECONCILIATION_SLICES`.
+// Pending/posted pairs stay inside one source account and billing period.
+// Vpass uses unconfirmed/posted; MyJCB uses unconfirmed/confirmed. MyJCB's
+// posted payment can be an installment slice, so only rows whose explicit
+// usage and payment totals agree participate in the pending purchase match.
 //
-// Nothing is accepted automatically. Auto-acceptance needs a link id the
+// // Nothing is accepted automatically. Auto-acceptance needs a link id the
 // provider itself issued for the pair, exposed by the parser as
 // `extra_json.$._kogane.providerLinkId`. Surveying the deployed parsers and
 // `docs/sources/*.md`: MyJCB's third-party column survey mentions an approval
@@ -53,11 +47,12 @@ export interface ReconciliationSlice {
 }
 
 /**
- * Exactly one slice to start with (addendum 07 section 8: finish one vertical
- * slice before generalising). MyJCB is the documented next entry.
+ * Explicit supported provider status families; installment comparability is
+ * checked before MyJCB facts enter the matcher.
  */
 export const RECONCILIATION_SLICES: readonly ReconciliationSlice[] = [
   { sourceId: "vpass", pendingStatuses: ["unconfirmed"], postedStatuses: ["posted"] },
+  { sourceId: "myjcb", pendingStatuses: ["unconfirmed"], postedStatuses: ["confirmed"] },
 ];
 
 /** Bounds: one sweep reads at most this many published rows and pairs inside bounded groups. */
@@ -100,6 +95,8 @@ interface FactRow {
   statement_period: string | null;
   provider_link_id: string | null;
   identity_origin: string | null;
+  usage_amount_text: string | null;
+  payment_amount_text: string | null;
 }
 
 const jsonText = (path: string) =>
@@ -115,9 +112,11 @@ const jsonText = (path: string) =>
 export const factQuery = `SELECT t.id,t.parse_run_id,t.source_account,t.external_id,t.status,t.as_of,
  t.counterparty,t.currency,a.source_id,fr.producer_id,ses.external_id_namespace,
  d.status AS value_status,d.coefficient,d.scale,d.basis AS value_basis,
- ${jsonText("$._kogane.statementMonth")} AS statement_period,
+ coalesce(${jsonText("$._kogane.statementMonth")},replace(${jsonText("$._kogane.period")},'-','')) AS statement_period,
  ${jsonText("$._kogane.providerLinkId")} AS provider_link_id,
- ${jsonText("$._kogane.identityOrigin")} AS identity_origin
+ ${jsonText("$._kogane.identityOrigin")} AS identity_origin,
+ ${jsonText("$._kogane.usageAmountText")} AS usage_amount_text,
+ ${jsonText("$._kogane.paymentAmountText")} AS payment_amount_text
 FROM transaction_observations t
 JOIN parse_runs p ON p.id=t.parse_run_id
 JOIN published_parse_runs pub ON pub.parse_run_id=p.id
@@ -271,7 +270,9 @@ export async function reconciliationSweep(
       )
       .all<FactRow>();
     result.scanned += rows.results.length;
-    const groups = groupFacts(rows.results.map((row) => factOf(row, slice)));
+    const groups = groupFacts(
+      rows.results.filter(comparablePayment).map((row) => factOf(row, slice)),
+    );
     for (const facts of groups.values()) {
       if (facts.length > GROUP_LIMIT) {
         result.groupsSkipped += 1;
@@ -304,4 +305,17 @@ export async function reconciliationSweep(
     }
   }
   return result;
+}
+
+/** MyJCB's posted amount can be an installment slice. Only a provider row with
+ * equal full usage/payment amounts participates in pending-to-posted matching. */
+function comparablePayment(row: FactRow): boolean {
+  if (row.source_id !== "myjcb" || row.status !== "confirmed") return true;
+  const parse = (value: string | null): bigint | null => {
+    if (value === null || !/^[0-9]+(?:,[0-9]{3})*$/.test(value.trim())) return null;
+    return BigInt(value.trim().replaceAll(",", ""));
+  };
+  const usage = parse(row.usage_amount_text),
+    payment = parse(row.payment_amount_text);
+  return usage !== null && usage > 0n && usage === payment;
 }

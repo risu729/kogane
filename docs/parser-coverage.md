@@ -451,3 +451,20 @@ Synthetic data only: the CI checks (today `mise run //<workspace>:ci`) of
 `hk check --all`. Not verified:
 production data, a real D1 or R2, and the effect of switching any production
 dataset to `coverage-v1` (no dataset is switched by this change).
+
+## Card payment totals
+
+Vpass finalized Web statement headers and MyJCB confirmed detail HTML now emit
+`credit_statement_payment_amount` observations with an explicit provider payment
+date. Vpass reads `payTotal`/`shiharaiDate`/`seikyuYm` on the first finalized page;
+MyJCB reads the dated `お支払い金額合計` definition and paired amount, verifying
+the statement month. Missing totals remain absent; contradictory or ambiguous
+fields fail parsing. Customized Vpass amounts, MyJCB unconfirmed pages and
+purchase-row sums do not establish a final bill.
+
+These are statement measurements, excluded from net-asset summation. They do
+not establish outstanding principal, payment completion or fee decomposition.
+MyJCB past-month summary observations remain month-based and are not promoted
+to exact payment dates. New synthetic tests cover ambiguity, invalid dates,
+refund/zero totals and mutable pages; archived provider samples were checked
+read-only without copying private values into fixtures.

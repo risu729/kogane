@@ -277,3 +277,17 @@ migration 0026.
 Not verified: production data, and the behaviour of concurrent acceptances from
 several Workers (the operation ledger and the proposal-resolution trigger are the
 arbiter; see the tests).
+
+## Statement settlement review
+
+[Card statement settlement review](card-settlements.md) implements the first
+operator-approved Vpass/MyJCB-to-SMBC payment correspondence. Its append-only
+candidate decisions pin published source revisions, ownership evidence and
+exclusive payment allocation, with an approved withdrawal path. Acceptance
+records the observed cash effect and keeps principal/fee decomposition unknown;
+a statement total is not turned into an invented obligation principal.
+
+The confirmation flow uses `card-settlement.accept`, `card-settlement.reject`
+and `card-settlement.withdraw`. The last withdraws a judgement, not funds.
+All effects, receipt reservation and approval consumption share one guarded
+batch. Original source observations and historical decisions are preserved.

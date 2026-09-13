@@ -1,4 +1,10 @@
-import type { ArtifactMeta, Parser, ParseResult, TransactionObservation } from "../types.ts";
+import type {
+  ArtifactMeta,
+  BalanceObservation,
+  Parser,
+  ParseResult,
+  TransactionObservation,
+} from "../types.ts";
 import { decodeUtf8, isObject, unitScopeAdmitted } from "./util.ts";
 import { stableFingerprint } from "./sbi-strict.ts";
 
@@ -72,7 +78,7 @@ interface Scope {
 
 export const vpassStatementPage: Parser = {
   name: "vpass-statement-page",
-  version: "1.0.0",
+  version: "1.1.0",
   accepts(artifact: ArtifactMeta): boolean {
     return (
       artifact.sourceId === SOURCE &&
@@ -216,7 +222,94 @@ function parseWeb(
         `json:$.body.content.WebMeisaiTopDisplayServiceBean.meisaiList[${index}].data[5] has no provider amount`,
       );
   });
-  return { observations, warnings };
+  const statementPayment = webStatementPayment(bean, artifact, scope);
+  return {
+    observations:
+      statementPayment === undefined ? observations : [...observations, statementPayment],
+    warnings,
+  };
+}
+
+/**
+ * Vpass Android maps these TopDetail fields directly to a final bill's
+ * amount/date/period. Customized shiharaiKin fields are a different, unsettled
+ * model. No row sum or settlement inference belongs in this observation.
+ */
+function webStatementPayment(
+  bean: Record<string, unknown>,
+  artifact: ArtifactMeta,
+  scope: Scope,
+): BalanceObservation | undefined {
+  // The header repeats during pagination; one artifact contributes one bill.
+  if (scope.pageIndex !== 0) return undefined;
+  const locator = "json:$.body.content.WebMeisaiTopDisplayServiceBean.webMeisaiTopK3Vo";
+  const summary = requiredObject(bean["webMeisaiTopK3Vo"], "vpass statement summary");
+  if (summary["payTotal"] === undefined) return undefined;
+  // The app marks saiseiStatus=1 as still creating even in the web family.
+  if (bean["saiseiStatus"] === "1") return undefined;
+  if (bean["saiseiStatus"] !== "0")
+    throw new Error("vpass statement summary has an unsupported creation status");
+  const payTotal = boundedString(summary["payTotal"], `${locator}.payTotal`, false);
+  const amount = jpyInteger(payTotal, `${locator}.payTotal`);
+  const providerMonth = boundedString(summary["seikyuYm"], `${locator}.seikyuYm`, false);
+  if (providerMonth !== scope.month)
+    throw new Error("vpass statement summary month conflicts with artifact key");
+  const period = `${scope.month.slice(0, 4)}-${scope.month.slice(4)}`;
+  const providerPaymentDate = boundedString(
+    summary["shiharaiDate"],
+    `${locator}.shiharaiDate`,
+    false,
+  );
+  const paymentDate = statementPaymentDate(providerPaymentDate, `${locator}.shiharaiDate`);
+  return {
+    kind: "balance",
+    sourceAccount: `vpass:${scope.card}`,
+    metric: "credit_statement_payment_amount",
+    amountMinor: amount,
+    amountText: String(amount),
+    amountScale: 0,
+    instrument: "JPY",
+    asOf: `${period}-01`,
+    observedAt: canonicalInstant(artifact.fetchedAt, "artifact.fetchedAt"),
+    rawLocator: `${locator}.payTotal`,
+    // Retain only the relevant provider fields, never the account/card/name
+    // fields that share this header. The artifact remains the full evidence.
+    extra: {
+      payTotal,
+      seikyuYm: providerMonth,
+      shiharaiDate: providerPaymentDate,
+      _kogane: {
+        canonicalDataset: "statement-page",
+        sourceAccountScope: "card-statement-aggregate",
+        statementFamily: "web",
+        statementMonth: scope.month,
+        period,
+        paymentDate,
+        pageKind: scope.pageKind,
+        pageIndex: scope.pageIndex,
+        amountSign: "provider-statement-total",
+        snapshotSemantics: "provider-reported-monthly-payment-amount",
+      },
+    },
+  };
+}
+
+function statementPaymentDate(value: string, label: string): string {
+  const match = /^(\d{4})年(\d{1,2})月(\d{1,2})日$/u.exec(value.normalize("NFKC").trim());
+  if (!match) throw new Error(`${label} is not a provider YYYY年M月D日 date`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    year < 2000 ||
+    year > 2199 ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  )
+    throw new Error(`${label} is not a calendar date`);
+  return `${match[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function parseCustomized(

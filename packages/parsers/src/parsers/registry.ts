@@ -9,7 +9,12 @@ import {
   moneyForwardEvidenceOnly,
   moneyForwardMonthlyTransactions,
 } from "./moneyforward-parser.ts";
-import { myJcbCreditLedger, myJcbEvidenceOnly, myJcbPastMonthBalances } from "./myjcb.ts";
+import {
+  myJcbCreditLedger,
+  myJcbCreditStatement,
+  myJcbEvidenceOnly,
+  myJcbPastMonthBalances,
+} from "./myjcb.ts";
 import {
   sonyBankGrossBalance,
   sonyBankHistoryCsv,
@@ -44,6 +49,7 @@ export const PARSERS: readonly Parser[] = [
   moneyForwardMonthlyTransactions,
   moneyForwardEvidenceOnly,
   myJcbCreditLedger,
+  myJcbCreditStatement,
   myJcbPastMonthBalances,
   myJcbEvidenceOnly,
   sonyBankGrossBalance,

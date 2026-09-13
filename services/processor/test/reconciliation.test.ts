@@ -45,6 +45,8 @@ interface SeedRow {
   family: string;
   linkId?: string;
   origin?: string;
+  usageAmountText?: string;
+  paymentAmountText?: string;
 }
 
 /** One published parse of one artifact carrying the given synthetic rows. */
@@ -67,6 +69,10 @@ async function seedRows(
     const extra = {
       _kogane: {
         statementMonth: row.month,
+        ...(row.usageAmountText === undefined ? {} : { usageAmountText: row.usageAmountText }),
+        ...(row.paymentAmountText === undefined
+          ? {}
+          : { paymentAmountText: row.paymentAmountText }),
         statementFamily: row.family,
         identityOrigin: row.origin ?? "sanitized-row+card+month+family+occurrence",
         ...(row.linkId === undefined ? {} : { providerLinkId: row.linkId }),
@@ -120,8 +126,8 @@ async function proposals(): Promise<
   }));
 }
 
-test("the slice is exactly the Vpass pending/posted pair", () => {
-  expect(RECONCILIATION_SLICES).toHaveLength(1);
+test("slices cover Vpass and guarded MyJCB pending/posted pairs", () => {
+  expect(RECONCILIATION_SLICES).toHaveLength(2);
   expect(VPASS).toEqual({
     sourceId: "vpass",
     pendingStatuses: ["unconfirmed"],
@@ -144,7 +150,7 @@ test("a pending and a posted row of one card become one candidate, accepted by n
     { status: "posted", amount: -1234, asOf: "2026-03-02", month: "2026-03", family: "web" },
   ]);
   const first = await reconciliationSweep(db, { now: "2026-03-20T00:00:00Z" });
-  expect(first).toMatchObject({ slices: 1, scanned: 2, groups: 1, written: 1, autoAccepted: 0 });
+  expect(first).toMatchObject({ slices: 2, scanned: 2, groups: 1, written: 1, autoAccepted: 0 });
   const stored = await proposals();
   expect(stored).toHaveLength(1);
   expect(stored[0]).toMatchObject({
@@ -487,3 +493,34 @@ test("migration 0032 applies on 0017 through 0035 with seeded rows and keeps its
     await local.dispose();
   }
 }, 60_000);
+
+test("MyJCB full one-payment rows propose, installment slices do not mimic a pending purchase", async () => {
+  const myjcb = RECONCILIATION_SLICES.find((slice) => slice.sourceId === "myjcb")!;
+  await seedRows("myjcb", "full-payment", [
+    { status: "unconfirmed", amount: -1200, asOf: "2026-09-01", month: "202609", family: "ledger" },
+    {
+      status: "confirmed",
+      amount: -1200,
+      asOf: "2026-09-01",
+      month: "202609",
+      family: "ledger",
+      usageAmountText: "1,200",
+      paymentAmountText: "1,200",
+    },
+  ]);
+  await seedRows("myjcb", "installment-slice", [
+    { status: "unconfirmed", amount: -300, asOf: "2026-09-01", month: "202609", family: "ledger" },
+    {
+      status: "confirmed",
+      amount: -300,
+      asOf: "2026-09-01",
+      month: "202609",
+      family: "ledger",
+      usageAmountText: "1,200",
+      paymentAmountText: "300",
+    },
+  ]);
+  const result = await reconciliationSweep(db, { slices: [myjcb] });
+  expect(result.written).toBe(1);
+  expect(result.autoAccepted).toBe(0);
+});

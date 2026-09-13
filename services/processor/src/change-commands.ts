@@ -33,6 +33,8 @@ import { IDENTITY_POLICY_VERSION } from "./identity-store.ts";
 import { identitySubjectRef } from "../../../packages/application/src/operations/sql.ts";
 import { prepareIdentityCommand } from "./identity-commands.ts";
 
+import { cardSettlementMutation } from "./card-settlement-commands.ts";
+
 const BODY_LIMIT = 16 * 1024;
 const ACTOR = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
 const COMMAND_PATH = /^\/command\/v1\/(plan|simulate|approve|commit|operation)$/u;
@@ -96,6 +98,9 @@ export function changeMutationPlanners(db: D1Database): MutationPlanners {
     "identity.release-override": identity,
     "relation.accept": relationMutation,
     "relation.reject": relationMutation,
+    "card-settlement.accept": cardSettlementMutation,
+    "card-settlement.reject": cardSettlementMutation,
+    "card-settlement.withdraw": cardSettlementMutation,
   };
 }
 

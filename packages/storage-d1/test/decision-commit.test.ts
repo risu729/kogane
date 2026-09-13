@@ -69,7 +69,10 @@ function mutationWrites(): SqlWrite[] {
   ];
 }
 
-function commitWrites(expectedRevisions: Record<string, number>): SqlWrite[] {
+function commitWrites(
+  expectedRevisions: Record<string, number>,
+  precondition?: SqlWrite,
+): SqlWrite[] {
   return [
     receiptReservationWrite({
       operationId: OPERATION_ID,
@@ -81,6 +84,7 @@ function commitWrites(expectedRevisions: Record<string, number>): SqlWrite[] {
       now: NOW,
       approvalId: APPROVAL_ID,
       expectedRevisionsJson: JSON.stringify(expectedRevisions),
+      ...(precondition ? { precondition } : {}),
     }),
     ...mutationWrites(),
     approvalConsumptionWrite(APPROVAL_ID, OPERATION_ID, PRINCIPAL),
@@ -126,6 +130,38 @@ INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kin
     expect(counts()).toEqual(before);
     expect(before.receipts).toBe(0);
     expect(before.outbox).toBe(0);
+  });
+
+  test("domain eligibility is rechecked inside reservation and consumes nothing on failure", async () => {
+    seed({ [SUBJECT]: 0 });
+    const before = counts();
+    const store = d1CommandStore(sqliteD1(db));
+    // Simulate a source becoming ineligible after planning, while the target
+    // decision revision itself remains unchanged. Two anonymous parameters
+    // exercise the offset after the reservation's nine numbered parameters.
+    const precondition = {
+      sql: "EXISTS(SELECT 1 FROM accounts WHERE id=? AND status=?)",
+      binds: ["acct-1", "unresolved"],
+    };
+    const refused = await store.batch(commitWrites({ [SUBJECT]: 0 }, precondition));
+    expect(refused.every((result) => result.changes === 0)).toBe(true);
+    expect(counts()).toEqual(before);
+    const accepted = await store.batch(
+      commitWrites(
+        { [SUBJECT]: 0 },
+        {
+          ...precondition,
+          binds: ["acct-1", "identified"],
+        },
+      ),
+    );
+    expect(accepted[0]?.changes).toBe(1);
+    expect(counts()).toMatchObject({
+      receipts: 1,
+      decisions: 1,
+      approvalUses: 0,
+      committedPlans: 1,
+    });
   });
 
   test("the same batch with the revision the plan expected writes all of it", async () => {
