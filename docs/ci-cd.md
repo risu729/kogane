@@ -12,8 +12,7 @@ arguments and existing environment values unchanged. The dependency-free ledger
 and auto-merge stages select only the pinned Node tool with `MISE_ENABLE_TOOLS`.
 `--no-deps` prevents a package install before a release decision or while an
 automation token is in scope. These production/account-changing tasks never join
-the development validation graph described in [CI](ci.md). The separate
-`automation:` namespace also keeps them out of the current `ci:*` discovery.
+`hk check`; that command covers only the validation graph described in [CI](ci.md).
 For rollback commits that predate these tasks, the release workflow selects the
 legacy `.github/scripts/release-*.mjs` entrypoint from the same verified commit.
 Selection is by file layout, never a fallback after a failed command; no release

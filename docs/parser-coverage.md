@@ -444,7 +444,7 @@ scope (no dataset is switched by this change).
 
 ## Verified locally
 
-Synthetic data only: the CI checks (today `mise run ci:<short>`) of
+Synthetic data only: the CI checks (today `mise run //<workspace>:ci`) of
 `experiments/observation-pipeline-local`, `services/processor`,
 `services/raw-evidence`, `services/app`, `packages/read-model`,
 `packages/domain`; the repository-wide guards (`mise run ci:root`);

@@ -4,7 +4,7 @@ The hosted `kogane-demo` Worker has been retired. There is no deployment config
 or release target for a synthetic snapshot, and the browser does not display
 sources classified as synthetic.
 
-`local-pipeline:export-demo` (in `experiments/observation-pipeline-local`)
+`//experiments/observation-pipeline-local:export-demo` (in `experiments/observation-pipeline-local`)
 creates a fresh temporary store from committed synthetic fixtures, runs parsers,
 and exports the resulting observation API responses. It takes no production
 store as input. The generated `demo-snapshot.json` is ignored by Git and remains

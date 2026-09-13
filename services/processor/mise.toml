@@ -1,37 +1,32 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["processor:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/processor."
-dir = "services/processor"
 run = "./node_modules/.bin/wrangler types"
 
-["processor:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/processor."
-depends = ["processor:types"]
-dir = "services/processor"
+depends = ["//services/processor:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["processor:test"]
+[tasks."test"]
 description = "Run the services/processor tests."
-depends = ["processor:types"]
-dir = "services/processor"
+depends = ["//services/processor:types"]
 run = "bun test"
 
-["processor:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/processor deployment without uploading it."
-depends = ["processor:types"]
-dir = "services/processor"
+depends = ["//services/processor:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["processor:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/processor for the release manifest."
-depends = ["processor:types"]
-dir = "services/processor"
+depends = ["//services/processor:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/processor --config wrangler.jsonc"
 
-["ci:processor"]
+[tasks."ci"]
 description = "Every check CI runs for services/processor."
-depends = ["processor:typecheck", "processor:test"]
+depends = ["//services/processor:typecheck", "//services/processor:test"]

@@ -1,0 +1,14 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks."typecheck"]
+description = "Type-check packages/collector-diagnostics."
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks."test"]
+description = "Run the packages/collector-diagnostics tests."
+run = "bun test"
+
+[tasks."ci"]
+description = "Every check CI runs for packages/collector-diagnostics."
+depends = ["//packages/collector-diagnostics:typecheck", "//packages/collector-diagnostics:test"]

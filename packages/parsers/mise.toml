@@ -1,30 +1,26 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["parsers:typecheck"]
+[tasks."typecheck"]
 description = "Type-check packages/parsers."
-dir = "packages/parsers"
 run = "./node_modules/.bin/tsc --noEmit"
 
-["parsers:test"]
+[tasks."test"]
 description = "Run the packages/parsers tests."
-dir = "packages/parsers"
 run = "bun test"
 
-["parsers:digests"]
+[tasks."digests"]
 description = "Print the deployed parser digests."
-dir = "packages/parsers"
 hide = true
 run = "bun scripts/parser-digests.ts"
 
-["parsers:freeze-coverage-contract"]
+[tasks."freeze-coverage-contract"]
 description = "Re-freeze the coverage-contract fixture from the current parsers."
 # A reviewed fixture update, never a routine step: the frozen file is what
 # proves the converted parsers still emit the same observations.
-dir = "packages/parsers"
 hide = true
 run = "bun scripts/freeze-coverage-contract.ts"
 
-["ci:parsers"]
+[tasks."ci"]
 description = "Every check CI runs for packages/parsers."
-depends = ["parsers:typecheck", "parsers:test"]
+depends = ["//packages/parsers:typecheck", "//packages/parsers:test"]

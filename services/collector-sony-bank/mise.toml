@@ -1,37 +1,32 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["sony-bank-worker:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/collector-sony-bank."
-dir = "services/collector-sony-bank"
 run = "./node_modules/.bin/wrangler types"
 
-["sony-bank-worker:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/collector-sony-bank."
-depends = ["sony-bank-worker:types"]
-dir = "services/collector-sony-bank"
+depends = ["//services/collector-sony-bank:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["sony-bank-worker:test"]
+[tasks."test"]
 description = "Run the services/collector-sony-bank tests."
-depends = ["sony-bank-worker:types"]
-dir = "services/collector-sony-bank"
+depends = ["//services/collector-sony-bank:types"]
 run = "bun test"
 
-["sony-bank-worker:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/collector-sony-bank deployment without uploading it."
-depends = ["sony-bank-worker:types"]
-dir = "services/collector-sony-bank"
+depends = ["//services/collector-sony-bank:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["sony-bank-worker:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-sony-bank for the release manifest."
-depends = ["sony-bank-worker:types"]
-dir = "services/collector-sony-bank"
+depends = ["//services/collector-sony-bank:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/sony-bank-worker --config wrangler.jsonc"
 
-["ci:sony-bank-worker"]
+[tasks."ci"]
 description = "Every check CI runs for services/collector-sony-bank."
-depends = ["sony-bank-worker:typecheck", "sony-bank-worker:test"]
+depends = ["//services/collector-sony-bank:typecheck", "//services/collector-sony-bank:test"]

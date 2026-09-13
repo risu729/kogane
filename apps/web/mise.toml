@@ -1,34 +1,28 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["web:typecheck"]
+[tasks."typecheck"]
 description = "Type-check the web client."
-dir = "apps/web"
 run = "./node_modules/.bin/tsc --noEmit"
 
-["web:build"]
+[tasks."build"]
 description = "Build the local observation browser client."
-dir = "apps/web"
 run = "./node_modules/.bin/vite build"
 
-["web:build-evidence"]
+[tasks."build-evidence"]
 description = "Build the evidence-browser client bundle."
-dir = "apps/web"
 run = "./node_modules/.bin/vite build --mode evidence --outDir dist-evidence"
 
-["web:build-production"]
+[tasks."build-production"]
 description = "Build the production evidence-browser client bundle."
-dir = "apps/web"
 run = "./node_modules/.bin/vite build --mode production --outDir dist-production"
 
-["web:dev"]
+[tasks."dev"]
 description = "Start the local Vite development server."
-dir = "apps/web"
 run = "./node_modules/.bin/vite"
 
-["web:browser"]
+[tasks."browser"]
 description = "Install the locked Playwright Chromium in CI; never downloads locally."
-dir = "apps/web"
 hide = true
 run = '''
 if [ "${CI:-}" = "true" ] && [ -z "${CHROMIUM_PATH:-}" ]; then
@@ -36,12 +30,11 @@ if [ "${CI:-}" = "true" ] && [ -z "${CHROMIUM_PATH:-}" ]; then
 fi
 '''
 
-["web:test"]
+[tasks."test"]
 description = "Run the web client's unit and browser tests."
-depends = ["web:build", "web:build-evidence", "web:build-production", "web:browser"]
-dir = "apps/web"
+depends = ["//apps/web:build", "//apps/web:build-evidence", "//apps/web:build-production", "//apps/web:browser"]
 run = "bun test"
 
-["ci:web"]
+[tasks."ci"]
 description = "Every check CI runs for apps/web."
-depends = ["web:typecheck", "web:build", "web:build-evidence", "web:build-production", "web:test"]
+depends = ["//apps/web:typecheck", "//apps/web:build", "//apps/web:build-evidence", "//apps/web:build-production", "//apps/web:test"]

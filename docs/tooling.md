@@ -18,8 +18,8 @@ fixed toolchain:
 
 - **mise** pins every CLI (`mise.toml` + `mise.lock`, Linux x64 and Windows x64)
   and is the **only task runner**. No `package.json` carries a `scripts` field;
-  each workspace declares its tasks in a `tasks.toml` the root `mise.toml`
-  includes. Dependencies are installed by the `bun` deps provider
+  each workspace owns a `mise.toml`, discovered through native mise monorepo
+  config roots and addressed as `//<workspace>:<task>`. Dependencies are installed by the `bun` deps provider
   (`bun install --frozen-lockfile`), never by a task that downloads a tool on
   demand.
 - **Bun** is the package manager and the test runner for pure TypeScript. The
@@ -27,16 +27,17 @@ fixed toolchain:
   `linker = "isolated"`, so a workspace sees only what it declares and
   conflicting pins (TypeScript 5.9.3 and 7.0.2, five Wrangler versions) coexist
   instead of being reconciled by hoisting.
-- **hk** runs the shared lint and format presets (oxlint, oxfmt, tombi, yamlfmt,
-  yamllint, actionlint, ShellCheck, ghalint, pinact, zizmor, ruff, typos).
+- **hk** is the complete verification entrypoint: `hk check --all` runs the
+  shared lint presets plus mise tasks for repository guards, Knip, typechecks,
+  tests, builds and Worker dry runs. `hk fix` and the staged pre-commit hook
+  retain only the lint/format steps.
 - **Vitest** with `@cloudflare/vitest-plugin` runs the Workers-runtime tests;
   **Wrangler** generates Worker types and validates deployments with
-  `--dry-run`; in CI the dry run goes through
-  `risu729/wrangler-deploy-action`, which resolves the Wrangler the workspace
-  pins and never downloads one.
+  `--dry-run` through workspace mise tasks in both local checks and CI.
+  Production uploads retain the pinned `risu729/wrangler-deploy-action`.
 
-[Development checks and CI](ci.md) describes the task names, the generated CI
-matrices and how to add a workspace; `infra/dependency-resolution.md` records
+[Development checks and CI](ci.md) describes the native monorepo task names,
+the shared hk check and how to add a workspace; `infra/dependency-resolution.md` records
 how the single lockfile resolves.
 
 ## Summary

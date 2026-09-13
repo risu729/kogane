@@ -35,7 +35,7 @@ compare byte for byte instead of structurally. A new generated ledger has to be 
 ignore list deliberately.
 
 The generators keep their bodies under `scripts/`; the three tasks above are their only entry
-points (decision D4). Their test suites run in `mise run ci:root`, which the CI lint job invokes:
+points (decision D4). Their test suites run in `mise run ci:root`, which the shared hk verification graph invokes:
 the `root:test` task runs the `scripts/` and `tasks/_lib/` directories rather than a list, so a
 new ledger suite joins CI by existing.
 

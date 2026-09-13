@@ -30,9 +30,9 @@ Bitwarden内の既存passkeyをWorkers Web Cryptoで使い、`initiateLoginWithP
 
 ```sh
 bun install --frozen-lockfile
-mise run sbi-vc-trade-worker:test
-mise run sbi-vc-trade-worker:typecheck
-mise run sbi-vc-trade-worker:dry-run
+mise run //services/collector-sbi-vc-trade:test
+mise run //services/collector-sbi-vc-trade:typecheck
+mise run //services/collector-sbi-vc-trade:dry-run
 ```
 
 中央schema `0006`、`kogane-ingest`、`kogane-collector-r2-importer`の順に反映し、importerのsource専用credentialを同期してからこのWorkerをdeployする。過去outboxは次で再送する。

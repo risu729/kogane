@@ -160,7 +160,7 @@ the UI shows.
 
 `tasks/_lib/publication-gate-predicates.test.ts` fails CI when the legacy rule
 or a bare success read appears where it should not. It runs in the standalone
-offline step — `mise run ci:root`, which the CI lint job invokes; `root:test` in `tasks.toml`
+offline step — `mise run ci:root`, which the shared hk verification graph invokes; `root:test` in `mise.toml`
 runs every test under `tasks/_lib/` and `scripts/` by directory, so a new
 guard joins CI by existing.
 

@@ -108,8 +108,8 @@ Worker側の署名検査ができる。
 ```sh
 bun install --frozen-lockfile
 bun test
-mise run mobile-suica-worker:typecheck
-mise run mobile-suica-worker:dry-run
+mise run //services/collector-mobile-suica:typecheck
+mise run //services/collector-mobile-suica:dry-run
 ./node_modules/.bin/wrangler deploy
 ```
 

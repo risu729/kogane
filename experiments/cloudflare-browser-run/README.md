@@ -20,9 +20,9 @@ with the Japanese home IP.
 
 ```bash
 bun install
-mise run cloudflare-browser-run:types
-mise run cloudflare-browser-run:typecheck
-mise run cloudflare-browser-run:dry-run
+mise run //experiments/cloudflare-browser-run:types
+mise run //experiments/cloudflare-browser-run:typecheck
+mise run //experiments/cloudflare-browser-run:dry-run
 ./node_modules/.bin/wrangler deploy -c wrangler.bootstrap.jsonc
 ```
 

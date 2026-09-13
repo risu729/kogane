@@ -107,8 +107,8 @@ Queueは不要である。
 ```bash
 bun install
 bun test
-mise run vpoint-worker:typecheck
-mise run vpoint-worker:dry-run
+mise run //services/collector-vpoint:typecheck
+mise run //services/collector-vpoint:dry-run
 ```
 
 必要なCloudflare resources/secrets:

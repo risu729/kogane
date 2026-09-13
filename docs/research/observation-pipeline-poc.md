@@ -38,7 +38,7 @@ fixtures — which are byte-identical in `tests/fixtures/observation-pipeline`
 and proved so by `tests/fixture-manifest.test.ts`. The parser digests are
 unchanged (`packages/parsers/test/parser-digests.test.ts`), so a re-parse of
 those fixtures still produces the same observations. To run the pipeline
-itself: `mise run ci:local-pipeline`, or `mise run local-pipeline:preview` for
+itself: `mise run //experiments/observation-pipeline-local:ci`, or `mise run //experiments/observation-pipeline-local:preview` for
 the browsable synthetic store. For the code exactly as it was, check out
 `d096178`.
 
@@ -46,8 +46,9 @@ the browsable synthetic store. For the code exactly as it was, check out
 local store, its read API and the CLI entry points, with an owner, an expiry
 of 2026-12-31 and a stop condition (the App API covering replay and status).
 It is not part of any deployment and no production runtime imports it; the one
-remaining coupling is that the synthetic `kogane-demo` snapshot is exported
-from it, which `infra/workers-ci.json` names explicitly.
+remaining coupling is the generated synthetic snapshot used by local API
+conformance tests, declared in `infra/generated-files.json`. The public demo
+Worker was retired on 2026-09-13.
 
 ---
 
@@ -173,7 +174,7 @@ same holds for a component library, a CSS framework, and an icon pack — the
 client is React, TanStack Query, TanStack Table, and one plain stylesheet.
 
 **It cost a build step and a layer of restatement.** `bun src/serve.ts`
-renders nothing until `mise run web:build` has run, though the dev server builds
+renders nothing until `mise run //apps/web:build` has run, though the dev server builds
 as it goes. The client restates every response shape in
 `web/src/api.ts` rather than importing it from `src/queries.ts`, because
 that file reaches `bun:sqlite`. A column added to an observation table now

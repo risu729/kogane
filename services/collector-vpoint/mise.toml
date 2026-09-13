@@ -1,40 +1,35 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["vpoint-worker:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/collector-vpoint."
-dir = "services/collector-vpoint"
 run = "./node_modules/.bin/wrangler types"
 
-["vpoint-worker:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/collector-vpoint."
-depends = ["vpoint-worker:types"]
-dir = "services/collector-vpoint"
+depends = ["//services/collector-vpoint:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["vpoint-worker:test"]
+[tasks."test"]
 description = "Run the services/collector-vpoint tests: the pure suite, then the Miniflare R2 suite."
-depends = ["vpoint-worker:types"]
-dir = "services/collector-vpoint"
+depends = ["//services/collector-vpoint:types"]
 run = [
 	"bun test ./test/*.test.ts",
 	"./node_modules/.bin/vitest run",
 ]
 
-["vpoint-worker:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/collector-vpoint deployment without uploading it."
-depends = ["vpoint-worker:types"]
-dir = "services/collector-vpoint"
+depends = ["//services/collector-vpoint:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["vpoint-worker:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-vpoint for the release manifest."
-depends = ["vpoint-worker:types"]
-dir = "services/collector-vpoint"
+depends = ["//services/collector-vpoint:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/vpoint-worker --config wrangler.jsonc"
 
-["ci:vpoint-worker"]
+[tasks."ci"]
 description = "Every check CI runs for services/collector-vpoint."
-depends = ["vpoint-worker:typecheck", "vpoint-worker:test"]
+depends = ["//services/collector-vpoint:typecheck", "//services/collector-vpoint:test"]

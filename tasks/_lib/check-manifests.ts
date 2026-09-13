@@ -9,11 +9,9 @@
 //     download a tool on the fly (`npx`, `bunx`). Running a *file* with Bun
 //     (`bun scripts/x.ts`, `bun run src/x.ts`) stays allowed: that is a path,
 //     not an entry point that has to be declared twice;
-//   * every workspace directory must be reachable from a `ci:<short>` task, so
-//     a new workspace cannot be added without joining the CI matrix, which is
-//     generated from exactly these task names; and every `ci:<short>` other
-//     than `ci:root` must belong to exactly one workspace, so a matrix entry
-//     that runs nothing cannot pass vacuously;
+//   * every workspace has a native //path:ci task that reaches executable
+//     checks in that workspace, and the hk aggregate reaches every workspace;
+//     compatibility aliases cannot stand in for native task discovery;
 //   * every tracked Wrangler configuration is either validated by a dry-run
 //     task and listed in `infra/workers-ci.json`, or excluded there with a
 //     reason. A config can not simply be forgotten;
@@ -36,13 +34,14 @@ import { REPO_ROOT, trackedFiles } from "./repo-root.ts";
 export interface TaskRecord {
   name: string;
   depends?: string[];
+  depends_post?: string[];
   dir?: string | null;
   run?: string[];
   /** The file that defines the task, absolute. */
   source?: string | null;
 }
 
-/** One Wrangler configuration the CI `workers` matrix validates. */
+/** One Wrangler configuration the CI `workers` ledger validates. */
 export interface WorkerEntry {
   name: string;
   path: string;
@@ -67,7 +66,7 @@ export interface GeneratedFile {
   reason?: string;
 }
 
-/** A `<workspace>/src/**` module and what its relative specifiers resolve to. */
+/** A workspace source or test module and what its relative specifiers resolve to. */
 export interface SourceImports {
   file: string;
   imports: readonly string[];
@@ -130,32 +129,24 @@ export function workspaceDirectories(globs: readonly string[], manifests: string
     .sort();
 }
 
-/** Workspace directories that no `ci:*` task reaches. */
+/** Native workspace CI tasks must reach executable checks in their own directory. */
 export function uncoveredWorkspaces(
   directories: readonly string[],
   tasks: readonly TaskRecord[],
   root: string = REPO_ROOT,
 ): string[] {
   const byName = new Map(tasks.map((task) => [task.name, task]));
-  const directoryOf = (task: TaskRecord): string | undefined =>
-    task.dir == null ? undefined : relative(root, task.dir) || ".";
-  const reached = new Set<string>();
-  for (const task of tasks) {
-    if (!task.name.startsWith("ci:")) continue;
-    const queue = [task.name];
-    const seen = new Set<string>();
-    while (queue.length > 0) {
-      const name = queue.pop() as string;
-      if (seen.has(name)) continue;
-      seen.add(name);
-      const current = byName.get(name);
-      if (current === undefined) continue;
-      const directory = directoryOf(current);
-      if (directory !== undefined) reached.add(directory);
-      queue.push(...(current.depends ?? []));
-    }
-  }
-  return directories.filter((directory) => !reached.has(directory));
+  return directories.filter(
+    (directory) =>
+      ![...dependencyClosure(`//${directory}:ci`, byName)].some((name) => {
+        const task = byName.get(name);
+        return (
+          task?.dir != null &&
+          (task.run?.length ?? 0) > 0 &&
+          workspaceOf(relative(root, task.dir), directories) === directory
+        );
+      }),
+  );
 }
 
 /** The workspace directory a task runs in, or undefined when it runs elsewhere. */
@@ -165,43 +156,28 @@ function workspaceOf(directory: string, directories: readonly string[]): string 
   );
 }
 
-/**
- * Every `ci:<short>` task other than `ci:root` stands for exactly one workspace:
- * the tasks named `<short>:*` run inside it and no other `ci:` task claims it.
- * The CI matrix is `[.name[3:]]`, so a `ci:` task that reaches no workspace
- * would be a matrix entry that passes without running anything.
- */
+/** Native path names make workspace ownership unambiguous; aliases never count. */
 export function ciTaskMismatches(
   directories: readonly string[],
   tasks: readonly TaskRecord[],
   root: string = REPO_ROOT,
 ): string[] {
   const errors: string[] = [];
-  const claimed = new Map<string, string>();
   for (const task of tasks) {
-    if (!task.name.startsWith("ci:") || task.name === "ci:root") continue;
-    const short = task.name.slice("ci:".length);
-    const workspaces = new Set<string>();
-    for (const member of tasks) {
-      if (!member.name.startsWith(`${short}:`) || member.dir == null) continue;
-      const workspace = workspaceOf(relative(root, member.dir), directories);
-      if (workspace !== undefined) workspaces.add(workspace);
+    const match = /^\/\/(.+):ci$/u.exec(task.name);
+    if (match === null) continue;
+    const directory = match[1] as string;
+    if (!directories.includes(directory)) {
+      errors.push(`${task.name}: no matching package workspace`);
     }
     if ((task.depends ?? []).length === 0) {
-      errors.push(`${task.name}: depends on nothing; a ci: task must run the workspace's checks`);
+      errors.push(`${task.name}: depends on nothing; a workspace ci task must run checks`);
     }
-    if (workspaces.size !== 1) {
-      errors.push(
-        `${task.name}: the ${short}:* tasks run in ${workspaces.size === 0 ? "no workspace" : [...workspaces].sort().join(", ")}; a ci: task belongs to exactly one`,
-      );
-      continue;
-    }
-    const workspace = [...workspaces][0] as string;
-    const other = claimed.get(workspace);
-    if (other !== undefined) {
-      errors.push(`${task.name}: ${workspace} already has ${other}; one ci: task per workspace`);
-    } else {
-      claimed.set(workspace, task.name);
+    for (const member of tasks) {
+      if (!member.name.startsWith(`//${directory}:`) || member.dir == null) continue;
+      if (workspaceOf(relative(root, member.dir), directories) !== directory) {
+        errors.push(`${member.name}: runs outside its named workspace ${directory}`);
+      }
     }
   }
   return errors;
@@ -238,9 +214,8 @@ export function unaccountedConfigs(
 }
 
 /**
- * The `<path>/<config>` pairs the `*:dry-run` tasks validate. `infra/workers-ci.json`
- * must list exactly these, because the CI `workers` matrix is built from the
- * ledger while a developer runs the tasks (acceptance G4-09, G5-09).
+ * The `<path>/<config>` pairs the native `//path:dry-run` tasks validate.
+ * The Worker ledger must list exactly these, so hk cannot omit a configuration.
  */
 export function dryRunTargets(tasks: readonly TaskRecord[], root: string = REPO_ROOT): string[] {
   const targets: string[] = [];
@@ -255,7 +230,7 @@ export function dryRunTargets(tasks: readonly TaskRecord[], root: string = REPO_
   return targets.sort();
 }
 
-/** Differences between the dry-run tasks and the CI worker ledger. */
+/** Differences between the dry-run tasks and the Worker validation ledger. */
 export function ledgerMismatches(
   targets: readonly string[],
   workers: readonly WorkerEntry[],
@@ -281,42 +256,80 @@ export function ledgerMismatches(
   ];
 }
 
-/**
- * The `<short>` each workspace's task family uses, taken from the `ci:<short>`
- * tasks. `ciTaskMismatches` already fails when that mapping is not one to one,
- * so an ambiguous entry is left out here rather than reported twice.
- */
-export function workspaceShortNames(
+/** Native task prefixes for workspaces with a declared CI task. */
+export function workspaceTaskPrefixes(
   directories: readonly string[],
   tasks: readonly TaskRecord[],
-  root: string = REPO_ROOT,
 ): Map<string, string> {
-  const shorts = new Map<string, string>();
-  for (const task of tasks) {
-    if (!task.name.startsWith("ci:") || task.name === "ci:root") continue;
-    const short = task.name.slice("ci:".length);
-    const workspaces = new Set<string>();
-    for (const member of tasks) {
-      if (!member.name.startsWith(`${short}:`) || member.dir == null) continue;
-      const workspace = workspaceOf(relative(root, member.dir), directories);
-      if (workspace !== undefined) workspaces.add(workspace);
-    }
-    if (workspaces.size === 1) shorts.set([...workspaces][0] as string, short);
-  }
-  return shorts;
+  const names = new Set(tasks.map((task) => task.name));
+  return new Map(
+    directories
+      .filter((directory) => names.has(`//${directory}:ci`))
+      .map((directory) => [directory, `//${directory}`]),
+  );
 }
 
-/** Every task name reachable from `name` through `depends`, itself included. */
+/** Resolve the native ellipsis patterns used by the repository's aggregate tasks. */
+function dependencyNames(reference: string, owner: string, names: readonly string[]): string[] {
+  const namespace = owner.slice(0, owner.indexOf(":"));
+  const absolute = reference.startsWith("//")
+    ? reference
+    : `${namespace}:${reference.replace(/^:/u, "")}`;
+  const pattern = absolute
+    .split("/...")
+    .map((part) =>
+      part
+        .split("*")
+        .map((literal) =>
+          [...literal]
+            .map((character) =>
+              "\\^$.*+?()[]{}|".includes(character) ? "\\" + character : character,
+            )
+            .join(""),
+        )
+        .join(".*"),
+    )
+    .join("(?:/[^:]+)?");
+  const regex = new RegExp(`^${pattern}$`, "u");
+  return names.filter((name) => regex.test(name));
+}
+
+/** Every task reachable through normal and post dependencies, including wildcard tasks. */
 function dependencyClosure(name: string, byName: ReadonlyMap<string, TaskRecord>): Set<string> {
   const seen = new Set<string>();
+  const names = [...byName.keys()];
   const queue = [name];
   while (queue.length > 0) {
     const current = queue.pop() as string;
     if (seen.has(current)) continue;
     seen.add(current);
-    queue.push(...(byName.get(current)?.depends ?? []));
+    const task = byName.get(current);
+    for (const reference of [...(task?.depends ?? []), ...(task?.depends_post ?? [])]) {
+      queue.push(...dependencyNames(reference, current, names));
+    }
   }
   return seen;
+}
+
+/** hk's aggregate must include every workspace, root checks and every deployment validation. */
+export function aggregateCheckViolations(
+  directories: readonly string[],
+  tasks: readonly TaskRecord[],
+): string[] {
+  const closure = dependencyClosure("//:checks", new Map(tasks.map((task) => [task.name, task])));
+  const required = [
+    "//:ci:root",
+    ...directories.map((directory) => `//${directory}:ci`),
+    ...tasks.filter((task) => /^\/\/.+:dry-run$/u.test(task.name)).map((task) => task.name),
+  ];
+  return [
+    ...required
+      .filter((name) => !closure.has(name))
+      .map((name) => `//:checks: does not reach ${name}`),
+    ...["//:check", "//:verify", "//:fix"]
+      .filter((name) => closure.has(name))
+      .map((name) => `//:checks: must not call ${name}; hk would recurse`),
+  ];
 }
 
 /**
@@ -329,7 +342,7 @@ function namesGenerated(resolved: string, path: string): boolean {
 }
 
 /**
- * Workspaces whose `src/**` imports a generated file without their checks
+ * Workspaces whose source or test modules import a generated file without their checks
  * depending on the task that writes it.
  *
  * The dependency is not optional and it is not cosmetic: mise runs independent
@@ -346,7 +359,6 @@ export function generatedInputViolations(
   sources: readonly SourceImports[],
   directories: readonly string[],
   tasks: readonly TaskRecord[],
-  root: string = REPO_ROOT,
 ): string[] {
   const errors: string[] = [];
   const byName = new Map(tasks.map((task) => [task.name, task]));
@@ -356,7 +368,7 @@ export function generatedInputViolations(
         `infra/generated-files.json: ${file.path} names the producing task "${file.producedBy}", which does not exist`,
       );
   }
-  const shorts = workspaceShortNames(directories, tasks, root);
+  const shorts = workspaceTaskPrefixes(directories, tasks);
   const importedBy = new Map<string, GeneratedFile[]>();
   for (const source of sources) {
     const workspace = workspaceOf(source.file, directories);
@@ -381,7 +393,7 @@ export function generatedInputViolations(
         if (!byName.has(name)) continue;
         if (dependencyClosure(name, byName).has(file.producedBy)) continue;
         errors.push(
-          `${name}: ${workspace}/src imports the generated ${file.path}; add "${file.producedBy}", which writes it, to this task's depends`,
+          `${name}: ${workspace} imports the generated ${file.path}; add "${file.producedBy}", which writes it, to this task's depends`,
         );
       }
     }
@@ -427,7 +439,7 @@ const SCANNED = [
 ];
 
 function miseTasks(): TaskRecord[] {
-  const result = Bun.spawnSync(["mise", "tasks", "ls", "--json", "--hidden"], {
+  const result = Bun.spawnSync(["mise", "tasks", "ls", "--all", "--json", "--hidden"], {
     cwd: REPO_ROOT,
     env: { ...process.env, MISE_TASK_RUN_AUTO_INSTALL: "0" },
   });
@@ -461,6 +473,7 @@ export function check(): string[] {
     "mise.toml",
     "tasks.toml",
     "**/tasks.toml",
+    "**/mise.toml",
     ".github/workflows",
   )) {
     errors.push(...toolDownloads(readFileSync(`${REPO_ROOT}/${file}`, "utf8"), file));
@@ -472,10 +485,13 @@ export function check(): string[] {
   const tasks = miseTasks();
   for (const directory of uncoveredWorkspaces(directories, tasks)) {
     errors.push(
-      `${directory}: no ci:<short> task runs in this workspace; add ${directory}/tasks.toml and list it in mise.toml`,
+      `${directory}: no executable //${directory}:ci checks; declare tasks in ${directory}/mise.toml`,
     );
   }
-  errors.push(...ciTaskMismatches(directories, tasks));
+  errors.push(
+    ...ciTaskMismatches(directories, tasks),
+    ...aggregateCheckViolations(directories, tasks),
+  );
   const ledger = JSON.parse(readFileSync(`${REPO_ROOT}/infra/workers-ci.json`, "utf8")) as {
     workers: WorkerEntry[];
     excluded?: ExcludedConfig[];
@@ -499,10 +515,14 @@ export function check(): string[] {
   ).files;
   const sources = trackedFiles(
     "apps/*/src/**",
+    "apps/*/test/**",
     "experiments/*/src/**",
+    "experiments/*/test/**",
     "packages/*/src/**",
+    "packages/*/test/**",
     "poc/*/src/**",
     "services/*/src/**",
+    "services/*/test/**",
   )
     .filter((file) => /\.[cm]?[jt]sx?$/u.test(file))
     .map((file) => ({

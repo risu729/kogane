@@ -1,40 +1,35 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["mobile-suica-worker:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/collector-mobile-suica."
-dir = "services/collector-mobile-suica"
 run = "./node_modules/.bin/wrangler types"
 
-["mobile-suica-worker:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/collector-mobile-suica."
-depends = ["mobile-suica-worker:types"]
-dir = "services/collector-mobile-suica"
+depends = ["//services/collector-mobile-suica:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["mobile-suica-worker:test"]
+[tasks."test"]
 description = "Run the services/collector-mobile-suica tests: the pure suite, then the Miniflare R2 suite."
-depends = ["mobile-suica-worker:types"]
-dir = "services/collector-mobile-suica"
+depends = ["//services/collector-mobile-suica:types"]
 run = [
 	"bun test ./test/*.test.ts",
 	"./node_modules/.bin/vitest run",
 ]
 
-["mobile-suica-worker:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/collector-mobile-suica deployment without uploading it."
-depends = ["mobile-suica-worker:types"]
-dir = "services/collector-mobile-suica"
+depends = ["//services/collector-mobile-suica:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["mobile-suica-worker:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-mobile-suica for the release manifest."
-depends = ["mobile-suica-worker:types"]
-dir = "services/collector-mobile-suica"
+depends = ["//services/collector-mobile-suica:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/mobile-suica-worker --config wrangler.jsonc"
 
-["ci:mobile-suica-worker"]
+[tasks."ci"]
 description = "Every check CI runs for services/collector-mobile-suica."
-depends = ["mobile-suica-worker:typecheck", "mobile-suica-worker:test"]
+depends = ["//services/collector-mobile-suica:typecheck", "//services/collector-mobile-suica:test"]

@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   check,
+  aggregateCheckViolations,
   ciTaskMismatches,
   dryRunTargets,
   generatedInputViolations,
@@ -15,7 +16,7 @@ import {
   unaccountedConfigs,
   uncoveredWorkspaces,
   workspaceDirectories,
-  workspaceShortNames,
+  workspaceTaskPrefixes,
 } from "./check-manifests.ts";
 
 describe("package manifests (G4-01)", () => {
@@ -57,7 +58,7 @@ describe("package script invocations (G4-02)", () => {
   });
 
   test("a mise task invocation is not a package script", () => {
-    expect(scriptInvocations("mise run ci:app", "README.md")).toEqual([]);
+    expect(scriptInvocations("mise run //services/app:ci", "README.md")).toEqual([]);
     expect(scriptInvocations("mise run check --lint", "README.md")).toEqual([]);
   });
 
@@ -75,87 +76,108 @@ describe("package script invocations (G4-02)", () => {
   });
 });
 
-describe("workspace CI coverage (G4-09)", () => {
-  const manifests = [
-    "package.json",
-    "packages/domain/package.json",
-    "poc/thing/package.json",
-    "poc/thing/container/package.json",
-    "node_modules/x/package.json",
+describe("native workspace CI coverage", () => {
+  const directories = ["packages/domain", "experiments/thing"];
+  const tasks = [
+    { name: "//packages/domain:test", dir: "/repo/packages/domain", run: ["bun test"] },
+    {
+      name: "//packages/domain:ci",
+      depends: ["//packages/domain:test"],
+      dir: "/repo/packages/domain",
+    },
+    { name: "//:ci:root", depends: ["root:test"], dir: "/repo" },
   ];
 
-  test("only the directories the workspace globs select are workspaces", () => {
-    expect(workspaceDirectories(["packages/*", "poc/*"], manifests)).toEqual([
-      "packages/domain",
-      "poc/thing",
-    ]);
+  test("only manifest directories selected by workspace globs are workspaces", () => {
+    expect(
+      workspaceDirectories(
+        ["packages/*", "experiments/*"],
+        [
+          "package.json",
+          "packages/domain/package.json",
+          "experiments/thing/package.json",
+          "experiments/thing/container/package.json",
+          "node_modules/x/package.json",
+        ],
+      ),
+    ).toEqual([...directories].sort());
   });
 
-  test("a workspace reached through a ci: task's dependencies is covered", () => {
-    const tasks = [
-      { name: "domain:test", dir: "/repo/packages/domain" },
-      { name: "ci:domain", depends: ["domain:test"], dir: null },
-    ];
-    expect(uncoveredWorkspaces(["packages/domain"], tasks, "/repo")).toEqual([]);
-  });
-
-  test("a workspace whose tasks no ci: task depends on is reported", () => {
-    const tasks = [
-      { name: "thing:test", dir: "/repo/poc/thing" },
-      { name: "ci:domain", depends: ["domain:test"], dir: null },
-      { name: "domain:test", dir: "/repo/packages/domain" },
-    ];
-    expect(uncoveredWorkspaces(["packages/domain", "poc/thing"], tasks, "/repo")).toEqual([
-      "poc/thing",
-    ]);
-  });
-
-  test("a workspace with no task at all is reported", () => {
-    expect(uncoveredWorkspaces(["poc/thing"], [], "/repo")).toEqual(["poc/thing"]);
-  });
-});
-
-describe("one ci: task per workspace (G4-09)", () => {
-  const directories = ["packages/domain", "poc/thing"];
-
-  test("a ci: task whose family runs in one workspace, a subdirectory included, passes", () => {
-    const tasks = [
-      { name: "thing:test", dir: "/repo/poc/thing" },
-      { name: "thing:container", dir: "/repo/poc/thing/container" },
-      { name: "ci:thing", depends: ["thing:test", "thing:container"], dir: null },
-      { name: "ci:root", depends: ["root:test"], dir: null },
-    ];
+  test("native CI must reach an executable check in its own workspace", () => {
+    expect(uncoveredWorkspaces(directories, tasks, "/repo")).toEqual(["experiments/thing"]);
     expect(ciTaskMismatches(directories, tasks, "/repo")).toEqual([]);
   });
 
-  test("a ci: task that depends on nothing or reaches no workspace is reported", () => {
-    const tasks = [{ name: "ci:package", dir: null }];
-    expect(ciTaskMismatches(directories, tasks, "/repo")).toEqual([
-      "ci:package: depends on nothing; a ci: task must run the workspace's checks",
-      "ci:package: the package:* tasks run in no workspace; a ci: task belongs to exactly one",
+  test("empty tasks and flat compatibility aliases cannot provide coverage", () => {
+    expect(
+      uncoveredWorkspaces(
+        ["experiments/thing"],
+        [
+          { name: "//experiments/thing:ci", dir: "/repo/experiments/thing" },
+          { name: "ci:thing", depends: ["thing:test"] },
+          { name: "thing:test", dir: "/repo/experiments/thing", run: ["bun test"] },
+        ],
+        "/repo",
+      ),
+    ).toEqual(["experiments/thing"]);
+  });
+
+  test("a native CI task cannot claim an absent workspace or depend on nothing", () => {
+    expect(ciTaskMismatches(directories, [{ name: "//packages/ghost:ci" }], "/repo")).toEqual([
+      "//packages/ghost:ci: no matching package workspace",
+      "//packages/ghost:ci: depends on nothing; a workspace ci task must run checks",
     ]);
   });
 
-  test("two ci: tasks for the same workspace are reported", () => {
-    const tasks = [
-      { name: "thing:test", dir: "/repo/poc/thing" },
-      { name: "other:test", dir: "/repo/poc/thing" },
-      { name: "ci:thing", depends: ["thing:test"], dir: null },
-      { name: "ci:other", depends: ["other:test"], dir: null },
-    ];
-    expect(ciTaskMismatches(directories, tasks, "/repo")).toEqual([
-      "ci:other: poc/thing already has ci:thing; one ci: task per workspace",
-    ]);
+  test("a task family cannot run in another workspace", () => {
+    expect(
+      ciTaskMismatches(
+        directories,
+        [
+          ...tasks,
+          { name: "//packages/domain:build", dir: "/repo/experiments/thing", run: ["bun build"] },
+        ],
+        "/repo",
+      ),
+    ).toEqual(["//packages/domain:build: runs outside its named workspace packages/domain"]);
   });
 
-  test("a family spread over two workspaces is reported", () => {
-    const tasks = [
-      { name: "thing:test", dir: "/repo/poc/thing" },
-      { name: "thing:build", dir: "/repo/packages/domain" },
-      { name: "ci:thing", depends: ["thing:test", "thing:build"], dir: null },
+  test("the hk aggregate expands native globs and includes post dependencies", () => {
+    const all = [
+      ...tasks,
+      { name: "//experiments/thing:ci", depends: ["//experiments/thing:typecheck"] },
+      { name: "//experiments/thing:dry-run", run: ["wrangler deploy --dry-run"] },
+      {
+        name: "//:checks",
+        depends: ["ci:root", "//packages/...:ci", "//experiments/...:ci"],
+        depends_post: ["dry-run"],
+      },
+      { name: "//:dry-run", depends: ["//experiments/...:dry-run"] },
     ];
-    expect(ciTaskMismatches(directories, tasks, "/repo")).toEqual([
-      "ci:thing: the thing:* tasks run in packages/domain, poc/thing; a ci: task belongs to exactly one",
+    expect(aggregateCheckViolations(directories, all)).toEqual([]);
+    expect(
+      aggregateCheckViolations(
+        directories,
+        all.filter((task) => task.name !== "//:dry-run"),
+      ),
+    ).toEqual(["//:checks: does not reach //experiments/thing:dry-run"]);
+  });
+
+  test("the hk aggregate cannot omit a workspace or call hk recursively", () => {
+    expect(
+      aggregateCheckViolations(
+        ["packages/domain"],
+        [
+          { name: "//:checks", depends: ["ci:root", "check"] },
+          { name: "//:ci:root" },
+          { name: "//:check", run: ["hk check --all"] },
+          tasks[0]!,
+          tasks[1]!,
+        ],
+      ),
+    ).toEqual([
+      "//:checks: does not reach //packages/domain:ci",
+      "//:checks: must not call //:check; hk would recurse",
     ]);
   });
 });
@@ -243,31 +265,35 @@ describe("the CI worker ledger (G4-09, G5-09)", () => {
 describe("generated files a workspace imports (unified plan U15)", () => {
   const directories = ["experiments/local", "services/app"];
   const generated = [
-    { path: "services/app/demo-snapshot.json", producedBy: "local-pipeline:export-demo" },
+    { path: "services/app/demo-snapshot.json", producedBy: "//experiments/local:export-demo" },
   ];
   const sources = [
     {
-      file: "services/app/src/demo-worker.ts",
+      file: "services/app/test/snapshot-worker.ts",
       imports: ["services/app/demo-snapshot.json", "packages/domain/src/money.ts"],
     },
   ];
-  const producer = { name: "local-pipeline:export-demo", dir: "/repo/experiments/local" };
+  const producer = { name: "//experiments/local:export-demo", dir: "/repo/experiments/local" };
   const family = [
-    { name: "app:types", dir: "/repo/services/app" },
-    { name: "ci:app", depends: ["app:typecheck", "app:test"], dir: null },
-    { name: "ci:local-pipeline", depends: ["local-pipeline:export-demo"], dir: null },
+    { name: "//services/app:types", dir: "/repo/services/app" },
+    {
+      name: "//services/app:ci",
+      depends: ["//services/app:typecheck", "//services/app:test"],
+      dir: null,
+    },
+    { name: "//experiments/local:ci", depends: ["//experiments/local:export-demo"], dir: null },
   ];
 
-  test("a workspace short name comes from its ci: task", () => {
+  test("a workspace prefix comes from its native ci task", () => {
     expect([
-      ...workspaceShortNames(
-        directories,
-        [...family, producer, { name: "app:test", dir: "/repo/services/app" }],
-        "/repo",
-      ),
+      ...workspaceTaskPrefixes(directories, [
+        ...family,
+        producer,
+        { name: "//services/app:test", dir: "/repo/services/app" },
+      ]),
     ]).toEqual([
-      ["services/app", "app"],
-      ["experiments/local", "local-pipeline"],
+      ["experiments/local", "//experiments/local"],
+      ["services/app", "//services/app"],
     ]);
   });
 
@@ -275,66 +301,77 @@ describe("generated files a workspace imports (unified plan U15)", () => {
     const tasks = [
       ...family,
       producer,
-      { name: "app:typecheck", depends: ["app:types"], dir: "/repo/services/app" },
-      { name: "app:test", depends: ["app:types"], dir: "/repo/services/app" },
-      { name: "app:dry-run", depends: ["app:types"], dir: "/repo/services/app" },
+      {
+        name: "//services/app:typecheck",
+        depends: ["//services/app:types"],
+        dir: "/repo/services/app",
+      },
+      { name: "//services/app:test", depends: ["//services/app:types"], dir: "/repo/services/app" },
+      {
+        name: "//services/app:dry-run",
+        depends: ["//services/app:types"],
+        dir: "/repo/services/app",
+      },
     ];
-    expect(generatedInputViolations(generated, sources, directories, tasks, "/repo")).toEqual([
-      'app:typecheck: services/app/src imports the generated services/app/demo-snapshot.json; add "local-pipeline:export-demo", which writes it, to this task\'s depends',
-      'app:test: services/app/src imports the generated services/app/demo-snapshot.json; add "local-pipeline:export-demo", which writes it, to this task\'s depends',
-      'app:dry-run: services/app/src imports the generated services/app/demo-snapshot.json; add "local-pipeline:export-demo", which writes it, to this task\'s depends',
+    expect(generatedInputViolations(generated, sources, directories, tasks)).toEqual([
+      '//services/app:typecheck: services/app imports the generated services/app/demo-snapshot.json; add "//experiments/local:export-demo", which writes it, to this task\'s depends',
+      '//services/app:test: services/app imports the generated services/app/demo-snapshot.json; add "//experiments/local:export-demo", which writes it, to this task\'s depends',
+      '//services/app:dry-run: services/app imports the generated services/app/demo-snapshot.json; add "//experiments/local:export-demo", which writes it, to this task\'s depends',
     ]);
   });
 
   test("an indirect dependency counts, and a task that does not exist is not demanded", () => {
-    // `app:test` reaches the export through `app:build`; there is no
-    // `app:dry-run` at all, and a package without one must not fail here.
+    // `//services/app:test` reaches the export through `//services/app:build`; there is no
+    // `//services/app:dry-run` at all, and a package without one must not fail here.
     const tasks = [
       ...family,
       producer,
       {
-        name: "app:typecheck",
-        depends: ["app:types", "local-pipeline:export-demo"],
+        name: "//services/app:typecheck",
+        depends: ["//services/app:types", "//experiments/local:export-demo"],
         dir: "/repo/services/app",
       },
-      { name: "app:build", depends: ["local-pipeline:export-demo"], dir: "/repo/services/app" },
-      { name: "app:test", depends: ["app:build"], dir: "/repo/services/app" },
+      {
+        name: "//services/app:build",
+        depends: ["//experiments/local:export-demo"],
+        dir: "/repo/services/app",
+      },
+      { name: "//services/app:test", depends: ["//services/app:build"], dir: "/repo/services/app" },
     ];
-    expect(generatedInputViolations(generated, sources, directories, tasks, "/repo")).toEqual([]);
+    expect(generatedInputViolations(generated, sources, directories, tasks)).toEqual([]);
   });
 
   test("a workspace that does not import the file is not asked to depend on it", () => {
     const tasks = [
       ...family,
       producer,
-      { name: "app:typecheck", dir: "/repo/services/app" },
-      { name: "app:test", dir: "/repo/services/app" },
+      { name: "//services/app:typecheck", dir: "/repo/services/app" },
+      { name: "//services/app:test", dir: "/repo/services/app" },
     ];
     const unrelated = [
       { file: "services/app/src/routes.ts", imports: ["packages/application/src/index.ts"] },
     ];
-    expect(generatedInputViolations(generated, unrelated, directories, tasks, "/repo")).toEqual([]);
+    expect(generatedInputViolations(generated, unrelated, directories, tasks)).toEqual([]);
   });
 
   test("an extension-less specifier for a generated module still counts", () => {
-    const tasks = [...family, producer, { name: "app:test", dir: "/repo/services/app" }];
+    const tasks = [...family, producer, { name: "//services/app:test", dir: "/repo/services/app" }];
     const module = [{ file: "services/app/src/a.ts", imports: ["services/app/generated"] }];
     expect(
       generatedInputViolations(
-        [{ path: "services/app/generated.ts", producedBy: "local-pipeline:export-demo" }],
+        [{ path: "services/app/generated.ts", producedBy: "//experiments/local:export-demo" }],
         module,
         directories,
         tasks,
-        "/repo",
       ),
     ).toEqual([
-      'app:test: services/app/src imports the generated services/app/generated.ts; add "local-pipeline:export-demo", which writes it, to this task\'s depends',
+      '//services/app:test: services/app imports the generated services/app/generated.ts; add "//experiments/local:export-demo", which writes it, to this task\'s depends',
     ]);
   });
 
   test("a producing task that does not exist is reported once", () => {
-    expect(generatedInputViolations(generated, sources, directories, family, "/repo")).toEqual([
-      'infra/generated-files.json: services/app/demo-snapshot.json names the producing task "local-pipeline:export-demo", which does not exist',
+    expect(generatedInputViolations(generated, sources, directories, family)).toEqual([
+      'infra/generated-files.json: services/app/demo-snapshot.json names the producing task "//experiments/local:export-demo", which does not exist',
     ]);
   });
 
@@ -345,7 +382,7 @@ describe("generated files a workspace imports (unified plan U15)", () => {
 });
 
 describe("this repository", () => {
-  test("has no package scripts, no package-script callers, one ci: task per workspace and every wrangler config accounted for", () => {
+  test("has no package scripts, no package-script callers, one native ci task per workspace and every wrangler config accounted for", () => {
     expect(check()).toEqual([]);
   });
 });

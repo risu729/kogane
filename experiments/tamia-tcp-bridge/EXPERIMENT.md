@@ -85,6 +85,6 @@ future promotion:
 
 ## What it costs while open
 
-`mise run ci:tamia-tcp-bridge` (type-check) and a `wrangler deploy --dry-run` of
+`mise run //experiments/tamia-tcp-bridge:ci` (type-check) and a `wrangler deploy --dry-run` of
 both configs. The Worker name `kogane-tamia-tcp-bridge-20260825` stays in the
 configs so a redeploy reuses the same identity instead of creating a second one.

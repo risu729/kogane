@@ -1,37 +1,32 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["vpass-json:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/collector-vpass."
-dir = "services/collector-vpass"
 run = "./node_modules/.bin/wrangler types"
 
-["vpass-json:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/collector-vpass."
-depends = ["vpass-json:types"]
-dir = "services/collector-vpass"
+depends = ["//services/collector-vpass:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["vpass-json:test"]
+[tasks."test"]
 description = "Run the services/collector-vpass tests."
-depends = ["vpass-json:types"]
-dir = "services/collector-vpass"
+depends = ["//services/collector-vpass:types"]
 run = "bun test"
 
-["vpass-json:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/collector-vpass deployment without uploading it."
-depends = ["vpass-json:types"]
-dir = "services/collector-vpass"
+depends = ["//services/collector-vpass:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["vpass-json:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-vpass for the release manifest."
-depends = ["vpass-json:types"]
-dir = "services/collector-vpass"
+depends = ["//services/collector-vpass:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/vpass-json --config wrangler.jsonc"
 
-["ci:vpass-json"]
+[tasks."ci"]
 description = "Every check CI runs for services/collector-vpass."
-depends = ["vpass-json:typecheck", "vpass-json:test"]
+depends = ["//services/collector-vpass:typecheck", "//services/collector-vpass:test"]

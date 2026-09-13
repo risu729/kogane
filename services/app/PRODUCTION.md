@@ -12,7 +12,7 @@ JWTs fail closed. Responses remain no-store, logs contain no values or URLs, and
 raw bytes remain checksum-verified downloads with sandbox headers.
 
 Apply raw-evidence migration 0017 and deploy the parser before switching the UI.
-Run `mise run web:build-production`; this writes the
+Run `mise run //apps/web:build-production`; this writes the
 isolated `web/dist-production` asset directory. Deploy only the existing production
 evidence-browser config. `web:build-evidence` retains the older raw-only UI build;
 synthetic snapshots remain local API test fixtures and are never deployed.

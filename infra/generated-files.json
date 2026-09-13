@@ -1,11 +1,11 @@
 {
   "version": "generated-files-v1",
   "documentation": "docs/ci.md",
-  "description": "Files a task produces instead of the repository committing them, and the task that writes each one. A workspace whose src/** imports one of them must declare the producing task in the depends of its typecheck, test and dry-run tasks, or those tasks race the export that creates their input. tasks/_lib/check-manifests.ts enforces it.",
+  "description": "Files a task produces instead of the repository committing them, and the task that writes each one. A workspace whose src/** or test/** imports one of them must declare the producing task in the depends of its typecheck, test and dry-run tasks, or those tasks race the export that creates their input. tasks/_lib/check-manifests.ts enforces it.",
   "files": [
     {
       "path": "services/app/demo-snapshot.json",
-      "producedBy": "local-pipeline:export-demo",
+      "producedBy": "//experiments/observation-pipeline-local:export-demo",
       "reason": "Local API conformance tests use a synthetic snapshot exported from the local pipeline experiment. It is git-ignored and is not deployed or used by the production UI."
     }
   ]

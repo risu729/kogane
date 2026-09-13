@@ -1,0 +1,14 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks."typecheck"]
+description = "Type-check packages/observation-shared."
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks."test"]
+description = "Run the packages/observation-shared tests."
+run = "bun test"
+
+[tasks."ci"]
+description = "Every check CI runs for packages/observation-shared."
+depends = ["//packages/observation-shared:typecheck", "//packages/observation-shared:test"]

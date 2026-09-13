@@ -1,16 +1,14 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["domain:typecheck"]
+[tasks."typecheck"]
 description = "Type-check packages/domain."
-dir = "packages/domain"
 run = "./node_modules/.bin/tsc --noEmit"
 
-["domain:test"]
+[tasks."test"]
 description = "Run the packages/domain tests."
-dir = "packages/domain"
 run = "bun test"
 
-["ci:domain"]
+[tasks."ci"]
 description = "Every check CI runs for packages/domain."
-depends = ["domain:typecheck", "domain:test"]
+depends = ["//packages/domain:typecheck", "//packages/domain:test"]

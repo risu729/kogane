@@ -51,8 +51,8 @@ scripts/sync-local-secrets.sh \
 ```sh
 bun install --frozen-lockfile
 bun test
-mise run sbi-securities-worker:typecheck
-mise run sbi-securities-worker:dry-run
+mise run //services/collector-sbi-securities:typecheck
+mise run //services/collector-sbi-securities:dry-run
 ```
 
 手動実行は`POST /trigger`だけを受け付ける。

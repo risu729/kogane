@@ -35,11 +35,10 @@ imports them like everything else does. The client is `apps/web`.
 Two things in this repository depend on it today, and both are named so that
 the dependency is a decision rather than an accident:
 
-1. **The synthetic demo.** `local-pipeline:export-demo` ingests only the
-   committed fixtures into a throwaway store, captures the API responses and
-   writes `services/app/demo-snapshot.json`, which the
-   `kogane-demo` Worker serves. `infra/workers-ci.json` names that task as the
-   demo Worker's prepare step.
+1. **Local API conformance fixtures.** `//experiments/observation-pipeline-local:export-demo`
+   ingests committed fixtures into a throwaway store and captures the API
+   responses in `services/app/demo-snapshot.json`. The test adapter consumes
+   that generated snapshot; it has no deployed Worker or production UI use.
 2. **A second implementation of the read rules.** The snapshot-selection and
    publication-gate tests compare the D1 reader against this store's
    independent SQLite implementation of the same rule. That comparison is the
@@ -55,12 +54,12 @@ From the repository root:
 
 ```sh
 mise run install
-mise run local-pipeline:preview     # build the client + isolated synthetic-only store
-mise run local-pipeline:demo        # ingest the fixtures into state/, print row counts
-mise run web:build                  # build the client into apps/web/dist
-mise run local-pipeline:serve       # API + built client on http://127.0.0.1:8787/
-mise run web:dev                    # Vite dev server on 5173, proxying /api to 8787
-mise run ci:local-pipeline          # typecheck, demo export, tests (Chromium included)
+mise run //experiments/observation-pipeline-local:preview     # build the client + isolated synthetic-only store
+mise run //experiments/observation-pipeline-local:demo        # ingest the fixtures into state/, print row counts
+mise run //apps/web:build                  # build the client into apps/web/dist
+mise run //experiments/observation-pipeline-local:serve       # API + built client on http://127.0.0.1:8787/
+mise run //apps/web:dev                    # Vite dev server on 5173, proxying /api to 8787
+mise run //experiments/observation-pipeline-local:ci          # typecheck, demo export, tests (Chromium included)
 ```
 
 `local-pipeline:preview` uses only committed synthetic fixtures in a fresh

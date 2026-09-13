@@ -1,37 +1,32 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["moneyforward-worker:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/collector-moneyforward."
-dir = "services/collector-moneyforward"
 run = "./node_modules/.bin/wrangler types"
 
-["moneyforward-worker:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/collector-moneyforward."
-depends = ["moneyforward-worker:types"]
-dir = "services/collector-moneyforward"
+depends = ["//services/collector-moneyforward:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["moneyforward-worker:test"]
+[tasks."test"]
 description = "Run the services/collector-moneyforward tests."
-depends = ["moneyforward-worker:types"]
-dir = "services/collector-moneyforward"
+depends = ["//services/collector-moneyforward:types"]
 run = "bun test"
 
-["moneyforward-worker:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/collector-moneyforward deployment without uploading it."
-depends = ["moneyforward-worker:types"]
-dir = "services/collector-moneyforward"
+depends = ["//services/collector-moneyforward:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["moneyforward-worker:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-moneyforward for the release manifest."
-depends = ["moneyforward-worker:types"]
-dir = "services/collector-moneyforward"
+depends = ["//services/collector-moneyforward:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/moneyforward-worker --config wrangler.jsonc"
 
-["ci:moneyforward-worker"]
+[tasks."ci"]
 description = "Every check CI runs for services/collector-moneyforward."
-depends = ["moneyforward-worker:typecheck", "moneyforward-worker:test"]
+depends = ["//services/collector-moneyforward:typecheck", "//services/collector-moneyforward:test"]

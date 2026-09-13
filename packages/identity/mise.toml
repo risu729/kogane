@@ -1,16 +1,14 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["identity:typecheck"]
+[tasks."typecheck"]
 description = "Type-check packages/identity."
-dir = "packages/identity"
 run = "./node_modules/.bin/tsc --noEmit"
 
-["identity:test"]
+[tasks."test"]
 description = "Run the packages/identity tests."
-dir = "packages/identity"
 run = "bun test"
 
-["ci:identity"]
+[tasks."ci"]
 description = "Every check CI runs for packages/identity."
-depends = ["identity:typecheck", "identity:test"]
+depends = ["//packages/identity:typecheck", "//packages/identity:test"]

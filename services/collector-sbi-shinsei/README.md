@@ -128,8 +128,8 @@ FIDO、SMS、telephone approval の値は collector secret に含めません。
 ```bash
 bun install --frozen-lockfile
 bun test
-mise run sbi-shinsei-worker:typecheck
-mise run sbi-shinsei-worker:dry-run
+mise run //services/collector-sbi-shinsei:typecheck
+mise run //services/collector-sbi-shinsei:dry-run
 bun src/local/cli.ts --dry-run
 bun src/local/check-jsc.ts
 ```

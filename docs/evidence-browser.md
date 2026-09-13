@@ -122,7 +122,7 @@ The first request of every session. It names the connection
 `organizedDisplay`, `financialProducts`, `evidenceHistory`, plus
 `readOnly`, `rawEvidence`, `liveCollectors`). The connection name is a label;
 the client switches every behaviour on the capabilities, so the local store,
-the hosted synthetic demo, and the production Worker are told apart by what
+the local synthetic snapshot adapter, and the production Worker are told apart by what
 they implement, not by what they are called. The full table is in
 [frontend.md](frontend.md#api-metadata-and-capabilities).
 
@@ -592,7 +592,7 @@ is attached to. Loopback is the whole of the local protection: it must
 never be run behind a port forward or on a shared interface, and it is not
 a substitute for the access control a deployed instance needs.
 
-`mise run web:dev` is a second surface with the same store behind it: Vite
+`mise run //apps/web:dev` is a second surface with the same store behind it: Vite
 serves the client on port 5173 and proxies `/api` to the same server.
 Vite binds localhost unless it is passed `--host`, so the default is
 right; passing `--host` would expose the whole dataset on the network and
@@ -699,7 +699,7 @@ grants, tools, result contract, error codes, prompt-injection rules and the
   an actor from a request body or a header.
 - With `AGENT_API_GRANTS` absent or empty — the deployed default — every one
   of the agent routes answers 403 for every authenticated principal, and the
-  hosted synthetic demo never serves them at all. It is a different variable
+  local synthetic snapshot adapter never serves them at all. It is a different variable
   from the change lifecycle's `AGENT_GRANTS` and `OPERATOR_SUBJECTS`; see
   [Agent API](agent-api.md) for why they must not be merged. All three are
   allow-lists, so none of them grants anything by being absent.

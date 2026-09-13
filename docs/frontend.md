@@ -61,7 +61,7 @@ definition in `packages/observation-shared/src/api-schema.ts`. The response
 validator (`validApiResponse`) checks the object against that schema, both
 servers derive their accepted parameters from it, and the same
 conformance checks (`test/api-conformance.ts`) run against the local store,
-the hosted synthetic demo, and the production Worker. Capabilities are never
+the local synthetic snapshot adapter, and the production Worker. Capabilities are never
 an authorization switch: Access JWT verification, closed responses on auth
 failure, and `no-store` apply before any capability is read.
 
@@ -105,7 +105,7 @@ page's summary counts therefore come from `GET /api/v2/query?intent=coverage`
 — the shared application service (`packages/application`) that the agent API
 also calls, with the same scope rules — instead of summing rows in the client.
 On a store without that capability the page keeps its own arithmetic, so the
-local pipeline experiment and the synthetic demo are unaffected.
+local pipeline experiment and snapshot conformance tests are unaffected.
 
 What a page may still decide for itself is unchanged: open and closed
 sections, the selected tab, display density, an in-progress input, a
@@ -133,7 +133,7 @@ From the repository root:
 
 ```sh
 mise run install
-mise run local-pipeline:preview
+mise run //experiments/observation-pipeline-local:preview
 ```
 
 Preview builds the UI, creates a new temporary database, and populates it
@@ -143,7 +143,7 @@ regular `state/` database. A normal shutdown removes its temporary store.
 An abrupt process termination can leave a temporary `kogane-preview-*`
 directory; it contains only synthetic data.
 
-`mise run local-pipeline:serve` continues to read the regular local store. Its metadata
+`mise run //experiments/observation-pipeline-local:serve` continues to read the regular local store. Its metadata
 reports the data classification as unknown: an operator may have ingested
 real evidence, synthetic evidence, or both. An existing store must never be
 labelled synthetic merely because it is local. Neither mode is a connection
@@ -189,8 +189,8 @@ contract, authentication, deployment configuration, and verification.
 ## Verification
 
 ```sh
-mise run ci:web              # typecheck, the three builds, unit and browser tests
-mise run ci:local-pipeline   # the experiment's suite over the built client
+mise run //apps/web:ci              # typecheck, the three builds, unit and browser tests
+mise run //experiments/observation-pipeline-local:ci   # the experiment's suite over the built client
 ```
 
 `CHROMIUM_PATH` can select an existing Chromium/Chrome executable; without it

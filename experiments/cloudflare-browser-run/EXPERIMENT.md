@@ -53,7 +53,7 @@ these becomes true:
   was deleted on 2026-08-26 and the API reports code `10007`
   (`RESOURCE_INVENTORY.md`). The Worker name is kept in `wrangler.jsonc` and
   `wrangler.bootstrap.jsonc` so a redeploy reuses the same identity.
-- CI runs `mise run ci:cloudflare-browser-run` (type-check) and a
+- CI runs `mise run //experiments/cloudflare-browser-run:ci` (type-check) and a
   `wrangler deploy --dry-run` of `wrangler.jsonc`.
 
 ## Rules for running it

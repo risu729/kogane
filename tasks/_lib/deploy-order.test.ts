@@ -231,8 +231,15 @@ describe("consumers deploy before producers (G5-14)", () => {
     // The release manifest digests `bundleDir`, which only exists if
     // `mise run bundle` has a task that writes it (plan 11 §2).
     for (const worker of order.workers.filter((entry) => entry.deploy)) {
-      const tasks = readFileSync(`${REPO_ROOT}/${worker.path}/tasks.toml`, "utf8");
-      expect(tasks).toContain(`["${String(worker.bundleTask)}"]`);
+      const tasks = readFileSync(`${REPO_ROOT}/${worker.path}/mise.toml`, "utf8");
+      const aliases = Bun.TOML.parse(
+        readFileSync(REPO_ROOT + "/tasks-compat.toml", "utf8"),
+      ) as Record<string, { depends: string[] }>;
+      const localTask = "bundle";
+      expect(aliases[String(worker.bundleTask)]?.depends).toEqual([
+        "//" + worker.path + ":" + localTask,
+      ]);
+      expect(tasks).toContain(`[tasks."${localTask}"]`);
       expect(tasks).toContain(`--outdir ../../${String(worker.bundleDir)}`);
     }
   });

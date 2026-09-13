@@ -1,26 +1,23 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["tamia-tcp-bridge:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of experiments/tamia-tcp-bridge."
-dir = "experiments/tamia-tcp-bridge"
 run = "./node_modules/.bin/wrangler types"
 
-["tamia-tcp-bridge:typecheck"]
+[tasks."typecheck"]
 description = "Type-check experiments/tamia-tcp-bridge."
-depends = ["tamia-tcp-bridge:types"]
-dir = "experiments/tamia-tcp-bridge"
+depends = ["//experiments/tamia-tcp-bridge:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["tamia-tcp-bridge:dry-run"]
+[tasks."dry-run"]
 description = "Validate the experiments/tamia-tcp-bridge deployment without uploading it."
-depends = ["tamia-tcp-bridge:types"]
-dir = "experiments/tamia-tcp-bridge"
+depends = ["//experiments/tamia-tcp-bridge:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.bootstrap.jsonc",
 ]
 
-["ci:tamia-tcp-bridge"]
+[tasks."ci"]
 description = "Every check CI runs for experiments/tamia-tcp-bridge."
-depends = ["tamia-tcp-bridge:typecheck"]
+depends = ["//experiments/tamia-tcp-bridge:typecheck"]
