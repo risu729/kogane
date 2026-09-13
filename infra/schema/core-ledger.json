@@ -672,6 +672,17 @@
         }
       ],
       "sha256": "8c7ddc06e2d3a7329ebdc532c26307697965cb6f62b6b398f23cf4e76481febc"
+    },
+    {
+      "file": "0046_st_george_balance_snapshot.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "f19cf5d0e932ce4c09de7f4614c983faa6507b604c35924e74704f69babc3175"
     }
   ],
   "tables": [
@@ -16317,7 +16328,8 @@
       "0039_collection_runs.sql",
       "0043_remove_synthetic_bootstrap.sql",
       "0044_card_statement_settlements.sql",
-      "0045_expand_card_settlement_commands.sql"
+      "0045_expand_card_settlement_commands.sql",
+      "0046_st_george_balance_snapshot.sql"
     ],
     "schemaSha256": "b0bab16f796dabc97e55e31602856a6520612254881d75ea94bf5920e360647c"
   }

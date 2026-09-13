@@ -29,6 +29,30 @@ function input(
 }
 
 describe("non-SBI account identification", () => {
+  test("St.George identity is its provider account hash, independent of alias and fetch run", () => {
+    const account = "st-george:" + "a".repeat(64);
+    const first = otherIdentity(input("st-george", account, { currency: "AUD" }));
+    const second = otherIdentity(
+      input("st-george", account, {
+        currency: "AUD",
+        fetchRunId: 99,
+        extra: { label: "Another alias" },
+      }),
+    );
+    expect(first.account).toMatchObject({
+      key: [account],
+      label: "St.George",
+      status: "provider-local",
+      role: "deposit",
+    });
+    expect(second.account.key).toEqual(first.account.key);
+    expect(
+      otherIdentity(input("st-george", "st-george:" + "b".repeat(64))).account.key,
+    ).not.toEqual(first.account.key);
+    expect(otherIdentity(input("st-george", "st-george:index:0")).account.status).toBe(
+      "unresolved",
+    );
+  });
   test("Vpass durable binding is trusted input only and ignores ordinal, run and forged extra", () => {
     const binding = {
       cardToken: `vpass-card-v1-${"a".repeat(64)}`,

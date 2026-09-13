@@ -1,0 +1,68 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kogane-st-george-collector",
+  "main": "src/worker.ts",
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "vars": {
+    "COLLECTOR_SCHEMA_VERSION": "st-george-browser-v1",
+    "EGRESS_MODE": "tamia",
+    "RELAY_PUBLIC_URL": "wss://kogane-st-george-collector.takuanimal.workers.dev/tcp"
+  },
+  "r2_buckets": [
+    {
+      "binding": "DATA",
+      "bucket_name": "kogane-raw-evidence"
+    }
+  ],
+  "vpc_networks": [
+    {
+      "binding": "TAMIA",
+      "tunnel_id": "6b0ccf30-68b2-494e-baa8-f4f9f3e46b33",
+      "remote": true
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "StGeorgeCollectorContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      "instance_type": "basic",
+      "constraints": {
+        "regions": ["APAC"]
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COLLECTOR_CONTAINER",
+        "class_name": "StGeorgeCollectorContainer"
+      },
+      {
+        "name": "SESSION_STATE",
+        "class_name": "StGeorgeCollectionState"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["StGeorgeCollectorContainer", "StGeorgeCollectionState"]
+    }
+  ],
+  "triggers": {
+    "crons": []
+  }
+}

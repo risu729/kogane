@@ -1,4 +1,5 @@
 b332f41d0232477a7e4902322669f22cd496ae119a7ed1db8d8a17af41466f5d  tests/fixtures/observation-pipeline/coverage-contract/expected.json
+84aab7387cf675cfe4c19683ae3c3cfc8861fc6be09bb41329bbbc1b3564123a  tests/fixtures/observation-pipeline/coverage-contract/st-george-expected.json
 4f6421c52e8819ea24d02e227e23d16542ef87a2a1516199fd39664c7cec97e7  tests/fixtures/observation-pipeline/global-pass/activity-2099-02.html
 edf9881f63bdaf552c645c287ac5f2e0856fc9c28b17ba47152d907e07d670f9  tests/fixtures/observation-pipeline/mobile-suica-parser-boundaries/sf-history-more-kinds.json
 80b0b0f8e912a0c9665000780be0779612882b610d9e13b817e6181c87d8762c  tests/fixtures/observation-pipeline/mobile-suica-parser-boundaries/sf-history.json

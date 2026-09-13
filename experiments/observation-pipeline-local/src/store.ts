@@ -136,6 +136,26 @@ export function openStore(stateDir?: string): Store {
       ),
     )();
   }
+  // New source policy, applied once; existing operator policy choices survive.
+  if (
+    !db
+      .query(
+        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name = 'st-george-balances' AND dataset = 'account-snapshot'",
+      )
+      .get()
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0046_st_george_balance_snapshot.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   if (found === 0) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   return { db, blobDir };
 }

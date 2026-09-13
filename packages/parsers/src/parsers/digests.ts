@@ -74,6 +74,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "7ecebf37d5d5558e998d8e76b82df929210f3034abdd726f91d3a8d901ed52a6",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
       "6c198e41f78003be8f6f1074c28f78721b5cfb2fb031392c91d62ae2ec9a3ee4",
+    "poc/observation-pipeline/src/parsers/st-george.ts":
+      "3774b40435d48158e2fa4baba73c928029941f7e54975b8801b4c41863d5318a",
     "poc/observation-pipeline/src/parsers/util.ts":
       "c4ff4a29911701d82be082bbe572be0c70cfb665534aa503a133cda7e4542e3d",
     "poc/observation-pipeline/src/parsers/v-point-pay.ts":
@@ -82,6 +84,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "1ff35488c84fa1ca373983cbdac3cbcae5c66ebfbf569da4ee5f8d7acc9977fb",
     "poc/observation-pipeline/src/parsers/vpass.ts":
       "d640081b86215606c2d130de913aa5c0ad9b0664df850136d87151d0f51c7938",
+    "poc/observation-pipeline/src/st-george-contract.ts":
+      "768d352de3b50e4b4eebecf7c3eedba95d480fc3f877767cf54219dcede5091f",
     "poc/observation-pipeline/src/types.ts":
       "788f30258f5b92a28cd4f806d167d4bb816173e58b6103f277c9787d197e7bf7",
   },
@@ -504,6 +508,36 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/sony-bank.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "st-george-balances": {
+      version: "1.0.0",
+      codeDigest: "8b85ac6dad6d7fbf175a589acec2edfc21a64c7955dc90d4e6398ed27c71f64e",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/st-george.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/st-george-contract.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "st-george-transactions": {
+      version: "1.0.0",
+      codeDigest: "8b85ac6dad6d7fbf175a589acec2edfc21a64c7955dc90d4e6398ed27c71f64e",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/st-george.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/st-george-contract.ts",
         "poc/observation-pipeline/src/types.ts",
       ],
     },

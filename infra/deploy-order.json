@@ -183,6 +183,19 @@
       "bundleDir": "dist/sony-bank-worker"
     },
     {
+      "name": "st-george-worker",
+      "path": "services/collector-st-george",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-st-george-collector",
+      "role": "producer",
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "st-george-worker:bundle",
+      "bundleDir": "dist/st-george-worker"
+    },
+    {
       "name": "vpass-json",
       "path": "services/collector-vpass",
       "config": "wrangler.jsonc",

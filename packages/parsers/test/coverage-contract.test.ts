@@ -22,9 +22,14 @@ import { CONTRACT_PARSERS } from "./coverage-contract-cases.ts";
 import { FIXTURES_ROOT } from "./fixture-root.ts";
 
 type Frozen = { observations: Observation[]; warnings: string[] } | { error: true };
-const FROZEN: Record<string, Record<string, Frozen>> = JSON.parse(
-  readFileSync(join(FIXTURES_ROOT, "coverage-contract", "expected.json"), "utf8"),
-);
+// Historical expected.json remains byte-for-byte frozen. New source coverage
+// expectations live separately and cannot change the historical fixture hash.
+const FROZEN: Record<string, Record<string, Frozen>> = {
+  ...JSON.parse(readFileSync(join(FIXTURES_ROOT, "coverage-contract", "expected.json"), "utf8")),
+  ...JSON.parse(
+    readFileSync(join(FIXTURES_ROOT, "coverage-contract", "st-george-expected.json"), "utf8"),
+  ),
+};
 
 interface Expectation {
   completeness: Completeness;
@@ -110,6 +115,7 @@ const CLAIMS: Record<string, Record<string, Expectation>> = {
   },
   "sony-bank-gross-balance": { "complete-rows": { ...complete(17), expected: 17 } },
   "smbc-direct-balance": { "complete-rows": { ...complete(1), expected: 1 } },
+  "st-george-balances": { "complete-rows": { ...complete(2), expected: 2 } },
 };
 
 describe("coverage contract registry", () => {

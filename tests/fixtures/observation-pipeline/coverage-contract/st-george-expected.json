@@ -1,0 +1,59 @@
+{
+  "st-george-balances": {
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "st-george:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "metric": "account_balance",
+          "amountMinor": 12345,
+          "amountText": "123.45",
+          "amountScale": 2,
+          "instrument": "AUD",
+          "asOf": "2026-09-13T00:00:00Z",
+          "observedAt": "2026-09-13T00:00:00Z",
+          "rawLocator": "json:$.accounts[0].currentBalanceText",
+          "extra": {
+            "sourceAmountText": "123.45",
+            "_kogane": {
+              "label": "Synthetic account",
+              "currencyEvidence": "source-configured",
+              "accountIdentity": "sha256-normalized-bsb-account",
+              "historyState": "unknown",
+              "pendingState": "unknown"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "st-george:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "metric": "available_balance",
+          "amountMinor": 10000,
+          "amountText": "100.00",
+          "amountScale": 2,
+          "instrument": "AUD",
+          "asOf": "2026-09-13T00:00:00Z",
+          "observedAt": "2026-09-13T00:00:00Z",
+          "rawLocator": "json:$.accounts[0].availableBalanceText",
+          "extra": {
+            "sourceAmountText": "100.00",
+            "_kogane": {
+              "label": "Synthetic account",
+              "currencyEvidence": "source-configured",
+              "accountIdentity": "sha256-normalized-bsb-account",
+              "historyState": "unknown",
+              "pendingState": "unknown"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "empty-not-representable": {
+      "error": true
+    },
+    "unknown-fields": {
+      "error": true
+    }
+  }
+}

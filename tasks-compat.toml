@@ -78,6 +78,10 @@ depends = ["//services/collector-smbc-direct:bundle"]
 hide = true
 depends = ["//services/collector-sony-bank:bundle"]
 
+["st-george-worker:bundle"]
+hide = true
+depends = ["//services/collector-st-george:bundle"]
+
 ["vpass-json:bundle"]
 hide = true
 depends = ["//services/collector-vpass:bundle"]

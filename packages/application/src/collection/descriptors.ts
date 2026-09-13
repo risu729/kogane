@@ -71,6 +71,7 @@ export const COLLECTOR_SOURCE_IDS: Readonly<Record<string, string>> = {
   "sbi-vc-trade": "sbi-vc-trade",
   "smbc-direct": "smbc-bank",
   "sony-bank": "sony-bank",
+  "st-george": "st-george",
   "v-point": "v-point",
   "v-point-pay": "v-point-pay",
   "v-point-pay-email": "v-point-pay",
@@ -398,6 +399,14 @@ export function artifactRequest(
   if (artifact.unitKey !== undefined && fetchUnitId === null) fail("artifact_unit_unknown");
   return {
     artifactKey: artifact.artifactKey,
+    // This source's minimized capture contract names exactly one parser dataset.
+    // Other artifact names and roles do not inherit financial eligibility.
+    ...(manifest.source === "st-george" &&
+    artifact.artifactKey === "account-snapshot.json" &&
+    role === "sanitized_provider_capture" &&
+    artifact.mediaType === "application/json"
+      ? { dataset: "account-snapshot" }
+      : {}),
     artifactRole: role,
     payloadFidelity,
     containerKind: "single",

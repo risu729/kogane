@@ -12,6 +12,7 @@ const LABELS: Record<string, string> = {
   "global-pass": "GLOBAL PASSデビット明細",
   myjcb: "MyJCB請求口座",
   "smbc-bank": "三井住友銀行 円普通預金",
+  "st-george": "St.George",
   "sony-bank": "ソニー銀行",
   "sbi-shinsei-bank": "SBI新生銀行 預金口座",
   "sbi-vc-trade": "SBI VCトレード口座",
@@ -78,6 +79,9 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
       break;
     case "smbc-bank":
       if (a === "smbc-bank:ordinary-yen") account("deposit", "audited-ordinary-yen-scope");
+      break;
+    case "st-george":
+      if (/^st-george:[a-f0-9]{64}$/u.test(a)) account("deposit", "sha256-provider-bsb-account");
       break;
     case "sony-bank":
       if (/^sony-bank:deposit:(AUD|BRL|CAD|CHF|CNH|EUR|GBP|HKD|JPY|NZD|SEK|USD|ZAR)$/u.test(a))
