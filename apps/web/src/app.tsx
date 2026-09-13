@@ -202,8 +202,9 @@ export function App(): ReactNode {
           </div>
           <button
             className="button refresh-button"
-            disabled={fetching}
+            aria-disabled={fetching}
             onClick={() => {
+              if (client.isFetching() > 0) return;
               void client.invalidateQueries({ refetchType: "active" });
             }}
           >
