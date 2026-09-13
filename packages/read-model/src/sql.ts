@@ -279,6 +279,7 @@ const TRANSACTIONS_SQL = `WITH ${TRANSACTION_CTES}
                            'sony-bank-history-csv',
                            'sony-bank-wallet-history',
                            'smbc-direct-transactions',
+                           'st-george-transactions',
                            'sbi-shinsei-top-balances-and-activity',
                            'v-point-pay-notification-event'
                          ) AND t.external_id IS NOT NULL

@@ -1068,8 +1068,80 @@
     {
       "directory": "services/collector-st-george",
       "workspace": "services",
-      "disposition": null,
-      "workers": []
+      "disposition": {
+        "source": "St.George automation integration, 2026-09-13",
+        "proposedAction": "promote-service",
+        "proposedTarget": "services/collector-st-george",
+        "requiredVerification": "Keep authentication challenges human-required and collection read-only; validate Cloudflare or Tamia egress before enabling a schedule",
+        "executionStatus": "INTEGRATED_UNDEPLOYED",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "LIVE(buckets=kogane-raw-evidence)"
+      },
+      "workers": [
+        {
+          "config": "services/collector-st-george/wrangler.jsonc",
+          "name": "kogane-st-george-collector",
+          "main": "src/worker.ts",
+          "role": "not-deployed",
+          "liveWorker": false,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [],
+          "r2": [
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
+              "live": true
+            }
+          ],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [
+            {
+              "name": "COLLECTOR_CONTAINER",
+              "className": "StGeorgeCollectorContainer"
+            },
+            {
+              "name": "SESSION_STATE",
+              "className": "StGeorgeCollectionState"
+            }
+          ],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [
+            {
+              "tag": "v1",
+              "newSqliteClasses": [
+                "StGeorgeCollectorContainer",
+                "StGeorgeCollectionState"
+              ],
+              "newClasses": []
+            }
+          ],
+          "containers": [
+            {
+              "className": "StGeorgeCollectorContainer",
+              "image": "./Dockerfile",
+              "instanceType": "basic",
+              "maxInstances": 1
+            }
+          ],
+          "vpcNetworks": [
+            {
+              "binding": "TAMIA",
+              "tunnelId": "6b0ccf30-68b2-494e-baa8-f4f9f3e46b33"
+            }
+          ],
+          "serviceBindings": [],
+          "varNames": [
+            "COLLECTOR_SCHEMA_VERSION",
+            "EGRESS_MODE",
+            "RELAY_PUBLIC_URL"
+          ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        }
+      ]
     },
     {
       "directory": "services/collector-vpass",
@@ -1421,7 +1493,7 @@
     }
   ],
   "summary": {
-    "configCount": 24,
+    "configCount": 25,
     "deployedWorkerCount": 14,
     "crons": [
       {
@@ -1524,6 +1596,18 @@
         "storage": "sqlite"
       },
       {
+        "worker": "kogane-st-george-collector",
+        "className": "StGeorgeCollectionState",
+        "tag": "v1",
+        "storage": "sqlite"
+      },
+      {
+        "worker": "kogane-st-george-collector",
+        "className": "StGeorgeCollectorContainer",
+        "tag": "v1",
+        "storage": "sqlite"
+      },
+      {
         "worker": "kogane-vpass-runtime-probe-20260825",
         "className": "RuntimeProbeContainer",
         "tag": "v1",
@@ -1560,6 +1644,7 @@
           "kogane-sbi-vc-session-poc",
           "kogane-smbc-direct-backfill-poc",
           "kogane-sony-bank-collector-poc",
+          "kogane-st-george-collector",
           "kogane-vpass-collector-poc",
           "kogane-vpoint-collector-poc",
           "kogane-vpoint-pay-collector-poc"

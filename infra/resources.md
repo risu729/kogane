@@ -14,7 +14,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Summary
 
-- Wrangler configs: 24
+- Wrangler configs: 25
 - Distinct Workers that exist in the account: 14
 - Live Workers with no config in this repository: —
 - Live R2 buckets no config references: —
@@ -33,7 +33,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 | bucket | live | bound by |
 | --- | --- | --- |
-| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mizuho-collector<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-smbc-direct-backfill-poc<br>kogane-sony-bank-collector-poc<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
+| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mizuho-collector<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-smbc-direct-backfill-poc<br>kogane-sony-bank-collector-poc<br>kogane-st-george-collector<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
 | test | no | kogane-evidence-browser-test |
 
 ## Queues
@@ -50,6 +50,8 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | kogane-sbi-shinsei-collector-poc | SbiShinseiCollectorContainer | v1 | sqlite |
 | kogane-sbi-vc-session-poc | SbiVcSessionState | v1 | sqlite |
 | kogane-smbc-direct-backfill-poc | SmbcBackfillSession | v1 | sqlite |
+| kogane-st-george-collector | StGeorgeCollectionState | v1 | sqlite |
+| kogane-st-george-collector | StGeorgeCollectorContainer | v1 | sqlite |
 | kogane-vpass-runtime-probe-20260825 | RuntimeProbeContainer | v1 | sqlite |
 | kogane-vpoint-collector-poc | VPointSession | (declared via exports) | sqlite |
 | kogane-vpoint-pay-collector-poc | VPointPayCredentialState | (declared via exports) | sqlite |
@@ -551,9 +553,29 @@ No wrangler config.
 
 ### `services/collector-st-george`
 
-Disposition: not listed in the plan.
+- Disposition (St.George automation integration, 2026-09-13): `promote-service` → services/collector-st-george
+- Required verification: Keep authentication challenges human-required and collection read-only; validate Cloudflare or Tamia egress before enabling a schedule
+- Execution status: INTEGRATED_UNDEPLOYED (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(buckets=kogane-raw-evidence)
 
-No wrangler config.
+#### `kogane-st-george-collector` — `services/collector-st-george/wrangler.jsonc`
+
+- Role: not-deployed; exists in the account: no
+- Entry point: src/worker.ts
+- D1: —
+- R2: DATA → kogane-raw-evidence
+- KV: —
+- Queues: —
+- Durable Objects: COLLECTOR_CONTAINER → StGeorgeCollectorContainer<br>SESSION_STATE → StGeorgeCollectionState
+- DO migration tags: v1: StGeorgeCollectorContainer, StGeorgeCollectionState
+- Containers: StGeorgeCollectorContainer (./Dockerfile, basic, max 1)
+- Browser binding: —
+- VPC networks: TAMIA → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
+- Service bindings: —
+- Crons: —
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>EGRESS_MODE<br>RELAY_PUBLIC_URL
+- Required secrets (names only): —
 
 ### `services/collector-vpass`
 

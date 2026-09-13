@@ -17,6 +17,7 @@
         { "source": "sbi-vc-trade", "producer": "collector-sbi-vc-trade", "active": true },
         { "source": "smbc-bank", "producer": "collector-smbc-direct", "active": true },
         { "source": "sony-bank", "producer": "collector-sony-bank", "active": true },
+        { "source": "st-george", "producer": "collector-st-george", "active": true },
         { "source": "v-point", "producer": "collector-v-point", "active": true },
         { "source": "v-point-pay", "producer": "collector-v-point-pay", "active": true },
         { "source": "v-point-pay", "producer": "collector-v-point-pay-email", "active": true },

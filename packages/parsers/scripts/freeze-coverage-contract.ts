@@ -31,4 +31,10 @@ for (const { parser, cases } of CONTRACT_PARSERS) {
   expected[parser.name] = byCase;
 }
 const target = join(FIXTURES_ROOT, "coverage-contract", "expected.json");
-writeFileSync(target, `${JSON.stringify(expected, null, 2)}\n`);
+// New source cases must not expand the frozen historical fixture/manifest.
+const { "st-george-balances": stGeorge, ...historical } = expected;
+writeFileSync(target, `${JSON.stringify(historical, null, 2)}\n`);
+writeFileSync(
+  join(FIXTURES_ROOT, "coverage-contract", "st-george-expected.json"),
+  `${JSON.stringify({ "st-george-balances": stGeorge }, null, 2)}\n`,
+);

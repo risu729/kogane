@@ -2,6 +2,48 @@
 
 調査日: 2026-08-26 (Australia/Sydney)
 
+## Collector integration (2026-09-13)
+
+The runnable service is now [`services/collector-st-george`](../../services/collector-st-george/README.md).
+It follows Kogane's existing browser-container, shared DATA terminal, Processor
+registration and parser paths. A normal form login is followed by bounded
+portfolio/account-details GETs for the observed accounts. The existing local PoC
+remains available for diagnostics; there is no dependency from the deployed
+service on the experiment.
+
+Tamia is the explicit default egress, using the existing tunnel through an
+authenticated, host-restricted TCP relay. Direct container egress is a separate
+configuration; a rejection never automatically switches paths and retries login.
+With the user's PC back on WARP, a public login GET executed on Tamia returned
+HTTP 200 with all three expected login controls. This confirms Tamia reachability,
+not authenticated operation of the new cloud container. No WARP or tunnel setting
+was changed.
+
+The minimized JSON DOM capture contains stable hashed account identities,
+current/available balance text and the canonical `#transaction-all` rows.
+Opening/closing balance rows are preserved separately. The same extractor and
+strict validator successfully processed the private live capture offline:
+two portfolio accounts and one matching account-details capture, with 22 real
+transaction rows. The observation parsers produced two balance metrics and 22
+transaction observations for that captured account, without publishing values or
+raw HTML. Alternate date-tab tables are not combined.
+
+A successful bounded acquisition is distinct from complete history coverage.
+The balance parser can establish complete extraction of the captured balances;
+transaction history remains partial, with unverified pagination, populated
+pending rows, custom date ranges and unattended cloud authentication. AUD is an
+explicit source configuration, not an observed DOM currency label.
+
+The Durable Object serializes attempts and records uncertainty before bank I/O.
+Authentication/network failures require an explicit operator resume. Pending
+validated evidence is retained in bounded chunks until the shared terminal is
+verified, so storage retries do not repeat authentication. Credentials, cookies,
+hidden form state and raw capture bodies never enter this state or Git.
+
+The service is registered for repository CI and the existing release workflow.
+There is no cron enabled by default and no production deployment or credential
+provisioning was performed during this integration.
+
 ## Automation PoC (2026-09-13)
 
 An isolated runnable browser experiment now lives in

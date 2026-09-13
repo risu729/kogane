@@ -548,6 +548,16 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the St.George collector
+        id: deploy-st-george-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-st-george
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Vpass collector
         id: deploy-vpass-json
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpass-json')

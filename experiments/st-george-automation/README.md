@@ -1,5 +1,8 @@
 # St.George browser automation PoC
 
+The promoted collector is [services/collector-st-george](../../services/collector-st-george/README.md).
+This experiment remains a local diagnostic client.
+
 This experiment drives normal St.George Internet Banking pages after manual
 authentication. It does not import statements or exports. The bounded milestone
 is an automated portfolio GET and, optionally, a GET of the first existing account

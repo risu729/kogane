@@ -58,26 +58,44 @@ describe("dataset_snapshot_policies seed", () => {
         parser,
       ).toBe(true);
     // The migration file itself, not only the applied table, names every row.
-    const sql = readFileSync(
-      join(import.meta.dir, "../../../packages/storage-d1/migrations/core/0025_parse_coverage.sql"),
-      "utf8",
-    );
-    for (const [parser, dataset] of SNAPSHOT_DATASETS)
-      expect(sql).toContain(`'${dataset}','${parser}'`);
+    const sql =
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0025_parse_coverage.sql",
+        ),
+        "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0046_st_george_balance_snapshot.sql",
+        ),
+        "utf8",
+      );
+    for (const [parser, dataset] of SNAPSHOT_DATASETS) {
+      expect(sql).toContain("'" + dataset + "'");
+      expect(sql).toContain("'" + parser + "'");
+    }
   });
 
-  test("every dataset starts on legacy-warning-compat-v1 at run scope, so nothing changes on deploy", () => {
+  test("legacy datasets retain their policies and the new St.George balance parser uses explicit coverage", () => {
     for (const row of policyRows(database())) {
-      expect(row.policy_id).toBe(LEGACY_SNAPSHOT_POLICY);
+      const stGeorge = row.parser_name === "st-george-balances";
+      expect(row.policy_id).toBe(stGeorge ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
       // D13/PR-14: every seeded dataset stays on the run scope and stays a
       // container-snapshot dataset. Enabling `unit-independent-v1` is an
       // operator write, never a deploy.
       expect(row.unit_scope).toBe("run");
       expect(row.snapshot_selection).toBe(1);
-      expect(row.replaces_previous_on_complete_empty).toBe(1);
+      expect(row.replaces_previous_on_complete_empty).toBe(stGeorge ? 0 : 1);
       expect(row.required_parser_version).toBe(
-        row.parser_name === "sbi-foreign-cash-positions" ? FOREIGN_POSITION_SNAPSHOT_VERSION : null,
+        row.parser_name === "sbi-foreign-cash-positions"
+          ? FOREIGN_POSITION_SNAPSHOT_VERSION
+          : stGeorge
+            ? "1.0.0"
+            : null,
       );
       // The declared owner source is the one the parser accepts.
       const parser = PARSERS.find((candidate) => candidate.name === row.parser_name)!;
@@ -92,7 +110,7 @@ describe("dataset_snapshot_policies seed", () => {
           mime: "application/json",
           fetchedAt: "2026-09-07T00:00:00.000Z",
           sha256: "0".repeat(64),
-          artifactKey: "balance.normalized.json",
+          artifactKey: stGeorge ? "account-snapshot.json" : "balance.normalized.json",
         }),
         row.parser_name,
       ).toBe(true);
@@ -133,7 +151,10 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       snapshot(store, { parser, dataset, observations: facts(parser, "OLD"), coverage: {} });
       snapshot(store, { parser, dataset, observations: facts(parser, "NEW"), coverage: {} });
-      snapshot(store, { parser, dataset, unit: "u", observations: [], coverage: {} });
+      // St.George has no verified empty portfolio state and deliberately cannot
+      // replace membership from an empty synthetic projection.
+      if (parser !== "st-george-balances")
+        snapshot(store, { parser, dataset, unit: "u", observations: [], coverage: {} });
     }
     // Harmless warnings on the tolerant parsers: both policies keep the parse.
     const foreign = { parser: sbiForeignCashBalances.name, dataset: "foreign-cash-balances" };
@@ -169,7 +190,7 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
       coverage: parsed.coverage![0]!,
     });
     const rows = compare(store);
-    expect(rows.length).toBe(SNAPSHOT_DATASETS.length * 2);
+    expect(rows.length).toBe(SNAPSHOT_DATASETS.length * 2 - 1);
     expect(differing(rows)).toEqual([]);
     expect(rows.every((row) => row.legacy_artifact_id !== null)).toBe(true);
   });

@@ -1,0 +1,35 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.types]
+description = "Generate St.George Worker binding types."
+run = "./node_modules/.bin/wrangler types"
+
+[tasks.typecheck]
+description = "Check the St.George collector types."
+depends = ["//services/collector-st-george:types"]
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks.test]
+description = "Verify St.George collection and persistence using synthetic data."
+depends = ["//services/collector-st-george:types"]
+run = ["bun test ./test/*.test.ts", "./node_modules/.bin/vitest run"]
+
+[tasks.container]
+depends = ["//apps/web:browser"]
+description = "Install pinned browser dependencies and test the isolated container runtime."
+dir = "container"
+run = ["npm ci --ignore-scripts", "node --test *.node-test.mjs *.test.mjs"]
+
+[tasks.dry-run]
+description = "Validate the St.George Worker bundle without uploading."
+depends = ["//services/collector-st-george:types"]
+run = "./node_modules/.bin/wrangler deploy --dry-run"
+
+[tasks."bundle"]
+description = "Emit the St.George release bundle."
+depends = ["//services/collector-st-george:types"]
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/st-george-worker --config wrangler.jsonc"
+
+[tasks.ci]
+description = "Every CI check for the St.George collector."
+depends = ["//services/collector-st-george:typecheck", "//services/collector-st-george:test", "//services/collector-st-george:container"]

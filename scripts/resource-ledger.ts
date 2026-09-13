@@ -274,6 +274,15 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "services/collector-st-george": {
+    source: "St.George automation integration, 2026-09-13",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-st-george",
+    requiredVerification:
+      "Keep authentication challenges human-required and collection read-only; validate Cloudflare or Tamia egress before enabling a schedule",
+    executionStatus: "INTEGRATED_UNDEPLOYED",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "services/collector-vpass": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
