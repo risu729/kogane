@@ -70,6 +70,10 @@
       // Xvfb is installed by the image; the missing executable is a test fixture.
       "ignoreBinaries": ["Xvfb", "kogane-synthetic-missing-executable"]
     },
+    "services/collector-st-george/container": {
+      "entry": ["server.mjs", "*.node-test.mjs", "*.test.mjs"],
+      "ignoreBinaries": ["Xvfb", "kogane-synthetic-missing-executable"]
+    },
     "services/*": {
       "entry": ["test/**/*.{test.ts,test.mjs,node.mjs}", "scripts/**/*.{ts,mjs}", "src/local/*.ts"],
       // Wrangler configs name the Worker entry points, including test variants.

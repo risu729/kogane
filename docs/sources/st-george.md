@@ -2,6 +2,146 @@
 
 調査日: 2026-08-26 (Australia/Sydney)
 
+## Collector integration (2026-09-13)
+
+The runnable service is now [`services/collector-st-george`](../../services/collector-st-george/README.md).
+It follows Kogane's existing browser-container, shared DATA terminal, Processor
+registration and parser paths. A normal form login is followed by bounded
+portfolio/account-details GETs for the observed accounts. The existing local PoC
+remains available for diagnostics; there is no dependency from the deployed
+service on the experiment.
+
+Tamia is the explicit default egress, using the existing tunnel through an
+authenticated, host-restricted TCP relay. Direct container egress is a separate
+configuration; a rejection never automatically switches paths and retries login.
+With the user's PC back on WARP, a public login GET executed on Tamia returned
+HTTP 200 with all three expected login controls. This confirms Tamia reachability,
+not authenticated operation of the new cloud container. No WARP or tunnel setting
+was changed.
+
+The minimized JSON DOM capture contains stable hashed account identities,
+current/available balance text and the canonical `#transaction-all` rows.
+Opening/closing balance rows are preserved separately. The same extractor and
+strict validator successfully processed the private live capture offline:
+two portfolio accounts and one matching account-details capture, with 22 real
+transaction rows. The observation parsers produced two balance metrics and 22
+transaction observations for that captured account, without publishing values or
+raw HTML. Alternate date-tab tables are not combined.
+
+A successful bounded acquisition is distinct from complete history coverage.
+The balance parser can establish complete extraction of the captured balances;
+transaction history remains partial, with unverified pagination, populated
+pending rows, custom date ranges and unattended cloud authentication. AUD is an
+explicit source configuration, not an observed DOM currency label.
+
+The Durable Object serializes attempts and records uncertainty before bank I/O.
+Authentication/network failures require an explicit operator resume. Pending
+validated evidence is retained in bounded chunks until the shared terminal is
+verified, so storage retries do not repeat authentication. Credentials, cookies,
+hidden form state and raw capture bodies never enter this state or Git.
+
+The service is registered for repository CI and the existing release workflow.
+There is no cron enabled by default and no production deployment or credential
+provisioning was performed during this integration.
+
+## Automation PoC (2026-09-13)
+
+An isolated runnable browser experiment now lives in
+[`experiments/st-george-automation`](../../experiments/st-george-automation/README.md).
+It navigates the existing Internet Banking portfolio and one observed account link;
+it does not import CSV/PDF files or connect to production ingestion. Local tests use
+synthetic pages. A normal live browser login succeeded on 2026-09-13 after the
+user disconnected WARP. Pagination and session renewal still require validation;
+a successful login alone is not complete transaction collection.
+
+For live request/response discovery, use the existing **kogane capture / Kuebiko**
+Chrome profile before authentication. The user explicitly requested Kuebiko network
+capture for this PoC. Raw capture files can contain credentials, cookies and account
+data and must remain in the private local Kuebiko capture directory, outside Git.
+Only minimized route/schema findings belong in this document. An include filter
+alone does not scope NetLog or storage snapshots: a narrowly scoped capture also
+needs `--no-netlog` and should omit storage snapshots/tracking. This user-authorized
+capture workflow is an exception to the original metadata-only research boundary
+below, not permission to publish raw evidence or change banking settings.
+
+### Live Kuebiko result and network constraint
+
+On 2026-09-13, normal Windows Chrome in the existing Kuebiko capture reached the
+bank edge, but initially did not reach an authentication form. The first captured
+St.George responses were:
+
+| Request                       | Status | Observed response                                                                   |
+| ----------------------------- | ------ | ----------------------------------------------------------------------------------- |
+| `GET /ibank/loginPage.action` | 200    | HTML headed `Request error`, with a VPN/TOR connection note; zero forms and inputs. |
+| Favicon GET                   | 403    | HTML access-denied response.                                                        |
+
+Both response bodies were captured locally. These initial attempts had no login
+POST or authenticated account evidence. Header names included
+`akamai-grn` and `server-timing`, consistent with the previously observed Akamai
+edge. No header values, IP addresses, reference numbers, credentials, cookies, or
+raw bodies are included here.
+
+Cloudflare WARP was connected during the rejected attempts. After the user
+personally disconnected it and the Windows client reported `Disconnected`,
+reloading the same login URL in the same Kuebiko Chrome tab returned HTTP 200 with
+normal Internet Banking Logon HTML: one form and the three expected credential
+controls. This provides strong evidence of a **WARP/network-path-dependent
+rejection** in this environment. It does not reveal the bank's exact rule or
+distinguish egress reputation from other network-path signals. The agent did not
+change network protections.
+
+The current public login controls were verified from the captured normal page:
+
+| ID                  | Name             | Type     |
+| ------------------- | ---------------- | -------- |
+| `access-number`     | `userId`         | text     |
+| `securityNumber`    | `securityNumber` | password |
+| `internet-password` | `password`       | password |
+| `logonButton`       | `Login`          | submit   |
+
+The form is `#logonAction`, named `logonForm`, with
+`POST /ibank/logonActionSimple.action`. Only names and structure are recorded;
+obfuscated hidden values are not reusable credentials or an established direct
+login protocol. A normal login form is reachability evidence, not authenticated
+collection success. Captured public scripts confirm security-number/password
+mapping on blur or Enter, and device-print/duplicate-submission handling on the
+Logon button. Authentication must use the normal browser controls; a guessed
+POST, direct `form.submit()`, or replay of mapped payloads omits or reuses
+page/session-dependent state.
+
+After connectivity recovered, the normal form login succeeded in Kuebiko Chrome.
+The authenticated My Accounts heading and Logout link appeared, and the login
+inputs disappeared. No additional authentication or device enrollment appeared
+in this session. This establishes one successful browser login, not unattended
+renewal or a stable direct-login API.
+
+A live PoC run then completed the guarded portfolio GET. It observed two
+`#acctSummaryList > li` account cards with current and available balance fields.
+The current `h2 a` links use `javascript:viewAccountDetails` with one literal
+`/ibank/accountDetails.action` URL and an `index` query key. The captured function
+only guards duplicate navigation and assigns `document.location.href`; it does
+not submit a form. The initial PoC correctly stopped at this unfamiliar wrapper.
+The adapter extracts only this strict literal form and performs the same guarded
+GET without evaluating JavaScript or logging the query value. The adapted live
+run completed successfully: portfolio metadata was observed again and the first
+account-details GET reached the expected route with `#transHistExport` present.
+Its three visible tables and three generic body rows are structural counts, not
+a verified transaction count. No export control was clicked.
+
+The captured account-details response was HTTP 200 server-rendered HTML. It
+confirmed `#transHistExport`, `#txnHistoryTable`, text date controls
+`#acctDetDateFrom[name=dateFrom]` and `#acctDetDateTo[name=dateTo]`, and debit/credit
+and amount filters. Duplicate table IDs and hidden alternate layouts prevent
+generic row counts from establishing transaction semantics or completeness.
+Dispute forms are also present; no form or filter submission was attempted.
+Pagination, date coverage, pending/posted reconciliation and session renewal
+remain unverified.
+
+The PoC now classifies the visible bank error as `stopped / bank-request-error`
+even when the document returns HTTP 200. A synthetic regression verifies that it
+cannot be mistaken for login or portfolio success and initiates no further
+navigation. The experiment's 15 browser tests / 63 assertions and TypeScript check pass.
+
 ## 結論
 
 St.George Bank の個人口座は **app-only ではない**。公式 Internet Banking と

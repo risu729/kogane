@@ -1,5 +1,5 @@
 // Parser coverage contract in the production Worker (design review D01/D13,
-// PR-07): migration 0025 applies on top of 0017-0037, contract v2 rows are
+// PR-07): the current migration chain applies the coverage policy, contract v2 rows are
 // written in the pending phase and published with the parse run, legacy
 // parsers write nothing, an invalid contract is a terminal parser failure,
 // and the shadow comparison route exposes identifiers only.
@@ -39,7 +39,7 @@ const all = <T>(sql: string, ...args: unknown[]) =>
     .all<T>()
     .then((result) => result.results);
 
-test("migration 0025 applied on the production chain with the legacy seed", async () => {
+test("the current production migration chain preserves legacy policies and adds explicit St.George coverage", async () => {
   const tables = await all<{ name: string }>(
     "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('parse_issues','parse_coverage_claims','dataset_snapshot_policies') ORDER BY name",
   );
@@ -52,7 +52,14 @@ test("migration 0025 applied on the production chain with the legacy seed", asyn
     "SELECT parser_name,policy_id,unit_scope FROM dataset_snapshot_policies",
   );
   expect(policies).toHaveLength(SNAPSHOT_DATASETS.length);
-  expect(policies.every((row) => row.policy_id === "legacy-warning-compat-v1")).toBe(true);
+  expect(
+    policies
+      .filter((row) => row.parser_name !== "st-george-balances")
+      .every((row) => row.policy_id === "legacy-warning-compat-v1"),
+  ).toBe(true);
+  expect(policies.find((row) => row.parser_name === "st-george-balances")?.policy_id).toBe(
+    "coverage-v1",
+  );
   expect(policies.every((row) => row.unit_scope === "run")).toBe(true);
 });
 

@@ -1,0 +1,27 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks."typecheck"]
+description = "Type-check the St.George browser automation experiment."
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks."browser"]
+description = "Reuse the locked Chromium preparation; no local downloads."
+hide = true
+depends = ["//apps/web:browser"]
+
+[tasks."test"]
+description = "Test route guards and synthetic browser metadata without contacting the bank."
+depends = ["//experiments/st-george-automation:browser"]
+run = "bun test"
+
+[tasks."probe"]
+description = "Try the public St.George login page in a fresh normal browser."
+run = "bun src/cli.ts --probe"
+
+[tasks."try"]
+description = "Open a fresh headed browser for manual St.George login and read-only metadata."
+run = "bun src/cli.ts --headed"
+
+[tasks."ci"]
+description = "Every check CI runs for experiments/st-george-automation."
+depends = ["//experiments/st-george-automation:typecheck", "//experiments/st-george-automation:test"]

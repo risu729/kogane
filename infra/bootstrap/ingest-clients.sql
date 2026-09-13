@@ -82,6 +82,13 @@ SELECT 'processor-shared-r2', 'collector-sony-bank'
 WHERE NOT EXISTS (SELECT 1 FROM ingest_client_producers
   WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-sony-bank');
 INSERT INTO producers (id, kind, display_name)
+SELECT 'collector-st-george', 'collector', 'Shared-R2 collector collector-st-george'
+WHERE NOT EXISTS (SELECT 1 FROM producers WHERE id = 'collector-st-george');
+INSERT INTO ingest_client_producers (ingest_client_id, producer_id)
+SELECT 'processor-shared-r2', 'collector-st-george'
+WHERE NOT EXISTS (SELECT 1 FROM ingest_client_producers
+  WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-st-george');
+INSERT INTO producers (id, kind, display_name)
 SELECT 'collector-v-point', 'collector', 'Shared-R2 collector collector-v-point'
 WHERE NOT EXISTS (SELECT 1 FROM producers WHERE id = 'collector-v-point');
 INSERT INTO ingest_client_producers (ingest_client_id, producer_id)
@@ -199,6 +206,15 @@ WHERE NOT EXISTS (SELECT 1 FROM ingest_client_routes
   WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-sony-bank' AND source_id = 'sony-bank');
 UPDATE ingest_client_routes SET active = 1
 WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-sony-bank' AND source_id = 'sony-bank' AND active <> 1;
+INSERT INTO producer_sources (producer_id, source_id)
+SELECT 'collector-st-george', 'st-george'
+WHERE NOT EXISTS (SELECT 1 FROM producer_sources WHERE producer_id = 'collector-st-george' AND source_id = 'st-george');
+INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id, active)
+SELECT 'processor-shared-r2', 'collector-st-george', 'st-george', 1
+WHERE NOT EXISTS (SELECT 1 FROM ingest_client_routes
+  WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-st-george' AND source_id = 'st-george');
+UPDATE ingest_client_routes SET active = 1
+WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-st-george' AND source_id = 'st-george' AND active <> 1;
 INSERT INTO producer_sources (producer_id, source_id)
 SELECT 'collector-v-point', 'v-point'
 WHERE NOT EXISTS (SELECT 1 FROM producer_sources WHERE producer_id = 'collector-v-point' AND source_id = 'v-point');

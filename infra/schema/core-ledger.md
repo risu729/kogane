@@ -14,7 +14,7 @@ Schema digest: `b0bab16f796dabc97e55e31602856a6520612254881d75ea94bf5920e360647c
 
 ## Summary
 
-- Migrations applied: 45
+- Migrations applied: 46
 - Tables: 106 (all `STRICT`: yes)
 - Views: 37
 - Triggers: 387
@@ -225,5 +225,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0043_remove_synthetic_bootstrap.sql` | 36 | _synthetic_cleanup_runs |
 | `0044_card_statement_settlements.sql` | 27 | card_settlement_scan_cursor |
 | `0045_expand_card_settlement_commands.sql` | 34 | approvals_expanded, change_plans_expanded, decision_outbox_expanded, operation_receipts_expanded |
+| `0046_st_george_balance_snapshot.sql` | 1 | dataset_snapshot_policies |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql

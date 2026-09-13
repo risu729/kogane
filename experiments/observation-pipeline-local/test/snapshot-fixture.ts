@@ -124,7 +124,9 @@ export function snapshot(store: Store, options: Snapshot) {
       options.parserVersion ??
       (options.parser === "sbi-foreign-cash-positions"
         ? FOREIGN_POSITION_SNAPSHOT_VERSION
-        : "0.1.0"),
+        : options.parser === "st-george-balances"
+          ? "1.0.0"
+          : "0.1.0"),
     parsedAt: time,
     status: options.parseStatus ?? "ok",
     warnings: options.warnings ?? [],

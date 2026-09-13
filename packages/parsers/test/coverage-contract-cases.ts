@@ -19,6 +19,7 @@ import { sbiVcAccountMargin } from "../src/parsers/sbi-vc-account-margin.ts";
 import { sbiVcCashBalances } from "../src/parsers/sbi-vc-cash-balances.ts";
 import { sbiVcPositionSummary } from "../src/parsers/sbi-vc-position-summary.ts";
 import { smbcDirectBalance } from "../src/parsers/smbc-direct.ts";
+import { stGeorgeBalances } from "../src/parsers/st-george.ts";
 import { sonyBankGrossBalance } from "../src/parsers/sony-bank.ts";
 import { FIXTURES_ROOT } from "./fixture-root.ts";
 
@@ -306,6 +307,25 @@ export const SBI_SHINSEI: ContractParser[] = [
 
 const gross = fixtureJson("sony-bank-parser-boundaries", "gross-balance.json");
 const smbcBalance = { amount: 12345, currency: "JPY", observedAt: "2026-09-07T00:00:00.000Z" };
+const stGeorgeSnapshot = {
+  schema: "st-george-browser-v1",
+  observedAt: "2026-09-13T00:00:00Z",
+  currency: "AUD",
+  currencyEvidence: "source-configured",
+  accounts: [
+    {
+      accountKey: "a".repeat(64),
+      label: "Synthetic account",
+      currentBalanceText: "123.45",
+      availableBalanceText: "100.00",
+      openingBalanceText: null,
+      closingBalanceText: null,
+      historyState: "unknown",
+      pendingState: "unknown",
+      transactions: [],
+    },
+  ],
+};
 
 export const BANKS: ContractParser[] = [
   cases(sonyBankGrossBalance, meta("sony-bank", "gross-balance"), {
@@ -322,6 +342,15 @@ export const BANKS: ContractParser[] = [
       "complete-rows": json(smbcBalance),
       "unreadable-container": json({}),
       "unknown-fields": json({ ...smbcBalance, unexpected: true }),
+    },
+  ),
+  cases(
+    stGeorgeBalances,
+    meta("st-george", "account-snapshot", { artifactKey: "account-snapshot.json" }),
+    {
+      "complete-rows": json(stGeorgeSnapshot),
+      "empty-not-representable": json({ ...stGeorgeSnapshot, accounts: [] }),
+      "unknown-fields": json({ ...stGeorgeSnapshot, unexpected: true }),
     },
   ),
 ];

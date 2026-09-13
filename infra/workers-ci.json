@@ -82,6 +82,11 @@
       "config": "wrangler.jsonc"
     },
     {
+      "name": "st-george-worker",
+      "path": "services/collector-st-george",
+      "config": "wrangler.jsonc"
+    },
+    {
       "name": "tamia-tcp-bridge",
       "path": "experiments/tamia-tcp-bridge",
       "config": "wrangler.jsonc"

@@ -139,7 +139,9 @@ describe("complete container snapshots", () => {
     expect(latestBalances(store).map((row) => row.amount_text)).toEqual(["1.001"]);
   });
 
-  for (const [parser, dataset] of SNAPSHOT_DATASETS) {
+  for (const [parser, dataset] of SNAPSHOT_DATASETS.filter(
+    ([name]) => name !== "st-george-balances",
+  )) {
     test(`${parser}: repeated, removed instrument/account, and empty snapshots replace old rows`, () => {
       const store = database();
       const old = facts(parser, "OLD");
@@ -153,6 +155,21 @@ describe("complete container snapshots", () => {
       expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({ n: 3 });
     });
   }
+
+  test("St.George requires a coverage claim and retains previous membership on an unverified empty portfolio", () => {
+    const store = database();
+    const base = { parser: "st-george-balances", dataset: "account-snapshot", source: "st-george" };
+    snapshot(store, { ...base, observations: [balance("CLAIMLESS")] });
+    expect(latestBalances(store)).toHaveLength(0);
+    snapshot(store, { ...base, observations: [balance("OLD")], coverage: {} });
+    snapshot(store, { ...base, observations: [balance("NEW")], coverage: {} });
+    expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
+    // The production policy deliberately does not erase balances from a zero-account
+    // projection: the observed bank contract has no verified empty portfolio layout.
+    snapshot(store, { ...base, observations: [], coverage: {} });
+    expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
+    expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({ n: 4 });
+  });
 
   test("a newer unit must finish every artifact parse before replacing the old complete snapshot", () => {
     const store = database();
@@ -367,7 +384,9 @@ describe("coverage-v1 policy", () => {
     expect(latestBalances(store).map((row) => row.instrument)).toEqual(["OLD"]);
   });
 
-  for (const [parser, dataset] of SNAPSHOT_DATASETS) {
+  for (const [parser, dataset] of SNAPSHOT_DATASETS.filter(
+    ([name]) => name !== "st-george-balances",
+  )) {
     test(`${parser}: repeated, removed and empty claimed snapshots replace old rows under coverage-v1`, () => {
       const store = database();
       activatePolicy(store, parser, COVERAGE_SNAPSHOT_POLICY);

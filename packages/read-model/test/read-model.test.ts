@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   LOCAL_SNAPSHOT_RELATIONS,
   SNAPSHOT_CTES,
+  SNAPSHOT_DATASETS,
   snapshotCtes,
 } from "../../../packages/parsers/src/snapshot-query";
 import {
@@ -291,15 +292,22 @@ describe("named concepts in the final SQL", () => {
     expect(ctes).toContain("json_each(complete_parse.warnings_json)");
     const db = migratedDatabase();
     expect(db.query("SELECT count(*) AS n FROM dataset_snapshot_policies").get()).toEqual({
-      n: 11,
+      n: SNAPSHOT_DATASETS.length,
     });
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1'",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name <> 'st-george-balances'",
         )
         .get(),
     ).toEqual({ n: 0 });
+    expect(
+      db
+        .query(
+          "SELECT policy_id FROM dataset_snapshot_policies WHERE parser_name = 'st-george-balances'",
+        )
+        .get(),
+    ).toEqual({ policy_id: "coverage-v1" });
     // The shadow comparison compiles on the production schema and reads the views.
     expect(db.query(snapshotPolicyComparison.sql).all()).toEqual([]);
     expect(snapshotPolicyComparison.sql).toContain("FROM observation_fetch_artifacts fa");
