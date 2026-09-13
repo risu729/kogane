@@ -76,7 +76,11 @@ pagination and cloud execution each require their own
 validation. `services/collector-mizuho` now integrates the session-based direct
 client, sanitized evidence persistence, shared parsers, and existing projections.
 It is an operator-triggered service with no automated login renewal or cron;
-deployment stays disabled until the intended cloud network path is verified.
+the normal production release now includes its Worker and health postcheck.
+Deployment does not start collection. The trigger token is provisioned out of
+band; a successful health check does not establish authenticated bank access
+from Cloudflare. Cloud collection and session handoff remain unverified until
+a separate operational read succeeds.
 
 The bank app was renamed to みずほ銀行アプリ on 2026-09-03; historical app names
 below describe the original research. The

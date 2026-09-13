@@ -164,9 +164,9 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedAction: "promoted-to-service",
     proposedTarget: "services/collector-mizuho",
     requiredVerification:
-      "Owner-session trigger only; no cron. Cloud egress and unattended renewal require validation before activation.",
-    executionStatus: "IMPLEMENTED_NOT_DEPLOYED",
-    planLiveResourceStatus: "NOT_DEPLOYED",
+      "Production release enabled; owner-session trigger only, no cron. Provision trigger token out of band; verify authenticated cloud read separately. Unattended renewal is not implemented.",
+    executionStatus: "DEPLOYMENT_ENABLED",
+    planLiveResourceStatus: "DEPLOYMENT_PENDING_VERIFICATION",
   },
   "experiments/tamia-tcp-bridge": {
     source: "poc_disposition.csv (was poc/tamia-tcp-bridge)",
