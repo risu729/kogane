@@ -47,7 +47,15 @@ function seededDatabase(): Database {
   const db = new Database(":memory:");
   db.exec(LAYER_A);
   for (const name of readdirSync(MIGRATIONS)
-    .filter((entry) => entry.endsWith(".sql") && entry >= "0017")
+    // 0043 only removes historical bootstrap rows from the full Layer A
+    // schema; this deliberately minimal stub has neither those rows nor
+    // the registry and append-only guards that the cleanup touches.
+    .filter(
+      (entry) =>
+        entry.endsWith(".sql") &&
+        entry >= "0017" &&
+        entry !== "0043_remove_synthetic_bootstrap.sql",
+    )
     .sort())
     db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
   db.exec(`INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(1,1,'synthetic','1','2026-03-01','pending','[]');
