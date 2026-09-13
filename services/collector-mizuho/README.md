@@ -7,10 +7,11 @@ DATA bucket, terminal-last persistence, registered Mizuho parsers, and the
 existing balance/transaction projections. No statement upload is involved.
 
 The service does not log in or renew authentication. There is no cron, stored
-bank password, session store or automatic deployment. `infra/deploy-order.json`
-keeps deployment disabled until the operator has verified the intended cloud
-network path. Local WSL account and history collection has been verified; this does not
-establish Cloudflare egress compatibility.
+bank password or session store. `infra/deploy-order.json` includes the Worker
+in the normal production release, with a public health postcheck. Deployment
+uploads the service but does not start bank collection. Local WSL account and
+history collection has been verified; authenticated collection from Cloudflare
+and the browser-session handoff still require a separate operational check.
 
 ## Operations
 
@@ -22,6 +23,8 @@ establish Cloudflare egress compatibility.
   Keep this material in memory and submit it only to the controlled collector.
   The token is the only configured Worker secret. `.dev.vars.example` is a
   synthetic local value, never a production credential.
+  Provision `ADMIN_TRIGGER_TOKEN` out of band before the first production
+  release. CI/CD does not synchronize collector secrets or hold bank sessions.
 - Use a fresh session from the official bank browser after account/history
   navigation. The accepted origin is an HTTPS `web` or `webN` host under
   `ib.mizuhobank.co.jp`; requests can only target the observed account-list

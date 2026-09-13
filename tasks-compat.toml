@@ -2,6 +2,10 @@
 # Compatibility entry points for existing operational commands.
 # New tasks and all CI discovery use workspace mise.toml definitions.
 
+["mizuho-worker:bundle"]
+hide = true
+depends = ["//services/collector-mizuho:bundle"]
+
 ["web:build"]
 hide = true
 depends = ["//apps/web:build"]

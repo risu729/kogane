@@ -134,7 +134,7 @@ describe("the deployment ledger describes every Worker CI validates", () => {
     const checked = order.workers.filter(
       (worker) => worker.role === "producer" && worker.deploy && worker.healthPath !== "",
     );
-    expect(checked).toHaveLength(11);
+    expect(checked).toHaveLength(12);
     expect(checked.every((worker) => worker.healthAuth === "none")).toBe(true);
   });
 
@@ -194,6 +194,7 @@ describe("consumers deploy before producers (G5-14)", () => {
       "sbi-shinsei-worker",
       "sbi-vc-trade-worker",
       "smbc-direct-backfill-worker",
+      "mizuho-worker",
       "sony-bank-worker",
       "vpass-json",
       "vpoint-pay-worker",
@@ -205,24 +206,15 @@ describe("consumers deploy before producers (G5-14)", () => {
     expect(deployed.slice(2).every((worker) => worker.role === "producer")).toBe(true);
   });
 
-  test("every live collector remains a CD target, with only Mizuho awaiting initial provisioning", () => {
+  test("every collector is a CD target, and only the experiments are not", () => {
     // Deploying a collector replaces its script; it starts no collection, no
     // re-authentication and no backfill, and a change to what one bundles
     // passes CI and the existing branch rules before it merges.
-    // Mizuho is the one named initial-provisioning hold. Its direct bank
-    // session handoff and cloud egress still need operational verification;
-    // services/collector-mizuho/README.md records the activation gate.
-    // All established collectors keep their prior deployment requirement.
+    // What stays out of CD is the probe role: experiments and the bootstrap,
+    // audit and test-harness configurations.
     const producers = order.workers.filter((worker) => worker.role === "producer");
     expect(producers.length).toBe(13);
-    expect(producers.filter((worker) => !worker.deploy).map((worker) => worker.name)).toEqual([
-      "mizuho-worker",
-    ]);
-    expect(
-      producers
-        .filter((worker) => worker.name !== "mizuho-worker")
-        .every((worker) => worker.deploy),
-    ).toBe(true);
+    expect(producers.every((worker) => worker.deploy)).toBe(true);
     expect(producers.every((worker) => worker.path.startsWith("services/collector-"))).toBe(true);
     expect(order.workers.filter((worker) => worker.role === "probe").length).toBeGreaterThan(0);
     expect(order.workers.some((worker) => worker.role === "probe" && worker.deploy)).toBe(false);
@@ -237,22 +229,26 @@ describe("consumers deploy before producers (G5-14)", () => {
       expect(producers.some((worker) => worker.path === directory)).toBe(true);
   });
 
-  test("Mizuho's provisioning hold cannot enable deployment or scheduled bank access", () => {
-    const held = order.workers.find((worker) => worker.name === "mizuho-worker");
-    expect(held).toMatchObject({
+  test("Mizuho deploys without enabling scheduled bank access or storing a bank password", () => {
+    const mizuho = order.workers.find((worker) => worker.name === "mizuho-worker");
+    expect(mizuho).toMatchObject({
       path: "services/collector-mizuho",
       config: "wrangler.jsonc",
       worker: "kogane-mizuho-collector",
       role: "producer",
-      deploy: false,
+      deploy: true,
+      bundleTask: "mizuho-worker:bundle",
+      bundleDir: "dist/mizuho-worker",
     });
     const path = `${REPO_ROOT}/services/collector-mizuho/wrangler.jsonc`;
     const config = parseJsonc(readFileSync(path, "utf8"), path) as {
       triggers?: { crons?: unknown[] };
+      secrets?: { required?: string[] };
     };
     expect(config.triggers?.crons ?? []).toEqual([]);
-    expect(deploySteps(deployWorkflow).some((step) => step.workingDirectory === held!.path)).toBe(
-      false,
+    expect(config.secrets?.required).toEqual(["ADMIN_TRIGGER_TOKEN"]);
+    expect(deploySteps(deployWorkflow).some((step) => step.workingDirectory === mizuho!.path)).toBe(
+      true,
     );
   });
 
@@ -390,6 +386,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the SBI Shinsei collector",
       "Deploy the SBI VC Trade collector",
       "Deploy the SMBC Direct collector",
+      "Deploy the Mizuho collector",
       "Deploy the Sony Bank collector",
       "Deploy the Vpass collector",
       "Deploy the V Point Pay collector",

@@ -19,7 +19,7 @@ description = "Validate the Mizuho Worker without uploading it."
 depends = ["//services/collector-mizuho:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run"
 
-[tasks.bundle]
+[tasks."bundle"]
 description = "Build the Mizuho collector deployment bundle."
 depends = ["//services/collector-mizuho:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/mizuho-worker"

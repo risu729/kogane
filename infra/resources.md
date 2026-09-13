@@ -309,8 +309,8 @@ No wrangler config.
 ### `services/collector-mizuho`
 
 - Disposition (Mizuho direct collector integration, 2026-09-13): `promoted-to-service` → services/collector-mizuho
-- Required verification: Owner-session trigger only; no cron. Cloud egress and unattended renewal require validation before activation.
-- Execution status: IMPLEMENTED_NOT_DEPLOYED (plan recorded `NOT_DEPLOYED`)
+- Required verification: Production release enabled; owner-session trigger only, no cron. Provision trigger token out of band; verify authenticated cloud read separately. Unattended renewal is not implemented.
+- Execution status: DEPLOYMENT_ENABLED (plan recorded `DEPLOYMENT_PENDING_VERIFICATION`)
 - Live resources: LIVE(buckets=kogane-raw-evidence)
 
 #### `kogane-mizuho-collector` — `services/collector-mizuho/wrangler.jsonc`

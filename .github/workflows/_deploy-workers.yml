@@ -528,6 +528,16 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Mizuho collector
+        id: deploy-mizuho-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mizuho-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-mizuho
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Sony Bank collector
         id: deploy-sony-bank-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sony-bank-worker')

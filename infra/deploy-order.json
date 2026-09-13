@@ -162,10 +162,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-mizuho-collector",
       "role": "producer",
-      "deploy": false,
+      "deploy": true,
       "healthPath": "/health",
       "healthAuth": "none",
-      "healthIdentity": "schemaVersion"
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "mizuho-worker:bundle",
+      "bundleDir": "dist/mizuho-worker"
     },
     {
       "name": "sony-bank-worker",
