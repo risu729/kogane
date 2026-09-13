@@ -716,8 +716,24 @@ function jobInsert(
   now: number,
   plan?: Pick<PlanRow, "id" | "target_release">,
 ): D1PreparedStatement {
+  // Explicit replay may claim untouched repair work without resetting retries,
+  // stealing a lease, or changing the normal/candidate publication target.
+  const replay = lane === "replay" && plan !== undefined;
+  const conflict = replay
+    ? `ON CONFLICT(fetch_artifact_id,parser_name,parser_version) DO UPDATE
+       SET lane='replay',replay_plan_id=excluded.replay_plan_id
+       WHERE observation_parse_jobs.lane='repair' AND observation_parse_jobs.status='pending'
+        AND observation_parse_jobs.attempts=0 AND observation_parse_jobs.replay_plan_id IS NULL
+        AND observation_parse_jobs.lease_token IS NULL AND observation_parse_jobs.lease_until_ms=0
+        AND observation_parse_jobs.target_release IS excluded.target_release
+        AND NOT EXISTS(SELECT 1 FROM parse_runs p
+         WHERE p.fetch_artifact_id=observation_parse_jobs.fetch_artifact_id
+          AND p.parser_name=observation_parse_jobs.parser_name
+          AND p.parser_version=observation_parse_jobs.parser_version AND p.status='ok')`
+    : "";
   return env.DB.prepare(
-    "INSERT OR IGNORE INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms,replay_plan_id,target_release) VALUES(?,?,?,'pending',?,?,?,?)",
+    `${replay ? "INSERT" : "INSERT OR IGNORE"} INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms,replay_plan_id,target_release)
+     VALUES(?,?,?,'pending',?,?,?,?) ${conflict}`,
   ).bind(
     artifactId,
     parser.name,
@@ -893,9 +909,9 @@ async function repairScan(env: Env) {
 const replayFilterSql = ` AND a.source_id=?1 AND (?2 IS NULL OR a.dataset=?2) AND a.id>?3 AND a.id<=?4
  AND substr(a.fetched_at,1,10)>=coalesce(?5,'0000-00-00') AND substr(a.fetched_at,1,10)<=coalesce(?6,'9999-12-31')`;
 
-/** One bounded creation step for a running plan. Jobs that already exist at
- * this artifact/parser/version keep their lane; a job for a version with a
- * published success is skipped by executeParseJob exactly like any other. */
+/** One bounded creation step for a running plan. Untouched repair jobs with
+ * the same target may join this explicit replay; other existing work keeps
+ * its lane and retry state. Successful parses are never executed twice. */
 async function replayStep(env: Env, plan: PlanRow) {
   const parser = PARSERS.find(
     (p) => p.name === plan.parser_name && p.version === plan.parser_version,
@@ -1124,9 +1140,42 @@ async function inspectPlan(env: Env, id: number): Promise<Response> {
   const jobs = { pending: 0, running: 0, done: 0, failed: 0 };
   for (const row of counts.results)
     if (row.status in jobs) jobs[row.status as keyof typeof jobs] = row.count;
+  // The plan owns only its attached jobs. Show matching work left in other
+  // lanes too, so zero created jobs cannot be mistaken for completed parsing.
+  const scopeJobs = await env.DB.prepare(`SELECT j.lane,j.status,
+    j.replay_plan_id IS ?1 AS attached,j.target_release IS ?2 AS same_target,
+    j.attempts>0 AS attempted,count(*) AS jobs
+    FROM observation_parse_jobs j JOIN observation_fetch_artifacts a ON a.id=j.fetch_artifact_id
+    WHERE a.source_id=?3 AND (?4 IS NULL OR a.dataset=?4)
+     AND a.id>?5 AND a.id<=?6 AND j.parser_name=?7 AND j.parser_version=?8
+     AND substr(a.fetched_at,1,10)>=coalesce(?9,'0000-00-00')
+     AND substr(a.fetched_at,1,10)<=coalesce(?10,'9999-12-31')
+    GROUP BY j.lane,j.status,attached,same_target,attempted
+    ORDER BY j.lane,j.status,attached,same_target,attempted`)
+    .bind(
+      plan.id,
+      plan.target_release,
+      plan.source_id,
+      plan.dataset,
+      plan.artifact_id_from,
+      plan.artifact_id_high_water,
+      plan.parser_name,
+      plan.parser_version,
+      plan.fetched_from,
+      plan.fetched_to,
+    )
+    .all<{
+      lane: string;
+      status: string;
+      attached: number;
+      same_target: number;
+      attempted: number;
+      jobs: number;
+    }>();
   return Response.json({
     plan,
     jobs,
+    scopeJobs: scopeJobs.results,
     parserDeployed: PARSERS.some(
       (p) => p.name === plan.parser_name && p.version === plan.parser_version,
     ),

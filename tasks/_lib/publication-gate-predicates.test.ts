@@ -59,10 +59,10 @@ const PREDICATE_ALLOW_LIST: Record<string, number> = {
 const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   // successfulParses (the named execution fact) and the legacy rule.
   "packages/read-model/src/concepts.ts": 2,
-  // Writer: the duplicate-attempt skip and the comment that explains when
-  // contract v2 rows become visible. The publish batch moved to
-  // packages/storage-d1 with the rest of the gate (U05).
-  "services/processor/src/worker.ts": 2,
+  // Writer: duplicate-attempt skip, the replay promotion guard that preserves
+  // already successful attempts, and the contract-v2 visibility comment.
+  // Neither operational guard treats execution success as publication.
+  "services/processor/src/worker.ts": 3,
   // Writer: the publish batch, the two projection statements and the module
   // note, all now in the shared CORE package.
   "packages/storage-d1/src/atomic/publication.ts": 9,
