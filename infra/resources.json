@@ -244,8 +244,8 @@
       "disposition": {
         "source": "direct collector feasibility follow-up, 2026-09-13",
         "proposedAction": "isolated-as-experiment",
-        "proposedTarget": "experiments/mizuho-direct (local probe and offline account/history parsers)",
-        "requiredVerification": "Browser reads and one local HTTP account-list read verified; unattended renewal and cloud execution unverified",
+        "proposedTarget": "experiments/mizuho-direct (public-entry diagnostics; parsers promoted to packages/parsers)",
+        "requiredVerification": "Integrated local account/history reads verified; unattended renewal and cloud execution unverified",
         "executionStatus": "LOCAL_FEASIBILITY_ONLY",
         "planLiveResourceStatus": "NO_RESOURCES_DECLARED",
         "liveResourceStatus": "NO_LIVE_RESOURCE"
@@ -551,6 +551,54 @@
             "RELAY_PUBLIC_URL"
           ],
           "requiredSecretNames": [],
+          "unextractedKeys": []
+        }
+      ]
+    },
+    {
+      "directory": "services/collector-mizuho",
+      "workspace": "services",
+      "disposition": {
+        "source": "Mizuho direct collector integration, 2026-09-13",
+        "proposedAction": "promoted-to-service",
+        "proposedTarget": "services/collector-mizuho",
+        "requiredVerification": "Owner-session trigger only; no cron. Cloud egress and unattended renewal require validation before activation.",
+        "executionStatus": "IMPLEMENTED_NOT_DEPLOYED",
+        "planLiveResourceStatus": "NOT_DEPLOYED",
+        "liveResourceStatus": "LIVE(buckets=kogane-raw-evidence)"
+      },
+      "workers": [
+        {
+          "config": "services/collector-mizuho/wrangler.jsonc",
+          "name": "kogane-mizuho-collector",
+          "main": "src/worker.ts",
+          "role": "not-deployed",
+          "liveWorker": false,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [],
+          "r2": [
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
+              "live": true
+            }
+          ],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [],
+          "varNames": [
+            "COLLECTOR_SCHEMA_VERSION"
+          ],
+          "requiredSecretNames": [
+            "ADMIN_TRIGGER_TOKEN"
+          ],
           "unextractedKeys": []
         }
       ]
@@ -1353,7 +1401,7 @@
     }
   ],
   "summary": {
-    "configCount": 23,
+    "configCount": 24,
     "deployedWorkerCount": 14,
     "crons": [
       {
@@ -1481,6 +1529,7 @@
         "readers": [
           "kogane-evidence-browser",
           "kogane-globalpass-collector-poc",
+          "kogane-mizuho-collector",
           "kogane-mobile-suica-collector-poc",
           "kogane-moneyforward-collector-poc",
           "kogane-myjcb-collector-poc",

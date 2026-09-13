@@ -23,8 +23,8 @@ The historical research below predates this follow-up.
 - `experiments/mizuho-direct` contains a bounded, unauthenticated entry probe.
   Its output is diagnostic metadata only. It cannot authenticate, collect
   balances or transactions, or establish that a Worker runtime is supported.
-  Separate offline parsers cover the observed ordinary-deposit account and
-  history HTML, with synthetic fixtures only.
+  The observed ordinary-deposit parsers are promoted to `packages/parsers`;
+  their fixtures are synthetic.
 - Its one live Bun invocation returned HTTP 200, 5,817 response bytes and
   `unsupported-environment-50020`, with no redirects or recognized login form.
   No identifying input, authenticated request or credential retry was made.
@@ -71,11 +71,20 @@ The historical research below predates this follow-up.
   observed redirect established equivalence; after a fresh browser read, the
   corrected check succeeded. Other origins, paths and ports remain rejected.
   This verifies local session portability for this account-list read only.
+- After integration, the production TypeScript client was exercised once from
+  WSL with a newly authenticated browser session. Both account-list and
+  ordinary-history POST/redirect/GET reads succeeded (four requests: 302, 200,
+  302, 200), returning two sanitized evidence artifacts without partial results.
+  The client did not submit a password, write to the bank or persist live data
+  to Kogane during this validation. Shared ingestion/projection is tested with
+  synthetic data, including real local Workers/R2 semantics.
 
-Implement only observed read transitions. Direct HTTP history collection,
-expiry/re-login, pagination and cloud execution each require their own
-validation. The successful local balance read does not establish an unattended
-collector, and no production service or schedule was added.
+Implement only observed read transitions. Automated expiry/re-login,
+pagination and cloud execution each require their own
+validation. `services/collector-mizuho` now integrates the session-based direct
+client, sanitized evidence persistence, shared parsers, and existing projections.
+It is an operator-triggered service with no automated login renewal or cron;
+deployment stays disabled until the intended cloud network path is verified.
 
 The bank app was renamed to みずほ銀行アプリ on 2026-09-03; historical app names
 below describe the original research. The

@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { MizuhoParseError, parseAccountPage, parseHistoryPage } from "../src/parsers.mjs";
+import {
+  MizuhoParseError,
+  parseAccountPage,
+  parseHistoryPage,
+} from "../src/parsers/mizuho-html.ts";
 
 // Entirely synthetic structure matching the observed official page families.
-const span = (id, value) => `<span id="${id}">${value}</span>`;
+const span = (id: string, value: string): string => `<span id="${id}">${value}</span>`;
 function accountCard(index = "000", number = "001-1234567") {
   return `<button class="btn-account" type="button">
     ${span(`txtAccType_${index}`, "普通預金")}
@@ -13,7 +17,7 @@ function accountCard(index = "000", number = "001-1234567") {
     ${span(`txtBrrwUsblBal_${index}`, "1,234")}</button>`;
 }
 const accountPage = (cards = accountCard()) => `<form name="BALINQ_03010B">${cards}</form>`;
-const account = () => parseAccountPage(accountPage()).accounts[0];
+const account = () => parseAccountPage(accountPage()).accounts[0]!;
 function historyRow(index = "000", amount = "+ 1", balance = "1,234") {
   return `<div class="box-row-tx-ditails"><div><div class="t1-1">
     ${span(`txtTransCntnt_${index}`, "テスト入金 &amp; fixture")}
@@ -28,13 +32,13 @@ function historyPage(rows = historyRow(), range = "1&nbsp;-&nbsp;1&nbsp;件", to
     ${span("txtBrnch", "テスト支店")}${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}
     ${rows}${span("txtDispDetails", range)}${span("txtAllDispDetails", total)}</form>`;
 }
-const failure = (fn, code) => {
+const failure = (fn: () => unknown, code: string): void => {
   try {
     fn();
     throw new Error("Expected parser to reject");
   } catch (error) {
     expect(error).toBeInstanceOf(MizuhoParseError);
-    expect(error.code).toBe(code);
+    expect(error instanceof MizuhoParseError ? error.code : undefined).toBe(code);
   }
 };
 
@@ -53,11 +57,11 @@ describe("account HTML parser", () => {
       balanceYen: "1234",
       availableBalanceYen: "1234",
     });
-    expect(result.accounts[1].branchCode).toBe("002");
+    expect(result.accounts[1]!.branchCode).toBe("002");
   });
   test("supports negative balance and preserves yen precision above Number safe integers", () => {
     const result = parseAccountPage(accountPage().replaceAll("1,234", "-9,007,199,254,740,993"));
-    expect(result.accounts[0].balanceYen).toBe("-9007199254740993");
+    expect(result.accounts[0]!.balanceYen).toBe("-9007199254740993");
   });
   test.each(["12,34", "1.25", "NaN", "1,234 円", "１,２３４", "", "01"])(
     "rejects invalid money %s",
@@ -139,8 +143,8 @@ describe("history HTML parser", () => {
       historyPage(historyRow("000", "- 1,000")).replace("2026年9月1日", "2024年2月29日"),
       account(),
     );
-    expect(result.transactions[0].amountYen).toBe("-1000");
-    expect(result.transactions[0].date).toBe("2024-02-29");
+    expect(result.transactions[0]!.amountYen).toBe("-1000");
+    expect(result.transactions[0]!.date).toBe("2024-02-29");
   });
   test("rejects contradictory mobile and desktop balances", () => {
     failure(
@@ -185,6 +189,7 @@ describe("history HTML parser", () => {
       "account-mismatch",
     );
     failure(
+      // @ts-expect-error Exercise rejection of an invalid runtime currency.
       () => parseHistoryPage(historyPage(), { ...account(), currency: "USD" }),
       "invalid-account-context",
     );

@@ -58,9 +58,12 @@ function attributes(tag) {
 }
 
 function inspectHtml(html, url, status) {
+  // Keep a boundary where ignored content occurred: joining both sides could
+  // manufacture a form, script tag or response marker absent from the input.
+  // This is diagnostic token extraction, not HTML safe for rendering.
   const markup = html
-    .replace(/<!--[\s\S]*?-->/gu, "")
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, "");
+    .replace(/<!--[\s\S]*?-->/gu, " ")
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, " ");
   const visibleText = markup.replace(/<[^>]*>/gu, " ");
   const baseTag = markup.match(/<base\b[^>]*>/iu)?.[0];
   const baseValue = baseTag ? attributes(baseTag).get("href") : undefined;

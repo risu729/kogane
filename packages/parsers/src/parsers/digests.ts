@@ -22,6 +22,10 @@ export const PARSER_DIGESTS: ParserDigests = {
       "3d7af7b4650168811c424f69c7a76cf21ee2c2a04d278064a80a9c7f2e8df74a",
     "poc/observation-pipeline/src/parsers/global-pass-activity.ts":
       "42393618d30efce565baa2ebfc9fbe878bbfe6e21e6a3e80491f661619e5a4cf",
+    "poc/observation-pipeline/src/parsers/mizuho-html.ts":
+      "ff2aae8faea491f655d50f0101adfa7af96922aa44c397da7fe5e4dc41fd5d40",
+    "poc/observation-pipeline/src/parsers/mizuho.ts":
+      "b934139f1a7794a26b92619060577ff76c891c9a46bc744ccce996fac40bb268",
     "poc/observation-pipeline/src/parsers/mobile-suica-sf-history.ts":
       "d6233b8bb03b0a653d4c8c1016d29079635f54811c1176d287a2490330e496b9",
     "poc/observation-pipeline/src/parsers/moneyforward-parser.ts":
@@ -91,6 +95,36 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/global-pass-activity-parser.ts",
         "poc/observation-pipeline/src/parsers/global-pass-activity.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "mizuho-account-list": {
+      version: "1.0.0",
+      codeDigest: "a2ba1dc3874eea9254ed61db2c3f76984fb184322551b9b7bf26886de75fd627",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/mizuho-html.ts",
+        "poc/observation-pipeline/src/parsers/mizuho.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "mizuho-ordinary-history": {
+      version: "1.0.0",
+      codeDigest: "a2ba1dc3874eea9254ed61db2c3f76984fb184322551b9b7bf26886de75fd627",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/mizuho-html.ts",
+        "poc/observation-pipeline/src/parsers/mizuho.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",

@@ -157,6 +157,17 @@
       "bundleDir": "dist/smbc-direct-backfill-worker"
     },
     {
+      "name": "mizuho-worker",
+      "path": "services/collector-mizuho",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-mizuho-collector",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion"
+    },
+    {
       "name": "sony-bank-worker",
       "path": "services/collector-sony-bank",
       "config": "wrangler.jsonc",

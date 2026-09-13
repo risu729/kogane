@@ -361,6 +361,12 @@ describe("G0-06/G0-07/G5-15 a moved directory keeps its resource identities", ()
           entry.workers.map((worker) => `${worker.name} ${basename(worker.config)}`),
         )
         .sort(),
-    ).toEqual(WORKER_CONFIGS_BEFORE_THE_PROMOTIONS);
+    ).toEqual(
+      [
+        ...WORKER_CONFIGS_BEFORE_THE_PROMOTIONS,
+        // Added after the directory promotions; no historical identity changed.
+        "kogane-mizuho-collector wrangler.jsonc",
+      ].sort(),
+    );
   });
 });

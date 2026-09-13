@@ -57,6 +57,28 @@ describe("public login probe", () => {
     expect(report.httpStatus).toBe(status);
   });
 
+  test.each(["<!-- ignored -->", "<script>ignored</script>", "<style>ignored</style>"])(
+    "discarding %s cannot manufacture a login form or a maintenance marker",
+    async (discarded) => {
+      const report = await probePublicLogin({
+        fetchImpl: async () =>
+          htmlResponse(
+            `<fo${discarded}rm name="LOGBNK_00000B" method="POST" action="/servlet/LOGBNK0000001B.do">
+              <input name="txbCustNo"></form><p>50${discarded}010</p>`,
+          ),
+      });
+      expect(report.outcome).toBe("unknown");
+      expect(report.forms).toEqual([]);
+    },
+  );
+
+  test("removing a comment cannot assemble a script tag that hides a visible response marker", async () => {
+    const report = await probePublicLogin({
+      fetchImpl: async () => htmlResponse("<scr<!-- ignored -->ipt>50010</script>"),
+    });
+    expect(report.outcome).toBe("maintenance-50010");
+  });
+
   test("follows only the initial path on a bank webN origin without forwarding cookies", async () => {
     const requests = [];
     const report = await probePublicLogin({

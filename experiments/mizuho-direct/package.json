@@ -1,8 +1,5 @@
 {
   "name": "@kogane/mizuho-direct",
   "private": true,
-  "type": "module",
-  "dependencies": {
-    "parse5": "8.0.1"
-  }
+  "type": "module"
 }

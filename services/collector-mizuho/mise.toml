@@ -1,0 +1,29 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.types]
+description = "Generate Mizuho Worker binding types."
+run = "./node_modules/.bin/wrangler types worker-configuration.d.ts --env-file .dev.vars.example --strict-vars false"
+
+[tasks.typecheck]
+description = "Type-check the direct Mizuho collector."
+depends = ["//services/collector-mizuho:types"]
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks.test]
+description = "Test Mizuho collection without contacting the bank."
+depends = ["//services/collector-mizuho:types"]
+run = ["bun test ./test", "./node_modules/.bin/vitest run"]
+
+[tasks.dry-run]
+description = "Validate the Mizuho Worker without uploading it."
+depends = ["//services/collector-mizuho:types"]
+run = "./node_modules/.bin/wrangler deploy --dry-run"
+
+[tasks.bundle]
+description = "Build the Mizuho collector deployment bundle."
+depends = ["//services/collector-mizuho:types"]
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/mizuho-worker"
+
+[tasks.ci]
+description = "Run Mizuho collector verification."
+depends = ["//services/collector-mizuho:typecheck", "//services/collector-mizuho:test"]

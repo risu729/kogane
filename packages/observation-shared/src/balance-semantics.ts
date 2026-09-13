@@ -102,6 +102,7 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
       "activity_current_balance",
     ]) ||
     matches("smbc-bank", "smbc-direct-balance", ["account_balance"]) ||
+    matches("mizuho-bank", "mizuho-account-list", ["account_balance"]) ||
     matches("sony-bank", "sony-bank-history-json", ["available_after_transaction"]) ||
     matches("sony-bank", "sony-bank-history-csv", ["available_after_transaction"]);
   if (deposit)
@@ -162,6 +163,13 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
       "証拠金・決済関連額",
       "証拠金・制限・決済内訳は独立した残高として自動加算しません。",
       { measurementKind: input.metric === "withdrawal_limit" ? "capacity" : "unknown" },
+    );
+  if (matches("mizuho-bank", "mizuho-account-list", ["available_balance"]))
+    return result(
+      "other",
+      "引出可能額",
+      "預金残高と重なる利用可能額です。独立した資産残高として加算しません。",
+      { measurementKind: "capacity" },
     );
   // MoneyForward, Vpass, GLOBAL PASS and unknown/new metrics have no generic asset inference.
   return result(

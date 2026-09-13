@@ -135,6 +135,7 @@ export function classifyActivity(input: {
       "sony-bank/sony-bank-history-json",
       "sony-bank/sony-bank-history-csv",
       "smbc-bank/smbc-direct-transactions",
+      "mizuho-bank/mizuho-ordinary-history",
       "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
       "sbi-vc-trade/sbi-vc-cashflows",
       "mobile-suica/mobile-suica-sf-history",
