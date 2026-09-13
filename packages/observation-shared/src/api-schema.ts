@@ -161,6 +161,7 @@ export interface ApiCapabilities {
   readonly eventsV2: boolean;
   /** Human review of card statement/bank settlement candidates is available. */
   readonly cardSettlementReconciliation?: boolean;
+  readonly cardOwnershipReview?: boolean;
   /**
    * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
    * collection, re-registration, replay, rebuild, session refresh and the
@@ -194,6 +195,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   commands: false,
   eventsV2: false,
   cardSettlementReconciliation: false,
+  cardOwnershipReview: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -224,6 +226,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   commands: false,
   eventsV2: false,
   cardSettlementReconciliation: false,
+  cardOwnershipReview: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 

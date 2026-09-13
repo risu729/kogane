@@ -20,6 +20,7 @@ import { CollectionControls } from "./collection-controls.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
+import { CardOwnershipPage } from "./pages/CardOwnership.tsx";
 import { ReconciliationPage } from "./pages/Reconciliation.tsx";
 
 const NAV: { to: string; label: string; icon: string }[] = [
@@ -83,6 +84,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <IdentitiesPage />;
     case "rewards":
       return <RewardsPage />;
+    case "cardOwnership":
+      return <CardOwnershipPage key={route.proposalId} proposalId={route.proposalId} />;
     case "reconciliation":
       return <ReconciliationPage />;
     case "artifacts":
@@ -283,7 +286,7 @@ export function App(): ReactNode {
           </QueryBoundary>
         </main>
         <footer className="workspace-footer">
-          <span>保存された証跡を、読み取り専用で表示しています。</span>
+          <span>原本を保持し、確認・訂正の履歴を記録します。</span>
           <span>金融機関への接続・収集はこの画面から実行しません。</span>
         </footer>
       </div>

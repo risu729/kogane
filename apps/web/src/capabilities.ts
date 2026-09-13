@@ -45,6 +45,7 @@ export interface ClientFeatures {
   readonly commands: boolean;
   /** Cross-source card settlement review is advertised by the server. */
   readonly cardSettlementReconciliation: boolean;
+  readonly cardOwnershipReview: boolean;
 }
 
 /** Every feature is off until capabilities are known. */
@@ -58,6 +59,7 @@ export const NO_FEATURES: ClientFeatures = {
   rewards: false,
   commands: false,
   cardSettlementReconciliation: false,
+  cardOwnershipReview: false,
 };
 
 export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
@@ -76,5 +78,6 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     rewards: capabilities.rewardsV2,
     commands: capabilities.commands,
     cardSettlementReconciliation: capabilities.cardSettlementReconciliation === true,
+    cardOwnershipReview: capabilities.cardOwnershipReview === true,
   };
 }

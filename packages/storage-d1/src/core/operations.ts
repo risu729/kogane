@@ -33,6 +33,9 @@ const REVISION_OF = `coalesce(
  (SELECT max(m.revision) FROM account_mappings m WHERE 'account_mapping:'||m.source_account_id=e.key),
  (SELECT max(m.revision) FROM instrument_mappings m WHERE 'instrument_mapping:'||m.identifier_id=e.key),
  (SELECT max(d.revision) FROM card_settlement_decisions d WHERE 'card-settlement:'||d.proposal_id=e.key),
+ CASE WHEN e.key LIKE 'ownership:%' THEN
+  (SELECT count(*) FROM entity_relations r JOIN accounts a ON r.from_ref IN(a.id,'account:'||a.id)
+   WHERE 'ownership:'||r.kind||'|'||a.id=e.key) END,
  CASE WHEN e.key LIKE 'relation:%' THEN
   (SELECT count(*) FROM entity_relations r WHERE 'relation:'||r.kind||'|'||r.from_ref||'|'||r.to_ref=e.key) END,
  0)`;

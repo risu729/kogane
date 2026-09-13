@@ -117,6 +117,7 @@ export type Route =
   | { name: "identities" }
   | { name: "rewards" }
   | { name: "reconciliation" }
+  | { name: "cardOwnership"; proposalId: string }
   | { name: "artifacts" }
   | { name: "artifact"; id: number }
   | { name: "observation"; kind: ObservationKind; id: number }
@@ -132,6 +133,8 @@ function parseId(value: string | undefined): number | undefined {
 }
 
 export function matchRoute(path: string): Route {
+  const ownership = /^\/reconciliation\/([A-Za-z0-9_-]{1,128})\/ownership$/u.exec(path);
+  if (ownership) return { name: "cardOwnership", proposalId: ownership[1]! };
   const segments = path.split("/").filter((segment) => segment !== "");
   const [first, second, third] = segments;
 

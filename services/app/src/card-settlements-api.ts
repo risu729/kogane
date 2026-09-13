@@ -1,3 +1,4 @@
+import { queryCardOwnership } from "../../../packages/application/src/query/card-ownership.ts";
 import { queryCardSettlements } from "../../../packages/application/src/query/card-settlements.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { flagOn } from "./events-api";
@@ -5,6 +6,7 @@ import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
 export const CARD_SETTLEMENT_PATH = "/api/v2/reconciliation/card-settlements";
+export const CARD_OWNERSHIP_PATH = `${CARD_SETTLEMENT_PATH}/ownership`;
 
 /** A schema-ahead deployment does not advertise a route it cannot serve. */
 export async function cardSettlementsAvailable(env: Env): Promise<boolean> {
@@ -22,7 +24,8 @@ export async function cardSettlementsApi(
   url: URL,
   subject: string,
 ): Promise<Response | null> {
-  if (url.pathname !== CARD_SETTLEMENT_PATH) return null;
+  const ownership = url.pathname === CARD_OWNERSHIP_PATH;
+  if (url.pathname !== CARD_SETTLEMENT_PATH && !ownership) return null;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
   if (!(await cardSettlementsAvailable(env))) throw new HttpError(404, "not_found");
@@ -47,6 +50,13 @@ export async function cardSettlementsApi(
     (!/^[A-Za-z0-9_-]{1,128}$/u.test(proposalId) || url.searchParams.has("offset"))
   )
     throw new HttpError(400, "invalid_query");
+  if (ownership) {
+    if (proposalId === null || url.searchParams.has("offset"))
+      throw new HttpError(400, "invalid_query");
+    const review = await queryCardOwnership(d1Executor(env.DB), proposalId);
+    if (!review) throw new HttpError(404, "not_found");
+    return json({ apiVersion: 2, ...review });
+  }
   const page = await queryCardSettlements(d1Executor(env.DB), {
     offset,
     ...(proposalId === null ? {} : { proposalId }),

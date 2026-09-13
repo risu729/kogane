@@ -1798,3 +1798,19 @@ td summary {
 .settlement-targets {
   min-width: 640px;
 }
+
+.ownership-form {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+}
+.ownership-form > input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.ownership-evidence {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+}
