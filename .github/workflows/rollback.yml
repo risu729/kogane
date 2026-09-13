@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: The exact commit on main to go back to. It must be an ancestor of the recorded release.
+        description: The exact commit on main to go back to. It must include the production compatibility floor (#207) and be an ancestor of the recorded release.
         required: true
         type: string
       targets:

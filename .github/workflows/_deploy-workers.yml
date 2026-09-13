@@ -98,6 +98,26 @@ jobs:
               exit 1
               ;;
           esac
+      - name: Confirm the target meets the production compatibility floor
+        # This gate belongs to the current trusted workflow, before target code
+        # is checked out or run. An old target cannot enforce a newer retirement.
+        # #207 includes both #206's CORE/ingestion retirement and the public-demo
+        # retirement. Apply the floor to releases and all rollback subsets.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          COMPATIBILITY_FLOOR_SHA: 87da571c7aa35dd76f9b00737a886ac41e6d3491
+        run: |
+          status=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${COMPATIBILITY_FLOOR_SHA}...${SHA}" --jq '.status')
+          case "${status}" in
+            identical | ahead)
+              echo "${SHA} includes production compatibility floor ${COMPATIBILITY_FLOOR_SHA} (${status})." | tee -a "${GITHUB_STEP_SUMMARY}"
+              ;;
+            *)
+              echo "${SHA} is '${status}' relative to compatibility floor ${COMPATIBILITY_FLOOR_SHA}; pre-retirement code cannot be released or rolled back." >&2
+              exit 1
+              ;;
+          esac
       - name: Checkout the exact commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
