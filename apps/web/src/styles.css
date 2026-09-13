@@ -1549,7 +1549,8 @@ td summary {
 .state-empty p:last-child {
   margin-bottom: 0;
 }
-.button:disabled {
+.button:disabled,
+.button[aria-disabled="true"] {
   cursor: default;
   opacity: 0.5;
 }
