@@ -52,15 +52,15 @@ runbooks.
 
 ## Operations
 
-From this package, with the usual authorized Cloudflare environment:
+From the repository root in WSL, with the authorized Cloudflare environment:
 
 ```sh
-node scripts/ops.ts status
-node scripts/ops.ts catchup 100
-node scripts/ops.ts sweep replay 20
-node scripts/ops.ts replay plan '{"source":"smbc-bank","dataset":"balance-normalized","parser":"smbc-direct-balance","version":"1.0.0","reason":"..."}'
-node scripts/ops.ts replay start '{"planId":1}'
-node scripts/status.ts
+mise run //services/processor:ops status
+mise run //services/processor:ops catchup 100
+mise run //services/processor:ops sweep replay 20
+mise run //services/processor:ops replay plan '{"source":"smbc-bank","dataset":"balance-normalized","parser":"smbc-direct-balance","version":"1.0.0","reason":"..."}'
+mise run //services/processor:ops replay start '{"planId":1}'
+mise exec -- node services/processor/scripts/status.ts
 ```
 
 Use the project's pinned Node runtime: Bun's remote proxy stalled in the local

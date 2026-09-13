@@ -406,3 +406,12 @@ secret), or redeploy the previous Worker revision. Accepted operations stay in
 `ops_requests`; they are inert while nothing dispatches them, and turning the
 flag off does not need to remove them. The migration is not rolled back: its
 tables are unread by the previous revision.
+
+### Replay publication target
+
+The replay API pins `parserRelease` as `target_release`. With candidate mode on,
+a registered release that is not the dataset's active release produces candidate
+runs, not immediately adopted observations. Comparison and activation are separate
+operations; a successful parse or completed replay plan is not adoption. For a
+bounded backfill with the normally deployed parser and no candidate target, use
+the authenticated [processor replay helper](observation-lanes.md#bounded-operator-replay).

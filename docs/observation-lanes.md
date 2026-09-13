@@ -86,7 +86,7 @@ Internal `POST` routes on the pipeline Worker at the same trust level as
 | `/replay/pause`   | `planId`                                                                                                                          | `planned/running → paused`. Unclaimed replay jobs of the plan stop being selected; a held lease finishes through the normal fenced publish. Idempotent.                                                                                                                                       |
 | `/replay/resume`  | `planId`                                                                                                                          | `paused → running`. Idempotent.                                                                                                                                                                                                                                                               |
 | `/replay/cancel`  | `planId`                                                                                                                          | `→ cancelled`; pending (and expired-lease) replay jobs of the plan become `failed/replay_cancelled`. Published parse runs, observations and raw evidence are never touched.                                                                                                                   |
-| `/replay/inspect` | `planId`                                                                                                                          | Plan row, job counts by status, and whether the parser version is currently deployed.                                                                                                                                                                                                         |
+| `/replay/inspect` | `planId`                                                                                                                          | Plan row, attached job counts, `scopeJobs` counts for matching work in every lane, and whether the parser version is currently deployed.                                                                                                                                                      |
 
 The sweep's replay lane continues creation steps for running plans (two plans
 per sweep) and marks a plan `completed` once creation is complete and no job
@@ -106,8 +106,14 @@ Guarantees:
   parser must not run twice for the same input and version even when the gate
   has not published the result. The plan estimate above is the operator
   signal and does use the projection.
-- Jobs that already exist for an artifact/parser/version keep their lane and
-  status; replay never re-opens failed jobs or resets attempts.
+- An explicit replay can attach a matching `repair` job only when it is still
+  `pending`, has zero attempts, no lease, no successful parse, no existing replay
+  plan, and exactly the same `target_release` (including null). Its lane becomes
+  `replay`; attempts, backoff, priority and creation time stay unchanged.
+  `jobs_created` includes these newly attached jobs as well as newly inserted jobs.
+  Incremental work, running leases, retries, failed/done jobs and different release
+  targets remain untouched. Cancellation applies to attached jobs too; it never
+  deletes facts or resets attempts.
 - `target_release` is how a plan aims its jobs at a registered candidate
   release (A04, `docs/release-adoption.md`). With `RELEASE_CANDIDATES_ENABLED`
   absent it is recorded and ignored, and every replay result publishes
@@ -121,11 +127,44 @@ Guarantees:
   version, unless the version is not deployed, in which case the deployed
   registry decides as before.
 
+## Bounded operator replay
+
+Run the authenticated helper from the repository root in WSL:
+
+```sh
+mise run //services/processor:ops status
+mise run //services/processor:ops replay plan '{"source":"smbc-bank","dataset":"balance-normalized","parser":"smbc-direct-balance","version":"1.0.0","fetchedFrom":"2026-09-10","fetchedTo":"2026-09-11","reason":"Reviewed historical parser update"}'
+mise run //services/processor:ops replay inspect '{"planId":1}'
+mise run //services/processor:ops replay start '{"planId":1}'
+mise run //services/processor:ops sweep replay 20
+```
+
+Use the returned plan id and the deployed parser version. The plan's dates refer
+to artifact capture dates, not the financial statement month. The recorded
+`estimated_artifacts` is an eligibility upper bound: parser acceptance is checked
+when jobs are created. Zero jobs can mean that the selected metadata is not
+accepted by the parser, or that existing jobs could not join the plan. Inspect
+`scopeJobs`: `attached`, `same_target` and `attempted` are 0/1 flags beside each
+lane/status count. A completed plan does not prove that every matching job in
+another lane finished, or that candidate results were adopted.
+
+Omitting `targetRelease` on this internal helper uses normal publication. The
+public `POST /api/ops/v1/replays` API always pins its supplied `parserRelease` as
+`target_release`; with candidate mode enabled and no matching active release,
+its results remain candidates until explicit comparison and activation. Do not
+use candidate replay when the intended operation is an ordinary deployed-parser
+backfill. See [release adoption](release-adoption.md) for that separate process.
+
+For existing repair retries that intentionally cannot join a replay, the bounded
+`mise run //services/processor:ops sweep repair 20` runs at most 20 ready repair
+jobs across the lane; it is not source-filtered. Inspect progress before repeating.
+`catchup` increases only the incremental budget and does not accelerate repair.
+
 ## Budgets and overrides
 
 `POST /sweep` runs all lanes with the defaults above. `?maxJobs=N` (1–40)
 overrides the incremental budget only, which is the historical meaning of the
-sweep budget (`scripts/ops.ts catchup` relies on it). `?lane=incremental|repair|replay`
+sweep budget (`mise run //services/processor:ops catchup` relies on it). `?lane=incremental|repair|replay`
 runs that single lane, with `maxJobs` applying to it. Maintenance always runs.
 
 Per-source fairness inside a lane is not implemented; a slow source's failing
