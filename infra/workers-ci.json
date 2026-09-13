@@ -4,7 +4,7 @@
       "name": "app",
       "path": "services/app",
       "config": "wrangler.jsonc",
-      "prepare": "web:build-production"
+      "prepare": "//apps/web:build-production"
     },
     {
       "name": "app-test",

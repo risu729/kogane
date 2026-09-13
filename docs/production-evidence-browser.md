@@ -105,15 +105,15 @@ is disabled; detailed application events remain enabled.
 ## Build and verification
 
 ```sh
-mise run ci:web
-mise run ci:app
-mise run check --lint
+mise run //apps/web:ci
+mise run //services/app:ci
+mise run check
 ```
 
 The frontend job builds both modes and exercises synthetic browser responses.
 The Worker job builds the production assets and tests local D1/R2 plus signed
 synthetic JWTs. It does not query production or change Access configuration.
-The regular `mise run web:build && bun src/serve.ts --demo` remains the isolated local synthetic browser.
+The regular `mise run //apps/web:build && bun src/serve.ts --demo` remains the isolated local synthetic browser.
 
 Transactions and balances can be connected only when a production observation
 store and its provenance contract exist. Raw artifacts are not substituted for

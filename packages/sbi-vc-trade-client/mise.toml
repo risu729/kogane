@@ -1,0 +1,14 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks."typecheck"]
+description = "Type-check packages/sbi-vc-trade-client."
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks."test"]
+description = "Run the packages/sbi-vc-trade-client tests."
+run = "bun test"
+
+[tasks."ci"]
+description = "Every check CI runs for packages/sbi-vc-trade-client."
+depends = ["//packages/sbi-vc-trade-client:typecheck", "//packages/sbi-vc-trade-client:test"]

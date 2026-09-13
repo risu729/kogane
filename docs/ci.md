@@ -1,201 +1,164 @@
 # Continuous integration
 
-Kogane follows the CI structure used by
-[kuebiko](https://github.com/risu729/kuebiko/blob/main/.github/workflows/ci.yml)
-and [mikoto](https://github.com/risu729/mikoto/blob/main/.github/workflows/ci.yml):
-mise provides pinned tools, hk runs shared lint presets, and one `CI Check`
-guard collects the results required for merging.
+`hk check --all` is the common verification entrypoint for local development and
+GitHub Actions. It runs lint and formatting checks, repository guards, Knip,
+every workspace's typechecks, tests and builds, then every Worker dry run.
+`CI Check` remains the required merge status.
 
-**mise is the only task runner.** No `package.json` in this repository carries a
-`scripts` field, and nothing invokes a package script through `bun run`,
-`npm run` or `pnpm run`. Every development, build, test and dry-run entry point
-is a mise task, declared in a `tasks.toml` next to the code it runs.
-
-## One Bun workspace
-
-The repository root holds the only `package.json` with `workspaces`
-(`apps/*`, `services/*`, `packages/*`, `experiments/*`, `poc/*`) and the only
-`bun.lock`. `bunfig.toml` selects Bun's **isolated** linker, so every workspace
-gets its own `node_modules` containing exactly the versions it pins: the
-services that pin TypeScript 7.0.2 and Wrangler 4.128.0 keep them while the
-PoC workers keep 5.9.3 and their own Wrangler versions. Nothing is hoisted, so
-each workspace must declare every module it imports directly.
-
-Tasks therefore call `./node_modules/.bin/<binary>` from their `dir` rather than
-a bare name: that is the binary the workspace pinned. The root
-`node_modules/.bin` (on `PATH` through `[env] _.path` in `mise.toml`) carries
-only the root-level tooling, which is also what
-`risu729/wrangler-deploy-action` falls back to when a working directory does
-not pin Wrangler itself. No task downloads a tool on demand; there is no `npx`
-or `bunx` fallback, and a checkout without dependencies fails loudly instead of
-installing a different version.
-
-`infra/dependency-resolution.md` records how the single lockfile resolved
-compared with the per-package lockfiles it replaced.
-
-A container image that runs a frozen Bun install has to see that one lockfile,
-so its container entry sets `image_build_context` to the repository root and its
-Dockerfile copies the root `package.json`, `bunfig.toml` and `bun.lock` plus its
-own workspace manifest, then installs with `--filter <workspace name>`
-(`experiments/cloudflare-runtime-probe`). Only one workspace ends up in the image, so it
-installs `--linker hoisted`: the repository's isolated layout would put the
-dependencies under the workspace path, where the entry point cannot resolve
-them. The root `.dockerignore` keeps evidence, credentials, `node_modules` and
-build output out of that context. Images that install with npm from their own
-`container/package-lock.json` (`services/collector-globalpass`,
-`services/collector-sbi-shinsei`) are unaffected and keep their workspace directory as
-the context.
+**mise is the only task runner.** No `package.json` carries a `scripts` field.
+Tools are pinned in `mise.toml` and `mise.lock`; native mise monorepo tasks own
+commands and their dependencies. hk decides which checks and fixes to run.
+GitHub Actions provides the runner, permissions, triggers and result reporting.
 
 ## Local commands
 
 ```sh
 mise trust
-mise install          # pinned tools
-mise run install      # frozen Bun install for every workspace
-mise run check --lint # hk: never edits files
-mise run verify       # every workspace's CI checks, then the Worker dry runs
-mise run ci:app       # one workspace
+mise install                         # pinned tools
+mise run install                     # frozen workspace dependencies
+mise exec -- hk check --all --no-fail-fast
+mise run check                       # the same complete check
+mise run verify                      # compatibility alias for check
+mise run //services/app:ci            # one workspace
+mise run fix                         # apply available lint/format fixes
 mise run hooks:install
 ```
 
-`mise run check` applies available formatting and lint fixes; `--lint` never
-intentionally edits source files. The hk pre-commit hook uses the same checks
-on staged files. Tools are pinned in `mise.toml` and resolved for Linux x64 and
-Windows x64 in `mise.lock`.
+`check` is read-only with respect to source formatting. It does generate Worker
+types and local build/test outputs, and may download pinned dependencies or the
+locked Playwright browser when absent. It does not run collectors, bank logins,
+credential synchronization, backfills or deployments, and needs no production
+credentials. `fix` intentionally changes source files. The pre-commit hook runs
+only the shared lint/format steps on staged files, with unstaged work stashed;
+it does not run the full test/build graph on every commit.
 
-Dependencies are installed by the `bun` deps provider in `mise.toml`
-(`bun install --frozen-lockfile`). It is declared `auto = true`, so any
-`mise run` installs first when the root manifest, `bun.lock`, `bunfig.toml` or
-any workspace manifest changed. `mise deps --explain bun` shows that decision;
-`mise deps --force bun` repairs a broken `node_modules` without falling back to
-the network for a different version.
+Plain `hk check` runs the repository verification graph even with no selected
+files; hk's usual file selection still applies to file-based linters. Use
+`--all` for the complete lint scan. `--no-fail-fast` collects remaining hk
+failures, and the repository step uses `mise run --continue-on-error checks`
+so independent workspace failures are collected too. A failed prerequisite
+still prevents its dependent task from running.
 
-The full workspace suite runs on Linux in CI. Shell tests require GNU tools and
-Bash; the frontend suite requires a built client and Chromium. Locally,
-`CHROMIUM_PATH` selects an installed Chrome executable; in CI the hidden
-`web:browser` task installs the workspace's own locked Playwright Chromium.
+The full suite runs on Linux in CI. Shell tests require GNU tools and Bash.
+Frontend tests require the built client and Chromium: `CHROMIUM_PATH` selects
+an installed executable locally, and the workspace browser task supplies the
+locked Playwright Chromium in CI. Wrangler telemetry is disabled in CI.
 
-## Task names
+## One Bun workspace
 
-Each workspace owns a `tasks.toml` that the root `mise.toml` lists under
-`[task_config] includes`. Task names are `<short>:<verb>`:
+The root `package.json` defines `apps/*`, `services/*`, `packages/*`,
+`experiments/*`, with one root `bun.lock`. `bunfig.toml` selects the
+isolated linker. Each workspace declares its direct imports and retains its
+own pinned TypeScript, Wrangler and other dependencies. Workspace tasks invoke
+`./node_modules/.bin/<binary>` from that workspace; root tooling comes from
+root `node_modules/.bin` on mise's PATH. No task uses an `npx` or `bunx` fallback.
 
-| verb        | meaning                                                         |
-| ----------- | --------------------------------------------------------------- |
-| `types`     | `wrangler types` for a Worker                                   |
-| `typecheck` | `tsc --noEmit` (depends on `types`)                             |
-| `test`      | the workspace's tests                                           |
-| `build`     | a build or bundle check                                         |
-| `dry-run`   | `wrangler deploy --dry-run` for every config the workspace owns |
-| `dev`       | a local development server                                      |
+The root `bun` deps provider uses `bun install --frozen-lockfile`. Its automatic
+freshness check runs before mise tasks and `mise exec` when a source manifest,
+lockfile or install configuration changed, or the declared output is missing.
+`mise deps --explain bun` explains that decision; `mise deps --force bun` repairs
+an installation. This is dependency preparation, not a second task runner.
+[The dependency ledger](../infra/dependency-resolution.md) records resolution.
 
-`<short>` is the workspace's short name: `app` (`services/app`),
-`processor` (`services/processor`), `ingest`
-(`services/raw-evidence`), `importer` (`services/collector-r2-importer`), `web`
-(`poc/observation-pipeline`), the package name for `packages/*`, and the
-directory name for the remaining PoC workers.
+The runtime-probe container uses the repository root as `image_build_context`,
+copies the root lockfile, install configuration and its workspace manifest,
+then installs only that workspace with Bun's hoisted linker inside the image.
+The image needs dependencies beside its entrypoint rather than the repository's
+isolated layout. `.dockerignore` excludes evidence, credentials and build output.
+The GlobalPass and SBI Shinsei containers retain their independent, frozen npm
+container installs and workspace-local build contexts.
 
-Every workspace also declares one aggregate `ci:<short>` task — the exact set
-of checks CI runs for it. `ci:root` holds the repository-wide guards that
-belong to no workspace. Root tasks: `install`, `check`, `hooks:install`,
-`dry-run` (every Worker config), `load-fixture` and `verify`.
+## Native monorepo tasks
 
-Operational entry points — bank logins, credential synchronization, R2 audits,
-backfills, production deployments — are deliberately **not** mise tasks. mise is
-the entry point for development, build and test. Those scripts are run by path
-from the workspace directory (`bash scripts/audit-v-point-r2.sh`,
-`bun scripts/live-smoke.ts`), which is also what their documentation shows.
+The root declares `monorepo_root = true` and `[monorepo].config_roots` globs.
+Each workspace owns a `mise.toml` with local task names such as `ci`, `test`,
+`typecheck`, `build`, `types`, `bundle` and `dry-run`. Its directory is the
+working directory automatically; root-qualified references make cross-workspace
+dependencies explicit.
+
+```sh
+mise tasks ls --all                   # discover every workspace task
+mise run //apps/web:test
+mise run //services/processor:ci
+mise run //packages/domain:typecheck
+mise run dry-run                      # every validated Worker configuration
+```
+
+The root `checks` task composes `ci:root` and all workspace `ci` tasks, followed
+by `dry-run`. hk's `repository` check invokes this graph, never `check` or
+`verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the
+deployment ledger and existing operational instructions working. Workspace
+checks use native names; `ci:<short>` aliases are not retained. New code and docs
+should use `//<workspace>:<task>`.
+
+`ci:root` owns manifest/task coverage, repository tests, import-boundary checks
+and Knip. Root `bundle` and `dry-run` compose workspace tasks. Deployable
+Workers' bundle locations stay aligned with `infra/deploy-order.json`.
+
+Automation tasks under `tasks/automation/` call tested implementation modules in
+`tasks/_lib/ci/`. The release and auto-merge workflows use these mise tasks;
+GitHub-specific triggers, permissions, credential scopes and upload actions
+remain in workflow YAML. See [CI/CD automation](ci-cd.md) for their safeguards.
+Operational tasks are not dependencies of the check graph.
 
 ## Adding a workspace
 
-1. Create `<dir>/package.json` (no `scripts`) under one of the root
-   `workspaces` globs, declaring every module it imports directly — the
-   isolated linker hoists nothing.
-2. Run `mise run install` so the root `bun.lock` records it.
-3. Add `<dir>/tasks.toml` with `dir = "<dir>"` on every task (task `dir` is
-   resolved against the repository root, not the task file), and one aggregate
-   `ci:<short>`.
-4. List `<dir>/tasks.toml` in `[task_config] includes` of `mise.toml`.
-5. If it deploys a Worker, add each of its Wrangler configs to
-   `infra/workers-ci.json` and give it a `<short>:dry-run` task listing the same
-   configs. A config that serves built assets also names the task that produces
-   them in the entry's `prepare` field; without it the job only installs. A
-   config that cannot be dry-run (a `wrangler dev` helper with remote bindings
-   and no `main`) goes under `excluded` with the reason; a Wrangler config that
-   is in neither list fails the guard.
+1. Add its `package.json` without `scripts` under a root Bun workspace glob,
+   declaring every direct dependency, and update the root lockfile.
+2. Add a workspace `mise.toml` under the matching monorepo config-root glob.
+   Declare a `ci` aggregate with its typechecks, tests and required builds.
+3. Use `//<workspace>:<task>` for dependencies, including cross-workspace ones.
+4. For a Worker, list each deployable configuration in `infra/workers-ci.json`
+   and provide a `dry-run` task for those same configurations. Record any
+   build preparation dependency in the task graph. Configurations that cannot
+   be dry-run must be explicitly excluded in the ledger with a reason.
 
-Nothing else is needed: the CI matrices are generated from the task list and
-the ledger. `tasks/_lib/check-manifests.ts` fails if a workspace directory has
-no `ci:` task or two `ci:` tasks, if a `ci:` task runs nothing, if the dry-run
-tasks and `infra/workers-ci.json` disagree, if a tracked Wrangler config is
-neither listed nor excluded there, if a manifest grows a `scripts` field, or if
-any tracked file calls a package script.
+The manifest guard checks task discovery, workspace coverage, runnable `ci`
+tasks, deployment dry-run coverage, tracked Wrangler configurations and the
+ban on package scripts. A workspace is not silently omitted because someone
+forgot to add another Actions matrix row or root task-file include.
 
 ## Checks and coverage
 
-- Oxlint checks JavaScript and TypeScript correctness and suspicious constructs.
-  React uses the automatic JSX runtime. Control-character rejection and
-  deliberate redaction of sensitive exception causes remain intact.
-- Oxfmt formats source code and documentation. Tombi checks and formats TOML;
-  yamllint and yamlfmt cover YAML.
-- Actionlint, ShellCheck, ghalint, pinact, and zizmor validate workflow syntax,
-  shell code, permissions, action pins, and unsafe workflow patterns.
-- Ruff checks and formats Python probes without executing them. Typos and hk
-  hygiene checks cover spelling, whitespace, merge markers, and file integrity.
-- `ci:root` runs the guards under `tasks/_lib/` and `scripts/`: the manifest
-  and task-runner guard, the auto-merge decisions of
-  [CI/CD automation](ci-cd.md), the publication-gate predicate allow-list, and
-  the import boundaries of
-  [package layout](package-layout.md) (no deployed or shared module may import
-  `poc/`; the PoC web UI may not import a service internal or read-model SQL).
-  It also runs the [infrastructure ledgers](infra-ledgers.md) (a wrangler
-  config or a CORE migration that changes without its committed ledger fails
-  here).
-- `ci:root` finally runs `root:knip`, which reports unused files, exports and
-  dependencies with `--no-exit-code`. It is advisory and cannot fail the build:
-  almost every entry point here is a wrangler `main`, a `Dockerfile` `CMD`, a
-  cron, a Queue consumer or a mise task, none of which a static analyser
-  follows. See [the unused-code report](unused-report.md) for what the current
-  findings mean and the four conditions under which one may be acted on.
-- The workspace matrix runs each `ci:<short>`: type generation, `tsc --noEmit`,
-  the tests, and the build steps the workspace needs. The two container
-  packages use frozen npm installs without install scripts; the OCI probe
-  receives syntax checks only.
-- The Worker matrix runs `risu729/wrangler-deploy-action` in `dry-run` mode once
-  per Wrangler configuration listed in `infra/workers-ci.json`. Dry-run mode
-  passes no Cloudflare account id and no API token, so CI never reaches the
-  Cloudflare API.
+- Oxlint, Oxfmt, Tombi, yamllint and yamlfmt check source and configuration.
+- Actionlint, ShellCheck, ghalint, pinact and zizmor check workflow syntax,
+  permissions, action pins, shell code and unsafe workflow patterns.
+- Ruff checks Python without executing probes; typos and hk hygiene checks
+  cover spelling, whitespace, merge markers and file integrity.
+- Repository guards cover manifests, task coverage, infrastructure ledgers,
+  auto-merge and release decisions, publication gates and import boundaries.
+- Knip checks unlisted dependencies and unresolved imports as build failures.
+  Its broader unused-code report remains advisory because static analysis
+  cannot prove every runtime entrypoint. The report and policy are documented
+  in [unused-code analysis](unused-report.md).
+- Every workspace `ci` task runs its declared type generation, typechecks,
+  tests and builds. Container checks use frozen installs; syntax-only probes
+  remain syntax-only rather than executing live infrastructure experiments.
+- Worker `dry-run` tasks use each workspace's pinned Wrangler, never upload
+  code and require no Cloudflare account id or API token.
 
-Evidence under `data/`, parser fixture directories, stored patches, and
-generated Worker declarations are excluded from hk. Their exact bytes must
-not be changed by a formatter. Provider names and literal upstream fields
-have explicit spelling exceptions. TypeScript versions remain workspace-local.
-
-CI does not run collectors, login flows, credential synchronization, historical
-backfills, or deployments. It receives no production credentials. Workspace
-tests use synthetic inputs and local emulators. The runner disables Wrangler
-telemetry; installation still downloads pinned dependencies and tools.
+Evidence under `data/`, parser fixtures, stored patches and generated Worker
+declarations are excluded from hk formatting. Their exact bytes remain intact.
+Tests use synthetic inputs and local emulators. Dependency and browser/tool
+installation still needs network access.
 
 ## Jobs and the required merge guard
 
-| job                         | what it does                                                                                                                                                              |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Lint`                      | `mise run check --lint`, then `mise run ci:root`                                                                                                                          |
-| `Plan`                      | emits the workspace matrix from `mise tasks ls --json` (every name starting with `ci:`) and the Worker matrix from `infra/workers-ci.json`; fails if either list is empty |
-| `Workspace (<short>)`       | `mise run "ci:<short>"`                                                                                                                                                   |
-| `Worker (<name>)`           | the entry's `prepare` task (frozen `install` by default), then the shared Wrangler action in `dry-run` mode                                                               |
-| `CI Check`                  | `if: always()`, fails unless every needed result is exactly `success`                                                                                                     |
-| `Generate Actions Timeline` | run summary                                                                                                                                                               |
+| job                         | responsibility                                                          |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `Checks`                    | Install pinned tools, then `mise exec -- hk check --all --no-fail-fast` |
+| `CI Check`                  | Always run; succeed only when `Checks` returned exactly `success`       |
+| `Generate Actions Timeline` | Publish the run timeline                                                |
 
 The workflow runs for every pull request and every push to `main`, including
-documentation-only changes. **It has no path filters**: a workflow skipped by a
-path filter leaves a required check pending forever instead of reporting a
-result.
+documentation-only changes, and supports manual/reusable invocation. It has no
+path filters: skipping the entire workflow would leave a required check pending.
+There are no parallel Actions matrices duplicating the mise task graph.
 
-`CI Check` reads `toJson(needs)` and requires `result == "success"` for `lint`,
-`plan`, `workspaces` and `workers`. `failure`, `cancelled` and `skipped` all
-fail it, and a matrix that never expanded fails it too, so an unexpectedly
-absent job can never be read as a pass.
+`CI Check` treats failure, cancellation and unexpected skips as failures. Its
+name and the existing repository rule are unchanged. Successful CI on a push
+to this repository's `main` can start the separate release workflow; a pull
+request check never gains production credentials.
 
-The existing repository rule continues to require `CI Check`; no bypass or
-replacement status is part of this setup.
+The model follows the official [hk CI guide](https://hk.jdx.dev/ci.html) and
+[mise monorepo tasks](https://mise.jdx.dev/tasks/monorepo.html).

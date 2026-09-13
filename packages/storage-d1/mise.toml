@@ -1,16 +1,14 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["storage-d1:typecheck"]
+[tasks."typecheck"]
 description = "Type-check packages/storage-d1."
-dir = "packages/storage-d1"
 run = "./node_modules/.bin/tsc --noEmit"
 
-["storage-d1:test"]
+[tasks."test"]
 description = "Run the packages/storage-d1 tests: codecs, atomic commands and the migration parity."
-dir = "packages/storage-d1"
 run = "bun test"
 
-["ci:storage-d1"]
+[tasks."ci"]
 description = "Every check CI runs for packages/storage-d1."
-depends = ["storage-d1:typecheck", "storage-d1:test"]
+depends = ["//packages/storage-d1:typecheck", "//packages/storage-d1:test"]

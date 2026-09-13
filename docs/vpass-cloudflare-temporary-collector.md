@@ -59,7 +59,7 @@ hashes.
 
 ```sh
 bun install
-mise run vpass-json:types
+mise run //services/collector-vpass:types
 ./node_modules/.bin/wrangler deploy
 ```
 

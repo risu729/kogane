@@ -80,14 +80,14 @@ One Bun workspace, one lockfile, and mise as the only task runner. There are no
 mise trust
 mise install              # pinned tools (bun, node, hk, oxlint, ...)
 mise run install          # frozen Bun install for every workspace
-mise run check --lint     # hk: lint and format check, never edits files
-mise run ci:app           # one workspace's CI checks
-mise run verify           # every workspace, then the Worker deployment dry runs
-mise tasks ls             # what else is there
+hk check --all           # lint, types, tests, Knip, builds and Worker dry runs
+mise run //services/app:ci # one workspace's checks
+mise run fix              # explicitly apply lint/format fixes
+mise tasks ls --all        # discover the monorepo tasks
 ```
 
 See [Development checks and CI](docs/ci.md) for the task naming convention, how
-the CI matrices are generated, and what to do when adding a workspace.
+CI uses the same `hk check` entry point, and what to do when adding a workspace.
 
 ## Collectors
 

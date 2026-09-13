@@ -30,7 +30,7 @@
 chmod 600 /secure/sbi-vc-session.json
 bun install --frozen-lockfile
 bun test
-mise run sbi-vc-trade-client:typecheck
+mise run //packages/sbi-vc-trade-client:typecheck
 bun src/cli.ts -- \
   --session-file /secure/sbi-vc-session.json \
   --output /secure/sbi-vc-output

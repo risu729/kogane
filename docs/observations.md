@@ -438,10 +438,10 @@ The runnable entry points are `package.json` scripts:
 bun src/demo.ts        ingest the fixtures, parse them, print row counts
 bun src/ingest.ts      ingestion only
 bun src/parse.ts       every registered parser over every artifact
-mise run web:build       build the evidence browser's client
+mise run //apps/web:build       build the evidence browser's client
 bun src/serve.ts       the read-only browser on 127.0.0.1:8787
 bun test            the suite
-mise run web:typecheck   tsc --noEmit
+mise run //apps/web:typecheck   tsc --noEmit
 ```
 
 ## Versioning and supersession

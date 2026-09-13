@@ -92,7 +92,7 @@ Two consequences worth stating plainly:
 
 This PR adds one dependency (`drizzle-orm`, in `packages/storage-d1`) and
 touches no parser source, so every recorded digest is unchanged —
-`mise run ci:parsers` passes untouched.
+`mise run //packages/parsers:ci` passes untouched.
 
 ## Where the versions live
 

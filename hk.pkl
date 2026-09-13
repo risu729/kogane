@@ -40,4 +40,14 @@ local picked = (helpers.pick(new Listing {
   }
 }
 
-hooks = helpers.standardHooks(picked)
+// Fast staged-file fixes stay in pre-commit; the complete verification graph
+// belongs only to check. No glob/profile means it also runs with no changed files.
+hooks = (helpers.standardHooks(picked)) {
+  ["check"] {
+    steps = (picked) {
+      ["repository"] = new Config.Step {
+        check = "mise run --continue-on-error checks"
+      }
+    }
+  }
+}

@@ -1,26 +1,23 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["cloudflare-browser-run:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of experiments/cloudflare-browser-run."
-dir = "experiments/cloudflare-browser-run"
 run = "./node_modules/.bin/wrangler types"
 
-["cloudflare-browser-run:typecheck"]
+[tasks."typecheck"]
 description = "Type-check experiments/cloudflare-browser-run."
-depends = ["cloudflare-browser-run:types"]
-dir = "experiments/cloudflare-browser-run"
+depends = ["//experiments/cloudflare-browser-run:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["cloudflare-browser-run:dry-run"]
+[tasks."dry-run"]
 description = "Validate the experiments/cloudflare-browser-run deployment without uploading it."
-depends = ["cloudflare-browser-run:types"]
-dir = "experiments/cloudflare-browser-run"
+depends = ["//experiments/cloudflare-browser-run:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.bootstrap.jsonc",
 ]
 
-["ci:cloudflare-browser-run"]
+[tasks."ci"]
 description = "Every check CI runs for experiments/cloudflare-browser-run."
-depends = ["cloudflare-browser-run:typecheck"]
+depends = ["//experiments/cloudflare-browser-run:typecheck"]

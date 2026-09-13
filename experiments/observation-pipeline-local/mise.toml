@@ -1,0 +1,38 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks."typecheck"]
+description = "Type-check the local observation pipeline experiment."
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks."demo"]
+description = "Ingest the synthetic fixtures into state/ and print the row counts."
+run = "bun src/demo.ts"
+
+[tasks."serve"]
+description = "Serve the local read-only API and the built client on 127.0.0.1."
+run = "bun src/serve.ts"
+
+[tasks."preview"]
+description = "Serve an isolated synthetic-only store; never opens state/."
+depends = ["//apps/web:build"]
+run = "bun src/serve.ts --demo"
+
+[tasks."export-demo"]
+description = "Export the synthetic snapshot used by local API conformance tests."
+# The snapshot is test-only; no deployed Worker or browser bundle includes it.
+run = "bun src/export-demo.ts ../../services/app/demo-snapshot.json"
+
+[tasks."browser"]
+description = "Reuse the shared Playwright Chromium preparation."
+hide = true
+depends = ["//apps/web:browser"]
+
+[tasks."test"]
+description = "Run the local pipeline tests, including the browser tests over the built client."
+depends = ["//apps/web:build", "//apps/web:build-production", "//experiments/observation-pipeline-local:browser"]
+run = "bun test"
+
+[tasks."ci"]
+description = "Every check CI runs for experiments/observation-pipeline-local."
+depends = ["//experiments/observation-pipeline-local:typecheck", "//experiments/observation-pipeline-local:export-demo", "//experiments/observation-pipeline-local:test"]

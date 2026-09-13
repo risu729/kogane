@@ -1,21 +1,18 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["smbc-direct-backfill-worker:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/collector-smbc-direct."
-dir = "services/collector-smbc-direct"
 run = "./node_modules/.bin/wrangler types worker-configuration.d.ts --env-file .dev.vars.example --strict-vars false"
 
-["smbc-direct-backfill-worker:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/collector-smbc-direct."
-depends = ["smbc-direct-backfill-worker:types"]
-dir = "services/collector-smbc-direct"
+depends = ["//services/collector-smbc-direct:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["smbc-direct-backfill-worker:test"]
+[tasks."test"]
 description = "Run the services/collector-smbc-direct tests."
-depends = ["smbc-direct-backfill-worker:types"]
-dir = "services/collector-smbc-direct"
+depends = ["//services/collector-smbc-direct:types"]
 # The Miniflare suite runs first: `bun test ./test` still fails on the three
 # pre-existing `cloudflare:workers` mock failures under bun 1.4.0, which this
 # work item neither fixes nor hides. The directory argument keeps that failure
@@ -26,20 +23,18 @@ run = [
 	"bun test ./test",
 ]
 
-["smbc-direct-backfill-worker:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/collector-smbc-direct deployment without uploading it."
-depends = ["smbc-direct-backfill-worker:types"]
-dir = "services/collector-smbc-direct"
+depends = ["//services/collector-smbc-direct:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["smbc-direct-backfill-worker:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-smbc-direct for the release manifest."
-depends = ["smbc-direct-backfill-worker:types"]
-dir = "services/collector-smbc-direct"
+depends = ["//services/collector-smbc-direct:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/smbc-direct-backfill-worker --config wrangler.jsonc"
 
-["ci:smbc-direct-backfill-worker"]
+[tasks."ci"]
 description = "Every check CI runs for services/collector-smbc-direct."
-depends = ["smbc-direct-backfill-worker:typecheck", "smbc-direct-backfill-worker:test"]
+depends = ["//services/collector-smbc-direct:typecheck", "//services/collector-smbc-direct:test"]

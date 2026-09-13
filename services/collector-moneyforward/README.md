@@ -37,8 +37,8 @@ unset BW_SESSION
 
 ```bash
 bun install
-mise run moneyforward-worker:test
-mise run moneyforward-worker:typecheck
+mise run //services/collector-moneyforward:test
+mise run //services/collector-moneyforward:typecheck
 bunx wrangler r2 bucket create kogane-moneyforward-collector-poc
 ./scripts/sync-local-secrets.sh
 ./node_modules/.bin/wrangler deploy

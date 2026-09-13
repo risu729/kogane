@@ -1,30 +1,26 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["cloudflare-runtime-probe:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of experiments/cloudflare-runtime-probe."
-dir = "experiments/cloudflare-runtime-probe"
 run = "./node_modules/.bin/wrangler types"
 
-["cloudflare-runtime-probe:typecheck"]
+[tasks."typecheck"]
 description = "Type-check experiments/cloudflare-runtime-probe."
-depends = ["cloudflare-runtime-probe:types"]
-dir = "experiments/cloudflare-runtime-probe"
+depends = ["//experiments/cloudflare-runtime-probe:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["cloudflare-runtime-probe:typecheck-container"]
+[tasks."typecheck-container"]
 description = "Type-check the container side of experiments/cloudflare-runtime-probe."
-dir = "experiments/cloudflare-runtime-probe"
 run = "./node_modules/.bin/tsc -p tsconfig.container.json --noEmit"
 
-["cloudflare-runtime-probe:dry-run"]
+[tasks."dry-run"]
 description = "Validate the experiments/cloudflare-runtime-probe deployment without uploading it."
-depends = ["cloudflare-runtime-probe:types"]
-dir = "experiments/cloudflare-runtime-probe"
+depends = ["//experiments/cloudflare-runtime-probe:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["ci:cloudflare-runtime-probe"]
+[tasks."ci"]
 description = "Every check CI runs for experiments/cloudflare-runtime-probe."
-depends = ["cloudflare-runtime-probe:typecheck", "cloudflare-runtime-probe:typecheck-container"]
+depends = ["//experiments/cloudflare-runtime-probe:typecheck", "//experiments/cloudflare-runtime-probe:typecheck-container"]

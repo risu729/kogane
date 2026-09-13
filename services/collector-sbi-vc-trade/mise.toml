@@ -1,40 +1,35 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["sbi-vc-trade-worker:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/collector-sbi-vc-trade."
-dir = "services/collector-sbi-vc-trade"
 run = "./node_modules/.bin/wrangler types worker-configuration.d.ts --env-file .dev.vars.example --strict-vars false"
 
-["sbi-vc-trade-worker:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/collector-sbi-vc-trade."
-depends = ["sbi-vc-trade-worker:types"]
-dir = "services/collector-sbi-vc-trade"
+depends = ["//services/collector-sbi-vc-trade:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["sbi-vc-trade-worker:test"]
+[tasks."test"]
 description = "Run the services/collector-sbi-vc-trade tests."
-depends = ["sbi-vc-trade-worker:types"]
-dir = "services/collector-sbi-vc-trade"
+depends = ["//services/collector-sbi-vc-trade:types"]
 run = [
 	"bun test ./test/*.test.ts",
 	"./node_modules/.bin/vitest run",
 ]
 
-["sbi-vc-trade-worker:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/collector-sbi-vc-trade deployment without uploading it."
-depends = ["sbi-vc-trade-worker:types"]
-dir = "services/collector-sbi-vc-trade"
+depends = ["//services/collector-sbi-vc-trade:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["sbi-vc-trade-worker:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-sbi-vc-trade for the release manifest."
-depends = ["sbi-vc-trade-worker:types"]
-dir = "services/collector-sbi-vc-trade"
+depends = ["//services/collector-sbi-vc-trade:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/sbi-vc-trade-worker --config wrangler.jsonc"
 
-["ci:sbi-vc-trade-worker"]
+[tasks."ci"]
 description = "Every check CI runs for services/collector-sbi-vc-trade."
-depends = ["sbi-vc-trade-worker:typecheck", "sbi-vc-trade-worker:test"]
+depends = ["//services/collector-sbi-vc-trade:typecheck", "//services/collector-sbi-vc-trade:test"]

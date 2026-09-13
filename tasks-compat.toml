@@ -1,0 +1,91 @@
+#:schema https://mise.jdx.dev/schema/mise-task.json
+# Compatibility entry points for existing operational commands.
+# New tasks and all CI discovery use workspace mise.toml definitions.
+
+["web:build"]
+hide = true
+depends = ["//apps/web:build"]
+
+["web:build-evidence"]
+hide = true
+depends = ["//apps/web:build-evidence"]
+
+["web:build-production"]
+hide = true
+depends = ["//apps/web:build-production"]
+
+["web:dev"]
+hide = true
+depends = ["//apps/web:dev"]
+
+["local-pipeline:demo"]
+hide = true
+depends = ["//experiments/observation-pipeline-local:demo"]
+
+["local-pipeline:serve"]
+hide = true
+depends = ["//experiments/observation-pipeline-local:serve"]
+
+["local-pipeline:preview"]
+hide = true
+depends = ["//experiments/observation-pipeline-local:preview"]
+
+["local-pipeline:export-demo"]
+hide = true
+depends = ["//experiments/observation-pipeline-local:export-demo"]
+
+["app:bundle"]
+hide = true
+depends = ["//services/app:bundle"]
+
+["globalpass-worker:bundle"]
+hide = true
+depends = ["//services/collector-globalpass:bundle"]
+
+["mobile-suica-worker:bundle"]
+hide = true
+depends = ["//services/collector-mobile-suica:bundle"]
+
+["moneyforward-worker:bundle"]
+hide = true
+depends = ["//services/collector-moneyforward:bundle"]
+
+["myjcb-worker:bundle"]
+hide = true
+depends = ["//services/collector-myjcb:bundle"]
+
+["sbi-securities-worker:bundle"]
+hide = true
+depends = ["//services/collector-sbi-securities:bundle"]
+
+["sbi-shinsei-worker:bundle"]
+hide = true
+depends = ["//services/collector-sbi-shinsei:bundle"]
+
+["sbi-vc-trade-worker:bundle"]
+hide = true
+depends = ["//services/collector-sbi-vc-trade:bundle"]
+
+["smbc-direct-backfill-worker:bundle"]
+hide = true
+depends = ["//services/collector-smbc-direct:bundle"]
+
+["sony-bank-worker:bundle"]
+hide = true
+depends = ["//services/collector-sony-bank:bundle"]
+
+["vpass-json:bundle"]
+hide = true
+depends = ["//services/collector-vpass:bundle"]
+
+["vpoint-worker:bundle"]
+hide = true
+depends = ["//services/collector-vpoint:bundle"]
+
+["vpoint-pay-worker:bundle"]
+hide = true
+depends = ["//services/collector-vpoint-pay:bundle"]
+
+["processor:bundle"]
+hide = true
+depends = ["//services/processor:bundle"]

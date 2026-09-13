@@ -1,40 +1,35 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["myjcb-worker:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/collector-myjcb."
-dir = "services/collector-myjcb"
 run = "./node_modules/.bin/wrangler types"
 
-["myjcb-worker:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/collector-myjcb."
-depends = ["myjcb-worker:types"]
-dir = "services/collector-myjcb"
+depends = ["//services/collector-myjcb:types"]
 run = [
 	"./node_modules/.bin/tsc --noEmit",
 	"./node_modules/.bin/tsc --noEmit -p tsconfig.scripts.json",
 ]
 
-["myjcb-worker:test"]
+[tasks."test"]
 description = "Run the services/collector-myjcb tests."
-depends = ["myjcb-worker:types"]
-dir = "services/collector-myjcb"
+depends = ["//services/collector-myjcb:types"]
 run = "bun test"
 
-["myjcb-worker:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/collector-myjcb deployment without uploading it."
-depends = ["myjcb-worker:types"]
-dir = "services/collector-myjcb"
+depends = ["//services/collector-myjcb:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["myjcb-worker:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-myjcb for the release manifest."
-depends = ["myjcb-worker:types"]
-dir = "services/collector-myjcb"
+depends = ["//services/collector-myjcb:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/myjcb-worker --config wrangler.jsonc"
 
-["ci:myjcb-worker"]
+[tasks."ci"]
 description = "Every check CI runs for services/collector-myjcb."
-depends = ["myjcb-worker:typecheck", "myjcb-worker:test"]
+depends = ["//services/collector-myjcb:typecheck", "//services/collector-myjcb:test"]

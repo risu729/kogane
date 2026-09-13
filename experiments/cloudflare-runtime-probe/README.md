@@ -22,10 +22,10 @@ Use the exact locked dependencies:
 
 ```bash
 bun install --frozen-lockfile
-mise run cloudflare-runtime-probe:types
-mise run cloudflare-runtime-probe:typecheck
-mise run cloudflare-runtime-probe:typecheck-container
-mise run cloudflare-runtime-probe:dry-run
+mise run //experiments/cloudflare-runtime-probe:types
+mise run //experiments/cloudflare-runtime-probe:typecheck
+mise run //experiments/cloudflare-runtime-probe:typecheck-container
+mise run //experiments/cloudflare-runtime-probe:dry-run
 ./node_modules/.bin/wrangler deploy
 ```
 

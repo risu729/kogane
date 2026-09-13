@@ -36,5 +36,5 @@ The API also supports PRESTIA GLOBAL PASS stages that the GLOBAL PASS Worker doe
 The API does not alter manifest schemas, storage bodies, retry decisions or collection schedules. Changes to source or stage names update the allowlist and the relevant failure-path tests together.
 
 ```sh
-mise run ci:collector-diagnostics
+mise run //packages/collector-diagnostics:ci
 ```

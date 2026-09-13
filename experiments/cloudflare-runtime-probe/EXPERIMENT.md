@@ -51,7 +51,7 @@ these becomes true:
   address the same state rather than creating a second namespace.
 - `tamia` is referenced, never owned. Deleting the Tunnel as cleanup for this
   experiment is forbidden; the GLOBAL PASS collector runs through it.
-- CI runs `mise run ci:cloudflare-runtime-probe` (Worker and container
+- CI runs `mise run //experiments/cloudflare-runtime-probe:ci` (Worker and container
   type-checks) and a `wrangler deploy --dry-run`. That is all this directory
   costs while it is open.
 

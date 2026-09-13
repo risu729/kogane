@@ -89,8 +89,8 @@ Secret値をsource、Wrangler config、shell履歴、標準出力へ置かない
 ```sh
 bun install --frozen-lockfile
 bun test
-mise run sony-bank-worker:typecheck
-mise run sony-bank-worker:dry-run
+mise run //services/collector-sony-bank:typecheck
+mise run //services/collector-sony-bank:dry-run
 wrangler r2 bucket create kogane-sony-bank-collector-poc
 wrangler deploy
 wrangler secret put SONY_BANK_CREDENTIAL_JSON

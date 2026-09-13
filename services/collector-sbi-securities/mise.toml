@@ -1,40 +1,35 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["sbi-securities-worker:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/collector-sbi-securities."
-dir = "services/collector-sbi-securities"
 run = "./node_modules/.bin/wrangler types"
 
-["sbi-securities-worker:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/collector-sbi-securities."
-depends = ["sbi-securities-worker:types"]
-dir = "services/collector-sbi-securities"
+depends = ["//services/collector-sbi-securities:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["sbi-securities-worker:test"]
+[tasks."test"]
 description = "Run the services/collector-sbi-securities tests: the pure suite, then the Miniflare R2 suite."
-depends = ["sbi-securities-worker:types"]
-dir = "services/collector-sbi-securities"
+depends = ["//services/collector-sbi-securities:types"]
 run = [
 	"bun test ./test/*.test.ts",
 	"./node_modules/.bin/vitest run",
 ]
 
-["sbi-securities-worker:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/collector-sbi-securities deployment without uploading it."
-depends = ["sbi-securities-worker:types"]
-dir = "services/collector-sbi-securities"
+depends = ["//services/collector-sbi-securities:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
-["sbi-securities-worker:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-sbi-securities for the release manifest."
-depends = ["sbi-securities-worker:types"]
-dir = "services/collector-sbi-securities"
+depends = ["//services/collector-sbi-securities:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/sbi-securities-worker --config wrangler.jsonc"
 
-["ci:sbi-securities-worker"]
+[tasks."ci"]
 description = "Every check CI runs for services/collector-sbi-securities."
-depends = ["sbi-securities-worker:typecheck", "sbi-securities-worker:test"]
+depends = ["//services/collector-sbi-securities:typecheck", "//services/collector-sbi-securities:test"]

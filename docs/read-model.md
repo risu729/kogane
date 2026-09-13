@@ -136,7 +136,7 @@ rollback rules are in `docs/publication-gate.md`. `packages/read-model` is
 vendored by relative import, so there is no separate artifact to publish.
 
 Verified locally with synthetic data: the CI checks (today
-`mise run ci:<short>`) of `packages/read-model`, `services/app`,
+`mise run //<workspace>:ci`) of `packages/read-model`, `services/app`,
 `experiments/observation-pipeline-local`, and the repository-wide guards (`mise run ci:root`). Not verified: production data.
 
 ## Balance projection reader

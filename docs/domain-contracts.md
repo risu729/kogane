@@ -192,7 +192,7 @@ addendum 14 §7 against them and the helpers.
 
 ## Verified locally
 
-With synthetic data only: `mise run domain:typecheck` and `bun test` in
-`packages/domain` (today `mise run ci:domain`), the repository-wide guards
+With synthetic data only: `mise run //packages/domain:typecheck` and `bun test` in
+`packages/domain` (today `mise run //packages/domain:ci`), the repository-wide guards
 (today `mise run ci:root`), and `hk check`. Not verified: any
 service integration, D1, Workers, production data or load.

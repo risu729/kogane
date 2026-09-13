@@ -1,49 +1,44 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise-task.json
+#:schema https://mise.jdx.dev/schema/mise.json
 
-["app:types"]
+[tasks."types"]
 description = "Generate the Cloudflare Worker types of services/app."
-dir = "services/app"
 run = "./node_modules/.bin/wrangler types"
 
-["app:typecheck"]
+[tasks."typecheck"]
 description = "Type-check services/app."
 # `test/snapshot-worker.ts` imports the generated `demo-snapshot.json`, so the
 # typecheck needs the export to have run: `ci:app` runs typecheck and test in
 # parallel, and without this edge the typecheck could lose that race.
-depends = ["app:types", "local-pipeline:export-demo"]
-dir = "services/app"
+depends = ["//services/app:types", "//experiments/observation-pipeline-local:export-demo"]
 run = "./node_modules/.bin/tsc --noEmit"
 
-["app:test"]
+[tasks."test"]
 description = "Run the services/app tests."
 depends = [
-	"app:types",
-	"web:build",
-	"web:build-evidence",
-	"web:build-production",
-	"local-pipeline:export-demo",
+	"//services/app:types",
+	"//apps/web:build",
+	"//apps/web:build-evidence",
+	"//apps/web:build-production",
+	"//experiments/observation-pipeline-local:export-demo",
 ]
-dir = "services/app"
 run = "./node_modules/.bin/vitest run"
 
-["app:dry-run"]
+[tasks."dry-run"]
 description = "Validate the services/app deployment without uploading it."
 # The production config serves built assets, so the dry run builds them first.
 # The synthetic export remains a local test/typecheck fixture.
-depends = ["app:types", "web:build-production", "local-pipeline:export-demo"]
-dir = "services/app"
+depends = ["//services/app:types", "//apps/web:build-production", "//experiments/observation-pipeline-local:export-demo"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.test.jsonc",
 ]
 
-["app:bundle"]
+[tasks."bundle"]
 description = "Emit the deployable bundle of services/app for the release manifest."
-depends = ["app:types", "web:build-production"]
-dir = "services/app"
+depends = ["//services/app:types", "//apps/web:build-production"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/app --config wrangler.jsonc"
 
-["ci:app"]
+[tasks."ci"]
 description = "Every check CI runs for services/app."
-depends = ["app:typecheck", "app:test"]
+depends = ["//services/app:typecheck", "//services/app:test"]
