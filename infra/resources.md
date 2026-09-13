@@ -172,6 +172,15 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
+### `experiments/mizuho-direct`
+
+- Disposition (direct collector feasibility follow-up, 2026-09-13): `isolated-as-experiment` → experiments/mizuho-direct (local probe and offline account/history parsers)
+- Required verification: Browser reads and one local HTTP account-list read verified; unattended renewal and cloud execution unverified
+- Execution status: LOCAL_FEASIBILITY_ONLY (plan recorded `NO_RESOURCES_DECLARED`)
+- Live resources: NO_LIVE_RESOURCE
+
+No wrangler config.
+
 ### `experiments/observation-pipeline-local`
 
 - Disposition (poc_disposition.csv row poc/observation-pipeline + decision D1): `isolated-as-experiment` → experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)

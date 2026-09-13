@@ -55,6 +55,12 @@
         "wrangler": "4.125.0",
       },
     },
+    "experiments/mizuho-direct": {
+      "name": "@kogane/mizuho-direct",
+      "dependencies": {
+        "parse5": "8.0.1",
+      },
+    },
     "experiments/observation-pipeline-local": {
       "name": "@kogane/observation-pipeline-local",
       "dependencies": {
@@ -507,6 +513,8 @@
     "@kogane/evidence-contract": ["@kogane/evidence-contract@workspace:packages/evidence-contract"],
 
     "@kogane/identity": ["@kogane/identity@workspace:packages/identity"],
+
+    "@kogane/mizuho-direct": ["@kogane/mizuho-direct@workspace:experiments/mizuho-direct"],
 
     "@kogane/observation-pipeline": ["@kogane/observation-pipeline@workspace:services/processor"],
 

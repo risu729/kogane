@@ -149,6 +149,15 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "experiments/mizuho-direct": {
+    source: "direct collector feasibility follow-up, 2026-09-13",
+    proposedAction: "isolated-as-experiment",
+    proposedTarget: "experiments/mizuho-direct (local probe and offline account/history parsers)",
+    requiredVerification:
+      "Browser reads and one local HTTP account-list read verified; unattended renewal and cloud execution unverified",
+    executionStatus: "LOCAL_FEASIBILITY_ONLY",
+    planLiveResourceStatus: "NO_RESOURCES_DECLARED",
+  },
   "experiments/tamia-tcp-bridge": {
     source: "poc_disposition.csv (was poc/tamia-tcp-bridge)",
     proposedAction: "promote-service-if-used",

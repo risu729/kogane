@@ -1,0 +1,14 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.probe]
+description = "Inspect the public Mizuho login entry once, with no credentials."
+run = "bun src/cli.mjs"
+
+[tasks.test]
+description = "Test the public-entry probe and offline parsers with synthetic data."
+run = "bun test"
+
+[tasks.ci]
+description = "Check the local Mizuho experiment without contacting the bank."
+depends = ["//experiments/mizuho-direct:test"]
