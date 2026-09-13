@@ -53,6 +53,24 @@ different rules.
 - [Per-source research records](docs/sources/README.md)
 - [Roadmap](docs/roadmap.md)
 
+## Product status and next milestone
+
+The infrastructure migration and legacy resource retirement are complete.
+Financial product development continues: existing schemas, READ projections and
+pure calculation functions do not yet provide complete transaction matching,
+portfolio valuation, cost basis, P&L or tax reporting.
+
+The next major milestone connects **Vpass/MyJCB purchases and statements to
+bank debits**, separating purchase recognition from settlement and explaining
+the balance impact without counting an expense twice. It builds on the current
+Vpass pending/posted matcher; MyJCB and cross-source matching remain to implement.
+
+The [roadmap](docs/roadmap.md) records the current implementation limits,
+development order and acceptance criteria. Its main sequence is identity and
+data coverage → reconciliation/events → dated holdings and liabilities →
+price/FX valuation → lots/P&L → tax. Rewards progress in parallel, while UI and
+AI/MCP flows are delivered with each feature.
+
 ## Getting started
 
 One Bun workspace, one lockfile, and mise as the only task runner. There are no

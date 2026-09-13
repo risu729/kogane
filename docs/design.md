@@ -8,6 +8,20 @@ tax figures to be recomputed later under different rules.
 It is not a budgeting app. The UI and the AI/MCP interface are thin layers on
 top of the data platform.
 
+## Product completion
+
+Infrastructure migration and resource retirement establish the foundation;
+they do not complete the financial roadmap. The current status, implementation
+limits and delivery order live in the [roadmap](roadmap.md), including the next
+card-purchase → statement → bank-payment milestone.
+
+A feature is complete when its supported UI or MCP flow reaches a useful
+result with evidence, missing-input explanations and applicable correction or
+confirmation. Types, tables, pure functions and successful API responses are
+building blocks, not acceptance criteria on their own. UI and AI share the
+same application services and calculations; reward functionality progresses
+alongside the main account/event/valuation/P&L sequence.
+
 ## Top Design Principle
 
 > Do not build a system that stores current balances, valuations, and P&L.

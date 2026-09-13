@@ -10,6 +10,24 @@ Nothing here concludes anything about tax, and nothing fetches a price from
 outside. Everything below was exercised locally against synthetic data; no
 production claim is made.
 
+## Product implementation boundary
+
+This document specifies calculation and retention components, not a complete
+portfolio, cost-basis or tax product. In
+[`packages/domain/src/calculation.ts`](../packages/domain/src/calculation.ts),
+`costBasis()` returns `needs-policy` on every path, including when a caller
+supplies a verified-policy marker. It does not allocate lots or calculate cost.
+Likewise, `pnlDecomposition()` does not reconstruct a transaction history or
+supply missing acquisition costs.
+
+The [roadmap](roadmap.md) separates the remaining work: price/FX acquisition and
+as-of valuation can start from reported holdings; lots and disposal allocation
+then enable realized/unrealized P&L; verified jurisdiction/period rules enable
+tax outputs. Investment analysis and tax calculations share evidence and events
+but must retain distinct purposes and policies. Completion requires actual
+inputs and explainable, reproducible results through the supported UI or MCP
+flow.
+
 ## 1. A price is an observation with a basis
 
 `price = 8,000` does not say whether it prices one share, one unit, 10,000 fund
