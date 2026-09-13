@@ -140,7 +140,7 @@ export async function inspectPage(page: Page, stopReason: StopReason | null = nu
     return {
       status: "portfolio-observed",
       route,
-      selectorEvidence: "historical-third-party",
+      selectorEvidence: "live-2026-09-13",
       ...metadata.portfolio,
     } as const;
   }
@@ -148,7 +148,7 @@ export async function inspectPage(page: Page, stopReason: StopReason | null = nu
     return {
       status: "transaction-layout-candidate",
       route,
-      selectorEvidence: "historical-third-party",
+      selectorEvidence: "live-2026-09-13",
       ...metadata.transactions,
     } as const;
   }
@@ -171,27 +171,32 @@ export async function navigatePortfolio(page: Page) {
   return inspectPage(page);
 }
 
+export function resolveAccountDetailsHref(raw: string): string | null {
+  // Live 2026-09-13: this one-argument function only assigns document.location
+  // after a duplicate-submit flag. Parse its exact observed literal shape;
+  // never evaluate JavaScript or call the bank function.
+  const scripted =
+    /^javascript:viewAccountDetails\('(accountDetails\.action\?index=[0-9]+)'\)$/.exec(raw);
+  try {
+    const url = new URL(scripted?.[1] ?? raw, PORTFOLIO_URL);
+    return classifyRoute(url.href) === "transactions" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function navigateFirstTransaction(page: Page) {
   const before = await inspectPage(page);
   if (before.status !== "portfolio-observed") return before;
-  const href = await page.evaluate(() => {
+  const links = await page.evaluate(() => {
     const links = Array.from(
       document.querySelectorAll<HTMLAnchorElement>("#acctSummaryList > li h2 a"),
     );
-    for (const link of links) {
-      const url = new URL(link.href);
-      if (
-        link.getClientRects().length > 0 &&
-        url.origin === "https://ibanking.stgeorge.com.au" &&
-        url.pathname === "/ibank/accountDetails.action" &&
-        !url.username &&
-        !url.password &&
-        !url.hash
-      )
-        return url.href;
-    }
-    return null;
+    return links
+      .filter((link) => link.getClientRects().length > 0)
+      .map((link) => link.getAttribute("href") ?? "");
   });
+  const href = links.map(resolveAccountDetailsHref).find((candidate) => candidate !== null);
   if (!href) return { status: "unknown-layout", route: "portfolio" } as const;
   // Use only the real account-summary anchor; never invent account identifiers,
   // submit a form, replay a POST, or invoke an export control.

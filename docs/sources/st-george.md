@@ -8,8 +8,9 @@ An isolated runnable browser experiment now lives in
 [`experiments/st-george-automation`](../../experiments/st-george-automation/README.md).
 It navigates the existing Internet Banking portfolio and one observed account link;
 it does not import CSV/PDF files or connect to production ingestion. Local tests use
-synthetic pages. Authenticated selectors and session renewal still require live
-validation; a successful public login-page probe is not authenticated collection.
+synthetic pages. A normal live browser login succeeded on 2026-09-13 after the
+user disconnected WARP. Pagination and session renewal still require validation;
+a successful login alone is not complete transaction collection.
 
 For live request/response discovery, use the existing **kogane capture / Kuebiko**
 Chrome profile before authentication. The user explicitly requested Kuebiko network
@@ -24,31 +25,80 @@ below, not permission to publish raw evidence or change banking settings.
 ### Live Kuebiko result and network constraint
 
 On 2026-09-13, normal Windows Chrome in the existing Kuebiko capture reached the
-bank edge, but did not reach an authentication form. The capture contained two
-St.George records:
+bank edge, but initially did not reach an authentication form. The first captured
+St.George responses were:
 
 | Request                       | Status | Observed response                                                                   |
 | ----------------------------- | ------ | ----------------------------------------------------------------------------------- |
 | `GET /ibank/loginPage.action` | 200    | HTML headed `Request error`, with a VPN/TOR connection note; zero forms and inputs. |
 | Favicon GET                   | 403    | HTML access-denied response.                                                        |
 
-Both response bodies were captured locally. There was no login POST, request
-body, account portfolio, or authenticated API evidence. Header names included
+Both response bodies were captured locally. These initial attempts had no login
+POST or authenticated account evidence. Header names included
 `akamai-grn` and `server-timing`, consistent with the previously observed Akamai
 edge. No header values, IP addresses, reference numbers, credentials, cookies, or
 raw bodies are included here.
 
-Cloudflare WARP was connected during the attempt. The bank's VPN/TOR note makes
-the network path or egress reputation a plausible explanation, **not a confirmed
-root cause**: neither response exposes the bank's precise rule, and no comparison
-without WARP was performed. The user requested that WARP stay connected. Leave
-that constraint in place; do not retry the rejected route or alter network
-protections automatically. Authenticated automation remains unverified.
+Cloudflare WARP was connected during the rejected attempts. After the user
+personally disconnected it and the Windows client reported `Disconnected`,
+reloading the same login URL in the same Kuebiko Chrome tab returned HTTP 200 with
+normal Internet Banking Logon HTML: one form and the three expected credential
+controls. This provides strong evidence of a **WARP/network-path-dependent
+rejection** in this environment. It does not reveal the bank's exact rule or
+distinguish egress reputation from other network-path signals. The agent did not
+change network protections.
+
+The current public login controls were verified from the captured normal page:
+
+| ID                  | Name             | Type     |
+| ------------------- | ---------------- | -------- |
+| `access-number`     | `userId`         | text     |
+| `securityNumber`    | `securityNumber` | password |
+| `internet-password` | `password`       | password |
+| `logonButton`       | `Login`          | submit   |
+
+The form is `#logonAction`, named `logonForm`, with
+`POST /ibank/logonActionSimple.action`. Only names and structure are recorded;
+obfuscated hidden values are not reusable credentials or an established direct
+login protocol. A normal login form is reachability evidence, not authenticated
+collection success. Captured public scripts confirm security-number/password
+mapping on blur or Enter, and device-print/duplicate-submission handling on the
+Logon button. Authentication must use the normal browser controls; a guessed
+POST, direct `form.submit()`, or replay of mapped payloads omits or reuses
+page/session-dependent state.
+
+After connectivity recovered, the normal form login succeeded in Kuebiko Chrome.
+The authenticated My Accounts heading and Logout link appeared, and the login
+inputs disappeared. No additional authentication or device enrollment appeared
+in this session. This establishes one successful browser login, not unattended
+renewal or a stable direct-login API.
+
+A live PoC run then completed the guarded portfolio GET. It observed two
+`#acctSummaryList > li` account cards with current and available balance fields.
+The current `h2 a` links use `javascript:viewAccountDetails` with one literal
+`/ibank/accountDetails.action` URL and an `index` query key. The captured function
+only guards duplicate navigation and assigns `document.location.href`; it does
+not submit a form. The initial PoC correctly stopped at this unfamiliar wrapper.
+The adapter extracts only this strict literal form and performs the same guarded
+GET without evaluating JavaScript or logging the query value. The adapted live
+run completed successfully: portfolio metadata was observed again and the first
+account-details GET reached the expected route with `#transHistExport` present.
+Its three visible tables and three generic body rows are structural counts, not
+a verified transaction count. No export control was clicked.
+
+The captured account-details response was HTTP 200 server-rendered HTML. It
+confirmed `#transHistExport`, `#txnHistoryTable`, text date controls
+`#acctDetDateFrom[name=dateFrom]` and `#acctDetDateTo[name=dateTo]`, and debit/credit
+and amount filters. Duplicate table IDs and hidden alternate layouts prevent
+generic row counts from establishing transaction semantics or completeness.
+Dispute forms are also present; no form or filter submission was attempted.
+Pagination, date coverage, pending/posted reconciliation and session renewal
+remain unverified.
 
 The PoC now classifies the visible bank error as `stopped / bank-request-error`
 even when the document returns HTTP 200. A synthetic regression verifies that it
 cannot be mistaken for login or portfolio success and initiates no further
-navigation. The experiment's 13 browser tests and TypeScript check pass.
+navigation. The experiment's 15 browser tests / 63 assertions and TypeScript check pass.
 
 ## 結論
 

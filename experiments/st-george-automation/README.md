@@ -5,10 +5,13 @@ authentication. It does not import statements or exports. The bounded milestone
 is an automated portfolio GET and, optionally, a GET of the first existing account
 summary link, with only DOM counts and field presence printed.
 
-**Status:** synthetic browser tests exercise the implementation. Authentication,
-current account selectors, transaction semantics, pagination, session renewal, and
-API collection are not proven by those tests. See the current live-attempt outcome
-in [source research](../../docs/sources/st-george.md).
+**Status:** a normal live login and automated portfolio GET succeeded on
+2026-09-13 in Kuebiko Chrome after the user disconnected WARP. Both account cards
+and their current/available balance fields matched the selectors. The first
+account-details GET also succeeded with the expected export-control marker; its
+table counts remain generic structural evidence. Transaction semantics,
+pagination, session renewal, and API collection require separate
+validation. See [source research](../../docs/sources/st-george.md).
 
 ## Kuebiko request/response discovery
 
@@ -81,13 +84,13 @@ Output is JSON with fixed labels, booleans, and counts. It never includes a URL,
 query, account value, transaction value, browser exception text, response body,
 cookie, or token. Do not enable `DEBUG` or `PWDEBUG`; the CLI rejects them.
 
-| Status                         | Meaning                                                                                                                                          |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `manual-login-required`        | Recognizable login inputs exist, including when HTTP 200 or the URL resembles a portfolio.                                                       |
-| `portfolio-observed`           | Known account-list/card structure exists; output counts current/available balance field presence without reading values.                         |
-| `transaction-layout-candidate` | The historical export control exists on the account-details route. Table/row counts are generic DOM candidates, not verified transaction counts. |
-| `unknown-layout`               | Evidence is insufficient. Empty account lists are not called successful collection.                                                              |
-| `stopped`                      | A challenge, denied response, unknown route, download, invalid option, timeout, or browser failure stopped the experiment.                       |
+| Status                         | Meaning                                                                                                                                             |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `manual-login-required`        | Recognizable login inputs exist, including when HTTP 200 or the URL resembles a portfolio.                                                          |
+| `portfolio-observed`           | Known account-list/card structure exists; output counts current/available balance field presence without reading values.                            |
+| `transaction-layout-candidate` | The live-verified export control exists on the account-details route. Table/row counts are generic DOM candidates, not verified transaction counts. |
+| `unknown-layout`               | Evidence is insufficient. Empty account lists are not called successful collection.                                                                 |
+| `stopped`                      | A challenge, denied response, unknown route, download, invalid option, timeout, or browser failure stopped the experiment.                          |
 
 Exit code 0 means the requested milestone was observed: recognizable public
 login for `--probe`, portfolio structure by default, or a transaction layout
@@ -108,7 +111,11 @@ The allowlist is the exact HTTPS origin `ibanking.stgeorge.com.au` and the
 known `/ibank/loginPage.action`, `/ibank/viewAccountPortfolio.html`, and
 `/ibank/accountDetails.action` paths. The account-details URL comes only from an
 existing visible `#acctSummaryList > li h2 a` anchor, including its original query
-in transient process memory. No account parameter is invented or logged.
+in transient process memory. Current anchors use `javascript:viewAccountDetails`
+with one literal account-details URL. The captured function only guards duplicate
+navigation and assigns `document.location.href`. The PoC extracts that literal
+using a strict pattern and applies the same guarded GET; it never evaluates the
+JavaScript. No account parameter is invented or logged.
 Unknown paths are not inspected. Automatic navigation submits no forms and never
 replays POST/PUT/PATCH/DELETE requests. Bank JavaScript and human authentication
 still perform their own normal network activity; this is not a network sandbox.
@@ -118,8 +125,8 @@ The portfolio selector and balance-field structures are from
 The account-details route and `#transHistExport` are historical evidence in
 [the source research](../../docs/sources/st-george.md), traced to the older
 [ynab-sync implementation](https://github.com/geofflamrock/ynab-sync/tree/main/packages/st-george-au).
-Selectors are labeled historical until inspected in a current authenticated
-session. The generic transaction-table counts cannot establish pending/posted
+The portfolio selectors, current account-link wrapper, and export-control marker
+were verified in the 2026-09-13 authenticated session. The generic transaction-table counts cannot establish pending/posted
 status, schema, date coverage, pagination, or a reliable API endpoint.
 
 Stop if the bank asks for Secure Code, CAPTCHA, device enrollment, push approval,

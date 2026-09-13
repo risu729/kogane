@@ -11,6 +11,7 @@ import {
   navigateFirstTransaction,
   navigatePortfolio,
   observeStops,
+  resolveAccountDetailsHref,
 } from "../src/probe.ts";
 
 describe("route and command boundaries", () => {
@@ -44,6 +45,27 @@ describe("route and command boundaries", () => {
       ["--password", "secret"],
     ])
       expect(() => parseArgs(args)).toThrow();
+  });
+
+  test("parses only the observed account-details JavaScript literal without evaluating it", () => {
+    expect(
+      resolveAccountDetailsHref("javascript:viewAccountDetails('accountDetails.action?index=2')"),
+    ).toBe(BANK_ORIGIN + "/ibank/accountDetails.action?index=2");
+    expect(resolveAccountDetailsHref("accountDetails.action?index=2")).toBe(
+      BANK_ORIGIN + "/ibank/accountDetails.action?index=2",
+    );
+    for (const raw of [
+      "javascript:viewAccountDetails('accountDetails.action?index=2');alert(1)",
+      "javascript:viewAccountDetails('accountDetails.action?index=2', 'extra')",
+      "javascript:viewAccountDetails('accountDetails.action?index=2&action=write')",
+      "javascript:viewAccountDetails('accountDetails.action?index=-2')",
+      "javascript:viewAccountDetails('accountDetails.action?index=secret')",
+      "javascript:viewAccountDetails('payment.action?index=2')",
+      "javascript:viewAccountDetails('https://other.test/ibank/accountDetails.action?index=2')",
+      "javascript:otherFunction('accountDetails.action?index=2')",
+      "javascript:alert(1)",
+    ])
+      expect(resolveAccountDetailsHref(raw)).toBeNull();
   });
 });
 
@@ -82,7 +104,7 @@ describe("synthetic browser proof (no bank requests)", () => {
       expect(report).toEqual({
         status: "portfolio-observed",
         route: "portfolio",
-        selectorEvidence: "historical-third-party",
+        selectorEvidence: "live-2026-09-13",
         containerPresent: true,
         accountCards: 1,
         currentBalanceFields: 1,
@@ -193,6 +215,33 @@ describe("synthetic browser proof (no bank requests)", () => {
       expect(requests).toEqual([
         { method: "GET", path: "/ibank/viewAccountPortfolio.html" },
         { method: "GET", path: "/ibank/accountDetails.action" },
+      ]);
+    });
+  });
+
+  test("follows the live scripted account anchor with one guarded GET and no JS call", async () => {
+    const livePortfolio =
+      portfolio.replace(
+        "/ibank/accountDetails.action?account=" + secret,
+        "javascript:viewAccountDetails('accountDetails.action?index=2')",
+      ) + '<script>function viewAccountDetails() { throw new Error("must not execute"); }</script>';
+    await withPage(livePortfolio, PORTFOLIO_URL, async (page) => {
+      const requests: { method: string; path: string; query: string }[] = [];
+      await page.route("**/*", (route) => {
+        const url = new URL(route.request().url());
+        requests.push({ method: route.request().method(), path: url.pathname, query: url.search });
+        return route.fulfill({
+          contentType: "text/html",
+          body: '<button id="transHistExport">Export</button>',
+        });
+      });
+      expect((await navigateFirstTransaction(page)).status).toBe("transaction-layout-candidate");
+      expect(requests).toEqual([
+        {
+          method: "GET",
+          path: "/ibank/accountDetails.action",
+          query: "?index=2",
+        },
       ]);
     });
   });
