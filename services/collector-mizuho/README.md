@@ -59,6 +59,9 @@ types and refresh challenges fail explicitly. Account numbers are validated
 against discovery; repeated responsive balances are deduplicated within rows.
 Page-local indices are not transaction identities. Repeated identical rows
 remain separate; identity across unobserved pagination is not established.
+The latest published complete account list replaces current balance membership;
+accounts absent from that list retain their transaction history without retaining
+their old balances as current.
 
 ## Verification
 

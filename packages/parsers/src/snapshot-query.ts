@@ -23,6 +23,29 @@ export const SNAPSHOT_DATASETS = [
   ["smbc-direct-balance", "balance-normalized"],
 ] as const;
 
+/**
+ * Terminal-v1 artifacts have no dataset field. Their complete-container
+ * membership is selected by exact source/parser/artifact/unit instead, without
+ * changing ingestion metadata or opting transaction pages into replacement.
+ * The canonical dataset is also admitted for older/direct parser consumers.
+ */
+export const ARTIFACT_SNAPSHOT_CONTAINERS = [
+  {
+    sourceId: "mizuho-bank",
+    parserName: "mizuho-account-list",
+    artifactKey: "account-list.html",
+    fetchUnitKey: "account-list",
+    dataset: "mizuho-account-list-html",
+  },
+] as const;
+
+function artifactContainerMatch(artifact: string, policy: string): string {
+  return `${artifact}.source_id = ${policy}.source_id
+    AND ${artifact}.artifact_key = ${policy}.artifact_key
+    AND ${artifact}.fetch_unit_key = ${policy}.fetch_unit_key
+    AND (${artifact}.dataset IS NULL OR ${artifact}.dataset = ${policy}.dataset)`;
+}
+
 // Earlier foreign-position parsers did not validate pagination. Their stored
 // success is not proof of completeness, even if a newer reparse fails.
 export const FOREIGN_POSITION_SNAPSHOT_VERSION = "0.3.0";
@@ -163,7 +186,7 @@ export function legacyWarningCompatMembership(parse: string, policy: string): st
  * row so that the claim is matched by contract, not by free text.
  */
 export function containerScopeKeySql(artifact: string): string {
-  return `${artifact}.source_id || '/' || ${artifact}.dataset || CASE WHEN ${artifact}.fetch_unit_key IS NULL THEN '' ELSE '/unit=' || ${artifact}.fetch_unit_key END`;
+  return `${artifact}.source_id || '/' || COALESCE(${artifact}.dataset, '') || CASE WHEN ${artifact}.fetch_unit_key IS NULL THEN '' ELSE '/unit=' || ${artifact}.fetch_unit_key END`;
 }
 
 /**
@@ -210,6 +233,19 @@ export function snapshotCtes(
   const p = options.prefix ?? "";
   // The policy id is a fixed code-owned identifier, never provider input.
   const activePolicy = options.policy === undefined ? "policy.policy_id" : `'${options.policy}'`;
+  const artifactContainers = ARTIFACT_SNAPSHOT_CONTAINERS.map((container) =>
+    [
+      container.sourceId,
+      container.parserName,
+      container.artifactKey,
+      container.fetchUnitKey,
+      container.dataset,
+    ]
+      .map((value) => `'${value.replaceAll("'", "''")}'`)
+      .join(", "),
+  )
+    .map((values) => `(${values}, 1)`)
+    .join(",\n  ");
   // `snapshot_selection = 0` rows carry an eligibility policy only (D13/PR-14);
   // they must not make their dataset a container-snapshot dataset.
   return `${p}snapshot_policies(parser_name, dataset, required_version, policy_id, replaces_previous_on_complete_empty, unit_scope) AS (
@@ -252,6 +288,31 @@ export function snapshotCtes(
   ) AS snapshot_rank FROM ${p}eligible_snapshots
 ), ${p}current_snapshots AS (
   SELECT * FROM ${p}ranked_snapshots WHERE snapshot_rank = 1
+), ${p}artifact_container_policies(source_id, parser_name, artifact_key, fetch_unit_key, dataset, replaces_previous_on_complete_empty) AS (
+  VALUES ${artifactContainers}
+), ${p}eligible_artifact_containers AS (
+  SELECT fa.id AS artifact_id, fa.source_id, container_policy.parser_name,
+         fa.artifact_key, fa.fetch_unit_key, fa.fetched_at
+  FROM ${relations.fetchArtifacts} fa
+  JOIN ${relations.fetchRuns} f ON f.id = fa.fetch_run_id
+  JOIN ${p}artifact_container_policies container_policy ON ${artifactContainerMatch("fa", "container_policy")}
+  WHERE ${runScopeSuccessSql("f")}
+    AND EXISTS (
+      SELECT 1 FROM ${relations.parseRuns} complete_parse
+      WHERE complete_parse.fetch_artifact_id = fa.id
+        AND complete_parse.parser_name = container_policy.parser_name
+        AND complete_parse.status = 'ok'
+        AND EXISTS (SELECT 1 FROM ${relations.publishedParseRuns} published
+                    WHERE published.parse_run_id = complete_parse.id)
+        AND ${coverageV1Membership("complete_parse", "fa", "container_policy", claims)}
+    )
+), ${p}ranked_artifact_containers AS (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY source_id, parser_name, artifact_key, fetch_unit_key
+    ORDER BY fetched_at DESC, artifact_id DESC
+  ) AS snapshot_rank FROM ${p}eligible_artifact_containers
+), ${p}current_artifact_containers AS (
+  SELECT * FROM ${p}ranked_artifact_containers WHERE snapshot_rank = 1
 )`;
 }
 
@@ -259,7 +320,7 @@ export const SNAPSHOT_CTES = snapshotCtes(LOCAL_SNAPSHOT_RELATIONS);
 
 // The enclosing query binds p=parser and fa=artifact. Empty successful parses
 // participate above even though there is no observation to join below.
-export const CURRENT_SNAPSHOT = `(
+export const CURRENT_SNAPSHOT = `((
   NOT EXISTS (SELECT 1 FROM snapshot_policies policy
               WHERE policy.parser_name = p.parser_name)
   OR EXISTS (
@@ -271,7 +332,14 @@ export const CURRENT_SNAPSHOT = `(
       AND snapshot.fetch_unit_key IS fa.fetch_unit_key
       AND snapshot.fetch_run_id = fa.fetch_run_id
   )
-)`;
+) AND (
+  NOT EXISTS (SELECT 1 FROM artifact_container_policies container_policy
+              WHERE container_policy.parser_name = p.parser_name
+                AND ${artifactContainerMatch("fa", "container_policy")})
+  OR EXISTS (SELECT 1 FROM current_artifact_containers snapshot
+             WHERE snapshot.artifact_id = fa.id
+               AND snapshot.parser_name = p.parser_name)
+))`;
 
 /** One partition of the shadow comparison: the current snapshot artifact under each policy. */
 export interface SnapshotPolicyComparisonRow {

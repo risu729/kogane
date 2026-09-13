@@ -28,17 +28,9 @@ The historical research below predates this follow-up.
 - Its one live Bun invocation returned HTTP 200, 5,817 response bytes and
   `unsupported-environment-50020`, with no redirects or recognized login form.
   No identifying input, authenticated request or credential retry was made.
-- For the authenticated follow-up, the owner requested the existing Kuebiko
-  capture profile. The ordinary in-app test tab was closed before login.
-  The shortcut's latest-release lookup timed out; the already-installed
-  Kuebiko 1.3.0 was then started with the shortcut's dedicated Chrome Beta
-  profile and capture options. Logger attachment and browser control succeeded.
-  The owner-authorized credential read used the unlocked Bitwarden vault in
-  ordinary Chrome; bank login used the separate capture Chrome. The login
-  completed with customer number and password, without a first PIN or OTP in
-  this session. One initial format error was caused by mistakenly reading the
-  vault's password display mask; the actual password was then read and submitted
-  once. No repeated password guessing was performed.
+- Authenticated reads were observed with Kuebiko 1.3.0 and its dedicated Chrome
+  Beta profile. Login completed through the official bank page; the collector
+  reused the resulting session without implementing password submission.
 - Unchecked notices were passed without changing notification preferences.
   Account enumeration returned an ordinary-deposit account, and its account
   card opened the `入出金明細` page. Kuebiko saved the corresponding HTML and

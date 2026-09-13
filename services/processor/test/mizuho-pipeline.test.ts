@@ -17,9 +17,12 @@ import { runBalanceProjection } from "../src/balance-projection-job.ts";
 import { artifact, run } from "./collection-harness.ts";
 import {
   mizuhoAccountHtml,
+  mizuhoAccountCard,
   mizuhoHistoryHtml,
   mizuhoHistoryRow,
 } from "../../../packages/parsers/test/mizuho-fixture.ts";
+import { latestBalancesSql, transactionsSql } from "../../../packages/read-model/src/sql.ts";
+import { PAGE_LIMIT } from "../../../packages/read-model/src/scope.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -65,6 +68,7 @@ async function persistPages(
   pages: readonly { key: string; unit: string; html: string }[],
   producer = "collector-mizuho-bank",
   providerOutcome: "success" | "partial" = "success",
+  completedAt = "2026-09-01T00:01:00.000Z",
 ) {
   return persistRun(env.EVIDENCE, {
     run: run({
@@ -72,6 +76,7 @@ async function persistPages(
       producer,
       producerVersion: "1.0.0",
       runId,
+      completedAt,
       // A complete captured page never asserts that all bank history was read.
       providerOutcome,
       ...(providerOutcome === "partial" ? { safeErrorCode: "history-request-failed" } : {}),
@@ -236,6 +241,81 @@ test("a different bank's collector cannot register Mizuho evidence", async () =>
   ).toBe(2);
 }, 30000);
 
+async function accountRemovalRegression() {
+  const historyB = {
+    key: "ordinary/002-7654321/history/1-1.html",
+    unit: "ordinary:002:7654321:page:1:1",
+    html: mizuhoHistoryHtml().replace("1234567", "7654321"),
+  };
+  await persistPages(
+    "mizuho-account-removal-before",
+    [
+      {
+        key: "account-list.html",
+        unit: "account-list",
+        html: mizuhoAccountHtml(mizuhoAccountCard() + mizuhoAccountCard("001", "002-7654321")),
+      },
+      historyB,
+    ],
+    "collector-mizuho-bank",
+    "success",
+    "2026-09-02T00:01:00.000Z",
+  );
+  expect(
+    await registerCollectionRun(env, {
+      source: "mizuho-bank",
+      runId: "mizuho-account-removal-before",
+    }),
+  ).toMatchObject({ outcome: "registered", artifacts: 2 });
+  expect(await sweep(env)).toMatchObject({ parsed: 2, error: 0 });
+  const before = await runBalanceProjection(env);
+  expect(before).toMatchObject({ status: "complete", rowCount: 4 });
+
+  await persistPages(
+    "mizuho-account-removal-after",
+    [{ key: "account-list.html", unit: "account-list", html: mizuhoAccountHtml() }],
+    "collector-mizuho-bank",
+    "success",
+    "2026-09-03T00:01:00.000Z",
+  );
+  expect(
+    await registerCollectionRun(env, {
+      source: "mizuho-bank",
+      runId: "mizuho-account-removal-after",
+    }),
+  ).toMatchObject({ outcome: "registered", artifacts: 1 });
+  // Registered bytes alone must not replace an adopted complete snapshot.
+  const balances = latestBalancesSql({ source: "mizuho-bank" }, 0, PAGE_LIMIT);
+  expect(
+    (
+      await env.DB.prepare(balances.sql)
+        .bind(...balances.args)
+        .all()
+    ).results,
+  ).toHaveLength(4);
+  expect(await sweep(env)).toMatchObject({ parsed: 1, error: 0 });
+  const after = await runBalanceProjection(env);
+  expect(after).toMatchObject({ status: "complete", rowCount: 2 });
+
+  const current = await env.DB.prepare(balances.sql)
+    .bind(...balances.args)
+    .all<{ source_account: string }>();
+  expect(current.results.map((row) => row.source_account)).toEqual([
+    "mizuho-bank:ordinary:001:1234567",
+    "mizuho-bank:ordinary:001:1234567",
+  ]);
+  // Account membership replaces current balances, never append-only history.
+  const history = transactionsSql(
+    { source: "mizuho-bank", account: "mizuho-bank:ordinary:002:7654321" },
+    0,
+  );
+  const retained = await env.DB.prepare(history.sql)
+    .bind(...history.args)
+    .all<{ source_account: string }>();
+  expect(retained.results).toHaveLength(1);
+  expect(retained.results[0]?.source_account).toBe("mizuho-bank:ordinary:002:7654321");
+}
+
 test("an acquisition failure preserves evidence without publishing the successful page as a complete run", async () => {
   await persistPages(
     "mizuho-partial-acquisition",
@@ -267,3 +347,9 @@ test("an acquisition failure preserves evidence without publishing the successfu
     ).results,
   ).toEqual([{ quantity_coefficient: "1234" }, { quantity_coefficient: "1234" }]);
 }, 30000);
+
+test(
+  "a later complete account list removes absent balances while preserving their history",
+  accountRemovalRegression,
+  60000,
+);
