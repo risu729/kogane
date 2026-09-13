@@ -1,3 +1,4 @@
+// Local fixture values simulate the financial API contract for rendering tests.
 // Local synthetic fixtures only. No connection to a user browser or real account.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
@@ -43,7 +44,7 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         if (url.pathname === "/api/meta")
           return Response.json({
             apiVersion: 1,
-            source: { kind: "central-store", classification: "synthetic" },
+            source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (url.pathname.startsWith("/api/identity/")) {
