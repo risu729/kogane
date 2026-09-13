@@ -35,8 +35,13 @@ describe("payloads", () => {
       "identity.release-override",
       "relation.accept",
       "relation.reject",
+      "card-settlement.accept",
+      "card-settlement.reject",
+      "card-settlement.withdraw",
     ]);
-    expect(CHANGE_KINDS.some((kind) => /pay|transfer|order|withdraw|send/u.test(kind))).toBe(false);
+    expect(
+      CHANGE_KINDS.some((kind) => /^(?:payment|transfer|order|withdrawal|send)\./u.test(kind)),
+    ).toBe(false);
     expect(isChangeKind("payment.send")).toBe(false);
   });
 
@@ -49,6 +54,26 @@ describe("payloads", () => {
       { actorId: "someone-else" },
     ])
       expect(validPayload("identity.assign", { ...assign, ...extra })).toBe(false);
+  });
+
+  test("settlement decisions pin a server revision and cannot carry caller financial effects", () => {
+    for (const kind of [
+      "card-settlement.accept",
+      "card-settlement.reject",
+      "card-settlement.withdraw",
+    ] as const) {
+      const payload = { proposalId: "cs_synthetic", reason: "Reviewed the evidence" };
+      expect(validPayload(kind, payload)).toBe(true);
+      for (const extra of [
+        { expectedRevision: 1 },
+        { ownerId: "owner" },
+        { amount: "1000" },
+        { approved: true },
+      ])
+        expect(validPayload(kind, { ...payload, ...extra })).toBe(false);
+      expect(validPayload(kind, { ...payload, proposalId: "" })).toBe(false);
+      expect(validPayload(kind, { ...payload, reason: " " })).toBe(false);
+    }
   });
 
   test("payload shape is checked per kind", () => {

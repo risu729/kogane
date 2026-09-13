@@ -16,6 +16,9 @@ export const CHANGE_KINDS = [
   "identity.release-override",
   "relation.accept",
   "relation.reject",
+  "card-settlement.accept",
+  "card-settlement.reject",
+  "card-settlement.withdraw",
 ] as const;
 export type ChangeKind = (typeof CHANGE_KINDS)[number];
 
@@ -42,7 +45,15 @@ export interface RelationPayload {
   evidenceRefs: string[];
   reason: string;
 }
-export type ChangePayload = IdentityAssignPayload | IdentityReleasePayload | RelationPayload;
+export interface CardSettlementPayload {
+  proposalId: string;
+  reason: string;
+}
+export type ChangePayload =
+  | IdentityAssignPayload
+  | IdentityReleasePayload
+  | RelationPayload
+  | CardSettlementPayload;
 
 const REASON_MAX = 1000;
 
@@ -54,6 +65,9 @@ const REASON_MAX = 1000;
 export function validPayload(kind: ChangeKind, value: unknown): value is ChangePayload {
   if (!isRecord(value)) return false;
   const reason = isText(value.reason, REASON_MAX) && value.reason.trim() !== "";
+  if (kind.startsWith("card-settlement.")) {
+    return exactKeys(value, ["proposalId", "reason"]) && isText(value.proposalId, 512) && reason;
+  }
   if (kind === "identity.assign" || kind === "identity.release-override") {
     const assign = kind === "identity.assign";
     const keys = assign
@@ -305,6 +319,8 @@ export interface MutationInput {
 }
 
 export interface MutationWrites {
+  /** Trusted domain eligibility predicate, checked atomically before reserving any receipt. */
+  precondition?: CommitGuard;
   /** Appended to the commit batch in order; each is guarded. */
   writes: PreparedWrite[];
   decisionRevisionId: string;

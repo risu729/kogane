@@ -20,6 +20,7 @@ import { changeCommandRoute } from "./change-commands.ts";
 import { internalHealthRoute } from "./internal-health.ts";
 import { runBatch } from "../../../packages/storage-d1/src/d1.ts";
 import { dispatchDecisionOutbox } from "./decision-outbox.ts";
+import { cardSettlementSweep } from "./card-settlement-job.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import {
   publicationConsistency,
@@ -1633,7 +1634,10 @@ const defaultStages: ScheduledStages = {
   // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
-  reconcile: (env) => reconciliationSweep(env.DB),
+  reconcile: async (env) => ({
+    ...(await reconciliationSweep(env.DB)),
+    cardSettlements: await cardSettlementSweep(env.DB),
+  }),
   rewards: (env) => rewardClaimsStage(env),
   rewardReadProjection: (env) => rewardReadProjectionStage(env),
   reports: (env) => {

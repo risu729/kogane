@@ -5,7 +5,7 @@ not.** The next objective is to turn collected provider displays into connected
 transactions, explainable assets and liabilities, valuations, and eventually
 cost basis, P&L and tax outputs.
 
-This status was checked against repository revision `49d5d65e` on 2026-09-13.
+This status was updated with the card statement settlement slice on 2026-09-13.
 It distinguishes implemented contracts and calculation components from a feature
 that works with real inputs through its user interface. It is a repository
 assessment, not a new production acceptance run. Historical infrastructure
@@ -29,9 +29,14 @@ the relevant rollout records.
 
 Concrete limits in the current code:
 
-- [The reconciliation job](../services/processor/src/reconciliation-job.ts)
-  runs only Vpass pending/posted matching. MyJCB and cross-source matching are
-  still extensions to implement; a generic matcher is not deployed coverage.
+- [Card settlement review](card-settlements.md) now connects authoritative
+  Vpass/MyJCB statement totals to SMBC bank debits through explicit operator
+  decisions. Unknown ownership, stale evidence and occupied allocations block
+  acceptance. Other bank adapters, partial payments, refunds and complete
+  purchase recognition remain extensions; this is not complete event coverage.
+- [The pending/posted job](../services/processor/src/reconciliation-job.ts)
+  includes Vpass and the supported MyJCB usage/payment-equivalent subset.
+  An installment payment amount is not silently compared with a purchase amount.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
@@ -65,10 +70,11 @@ Valuation of provider-reported holdings can proceed before all transaction
 history has been reconstructed. Adding every source is not a prerequisite for
 finishing a representative bank, card, broker or rewards flow.
 
-**The next major milestone is to connect Vpass/MyJCB card usage and statements
-to bank debits, distinguish purchase recognition from settlement, and explain
-the balance impact without counting the same expense twice.** Securities
-executions, settlement, holdings and valuation follow that first complete flow.
+**The current milestone is to complete card usage → statement → bank debit
+coverage without counting an expense twice.** The first statement/debit review
+slice is implemented; source ownership, supported bank coverage, purchase-event
+recognition, partial payments and refund handling still need completion.
+Securities executions, settlement, holdings and valuation follow that flow.
 
 The numbered phases below retain the original layer identifiers. They describe
 the remaining work and its acceptance criteria, not a requirement to finish

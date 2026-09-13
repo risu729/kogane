@@ -22,6 +22,8 @@ import {
   identitySubjectRef,
 } from "./sql.ts";
 
+import { cardSettlementPlan } from "./card-settlement-target.ts";
+
 const SCOPE_LIMIT = 50;
 
 interface IdentitySubjectRow {
@@ -95,6 +97,7 @@ export async function resolveAndSimulate(
   kind: ChangeKind,
   payload: ChangePayload,
 ): Promise<CommandResult<{ resolved: ResolvedPlan }>> {
+  if (kind.startsWith("card-settlement.")) return cardSettlementPlan(store, kind, payload);
   return kind === "relation.accept" || kind === "relation.reject"
     ? relationPlan(store, kind, payload)
     : identityPlan(store, kind, payload);

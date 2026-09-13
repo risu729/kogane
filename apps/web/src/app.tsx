@@ -20,6 +20,7 @@ import { CollectionControls } from "./collection-controls.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
+import { ReconciliationPage } from "./pages/Reconciliation.tsx";
 
 const NAV: { to: string; label: string; icon: string }[] = [
   {
@@ -82,6 +83,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <IdentitiesPage />;
     case "rewards":
       return <RewardsPage />;
+    case "reconciliation":
+      return <ReconciliationPage />;
     case "artifacts":
       return <ArtifactsPage />;
     case "artifact":
@@ -89,7 +92,7 @@ function View({ route }: { route: Route }): ReactNode {
     case "observation":
       return <ObservationDetailPage kind={route.kind} id={route.id} />;
     case "confirm":
-      return <ConfirmPage planId={route.planId} />;
+      return <ConfirmPage key={route.planId} planId={route.planId} />;
     case "notFound":
       return <NotFoundPage path={route.path} />;
   }
@@ -167,6 +170,11 @@ export function App(): ReactNode {
               <span>{item.label}</span>
             </Link>
           ))}
+          {features.cardSettlementReconciliation ? (
+            <Link to="/reconciliation" current={path === "/reconciliation"}>
+              カード照合
+            </Link>
+          ) : null}
           {features.identities ? (
             <Link to="/identities" current={path === "/identities"}>
               口座・銘柄
