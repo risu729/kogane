@@ -185,7 +185,6 @@ describe("consumers deploy before producers (G5-14)", () => {
     expect(deployed.map((worker) => worker.name)).toEqual([
       "processor",
       "app",
-      "app-demo",
       "globalpass-worker",
       "mobile-suica-worker",
       "moneyforward-worker",
@@ -199,10 +198,10 @@ describe("consumers deploy before producers (G5-14)", () => {
       "vpoint-pay-worker",
       "vpoint-worker",
     ]);
-    // The three consumers of the shared contract come first, then every
+    // The two consumers of the shared contract come first, then every
     // collector: a reader understands the contract before a writer uses it.
-    expect(deployed.slice(0, 3).every((worker) => worker.role === "consumer")).toBe(true);
-    expect(deployed.slice(3).every((worker) => worker.role === "producer")).toBe(true);
+    expect(deployed.slice(0, 2).every((worker) => worker.role === "consumer")).toBe(true);
+    expect(deployed.slice(2).every((worker) => worker.role === "producer")).toBe(true);
   });
 
   test("every collector is a CD target, and only the experiments are not", () => {
@@ -347,7 +346,6 @@ describe("the deploy workflow follows the ledger", () => {
       "Apply the READ migrations",
       "Deploy the Processor",
       "Deploy the App",
-      "Deploy the demo App",
       "Deploy the GlobalPass collector",
       "Deploy the Mobile Suica collector",
       "Deploy the Money Forward collector",

@@ -346,7 +346,7 @@ What makes `planned` true is the `success` status, which is only posted when
 every step of the run succeeded. What a run actually did is recorded twice
 over, from the job's own step outcomes: as a one-line summary in the deployment
 status description (`3/5 deployed at abc123…, CORE migrations done, failed:
-app-demo`) and in full in the `release-progress-<sha>` artifact, which
+app`) and in full in the `release-progress-<sha>` artifact, which
 distinguishes `deployed`, `failed` and `skipped` per Worker (Actions records a
 step whose condition was not met as skipped, so a planned upload that never ran
 because an earlier step failed shows as `skipped`; `not reached` appears only
@@ -401,25 +401,24 @@ and a health route. `tasks/_lib/deploy-order.test.ts` keeps it in step with
 cannot drift into a second, different order.
 
 Consumers deploy before producers: a reader must understand the contract before
-a writer starts using it. The three consumers come first, then every collector:
+a writer starts using it. The two consumers come first, then every collector:
 
 | Order | Worker                            | Directory                           | Health route                | Reachable by    |
 | ----- | --------------------------------- | ----------------------------------- | --------------------------- | --------------- |
 | 1     | `kogane-observation-pipeline`     | `services/processor`                | `/internal/health`, binding | through the App |
 | 2     | `kogane-evidence-browser`         | `services/app`                      | `/api/ops/v1/health`        | Access token    |
-| 3     | `kogane-demo`                     | `services/app`                      | none                        | —               |
-| 4     | `kogane-globalpass-collector-poc` | `services/collector-globalpass`     | `/health`                   | unauthenticated |
-| 5     | `kogane-mobile-suica-...-poc`     | `services/collector-mobile-suica`   | `/health`                   | unauthenticated |
-| 6     | `kogane-moneyforward-...-poc`     | `services/collector-moneyforward`   | `/health`                   | unauthenticated |
-| 7     | `kogane-myjcb-collector-poc`      | `services/collector-myjcb`          | `/health`                   | unauthenticated |
-| 8     | `kogane-sbi-collector-poc`        | `services/collector-sbi-securities` | `/health`                   | unauthenticated |
-| 9     | `kogane-sbi-shinsei-...-poc`      | `services/collector-sbi-shinsei`    | `/health`                   | unauthenticated |
-| 10    | `kogane-sbi-vc-session-poc`       | `services/collector-sbi-vc-trade`   | `/healthz`                  | unauthenticated |
-| 11    | `kogane-smbc-direct-backfill-poc` | `services/collector-smbc-direct`    | none                        | —               |
-| 12    | `kogane-sony-bank-collector-poc`  | `services/collector-sony-bank`      | `/health`                   | unauthenticated |
-| 13    | `kogane-vpass-collector-poc`      | `services/collector-vpass`          | `/health`                   | unauthenticated |
-| 14    | `kogane-vpoint-pay-...-poc`       | `services/collector-vpoint-pay`     | `/health`                   | unauthenticated |
-| 15    | `kogane-vpoint-collector-poc`     | `services/collector-vpoint`         | `/health`                   | unauthenticated |
+| 3     | `kogane-globalpass-collector-poc` | `services/collector-globalpass`     | `/health`                   | unauthenticated |
+| 4     | `kogane-mobile-suica-...-poc`     | `services/collector-mobile-suica`   | `/health`                   | unauthenticated |
+| 5     | `kogane-moneyforward-...-poc`     | `services/collector-moneyforward`   | `/health`                   | unauthenticated |
+| 6     | `kogane-myjcb-collector-poc`      | `services/collector-myjcb`          | `/health`                   | unauthenticated |
+| 7     | `kogane-sbi-collector-poc`        | `services/collector-sbi-securities` | `/health`                   | unauthenticated |
+| 8     | `kogane-sbi-shinsei-...-poc`      | `services/collector-sbi-shinsei`    | `/health`                   | unauthenticated |
+| 9     | `kogane-sbi-vc-session-poc`       | `services/collector-sbi-vc-trade`   | `/healthz`                  | unauthenticated |
+| 10    | `kogane-smbc-direct-backfill-poc` | `services/collector-smbc-direct`    | none                        | —               |
+| 11    | `kogane-sony-bank-collector-poc`  | `services/collector-sony-bank`      | `/health`                   | unauthenticated |
+| 12    | `kogane-vpass-collector-poc`      | `services/collector-vpass`          | `/health`                   | unauthenticated |
+| 13    | `kogane-vpoint-pay-...-poc`       | `services/collector-vpoint-pay`     | `/health`                   | unauthenticated |
+| 14    | `kogane-vpoint-collector-poc`     | `services/collector-vpoint`         | `/health`                   | unauthenticated |
 
 Every collector is a CD target: leaving them out meant a merged collector
 change was live in the repository and not in production, which is a worse

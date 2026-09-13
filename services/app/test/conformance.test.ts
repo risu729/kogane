@@ -1,4 +1,4 @@
-// The production Worker and the hosted synthetic demo run the same
+// The production Worker and the local synthetic snapshot run the same
 // conformance checks as the local store experiment
 // (experiments/observation-pipeline-local/test/api-conformance.test.ts); both
 // import the checks from packages/observation-shared/test-support.
@@ -8,7 +8,7 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "../demo-snapshot.json";
-import demo from "../src/demo-worker";
+import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import {
@@ -79,7 +79,7 @@ const production: ConformanceTarget = {
       { ...env, ACCESS_ISSUER: issuer, ACCESS_AUDIENCE: "fixture-audience" } as Env,
     ),
 };
-const hostedDemo: ConformanceTarget = {
+const snapshotTarget: ConformanceTarget = {
   expected: LOCAL_STORE_CAPABILITIES,
   get: async (path, method = "GET") =>
     demo.fetch(
@@ -107,8 +107,8 @@ describe("observation API conformance: production evidence-browser worker", () =
   });
 });
 
-describe("observation API conformance: hosted synthetic demo", () => {
-  for (const check of CONFORMANCE_CHECKS) it(check.name, () => check.run(hostedDemo));
+describe("observation API conformance: local synthetic snapshot", () => {
+  for (const check of CONFORMANCE_CHECKS) it(check.name, () => check.run(snapshotTarget));
   it("serves the metadata object the export produced, byte for byte", async () => {
     const exported = snapshot.responses["/api/meta"]!;
     const expected = JSON.parse(atob(exported.bodyBase64)) as unknown;
@@ -118,7 +118,7 @@ describe("observation API conformance: hosted synthetic demo", () => {
       source: { kind: "local-store", classification: "synthetic" },
       capabilities: LOCAL_STORE_CAPABILITIES,
     });
-    const served = await hostedDemo.get("/api/meta");
+    const served = await snapshotTarget.get("/api/meta");
     expect(await served.text()).toBe(atob(exported.bodyBase64));
   });
 });

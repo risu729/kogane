@@ -1,8 +1,9 @@
+// Test-only snapshot adapter. No Wrangler configuration deploys this fixture.
 import snapshot from "../demo-snapshot.json";
-import { authenticate } from "./auth";
-import { isAgentPath, SHARED_QUERY_PATH } from "./agent-api";
-import { HttpError, json, secureResponse } from "./http";
-import { downloadDisposition } from "./read";
+import { authenticate } from "../src/auth";
+import { isAgentPath, SHARED_QUERY_PATH } from "../src/agent-api";
+import { HttpError, json, secureResponse } from "../src/http";
+import { downloadDisposition } from "../src/read";
 
 type DemoEnv = Pick<Env, "ASSETS" | "ACCESS_ISSUER" | "ACCESS_AUDIENCE">;
 const responses: Record<string, { status: number; contentType: string; bodyBase64: string }> =

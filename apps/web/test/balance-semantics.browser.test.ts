@@ -115,7 +115,7 @@ describe.if(runnable)("balance meaning and evidence display", () => {
         if (path === "/api/meta")
           return Response.json({
             apiVersion: 1,
-            source: { kind: "central-store", classification: "synthetic" },
+            source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (path === "/api/filter-options")

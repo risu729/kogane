@@ -6,7 +6,7 @@
     {
       "path": "services/app/demo-snapshot.json",
       "producedBy": "local-pipeline:export-demo",
-      "reason": "The demo Worker serves a synthetic snapshot exported from the local pipeline experiment. It is git-ignored so that an export taken on some developer's machine cannot be committed as if it were data."
+      "reason": "Local API conformance tests use a synthetic snapshot exported from the local pipeline experiment. It is git-ignored and is not deployed or used by the production UI."
     }
   ]
 }

@@ -50,9 +50,15 @@ export function splitSql(sql: string): string[] {
 }
 
 export function layerBMigrations(): string[] {
-  return readdirSync(migrationDir)
-    .filter((name) => name.endsWith(".sql") && name >= "0017")
-    .sort();
+  return (
+    readdirSync(migrationDir)
+      // Production-only Layer A data cleanup is covered against the full schema.
+      .filter(
+        (name) =>
+          name.endsWith(".sql") && name >= "0017" && name !== "0043_remove_synthetic_bootstrap.sql",
+      )
+      .sort()
+  );
 }
 
 /** Apply one migration file through D1, statement by statement. */

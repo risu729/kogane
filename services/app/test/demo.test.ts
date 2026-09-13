@@ -1,7 +1,7 @@
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "../demo-snapshot.json";
-import worker from "../src/demo-worker";
+import worker from "./snapshot-worker";
 import { LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 
@@ -54,7 +54,7 @@ async function call(path: string, options: { authenticated?: boolean; method?: s
   );
 }
 
-describe("hosted synthetic demo", () => {
+describe("local synthetic snapshot", () => {
   it("authenticates assets, navigation, API and raw before serving any bytes", async () => {
     expect(rawPath).toBeTruthy();
     for (const path of ["/", "/transactions", "/assets/app.js", "/api/meta", rawPath]) {

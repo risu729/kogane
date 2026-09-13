@@ -53,7 +53,6 @@ export const LIVE_INVENTORY = {
   accountId: ACCOUNT_ID,
   /** Worker scripts that exist in the account. */
   workers: [
-    "kogane-demo",
     "kogane-evidence-browser",
     "kogane-globalpass-collector-poc",
     "kogane-mobile-suica-collector-poc",
@@ -168,7 +167,8 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     // configs are byte-identical to what they were under the old directory, so
     // the frozen identity lines in `scripts/resource-ledger.test.ts` still match
     // (G0-06, G5-15). The Worker names did not move with the directory.
-    requiredVerification: "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
+    requiredVerification:
+      "Production Worker identity retained; public synthetic demo retired on 2026-09-13",
     executionStatus: "EXECUTED_RENAME",
     planLiveResourceStatus: "NOT_VERIFIED",
   },

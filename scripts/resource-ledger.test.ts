@@ -69,7 +69,6 @@ const COLLECTOR_IDENTITIES_BEFORE_THE_PROMOTIONS = [
  * this item neither moves nor touches.
  */
 const WORKER_CONFIGS_BEFORE_THE_PROMOTIONS = [
-  "kogane-demo wrangler.demo.jsonc",
   "kogane-evidence-browser wrangler.jsonc",
   "kogane-evidence-browser-test wrangler.test.jsonc",
   "kogane-globalpass-collector-poc wrangler.jsonc",
@@ -268,7 +267,6 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
  */
 // Approved retirement removes only obsolete projection target vars. Resource identities stay fixed.
 const FROZEN_MOVED_IDENTITIES = [
-  "kogane-demo config=wrangler.demo.jsonc live=true role=deployed email=false crons=- d1=- r2=- kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=../../apps/web/dist>ASSETS vars=ACCESS_AUDIENCE,ACCESS_ISSUER,AGENT_GRANTS,BALANCE_PROJECTION_ENABLED,OPERATOR_SUBJECTS,OPS_API_ENABLED secrets=- sha256=8597edfd5193d5d11deb07b14394f964db163e3b36055ab61b6910b32a81b3bc",
   "kogane-evidence-browser config=wrangler.jsonc live=true role=deployed email=false crons=- d1=DB>kogane-raw-evidence#b335a887-250d-45c9-bd72-af83f35fdc60,READ>kogane-read#320ebe31-a031-48a1-985f-0e6fabbd517a r2=EVIDENCE>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=PIPELINE>kogane-observation-pipeline assets=../../apps/web/dist-production>ASSETS vars=ACCESS_AUDIENCE,ACCESS_ISSUER,AGENT_API_GRANTS,AGENT_GRANTS,BALANCE_PROJECTION_ENABLED,COMMANDS_ENABLED,EVENTS_V2_ENABLED,EVIDENCE_SOURCE_ID,HEALTH_PROBE_TOKENS,OPERATOR_SUBJECTS,OPS_API_ENABLED,RELEASE_SHA,REWARDS_V2_ENABLED,SESSION_REFRESH_POLICY secrets=- sha256=4ed72d7af685e9b17d94402ea246f72c3a8f344b3a90fabfb5d59c453367dd66",
   "kogane-evidence-browser-test config=wrangler.test.jsonc live=false role=test-only email=false crons=- d1=DB>test#00000000-0000-0000-0000-000000000001,READ>test-read#00000000-0000-0000-0000-000000000002 r2=EVIDENCE>test kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=test/assets>ASSETS vars=ACCESS_AUDIENCE,ACCESS_ISSUER,AGENT_API_GRANTS,AGENT_GRANTS,BALANCE_PROJECTION_ENABLED,COMMANDS_ENABLED,EVENTS_V2_ENABLED,EVIDENCE_SOURCE_ID,HEALTH_PROBE_TOKENS,OPERATOR_SUBJECTS,OPS_API_ENABLED,RELEASE_SHA,REWARDS_V2_ENABLED,SESSION_REFRESH_POLICY secrets=- sha256=f5ac6668e9ef957256309f4349b650f604d33e28496cd3ccf5244ed136f95372",
   "kogane-observation-ops-local config=wrangler.ops.jsonc live=false role=binding-only email=false crons=- d1=- r2=- kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=OBSERVATIONS>kogane-observation-pipeline assets=- vars=- secrets=- sha256=902d4629a87b356b9fbecc55e816a13de9f008add7b5d911b61c0908cbb8cfbf",
@@ -286,9 +284,9 @@ describe("G0-06/G0-07/G5-15 the directory rename changed no runtime identity", (
         )
         .flatMap((entry) => entry.workers.map((worker) => worker.name)),
     );
-    // Seven configs moved; a missing one would make the assertion below pass by
+    // Six configs remain after public demo retirement; a missing one would pass by
     // comparing nothing.
-    expect(moved.size).toBe(7);
+    expect(moved.size).toBe(6);
     expect(
       resourceIdentityLines(ledger).filter((line) => moved.has(line.split(" ")[0] as string)),
     ).toEqual(FROZEN_MOVED_IDENTITIES);

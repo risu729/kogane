@@ -5,7 +5,7 @@
 // `/mcp`, each with a bounded JSON body, each behind the same Access gate as
 // every read route, and each behind a grant looked up by the verified
 // principal. `AGENT_API_GRANTS` absent means no principal has a grant, so every
-// agent route answers 403 — that is the deployed default, and the demo Worker
+// agent route answers 403 — that is the deployed default, and the test snapshot adapter
 // never serves these paths at all.
 //
 // `GET /api/v2/query` is the same query service under the reader authority
