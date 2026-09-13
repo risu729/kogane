@@ -61,6 +61,7 @@ export const EXTERNAL_ID_NAMESPACE = "shared-r2";
  */
 export const COLLECTOR_SOURCE_IDS: Readonly<Record<string, string>> = {
   "kogane-synthetic": "kogane-synthetic",
+  "mizuho-bank": "mizuho-bank",
   "mobile-suica": "mobile-suica",
   "moneyforward-me": "moneyforward-me",
   myjcb: "myjcb",

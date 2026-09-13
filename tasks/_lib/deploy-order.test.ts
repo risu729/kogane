@@ -20,6 +20,7 @@ import {
   workflowSteps,
 } from "./deploy-order.ts";
 import { REPO_ROOT, trackedFiles } from "./repo-root.ts";
+import { parseJsonc } from "../../scripts/jsonc.ts";
 
 const order = readDeployOrder();
 const ledger = JSON.parse(readFileSync(`${REPO_ROOT}/infra/workers-ci.json`, "utf8")) as {
@@ -131,7 +132,7 @@ describe("the deployment ledger describes every Worker CI validates", () => {
     expect(processor?.healthPath).toBe("");
     // Every collector that has a public health route is checked through it.
     const checked = order.workers.filter(
-      (worker) => worker.role === "producer" && worker.healthPath !== "",
+      (worker) => worker.role === "producer" && worker.deploy && worker.healthPath !== "",
     );
     expect(checked).toHaveLength(11);
     expect(checked.every((worker) => worker.healthAuth === "none")).toBe(true);
@@ -204,15 +205,24 @@ describe("consumers deploy before producers (G5-14)", () => {
     expect(deployed.slice(2).every((worker) => worker.role === "producer")).toBe(true);
   });
 
-  test("every collector is a CD target, and only the experiments are not", () => {
+  test("every live collector remains a CD target, with only Mizuho awaiting initial provisioning", () => {
     // Deploying a collector replaces its script; it starts no collection, no
     // re-authentication and no backfill, and a change to what one bundles
     // passes CI and the existing branch rules before it merges.
-    // What stays out of CD is the probe role: the experiments and the
-    // bootstrap, audit and test-harness configurations.
+    // Mizuho is the one named initial-provisioning hold. Its direct bank
+    // session handoff and cloud egress still need operational verification;
+    // services/collector-mizuho/README.md records the activation gate.
+    // All established collectors keep their prior deployment requirement.
     const producers = order.workers.filter((worker) => worker.role === "producer");
-    expect(producers.length).toBe(12);
-    expect(producers.every((worker) => worker.deploy)).toBe(true);
+    expect(producers.length).toBe(13);
+    expect(producers.filter((worker) => !worker.deploy).map((worker) => worker.name)).toEqual([
+      "mizuho-worker",
+    ]);
+    expect(
+      producers
+        .filter((worker) => worker.name !== "mizuho-worker")
+        .every((worker) => worker.deploy),
+    ).toBe(true);
     expect(producers.every((worker) => worker.path.startsWith("services/collector-"))).toBe(true);
     expect(order.workers.filter((worker) => worker.role === "probe").length).toBeGreaterThan(0);
     expect(order.workers.some((worker) => worker.role === "probe" && worker.deploy)).toBe(false);
@@ -222,9 +232,28 @@ describe("consumers deploy before producers (G5-14)", () => {
     const directories = trackedFiles("services")
       .map((file) => /^(services\/collector-[^/]+)\//u.exec(file)?.[1] ?? "")
       .filter((directory) => directory !== "" && directory !== "services/collector-r2-importer");
-    expect(new Set(directories).size).toBe(12);
+    expect(new Set(directories).size).toBe(13);
     for (const directory of new Set(directories))
       expect(producers.some((worker) => worker.path === directory)).toBe(true);
+  });
+
+  test("Mizuho's provisioning hold cannot enable deployment or scheduled bank access", () => {
+    const held = order.workers.find((worker) => worker.name === "mizuho-worker");
+    expect(held).toMatchObject({
+      path: "services/collector-mizuho",
+      config: "wrangler.jsonc",
+      worker: "kogane-mizuho-collector",
+      role: "producer",
+      deploy: false,
+    });
+    const path = `${REPO_ROOT}/services/collector-mizuho/wrangler.jsonc`;
+    const config = parseJsonc(readFileSync(path, "utf8"), path) as {
+      triggers?: { crons?: unknown[] };
+    };
+    expect(config.triggers?.crons ?? []).toEqual([]);
+    expect(deploySteps(deployWorkflow).some((step) => step.workingDirectory === held!.path)).toBe(
+      false,
+    );
   });
 
   test("every deployed Worker's bundle task exists in its workspace", () => {

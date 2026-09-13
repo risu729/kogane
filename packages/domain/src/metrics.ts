@@ -372,6 +372,7 @@ export const METRIC_REGISTRY: readonly RegistryEntry[] = [
       ]),
       balance("sbi-shinsei-bank", "sbi-shinsei-top-balances-and-activity", ["account_balance"]),
       balance("smbc-bank", "smbc-direct-balance", ["account_balance"]),
+      balance("mizuho-bank", "mizuho-account-list", ["account_balance"]),
     ],
     {
       metricId: "deposit.balance",
@@ -386,6 +387,18 @@ export const METRIC_REGISTRY: readonly RegistryEntry[] = [
       legacyBalance: LEGACY_DEPOSIT,
     },
   ),
+  entry([balance("mizuho-bank", "mizuho-account-list", ["available_balance"])], {
+    metricId: "deposit.available-balance",
+    measurementKind: "capacity",
+    subjectKind: "account",
+    unitDimension: "currency",
+    signMeaning: "unsigned",
+    timeBasis: "point-in-time",
+    aggregationRule: "non-additive",
+    overlapGroup: "mizuho-bank:deposit-vs-available",
+    sourceAuthority: "provider-reported",
+    legacyBalance: LEGACY_CAPACITY,
+  }),
   entry(
     [
       balance("sbi-shinsei-bank", "sbi-shinsei-top-balances-and-activity", [
@@ -604,6 +617,7 @@ export const METRIC_REGISTRY: readonly RegistryEntry[] = [
       transaction("sony-bank", "sony-bank-history-json"),
       transaction("sony-bank", "sony-bank-history-csv"),
       transaction("smbc-bank", "smbc-direct-transactions"),
+      transaction("mizuho-bank", "mizuho-ordinary-history"),
       transaction("sbi-shinsei-bank", "sbi-shinsei-top-balances-and-activity"),
       transaction("sbi-vc-trade", "sbi-vc-cashflows"),
       transaction("mobile-suica", "mobile-suica-sf-history"),

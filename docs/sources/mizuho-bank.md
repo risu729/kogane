@@ -2,6 +2,88 @@
 
 調査日: 2026-08-26
 
+## 2026-09-13 direct-collector feasibility check
+
+This follow-up tests a direct bank collector, not a user-export/import workflow.
+Authenticated browser account and ordinary-deposit history reads succeeded.
+The historical research below predates this follow-up.
+
+- The official login page opened successfully in the Codex in-app browser at
+  approximately 14:47 JST. It displayed the customer-number field `txbCustNo`
+  and the disabled Next button before any identifying input.
+- An unauthenticated WSL HTTP client received HTTP 200 with the explicit
+  unsupported-browser text and `SERVICE Unavailable:50020`. A separate web
+  retrieval returned maintenance code `50010`. These are observations of
+  different request environments, not evidence of a general bank outage.
+- The public bootstrap still supplies a bank-selected `webX.ib.mizuhobank.co.jp`
+  base and the public form/JavaScript framework described below. The public
+  scripts inspected in this follow-up did not establish WebAuthn support.
+  The current [official login FAQ](https://www.faq.mizuhobank.co.jp/faq/show/10035?site_domain=default)
+  describes customer number, password and a conditional first PIN.
+- `experiments/mizuho-direct` contains a bounded, unauthenticated entry probe.
+  Its output is diagnostic metadata only. It cannot authenticate, collect
+  balances or transactions, or establish that a Worker runtime is supported.
+  The observed ordinary-deposit parsers are promoted to `packages/parsers`;
+  their fixtures are synthetic.
+- Its one live Bun invocation returned HTTP 200, 5,817 response bytes and
+  `unsupported-environment-50020`, with no redirects or recognized login form.
+  No identifying input, authenticated request or credential retry was made.
+- Authenticated reads were observed with Kuebiko 1.3.0 and its dedicated Chrome
+  Beta profile. Login completed through the official bank page; the collector
+  reused the resulting session without implementing password submission.
+- Unchecked notices were passed without changing notification preferences.
+  Account enumeration returned an ordinary-deposit account, and its account
+  card opened the `入出金明細` page. Kuebiko saved the corresponding HTML and
+  requests. These observed reads use authenticated HTML form POSTs; no JSON API
+  is needed for these two surfaces.
+- Account-list navigation uses `/servlet/MENSRV0100002B.do`, returning form
+  `BALINQ_03010B`. The ordinary-deposit card uses
+  `/servlet/BALINQ0301002B.do` with the account `_SUBINDEX`, returning history
+  form `ACCHST_04110B`. Shared navigation fields are `_FRAMEID`, `_TARGETID`,
+  `_LUID`, `_TOKEN`, `_FORMID`, `_SUBINDEX` and `POSTKEY`. Tokens and session
+  cookies must come from the current session, not checked-in examples.
+- Account fields have indexed IDs `txtAccType_`, `txtBrnch_`, `txtAccNo_`,
+  `txtCrntBalBrrwBal_` and `txtCrntBalBrrwBalCrenCode_`. History rows use
+  `.box-row-tx-ditails`, `txtDate_`, `txtTransCntnt_`, a signed amount and
+  `txtEachBal_`. The balance element is repeated for desktop/mobile rendering
+  and must be deduplicated within each row. `txtDispDetails` and
+  `txtAllDispDetails` expose displayed/total counts.
+- Both offline parsers passed against the private captured pages. Discovery
+  contains a branch-code/account-number pair; history shows only the account
+  number and branch name. Signed history amounts include a space after the
+  sign. Synthetic regression fixtures cover those observed differences.
+- Raw captures stay local and private; credentials, cookies, account identifiers,
+  personal amounts and captured bodies must not enter this repository.
+- A one-off Python HTTP client in WSL reused the fresh browser session and
+  history form to request the observed account-list route. It followed one
+  same-origin, same-path POST/redirect/GET sequence and received HTTP 200,
+  20,092 response bytes and one account card. No password was resubmitted.
+  The first attempt stopped at the redirect because its origin comparison
+  incorrectly distinguished explicit HTTPS `:443` from the default port. The
+  observed redirect established equivalence; after a fresh browser read, the
+  corrected check succeeded. Other origins, paths and ports remain rejected.
+  This verifies local session portability for this account-list read only.
+- After integration, the production TypeScript client was exercised once from
+  WSL with a newly authenticated browser session. Both account-list and
+  ordinary-history POST/redirect/GET reads succeeded (four requests: 302, 200,
+  302, 200), returning two sanitized evidence artifacts without partial results.
+  The client did not submit a password, write to the bank or persist live data
+  to Kogane during this validation. Shared ingestion/projection is tested with
+  synthetic data, including real local Workers/R2 semantics.
+
+Implement only observed read transitions. Automated expiry/re-login,
+pagination and cloud execution each require their own
+validation. `services/collector-mizuho` now integrates the session-based direct
+client, sanitized evidence persistence, shared parsers, and existing projections.
+It is an operator-triggered service with no automated login renewal or cron;
+deployment stays disabled until the intended cloud network path is verified.
+
+The bank app was renamed to みずほ銀行アプリ on 2026-09-03; historical app names
+below describe the original research. The
+[current service page](https://www.mizuhobank.co.jp/direct/about/service/balance.html)
+and [login guidance](https://www.mizuhobank.co.jp/retail/products/direct/goriyo/loginout/n00000.html)
+are the current starting references.
+
 ## 結論
 
 - **推奨する正本は、公式Webの「みずほダイレクト」**。残高・口座列挙は

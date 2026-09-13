@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kogane-mizuho-collector",
+  "main": "src/worker.ts",
+  // Latest date supported by the repository's pinned test runtime.
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "workers_dev": true,
+  "preview_urls": false,
+  "secrets": { "required": ["ADMIN_TRIGGER_TOKEN"] },
+  "observability": { "enabled": true },
+  "r2_buckets": [{ "binding": "DATA", "bucket_name": "kogane-raw-evidence" }],
+  "vars": { "COLLECTOR_SCHEMA_VERSION": "mizuho-collector-v1" }
+}

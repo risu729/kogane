@@ -12,6 +12,13 @@ WHERE NOT EXISTS (SELECT 1 FROM ingest_clients WHERE id = 'processor-shared-r2')
 UPDATE ingest_clients SET active = 1
 WHERE id = 'processor-shared-r2' AND active <> 1;
 INSERT INTO producers (id, kind, display_name)
+SELECT 'collector-mizuho-bank', 'collector', 'Shared-R2 collector collector-mizuho-bank'
+WHERE NOT EXISTS (SELECT 1 FROM producers WHERE id = 'collector-mizuho-bank');
+INSERT INTO ingest_client_producers (ingest_client_id, producer_id)
+SELECT 'processor-shared-r2', 'collector-mizuho-bank'
+WHERE NOT EXISTS (SELECT 1 FROM ingest_client_producers
+  WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-mizuho-bank');
+INSERT INTO producers (id, kind, display_name)
 SELECT 'collector-mobile-suica', 'collector', 'Shared-R2 collector collector-mobile-suica'
 WHERE NOT EXISTS (SELECT 1 FROM producers WHERE id = 'collector-mobile-suica');
 INSERT INTO ingest_client_producers (ingest_client_id, producer_id)
@@ -102,6 +109,15 @@ INSERT INTO ingest_client_producers (ingest_client_id, producer_id)
 SELECT 'processor-shared-r2', 'collector-vpass'
 WHERE NOT EXISTS (SELECT 1 FROM ingest_client_producers
   WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-vpass');
+INSERT INTO producer_sources (producer_id, source_id)
+SELECT 'collector-mizuho-bank', 'mizuho-bank'
+WHERE NOT EXISTS (SELECT 1 FROM producer_sources WHERE producer_id = 'collector-mizuho-bank' AND source_id = 'mizuho-bank');
+INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id, active)
+SELECT 'processor-shared-r2', 'collector-mizuho-bank', 'mizuho-bank', 1
+WHERE NOT EXISTS (SELECT 1 FROM ingest_client_routes
+  WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-mizuho-bank' AND source_id = 'mizuho-bank');
+UPDATE ingest_client_routes SET active = 1
+WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-mizuho-bank' AND source_id = 'mizuho-bank' AND active <> 1;
 INSERT INTO producer_sources (producer_id, source_id)
 SELECT 'collector-mobile-suica', 'mobile-suica'
 WHERE NOT EXISTS (SELECT 1 FROM producer_sources WHERE producer_id = 'collector-mobile-suica' AND source_id = 'mobile-suica');

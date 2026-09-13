@@ -149,6 +149,25 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "experiments/mizuho-direct": {
+    source: "direct collector feasibility follow-up, 2026-09-13",
+    proposedAction: "isolated-as-experiment",
+    proposedTarget:
+      "experiments/mizuho-direct (public-entry diagnostics; parsers promoted to packages/parsers)",
+    requiredVerification:
+      "Integrated local account/history reads verified; unattended renewal and cloud execution unverified",
+    executionStatus: "LOCAL_FEASIBILITY_ONLY",
+    planLiveResourceStatus: "NO_RESOURCES_DECLARED",
+  },
+  "services/collector-mizuho": {
+    source: "Mizuho direct collector integration, 2026-09-13",
+    proposedAction: "promoted-to-service",
+    proposedTarget: "services/collector-mizuho",
+    requiredVerification:
+      "Owner-session trigger only; no cron. Cloud egress and unattended renewal require validation before activation.",
+    executionStatus: "IMPLEMENTED_NOT_DEPLOYED",
+    planLiveResourceStatus: "NOT_DEPLOYED",
+  },
   "experiments/tamia-tcp-bridge": {
     source: "poc_disposition.csv (was poc/tamia-tcp-bridge)",
     proposedAction: "promote-service-if-used",

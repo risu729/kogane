@@ -8,6 +8,7 @@
       "active": true,
       "routes": [
         { "source": "global-pass", "producer": "collector-prestia-globalpass", "active": true },
+        { "source": "mizuho-bank", "producer": "collector-mizuho-bank", "active": true },
         { "source": "mobile-suica", "producer": "collector-mobile-suica", "active": true },
         { "source": "moneyforward-me", "producer": "collector-moneyforward-me", "active": true },
         { "source": "myjcb", "producer": "collector-myjcb", "active": true },

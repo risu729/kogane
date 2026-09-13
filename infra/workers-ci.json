@@ -42,6 +42,11 @@
       "config": "wrangler.jsonc"
     },
     {
+      "name": "mizuho-worker",
+      "path": "services/collector-mizuho",
+      "config": "wrangler.jsonc"
+    },
+    {
       "name": "myjcb-worker",
       "path": "services/collector-myjcb",
       "config": "wrangler.jsonc"

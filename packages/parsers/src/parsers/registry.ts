@@ -4,6 +4,7 @@ import type { Parser } from "../types.ts";
 export { PARSER_CODE_DIGESTS, PARSER_DIGESTS } from "./digests.ts";
 import { paypayCsv } from "./paypay-csv.ts";
 import { mobileSuicaSfHistory } from "./mobile-suica-sf-history.ts";
+import { mizuhoAccountList, mizuhoOrdinaryHistory } from "./mizuho.ts";
 import {
   moneyForwardEvidenceOnly,
   moneyForwardMonthlyTransactions,
@@ -43,6 +44,8 @@ import { vpassStatementPage } from "./vpass.ts";
 export const PARSERS: readonly Parser[] = [
   globalPassActivity,
   mobileSuicaSfHistory,
+  mizuhoAccountList,
+  mizuhoOrdinaryHistory,
   moneyForwardMonthlyTransactions,
   moneyForwardEvidenceOnly,
   myJcbCreditLedger,

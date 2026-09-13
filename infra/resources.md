@@ -14,7 +14,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Summary
 
-- Wrangler configs: 23
+- Wrangler configs: 24
 - Distinct Workers that exist in the account: 14
 - Live Workers with no config in this repository: —
 - Live R2 buckets no config references: —
@@ -33,7 +33,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 | bucket | live | bound by |
 | --- | --- | --- |
-| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-smbc-direct-backfill-poc<br>kogane-sony-bank-collector-poc<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
+| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mizuho-collector<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-smbc-direct-backfill-poc<br>kogane-sony-bank-collector-poc<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
 | test | no | kogane-evidence-browser-test |
 
 ## Queues
@@ -172,6 +172,15 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
+### `experiments/mizuho-direct`
+
+- Disposition (direct collector feasibility follow-up, 2026-09-13): `isolated-as-experiment` → experiments/mizuho-direct (public-entry diagnostics; parsers promoted to packages/parsers)
+- Required verification: Integrated local account/history reads verified; unattended renewal and cloud execution unverified
+- Execution status: LOCAL_FEASIBILITY_ONLY (plan recorded `NO_RESOURCES_DECLARED`)
+- Live resources: NO_LIVE_RESOURCE
+
+No wrangler config.
+
 ### `experiments/observation-pipeline-local`
 
 - Disposition (poc_disposition.csv row poc/observation-pipeline + decision D1): `isolated-as-experiment` → experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)
@@ -296,6 +305,32 @@ No wrangler config.
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
+
+### `services/collector-mizuho`
+
+- Disposition (Mizuho direct collector integration, 2026-09-13): `promoted-to-service` → services/collector-mizuho
+- Required verification: Owner-session trigger only; no cron. Cloud egress and unattended renewal require validation before activation.
+- Execution status: IMPLEMENTED_NOT_DEPLOYED (plan recorded `NOT_DEPLOYED`)
+- Live resources: LIVE(buckets=kogane-raw-evidence)
+
+#### `kogane-mizuho-collector` — `services/collector-mizuho/wrangler.jsonc`
+
+- Role: not-deployed; exists in the account: no
+- Entry point: src/worker.ts
+- D1: —
+- R2: DATA → kogane-raw-evidence
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Required secrets (names only): ADMIN_TRIGGER_TOKEN
 
 ### `services/collector-mobile-suica`
 
