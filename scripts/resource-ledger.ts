@@ -168,6 +168,15 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "DEPLOYMENT_ENABLED",
     planLiveResourceStatus: "DEPLOYMENT_PENDING_VERIFICATION",
   },
+  "experiments/st-george-automation": {
+    source: "St.George automation proof of concept, 2026-09-13",
+    proposedAction: "isolate",
+    proposedTarget: "experiments/st-george-automation",
+    requiredVerification:
+      "Local browser automation and synthetic checks only; authenticated routes require Kuebiko evidence before promotion",
+    executionStatus: "LOCAL_POC",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "experiments/tamia-tcp-bridge": {
     source: "poc_disposition.csv (was poc/tamia-tcp-bridge)",
     proposedAction: "promote-service-if-used",

@@ -267,6 +267,20 @@
       "workers": []
     },
     {
+      "directory": "experiments/st-george-automation",
+      "workspace": "experiments",
+      "disposition": {
+        "source": "St.George automation proof of concept, 2026-09-13",
+        "proposedAction": "isolate",
+        "proposedTarget": "experiments/st-george-automation",
+        "requiredVerification": "Local browser automation and synthetic checks only; authenticated routes require Kuebiko evidence before promotion",
+        "executionStatus": "LOCAL_POC",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "NO_LIVE_RESOURCE"
+      },
+      "workers": []
+    },
+    {
       "directory": "experiments/tamia-tcp-bridge",
       "workspace": "experiments",
       "disposition": {
@@ -1050,6 +1064,12 @@
           "unextractedKeys": []
         }
       ]
+    },
+    {
+      "directory": "services/collector-st-george",
+      "workspace": "services",
+      "disposition": null,
+      "workers": []
     },
     {
       "directory": "services/collector-vpass",

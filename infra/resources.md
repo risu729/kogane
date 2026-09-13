@@ -190,6 +190,15 @@ No wrangler config.
 
 No wrangler config.
 
+### `experiments/st-george-automation`
+
+- Disposition (St.George automation proof of concept, 2026-09-13): `isolate` → experiments/st-george-automation
+- Required verification: Local browser automation and synthetic checks only; authenticated routes require Kuebiko evidence before promotion
+- Execution status: LOCAL_POC (plan recorded `NOT_VERIFIED`)
+- Live resources: NO_LIVE_RESOURCE
+
+No wrangler config.
+
 ### `experiments/tamia-tcp-bridge`
 
 - Disposition (poc_disposition.csv (was poc/tamia-tcp-bridge)): `promote-service-if-used` → experiments/tamia-tcp-bridge (not used by any collector; promote to services/tamia-tcp-bridge only when one routes through it)
@@ -539,6 +548,12 @@ No wrangler config.
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
+
+### `services/collector-st-george`
+
+Disposition: not listed in the plan.
+
+No wrangler config.
 
 ### `services/collector-vpass`
 

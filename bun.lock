@@ -69,6 +69,14 @@
         "typescript": "5.9.3",
       },
     },
+    "experiments/st-george-automation": {
+      "name": "@kogane/st-george-automation",
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "playwright": "1.62.1",
+        "typescript": "5.9.3",
+      },
+    },
     "experiments/tamia-tcp-bridge": {
       "name": "@kogane/tamia-tcp-bridge",
       "devDependencies": {
@@ -565,6 +573,8 @@
     "@kogane/poc-vpoint-worker": ["@kogane/poc-vpoint-worker@workspace:services/collector-vpoint"],
 
     "@kogane/read-model": ["@kogane/read-model@workspace:packages/read-model"],
+
+    "@kogane/st-george-automation": ["@kogane/st-george-automation@workspace:experiments/st-george-automation"],
 
     "@kogane/storage-d1": ["@kogane/storage-d1@workspace:packages/storage-d1"],
 

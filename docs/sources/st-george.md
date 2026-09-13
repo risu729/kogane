@@ -2,6 +2,54 @@
 
 調査日: 2026-08-26 (Australia/Sydney)
 
+## Automation PoC (2026-09-13)
+
+An isolated runnable browser experiment now lives in
+[`experiments/st-george-automation`](../../experiments/st-george-automation/README.md).
+It navigates the existing Internet Banking portfolio and one observed account link;
+it does not import CSV/PDF files or connect to production ingestion. Local tests use
+synthetic pages. Authenticated selectors and session renewal still require live
+validation; a successful public login-page probe is not authenticated collection.
+
+For live request/response discovery, use the existing **kogane capture / Kuebiko**
+Chrome profile before authentication. The user explicitly requested Kuebiko network
+capture for this PoC. Raw capture files can contain credentials, cookies and account
+data and must remain in the private local Kuebiko capture directory, outside Git.
+Only minimized route/schema findings belong in this document. An include filter
+alone does not scope NetLog or storage snapshots: a narrowly scoped capture also
+needs `--no-netlog` and should omit storage snapshots/tracking. This user-authorized
+capture workflow is an exception to the original metadata-only research boundary
+below, not permission to publish raw evidence or change banking settings.
+
+### Live Kuebiko result and network constraint
+
+On 2026-09-13, normal Windows Chrome in the existing Kuebiko capture reached the
+bank edge, but did not reach an authentication form. The capture contained two
+St.George records:
+
+| Request                       | Status | Observed response                                                                   |
+| ----------------------------- | ------ | ----------------------------------------------------------------------------------- |
+| `GET /ibank/loginPage.action` | 200    | HTML headed `Request error`, with a VPN/TOR connection note; zero forms and inputs. |
+| Favicon GET                   | 403    | HTML access-denied response.                                                        |
+
+Both response bodies were captured locally. There was no login POST, request
+body, account portfolio, or authenticated API evidence. Header names included
+`akamai-grn` and `server-timing`, consistent with the previously observed Akamai
+edge. No header values, IP addresses, reference numbers, credentials, cookies, or
+raw bodies are included here.
+
+Cloudflare WARP was connected during the attempt. The bank's VPN/TOR note makes
+the network path or egress reputation a plausible explanation, **not a confirmed
+root cause**: neither response exposes the bank's precise rule, and no comparison
+without WARP was performed. The user requested that WARP stay connected. Leave
+that constraint in place; do not retry the rejected route or alter network
+protections automatically. Authenticated automation remains unverified.
+
+The PoC now classifies the visible bank error as `stopped / bank-request-error`
+even when the document returns HTTP 200. A synthetic regression verifies that it
+cannot be mistaken for login or portfolio success and initiates no further
+navigation. The experiment's 13 browser tests and TypeScript check pass.
+
 ## 結論
 
 St.George Bank の個人口座は **app-only ではない**。公式 Internet Banking と
