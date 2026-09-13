@@ -84,3 +84,12 @@ test("ambiguous mappings and terminal candidates remain read-only", async () => 
   expect(side.evidenceRefs).toEqual([]);
   expect(side.blockers).toEqual(["candidate_not_proposed", "account_mapping_unresolved"]);
 });
+
+test("duplicate current identity rows do not become a falsely unique mapping", async () => {
+  const { db, sql } = fixture();
+  db.exec("INSERT INTO current_identity_observations VALUES('balance',11,1,'sa-card')");
+  const side = (await queryCardOwnership(sql, "one"))!.sides[0]!;
+  expect(side.accountId).toBeNull();
+  expect(side.blockers).toContain("account_mapping_unresolved");
+  expect(side.evidenceRefs).toEqual([]);
+});

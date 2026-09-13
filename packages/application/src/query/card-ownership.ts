@@ -58,9 +58,13 @@ export async function queryCardOwnership(
     const match = /^(balance|transaction):([0-9]+)$/u.exec(fact.ref.id);
     const parse = /^parse_run:([0-9]+)$/u.exec(fact.ref.revision);
     const mappings =
-      match && parse
+      match &&
+      parse &&
+      match[1] === fact.ref.kind &&
+      Number.isSafeInteger(Number(match[2])) &&
+      Number.isSafeInteger(Number(parse[1]))
         ? await sql.all<Mapping>(
-            `SELECT DISTINCT o.source_account_id,m.id,m.account_id,m.revision,
+            `SELECT o.source_account_id,m.id,m.account_id,m.revision,
       (SELECT count(*) FROM entity_relations r WHERE r.kind=?3 AND r.from_ref IN(m.account_id,'account:'||m.account_id)) AS ownership_revision,
       COALESCE((SELECT max(r.rowid) FROM entity_relations r WHERE r.kind=?3 AND r.from_ref IN(m.account_id,'account:'||m.account_id)),0) AS last_row
       FROM current_identity_observations o JOIN current_account_mappings m ON m.source_account_id=o.source_account_id
