@@ -29,7 +29,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
       "4f416ffcee43ae0425a5597adefd33636d2a8e8b3ab103c00b95d0603d4bb2f8",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
-      "cbcedc7b91084e9bfee2b9e8a8021e9052cd7d42b5af89233473c28ca5293f86",
+      "fc9e0934423da483a914c59e8c9e8f3a853f3fb56a48b8ded596910351998103",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
       "a89829e4856c7baa3abcda2e25762b7debf4a22fddc777756adb920ed8951621",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
@@ -77,7 +77,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/v-point.ts":
       "1ff35488c84fa1ca373983cbdac3cbcae5c66ebfbf569da4ee5f8d7acc9977fb",
     "poc/observation-pipeline/src/parsers/vpass.ts":
-      "c38e30ea809632470ee7c1ed80d542c1beec4d9920f55ed458967f3ff0d202d4",
+      "d640081b86215606c2d130de913aa5c0ad9b0664df850136d87151d0f51c7938",
     "poc/observation-pipeline/src/types.ts":
       "788f30258f5b92a28cd4f806d167d4bb816173e58b6103f277c9787d197e7bf7",
   },
@@ -138,8 +138,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-canonical-evidence-boundary": {
-      version: "1.0.0",
-      codeDigest: "709807ab7a3957202f2728f63f2519ca525ed208b292fa9df28c70d262a58df2",
+      version: "1.1.0",
+      codeDigest: "e6cb62bb2cf654be114199449a34a5c089436efd2935e3c790bf486d7a322c83",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -151,8 +151,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-ledger": {
-      version: "1.0.0",
-      codeDigest: "709807ab7a3957202f2728f63f2519ca525ed208b292fa9df28c70d262a58df2",
+      version: "1.1.0",
+      codeDigest: "e6cb62bb2cf654be114199449a34a5c089436efd2935e3c790bf486d7a322c83",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -164,8 +164,21 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-past-month-balances": {
+      version: "1.1.0",
+      codeDigest: "e6cb62bb2cf654be114199449a34a5c089436efd2935e3c790bf486d7a322c83",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/myjcb.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "myjcb-credit-statement-total": {
       version: "1.0.0",
-      codeDigest: "709807ab7a3957202f2728f63f2519ca525ed208b292fa9df28c70d262a58df2",
+      codeDigest: "e6cb62bb2cf654be114199449a34a5c089436efd2935e3c790bf486d7a322c83",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -512,8 +525,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "vpass-statement-page": {
-      version: "1.0.0",
-      codeDigest: "28a54a13875f321092f74b056e4424ced2f248130ee6051484cb50a822766a1e",
+      version: "1.1.0",
+      codeDigest: "da475f3819cc8e7a7e5305676ba7c86ea65381dc9e7d89856648d012d555854b",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
