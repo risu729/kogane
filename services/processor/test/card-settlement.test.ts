@@ -414,3 +414,281 @@ test("published debit revision invalidates approval; a generic allocation agains
       .n,
   ).toBe(2);
 }, 60000);
+
+test("one resolved card month cannot be allocated twice after raw ordinal changes", async () => {
+  const stableCard: IdentityResolver = (input) => ({
+    ...resolver(input),
+    account: {
+      key: ["synthetic-stable-card-token"],
+      label: "synthetic card",
+      role: "credit",
+      status: "provider-local",
+      reason: "synthetic verified stable card identity",
+    },
+  });
+  for (const [id, source, parser] of [
+    [801, "vpass", "vpass-statement-page"],
+    [802, "vpass", "vpass-statement-page"],
+    [803, "smbc-bank", "smbc-direct-transactions"],
+  ] as const) {
+    await seedArtifact(env, id, source, "synthetic", "ordinal-refresh-" + id, {});
+    await db
+      .prepare(`INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES(?,?,?,'1','2026-10-12','ok','[]')`)
+      .bind(id, id, parser)
+      .run();
+  }
+  for (const [id, ordinal] of [
+    [801, "card-001"],
+    [802, "card-002"],
+  ] as const) {
+    await db
+      .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
+      VALUES(?,?,'credit_statement_payment_amount',5000,'5000',0,'JPY','2026-10-01','synthetic-ordinal-total',?)`)
+      .bind(
+        id,
+        "vpass:" + ordinal,
+        JSON.stringify({
+          _kogane: {
+            period: "2026-10",
+            paymentDate: "2026-10-10",
+            snapshotSemantics: "provider-reported-monthly-payment-amount",
+          },
+        }),
+      )
+      .run();
+  }
+  for (const externalId of ["ordinal-first-debit", "ordinal-second-debit"]) {
+    await db
+      .prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,as_of,raw_locator,extra_json)
+      VALUES(803,'smbc-bank:synthetic-ordinal-test',?,'posted',-5000,'-5000',0,'JPY','2026-10-10T00:00:00+09:00','synthetic-ordinal-debit',?)`)
+      .bind(
+        externalId,
+        JSON.stringify({ _kogane: { direction: "outflow", amountSignSource: "direction" } }),
+      )
+      .run();
+  }
+  for (const [id, source] of [
+    [801, "vpass"],
+    [803, "smbc-bank"],
+  ] as const) {
+    await publishParse(db, id);
+    await identifyParse(
+      db,
+      {
+        id,
+        artifact_id: id,
+        source_id: source,
+        producer_id: "collector-r2-importer",
+        fetch_run_id: id,
+      },
+      source === "vpass" ? stableCard : resolver,
+    );
+  }
+  await ownership(801, "liable_party");
+  await ownership(803, "beneficial_owner");
+  await cardSettlementSweep(db);
+  const candidate = async (parse: number, externalId: string) => {
+    const row = await db
+      .prepare(`SELECT c.id,c.statement_key,c.bank_key FROM card_settlement_candidates c
+      JOIN transaction_observations t ON t.id=c.bank_observation_id
+      WHERE c.statement_parse_run_id=? AND t.external_id=?
+      AND json_extract(c.facts_json,'$.ownership')='established-same'`)
+      .bind(parse, externalId)
+      .first<{ id: string; statement_key: string; bank_key: string }>();
+    if (!row) throw new Error("synthetic ordinal candidate missing");
+    return row;
+  };
+  const first = await candidate(801, "ordinal-first-debit");
+  const acceptFirst = await preparedCommand("card-settlement.accept", {
+    proposalId: first.id,
+    reason: "first ordinal reviewed",
+  });
+  expect((await acceptFirst()).ok).toBe(true);
+  await publishParse(db, 802);
+  await identifyParse(
+    db,
+    {
+      id: 802,
+      artifact_id: 802,
+      source_id: "vpass",
+      producer_id: "collector-r2-importer",
+      fetch_run_id: 802,
+    },
+    stableCard,
+  );
+  const resolved = await db
+    .prepare(`SELECT DISTINCT m.account_id FROM current_account_mappings m
+    JOIN current_identity_observations o ON o.source_account_id=m.source_account_id
+    WHERE o.parse_run_id IN(801,802)`)
+    .all<{ account_id: string }>();
+  expect(resolved.results).toHaveLength(1);
+  await cardSettlementSweep(db);
+  const refreshed = await candidate(802, "ordinal-second-debit");
+  expect(first.statement_key).not.toBe(refreshed.statement_key);
+  expect(first.bank_key).not.toBe(refreshed.bank_key);
+  const receipts = (await db
+    .prepare("SELECT count(*) AS n FROM operation_receipts")
+    .first<{ n: number }>())!.n;
+  expect(
+    (await db
+      .prepare("SELECT allocation_available FROM card_settlement_readiness WHERE id=?")
+      .bind(refreshed.id)
+      .first<{ allocation_available: number }>())!.allocation_available,
+  ).toBe(0);
+  await expect(
+    command("card-settlement.accept", {
+      proposalId: refreshed.id,
+      reason: "refreshed ordinal reviewed",
+    }),
+  ).rejects.toThrow("stale_context");
+  expect(
+    (await db.prepare("SELECT count(*) AS n FROM operation_receipts").first<{ n: number }>())!.n,
+  ).toBe(receipts);
+  expect(
+    (
+      await command("card-settlement.withdraw", {
+        proposalId: first.id,
+        reason: "correct the same resolved card month",
+      })
+    ).ok,
+  ).toBe(true);
+  expect(
+    (
+      await command("card-settlement.accept", {
+        proposalId: refreshed.id,
+        reason: "corrected ordinal reviewed after withdrawal",
+      })
+    ).ok,
+  ).toBe(true);
+}, 60000);
+
+test("a newer resolved card ordinal invalidates an earlier approval without consuming it", async () => {
+  const stableCard: IdentityResolver = (input) => ({
+    ...resolver(input),
+    account: {
+      key: ["synthetic-freshness-card"],
+      label: "synthetic",
+      role: "credit",
+      status: "provider-local",
+      reason: "verified synthetic identity",
+    },
+  });
+  for (const [id, source, parser] of [
+    [901, "vpass", "vpass-statement-page"],
+    [902, "vpass", "vpass-statement-page"],
+    [903, "smbc-bank", "smbc-direct-transactions"],
+  ] as const) {
+    await seedArtifact(env, id, source, "synthetic", "freshness-" + id, {});
+    await db
+      .prepare(`INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES(?,?,?,'1','2026-11-12','ok','[]')`)
+      .bind(id, id, parser)
+      .run();
+  }
+  for (const [id, ordinal] of [
+    [901, "card-003"],
+    [902, "card-004"],
+  ] as const) {
+    await db
+      .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
+      VALUES(?,?,'credit_statement_payment_amount',6000,'6000',0,'JPY','2026-11-01','synthetic-freshness',?)`)
+      .bind(
+        id,
+        "vpass:" + ordinal,
+        JSON.stringify({
+          _kogane: {
+            period: "2026-11",
+            paymentDate: "2026-11-10",
+            snapshotSemantics: "provider-reported-monthly-payment-amount",
+          },
+        }),
+      )
+      .run();
+  }
+  await db
+    .prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,as_of,raw_locator,extra_json)
+    VALUES(903,'smbc-bank:synthetic-freshness','synthetic-freshness-debit','posted',-6000,'-6000',0,'JPY','2026-11-10T00:00:00+09:00','synthetic-freshness',?)`)
+    .bind(JSON.stringify({ _kogane: { direction: "outflow", amountSignSource: "direction" } }))
+    .run();
+  for (const [id, source] of [
+    [901, "vpass"],
+    [903, "smbc-bank"],
+  ] as const) {
+    await publishParse(db, id);
+    await identifyParse(
+      db,
+      {
+        id,
+        artifact_id: id,
+        source_id: source,
+        producer_id: "collector-r2-importer",
+        fetch_run_id: id,
+      },
+      source === "vpass" ? stableCard : resolver,
+    );
+  }
+  await ownership(901, "liable_party");
+  await ownership(903, "beneficial_owner");
+  await cardSettlementSweep(db);
+  const old = (await db
+    .prepare("SELECT id FROM card_settlement_candidates WHERE statement_parse_run_id=901")
+    .first<{ id: string }>())!;
+  const acceptOld = await preparedCommand("card-settlement.accept", {
+    proposalId: old.id,
+    reason: "reviewed before refresh",
+  });
+  const receipts = (await db
+    .prepare("SELECT count(*) AS n FROM operation_receipts")
+    .first<{ n: number }>())!.n;
+  const approvals = await db
+    .prepare("SELECT approval_id,uses_remaining FROM approvals ORDER BY approval_id")
+    .all();
+  await publishParse(db, 902);
+  await identifyParse(
+    db,
+    {
+      id: 902,
+      artifact_id: 902,
+      source_id: "vpass",
+      producer_id: "collector-r2-importer",
+      fetch_run_id: 902,
+    },
+    stableCard,
+  );
+  expect(
+    (await db
+      .prepare("SELECT statement_current FROM card_settlement_readiness WHERE id=?")
+      .bind(old.id)
+      .first<{ statement_current: number }>())!.statement_current,
+  ).toBe(0);
+  expect((await acceptOld()).ok).toBe(false);
+  expect(
+    (await db.prepare("SELECT count(*) AS n FROM operation_receipts").first<{ n: number }>())!.n,
+  ).toBe(receipts);
+  expect(
+    (
+      await db
+        .prepare("SELECT approval_id,uses_remaining FROM approvals ORDER BY approval_id")
+        .all()
+    ).results,
+  ).toEqual(approvals.results);
+  await cardSettlementSweep(db);
+  const fresh = (await db
+    .prepare("SELECT id FROM card_settlement_candidates WHERE statement_parse_run_id=902")
+    .first<{ id: string }>())!;
+  expect(
+    (await db
+      .prepare("SELECT statement_current FROM card_settlement_readiness WHERE id=?")
+      .bind(fresh.id)
+      .first<{ statement_current: number }>())!.statement_current,
+  ).toBe(1);
+  expect(
+    (
+      await command("card-settlement.accept", {
+        proposalId: fresh.id,
+        reason: "reviewed the current ordinal",
+      })
+    ).ok,
+  ).toBe(true);
+}, 60000);

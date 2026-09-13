@@ -648,7 +648,7 @@
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "a5a9f159aef315fe88f391eea81d13541c1fc9483dd708e75ba605c29f8c1a5f"
+      "sha256": "b4a24fa391b4c560678092e61f78aefc7fa4b8522321828044d7055e6a2d7a9b"
     },
     {
       "file": "0045_expand_card_settlement_commands.sql",
@@ -12400,7 +12400,7 @@
         "owner_ref",
         "evidence_refs_json"
       ],
-      "sqlSha256": "2bd48014fa909e2f"
+      "sqlSha256": "4ed129fabd3013bb"
     },
     {
       "name": "card_settlement_readiness",
@@ -12411,7 +12411,7 @@
         "ownership_current",
         "allocation_available"
       ],
-      "sqlSha256": "dc76683671eceb0b"
+      "sqlSha256": "7a76a7fa25f181f7"
     },
     {
       "name": "card_settlement_reviews",
@@ -12444,6 +12444,7 @@
         "source_account",
         "unit_ref",
         "source_id",
+        "fetched_at",
         "value_status",
         "coefficient",
         "scale",
@@ -12452,7 +12453,7 @@
         "statement_key",
         "position"
       ],
-      "sqlSha256": "ced871b3fa74ea4c"
+      "sqlSha256": "5cd2680fcf78f6ee"
     },
     {
       "name": "current_account_connection_reviews",
@@ -16318,6 +16319,6 @@
       "0044_card_statement_settlements.sql",
       "0045_expand_card_settlement_commands.sql"
     ],
-    "schemaSha256": "a46f882344e3bb6c7640f9f276df65e86da3a60a35a9008a76af60d1bb3b560f"
+    "schemaSha256": "b0bab16f796dabc97e55e31602856a6520612254881d75ea94bf5920e360647c"
   }
 }

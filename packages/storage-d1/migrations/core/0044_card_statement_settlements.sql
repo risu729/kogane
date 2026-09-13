@@ -82,7 +82,7 @@ CREATE TRIGGER card_settlement_decisions_bump_revision_delete AFTER DELETE ON ca
 -- the as_of month-start used by old MyJCB aggregates is never a due date.
 CREATE VIEW card_statement_facts AS
 WITH ranked AS (
- SELECT b.id,b.parse_run_id,b.source_account,b.instrument AS unit_ref,a.source_id,
+ SELECT b.id,b.parse_run_id,b.source_account,b.instrument AS unit_ref,a.source_id,a.fetched_at,
  d.status AS value_status,d.coefficient,d.scale,
  json_extract(b.extra_json,'$._kogane.paymentDate') AS payment_date,
  coalesce(json_extract(b.extra_json,'$._kogane.period'),
@@ -142,8 +142,17 @@ JOIN current_account_mappings m ON m.source_account_id=o.source_account_id
 LEFT JOIN entity_relations r ON r.from_ref IN(m.account_id,'account:'||m.account_id)
  AND r.kind=CASE WHEN o.kind='balance' THEN 'liable_party' ELSE 'beneficial_owner' END AND r.status='accepted'
  AND r.valid_from IS NULL AND r.valid_to IS NULL
+ -- Date-bounded ownership is unsupported here. Do not silently discard a
+ -- current dated claim and let a conflicting timeless owner win instead.
+ AND NOT EXISTS(SELECT 1 FROM entity_relations dated
+  JOIN decision_revisions dated_decision ON dated_decision.id=dated.decision_revision_id AND dated_decision.superseded_by IS NULL
+  WHERE dated.from_ref IN(m.account_id,'account:'||m.account_id)
+   AND dated.kind=CASE WHEN o.kind='balance' THEN 'liable_party' ELSE 'beneficial_owner' END
+   AND dated.status='accepted' AND (dated.valid_from IS NOT NULL OR dated.valid_to IS NOT NULL)
+   AND NOT EXISTS(SELECT 1 FROM entity_relations latest WHERE latest.kind=dated.kind
+    AND latest.from_ref IN(m.account_id,'account:'||m.account_id) AND latest.to_ref=dated.to_ref AND latest.rowid>dated.rowid))
  AND NOT EXISTS(SELECT 1 FROM entity_relations newer WHERE newer.kind=r.kind
-  AND newer.from_ref=r.from_ref AND newer.to_ref=r.to_ref AND newer.rowid>r.rowid)
+  AND newer.from_ref IN(m.account_id,'account:'||m.account_id) AND newer.to_ref=r.to_ref AND newer.rowid>r.rowid)
 LEFT JOIN decision_revisions d ON d.id=r.decision_revision_id AND d.superseded_by IS NULL
 WHERE o.kind IN ('balance','transaction') AND (r.id IS NULL OR d.id IS NOT NULL)
 GROUP BY o.kind,o.observation_id;
@@ -151,7 +160,16 @@ GROUP BY o.kind,o.observation_id;
 -- Same predicate flags feed review and the atomic acceptance reservation.
 CREATE VIEW card_settlement_readiness AS
 SELECT c.id,
- EXISTS(SELECT 1 FROM card_statement_facts s WHERE s.id=c.statement_observation_id AND s.parse_run_id=c.statement_parse_run_id) AS statement_current,
+ EXISTS(SELECT 1 FROM card_statement_facts s
+  WHERE s.id=c.statement_observation_id AND s.parse_run_id=c.statement_parse_run_id
+  -- Explicit identity also governs freshness when a raw card ordinal changes.
+  -- Keep immutable proposals visible, but never accept an older representation.
+  AND NOT EXISTS(SELECT 1 FROM card_statement_facts newer
+   JOIN card_settlement_fact_ownership identity ON identity.kind='balance' AND identity.observation_id=newer.id
+   WHERE newer.source_id=s.source_id AND newer.period=s.period
+    AND identity.account_id=json_extract(c.facts_json,'$.statement.accountId')
+    AND (newer.fetched_at>s.fetched_at OR (newer.fetched_at=s.fetched_at AND newer.id>s.id)))
+ ) AS statement_current,
  EXISTS(SELECT 1 FROM card_bank_debit_facts b WHERE b.id=c.bank_observation_id AND b.parse_run_id=c.bank_parse_run_id) AS bank_current,
  EXISTS(SELECT 1 FROM card_settlement_fact_ownership s JOIN card_settlement_fact_ownership b
   ON b.kind='transaction' AND b.observation_id=c.bank_observation_id
@@ -165,7 +183,13 @@ SELECT c.id,
    AND NOT EXISTS(SELECT 1 FROM json_each(b.evidence_refs_json) e WHERE e.value NOT IN (SELECT value FROM json_each(c.facts_json,'$.ownershipEvidenceRefs')))
  ) AS ownership_current,
  NOT EXISTS(SELECT 1 FROM card_settlement_reviews used WHERE used.status='accepted' AND used.id<>c.id
-  AND (used.statement_key=c.statement_key OR used.bank_key=c.bank_key))
+  AND (used.statement_key=c.statement_key OR used.bank_key=c.bank_key
+   -- A verified account survives raw card ordinals and producer namespaces.
+   -- Reserve its provider/month once even when a refreshed artifact uses a
+   -- different source_account. Unresolved candidates retain raw-key guards.
+   OR (json_extract(used.facts_json,'$.statement.sourceId')=json_extract(c.facts_json,'$.statement.sourceId')
+    AND json_extract(used.facts_json,'$.statement.accountId')=json_extract(c.facts_json,'$.statement.accountId')
+    AND json_extract(used.facts_json,'$.statement.period')=json_extract(c.facts_json,'$.statement.period'))))
  AND NOT EXISTS(SELECT 1 FROM current_allocations a
   JOIN transaction_observations t ON a.source_component_ref='transaction:'||t.id
   JOIN parse_runs p ON p.id=t.parse_run_id

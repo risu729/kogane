@@ -10,7 +10,7 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `a46f882344e3bb6c7640f9f276df65e86da3a60a35a9008a76af60d1bb3b560f`
+Schema digest: `b0bab16f796dabc97e55e31602856a6520612254881d75ea94bf5920e360647c`
 
 ## Summary
 
@@ -158,7 +158,7 @@ Full column, foreign-key, index and trigger detail per table is in
 | `card_settlement_fact_ownership` | kind, observation_id, account_id, owner_ref, evidence_refs_json |
 | `card_settlement_readiness` | id, statement_current, bank_current, ownership_current, allocation_available |
 | `card_settlement_reviews` | id, statement_key, bank_key, statement_observation_id, statement_parse_run_id, bank_observation_id, bank_parse_run_id, policy_release, facts_json, proposal_digest, created_at, revision, status, decision_revision_id, event_id, obligation_id, settlement_id |
-| `card_statement_facts` | id, parse_run_id, source_account, unit_ref, source_id, value_status, coefficient, scale, payment_date, period, statement_key, position |
+| `card_statement_facts` | id, parse_run_id, source_account, unit_ref, source_id, fetched_at, value_status, coefficient, scale, payment_date, period, statement_key, position |
 | `current_account_connection_reviews` | id, producer_id, connection_key, revision, label, status, related_source_id, direct_producer_id, reason, verifier_version, detail_artifact_id, direct_artifact_id, branch_artifact_id, direct_reference_ids_json, created_at, evidence_eligible |
 | `current_account_mappings` | id, source_account_id, revision, account_id, method, reason, policy_version, created_at, label, status |
 | `current_allocations` | id, source_component_ref, target_effect_ref, role, unit_ref, coefficient, scale, decision_revision_id, superseded_by, created_at |

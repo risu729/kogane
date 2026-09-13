@@ -36,7 +36,7 @@ different rules.
 - [The Processor: shared-R2 terminals, registration and job lanes](docs/processor.md)
 - [Frontend stack and API handoff](docs/frontend.md)
 - [Development checks and CI](docs/ci.md)
-- [CI/CD automation: auto-merge, the Risk Gate and production deploys](docs/ci-cd.md)
+- [CI/CD automation: auto-merge and production deploys](docs/ci-cd.md)
 - [Infrastructure ledgers: resources, CORE schema, dependencies, retention](docs/infra-ledgers.md)
 - [Operations: health signals, load, retention and drills](docs/operations.md)
 - [Rollout: every flag, its prerequisites, order and rollback](docs/rollout.md)

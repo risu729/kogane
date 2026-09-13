@@ -33,7 +33,7 @@ A bounded Processor sweep reads published observations, retaining provider
 identity and acquisition namespace. Exact same-unit amounts and nearby dates
 produce candidates only. They never cause automatic acceptance.
 
-The `照合` page shows the source facts, evidence links, candidate rationale,
+The `カード照合` page shows the source facts, evidence links, candidate rationale,
 current readiness blockers and decision history. An authenticated human operator
 can plan an acceptance or rejection; the confirmation page then simulates,
 approves and commits the pinned plan. Agents do not acquire acceptance rights.
@@ -47,7 +47,8 @@ collecting or generating candidates.
 
 The commit rechecks the source publication/currentness, ownership, allocation
 availability and expected candidate revision in the same database batch that
-reserves the receipt. If any condition fails, it consumes no approval and writes
+reserves the receipt. Resolved card account and statement month also guard
+against duplicates and older statements when a provider changes card ordinals. If any condition fails, it consumes no approval and writes
 no partial receipt or decision. A resend returns the existing receipt.
 
 An accepted decision can be withdrawn through a new approved plan. Withdrawal
