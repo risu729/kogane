@@ -132,6 +132,9 @@ jobs:
           # The ledger steps below run before the rest of the toolchain exists;
           # they need the pinned node, not whatever the runner image ships.
           MISE_ENABLE_TOOLS: node
+      # Older compatible rollback commits predate tasks/automation. Select their legacy
+      # entrypoint by layout only; a failed task never falls back or gets retried.
+      # Both paths execute the same exact commit confirmed above, never main's tip.
       - name: Read the release ledger
         id: ledger
         # The newest *successful* deployment is the environment's state. A newer
@@ -141,8 +144,13 @@ jobs:
         # stopped, which is what makes the resume below readable (finding 2).
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          MISE_ENABLE_TOOLS: node
         run: |
-          node .github/scripts/release-ledger.mjs latest \
+          release_tool=(node .github/scripts/release-ledger.mjs)
+          if [[ -f tasks/automation/release-ledger ]]; then
+            release_tool=(mise run --no-deps automation:release-ledger)
+          fi
+          "${release_tool[@]}" latest \
             --record "${RUNNER_TEMP}/previous-record.json" \
             --attempt "${RUNNER_TEMP}/attempt-record.json"
       - name: Decide whether this run may deploy
@@ -156,10 +164,15 @@ jobs:
         env:
           SHA: ${{ inputs.sha }}
           MODE: ${{ inputs.mode }}
+          MISE_ENABLE_TOOLS: node
           RECORDED: ${{ steps.ledger.outputs.sha }}
           TARGETS: ${{ inputs.targets }}
         run: |
-          node .github/scripts/release-ledger.mjs decide \
+          release_tool=(node .github/scripts/release-ledger.mjs)
+          if [[ -f tasks/automation/release-ledger ]]; then
+            release_tool=(mise run --no-deps automation:release-ledger)
+          fi
+          "${release_tool[@]}" decide \
             --mode "${MODE}" --head "${SHA}" --recorded "${RECORDED}" \
             --targets "${TARGETS}" \
             --previous "${RUNNER_TEMP}/previous-record.json" \
@@ -233,7 +246,12 @@ jobs:
         if: steps.decide.outputs.proceed == 'true'
         env:
           SHA: ${{ inputs.sha }}
-        run: node .github/scripts/release-sha.mjs --sha "${SHA}"
+        run: |
+          release_tool=(node .github/scripts/release-sha.mjs)
+          if [[ -f tasks/automation/release-sha ]]; then
+            release_tool=(mise run --no-deps automation:release-sha)
+          fi
+          "${release_tool[@]}" --sha "${SHA}"
       - name: Compute the release manifest
         if: steps.decide.outputs.proceed == 'true'
         env:
@@ -241,7 +259,11 @@ jobs:
           MODE: ${{ inputs.mode }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          node .github/scripts/release-manifest.mjs write \
+          release_tool=(node .github/scripts/release-manifest.mjs)
+          if [[ -f tasks/automation/release-manifest ]]; then
+            release_tool=(mise run --no-deps automation:release-manifest)
+          fi
+          "${release_tool[@]}" write \
             --sha "${SHA}" \
             --mode "${MODE}" \
             --run-id "${GITHUB_RUN_ID}" \
@@ -265,7 +287,11 @@ jobs:
         env:
           MODE: ${{ inputs.mode }}
         run: |
-          node .github/scripts/release-manifest.mjs compare \
+          release_tool=(node .github/scripts/release-manifest.mjs)
+          if [[ -f tasks/automation/release-manifest ]]; then
+            release_tool=(mise run --no-deps automation:release-manifest)
+          fi
+          "${release_tool[@]}" compare \
             --mode "${MODE}" \
             --previous "${RUNNER_TEMP}/previous-record.json" \
             --current "${RUNNER_TEMP}/release-record.json"
@@ -309,7 +335,11 @@ jobs:
           DESCRIPTION: kogane ${{ inputs.mode }} ${{ inputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          node .github/scripts/release-ledger.mjs create \
+          release_tool=(node .github/scripts/release-ledger.mjs)
+          if [[ -f tasks/automation/release-ledger ]]; then
+            release_tool=(mise run --no-deps automation:release-ledger)
+          fi
+          "${release_tool[@]}" create \
             --record "${RUNNER_TEMP}/release-record.json" \
             --description "${DESCRIPTION}" \
             --log-url "${RUN_URL}"
@@ -359,7 +389,12 @@ jobs:
         # configuration, lockfile or migration that changed after the manifest
         # was written stops the deployment (acceptance G5-11).
         if: steps.decide.outputs.proceed == 'true'
-        run: node .github/scripts/release-manifest.mjs verify --manifest "${RUNNER_TEMP}/release-manifest.json"
+        run: |
+          release_tool=(node .github/scripts/release-manifest.mjs)
+          if [[ -f tasks/automation/release-manifest ]]; then
+            release_tool=(mise run --no-deps automation:release-manifest)
+          fi
+          "${release_tool[@]}" verify --manifest "${RUNNER_TEMP}/release-manifest.json"
       - name: Deploy the Processor
         id: deploy-processor
         # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
@@ -637,7 +672,11 @@ jobs:
         env:
           STEPS_JSON: ${{ toJSON(steps) }}
         run: |
-          node .github/scripts/release-ledger.mjs progress \
+          release_tool=(node .github/scripts/release-ledger.mjs)
+          if [[ -f tasks/automation/release-ledger ]]; then
+            release_tool=(mise run --no-deps automation:release-ledger)
+          fi
+          "${release_tool[@]}" progress \
             --record "${RUNNER_TEMP}/release-record.json" \
             --out "${RUNNER_TEMP}/release-progress.json"
       - name: Upload the release progress
@@ -657,7 +696,11 @@ jobs:
           DESCRIPTION: kogane ${{ inputs.mode }} ${{ inputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          node .github/scripts/release-ledger.mjs status \
+          release_tool=(node .github/scripts/release-ledger.mjs)
+          if [[ -f tasks/automation/release-ledger ]]; then
+            release_tool=(mise run --no-deps automation:release-ledger)
+          fi
+          "${release_tool[@]}" status \
             --deployment "${DEPLOYMENT_ID}" --state success \
             --description "${DESCRIPTION}" --log-url "${RUN_URL}" \
             --progress "${RUNNER_TEMP}/release-progress.json"
@@ -676,7 +719,11 @@ jobs:
           DESCRIPTION: kogane ${{ inputs.mode }} ${{ inputs.sha }} failed
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |-
-          node .github/scripts/release-ledger.mjs status \
+          release_tool=(node .github/scripts/release-ledger.mjs)
+          if [[ -f tasks/automation/release-ledger ]]; then
+            release_tool=(mise run --no-deps automation:release-ledger)
+          fi
+          "${release_tool[@]}" status \
             --deployment "${DEPLOYMENT_ID}" --state failure \
             --description "${DESCRIPTION}" --log-url "${RUN_URL}" \
             --progress "${RUNNER_TEMP}/release-progress.json"

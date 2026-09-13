@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run the reviewed release-ledger automation entrypoint."
+set -euo pipefail
+exec node "${MISE_PROJECT_ROOT}/tasks/_lib/ci/release-ledger.mjs" "$@"

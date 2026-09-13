@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
-import { RELEASE_SHA_VAR, stampConfig, stampReleaseSha } from "../.github/scripts/release-sha.mjs";
+import { RELEASE_SHA_VAR, stampConfig, stampReleaseSha } from "../tasks/_lib/ci/release-sha.mjs";
 import { readDeployOrder } from "../tasks/_lib/deploy-order.ts";
 import { REPO_ROOT } from "../tasks/_lib/repo-root.ts";
 
