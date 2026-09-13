@@ -24,6 +24,18 @@ const parse = (body = html(), meta = artifact) =>
   myJcbCreditStatement.parse(new TextEncoder().encode(body), meta);
 
 describe("authoritative MyJCB statement totals", () => {
+  test("accepts CORE's normalized HTML media type without allowing other encodings", () => {
+    for (const mime of ["text/html", "text/html; charset=utf-8"]) {
+      const meta = { ...artifact, mime };
+      expect(myJcbCreditStatement.accepts(meta)).toBe(true);
+      expect(parse(html(), meta).observations).toHaveLength(1);
+    }
+    for (const mime of ["application/json", "text/plain", "text/html; charset=shift_jis"])
+      expect(myJcbCreditStatement.accepts({ ...artifact, mime })).toBe(false);
+    expect(() =>
+      myJcbCreditStatement.parse(new Uint8Array([0xff]), { ...artifact, mime: "text/html" }),
+    ).toThrow();
+  });
   test("records the provider total and actual due date, ignoring usage and subtotals", () => {
     const result = parse(html("<dl><dt>お支払い小計</dt><dd>999円</dd></dl>" + total));
     expect(result.observations).toHaveLength(1);
