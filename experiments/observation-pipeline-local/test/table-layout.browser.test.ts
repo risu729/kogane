@@ -1,3 +1,4 @@
+// Local fixture values simulate the financial API contract for rendering tests.
 // Column geometry needs a real layout engine: API tests cannot catch clipped money.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
@@ -87,7 +88,7 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
               apiVersion: 1,
               source: {
                 kind: central ? "central-store" : "local-store",
-                classification: "synthetic",
+                classification: "financial",
               },
               capabilities: central ? CENTRAL_STORE_CAPABILITIES : LOCAL_STORE_CAPABILITIES,
             });

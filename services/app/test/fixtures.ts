@@ -11,6 +11,10 @@ export async function seedRegistry() {
     env.DB.prepare(
       "INSERT INTO sources (id,provider,display_name) VALUES ('other-test','Fixture','Fixture')",
     ),
+    // Synthetic sources are test-owned; production migrations do not seed them.
+    env.DB.prepare(
+      "INSERT INTO sources (id,provider,display_name) VALUES ('kogane-synthetic','Fixture','Fixture')",
+    ),
     env.DB.prepare(
       "INSERT INTO ingest_clients (id,display_name) VALUES ('evidence-test','Fixture')",
     ),

@@ -1,3 +1,4 @@
+// Local fixture values simulate the financial API contract for rendering tests.
 // Synthetic local server only; production bundle, no live browser or account.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -131,7 +132,7 @@ describe.if(runnable)("organized observation labels", () => {
         if (url.pathname === "/api/meta")
           return Response.json({
             apiVersion: 1,
-            source: { kind: "central-store", classification: "synthetic" },
+            source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (url.pathname === "/api/filter-options")

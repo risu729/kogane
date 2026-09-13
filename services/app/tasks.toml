@@ -8,7 +8,7 @@ run = "./node_modules/.bin/wrangler types"
 
 ["app:typecheck"]
 description = "Type-check services/app."
-# `src/demo-worker.ts` imports the generated `demo-snapshot.json`, so the
+# `test/snapshot-worker.ts` imports the generated `demo-snapshot.json`, so the
 # typecheck needs the export to have run: `ci:app` runs typecheck and test in
 # parallel, and without this edge the typecheck could lose that race.
 depends = ["app:types", "local-pipeline:export-demo"]
@@ -29,13 +29,12 @@ run = "./node_modules/.bin/vitest run"
 
 ["app:dry-run"]
 description = "Validate the services/app deployment without uploading it."
-# The production and demo configs serve built assets, so the dry run builds
-# them first; in CI the ledger's `prepare` task does the same before the action.
+# The production config serves built assets, so the dry run builds them first.
+# The synthetic export remains a local test/typecheck fixture.
 depends = ["app:types", "web:build-production", "local-pipeline:export-demo"]
 dir = "services/app"
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
-	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.demo.jsonc",
 	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.test.jsonc",
 ]
 
@@ -44,12 +43,6 @@ description = "Emit the deployable bundle of services/app for the release manife
 depends = ["app:types", "web:build-production"]
 dir = "services/app"
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/app --config wrangler.jsonc"
-
-["app-demo:bundle"]
-description = "Emit the deployable bundle of the demo Worker for the release manifest."
-depends = ["app:types", "local-pipeline:export-demo"]
-dir = "services/app"
-run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/app-demo --config wrangler.demo.jsonc"
 
 ["ci:app"]
 description = "Every check CI runs for services/app."

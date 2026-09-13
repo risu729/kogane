@@ -57,7 +57,7 @@ describe.if(runnable)("change confirmation screen", () => {
         if (url.pathname === "/api/meta")
           return Response.json({
             apiVersion: 1,
-            source: { kind: "central-store", classification: "synthetic" },
+            source: { kind: "central-store", classification: "financial" },
             capabilities: { ...CENTRAL_STORE_CAPABILITIES, commands },
           });
         if (url.pathname.startsWith("/api/command/v1/")) {

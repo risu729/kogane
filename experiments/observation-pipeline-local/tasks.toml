@@ -23,10 +23,8 @@ dir = "experiments/observation-pipeline-local"
 run = "bun src/serve.ts --demo"
 
 ["local-pipeline:export-demo"]
-description = "Export the synthetic demo snapshot the reader Worker serves."
-# The demo Worker serves both the snapshot and the built client, so the task
-# that prepares its deployment has to produce both.
-depends = ["web:build"]
+description = "Export the synthetic snapshot used by local API conformance tests."
+# The snapshot is test-only; no deployed Worker or browser bundle includes it.
 dir = "experiments/observation-pipeline-local"
 run = "bun src/export-demo.ts ../../services/app/demo-snapshot.json"
 

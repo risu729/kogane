@@ -627,6 +627,17 @@
       "statementCount": 7,
       "insertStatements": [],
       "sha256": "a575e051cec76f0a9fb9cbf3715e7031bbbce338bc27a004ed9bf55f97966f74"
+    },
+    {
+      "file": "0043_remove_synthetic_bootstrap.sql",
+      "statementCount": 36,
+      "insertStatements": [
+        {
+          "table": "_synthetic_cleanup_runs",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "e124cfe411701cc295d310f0aac3d61d4b14d707898cd1e69cc421b935e4037d"
     }
   ],
   "tables": [
@@ -15724,7 +15735,8 @@
       "0034_reports.sql",
       "0035_observation_job_lanes.sql",
       "0038_source_revision.sql",
-      "0039_collection_runs.sql"
+      "0039_collection_runs.sql",
+      "0043_remove_synthetic_bootstrap.sql"
     ],
     "schemaSha256": "c62cf12fa235c852d78a7806d95b82f380baeb0b1730dcdf04f5847edc635c69"
   }

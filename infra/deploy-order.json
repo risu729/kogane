@@ -44,18 +44,6 @@
       "bundleDir": "dist/app"
     },
     {
-      "name": "app-demo",
-      "path": "services/app",
-      "config": "wrangler.demo.jsonc",
-      "worker": "kogane-demo",
-      "role": "consumer",
-      "deploy": true,
-      "healthPath": "",
-      "healthAuth": "none",
-      "bundleTask": "app-demo:bundle",
-      "bundleDir": "dist/app-demo"
-    },
-    {
       "name": "app-test",
       "path": "services/app",
       "config": "wrangler.test.jsonc",

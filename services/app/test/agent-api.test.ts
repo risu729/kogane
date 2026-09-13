@@ -10,7 +10,7 @@
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import demo from "../src/demo-worker";
+import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { MCP_TOOLS } from "../src/mcp";
@@ -161,7 +161,7 @@ describe("the agent API is off until a grant is configured", () => {
     }
   });
 
-  it("is not served by the hosted synthetic demo", async () => {
+  it("is not served by the local synthetic snapshot", async () => {
     const assets = { fetch: async () => new Response("shell") } as unknown as Env["ASSETS"];
     for (const path of [...AGENT_PATHS, "/mcp", "/api/v2/query?intent=coverage"]) {
       const response = await demo.fetch(

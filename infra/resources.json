@@ -5,7 +5,6 @@
     "readAt": "2026-09-13",
     "accountId": "59ea63cc00914b30ca410b062ae2bb7f",
     "workers": [
-      "kogane-demo",
       "kogane-evidence-browser",
       "kogane-globalpass-collector-poc",
       "kogane-mobile-suica-collector-poc",
@@ -328,46 +327,12 @@
         "source": "plan 07 §1 + decision D1",
         "proposedAction": "rename-directory",
         "proposedTarget": "services/app",
-        "requiredVerification": "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
+        "requiredVerification": "Production Worker identity retained; public synthetic demo retired on 2026-09-13",
         "executionStatus": "EXECUTED_RENAME",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)"
+        "liveResourceStatus": "LIVE(workers=kogane-evidence-browser; buckets=kogane-raw-evidence)"
       },
       "workers": [
-        {
-          "config": "services/app/wrangler.demo.jsonc",
-          "name": "kogane-demo",
-          "main": "src/demo-worker.ts",
-          "role": "deployed",
-          "liveWorker": true,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "assets": {
-            "directory": "../../apps/web/dist",
-            "binding": "ASSETS"
-          },
-          "varNames": [
-            "ACCESS_AUDIENCE",
-            "ACCESS_ISSUER",
-            "AGENT_GRANTS",
-            "BALANCE_PROJECTION_ENABLED",
-            "OPERATOR_SUBJECTS",
-            "OPS_API_ENABLED"
-          ],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
         {
           "config": "services/app/wrangler.jsonc",
           "name": "kogane-evidence-browser",
@@ -1374,8 +1339,8 @@
     }
   ],
   "summary": {
-    "configCount": 24,
-    "deployedWorkerCount": 15,
+    "configCount": 23,
+    "deployedWorkerCount": 14,
     "crons": [
       {
         "worker": "kogane-globalpass-collector-poc",

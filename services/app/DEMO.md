@@ -1,42 +1,16 @@
-# Hosted observation demo
+# Local synthetic test snapshots
 
-URL: https://kogane-demo.takuanimal.workers.dev
-
-The normal observation UI (overview, transactions, balances, positions, artifacts,
-and observation details) runs independently of the production parsed-data API.
-Every displayed observation and downloadable original is synthetic fixture data.
-The UI labels it as a demo. It has no D1, R2, collector, or production API binding.
-The existing evidence browser remains the separate real raw-evidence reader.
+The hosted `kogane-demo` Worker has been retired. There is no deployment config
+or release target for a synthetic snapshot, and the browser does not display
+sources classified as synthetic.
 
 `local-pipeline:export-demo` (in `experiments/observation-pipeline-local`)
-creates a fresh temporary store from committed fixtures, runs parsers, and
-exports deterministic API responses. It cannot accept an existing store as
-input. The generated `demo-snapshot.json` is ignored by Git and must be
-regenerated for each build. Artifact links include
-superseded parse observations. Updating the demo requires rebuilding and deploying.
+creates a fresh temporary store from committed synthetic fixtures, runs parsers,
+and exports the resulting observation API responses. It takes no production
+store as input. The generated `demo-snapshot.json` is ignored by Git and remains
+an input to local API conformance tests only.
 
-From the repository root:
-
-```sh
-mise run install
-mise run web:build
-mise run local-pipeline:export-demo
-cd services/app
-./node_modules/.bin/wrangler deploy --config wrangler.demo.jsonc --dry-run
-./node_modules/.bin/wrangler deploy --config wrangler.demo.jsonc
-```
-
-The Access application `Kogane synthetic demo` protects the Worker's production
-and preview URLs using the existing `default` policy and Cloudflare One Client
-authentication. Preview URLs are disabled. The Worker also validates the Access
-JWT before serving any API response or static asset. For a new deployment target,
-bootstrap with `workers_dev: false`, configure Worker-scoped Access and its AUD,
-then enable routing. An empty AUD fails closed.
-
-Only GET and HEAD are supported. Raw originals are attachments with sandbox CSP.
-Responses are not cached. Request logs contain route category, method, status,
-duration, request ID, and error code, without tokens or response contents.
-
-CI builds both UI modes, regenerates the snapshot, checks types, runs authenticated
-Worker tests, and dry-runs both Worker configurations. Export tests verify stable
-output, provenance links, raw hashes, and temporary-store cleanup.
+`test/snapshot-worker.ts` is a test adapter for those responses. It has no
+Cloudflare resource, D1, R2, collector, or production API binding. Keep this
+adapter and its generated input under test use; do not restore a public Worker
+or add the snapshot to the production frontend.

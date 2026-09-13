@@ -14,7 +14,7 @@ Schema digest: `c62cf12fa235c852d78a7806d95b82f380baeb0b1730dcdf04f5847edc635c69
 
 ## Summary
 
-- Migrations applied: 42
+- Migrations applied: 43
 - Tables: 102 (all `STRICT`: yes)
 - Views: 31
 - Triggers: 375
@@ -212,5 +212,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0035_observation_job_lanes.sql` | 13 | observation_lane_state |
 | `0038_source_revision.sql` | 101 | core_source_revision |
 | `0039_collection_runs.sql` | 14 | collection_scan_state |
+| `0043_remove_synthetic_bootstrap.sql` | 36 | _synthetic_cleanup_runs |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql

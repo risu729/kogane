@@ -384,18 +384,6 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      - name: Deploy the demo App
-        id: deploy-app-demo
-        # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
-        # from the job's `steps` context to record, per Worker, what happened.
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app-demo')
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
-        with:
-          mode: production
-          working-directory: services/app
-          config: wrangler.demo.jsonc
-          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # The collectors, in the ledger's order, after every consumer of the
       # shared contract (unified plan 11 §4). Uploading a collector replaces
       # its script and nothing else: its crons stay as its configuration

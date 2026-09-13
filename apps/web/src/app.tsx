@@ -103,7 +103,8 @@ export function App(): ReactNode {
   const metadata = useMetadata();
   const metadataReady = metadata.data !== undefined;
   useEffect(() => {
-    const heading = main.current?.querySelector("h1");
+    // Content is mounted only after metadata resolves; defer focus until then.
+    const heading = metadataReady ? main.current?.querySelector("h1") : null;
     document.title = `${heading?.textContent ?? "記録と原本"} | kogane`;
     if (heading) {
       heading.tabIndex = -1;
@@ -115,19 +116,19 @@ export function App(): ReactNode {
   }, [path, metadataReady]);
   const client = useQueryClient();
   const fetching = useIsFetching() > 0;
-  const connected = metadata.isSuccess;
   const classification = metadata.data?.source.classification;
   const synthetic = classification === "synthetic";
+  const connected = metadata.isSuccess && !synthetic;
   // Feature decisions come from advertised capabilities only. `source.kind`
   // is a label: an unknown name gets the generic label and identical behaviour.
   const features = useFeatures();
   const connectionLabel = metadata.isPending
     ? "接続を確認中"
-    : connected
-      ? synthetic
-        ? "デモデータに接続"
-        : (SOURCE_KIND_LABELS[metadata.data?.source.kind ?? ""] ?? "保存された記録に接続")
-      : "接続を確認できません";
+    : synthetic
+      ? "表示対象の記録がありません"
+      : connected
+        ? (SOURCE_KIND_LABELS[metadata.data?.source.kind ?? ""] ?? "保存された記録に接続")
+        : "接続を確認できません";
 
   const evidenceRoute =
     features.evidenceHistory && (path === "/evidence" || path.startsWith("/runs/"));
@@ -223,11 +224,7 @@ export function App(): ReactNode {
           <p>
             {metadata.data ? (
               synthetic ? (
-                <>
-                  <strong>デモデータ</strong>
-                  <span className="notice-divider">·</span>
-                  実際の取引・残高ではありません
-                </>
+                "この接続先のデータは表示できません"
               ) : classification === "financial" ? (
                 <>
                   <strong>保存された実データ</strong>
@@ -250,23 +247,30 @@ export function App(): ReactNode {
           </p>
         </div>
         <main id="main" ref={main} tabIndex={-1}>
-          <ParsingHealthNotice health={metadata.data?.parsingHealth} />
+          {!synthetic ? <ParsingHealthNotice health={metadata.data?.parsingHealth} /> : null}
           <QueryBoundary query={metadata} label="接続情報">
-            {() => (
-              <>
-                {features.serverFilters &&
-                ["transactions", "balances", "summaries", "positions", "artifacts"].includes(
-                  route.name,
-                ) ? (
-                  <CollectionControls kind={route.name} />
-                ) : null}
-                {evidenceRoute ? (
-                  <EvidenceContent observationsAvailable />
-                ) : (
-                  <View key={path + window.location.search} route={route} />
-                )}
-              </>
-            )}
+            {() =>
+              synthetic ? (
+                <section>
+                  <h1>表示対象の記録がありません</h1>
+                  <p>接続先を確認してください。</p>
+                </section>
+              ) : (
+                <>
+                  {features.serverFilters &&
+                  ["transactions", "balances", "summaries", "positions", "artifacts"].includes(
+                    route.name,
+                  ) ? (
+                    <CollectionControls kind={route.name} />
+                  ) : null}
+                  {evidenceRoute ? (
+                    <EvidenceContent observationsAvailable />
+                  ) : (
+                    <View key={path + window.location.search} route={route} />
+                  )}
+                </>
+              )
+            }
           </QueryBoundary>
         </main>
         <footer className="workspace-footer">

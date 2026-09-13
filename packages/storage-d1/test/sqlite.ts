@@ -38,7 +38,12 @@ export function coreDatabase(from = "0017"): Database {
   const db = new Database(":memory:");
   db.exec(LAYER_A);
   for (const name of readdirSync(directory)
-    .filter((entry) => entry.endsWith(".sql") && entry >= from)
+    // 0043 only cleans bootstrap rows in the full Layer A schema; this stub
+    // has neither those rows nor the registry/immutability tables it touches.
+    .filter(
+      (entry) =>
+        entry.endsWith(".sql") && entry >= from && entry !== "0043_remove_synthetic_bootstrap.sql",
+    )
     .sort())
     db.exec(readFileSync(join(directory, name), "utf8"));
   return db;

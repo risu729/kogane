@@ -14,8 +14,8 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Summary
 
-- Wrangler configs: 24
-- Distinct Workers that exist in the account: 15
+- Wrangler configs: 23
+- Distinct Workers that exist in the account: 14
 - Live Workers with no config in this repository: —
 - Live R2 buckets no config references: —
 - Workers with an `email()` handler (Email routes are configured outside this repository): kogane-vpoint-collector-poc
@@ -229,28 +229,9 @@ No wrangler config.
 ### `services/app`
 
 - Disposition (plan 07 §1 + decision D1): `rename-directory` → services/app
-- Required verification: git mv only; Worker names kogane-evidence-browser and kogane-demo stay
+- Required verification: Production Worker identity retained; public synthetic demo retired on 2026-09-13
 - Execution status: EXECUTED_RENAME (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)
-
-#### `kogane-demo` — `services/app/wrangler.demo.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/demo-worker.ts
-- D1: —
-- R2: —
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: `../../apps/web/dist` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>OPERATOR_SUBJECTS<br>OPS_API_ENABLED
-- Required secrets (names only): —
+- Live resources: LIVE(workers=kogane-evidence-browser; buckets=kogane-raw-evidence)
 
 #### `kogane-evidence-browser` — `services/app/wrangler.jsonc`
 

@@ -7,12 +7,6 @@
       "prepare": "web:build-production"
     },
     {
-      "name": "app-demo",
-      "path": "services/app",
-      "config": "wrangler.demo.jsonc",
-      "prepare": "local-pipeline:export-demo"
-    },
-    {
       "name": "app-test",
       "path": "services/app",
       "config": "wrangler.test.jsonc"

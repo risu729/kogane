@@ -21,7 +21,7 @@
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import demo from "../src/demo-worker";
+import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { seedRegistry } from "./fixtures";
 import { MCP_TOOLS } from "../src/mcp";
@@ -198,7 +198,7 @@ describe("the operations API does not exist until its flag is on", () => {
     expect((await on.json()).capabilities.opsApi).toBe(true);
   });
 
-  it("never serves an operations path from the synthetic demo Worker", async () => {
+  it("never serves an operations path from the test snapshot adapter", async () => {
     const post = await call(`${OPS}/collections`, {
       body: COLLECTION,
       environment: ENABLED,

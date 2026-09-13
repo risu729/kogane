@@ -15,7 +15,9 @@ Apply raw-evidence migration 0017 and deploy the parser before switching the UI.
 Run `mise run web:build-production`; this writes the
 isolated `web/dist-production` asset directory. Deploy only the existing production
 evidence-browser config. `web:build-evidence` retains the older raw-only UI build;
-the isolated synthetic demo continues to use its separate config and snapshot.
+synthetic snapshots remain local API test fixtures and are never deployed.
+The shared UI refuses to render a synthetic source, including parsing-health
+counts, collection controls, evidence history and deep-linked details.
 These three builds have separate output directories; running the legacy tests
 cannot replace the deployable production application. CI builds all three before
 testing, and production-mode browser tests exercise the production asset bundle.

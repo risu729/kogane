@@ -63,14 +63,25 @@ describe("config/ingest-clients.json", () => {
       left.producer.localeCompare(right.producer),
     );
     expect(declared).toEqual(expected);
-    // Every CORE source the mapping points at is a declared, active source, so
+    // Every production CORE source is declared and active, so
     // a terminal that maps is never refused as `source_undeclared`.
     const db = freshCore();
-    for (const source of new Set(Object.values(COLLECTOR_SOURCE_IDS))) {
+    for (const source of new Set(expected.map((route) => route.source))) {
       expect(db.query("SELECT 1 AS ok FROM sources WHERE id=? AND active=1").get(source)).toEqual({
         ok: 1,
       });
     }
+  });
+
+  test("the production bootstrap cannot restore the removed synthetic source or routes", () => {
+    using db = freshCore();
+    db.exec(sql);
+    expect(db.query("SELECT id FROM sources WHERE id='kogane-synthetic'").all()).toEqual([]);
+    expect(
+      db
+        .query("SELECT source_id FROM ingest_client_routes WHERE source_id='kogane-synthetic'")
+        .all(),
+    ).toEqual([]);
   });
 
   test("applies to a fresh CORE and is a no-op on the second apply", () => {
