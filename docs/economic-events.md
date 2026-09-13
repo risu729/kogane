@@ -10,6 +10,17 @@ Nothing here rewrites Layer A or Layer B. No observation is updated or deleted,
 no parser version changes, and the existing visible result set is unchanged
 while both flags are off.
 
+## Product delivery scope
+
+The implemented Vpass pending/posted slice below is the starting point for
+phases 6–7, not completion of reconciliation or event generation. The
+[next product milestone](roadmap.md#phases-67--reconciliation-and-economic-event-generation)
+adds MyJCB, card statements and bank debits, with review/correction and an
+explanation from purchase through settlement to source evidence. Event, leg,
+allocation and settlement tables still need continuous population from the
+supported transaction families. Matching two observations alone does not
+produce the complete economic event or its balance effect.
+
 ## What is automatic and what is proposal-only
 
 | Step                                                      | Who does it                                               |

@@ -1,245 +1,262 @@
 # Roadmap
 
-Phases are ordered so that evidence collection runs long before any schema
-is committed to — including the raw layer's own schema. The single most
-important sequencing rule: **collect and analyze real captures (phases 0–1)
-before building any storage or freezing any schema (phase 2 onward).**
+**The infrastructure migration is complete; the financial product roadmap is
+not.** The next objective is to turn collected provider displays into connected
+transactions, explainable assets and liabilities, valuations, and eventually
+cost basis, P&L and tax outputs.
 
-## Phase 0 — Collect (no code)
+This status was checked against repository revision `49d5d65e` on 2026-09-13.
+It distinguishes implemented contracts and calculation components from a feature
+that works with real inputs through its user interface. It is a repository
+assessment, not a new production acceptance run. Historical infrastructure
+completion evidence belongs in [legacy retirement](legacy-retirement.md) and
+the relevant rollout records.
 
-No server, no database, no custom code.
+## Current position
 
-- Periodic (e.g. weekly) Kuebiko sessions across direct account surfaces:
-  banks, cards, brokers, crypto exchanges, stored-value services, and reward
-  programs. Aggregators are optional reconciliation inputs, not required
-  collection targets.
-- CSV/OFX/PDF exports saved into a designated local folder.
-- Capture root and exports folder backed up to private Google Drive
-  storage.
+| Original phases                         | Implemented foundation                                                              | Work still needed for product completion                                                                     |
+| --------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication           | Coverage by account and data type; collection requests connected to execution and visible results            |
+| 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections                     | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities |
+| 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts | More transaction families and continuous event production from adopted observations                          |
+| 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots                   | Time-indexed positions, reported valuations and liabilities as well as cash balances                         |
+| 9 + 13: prices and valuation            | Price contracts, pure valuation functions and fixed report artifacts                | Price/FX acquisition, selection policies and portfolio valuation from actual holdings                        |
+| 10: rewards                             | Bucket claims, expiry and conversion functions, READ projections                    | Classified activity history, verified applicable rules, membership and usable conversion offers              |
+| 11: derived balances and positions      | Difference contracts and reconciliation readers                                     | Applying adopted events to a starting snapshot to reconstruct balances and quantities                        |
+| 12 + 14: cost basis and P&L             | Input gates and some P&L decomposition functions                                    | Lots, carried cost, disposal allocation, realized and unrealized P&L                                         |
+| 15: tax                                 | Refusal when required policy or inputs are missing                                  | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                   |
+| 16: AI / MCP                            | Shared query/explanation/proposal service and transports                            | Complete analysis and correction flows using the same services as the UI                                     |
 
-This phase also surfaces the real-world cases the later layers must handle:
-pending → posted, amount/date/description changes, unstable external IDs,
-duplicates, refunds and partial refunds, card settlement debits,
-inter-account and cross-currency transfers, FX and foreign transaction fees,
-broker-reported valuations, reward expiry displays.
+Concrete limits in the current code:
 
-## Phase 1 — Capture Analysis
+- [The reconciliation job](../services/processor/src/reconciliation-job.ts)
+  runs only Vpass pending/posted matching. MyJCB and cross-source matching are
+  still extensions to implement; a generic matcher is not deployed coverage.
+- [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
+  leaves collector requests, including unattended session refresh, waiting with
+  `awaiting_collector_dispatch`. An accepted request is not a completed capture.
+- [`costBasis()`](../packages/domain/src/calculation.ts) returns
+  `needs-policy` on every path. It is a contract and refusal gate, not a lot or
+  cost-basis engine. `pnlDecomposition()` does not supply the missing transaction
+  reconstruction and cost allocation.
+- The [balance read model](balance-read-model.md) and
+  [agent queries](agent-api.md) expose scoped quantities with unknown liability
+  coverage, not a complete net-worth figure.
+- [Price and report components](calculation-and-reports.md) do not fetch market
+  prices or FX. [Reward components](rewards.md) still require activity
+  classification and verified offer inputs before they can provide useful
+  forecasts and exchanges for actual holdings.
 
-With a few weeks of real captures accumulated, characterize each source
-from `metadata.ndjson` and the saved bodies: internal JSON APIs vs HTML,
-payload shapes and sizes, noise ratio, how often data actually changes,
-observed pending → posted behavior. From that evidence, design the raw
-layer: which artifact metadata to keep, the source allowlist structure, and
-the ingestion tables.
+## Delivery order and the next milestone
 
-For SBI Securities, SMBC, Mobile Suica, and PayPay this analysis is largely
-pre-done: `pnsk-lab/mnie` already identified the internal endpoints, request
-shapes, and encodings (see `docs/tooling.md`). Those sources can skip
-straight to endpoint replay; the capture-analysis effort concentrates on the
-long tail.
-
-## Phase 2 — Infrastructure + Raw Evidence Collector
-
-Built only after phase 1, then backfilled with all accumulated captures.
-The detailed plan — full DDL, the ingestion API, the importer CLI,
-idempotency and backfill rules — is in `docs/raw-store.md`.
-
-**Implementation status (2026-09-02):** the cross-source D1 schema and Worker
-foundation passed independent architecture, use-case, and adversarial
-SQLite/D1 review with no P0/P1 findings. Migrations through `0004` and Worker
-schema version `0004` are deployed. The production synthetic round trip proves
-run-scoped streaming R2 writes, immutable catalogue ingestion, R2 integrity
-verification, and complete sealing; production reconciliation reports no
-unsealed run and no synthetic run in the financial projection. The sanitized
-acceptance suite covers 12 documented source shapes, including a 1,001-item
-resumable inventory. Collector-R2/Kuebiko importers and staging-bucket backfill
-remain the next implementation unit. See `docs/raw-store.md`.
-
-- Cloudflare Worker, D1 database, private R2 bucket, CI.
-- Bearer-token auth for the ingestion API.
-- Importer CLI (`import-kuebiko`, `ingest-file`).
-- Per-source collector coordinator and short-lived consumer only after its
-  replay path is validated in phase 1. Treat password bootstrap as a separate
-  gate: visible Windows Chrome has produced both successes and failures, so it
-  is not yet a stable repeated control. The deployed issuer remains gated on a
-  repeatable Windows baseline and then a persistent Container-based coherent
-  browser or real Android/macOS testing. The Linux/cloud consumer receives only
-  an encrypted source-scoped session envelope. The vault, master password, and
-  Vpass password never enter Cloudflare for the replay-only flow.
-
-The original four-table sketch below remains useful as the layer summary; the
-candidate schema expands it with acquisition method, scoped authorization,
-progress/terminal reports, units/pages/ranges, typed privacy-safe origins,
-lineage, transforms, inventory seals, and integrity events:
-
-```sql
-sources                 -- reviewed provider/data-surface registry
-fetch_runs              -- source-specific acquisition identity
-raw_objects             -- sha256, exact byte size, private R2 key
-fetch_artifacts         -- run, role/fidelity/container, safe media essence,
-                        -- timestamp basis, raw-object digest
-artifact_http_metadata  -- method/status/scheme/host, sanitized path template,
-                        -- reviewed query names and optional HMAC only
-```
-
-Blobs are content-addressed in R2 (dedupe); fetch history is append-only.
-Raw URLs, query values, userinfo, fragments, cookies, tokens, and unreviewed
-path/query shapes are never catalogue fields. HTTP provenance is useful for
-later parser development only after this enforced sanitization boundary.
-
-## Phase 3 — Observation Layer
-
-Deterministic, versioned parsers turn raw objects into typed observations
-("the source says X") — no interpretation yet. The detailed plan — the
-parser contract, versioning and supersession, the tables, and the first
-parsers — is in `docs/observations.md`. Physically separate tables per
-shape, not one generic EAV table:
+The main sequence is:
 
 ```text
-transaction_observations   balance_observations
-position_observations      valuation_observations
-reward_observations
+account/instrument identity and data coverage
+  → cross-source reconciliation and economic events
+  → dated balances, holdings and liabilities
+  → price/FX acquisition and valuation
+  → lots, cost basis and P&L
+  → jurisdiction-specific tax outputs
 ```
 
-Every observation records `parser_name` / `parser_version` and its raw
-provenance (`raw_object`, locator within it). Re-parsing all historical
-evidence with a newer parser, superseding prior observations, is a
-first-class operation from day one.
+Rewards are a parallel workstream. UI and AI/MCP work accompany every stage.
+Valuation of provider-reported holdings can proceed before all transaction
+history has been reconstructed. Adding every source is not a prerequisite for
+finishing a representative bank, card, broker or rewards flow.
 
-The first parsers do not need to be written from scratch: `smcc-meisai-
-scraper`'s `parser.ts` (Vpass card) and `pnsk-lab/mnie`'s provider parse
-code already produce close-to-correct typed output. Both need the same two
-changes — emit parser name/version and raw locators, and stop dropping
-unrecognized fields — before adoption. See `docs/tooling.md`.
+**The next major milestone is to connect Vpass/MyJCB card usage and statements
+to bank debits, distinguish purchase recognition from settlement, and explain
+the balance impact without counting the same expense twice.** Securities
+executions, settlement, holdings and valuation follow that first complete flow.
 
-## Operator tooling — Evidence Browser
+The numbered phases below retain the original layer identifiers. They describe
+the remaining work and its acceptance criteria, not a requirement to finish
+each phase everywhere before starting the next.
 
-Not a numbered phase, because it is not a data layer: it is a read-only
-operator tool that spans phases 2 and 3 and would be deleted without data
-loss. It exists so that a human can see, for any observation, the exact
-bytes it came from and the parser version that produced it. Re-parsing is
-a first-class operation, and an operation nobody can verify is an
-operation nobody trusts.
+## Phases 0–5 — Coverage and cross-source identity
 
-The browser now reads A, B, and the account/instrument interpretation in C.
-It does not write financial data or mappings: corrections use the private
-operator endpoint. The displayed identity coverage includes eligible B records
-that have not yet received a sealed C projection. It remains an inspection tool,
-not an asset-total or profit-and-loss product. See `docs/evidence-browser.md`,
-`docs/identity.md`, and the dated acceptance evidence in `docs/identity-rollout.md`.
+Track coverage per owned account and data type: balances, bank movements, card
+usage, statements, security positions, executions, settlement cash, and reward
+balances/activity/expiry. A deployed collector or a balance response does not
+prove the trade history needed for P&L is available. Use the
+[account inventory](account-inventory.md), [source research](source-research.md)
+and [parser coverage contract](parser-coverage.md) for this inventory.
 
-## Phase 4 — Identity
+Connect collection and replay requests to execution, terminal status and
+published observations. Resolve the same account seen directly and through
+MoneyForward, and the same instrument held at different brokers, with explicit
+evidence. Preserve different products with similar names and unresolved
+references. Expose the existing correction history in the review flow.
 
-`source_accounts` (what a provider calls an account) vs `accounts`
-(canonical), with corrigible mappings. The same real account may appear via
-its own site, an aggregator, and CSV exports.
+Source expansion remains part of this work: the inventory includes further
+payments, banks, overseas accounts and reward programs. Complete representative
+flows first, then extend them under the same contracts.
 
-Implemented storage and collector rules are described in `docs/identity.md`,
-`docs/identity-sbi.md`, and `docs/identity-sources.md`. Mapping revisions are
-append-only and preserve the original decision and evidence. Similar display
-names are not evidence that accounts from different sources are the same.
-Private correction and historical replay procedures are in
-`docs/identity-operations.md`; rollout completion is verified separately with
-`docs/identity-audit.md`, not inferred from merged PRs.
+**Done when:** a user can request collection, follow it to published
+observations, and distinguish resolved accounts/instruments from unresolved
+ones for the selected scope. Missing data types remain visible.
 
-## Phase 5 — Instruments
+Contracts: [collection](collection.md), [observations](observations.md),
+[identity](identity.md), [source identities](identity-sources.md).
 
-`instruments` + `instrument_identifiers` + type-specific detail tables.
-Positions become `(account, instrument, quantity)`.
+## Phases 6–7 — Reconciliation and economic event generation
 
-Existing collectors now produce stable instrument entities with namespaced
-identifiers and separate roles for settlement, trade, and usage units. Explicit
-currency identities, provider-local security/crypto references, aggregate
-products, and unresolved references remain distinct. Provider-local identity
-is not a completed global security-master crosswalk. This stage does not change
-reported quantities, deduplicate observations, or add overlapping balances.
+Build on Vpass pending/posted matching, then add MyJCB, card statement/payment
+matching, bank transfers and securities transactions. Continuously generate
+corrigible events from adopted source observations; event tables and matching
+functions alone do not complete this stage.
 
-## Phase 6 — Reconciliation
+| Transaction family                                 | Meaning to establish                                                    |
+| -------------------------------------------------- | ----------------------------------------------------------------------- |
+| Pending → posted, cancellation, partial refund     | Revision of one purchase versus a separate transaction                  |
+| Card purchase → statement → bank debit             | Purchase recognition versus settlement, without double counting         |
+| Transfers between owned accounts                   | Internal movement versus external spending                              |
+| FX and overseas transfers                          | Changes per currency, explicit fees and unexplained differences         |
+| Securities orders, executions, settlement and cash | Quantity changes linked to the relevant cash movement                   |
+| Reward exchanges and stored-value funding          | Request, deduction, arrival, cancellation and return as separate stages |
 
-`observation_links` with relation / method / confidence
-(provider-given links, exact matches, heuristics, AI, manual). Never
-update-in-place.
+Connect candidate review, acceptance, rejection and correction to guarded
+commands and the UI. Amount/date proximity stays a proposal; provider evidence
+or an explicit recorded decision establishes adoption. Preserve explanation
+links through events, allocations and source facts to original statements.
 
-## Phase 7 — Economic Events
+**Done when:** for a card purchase, a user can identify its statement and bank
+payment, inspect the original evidence, and correct a mistaken match without
+erasing the earlier decision. The resulting purchase and cash-movement views
+must account for the same case without treating settlement as another expense.
 
-`economic_events` + `event_legs`. Multi-asset, not forced to balance when
-information is missing.
+Contracts: [economic events](economic-events.md),
+[decision log](decision-log.md), [change lifecycle](change-lifecycle.md).
 
-## Phase 8 — State Snapshots
+## Phases 8 + 11 — Dated reported and reconstructed state
 
-`balance_snapshots`, `position_snapshots`, `valuation_snapshots` from
-provider-reported state. Differences between provider-reported and
-event-derived values become reconciliation signals, not bugs to overwrite.
+Maintain two distinct views: what a provider reported at a point in time, and
+what adopted events imply from a starting snapshot. Extend reported state to
+security/crypto quantities, provider valuations, card payables and other
+liabilities.
 
-## Phase 9 — Market / Reference Data
+Apply events to reconstruct balances and positions. Preserve transaction and
+settlement dates, pending and posted states, late-arriving evidence and missing
+history. Differences against provider snapshots are explained discrepancies,
+never invented adjustment transactions. Show historical holdings and changes
+between dates; incomplete account or liability coverage must remain a scoped
+result rather than a whole-portfolio net worth.
 
-`price_observations` as its own domain; archive every price actually used
-in a calculation, with provenance.
+**Done when:** for a requested date, quantities and liabilities in the supported
+scope are available, with discrepancies traced to transactions, timing or
+missing evidence. Unknown causes remain explicitly unresolved.
 
-## Phase 10 — Rewards
+Contracts: [balance READ](balance-read-model.md), [economic events](economic-events.md),
+[fixed projection inputs](projection-input.md).
 
-Quantity / lots + expiry rules / conversion graph / valuations, per
-`docs/design.md`. Expiry forecasting (including inactivity-based programs)
-and expiring-value reports.
+## Phases 9 + 13 — Market data and portfolio valuation
 
-## Phase 11 — Derived Positions
+Acquire and retain price/FX history, link it to instruments, and choose prices
+under explicit as-of, freshness, holiday and missing-data policies. Distinguish
+provider-reported valuations from Kogane calculations.
 
-Positions and balances computed from events + snapshots; unexplained
-differences surfaced.
+Start with supported cash, deposits, equities, funds and crypto. Product-specific
+valuation needs must not be forced through quantity × price. Fix the holdings,
+prices, FX, policies and calculation version used by each retained result.
+Reported holding snapshots allow this stage to progress even where complete
+transaction history is unavailable.
 
-## Phase 12 — Lots / Cost Basis
+**Done when:** a user can value the supported holdings on a specified date in a
+chosen base currency, inspect the prices/FX used, reproduce the result, and see
+the unvalued portion and its reasons.
 
-Generated per methodology and jurisdiction from acquisition/disposal events.
+Contract: [calculation policies and reports](calculation-and-reports.md).
 
-## Phase 13 — Valuation Engine
+## Phase 10 — Usable reward forecasts and conversion simulation
 
-`value(portfolio, as_of, base, price_policy, fx_policy)` — any base
-instrument, explicit policies.
+Run this alongside the main financial sequence. Collect regular, promotional,
+restricted-use and pending buckets, qualifying activity and membership state.
+Version the applicable terms with evidence and effective dates. Keep
+provider-displayed expiry separate from calculated expiry, and preserve unknown
+activity classification or rules.
 
-## Phase 14 — P&L
+Populate verified offers with ratio, minimum, increment, cap, membership
+conditions, application deadline, arrival delay and fees. Simulate routes that
+meet a requested use and deadline, respecting shared quotas and availability.
 
-Decomposable P&L (market / FX / income / fees, realized / unrealized) under
-an explicit calculation context, cached with `calculation_version`.
+**Done when:** actual holdings show near-term expiry and unknown expiry
+separately, and eligible conversion candidates explain expected quantities,
+timing and conditions. Executing a real exchange is outside this milestone.
 
-## Phase 15 — Tax
+Contract: [rewards](rewards.md).
 
-Jurisdiction-specific interpretation layers (JP / AU) over the same events.
-Never bake tax semantics into lower layers.
+## Phases 12 + 14 — Lots, cost basis and P&L
 
-## Phase 16 — AI / MCP
+Implement acquisition and disposal history, additional purchases, partial
+sales, transfers, fees and supported corporate actions such as splits. Carry
+cost across owned accounts; an absent acquisition history is unknown cost,
+never zero.
 
-AI classifies, matches, and suggests — always as interpretations with
-model/version/confidence recorded, always human-correctable, never touching
-evidence or observations.
+Allocate cost to disposals under a selected method, calculate realized and
+remaining unrealized P&L, then separate market change, FX, income and fees.
+Investment-analysis cost/P&L and tax recognition use shared events but distinct,
+explicit purposes and policies.
 
-## MVP Cut
+**Done when:** a disposal can be traced to its acquisitions, quantity, allocated
+cost, fees, FX and gain/loss; period results distinguish external cash flows
+from investment performance. Missing cost history prevents an exact result.
 
-The first milestone is phases 0–3 only:
+Contract: [calculation policies and reports](calculation-and-reports.md).
 
-```text
-several direct real sources captured (bank / card / broker / stored value or rewards)
-      ↓
-raw schema designed from the actual captures
-      ↓
-everything backfilled into the raw store, re-parseable
-      ↓
-typed balance / transaction / position observations extracted
-```
+## Phase 15 — Jurisdiction- and period-specific tax outputs
 
-Explicitly out of scope for the MVP: ledger, categories, transfers, lots,
-P&L, tax, reward valuation, AI classification, and the product UI.
+Begin with one jurisdiction, tax period and asset/account class. Add verified
+rules, required inputs, calculation traces, independent reference examples and
+export together. JP/AU support remains a goal, not a present capability of the
+policy gate. Do not turn an investment P&L export into an implied tax result.
 
-This last exclusion was originally written as "any UI", and is narrowed
-here deliberately rather than quietly. The read-only evidence browser
-described above is admitted to the MVP; every user-facing view — balances
-as a dashboard, net worth, categories, charts — remains excluded. The
-distinction being drawn is that the browser renders observations and their
-provenance and nothing else: it interprets nothing, stores nothing, and
-computes no derived value. Admitting it costs the MVP a surface that
-renders real financial data and must never be publicly reachable, which is
-a real cost and the reason the boundary is stated as rules in
-`docs/evidence-browser.md` rather than left to judgement.
+Freeze each output with its inputs and rule versions. Corrections or new rules
+produce a new report that can be compared with the previous one.
 
-A worked implementation of phases 2 and 3 and the browser, against the
-payload shapes the live collectors already emit, is in
-`experiments/observation-pipeline-local` and `apps/web`.
+**Done when:** a report names its supported scope, traces results to events and
+applied rules, identifies missing information and passes independent expected
+examples for that scope.
+
+Contracts: [calculation policies and reports](calculation-and-reports.md),
+[design](design.md).
+
+## Phase 16 and product UI — Deliver with every stage
+
+Use the same application services and results for UI and AI/MCP. Match review
+comes with reconciliation; valuation explanation comes with valuation; expiry
+and offer comparison come with rewards. Do not build separate AI arithmetic.
+AI mappings/classifications remain proposals with evidence and model/version
+information, and humans can correct them.
+
+Before granting a real agent access, verify authorization across queries,
+evidence, explanations, proposals and their human confirmation paths, including
+scope restrictions. This is the entry gate to agent use, not a substitute for
+the financial work above.
+
+**Done for each feature when:** the supported flow can begin in UI or MCP and
+reach its result, evidence, missing-input explanation and applicable correction
+or confirmation. A stored row or HTTP 200 alone is insufficient.
+
+Contracts: [agent API](agent-api.md), [operations API](ops-api.md),
+[frontend](frontend.md), [website data boundaries](website-data-boundaries.md).
+
+## Small independent follow-up — Rollback compatibility
+
+After [legacy retirement](legacy-retirement.md), releases depending on removed
+Workers, buckets or CORE projections are invalid rollback targets. Add a
+machine-enforced minimum compatible release/resource-schema check before upload;
+migration filename/digest prefix compatibility alone does not establish this.
+
+**Done when:** an incompatible pre-retirement target is rejected before any
+Worker upload and a compatible target passes the gate. Keep this work bounded
+and independent of the main financial milestone.
+
+## Historical MVP boundary
+
+The original MVP was capture → raw evidence → typed observations, with an
+operator evidence browser. It intentionally excluded financial analysis and
+product UI. That boundary describes the initial delivery, not the remaining
+scope of Kogane. The evidence-before-schema principle still applies when
+onboarding a new source, but repeating the initial infrastructure build is not
+the next roadmap objective.
