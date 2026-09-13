@@ -38,7 +38,7 @@ const PAST_ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-past-months\.json$
 
 export const myJcbCreditLedger: Parser = {
   name: "myjcb-credit-ledger",
-  version: "1.1.0",
+  version: "1.1.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -178,7 +178,7 @@ export const myJcbCreditLedger: Parser = {
 
 export const myJcbPastMonthBalances: Parser = {
   name: "myjcb-credit-past-month-balances",
-  version: "1.1.0",
+  version: "1.1.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -299,11 +299,13 @@ function statementText(node: StatementNode): string {
 /** HTML has the exact due date that the past-month summary intentionally lacks. */
 export const myJcbCreditStatement: Parser = {
   name: "myjcb-credit-statement-total",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.dataset === "credit-detail" &&
-    artifact.mime === "text/html; charset=utf-8",
+    // CORE normalizes media types by removing parameters. Both forms carry
+    // sanitized UTF-8 HTML; parse still rejects invalid UTF-8 bytes.
+    (artifact.mime === "text/html" || artifact.mime === "text/html; charset=utf-8"),
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
     if (bytes.byteLength > 3_000_000) throw new Error("myjcb statement HTML is too large");
@@ -396,7 +398,7 @@ export const myJcbCreditStatement: Parser = {
 
 export const myJcbEvidenceOnly: Parser = {
   name: "myjcb-canonical-evidence-boundary",
-  version: "1.1.0",
+  version: "1.1.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
