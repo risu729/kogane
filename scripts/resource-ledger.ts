@@ -164,7 +164,7 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedAction: "promoted-to-service",
     proposedTarget: "services/collector-mizuho",
     requiredVerification:
-      "Production release enabled; owner-session trigger only, no cron. Provision trigger token out of band; verify authenticated cloud read separately. Unattended renewal is not implemented.",
+      "Daily 06:25 JST login and collection with Worker secrets; additional authentication stops without retry. Provision credentials out of band and verify password login/cloud collection separately. Explicit-session trigger remains available.",
     executionStatus: "DEPLOYMENT_ENABLED",
     planLiveResourceStatus: "DEPLOYMENT_PENDING_VERIFICATION",
   },

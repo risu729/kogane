@@ -229,7 +229,7 @@ describe("consumers deploy before producers (G5-14)", () => {
       expect(producers.some((worker) => worker.path === directory)).toBe(true);
   });
 
-  test("Mizuho deploys without enabling scheduled bank access or storing a bank password", () => {
+  test("Mizuho's daily login uses only provisioned Worker secrets, never workflow credentials", () => {
     const mizuho = order.workers.find((worker) => worker.name === "mizuho-worker");
     expect(mizuho).toMatchObject({
       path: "services/collector-mizuho",
@@ -245,8 +245,14 @@ describe("consumers deploy before producers (G5-14)", () => {
       triggers?: { crons?: unknown[] };
       secrets?: { required?: string[] };
     };
-    expect(config.triggers?.crons ?? []).toEqual([]);
-    expect(config.secrets?.required).toEqual(["ADMIN_TRIGGER_TOKEN"]);
+    expect(config.triggers?.crons).toEqual(["25 21 * * *"]);
+    expect(config.secrets?.required).toEqual([
+      "ADMIN_TRIGGER_TOKEN",
+      "MIZUHO_CUSTOMER_NUMBER",
+      "MIZUHO_LOGIN_PASSWORD",
+    ]);
+    expect(deployWorkflow).not.toContain("MIZUHO_CUSTOMER_NUMBER");
+    expect(deployWorkflow).not.toContain("MIZUHO_LOGIN_PASSWORD");
     expect(deploySteps(deployWorkflow).some((step) => step.workingDirectory === mizuho!.path)).toBe(
       true,
     );
