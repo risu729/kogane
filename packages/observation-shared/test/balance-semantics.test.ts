@@ -51,22 +51,36 @@ function row(
   };
 }
 test("billing amounts are statements, never unpaid debt or summable assets", () => {
-  expect(
-    classifyBalance({
-      sourceId: "myjcb",
-      parserName: "myjcb-credit-past-month-balances",
-      metric: "credit_statement_payment_amount",
-      sourceAccount: "myjcb:synthetic:root",
-    }),
-  ).toMatchObject({ kind: "statement", label: "請求額", netAssetEligible: false });
-  expect(
-    classifyBalance({
-      sourceId: "other",
-      parserName: "myjcb-credit-past-month-balances",
-      metric: "credit_statement_payment_amount",
-      sourceAccount: "unknown",
-    }).kind,
-  ).toBe("other");
+  for (const [sourceId, parserName] of [
+    ["myjcb", "myjcb-credit-past-month-balances"],
+    ["myjcb", "myjcb-credit-statement-total"],
+    ["vpass", "vpass-statement-page"],
+  ] as const) {
+    expect(
+      classifyBalance({
+        sourceId,
+        parserName,
+        metric: "credit_statement_payment_amount",
+        sourceAccount: `${sourceId}:synthetic:root`,
+      }),
+    ).toMatchObject({
+      kind: "statement",
+      label: "請求額",
+      measurementKind: "statement_amount",
+      timeBasis: "statement_month",
+      netAssetEligible: false,
+    });
+    for (const mismatch of [
+      { sourceId: "other", parserName, metric: "credit_statement_payment_amount" },
+      { sourceId, parserName: "unknown", metric: "credit_statement_payment_amount" },
+      { sourceId, parserName, metric: "unpaid_debt" },
+    ]) {
+      expect(classifyBalance({ ...mismatch, sourceAccount: "synthetic" })).toMatchObject({
+        kind: "other",
+        netAssetEligible: false,
+      });
+    }
+  }
 });
 test("source audit separates explicit deposits, gross totals, rewards, limits and unsupported sources", () => {
   const cases = [

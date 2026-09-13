@@ -1,3 +1,4 @@
+import { parse, type DefaultTreeAdapterMap } from "parse5";
 import type { ArtifactMeta, BalanceObservation, Parser, ParseResult } from "../types.ts";
 import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import {
@@ -37,7 +38,7 @@ const PAST_ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-past-months\.json$
 
 export const myJcbCreditLedger: Parser = {
   name: "myjcb-credit-ledger",
-  version: "1.0.0",
+  version: "1.1.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -177,7 +178,7 @@ export const myJcbCreditLedger: Parser = {
 
 export const myJcbPastMonthBalances: Parser = {
   name: "myjcb-credit-past-month-balances",
-  version: "1.0.0",
+  version: "1.1.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -282,15 +283,125 @@ export const myJcbPastMonthBalances: Parser = {
   },
 };
 
+type StatementNode = DefaultTreeAdapterMap["node"];
+function statementNodes(node: StatementNode, tag: string): DefaultTreeAdapterMap["element"][] {
+  const result: DefaultTreeAdapterMap["element"][] = [];
+  if ("tagName" in node && node.tagName === tag) result.push(node);
+  if ("childNodes" in node)
+    for (const child of node.childNodes) result.push(...statementNodes(child, tag));
+  return result;
+}
+function statementText(node: StatementNode): string {
+  if ("value" in node) return node.value;
+  return "childNodes" in node ? node.childNodes.map(statementText).join("") : "";
+}
+
+/** HTML has the exact due date that the past-month summary intentionally lacks. */
+export const myJcbCreditStatement: Parser = {
+  name: "myjcb-credit-statement-total",
+  version: "1.0.0",
+  accepts: (artifact) =>
+    artifact.sourceId === SOURCE &&
+    artifact.dataset === "credit-detail" &&
+    artifact.mime === "text/html; charset=utf-8",
+  parse(bytes, artifact) {
+    requireSuccessfulRun(artifact);
+    if (bytes.byteLength > 3_000_000) throw new Error("myjcb statement HTML is too large");
+    validateSanitizedHtml(bytes, artifact, true);
+    const document = parse(decodeUtf8(bytes));
+    const headings = statementNodes(document, "h2").map((node) =>
+      statementText(node).replace(/\s+/gu, ""),
+    );
+    const confirmed = statementNodes(document, "h1").filter(
+      (node) => statementText(node).replace(/\s+/gu, "") === "カードご利用代金明細(確定分)",
+    ).length;
+    if (
+      confirmed !== 1 ||
+      artifact.statementState === "unconfirmed" ||
+      artifact.statementState === "unknown"
+    ) {
+      if (confirmed > 1 || (confirmed === 1 && artifact.statementState === "unconfirmed"))
+        throw new Error("myjcb statement confirmation conflicts");
+      return { observations: [], warnings: ["statement_total_not_confirmed"] };
+    }
+    if (/\/credit-detail-00\.html$/u.test(artifact.artifactKey ?? ""))
+      throw new Error("myjcb detailMonth 0 cannot be finalized");
+    const periods = headings.flatMap((text) => {
+      const match = /^(\d{4})年(\d{1,2})月お支払い分のカードご利用明細$/u.exec(text);
+      return match ? [`${match[1]}-${match[2]!.padStart(2, "0")}`] : [];
+    });
+    if (periods.length !== 1) throw new Error("myjcb statement period missing or ambiguous");
+    const totals = statementNodes(document, "dt").filter((node) =>
+      statementText(node).includes("お支払い金額合計"),
+    );
+    if (totals.length === 0) return { observations: [], warnings: ["statement_total_missing"] };
+    if (totals.length !== 1) throw new Error("myjcb statement total is ambiguous");
+    const total = totals[0]!;
+    const label = statementText(total).replace(/\s+/gu, "");
+    const match = /^(\d{4})年(\d{1,2})月(\d{1,2})日\([月火水木金土日]\)お支払い金額合計$/u.exec(
+      label,
+    );
+    if (!match) throw new Error("myjcb statement total date is invalid");
+    const paymentDate = normalizedDate(
+      `${match[1]}-${match[2]!.padStart(2, "0")}-${match[3]!.padStart(2, "0")}`,
+      "myjcb statement payment date",
+    );
+    const period = paymentDate.slice(0, 7);
+    if (period !== periods[0]) throw new Error("myjcb statement date and month conflict");
+    if (artifact.period != null) {
+      const metadataMonth = providerYearMonth(artifact.period, "myjcb statement metadata period");
+      if (metadataMonth !== undefined && metadataMonth.slice(0, 7) !== period)
+        throw new Error("myjcb statement metadata and month conflict");
+    }
+    const parent = total.parentNode;
+    if (!parent || !("tagName" in parent) || parent.tagName !== "dl")
+      throw new Error("myjcb statement total has no definition list");
+    const values = parent.childNodes.filter((node) => "tagName" in node && node.tagName === "dd");
+    const labels = parent.childNodes.filter((node) => "tagName" in node && node.tagName === "dt");
+    if (values.length !== 1 || labels.length !== 1)
+      throw new Error("myjcb statement total value is ambiguous");
+    const amount = jpyAmount(statementText(values[0]!), "myjcb statement total");
+    const connection = artifact.artifactKey!.split("/")[0]!;
+    return {
+      observations: [
+        {
+          kind: "balance",
+          sourceAccount: `myjcb:${connection}:root`,
+          metric: "credit_statement_payment_amount",
+          amountMinor: amount,
+          amountText: String(amount),
+          amountScale: 0,
+          instrument: "JPY",
+          asOf: paymentDate,
+          observedAt: artifact.fetchedAt,
+          rawLocator: "html:dt[exact-statement-payment-total]+dd",
+          extra: {
+            _kogane: {
+              canonicalDataset: "credit-detail",
+              period,
+              statementMonth: period.replace("-", ""),
+              paymentDate,
+              statementState: "confirmed",
+              sourceAccountScope: "root-statement-aggregate",
+              amountSign: "provider-statement-total",
+              snapshotSemantics: "provider-reported-monthly-payment-amount",
+            },
+          },
+        },
+      ],
+      warnings: [],
+    };
+  },
+};
+
 export const myJcbEvidenceOnly: Parser = {
   name: "myjcb-canonical-evidence-boundary",
-  version: "1.0.0",
+  version: "1.1.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
       artifact.sourceId === SOURCE &&
       ((artifact.dataset === "credit-menu" && artifact.mime === "text/html; charset=utf-8") ||
-        (artifact.dataset === "credit-detail" && artifact.mime === "text/html; charset=utf-8") ||
         (artifact.dataset === "discovery" && artifact.mime === "application/json"))
     );
   },
@@ -367,7 +478,11 @@ function sameStringArray(value: unknown, expected: readonly string[]): boolean {
   );
 }
 
-function validateSanitizedHtml(bytes: Uint8Array, artifact: ArtifactMeta): void {
+function validateSanitizedHtml(
+  bytes: Uint8Array,
+  artifact: ArtifactMeta,
+  allowMissingStatementMeta = false,
+): void {
   const html = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   if (
     !/^\s*(?:<!doctype\s+html(?:\s+[^>]*)?>\s*)?<html\b/iu.test(html) ||
@@ -403,14 +518,20 @@ function validateSanitizedHtml(bytes: Uint8Array, artifact: ArtifactMeta): void 
     const match = key?.match(/^([a-z0-9][a-z0-9-]{0,63})\/credit-detail-(0[0-9]|1[0-7])\.html$/u);
     if (
       !match ||
-      typeof artifact.period !== "string" ||
-      artifact.period.length === 0 ||
-      artifact.period.length > 64 ||
-      !["confirmed", "unconfirmed", "unknown"].includes(artifact.statementState ?? "")
+      (!(allowMissingStatementMeta && artifact.period == null) &&
+        (typeof artifact.period !== "string" ||
+          artifact.period.length === 0 ||
+          artifact.period.length > 64)) ||
+      (!(allowMissingStatementMeta && artifact.statementState == null) &&
+        !["confirmed", "unconfirmed", "unknown"].includes(artifact.statementState ?? ""))
     ) {
       throw new Error("myjcb credit-detail metadata is invalid");
     }
-    if (Number(match[2]) === 0 && artifact.statementState !== "unconfirmed") {
+    if (
+      Number(match[2]) === 0 &&
+      artifact.statementState !== "unconfirmed" &&
+      !(allowMissingStatementMeta && artifact.statementState == null)
+    ) {
       throw new Error("myjcb detailMonth 0 must remain unconfirmed");
     }
     if (
