@@ -5,7 +5,7 @@ import type { TemporalValue } from "../../../packages/domain/src/time.ts";
 import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
 import type { CardSettlementReview } from "./reconciliation-api.ts";
 import { Link } from "./router.tsx";
-import { Badge, Kv, KvRow, Nullable } from "./ui.tsx";
+import { Badge, Kv, KvRow, Notice, Nullable } from "./ui.tsx";
 
 export const SETTLEMENT_STATUS = {
   proposed: "確認待ち",
@@ -118,13 +118,13 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
         </KvRow>
       </Kv>
       <h3>照合の根拠</h3>
-      <ul className="plain-list">
+      <ul className="warning-list">
         {facts.rationaleCodes.map((code) => (
           <li key={code}>{settlementReason(code)}</li>
         ))}
       </ul>
       {review.acceptanceBlockers.length > 0 ? (
-        <div role="note" className="notice notice-warn">
+        <Notice tone="warn" inline role="note">
           <p>
             <strong>
               {review.status === "proposed"
@@ -132,13 +132,13 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
                 : "保存された根拠の再確認が必要です。"}
             </strong>
           </p>
-          <ul className="plain-list">
+          <ul className="warning-list">
             {review.acceptanceBlockers.map((code) => (
               <li key={code}>{settlementReason(code)}</li>
             ))}
           </ul>
           <p>金額や日付の一致だけで、口座の保有者を推測して確定することはありません。</p>
-        </div>
+        </Notice>
       ) : null}
       <h3>残高・支出への影響</h3>
       <Kv>
@@ -174,7 +174,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
       </p>
       <details className="detail-disclosure settlement-history">
         <summary>再確認する条件と判断の履歴</summary>
-        <ul className="plain-list">
+        <ul className="warning-list">
           {facts.rejectionConditions.map((code) => (
             <li key={code}>{settlementReason(code)}</li>
           ))}

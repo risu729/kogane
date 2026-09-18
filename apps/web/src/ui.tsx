@@ -511,19 +511,24 @@ export function QueryBoundary<T>({
 
 // ── notices ──────────────────────────────────────────────────────────
 
-/** A toned message: warn for a stale or derived value, bad for a blocker.
- * Inside a panel it sits as the panel note; in page flow it gets its own frame. */
+/** A toned message: warn for a stale or derived value, bad for a blocker; no
+ * tone for a plain remark. At panel level it is the panel note (in page flow
+ * it gets its own frame); `inline` renders the boxed `.notice` for a message
+ * inside a panel body. */
 export function Notice({
   tone,
   role,
+  inline = false,
   children,
 }: {
-  tone: "warn" | "bad";
-  role?: "alert" | "status";
+  tone?: "warn" | "bad" | undefined;
+  role?: "alert" | "status" | "note";
+  inline?: boolean;
   children: ReactNode;
 }): ReactNode {
+  const base = inline ? "notice" : "panel-note";
   return (
-    <div className={`panel-note panel-note-${tone}`} role={role}>
+    <div className={tone === undefined ? base : `${base} ${base}-${tone}`} role={role}>
       {children}
     </div>
   );

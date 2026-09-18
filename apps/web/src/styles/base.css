@@ -238,7 +238,13 @@ summary:hover {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
+}
+
+/* An ordered stack keeps its numbers: the order is the point of the element. */
+ol.plain-list {
+  list-style: decimal;
+  padding-left: var(--space-5);
 }
 
 .warning-list {

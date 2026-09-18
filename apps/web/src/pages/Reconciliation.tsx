@@ -10,7 +10,7 @@ import {
 } from "../reconciliation-display.tsx";
 import { postCommand, type ChangePlanView } from "../command-api.ts";
 import { Link, navigate } from "../router.tsx";
-import { Badge, EmptyState, Loading, QueryBoundary } from "../ui.tsx";
+import { Badge, EmptyState, Loading, Notice, QueryBoundary } from "../ui.tsx";
 
 function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode {
   const features = useFeatures();
@@ -91,9 +91,9 @@ function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode 
         ) : null}
       </div>
       {plan.isError ? (
-        <p className="notice notice-bad" role="alert">
+        <Notice tone="bad" inline role="alert">
           {plan.error.message}
-        </p>
+        </Notice>
       ) : null}
       <p className="footnote">
         次の画面で内容を確認し、承認してから確定します。確認画面を開くだけでは採用・却下しません。

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { CardOwnershipSide } from "../../../packages/domain/src/card-ownership-review.ts";
 import { Link } from "./router.tsx";
-import { Kv, KvRow } from "./ui.tsx";
+import { Kv, KvRow, Notice } from "./ui.tsx";
 export const OWNERSHIP_ROLES = {
   liable_party: "カード請求の支払義務を負う人",
   beneficial_owner: "銀行口座の資金を保有する人",
@@ -39,14 +39,14 @@ export function CardOwnershipDetails({ side }: { side: CardOwnershipSide }): Rea
         </KvRow>
       </Kv>
       {side.blockers.length > 0 ? (
-        <div role="note" className="notice notice-warn">
-          <ul className="plain-list">
+        <Notice tone="warn" inline role="note">
+          <ul className="warning-list">
             {side.blockers.map((code) => (
               <li key={code}>{BLOCKERS[code] ?? code}</li>
             ))}
           </ul>
           <Link to="/identities">口座の整理を確認</Link>
-        </div>
+        </Notice>
       ) : null}
       <details className="detail-disclosure settlement-history">
         <summary>現在の対応と記録済みの判断</summary>

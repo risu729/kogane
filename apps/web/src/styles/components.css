@@ -359,6 +359,10 @@
   margin-bottom: 0;
 }
 
+.notice strong {
+  display: block;
+}
+
 .notice a {
   color: inherit;
 }

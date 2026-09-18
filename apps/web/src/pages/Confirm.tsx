@@ -13,7 +13,7 @@ import { CardOwnershipDetails, OWNERSHIP_ROLES, ownerLabel } from "../card-owner
 import { useCardSettlement } from "../reconciliation-api.ts";
 import { CardSettlementDetails } from "../reconciliation-display.tsx";
 import { Link } from "../router.tsx";
-import { Badge, EmptyState, Kv, KvRow, Nullable, Panel, QueryBoundary } from "../ui.tsx";
+import { Badge, EmptyState, Kv, KvRow, Notice, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
   CommandError,
   postCommand,
@@ -216,10 +216,10 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
               }
             >
               {data.stale ? (
-                <p className="panel-note panel-note-bad" role="alert">
+                <Notice tone="bad" role="alert">
                   この計画が読み取った版から対象が変わりました。古い承認は適用されません。再試算した計画で
                   確認し直してください。
-                </p>
+                </Notice>
               ) : null}
               <div className="panel-body">
                 <Kv>
@@ -246,9 +246,9 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
               <Panel id="ownership-review" title="口座の保有者の判断">
                 <div className="panel-body">
                   {!features.cardOwnershipReview ? (
-                    <p className="notice notice-bad" role="alert">
+                    <Notice tone="bad" inline role="alert">
                       保有者の根拠を取得できない接続先のため、承認・確定できません。
-                    </p>
+                    </Notice>
                   ) : (
                     <QueryBoundary query={ownership} label="保有者の根拠">
                       {() =>
@@ -265,17 +265,17 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                             </p>
                           </>
                         ) : (
-                          <p className="notice notice-bad" role="alert">
+                          <Notice tone="bad" inline role="alert">
                             計画した口座と根拠の詳細を取得できません。
-                          </p>
+                          </Notice>
                         )
                       }
                     </QueryBoundary>
                   )}
                   {!ownershipReady && ownership.isSuccess ? (
-                    <p className="notice notice-bad" role="alert">
+                    <Notice tone="bad" inline role="alert">
                       口座または保有者の記録が計画作成後に変わっています。新しい計画で確認し直してください。
-                    </p>
+                    </Notice>
                   ) : null}
                   <p className="footnote">
                     保有者の判断を保存してもカード決済は採用されません。次の定期処理で新しい照合候補が作成された後、請求と銀行引落を別に確認してください。
@@ -294,9 +294,9 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
               <Panel id="settlement-review" title="請求・銀行原本と金額の確認">
                 <div className="panel-body">
                   {!features.cardSettlementReconciliation ? (
-                    <p className="notice notice-bad" role="alert">
+                    <Notice tone="bad" inline role="alert">
                       照合の詳細を取得できない接続先のため、承認・確定できません。
-                    </p>
+                    </Notice>
                   ) : (
                     <QueryBoundary
                       query={settlement}
@@ -310,19 +310,19 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                     </QueryBoundary>
                   )}
                   {!settlementRevisionMatches && settlement.isSuccess ? (
-                    <p className="notice notice-bad" role="alert">
+                    <Notice tone="bad" inline role="alert">
                       候補の判断が計画作成後に更新されています。新しい計画で確認し直してください。
-                    </p>
+                    </Notice>
                   ) : null}
                   {!settlementActionAllowed && settlement.isSuccess ? (
-                    <p className="notice notice-bad" role="alert">
+                    <Notice tone="bad" inline role="alert">
                       この候補では計画した操作を実行できません。条件と根拠を一覧で確認し直してください。
-                    </p>
+                    </Notice>
                   ) : null}
                   {data.simulation.kind === "card-settlement.withdraw" ? (
-                    <p className="notice notice-warn">
+                    <Notice tone="warn" inline>
                       解除するのは請求と引落の対応付けです。銀行の出金原本は残り、現金が返却されたことにはなりません。
-                    </p>
+                    </Notice>
                   ) : null}
                   <p className="footnote">
                     <Link to="/reconciliation">照合候補に戻る</Link>
@@ -451,18 +451,18 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                   </button>
                 </div>
                 {approveMutation.isError ? (
-                  <p className="notice notice-bad" role="alert">
+                  <Notice tone="bad" inline role="alert">
                     {approveMutation.error instanceof CommandError
                       ? approveMutation.error.message
                       : "承認できませんでした。"}
-                  </p>
+                  </Notice>
                 ) : null}
                 {commitMutation.isError ? (
-                  <p className="notice notice-bad" role="alert">
+                  <Notice tone="bad" inline role="alert">
                     {commitMutation.error instanceof CommandError
                       ? commitMutation.error.message
                       : "確定できませんでした。"}
-                  </p>
+                  </Notice>
                 ) : null}
                 <p className="footnote">
                   承認は試算した内容への同意、確定はその適用です。対象が変わると承認は無効になります。
@@ -472,18 +472,18 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
 
             {receipt === null ? null : (
               <Panel id="plan-receipt" title="操作の記録">
-                <p
-                  className={`panel-note${
+                <Notice
+                  tone={
                     RECEIPT_STATE[receipt.status]?.tone === "bad"
-                      ? " panel-note-bad"
+                      ? "bad"
                       : RECEIPT_STATE[receipt.status]?.tone === "warn"
-                        ? " panel-note-warn"
-                        : ""
-                  }`}
+                        ? "warn"
+                        : undefined
+                  }
                   role="status"
                 >
                   {RECEIPT_STATE[receipt.status]?.note ?? ""}
-                </p>
+                </Notice>
                 <div className="panel-body">
                   <Kv>
                     <KvRow label="操作ID">
@@ -503,9 +503,9 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                     </KvRow>
                   </Kv>
                   {receiptError ? (
-                    <p className="notice notice-bad" role="alert">
+                    <Notice tone="bad" inline role="alert">
                       {receiptError}
-                    </p>
+                    </Notice>
                   ) : null}
                   {receipt.status === "accepted" ? (
                     <div className="button-row">

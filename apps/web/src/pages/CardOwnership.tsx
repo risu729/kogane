@@ -10,7 +10,7 @@ import { CardOwnershipDetails, OWNERSHIP_ROLES, ownerLabel } from "../card-owner
 import { useFeatures } from "../api.ts";
 import { postCommand, type ChangePlanView } from "../command-api.ts";
 import { Link, navigate } from "../router.tsx";
-import { EmptyState, Loading, Panel, QueryBoundary } from "../ui.tsx";
+import { EmptyState, Loading, Notice, Panel, QueryBoundary } from "../ui.tsx";
 
 function OwnershipForm({
   review,
@@ -100,9 +100,9 @@ function OwnershipForm({
         </p>
       </div>
       {invalidLabel ? (
-        <p className="notice notice-bad" role="alert">
+        <Notice tone="bad" inline role="alert">
           識別名は128文字以内とし、縦線・スラッシュ・制御文字を含めないでください。
-        </p>
+        </Notice>
       ) : null}
       <label className="check-field ownership-evidence">
         <input
@@ -142,9 +142,9 @@ function OwnershipForm({
         </button>
       </div>
       {plan.isError ? (
-        <p className="notice notice-bad" role="alert">
+        <Notice tone="bad" inline role="alert">
           {plan.error.message}
-        </p>
+        </Notice>
       ) : null}
       <p className="footnote">
         ここでは期間を限定しない関係を記録します。名義変更や期間の指定が必要な場合は、この画面では確定しないでください。次の画面で承認・確定するまで判断は保存されません。
