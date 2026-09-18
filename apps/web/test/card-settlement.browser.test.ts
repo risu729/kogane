@@ -155,6 +155,9 @@ describe.if(runnable)("card settlement review", () => {
         exact: true,
       })
       .waitFor();
+    // The page head renders before the list or plan resolves; wait for every
+    // loading skeleton (outer and nested boundaries) to be gone.
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
     return page;
   }
 

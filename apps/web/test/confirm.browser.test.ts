@@ -118,6 +118,9 @@ describe.if(runnable)("change confirmation screen", () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/confirm/${PLAN_ID}`);
     await page.getByRole("heading", { name: "変更の確認" }).waitFor();
+    // The page head renders before the plan resolves; wait for every loading
+    // skeleton (outer plan and nested evidence boundaries) to be gone.
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
     return page;
   };
 
