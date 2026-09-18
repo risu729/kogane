@@ -83,6 +83,30 @@ Rule: new CSS uses tokens. Raw colours, pixel sizes and radii belong only in
 `tokens.css`; a value that has no token gets one there first. The brand mark's
 drawn dimensions are the one documented exception.
 
+### Shared primitives
+
+Pages compose these instead of writing their own markup or rules:
+
+| Need                          | Use                                                                                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Page header                   | `.page-head` with the `<h1>` and a `.lede`; `.footnote` for caveats                                                                   |
+| Grouped content               | `Panel` (`.panel` with `.panel-head`, `.panel-note`, `.panel-body`); content inside a panel always sits in `.panel-body`              |
+| Key/value facts               | `Kv` / `KvRow`                                                                                                                        |
+| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, never blank                                                    |
+| Loading, error, empty, stale  | `QueryBoundary` (with `isEmpty`/`empty`), `ErrorState`, `EmptyState`                                                                  |
+| Notices                       | `Notice` (`.panel-note` tones `-warn`/`-bad`) at panel level; `.notice notice-warn/-bad` inside a body                                |
+| Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |
+| Free-text and checkbox inputs | `.field` (label + input/textarea) and `.check-field`; never a bare native control                                                     |
+| Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`                                                                            |
+| Paging                        | `Pagination` (offset or cursor) rendering `.pagination`                                                                               |
+| Tables                        | `.table-scroll` region with `role="region"`, `tabIndex`, a `<caption>` and a class that sets `min-width`; `.cell-time` for timestamps |
+| Disclosures                   | `.detail-disclosure` (card) or `.inline-disclosure` (inside cells and cards)                                                          |
+| Lists                         | `.plain-list` (stacked, no bullets), `.warning-list` (parser warnings)                                                                |
+| Long tokens                   | `.wrap-any`; `.visually-hidden` for captions whose text is already on screen                                                          |
+
+The application frame is `AppShell`, used by both the observation client and
+the evidence-only client; navigation entries come from one list with icons.
+
 ## API metadata and capabilities
 
 `/api/meta` describes the connection. Its `source.kind` (`local-store`,
