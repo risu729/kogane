@@ -505,15 +505,96 @@
 
 /* ── settlement and card ownership ─────────────────────────────────── */
 
+/* One reconciliation candidate: a panel whose head carries the facts that
+ * identify it (source, amount, status), with the full review under a
+ * disclosure that is open only while the candidate still needs a decision. */
+.settlement-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+}
+
+.settlement-head h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settlement-head .badge {
+  justify-self: start;
+}
+
+.settlement-facts {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.settlement-facts dt {
+  display: inline;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.settlement-facts dd {
+  display: inline;
+  margin: 0;
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.settlement-facts .null {
+  font-family: var(--sans);
+}
+
+.settlement-disclosure {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.settlement-disclosure > summary {
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-sm);
+  background: var(--panel-2);
+}
+
+.settlement-disclosure[open] > summary {
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settlement-details h3 {
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+.settlement-details .kv + h3 {
+  margin-top: var(--space-6);
+}
+
 /* A written reason precedes every reviewed settlement decision. */
 .settlement-reason {
-  display: block;
-  box-sizing: border-box;
-  width: 100%;
-  margin: var(--space-2) 0 var(--space-4);
-  padding: var(--space-3);
-  font: inherit;
-  resize: vertical;
+  min-height: calc(var(--control-height) * 2);
+}
+
+.settlement-decision {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.settlement-decision .button-row,
+.ownership-form .button-row {
+  margin-top: 0;
 }
 
 .settlement-history {
@@ -524,26 +605,37 @@
   min-width: 40rem;
 }
 
+/* The ownership decision form is its own surface beneath the evidence. */
 .ownership-form {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4);
+  margin-top: var(--space-6);
   padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
 }
 
-.ownership-form > input {
-  min-width: 0;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.ownership-evidence {
-  display: flex;
-  align-items: start;
-  gap: var(--space-2);
+.ownership-form .field input,
+.ownership-form .field textarea {
+  background: var(--panel);
 }
 
 @media (max-width: 760px) {
+  .settlement-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settlement-disclosure > summary {
+    padding: var(--space-3) var(--space-4);
+  }
+  .settlement-decision {
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+  }
   .ownership-form {
+    gap: var(--space-3);
+    margin-top: var(--space-5);
     padding: var(--space-4);
   }
 }

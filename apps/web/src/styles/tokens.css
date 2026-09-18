@@ -97,4 +97,8 @@
 
   /* Shadows */
   --shadow-sm: 0 2px 4px color-mix(in srgb, var(--ink) 3%, transparent);
+
+  /* Controls */
+  --control-height: 38px; /* inputs and buttons */
+  --check-size: 18px; /* native checkbox, drawn by the browser */
 }

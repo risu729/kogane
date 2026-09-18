@@ -2,10 +2,15 @@ import { useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useFeatures } from "../api.ts";
 import { useCardSettlements, type CardSettlementReview } from "../reconciliation-api.ts";
-import { CardSettlementDetails } from "../reconciliation-display.tsx";
+import {
+  CardSettlementDetails,
+  DateValue,
+  SETTLEMENT_STATUS,
+  SettlementQuantity,
+} from "../reconciliation-display.tsx";
 import { postCommand, type ChangePlanView } from "../command-api.ts";
 import { Link, navigate } from "../router.tsx";
-import { EmptyState, ErrorState, Loading, Panel } from "../ui.tsx";
+import { Badge, EmptyState, Loading, QueryBoundary } from "../ui.tsx";
 
 function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode {
   const features = useFeatures();
@@ -35,22 +40,24 @@ function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode 
   const proposed = review.status === "proposed";
   if (review.status === "rejected" || review.status === "withdrawn")
     return (
-      <p className="panel-note">
+      <p className="footnote">
         この候補の判断は保存されています。対応先を訂正する場合は、別の候補を原本と照合して採用してください。
       </p>
     );
   return (
-    <>
-      <label htmlFor={`reason-${review.proposalId}`}>判断の理由</label>
-      <textarea
-        id={`reason-${review.proposalId}`}
-        className="settlement-reason"
-        rows={2}
-        maxLength={1000}
-        value={reason}
-        onChange={(event) => setReason(event.target.value)}
-        disabled={!features.known || !features.commands || plan.isPending}
-      />
+    <div className="settlement-decision">
+      <div className="field">
+        <label htmlFor={`reason-${review.proposalId}`}>判断の理由</label>
+        <textarea
+          id={`reason-${review.proposalId}`}
+          className="settlement-reason"
+          rows={2}
+          maxLength={1000}
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          disabled={!features.known || !features.commands || plan.isPending}
+        />
+      </div>
       <div className="button-row">
         {proposed ? (
           <button
@@ -83,11 +90,76 @@ function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode 
           </button>
         ) : null}
       </div>
-      <p className="panel-note">
+      {plan.isError ? (
+        <p className="notice notice-bad" role="alert">
+          {plan.error.message}
+        </p>
+      ) : null}
+      <p className="footnote">
         次の画面で内容を確認し、承認してから確定します。確認画面を開くだけでは採用・却下しません。
       </p>
-      {plan.isError ? <p role="alert">{plan.error.message}</p> : null}
-    </>
+    </div>
+  );
+}
+
+function statementSource(review: CardSettlementReview): string {
+  return review.facts.statement.sourceId === "vpass" ? "Vpass" : "MyJCB";
+}
+
+/**
+ * One candidate. The head carries what identifies it; the review itself sits
+ * under a disclosure that starts open only while a decision is still due.
+ */
+function SettlementCard({ review }: { review: CardSettlementReview }): ReactNode {
+  const features = useFeatures();
+  const id = `review-${review.proposalId}`;
+  const { facts } = review;
+  return (
+    <section className="panel" aria-labelledby={id}>
+      <div className="panel-head settlement-head">
+        <h2 id={id}>{statementSource(review)} の請求と銀行引落</h2>
+        <Badge tone={review.status === "accepted" ? "ok" : "neutral"}>
+          {SETTLEMENT_STATUS[review.status]}
+        </Badge>
+        <dl className="settlement-facts">
+          <div>
+            <dt>請求総額 </dt>
+            <dd>
+              <SettlementQuantity value={facts.statement.amount} />
+            </dd>
+          </div>
+          <div>
+            <dt>引落予定日 </dt>
+            <dd>
+              <DateValue value={facts.statement.paymentDate} />
+            </dd>
+          </div>
+          <div>
+            <dt>銀行 </dt>
+            <dd>
+              {facts.bankDebit.sourceId} · {facts.bankDebit.sourceAccount}
+            </dd>
+          </div>
+        </dl>
+      </div>
+      <details
+        className="detail-disclosure settlement-disclosure"
+        open={review.status === "proposed"}
+      >
+        <summary>候補の詳細と判断</summary>
+        <div className="panel-body">
+          <CardSettlementDetails review={review} />
+          {features.cardOwnershipReview && review.status === "proposed" ? (
+            <p>
+              <Link to={`/reconciliation/${review.proposalId}/ownership`}>
+                口座の保有者と根拠を確認
+              </Link>
+            </p>
+          ) : null}
+          <ReviewActions review={review} />
+        </div>
+      </details>
+    </section>
   );
 }
 
@@ -96,62 +168,58 @@ export function ReconciliationPage(): ReactNode {
   const [offset, setOffset] = useState(0);
   const query = useCardSettlements(offset);
   if (!features.known) return <Loading label="照合機能" />;
-  if (!features.cardSettlementReconciliation)
-    return (
-      <>
-        <h1>カード請求と引落の照合</h1>
-        <EmptyState>この接続先はカード決済の照合候補を提供していません。</EmptyState>
-      </>
-    );
-  if (query.isPending) return <Loading label="照合候補" />;
-  if (query.isError)
-    return <ErrorState error={query.error} label="照合候補" onRetry={() => void query.refetch()} />;
   return (
     <>
-      <h1>カード請求と引落の照合</h1>
-      <p>
-        カード会社の請求総額と銀行の出金を、原本を見ながら確認します。候補は自動採用されません。
-      </p>
-      <p className="panel-note">
-        対象は取得済みの請求・銀行明細です。候補がないことは、未払がないことや照合が完了したことを意味しません。
-      </p>
-      {query.data.items.length === 0 ? (
-        <EmptyState>現在表示できる照合候補はありません。</EmptyState>
-      ) : (
-        query.data.items.map((review) => (
-          <Panel
-            key={review.proposalId}
-            id={`review-${review.proposalId}`}
-            title={`${review.facts.statement.sourceId === "vpass" ? "Vpass" : "MyJCB"} の請求と銀行引落`}
-          >
-            <CardSettlementDetails review={review} />
-            {features.cardOwnershipReview && review.status === "proposed" ? (
-              <p>
-                <Link to={`/reconciliation/${review.proposalId}/ownership`}>
-                  口座の保有者と根拠を確認
-                </Link>
-              </p>
-            ) : null}
-            <ReviewActions review={review} />
-          </Panel>
-        ))
-      )}
-      <div className="button-row" aria-label="照合候補のページ">
-        {offset > 0 ? (
-          <button className="button" type="button" onClick={() => setOffset(0)}>
-            先頭に戻る
-          </button>
-        ) : null}
-        {query.data.nextOffset !== null ? (
-          <button
-            className="button"
-            type="button"
-            onClick={() => setOffset(query.data.nextOffset!)}
-          >
-            次の候補
-          </button>
-        ) : null}
+      <div className="page-head">
+        <h1>カード請求と引落の照合</h1>
+        <p className="lede">
+          カード会社の請求総額と銀行の出金を、原本を見ながら確認します。候補は自動採用されません。
+        </p>
+        <p className="footnote">
+          対象は取得済みの請求・銀行明細です。候補がないことは、未払がないことや照合が完了したことを意味しません。
+        </p>
       </div>
+      {!features.cardSettlementReconciliation ? (
+        <EmptyState>この接続先はカード決済の照合候補を提供していません。</EmptyState>
+      ) : (
+        <QueryBoundary
+          query={query}
+          label="照合候補"
+          isEmpty={(data) => data.items.length === 0}
+          empty="現在表示できる照合候補はありません。"
+        >
+          {(data) => (
+            <>
+              {data.items.map((review) => (
+                <SettlementCard key={review.proposalId} review={review} />
+              ))}
+              <nav className="pagination" aria-label="照合候補のページ">
+                <span role="status" aria-live="polite">
+                  {offset + 1}–{offset + data.items.length} 件目
+                </span>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={offset === 0}
+                  onClick={() => setOffset(0)}
+                >
+                  先頭に戻る
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={data.nextOffset === null}
+                  onClick={() =>
+                    data.nextOffset === null ? undefined : setOffset(data.nextOffset)
+                  }
+                >
+                  次の候補
+                </button>
+              </nav>
+            </>
+          )}
+        </QueryBoundary>
+      )}
     </>
   );
 }
