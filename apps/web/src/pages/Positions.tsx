@@ -1,7 +1,17 @@
 import type { ReactNode } from "react";
 import { useFeatures, usePositions, type PositionWithValuations } from "../api.ts";
-import { Amount, Badge, EmptyState, Nullable, ObservationLink, QueryBoundary } from "../ui.tsx";
+import {
+  Amount,
+  Badge,
+  EmptyState,
+  Kv,
+  KvRow,
+  Nullable,
+  ObservationLink,
+  QueryBoundary,
+} from "../ui.tsx";
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
+import { formatAmount } from "../money.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
 import {
@@ -80,6 +90,12 @@ function PositionList({ entries }: { entries: PositionWithValuations[] }): React
     </>
   );
 }
+/**
+ * A figure whose formatted amount is longer than this takes the whole row of
+ * the grid, so a large exact amount is read in one line rather than scrolled.
+ * This is a length of text, never a comparison of amounts.
+ */
+const WIDE_FIGURE_CHARS = 16;
 function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
   const { position, valuations } = entry;
   const security = organizedInstrument(position.organization, "security");
@@ -87,48 +103,47 @@ function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
   return (
     <article className="position-card">
       <div className="position-facts">
+        {/* The security code is the heading: it is the identifier the source
+            reported, and the name underneath is a label for it. */}
         <div className="position-title">
-          <span className="security-code">{position.security_code}</span>
+          <h2 className="security-code">{position.security_code}</h2>
           <Badge>{position.source_id}</Badge>
         </div>
-        <h2 className="security-name">
+        <div className="security-name">
           <Nullable value={security?.label || position.security_name} placeholder="銘柄名未記録" />
-        </h2>
+        </div>
         {security && security.label !== position.security_name ? (
           <div className="table-secondary">
             取得元の銘柄名: <Nullable value={position.security_name} />
           </div>
         ) : null}
-        <div className="quantity">{position.quantity_text}</div>
-        <div className="figure-metric">保有数量（取得元の表記）</div>
-        <dl className="kv">
-          <dt>口座</dt>
-          <dd>
+        <div className="position-quantity">
+          <div className="quantity">{position.quantity_text}</div>
+          <div className="figure-metric">保有数量（取得元の表記）</div>
+        </div>
+        <Kv>
+          <KvRow label="口座">
             <OrganizedSourceAccount
               source={position.source_id}
               account={position.source_account}
               organization={position.organization}
             />
-          </dd>
-          <dt>市場</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="市場">
             <Nullable value={position.market} />
-          </dd>
-          <dt>通貨</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="通貨">
             <Nullable value={position.currency} />
-          </dd>
-          <dt>基準日</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="基準日">
             <Nullable value={position.as_of} />
-          </dd>
-          <dt>記録</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="記録">
             <ObservationLink kind="position" id={position.id}>
               詳細・原本を確認
             </ObservationLink>
-          </dd>
-        </dl>
+          </KvRow>
+        </Kv>
         <details className="detail-disclosure">
           <summary>数量・解析の情報</summary>
           <p>
@@ -149,40 +164,49 @@ function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
                 <div className="figures">
                   {valuations
                     .filter((value) => value.currency === currency)
-                    .map((value) => (
-                      <div className="figure" key={value.id}>
-                        <div className="figure-metric">{value.metric}</div>
-                        <OrganizedSourceAccount
-                          source={value.source_id}
-                          account={value.source_account}
-                          organization={value.organization}
-                        />
-                        <OrganizedInstrumentContext
-                          organization={value.organization}
-                          role="security"
-                        />
-                        <OrganizedInstrumentContext
-                          organization={value.organization}
-                          role="unit"
-                          original={value.currency}
-                        />
-                        <div className="figure-amount">
-                          <Amount
-                            minor={value.amount_minor}
-                            unit={value.currency}
-                            text={value.amount_text}
+                    .map((value) => {
+                      const wide =
+                        formatAmount(value.amount_minor, value.currency, value.amount_text).length >
+                        WIDE_FIGURE_CHARS;
+                      return (
+                        <div className={wide ? "figure figure-wide" : "figure"} key={value.id}>
+                          <div className="figure-head">
+                            <span className="figure-metric">{value.metric}</span>
+                            {/* The currency stays visible even when the amount is missing. */}
+                            <span className="figure-currency">{value.currency}</span>
+                          </div>
+                          <OrganizedSourceAccount
+                            source={value.source_id}
+                            account={value.source_account}
+                            organization={value.organization}
                           />
+                          <OrganizedInstrumentContext
+                            organization={value.organization}
+                            role="security"
+                          />
+                          <OrganizedInstrumentContext
+                            organization={value.organization}
+                            role="unit"
+                            original={value.currency}
+                          />
+                          <div className="figure-amount">
+                            <Amount
+                              minor={value.amount_minor}
+                              unit={value.currency}
+                              text={value.amount_text}
+                            />
+                          </div>
+                          <div className="figure-foot">
+                            <span className="figure-asof">
+                              基準日: <Nullable value={value.as_of} />
+                            </span>
+                            <ObservationLink kind="valuation" id={value.id}>
+                              詳細
+                            </ObservationLink>
+                          </div>
                         </div>
-                        <div className="figure-foot">
-                          <span>
-                            基準日: <Nullable value={value.as_of} />
-                          </span>
-                          <ObservationLink kind="valuation" id={value.id}>
-                            詳細
-                          </ObservationLink>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               </div>
             </section>

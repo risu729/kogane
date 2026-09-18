@@ -193,6 +193,19 @@ summary:hover {
   min-width: 14ch;
 }
 
+/* Present for assistive technology and search, drawn nowhere: table captions
+ * whose text already appears as the panel title, and the like. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* Unbroken provider strings (URLs, run ids, hashes) wrap inside their box. */
 .wrap-any {
   overflow-wrap: anywhere;

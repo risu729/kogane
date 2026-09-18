@@ -258,8 +258,14 @@ describe.if(runnable)("organized observation labels", () => {
       expect(await page.locator("main").innerText()).toContain("日本円");
       expect(await page.locator("main").innerText()).toContain("248,820");
       await page.goto(origin + "/positions");
-      await page.locator("h2.security-name").first().waitFor();
-      expect(await page.locator("h2.security-name").first().textContent()).toBe(securityLabel);
+      // The heading is the reported code; the organized name is its secondary line.
+      await page.locator(".position-card .security-name").first().waitFor();
+      expect(await page.locator(".position-card h2.security-code").first().textContent()).toBe(
+        "1234",
+      );
+      expect(await page.locator(".position-card .security-name").first().textContent()).toBe(
+        securityLabel,
+      );
       expect(await page.locator(".position-facts").first().innerText()).toContain("Example <Fund>");
       expect(await page.locator(".position-valuations").first().innerText()).toContain(
         accountLabel,
