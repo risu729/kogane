@@ -265,6 +265,21 @@
   font-size: var(--text-xs);
 }
 
+/* ── observation detail ────────────────────────────────────────────── */
+
+/* Two columns (label, stored value): a phone width holds it without a
+ * scroller, so it keeps a smaller minimum than the shared table default. */
+.stored-row-table {
+  min-width: 20rem;
+}
+
+/* It fits a phone width, so the shared "scroll sideways" hint would be false. */
+@media (max-width: 760px) {
+  .table-scroll:has(.stored-row-table)::before {
+    content: none;
+  }
+}
+
 /* ── observation lists ─────────────────────────────────────────────── */
 
 .obs-list {

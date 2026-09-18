@@ -6,7 +6,10 @@ import {
   Amount,
   CellValue,
   KindBadge,
+  Kv,
+  KvRow,
   LineageBadge,
+  Notice,
   Nullable,
   Panel,
   QueryBoundary,
@@ -50,6 +53,7 @@ const FIELD_LABELS: Record<string, string> = {
   subject: "評価対象",
   raw_locator: "原本内の位置",
   parse_run_id: "解析番号",
+  parser: "解析方法",
 };
 export function ObservationDetailPage({
   kind,
@@ -106,13 +110,13 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
   return (
     <>
       {provenance?.superseded_by_parse_run_id != null ? (
-        <div className="state state-error" role="alert">
-          <span className="state-title">これは旧解析の記録です</span>
+        <Notice tone="warn" role="alert">
+          <strong>これは旧解析の記録です</strong>
           <p>
             解析 #{provenance.superseded_by_parse_run_id}
             に置き換えられています。現在の値として扱わないでください。
           </p>
-        </div>
+        </Notice>
       ) : null}
       {hasAmount ? (
         <Panel id="amount" title="記録された金額">
@@ -179,8 +183,9 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
         </Panel>
       ) : null}
       <Panel id="stored-row" title="記録の内容">
-        <div className="table-scroll">
-          <table>
+        <div className="table-scroll" role="region" aria-label="記録の内容" tabIndex={0}>
+          <table className="stored-row-table">
+            <caption>保存された列と値をそのまま並べています。</caption>
             <thead>
               <tr>
                 <th scope="col">項目</th>
@@ -227,18 +232,15 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
                 </code>
               </pre>
             )}
-            <details>
+            <details className="detail-disclosure">
               <summary>内部の項目名</summary>
-              <dl className="kv">
+              <Kv>
                 {Object.keys(row).map((key) => (
-                  <div className="kv-entry" key={key}>
-                    <dt>{displayLabel(FIELD_LABELS, key)}</dt>
-                    <dd>
-                      <code>{key}</code>
-                    </dd>
-                  </div>
+                  <KvRow key={key} label={displayLabel(FIELD_LABELS, key)}>
+                    <code>{key}</code>
+                  </KvRow>
                 ))}
-              </dl>
+              </Kv>
             </details>
           </div>
         </Panel>
@@ -248,10 +250,10 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
       </h2>
       <p className="footnote">記録 → 解析 → 原本 → 収集の順に、保存された情報を確認できます。</p>
       {provenance == null ? (
-        <div className="state state-error" role="alert">
-          <span className="state-title">原本へのつながりを確認できません</span>
+        <Notice tone="bad" role="alert">
+          <strong>原本へのつながりを確認できません</strong>
           <p>対応する解析記録がないため、この値の取得経路を確認できません。</p>
-        </div>
+        </Notice>
       ) : (
         <ProvenanceChain detail={detail} provenance={provenance} />
       )}
@@ -260,10 +262,12 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
 }
 function Step({
   number,
+  stage,
   title,
   children,
 }: {
   number: number;
+  stage: string;
   title: string;
   children: ReactNode;
 }): ReactNode {
@@ -274,7 +278,10 @@ function Step({
       </span>
       <section className="chain-card">
         <div className="chain-card-head">
-          <h3>{title}</h3>
+          <div className="chain-heading">
+            <span className="chain-stage">{stage}</span>
+            <h3 className="chain-title">{title}</h3>
+          </div>
         </div>
         <div className="chain-body">{children}</div>
       </section>
@@ -290,94 +297,92 @@ function ProvenanceChain({
 }): ReactNode {
   return (
     <ol className="chain">
-      <Step number={1} title="記録と原本内の位置">
-        <dl className="kv">
-          <dt>口座</dt>
-          <dd>
+      <Step number={1} stage="記録" title="口座と原本内の位置">
+        <Kv>
+          <KvRow label="口座">
             <Nullable value={stringAt(detail.row, "source_account")} />
-          </dd>
-          <dt>原本内の位置</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="原本内の位置">
             <Nullable value={stringAt(detail.row, "raw_locator")} placeholder="位置未記録" />
-          </dd>
-        </dl>
+          </KvRow>
+        </Kv>
         <p className="footnote">
           この位置を原本と照らし合わせることで、読み取った値を確認できます。
         </p>
       </Step>
-      <Step number={2} title={`解析 #${p.parse_run_id}`}>
+      <Step number={2} stage="解析" title={`解析 #${p.parse_run_id}`}>
         <StatusBadge status={p.parse_status} />
         <LineageBadge supersededBy={p.superseded_by_parse_run_id} />
-        <dl className="kv">
-          <dt>解析方法</dt>
-          <dd>
+        <Kv>
+          <KvRow label="解析方法">
             {p.parser_name}@{p.parser_version}
-          </dd>
-          <dt>解析日時</dt>
-          <dd>{p.parsed_at}</dd>
-          <dt>エラー</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="解析日時">{p.parsed_at}</KvRow>
+          <KvRow label="エラー">
             <Nullable value={p.error} placeholder="エラー未記録" />
-          </dd>
-        </dl>
+          </KvRow>
+        </Kv>
         <WarningList warnings={p.warnings} />
         {p.warnings.parsed && p.warnings.list.length === 0 ? (
           <p className="dim">解析の注意事項は記録されていません。</p>
         ) : null}
       </Step>
-      <Step number={3} title={`原本 #${p.artifact_id}`}>
-        <dl className="kv">
-          <dt>取得元</dt>
-          <dd>{p.source_id}</dd>
-          <dt>資料の種類</dt>
-          <dd>
+      <Step number={3} stage="原本" title={`原本 #${p.artifact_id}`}>
+        <Kv>
+          <KvRow label="取得元">{p.source_id}</KvRow>
+          <KvRow label="資料の種類">
             <Nullable value={p.dataset} />
-          </dd>
-          <dt>取得日時</dt>
-          <dd>{p.fetched_at}</dd>
-          <dt>解析履歴</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="取得日時">{p.fetched_at}</KvRow>
+          <KvRow label="解析履歴">
             <Link to={`/artifacts/${p.artifact_id}`}>この原本のすべての解析を見る</Link>
-          </dd>
-        </dl>
-        <details>
+          </KvRow>
+        </Kv>
+        <details className="detail-disclosure">
           <summary>取得URL・形式</summary>
-          <p>
-            <Nullable value={p.url} />
-          </p>
-          <p>{p.mime}</p>
+          <Kv>
+            <KvRow label="取得URL">
+              <span className="wrap-any">
+                <Nullable value={p.url} />
+              </span>
+            </KvRow>
+            <KvRow label="資料形式">{p.mime}</KvRow>
+          </Kv>
         </details>
       </Step>
-      <Step number={4} title="保存された原本データ">
+      <Step number={4} stage="保存データ" title="保存された原本データ">
         <RawLink sha256={p.sha256}>この記録の原本を開く ↗</RawLink>
         <details className="detail-disclosure">
           <summary>原本の識別情報</summary>
-          <dl className="kv">
-            <dt>SHA-256</dt>
-            <dd>
+          <Kv>
+            <KvRow label="SHA-256">
               <Sha value={p.sha256} full />
-            </dd>
-            <dt>サイズ</dt>
-            <dd>{p.size} バイト</dd>
-            <dt>保存形式</dt>
-            <dd>{p.content_type}</dd>
-          </dl>
+            </KvRow>
+            <KvRow label="サイズ">{p.size} バイト</KvRow>
+            <KvRow label="保存形式">{p.content_type}</KvRow>
+          </Kv>
         </details>
       </Step>
-      <Step number={5} title={`収集 #${p.fetch_run_id}`}>
+      <Step number={5} stage="収集" title={`収集 #${p.fetch_run_id}`}>
         <StatusBadge status={p.fetch_status} />
-        <dl className="kv">
-          <dt>開始日時</dt>
-          <dd>{p.started_at}</dd>
-          <dt>完了日時</dt>
-          <dd>
+        <Kv>
+          <KvRow label="開始日時">{p.started_at}</KvRow>
+          <KvRow label="完了日時">
             <Nullable value={p.completed_at} placeholder="完了日時未記録" />
-          </dd>
-        </dl>
-        <details>
+          </KvRow>
+        </Kv>
+        <details className="detail-disclosure">
           <summary>収集ツール・実行番号</summary>
-          <p>{p.tool}</p>
-          <Nullable value={p.external_run_id} />
+          <Kv>
+            <KvRow label="収集ツール">
+              <span className="wrap-any">{p.tool}</span>
+            </KvRow>
+            <KvRow label="外部実行番号">
+              <span className="wrap-any">
+                <Nullable value={p.external_run_id} placeholder="外部実行番号未記録" />
+              </span>
+            </KvRow>
+          </Kv>
         </details>
       </Step>
     </ol>

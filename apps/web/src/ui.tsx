@@ -505,3 +505,23 @@ export function QueryBoundary<T>({
     </>
   );
 }
+
+// ── notices ──────────────────────────────────────────────────────────
+
+/** A toned message: warn for a stale or derived value, bad for a blocker.
+ * Inside a panel it sits as the panel note; in page flow it gets its own frame. */
+export function Notice({
+  tone,
+  role,
+  children,
+}: {
+  tone: "warn" | "bad";
+  role?: "alert" | "status";
+  children: ReactNode;
+}): ReactNode {
+  return (
+    <div className={`panel-note panel-note-${tone}`} role={role}>
+      {children}
+    </div>
+  );
+}
