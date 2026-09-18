@@ -136,14 +136,19 @@
 }
 
 .position-facts {
-  padding: var(--space-3);
+  padding: var(--space-5);
   border-right: 1px solid var(--border);
   background: var(--panel-2);
+  min-width: 0;
 }
 
 .position-valuations {
-  padding: var(--space-3);
+  padding: var(--space-5);
   min-width: 0;
+}
+
+.position-valuations h3 {
+  margin-bottom: var(--space-3);
 }
 
 @media (max-width: 860px) {
@@ -156,23 +161,39 @@
   }
 }
 
+@media (max-width: 760px) {
+  .position-facts,
+  .position-valuations {
+    padding: var(--space-4);
+  }
+}
+
+/* The security code is the heading; the name is its secondary line. */
 .position-title {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
   flex-wrap: wrap;
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .security-code {
   font-family: var(--mono);
   font-size: var(--text-lg);
   font-weight: 600;
+  letter-spacing: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .security-name {
   color: var(--text-2);
   font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.position-quantity {
+  margin: var(--space-4) 0 var(--space-5);
 }
 
 .quantity {
@@ -181,11 +202,18 @@
   font-size: var(--text-xl);
   font-weight: 600;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
+.position-facts .detail-disclosure {
+  margin-bottom: 0;
+}
+
+/* Never narrower than the column: a 190px minimum inside a narrower grid
+ * would overflow it instead of shrinking. */
 .figures {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
   gap: var(--space-2);
 }
 
@@ -194,7 +222,7 @@
 .currency-group {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
 .currency-group-head {
@@ -202,27 +230,43 @@
   align-items: baseline;
   gap: var(--space-2);
   flex-wrap: wrap;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   background: var(--panel-3);
+  font-size: var(--text-sm);
+  color: var(--text-2);
 }
 
 .currency-group-body {
-  padding: var(--space-2);
+  padding: var(--space-3);
 }
 
 .currency-label {
   font-family: var(--mono);
   font-weight: 600;
   font-size: var(--text-md);
+  color: var(--text);
 }
 
 .figure {
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
   background: var(--panel-2);
   min-width: 0;
+}
+
+/* A long exact amount gets the whole row rather than a scrollbar. */
+.figure-wide {
+  grid-column: 1 / -1;
+}
+
+.figure-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .figure-metric {
@@ -232,6 +276,8 @@
   overflow-wrap: anywhere;
 }
 
+/* The amount is never clipped or wrapped: a figure too long for its cell
+ * scrolls, and the value stays exact and selectable. */
 .figure-amount {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
@@ -239,6 +285,7 @@
   font-weight: 600;
   white-space: nowrap;
   overflow-x: auto;
+  margin-top: var(--space-2);
 }
 
 .figure-currency {
@@ -246,8 +293,9 @@
   font-size: var(--text-xs);
   color: var(--text-2);
   border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  padding: 0 0.3em;
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+  flex: 0 0 auto;
 }
 
 .figure-asof {
@@ -260,9 +308,22 @@
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
   margin-top: var(--space-1);
   font-size: var(--text-xs);
+}
+
+@media (max-width: 760px) {
+  .quantity {
+    font-size: var(--text-lg);
+  }
+  .currency-group-body {
+    padding: var(--space-2);
+  }
+  .figure {
+    padding: var(--space-2);
+  }
 }
 
 /* ── observation detail ────────────────────────────────────────────── */
@@ -404,56 +465,136 @@
 
 /* ── reward programmes (A11) ───────────────────────────────────────── */
 
-/* A quantity always carries its unit: this number is not yen unless it says so. */
-.reward-quantity .reward-unit {
-  font-size: var(--text-xs);
-  color: var(--muted);
+/* A quantity always carries its unit, attached and muted: this number is
+ * not yen unless it says so. Zones on dates share the treatment. */
+.reward-unit {
   font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--text-3);
 }
 
-/* Unconfirmed is a word, never only a colour. */
-.reward-unknown {
-  color: var(--muted);
-  font-style: italic;
+.reward-holding-table {
+  min-width: 40rem;
 }
 
-.reward-block {
-  margin-top: var(--space-4);
+.reward-expiry-table {
+  min-width: 52rem;
+}
+
+.reward-block + .reward-block {
+  margin-top: var(--space-5);
 }
 
 .reward-block h3 {
-  font-size: var(--text-lg);
-  margin: 0 0 var(--space-1);
+  margin: 0 0 var(--space-2);
 }
 
-.reward-reasons {
-  margin: var(--space-3) 0 0;
-  padding-left: var(--space-4);
-  color: var(--muted);
+.reward-block-text {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text-2);
 }
 
-.reward-caption {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+.reward-block + .footnote {
+  margin-top: var(--space-5);
+}
+
+.panel-body > .kv + .warning-list {
+  margin-top: var(--space-4);
 }
 
 /* ── settlement and card ownership ─────────────────────────────────── */
 
+/* One reconciliation candidate: a panel whose head carries the facts that
+ * identify it (source, amount, status), with the full review under a
+ * disclosure that is open only while the candidate still needs a decision. */
+.settlement-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+}
+
+.settlement-head h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settlement-head .badge {
+  justify-self: start;
+}
+
+.settlement-facts {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.settlement-facts dt {
+  display: inline;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.settlement-facts dd {
+  display: inline;
+  margin: 0;
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.settlement-facts .null {
+  font-family: var(--sans);
+}
+
+.settlement-disclosure {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.settlement-disclosure > summary {
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-sm);
+  background: var(--panel-2);
+}
+
+.settlement-disclosure[open] > summary {
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settlement-details h3 {
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+.settlement-details .kv + h3 {
+  margin-top: var(--space-6);
+}
+
 /* A written reason precedes every reviewed settlement decision. */
 .settlement-reason {
-  display: block;
-  box-sizing: border-box;
-  width: 100%;
-  margin: var(--space-2) 0 var(--space-4);
-  padding: var(--space-3);
-  font: inherit;
-  resize: vertical;
+  min-height: calc(var(--control-height) * 2);
+}
+
+.settlement-decision {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.settlement-decision .button-row,
+.ownership-form .button-row {
+  margin-top: 0;
 }
 
 .settlement-history {
@@ -464,26 +605,37 @@
   min-width: 40rem;
 }
 
+/* The ownership decision form is its own surface beneath the evidence. */
 .ownership-form {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4);
+  margin-top: var(--space-6);
   padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
 }
 
-.ownership-form > input {
-  min-width: 0;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.ownership-evidence {
-  display: flex;
-  align-items: start;
-  gap: var(--space-2);
+.ownership-form .field input,
+.ownership-form .field textarea {
+  background: var(--panel);
 }
 
 @media (max-width: 760px) {
+  .settlement-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settlement-disclosure > summary {
+    padding: var(--space-3) var(--space-4);
+  }
+  .settlement-decision {
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+  }
   .ownership-form {
+    gap: var(--space-3);
+    margin-top: var(--space-5);
     padding: var(--space-4);
   }
 }
