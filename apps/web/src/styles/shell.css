@@ -274,7 +274,7 @@
 main {
   max-width: 1600px;
   margin: 0 auto;
-  padding: var(--space-7) var(--space-8) 60px;
+  padding: var(--space-7) var(--space-8) var(--space-8);
   min-width: 0;
 }
 
@@ -307,7 +307,7 @@ main {
     margin-right: var(--space-6);
   }
   main {
-    padding: var(--space-7) var(--space-6) 48px;
+    padding: var(--space-7) var(--space-6) var(--space-8);
   }
   .workspace-footer {
     margin-left: var(--space-6);

@@ -126,7 +126,7 @@ tr.is-superseded th:first-child {
   padding: 0;
   white-space: nowrap;
   box-sizing: border-box;
-  min-height: 28px;
+  min-height: var(--tap-min);
 }
 
 /* `all: unset` also removes the global focus ring; restore it inside the cell. */
@@ -286,7 +286,7 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
 
 /* Wide enough for a stored `YYYY-MM-DDTHH:MM:SS+09:00` on one line. */
 .transaction-table .col-date {
-  width: 15rem;
+  width: 13.5rem;
 }
 .transaction-table .col-description {
   width: auto;
@@ -297,7 +297,7 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
   max-width: 13rem;
 }
 .transaction-table .col-amount {
-  width: 12rem;
+  width: 10rem;
 }
 .transaction-table .col-status {
   width: 7rem;
@@ -307,7 +307,7 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
 }
 
 .transaction-table td.col-description {
-  min-width: 14rem;
+  min-width: 12rem;
 }
 .transaction-table td.col-date {
   font-variant-numeric: tabular-nums;

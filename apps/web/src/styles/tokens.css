@@ -20,7 +20,6 @@
   --text: #252b29;
   --text-2: #5d645e;
   --text-3: #6a6c61;
-  --muted: var(--text-3);
   --link: #716020;
   --focus: #8b6e20;
   --gold: #a48235;
@@ -93,6 +92,7 @@
   --space-8: 40px;
 
   /* Radii */
+  --radius-xs: 2px; /* focus ring corners, skeleton bars */
   --radius-sm: 6px; /* badges, chips, inputs, buttons */
   --radius-md: 10px; /* nested cards, disclosures, navigation */
   --radius-lg: 14px; /* panels, cards, states */
@@ -103,5 +103,6 @@
 
   /* Controls */
   --control-height: 38px; /* inputs and buttons */
+  --tap-min: 32px; /* smallest hit area of a control: summaries, sort buttons */
   --check-size: 18px; /* native checkbox, drawn by the browser */
 }
