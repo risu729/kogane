@@ -1,0 +1,390 @@
+/* Application shell: sidebar, brand, navigation, workspace bar, source notice,
+ * main column and footer, with their responsive rules. */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  min-height: 100dvh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  padding: var(--space-7) var(--space-5) var(--space-6);
+  background: var(--panel-3);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace {
+  min-width: 0;
+}
+
+.skip-link {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  transform: translateY(-150%);
+  z-index: 100;
+  padding: var(--space-2) var(--space-4);
+  background: var(--ink);
+  color: var(--on-ink);
+  border-radius: var(--radius-sm);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* ── brand ─────────────────────────────────────────────────────────── */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-1);
+  border-bottom: none;
+  color: var(--text);
+}
+
+.brand:hover {
+  border-bottom: none;
+}
+
+.brand-name {
+  display: block;
+  font-family: var(--serif);
+  font-size: var(--text-3xl);
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.06em;
+}
+
+.brand-sub {
+  display: block;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  margin-top: var(--space-2);
+  letter-spacing: 0.03em;
+}
+
+/* The brand mark is a drawn glyph; its dimensions are its own. */
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 39px;
+  height: 44px;
+  background: var(--ink);
+  color: var(--gold-soft);
+  font:
+    italic 36px var(--serif),
+    serif;
+  border-radius: 13px 3px 13px 3px;
+}
+
+.brand-dot {
+  color: var(--gold);
+}
+
+/* ── navigation ────────────────────────────────────────────────────── */
+
+.nav-label {
+  margin: 56px var(--space-3) var(--space-3);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  color: var(--text-3);
+}
+
+.nav {
+  display: flex;
+  gap: var(--space-2);
+  flex-direction: column;
+}
+
+.nav a {
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  color: var(--text-2);
+  font-size: var(--text-base);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.nav a:hover {
+  color: var(--text);
+  background: var(--panel-hover);
+}
+
+.nav a[aria-current="page"] {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
+}
+
+.nav svg {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+}
+
+.nav a[aria-current="page"] svg {
+  color: var(--gold);
+}
+
+/* ── sidebar note and footer ───────────────────────────────────────── */
+
+.sidebar-note {
+  margin-top: auto;
+  padding: var(--space-6) var(--space-3);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+.sidebar-note strong {
+  display: block;
+  font-weight: 500;
+  font-size: var(--text-md);
+  color: var(--ink);
+}
+
+.sidebar-note-symbol {
+  color: var(--gold);
+  font-size: var(--text-2xl);
+}
+
+.sidebar-note p {
+  margin: var(--space-2) 0 var(--space-4);
+  line-height: 1.9;
+}
+
+.read-only-label {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.sidebar-footer {
+  border-top: 1px solid var(--border-strong);
+  padding-top: var(--space-5);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+}
+
+.sidebar-footer span {
+  color: var(--text-3);
+  display: block;
+  font-size: var(--text-xs);
+  margin-top: var(--space-1);
+  letter-spacing: 0.11em;
+}
+
+/* ── workspace bar ─────────────────────────────────────────────────── */
+
+.workspace-bar {
+  min-height: 86px;
+  padding: var(--space-4) var(--space-8);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.workspace-caption {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.workspace-caption span {
+  padding: 0 var(--space-3);
+  color: var(--border-strong);
+}
+
+.refresh-symbol {
+  display: inline-block;
+  font-size: var(--text-xl);
+  line-height: 1;
+}
+
+.is-refreshing {
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── source notice ─────────────────────────────────────────────────── */
+
+.source-notice {
+  margin: var(--space-5) var(--space-8) 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+.source-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.connection-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.connection-dot.connected {
+  background: var(--ok-fg);
+}
+
+.source-notice p {
+  margin: 0;
+}
+
+.source-notice strong {
+  font-weight: 500;
+}
+
+.notice-divider {
+  padding: 0 var(--space-2);
+  color: var(--text-3);
+}
+
+/* ── main column and footer ────────────────────────────────────────── */
+
+main {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-8) 60px;
+  min-width: 0;
+}
+
+.workspace-footer {
+  margin: 0 var(--space-8) var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+/* ── responsive ────────────────────────────────────────────────────── */
+
+@media (max-width: 1150px) {
+  .app-shell {
+    grid-template-columns: 202px minmax(0, 1fr);
+  }
+  .sidebar {
+    padding: var(--space-7) var(--space-3) var(--space-5);
+  }
+  .workspace-bar {
+    padding: var(--space-4) var(--space-6);
+  }
+  .source-notice {
+    margin-left: var(--space-6);
+    margin-right: var(--space-6);
+  }
+  main {
+    padding: var(--space-7) var(--space-6) 48px;
+  }
+  .workspace-footer {
+    margin-left: var(--space-6);
+    margin-right: var(--space-6);
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    display: block;
+  }
+  .sidebar {
+    position: relative;
+    height: auto;
+    padding: var(--space-5) var(--space-4) 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    width: max-content;
+    padding: 0 var(--space-1) var(--space-5);
+  }
+  .brand-name {
+    font-size: var(--text-2xl);
+  }
+  .brand-sub {
+    font-size: var(--text-xs);
+    margin-top: var(--space-1);
+  }
+  .brand-mark {
+    width: 34px;
+    height: 38px;
+    font-size: 30px;
+  }
+  .nav-label,
+  .sidebar-note,
+  .sidebar-footer {
+    display: none;
+  }
+  .nav {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+    gap: 2px;
+  }
+  .nav a {
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) 2px var(--space-3);
+    font-size: var(--text-xs);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .nav svg {
+    width: 17px;
+    height: 17px;
+  }
+  .workspace-bar {
+    padding: var(--space-3) var(--space-4);
+    min-height: 65px;
+  }
+  .workspace-caption {
+    font-size: var(--text-xs);
+  }
+  .workspace-caption span {
+    padding: 0 var(--space-1);
+  }
+  .refresh-button {
+    font-size: var(--text-xs);
+    padding: var(--space-2);
+  }
+  .source-notice {
+    margin: var(--space-4) var(--space-5) 0;
+    font-size: var(--text-xs);
+    gap: var(--space-1) var(--space-3);
+  }
+  main {
+    padding: var(--space-6) var(--space-4) var(--space-8);
+  }
+  .workspace-footer {
+    margin: 0 var(--space-5) var(--space-6);
+    font-size: var(--text-xs);
+  }
+}

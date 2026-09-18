@@ -1,0 +1,321 @@
+/* Tables: the scroll region, cell defaults, sortable headers and the column
+ * contracts for the transaction, balance and identity tables. */
+
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.table-scroll[tabindex]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--sans);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A table inside the scroll region keeps a readable width and scrolls rather
+ * than narrowing columns to single characters. Tables with their own column
+ * contract set a larger minimum; :where() keeps this default below them. */
+:where(.table-scroll) table {
+  min-width: 40rem;
+}
+
+caption {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-2);
+  font-size: var(--text-md);
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-3);
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-strong);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-xs);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  z-index: 1;
+}
+
+th.num,
+td.num {
+  text-align: right;
+}
+
+tbody th {
+  text-align: left;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+td,
+tbody th {
+  max-width: 24rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+tbody tr:nth-child(even) {
+  background: var(--panel-2);
+}
+
+tbody tr:hover {
+  background: var(--panel-3);
+}
+
+tbody tr:last-child td,
+tbody tr:last-child th {
+  border-bottom: none;
+}
+
+tr.is-superseded {
+  background: var(--sup-bg) !important;
+}
+
+tr.is-superseded td,
+tr.is-superseded th {
+  color: var(--text-2);
+}
+
+tr.is-superseded td:first-child,
+tr.is-superseded th:first-child {
+  box-shadow: inset 2px 0 0 var(--sup-fg);
+}
+
+/* ── sortable headers ──────────────────────────────────────────────── */
+
+.sort-button {
+  all: unset;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+  padding: 0;
+  white-space: nowrap;
+  box-sizing: border-box;
+  min-height: 28px;
+}
+
+/* `all: unset` also removes the global focus ring; restore it inside the cell. */
+.sort-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+th.num .sort-button {
+  text-align: right;
+}
+
+.sort-button:hover {
+  color: var(--text);
+  background: var(--border);
+}
+
+.sort-arrow {
+  color: var(--text-3);
+  margin-left: 0.35em;
+}
+
+th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
+  color: var(--link);
+}
+
+/* ── secondary cell content ────────────────────────────────────────── */
+
+.table-secondary {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.source-account,
+.organized-account,
+.identity-preview {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.financial-product-summary {
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.financial-product-details {
+  margin-top: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.identity-details {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.identity-details summary {
+  cursor: pointer;
+  color: var(--text-2);
+  padding-block: var(--space-1);
+}
+
+.identity-details summary:hover {
+  color: var(--text);
+}
+
+.identity-details dl {
+  margin: var(--space-2) 0 0;
+}
+
+.identity-details dt {
+  font-weight: 600;
+  margin-top: var(--space-2);
+}
+
+.identity-details dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.record-dates {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.record-dates dt {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+.record-dates dd {
+  margin: 2px 0 var(--space-2);
+}
+
+.record-dates dd:last-child {
+  margin-bottom: 0;
+}
+
+/* ── transaction table ─────────────────────────────────────────────── */
+
+/* Keep the narrative readable; identifiers must not dictate every column's width. */
+.transaction-table {
+  table-layout: auto;
+  min-width: 62rem;
+}
+
+.transaction-table .col-date {
+  width: 11rem;
+}
+.transaction-table .col-description {
+  width: auto;
+}
+.transaction-table .col-source {
+  width: 13rem;
+  min-width: 11rem;
+  max-width: 13rem;
+}
+.transaction-table .col-amount {
+  width: 12rem;
+}
+.transaction-table .col-status {
+  width: 7rem;
+}
+.transaction-table .col-detail {
+  width: 5rem;
+}
+
+.transaction-table td.col-description {
+  min-width: 14rem;
+}
+.transaction-table td.col-date {
+  font-variant-numeric: tabular-nums;
+}
+.transaction-table td.col-amount {
+  overflow-wrap: normal;
+  max-width: none;
+}
+
+.transaction-table th:has(.sort-button) {
+  padding: 0;
+}
+.transaction-table .sort-button {
+  padding: var(--space-3) var(--space-4);
+  min-height: 44px;
+}
+
+/* ── balance table ─────────────────────────────────────────────────── */
+
+.balance-table {
+  min-width: 54rem;
+  table-layout: auto;
+}
+
+.balance-table .col-source {
+  width: 13rem;
+  min-width: 11rem;
+  max-width: 13rem;
+}
+.balance-table .col-metric {
+  min-width: 11rem;
+}
+.balance-table .col-amount {
+  width: 12rem;
+  max-width: none;
+  overflow-wrap: normal;
+}
+.balance-table .col-dates {
+  width: 16rem;
+  min-width: 14rem;
+}
+.balance-table .col-lineage {
+  min-width: 9rem;
+}
+.balance-table .col-detail {
+  width: 5rem;
+  min-width: 5rem;
+}
+
+/* ── identity table ────────────────────────────────────────────────── */
+
+.identity-page table {
+  min-width: 52rem;
+}
+.identity-page th {
+  white-space: nowrap;
+}
+.identity-page td:first-child {
+  overflow-wrap: anywhere;
+  max-width: 18rem;
+}
+.identity-page td:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── responsive ────────────────────────────────────────────────────── */
+
+/* Every table in the region has a minimum width, so on a narrow screen the
+ * region always scrolls and the hint is always true. */
+@media (max-width: 760px) {
+  .table-scroll:has(table)::before {
+    content: "左右にスクロールして全項目を確認できます →";
+    display: block;
+    position: sticky;
+    left: 0;
+    padding: var(--space-2) var(--space-4);
+    color: var(--text-2);
+    font: var(--text-xs) var(--sans);
+  }
+}

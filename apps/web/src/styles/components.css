@@ -1,0 +1,698 @@
+/* Shared components: panels, notes, badges, buttons, filters, key/value
+ * grids, states, pagination, disclosures, tiles, provenance chain, notices
+ * and code previews. Responsive rules sit next to the rule they modify. */
+
+/* ── panels ────────────────────────────────────────────────────────── */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-6);
+  box-shadow: var(--shadow-sm);
+  overflow: clip;
+  min-width: 0;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.count {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-body {
+  padding: var(--space-6);
+}
+
+.panel-note {
+  padding: var(--space-3) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: var(--text-md);
+  background: var(--panel);
+}
+
+/* Tones for a note: warn for a derived or stale figure, bad for a blocker. */
+.panel-note-warn,
+.derived-note {
+  background: var(--warn-bg);
+  border-bottom: 1px solid var(--warn-border);
+  color: var(--warn-fg);
+}
+
+.panel-note-bad {
+  background: var(--bad-bg);
+  border-bottom: 1px solid var(--bad-border);
+  color: var(--bad-fg);
+}
+
+.derived-note strong {
+  font-family: var(--mono);
+}
+
+@media (max-width: 760px) {
+  .panel-head {
+    padding: var(--space-4);
+  }
+  .panel-body {
+    padding: var(--space-4);
+  }
+  .panel-note {
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-sm);
+  }
+}
+
+/* ── badges ────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  color: var(--text-2);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+.badge-ok {
+  color: var(--ok-fg);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.badge-warn {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.badge-bad {
+  color: var(--bad-fg);
+  background: var(--bad-bg);
+  border-color: var(--bad-border);
+}
+
+.badge-superseded {
+  color: var(--sup-fg);
+  background: var(--sup-bg);
+  border-color: var(--sup-border);
+}
+
+.badge-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── buttons ───────────────────────────────────────────────────────── */
+
+.button {
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+  justify-content: center;
+  align-items: center;
+  line-height: 1.5;
+  gap: var(--space-2);
+  display: inline-flex;
+  min-height: 38px;
+}
+
+/* An <a class="button"> keeps its box border; the link underline never leaks in. */
+.button:hover {
+  color: var(--text);
+  background: var(--panel-3);
+  border-color: var(--border-strong);
+}
+
+.button[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--gold-soft);
+  border-color: var(--gold);
+  font-weight: 600;
+}
+
+.button:disabled,
+.button[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* ── filters and toolbars ──────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.filter-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.filter-field {
+  display: flex;
+  flex: 1 1 145px;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+.filter-field input,
+.filter-field select {
+  text-overflow: ellipsis;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.filter-input {
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  min-width: 0;
+  width: min(100%, 34ch);
+}
+
+.filter-input::placeholder {
+  color: var(--text-3);
+}
+
+/* A field the page has marked invalid shows it beside the alert text. */
+:is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--bad-fg);
+  box-shadow: 0 0 0 2px var(--bad-border);
+}
+
+@media (max-width: 760px) {
+  .toolbar,
+  .filter-grid {
+    padding: var(--space-4);
+    gap: var(--space-3);
+  }
+}
+
+/* ── key/value grids ───────────────────────────────────────────────── */
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr);
+  gap: 0;
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+.kv dt {
+  font-family: var(--sans);
+  color: var(--text-3);
+  padding: var(--space-2) var(--space-5) var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.kv dd {
+  font-family: var(--mono);
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kv dt:last-of-type,
+.kv dd:last-of-type {
+  border-bottom: none;
+}
+
+.kv-entry {
+  display: contents;
+}
+
+@media (max-width: 760px) {
+  .kv {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kv dt {
+    border-bottom: 0;
+    padding: var(--space-3) 0 0;
+    font-size: var(--text-xs);
+  }
+  .kv dd {
+    padding-top: var(--space-1);
+  }
+}
+
+/* ── states: loading, error, empty ─────────────────────────────────── */
+
+.state {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: var(--space-7);
+  color: var(--text-2);
+  font-family: var(--sans);
+  font-size: var(--text-md);
+}
+
+.state-error {
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.state-title {
+  font-weight: 600;
+  display: block;
+  margin-bottom: var(--space-3);
+}
+
+.state p {
+  margin: 0 0 var(--space-4);
+}
+
+.state-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-8) var(--space-7);
+}
+
+.state-empty p:last-child {
+  margin-bottom: 0;
+}
+
+.empty-symbol {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  color: var(--gold);
+  width: 42px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
+}
+
+.skeleton-bar {
+  height: var(--space-2);
+  border-radius: 2px;
+  background: var(--panel-3);
+  margin: var(--space-2) 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar,
+  .is-refreshing {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .state {
+    padding: var(--space-5);
+  }
+}
+
+/* ── pagination ────────────────────────────────────────────────────── */
+
+.pagination,
+.page-actions {
+  padding: var(--space-4) var(--space-6);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  border-top: 1px solid var(--border);
+}
+
+.pagination .button,
+.page-actions .button {
+  min-width: 60px;
+}
+
+/* Page-level actions sit on the page, not in a panel: no inset, no rule. */
+.page-actions {
+  padding-inline: 0;
+  border-top: 0;
+  justify-content: flex-start;
+}
+
+@media (max-width: 760px) {
+  .pagination {
+    padding: var(--space-3) var(--space-4);
+    justify-content: center;
+  }
+}
+
+/* ── disclosures ───────────────────────────────────────────────────── */
+
+.detail-disclosure {
+  margin: var(--space-5) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-5);
+  background: var(--panel);
+  min-width: 0;
+}
+
+.detail-disclosure summary,
+td summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.detail-disclosure[open] summary {
+  margin-bottom: var(--space-4);
+}
+
+.detail-disclosure pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .detail-disclosure {
+    margin: var(--space-4) 0;
+    padding: var(--space-3) var(--space-4);
+  }
+}
+
+/* ── stat tiles ────────────────────────────────────────────────────── */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border-top: 1px solid var(--border);
+}
+
+.tile {
+  background: var(--panel);
+  padding: var(--space-6);
+}
+
+.tile-value {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xl);
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.tile-label {
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  word-break: break-word;
+  margin-top: var(--space-2);
+}
+
+@media (max-width: 760px) {
+  .tile {
+    padding: var(--space-4);
+  }
+  .tile-value {
+    font-size: var(--text-xl);
+  }
+}
+
+/* ── provenance chain ──────────────────────────────────────────────── */
+
+.chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chain-step {
+  position: relative;
+  padding-left: 36px;
+}
+
+.chain-step::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 36px;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-strong);
+}
+
+.chain-step:last-child::before {
+  display: none;
+}
+
+.chain-marker {
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chain-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  margin-bottom: var(--space-3);
+}
+
+/* A superseded parse run is tinted whole, head included, so it can never be
+ * mistaken for a current one at a glance. */
+.chain-card.is-superseded {
+  border-color: var(--sup-border);
+  background: var(--sup-bg);
+}
+
+.chain-card.is-superseded > .chain-card-head {
+  background: color-mix(in srgb, var(--sup-bg) 70%, var(--border));
+  border-bottom-color: var(--sup-border);
+}
+
+.chain-card > .chain-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.chain-stage {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.chain-title {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: var(--text-md);
+}
+
+.chain-body {
+  padding: var(--space-2) var(--space-3);
+}
+
+.chain-arrow {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 0 var(--space-3) 0;
+  display: block;
+}
+
+@media (max-width: 760px) {
+  .chain-step {
+    padding-left: 28px;
+  }
+}
+
+/* ── query notices ─────────────────────────────────────────────────── */
+
+.query-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+.query-warning {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+}
+
+/* ── raw evidence preview ──────────────────────────────────────────── */
+
+.evidence-preview {
+  margin-top: var(--space-5);
+}
+
+.preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-4);
+}
+
+.preview-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-md);
+}
+
+.evidence-preview .muted {
+  color: var(--text-2);
+  font-size: var(--text-md);
+}
+
+.preview-code {
+  max-height: 36rem;
+  max-width: 100%;
+  overflow: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font: var(--text-md) / 1.65 var(--mono);
+  white-space: pre;
+  tab-size: 2;
+}
+
+.preview-code.is-wrapped {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preview-code code {
+  font: inherit;
+}
+
+.preview-code .code-constant {
+  color: var(--code-constant);
+}
+.preview-code .code-string {
+  color: var(--code-string);
+}
+.preview-code .code-variable {
+  color: var(--code-variable);
+}
+.preview-code .code-tag {
+  color: var(--code-tag);
+}
+.preview-code .code-comment {
+  color: var(--code-comment);
+}
+.preview-code .code-keyword {
+  color: var(--code-keyword);
+}
+.preview-code .code-entity {
+  color: var(--code-entity);
+}
+.preview-code .code-text {
+  color: var(--code-fg);
+}
+.preview-code .code-invalid {
+  color: var(--code-invalid);
+}
+
+@media (max-width: 760px) {
+  .preview-code {
+    padding: var(--space-3);
+    max-height: 24rem;
+  }
+}
