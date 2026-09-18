@@ -141,8 +141,12 @@ h4 {
 
 /* ── disclosures ───────────────────────────────────────────────────── */
 
-/* Every <details> opens the same way; components only adjust size and spacing. */
+/* Every <details> opens the same way; components only adjust size and
+ * spacing. The line is centred in a hit area a finger can find, whatever the
+ * type size. */
 summary {
+  min-height: var(--tap-min);
+  align-content: center;
   cursor: pointer;
   color: var(--text-2);
 }

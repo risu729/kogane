@@ -142,10 +142,7 @@ function SettlementCard({ review }: { review: CardSettlementReview }): ReactNode
           </div>
         </dl>
       </div>
-      <details
-        className="detail-disclosure settlement-disclosure"
-        open={review.status === "proposed"}
-      >
+      <details className="settlement-disclosure" open={review.status === "proposed"}>
         <summary>候補の詳細と判断</summary>
         <div className="panel-body">
           <CardSettlementDetails review={review} />

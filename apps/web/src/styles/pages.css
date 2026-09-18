@@ -130,7 +130,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-6);
   display: grid;
   grid-template-columns: minmax(280px, 22rem) minmax(0, 1fr);
 }
@@ -552,12 +552,10 @@
   font-family: var(--sans);
 }
 
+/* The disclosure is a panel section: its summary is a toned bar spanning the
+ * panel, and the review opens beneath it as a panel body. */
 .settlement-disclosure {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  min-width: 0;
 }
 
 .settlement-disclosure > summary {
@@ -567,7 +565,6 @@
 }
 
 .settlement-disclosure[open] > summary {
-  margin-bottom: 0;
   border-bottom: 1px solid var(--border);
 }
 

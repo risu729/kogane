@@ -168,6 +168,10 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
   overflow-wrap: anywhere;
 }
 
+.source-account > .inline-disclosure {
+  margin-top: var(--space-2);
+}
+
 /* The organised view of one stored source/account: product claim, current
  * label, stored identifiers and connection, each on its own line. */
 .organized-account {
@@ -225,35 +229,6 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
 
 .financial-product-details > .detail-disclosure {
   margin: var(--space-3) 0 0;
-}
-
-.identity-details {
-  margin-top: var(--space-2);
-  font-size: var(--text-sm);
-}
-
-.identity-details summary {
-  cursor: pointer;
-  color: var(--text-2);
-  padding-block: var(--space-1);
-}
-
-.identity-details summary:hover {
-  color: var(--text);
-}
-
-.identity-details dl {
-  margin: var(--space-2) 0 0;
-}
-
-.identity-details dt {
-  font-weight: 600;
-  margin-top: var(--space-2);
-}
-
-.identity-details dd {
-  margin: 2px 0 0;
-  overflow-wrap: anywhere;
 }
 
 .record-dates {

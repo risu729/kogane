@@ -82,7 +82,7 @@ export function SourceAccount({ source, account }: { source: string; account: st
         </div>
       </div>
       {longSource || longAccount ? (
-        <details className="identity-details">
+        <details className="inline-disclosure">
           <summary>取得元・口座の全文</summary>
           <dl>
             <dt>取得元</dt>

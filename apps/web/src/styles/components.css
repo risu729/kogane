@@ -569,6 +569,28 @@
   min-width: 0;
 }
 
+/* In page flow it keeps the panels' rhythm. */
+main > .detail-disclosure {
+  margin: var(--space-6) 0;
+}
+
+/* Directly under a panel it is the panel's last section: a rule above, the
+ * panel's inset, no frame of its own. */
+.panel > .detail-disclosure {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding: var(--space-4) var(--space-6);
+}
+
+/* Holding panels, it is a section toggle: the panels carry the frames. */
+.detail-disclosure:has(> .panel) {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
 /* A light disclosure for a line or two of secondary text; it looks the same
  * inside a table cell and inside a panel or card body. */
 .inline-disclosure {
@@ -580,11 +602,24 @@
   margin: var(--space-1) 0 0;
 }
 
+/* The full text of a shortened identifier pair. */
+.inline-disclosure dl {
+  margin: var(--space-2) 0 0;
+}
+
+.inline-disclosure dt {
+  font-weight: 600;
+  margin-top: var(--space-2);
+}
+
+.inline-disclosure dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .detail-disclosure summary,
 .inline-disclosure summary,
 td summary {
-  cursor: pointer;
-  color: var(--text-2);
   font-size: var(--text-sm);
 }
 
@@ -607,6 +642,12 @@ td summary {
   .detail-disclosure {
     margin: var(--space-4) 0;
     padding: var(--space-3) var(--space-4);
+  }
+  .panel > .detail-disclosure {
+    padding: var(--space-4);
+  }
+  .detail-disclosure:has(> .panel) {
+    padding: 0;
   }
 }
 
