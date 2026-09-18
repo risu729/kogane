@@ -92,43 +92,40 @@ function BalancesBody({
   ]);
   return (
     <>
-      {!serverFilters ? (
-        <section className="panel">
-          <div className="panel-body">
-            <RecordControls rows={rows} filters={filters} onChange={setFilters} />
-            <div className="filter-grid">
-              {[
-                {
-                  label: "通貨・単位",
-                  value: instrument,
-                  options: instruments,
-                  setValue: setInstrument,
-                },
-                {
-                  label: summaries ? "実績・請求の種類" : "残高の種類",
-                  value: metric,
-                  options: metrics,
-                  setValue: setMetric,
-                },
-              ].map(({ label, value, options, setValue }) => (
-                <label className="filter-field" key={label}>
-                  {label}
-                  <select
-                    aria-label={label}
-                    value={value}
-                    onChange={(event) => setValue(event.target.value)}
-                  >
-                    <option value="">すべて</option>
-                    {value && !options.includes(value) ? (
-                      <option value={value}>{value}（今回の記録に含まれません）</option>
-                    ) : null}
-                    {options.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-              ))}
-            </div>
+      <section className="panel" aria-label={summaries ? "実績・請求の表示条件" : "残高の表示条件"}>
+        {!serverFilters ? (
+          <RecordControls rows={rows} filters={filters} onChange={setFilters}>
+            {[
+              {
+                label: "通貨・単位",
+                value: instrument,
+                options: instruments,
+                setValue: setInstrument,
+              },
+              {
+                label: summaries ? "実績・請求の種類" : "残高の種類",
+                value: metric,
+                options: metrics,
+                setValue: setMetric,
+              },
+            ].map(({ label, value, options, setValue }) => (
+              <label className="filter-field" key={label}>
+                {label}
+                <select
+                  aria-label={label}
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                >
+                  <option value="">すべて</option>
+                  {value && !options.includes(value) ? (
+                    <option value={value}>{value}（今回の記録に含まれません）</option>
+                  ) : null}
+                  {options.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
             <button
               className="button"
               type="button"
@@ -141,18 +138,16 @@ function BalancesBody({
             >
               条件をクリア
             </button>
-          </div>
-        </section>
-      ) : null}
-      <section className="panel" aria-label={summaries ? "実績・請求の表示条件" : "残高の表示条件"}>
+          </RecordControls>
+        ) : null}
         <div className="panel-body">
-          <label>
+          <label className="check-field">
             <input
               type="checkbox"
               checked={hideZero}
               onChange={(event) => setHideZero(event.target.checked)}
-            />{" "}
-            {summaries ? "0の実績・請求を除外" : "残高0を除外"}
+            />
+            <span>{summaries ? "0の実績・請求を除外" : "残高0を除外"}</span>
           </label>
           <p className="footnote">
             DBで正規化された金額が0の行を除外します。未記録・解析不能・値の不一致・正規化情報がない行は残します。

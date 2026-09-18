@@ -35,8 +35,11 @@ function ArtifactTable({ rows }: { rows: ArtifactRow[] }): ReactNode {
       count={`${rows.length}件`}
       note="解析件数には旧解析の記録も含みます。現行の取引件数とは異なる場合があります。"
     >
-      <div className="table-scroll">
-        <table>
+      <div className="table-scroll" role="region" aria-label="保存された原本" tabIndex={0}>
+        <table className="artifact-table">
+          <caption>
+            取得日時は記録された表記のままです。件数は解析された記録の数で、取得元の全履歴を表しません。
+          </caption>
           <thead>
             <tr>
               {["原本", "取得元", "資料の種類", "取得日時", "解析された記録", "原本データ"].map(
@@ -59,7 +62,7 @@ function ArtifactTable({ rows }: { rows: ArtifactRow[] }): ReactNode {
                   <Nullable value={artifact.dataset} />
                   <div className="dim">{artifact.mime}</div>
                 </td>
-                <td>{artifact.fetched_at}</td>
+                <td className="cell-time">{artifact.fetched_at}</td>
                 <td>
                   取引 {artifact.transaction_count} / 残高 {artifact.balance_count}
                   <br />

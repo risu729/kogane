@@ -176,13 +176,16 @@ export function StatusBadge({ status }: { status: string }): ReactNode {
     error: "エラー",
     pending: "待機中",
     running: "実行中",
+    cancelled: "収集中止",
+    human_required: "操作が必要",
+    unknown: "結果不明",
   };
   const tone: Tone =
     status === "ok" || status === "success"
       ? "ok"
       : status === "failed" || status === "error"
         ? "bad"
-        : status === "partial"
+        : status === "partial" || status === "human_required"
           ? "warn"
           : "neutral";
   return (

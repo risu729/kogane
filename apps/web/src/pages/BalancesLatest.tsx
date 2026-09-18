@@ -15,8 +15,34 @@ import {
 } from "../api.ts";
 import type { MeasureView } from "../../../../packages/observation-shared/src/api-schema.ts";
 import { Amount, Badge, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
+import { Pagination } from "../pagination.tsx";
 import { OrganizedSourceAccount } from "../organization.tsx";
 import { balanceMeaning } from "../balance-display.tsx";
+
+/**
+ * The block is one read model shown on two pages, so every heading, column
+ * and count names the measure the page is about; the asset subtotal exists
+ * only where the rows are balances.
+ */
+const VIEW_COPY: Record<
+  MeasureView,
+  { label: string; title: string; items: string; metric: string; subtotals: boolean }
+> = {
+  balances: {
+    label: "最新の残高",
+    title: "項目ごとの最新の残高",
+    items: "残高",
+    metric: "残高の種類",
+    subtotals: true,
+  },
+  summaries: {
+    label: "最新の期間実績・請求",
+    title: "項目ごとの最新の期間実績・請求",
+    items: "期間実績・請求",
+    metric: "項目の種類",
+    subtotals: false,
+  },
+};
 
 /** Every state is named in words; the badge never carries the meaning alone. */
 const ADOPTION_LABELS: Record<BalanceAdoptionState, { label: string; note: string }> = {
@@ -74,11 +100,13 @@ export function BalancesLatestPage({ view = "balances" }: { view?: MeasureView }
   const [cursor, setCursor] = useState<string | null>(null);
   const [trail, setTrail] = useState<(string | null)[]>([]);
   const query = useLatestBalances(view, cursor);
+  const copy = VIEW_COPY[view];
   return (
-    <QueryBoundary query={query} label="最新の残高">
+    <QueryBoundary query={query} label={copy.label}>
       {(page) => (
         <LatestBody
           page={page}
+          copy={copy}
           canGoBack={trail.length > 0}
           onNext={() => {
             if (page.page.nextCursor === null) return;
@@ -101,12 +129,14 @@ export function BalancesLatestPage({ view = "balances" }: { view?: MeasureView }
 
 function LatestBody({
   page,
+  copy,
   canGoBack,
   onNext,
   onBack,
   onRefresh,
 }: {
   page: LatestBalancePage;
+  copy: (typeof VIEW_COPY)[MeasureView];
   canGoBack: boolean;
   onNext: () => void;
   onBack: () => void;
@@ -118,8 +148,8 @@ function LatestBody({
       <section className="panel" aria-label="この一覧の範囲">
         <div className="panel-body">
           <p className="footnote">
-            残高 {page.items.length}件 / 根拠となる記録 {evidence}件。 根拠の件数は残高の件数では
-            ありません。
+            {copy.items} {page.items.length}件 / 根拠となる記録 {evidence}件。 根拠の件数は
+            {copy.items}の件数ではありません。
           </p>
           <p className="footnote">
             データの完全性:{" "}
@@ -131,22 +161,22 @@ function LatestBody({
             {page.dataCoverage.stale ? " / 直近の取得で更新できていない記録があります" : ""}
           </p>
           {page.dataCoverage.reasons.length ? (
-            <ul className="footnote">
+            <ul className="plain-list footnote">
               {page.dataCoverage.reasons.map((reason) => (
                 <li key={reason}>{reason}</li>
               ))}
             </ul>
           ) : null}
-          <Subtotals page={page} />
+          {copy.subtotals ? <Subtotals page={page} /> : null}
         </div>
       </section>
       <Panel
         id="latest-balances-v2"
-        title="項目ごとの最新の記録"
+        title={copy.title}
         count={`このページ ${page.items.length}件`}
         note="一つの固定スナップショットを順に読んでいます。読んでいる間に新しい解析が終わっても、この一覧の内容は変わりません。"
       >
-        <div className="table-scroll" role="region" aria-label="最新の残高" tabIndex={0}>
+        <div className="table-scroll" role="region" aria-label={copy.label} tabIndex={0}>
           <table className="balance-table">
             <caption>
               金額・日時は保存された表記です。採用・除外はこの範囲の集計についての判断であり、
@@ -158,7 +188,7 @@ function LatestBody({
                   取得元・口座
                 </th>
                 <th scope="col" className="col-metric">
-                  残高の種類
+                  {copy.metric}
                 </th>
                 <th scope="col" className="col-amount num">
                   金額
@@ -187,21 +217,18 @@ function LatestBody({
             </tbody>
           </table>
         </div>
+        <Pagination
+          label="表示ページ"
+          status={page.page.hasMore ? "続きがあります" : "最後のページです"}
+          previous={{ label: "前へ", disabled: !canGoBack, onClick: onBack }}
+          next={{ label: "次へ", disabled: !page.page.hasMore, onClick: onNext }}
+          actions={
+            <button className="button" type="button" onClick={onRefresh}>
+              最新の状態に更新
+            </button>
+          }
+        />
       </Panel>
-      <div className="pagination" aria-label="表示ページ">
-        <span role="status" aria-live="polite">
-          {page.page.hasMore ? "続きがあります" : "最後のページです"}
-        </span>
-        <button className="button" type="button" disabled={!canGoBack} onClick={onBack}>
-          前へ
-        </button>
-        <button className="button" type="button" disabled={!page.page.hasMore} onClick={onNext}>
-          次へ
-        </button>
-        <button className="button" type="button" onClick={onRefresh}>
-          最新の状態に更新
-        </button>
-      </div>
     </>
   );
 }
@@ -220,7 +247,7 @@ function Subtotals({ page }: { page: LatestBalancePage }): ReactNode {
       <p className="footnote">
         把握できている資産の小計（単位ごと）。負債の取得状況は不明のため、純資産ではありません。
       </p>
-      <ul className="footnote">
+      <ul className="plain-list footnote">
         {subtotal.map((total) => (
           <li key={total.unitRef}>
             {total.unitRef}: {decimalText(total.coefficient, total.scale)}（採用{" "}
