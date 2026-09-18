@@ -1,11 +1,13 @@
 import { useState, type ReactNode } from "react";
-import { useArtifacts, type ArtifactRow } from "../api.ts";
+import { useArtifacts, useFeatures, type ArtifactRow } from "../api.ts";
+import { CollectionControls } from "../collection-controls.tsx";
 import { Link } from "../router.tsx";
 import { Nullable, Panel, QueryBoundary, RawLink } from "../ui.tsx";
 import { pageWindow } from "../filters.ts";
 import { Pager } from "./ViewControls.tsx";
 export function ArtifactsPage(): ReactNode {
   const query = useArtifacts();
+  const { serverFilters } = useFeatures();
   return (
     <>
       <div className="page-head">
@@ -14,6 +16,7 @@ export function ArtifactsPage(): ReactNode {
           取得時の資料を保存しています。各原本から、解析された記録とその履歴を確認できます。
         </p>
       </div>
+      {serverFilters ? <CollectionControls kind="artifacts" /> : null}
       <QueryBoundary
         query={query}
         label="原本"

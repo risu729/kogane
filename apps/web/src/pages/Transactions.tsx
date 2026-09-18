@@ -24,6 +24,7 @@ import {
   organizedInstrument,
 } from "../organization.tsx";
 import { activityMeaning, ActivityFacts } from "../activity-display.tsx";
+import { CollectionControls } from "../collection-controls.tsx";
 const features = tableFeatures({
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
@@ -108,6 +109,7 @@ const columns = helper.columns([
 ]);
 export function TransactionsPage(): ReactNode {
   const query = useTransactions();
+  const { serverFilters } = useFeatures();
   return (
     <>
       <div className="page-head">
@@ -116,6 +118,7 @@ export function TransactionsPage(): ReactNode {
           カード利用、口座の入出金、売買、利用通知の記録です。残高や期間合計とは分け、金額の正負だけで収入・支出とは判断しません。
         </p>
       </div>
+      {serverFilters ? <CollectionControls kind="transactions" /> : null}
       <QueryBoundary
         query={query}
         label="取引"

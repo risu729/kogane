@@ -31,7 +31,7 @@ a:hover {
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 code,
@@ -130,6 +130,20 @@ h4 {
   margin-top: var(--space-6);
 }
 
+/* A sub-heading in page flow between panels: set off from the panel above it,
+ * close to the group it introduces. */
+.section-head {
+  margin: var(--space-6) 0 var(--space-4);
+}
+
+.section-head h2 {
+  font-size: var(--text-lg);
+}
+
+.section-head .footnote {
+  margin-top: var(--space-1);
+}
+
 @media (max-width: 760px) {
   .page-head {
     margin-bottom: var(--space-6);
@@ -141,8 +155,12 @@ h4 {
 
 /* ── disclosures ───────────────────────────────────────────────────── */
 
-/* Every <details> opens the same way; components only adjust size and spacing. */
+/* Every <details> opens the same way; components only adjust size and
+ * spacing. The line is centred in a hit area a finger can find, whatever the
+ * type size. */
 summary {
+  min-height: var(--tap-min);
+  align-content: center;
   cursor: pointer;
   color: var(--text-2);
 }
@@ -220,7 +238,13 @@ summary:hover {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
+}
+
+/* An ordered stack keeps its numbers: the order is the point of the element. */
+ol.plain-list {
+  list-style: decimal;
+  padding-left: var(--space-5);
 }
 
 .warning-list {

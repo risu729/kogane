@@ -154,7 +154,7 @@ export function IdentitiesPage(): ReactNode {
         id="identity-list"
         title={tab === "accounts" ? "整理済みの口座" : "整理済みの通貨・銘柄"}
       >
-        <div className="toolbar" role="group" aria-label="一覧の種類">
+        <div className="tab-row" role="group" aria-label="一覧の種類">
           <button
             type="button"
             className="button"

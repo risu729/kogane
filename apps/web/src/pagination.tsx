@@ -17,6 +17,7 @@ export function Pagination({
   next,
   position,
   actions,
+  bare = false,
 }: {
   /** Accessible name of the row, e.g. 表示ページ. */
   label: string;
@@ -28,9 +29,11 @@ export function Pagination({
   position?: ReactNode;
   /** Further actions that belong to the row, such as a refresh button. */
   actions?: ReactNode;
+  /** In page flow after a list of cards or panels, without the panel inset and rule. */
+  bare?: boolean;
 }): ReactNode {
   return (
-    <div className="pagination" aria-label={label}>
+    <div className={bare ? "pagination pagination-bare" : "pagination"} aria-label={label}>
       <span role="status" aria-live="polite">
         {status}
       </span>

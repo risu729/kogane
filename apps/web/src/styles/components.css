@@ -46,8 +46,7 @@
 }
 
 /* Tones for a note: warn for a derived or stale figure, bad for a blocker. */
-.panel-note-warn,
-.derived-note {
+.panel-note-warn {
   background: var(--warn-bg);
   border-bottom: 1px solid var(--warn-border);
   color: var(--warn-fg);
@@ -59,8 +58,9 @@
   color: var(--bad-fg);
 }
 
-.derived-note strong {
-  font-family: var(--mono);
+/* A note that closes a panel has the panel's own border beneath it. */
+.panel > .panel-note:last-child {
+  border-bottom: 0;
 }
 
 @media (max-width: 760px) {
@@ -182,18 +182,6 @@
   }
 }
 
-/* ── filters and toolbars ──────────────────────────────────────────── */
-
-.toolbar {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  flex-wrap: wrap;
-  padding: var(--space-4) var(--space-6);
-  border-bottom: 1px solid var(--border);
-  background: var(--panel-2);
-}
-
 /* ── filters ───────────────────────────────────────────────────────── */
 
 /* One bar per panel: fields, search and the clear action share a row that
@@ -253,35 +241,26 @@
   color: var(--text-3);
 }
 
-/* A checkbox with its label: one hit area, the system accent colour, and the
- * box drawn at a size a finger can find. */
-.check-field {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 32px;
-  font-size: var(--text-md);
-  color: var(--text);
-  cursor: pointer;
-}
-
-.check-field input[type="checkbox"] {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--gold);
-  cursor: pointer;
-}
-
 /* A field the page has marked invalid shows it beside the alert text. */
 :is(input, select, textarea)[aria-invalid="true"] {
   border-color: var(--bad-fg);
   box-shadow: 0 0 0 2px var(--bad-border);
 }
 
+/* A row of aria-pressed tabs that switches what a panel lists; it shares the
+ * filter bar's inset and surface. */
+.tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
 @media (max-width: 760px) {
-  .filter-grid {
+  .filter-grid,
+  .tab-row {
     padding: var(--space-4);
     gap: var(--space-3);
   }
@@ -380,6 +359,10 @@
   margin-bottom: 0;
 }
 
+.notice strong {
+  display: block;
+}
+
 .notice a {
   color: inherit;
 }
@@ -395,8 +378,10 @@
 }
 
 /* The label column sizes to the longest label but never past 14rem, so a
- * long Japanese label wraps instead of squeezing the value column. */
-.kv dt {
+ * long Japanese label wraps instead of squeezing the value column. Child
+ * combinators keep a <dl> nested in a value (a disclosure's full text, the
+ * record dates) out of the grid's rules. */
+.kv > dt {
   font-family: var(--sans);
   color: var(--text-3);
   padding: var(--space-2) var(--space-5) var(--space-2) 0;
@@ -404,7 +389,7 @@
   max-width: 14rem;
 }
 
-.kv dd {
+.kv > dd {
   font-family: var(--mono);
   margin: 0;
   padding: var(--space-2) 0;
@@ -413,25 +398,21 @@
   overflow-wrap: anywhere;
 }
 
-.kv dt:last-of-type,
-.kv dd:last-of-type {
+.kv > dt:last-of-type,
+.kv > dd:last-of-type {
   border-bottom: none;
-}
-
-.kv-entry {
-  display: contents;
 }
 
 @media (max-width: 760px) {
   .kv {
     grid-template-columns: minmax(0, 1fr);
   }
-  .kv dt {
+  .kv > dt {
     border-bottom: 0;
     padding: var(--space-3) 0 0;
     font-size: var(--text-xs);
   }
-  .kv dd {
+  .kv > dd {
     padding-top: var(--space-1);
   }
 }
@@ -488,7 +469,7 @@
 
 .skeleton-bar {
   height: var(--space-2);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--panel-3);
   margin: var(--space-2) 0;
   animation: pulse 1.4s ease-in-out infinite;
@@ -549,8 +530,7 @@
 
 /* ── pagination ────────────────────────────────────────────────────── */
 
-.pagination,
-.page-actions {
+.pagination {
   padding: var(--space-4) var(--space-6);
   display: flex;
   flex-wrap: wrap;
@@ -562,22 +542,24 @@
   border-top: 1px solid var(--border);
 }
 
-.pagination .button,
-.page-actions .button {
+.pagination .button {
   min-width: 60px;
 }
 
-/* Page-level actions sit on the page, not in a panel: no inset, no rule. */
-.page-actions {
-  padding-inline: 0;
+/* A pager that closes a list of cards or panels in page flow: no panel inset
+ * and no rule, so it reads as the list's last line. */
+.pagination-bare {
+  padding: 0;
   border-top: 0;
-  justify-content: flex-start;
 }
 
 @media (max-width: 760px) {
   .pagination {
     padding: var(--space-3) var(--space-4);
     justify-content: center;
+  }
+  .pagination-bare {
+    padding: 0;
   }
 }
 
@@ -592,6 +574,28 @@
   min-width: 0;
 }
 
+/* In page flow it keeps the panels' rhythm. */
+main > .detail-disclosure {
+  margin: var(--space-6) 0;
+}
+
+/* Directly under a panel it is the panel's last section: a rule above, the
+ * panel's inset, no frame of its own. */
+.panel > .detail-disclosure {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding: var(--space-4) var(--space-6);
+}
+
+/* Holding panels, it is a section toggle: the panels carry the frames. */
+.detail-disclosure:has(> .panel) {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
 /* A light disclosure for a line or two of secondary text; it looks the same
  * inside a table cell and inside a panel or card body. */
 .inline-disclosure {
@@ -603,11 +607,24 @@
   margin: var(--space-1) 0 0;
 }
 
+/* The full text of a shortened identifier pair. */
+.inline-disclosure dl {
+  margin: var(--space-2) 0 0;
+}
+
+.inline-disclosure dt {
+  font-weight: 600;
+  margin-top: var(--space-2);
+}
+
+.inline-disclosure dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .detail-disclosure summary,
 .inline-disclosure summary,
 td summary {
-  cursor: pointer;
-  color: var(--text-2);
   font-size: var(--text-sm);
 }
 
@@ -631,22 +648,29 @@ td summary {
     margin: var(--space-4) 0;
     padding: var(--space-3) var(--space-4);
   }
+  .panel > .detail-disclosure {
+    padding: var(--space-4);
+  }
+  .detail-disclosure:has(> .panel) {
+    padding: 0;
+  }
 }
 
 /* ── stat tiles ────────────────────────────────────────────────────── */
 
-/* Two tiles fit a phone: the minimum never exceeds the available width. */
+/* Two tiles fit a phone: the minimum never exceeds the available width. Each
+ * tile draws its own top and left hairline, so an empty trailing cell stays
+ * the panel's colour. */
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr));
-  gap: 1px;
-  background: var(--border);
   border-top: 1px solid var(--border);
 }
 
 .tile {
   background: var(--panel);
   padding: var(--space-6);
+  box-shadow: -1px -1px 0 var(--border);
 }
 
 .tile-value {
