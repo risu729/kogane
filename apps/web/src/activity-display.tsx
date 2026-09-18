@@ -40,7 +40,7 @@ export function ActivityFacts({ meaning }: { meaning: ActivityMeaning }): ReactN
           単価: {meaning.price} {meaning.priceUnit}
         </div>
       ) : null}
-      <details>
+      <details className="inline-disclosure">
         <summary>この記録の意味</summary>
         <p>{meaning.reason}</p>
         <p>解釈の版: {meaning.policyVersion}</p>

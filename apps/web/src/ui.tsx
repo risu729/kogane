@@ -396,12 +396,15 @@ export function QueryBoundary<T>({
   label,
   isEmpty,
   empty,
+  coverageNotice = true,
   children,
 }: {
   query: UseQueryResult<T, Error>;
   label: string;
   isEmpty?: (data: T) => boolean;
   empty?: ReactNode;
+  /** Pages that page in memory render their own pager instead of the URL-based notice. */
+  coverageNotice?: boolean;
   children: (data: T) => ReactNode;
 }): ReactNode {
   const retry = (): void => {
@@ -451,7 +454,7 @@ export function QueryBoundary<T>({
           通信が一時停止しています。接続が戻るまで、前回読み込んだ{label}を表示しています。
         </div>
       ) : null}
-      {coverage?.truncated ? (
+      {coverageNotice && coverage?.truncated ? (
         <div className="query-notice query-warning" role="status">
           このページは各一覧の最大500件を表示しています。続きの記録があります。表示件数は全記録の総数ではありません。
           {coverage.nextCursor || coverage.nextOffset != null ? (
@@ -503,5 +506,25 @@ export function QueryBoundary<T>({
         children(data)
       )}
     </>
+  );
+}
+
+// ── notices ──────────────────────────────────────────────────────────
+
+/** A toned message: warn for a stale or derived value, bad for a blocker.
+ * Inside a panel it sits as the panel note; in page flow it gets its own frame. */
+export function Notice({
+  tone,
+  role,
+  children,
+}: {
+  tone: "warn" | "bad";
+  role?: "alert" | "status";
+  children: ReactNode;
+}): ReactNode {
+  return (
+    <div className={`panel-note panel-note-${tone}`} role={role}>
+      {children}
+    </div>
   );
 }

@@ -265,6 +265,21 @@
   font-size: var(--text-xs);
 }
 
+/* ── observation detail ────────────────────────────────────────────── */
+
+/* Two columns (label, stored value): a phone width holds it without a
+ * scroller, so it keeps a smaller minimum than the shared table default. */
+.stored-row-table {
+  min-width: 20rem;
+}
+
+/* It fits a phone width, so the shared "scroll sideways" hint would be false. */
+@media (max-width: 760px) {
+  .table-scroll:has(.stored-row-table)::before {
+    content: none;
+  }
+}
+
 /* ── observation lists ─────────────────────────────────────────────── */
 
 .obs-list {
@@ -292,27 +307,99 @@
   overflow-wrap: anywhere;
 }
 
-/* ── identities ────────────────────────────────────────────────────── */
+/* ── identities and account connections ────────────────────────────── */
 
-.identity-page {
-  min-width: 0;
+/* One free-text field: cap it so it does not stretch across the panel. */
+.identity-source-field {
+  max-width: 48ch;
 }
-.identity-page h2,
-.identity-page p {
+
+/* The two buttons stay together when the row wraps. */
+.identity-filter-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+}
+
+.identity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+/* The grid sits between panel bodies without a doubled rule after a toolbar. */
+.panel-body + .identity-grid,
+.identity-grid + .panel-body {
+  border-top: 1px solid var(--border);
+}
+
+.identity-card {
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
   overflow-wrap: anywhere;
 }
-.identity-page form {
+
+/* Labels are recorded identifiers: no page-heading letter-spacing or casing. */
+.identity-card-title {
+  font-family: var(--sans);
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.identity-card-meta {
+  margin: var(--space-1) 0 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.identity-card-link {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-md);
+}
+
+.identity-card .detail-disclosure {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel);
+}
+
+.identity-card .detail-disclosure p {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+}
+
+.identity-card .detail-disclosure p:last-child {
+  margin-bottom: 0;
+}
+
+.connection-counts {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: end;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-md);
 }
-.identity-page form label {
-  min-width: 0;
+
+.connection-count .count {
+  color: var(--text);
+  font-size: var(--text-md);
 }
-.identity-page input {
-  max-width: 100%;
-  box-sizing: border-box;
+
+@media (max-width: 760px) {
+  .identity-grid {
+    padding: var(--space-4);
+    gap: var(--space-3);
+  }
+  .identity-card {
+    padding: var(--space-4);
+  }
 }
 
 /* ── reward programmes (A11) ───────────────────────────────────────── */
