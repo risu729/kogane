@@ -10,6 +10,7 @@ import {
 import { Link } from "../router.tsx";
 import {
   Badge,
+  EmptyState,
   LineageBadge,
   Nullable,
   Panel,
@@ -103,7 +104,7 @@ function SummaryCounts({
 function HandOff({ shared }: { shared: SharedQueryResponse<CoverageSummaryData> }): ReactNode {
   const gaps = shared.result.coverage.gaps;
   return (
-    <details className="panel-body detail-disclosure">
+    <details className="detail-disclosure">
       <summary>この数字の出どころ（引き継ぎ用の参照）</summary>
       <ul>
         <li>
@@ -141,9 +142,9 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
         count={`${data.sources.length}件`}
         note="保存された原本を、取得元ごとに確認できます。"
       >
-        <div className="source-grid">
-          {data.sources.length ? (
-            data.sources
+        {data.sources.length ? (
+          <div className="source-grid">
+            {data.sources
               .filter((source) => source.artifact_count > 0)
               .map((source) => (
                 <article className="source-card" key={source.id}>
@@ -155,13 +156,13 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
                     <Badge>{source.ingestion}</Badge>
                   </details>
                 </article>
-              ))
-          ) : (
-            <p className="panel-body">取得元がまだ登録されていません。</p>
-          )}
-        </div>
+              ))}
+          </div>
+        ) : (
+          <EmptyState>取得元がまだ登録されていません。</EmptyState>
+        )}
         {data.sources.some((source) => source.artifact_count === 0) ? (
-          <details className="panel-body detail-disclosure">
+          <details className="detail-disclosure">
             <summary>
               原本が未保存の取得元（
               {data.sources.filter((source) => source.artifact_count === 0).length}件）
@@ -184,15 +185,20 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
         count={`${data.fetchRuns.length}件`}
         note="登録の新しい順に、実行ごとの結果と日時を表示しています。"
       >
-        <div className="table-scroll">
-          <table>
+        <div className="table-scroll" role="region" aria-label="最近の収集履歴" tabIndex={0}>
+          <table className="fetch-run-table">
+            <caption>
+              日時は記録された表記のままです。結果は収集の実行についてのもので、取得元の全履歴が揃っていることは意味しません。
+            </caption>
             <thead>
               <tr>
                 <th scope="col">取得元</th>
                 <th scope="col">結果</th>
                 <th scope="col">開始日時</th>
                 <th scope="col">完了日時</th>
-                <th scope="col">実行の詳細</th>
+                <th scope="col" className="col-run">
+                  実行の詳細
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -203,15 +209,17 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
                     <td>
                       <StatusBadge status={run.status} />
                     </td>
-                    <td>{run.started_at}</td>
-                    <td>
+                    <td className="cell-time">{run.started_at}</td>
+                    <td className="cell-time">
                       <Nullable value={run.completed_at} placeholder="完了日時未記録" />
                     </td>
-                    <td>
+                    <td className="col-run">
                       <details>
                         <summary>実行 #{run.id}</summary>
                         <p>{run.tool}</p>
-                        <Nullable value={run.external_run_id} />
+                        <p>
+                          <Nullable value={run.external_run_id} placeholder="外部の実行IDなし" />
+                        </p>
                       </details>
                     </td>
                   </tr>
@@ -256,8 +264,11 @@ function ParseHistory({ data }: { data: Overview }): ReactNode {
   );
   return (
     <Panel id="parse-runs" title="解析の履歴" count={`${data.parseRuns.length}件`}>
-      <div className="table-scroll">
-        <table>
+      <div className="table-scroll" role="region" aria-label="解析の履歴" tabIndex={0}>
+        <table className="parse-run-table">
+          <caption>
+            旧解析の記録も残しています。置き換えられた行は色と「旧解析」の表示で区別します。
+          </caption>
           <thead>
             <tr>
               {["原本", "解析方法", "解析日時", "結果", "履歴", "注意・エラー"].map((label) => (
@@ -281,7 +292,7 @@ function ParseHistory({ data }: { data: Overview }): ReactNode {
                 <td>
                   {run.parser_name}@{run.parser_version}
                 </td>
-                <td>{run.parsed_at}</td>
+                <td className="cell-time">{run.parsed_at}</td>
                 <td>
                   <StatusBadge status={run.status} />
                 </td>

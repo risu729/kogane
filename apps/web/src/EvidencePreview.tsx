@@ -104,25 +104,25 @@ function PreviewContent({
           <>
             <div className="preview-toolbar">
               {language === "json" && formatted !== null ? (
-                <label>
+                <label className="check-field">
                   <input
                     type="checkbox"
                     checked={pretty}
                     onChange={(event) => setPretty(event.target.checked)}
                   />
-                  JSONを整形して表示
+                  <span>JSONを整形して表示</span>
                 </label>
               ) : null}
               <p className="muted">
                 保存された内容をテキストとして表示しています。HTMLは実行されません。
               </p>
-              <label>
+              <label className="check-field">
                 <input
                   type="checkbox"
                   checked={wrap}
                   onChange={(event) => setWrap(event.target.checked)}
                 />
-                長い行を折り返す
+                <span>長い行を折り返す</span>
               </label>
             </div>
             {language === "json" ? (

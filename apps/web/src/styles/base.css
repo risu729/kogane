@@ -195,6 +195,13 @@ summary:hover {
 
 /* ── list helpers ──────────────────────────────────────────────────── */
 
+/* A list without bullets or indent, for short notes that happen to be lists. */
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .warning-list {
   margin: var(--space-1) 0 0;
   padding-left: var(--space-4);

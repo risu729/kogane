@@ -1,9 +1,14 @@
 /* Tables: the scroll region, cell defaults, sortable headers and the column
- * contracts for the transaction, balance and identity tables. */
+ * contracts for the transaction, balance, identity, run, artifact and
+ * evidence tables. Every table names a minimum width that keeps its columns
+ * readable; the region scrolls, and says so, when it cannot grant it. */
 
+/* The region is a size container so that a caption can be bounded to the
+ * visible width of a table that scrolls. */
 .table-scroll {
   overflow-x: auto;
   max-width: 100%;
+  container-type: inline-size;
 }
 
 .table-scroll[tabindex]:focus-visible {
@@ -26,11 +31,17 @@ table {
   min-width: 40rem;
 }
 
+/* A caption is read before the table: it wraps within the visible region and
+ * stays in view while the table scrolls sideways. */
 caption {
   text-align: left;
   padding: var(--space-2) var(--space-3);
   color: var(--text-2);
   font-size: var(--text-md);
+  position: sticky;
+  left: 0;
+  box-sizing: border-box;
+  max-width: 100cqi;
 }
 
 thead th {
@@ -68,6 +79,14 @@ tbody th {
   padding: var(--space-4);
   border-bottom: 1px solid var(--border);
   vertical-align: top;
+}
+
+/* A timestamp is one token: it never breaks inside the date or the offset. */
+.cell-time {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 tbody tr:nth-child(even) {
@@ -201,6 +220,8 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
 
 .record-dates dd {
   margin: 2px 0 var(--space-2);
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .record-dates dd:last-child {
@@ -212,11 +233,12 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
 /* Keep the narrative readable; identifiers must not dictate every column's width. */
 .transaction-table {
   table-layout: auto;
-  min-width: 62rem;
+  min-width: 60rem;
 }
 
+/* Wide enough for a stored `YYYY-MM-DDTHH:MM:SS+09:00` on one line. */
 .transaction-table .col-date {
-  width: 11rem;
+  width: 15rem;
 }
 .transaction-table .col-description {
   width: auto;
@@ -257,34 +279,66 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
 
 /* ── balance table ─────────────────────────────────────────────────── */
 
+/* Only the identifier-like columns carry a fixed minimum; the amount column
+ * shrinks to its content and the descriptive columns share what is left, so
+ * the table fits the content column on a laptop without a scroll. */
 .balance-table {
   min-width: 54rem;
   table-layout: auto;
 }
 
 .balance-table .col-source {
-  width: 13rem;
-  min-width: 11rem;
+  min-width: 9rem;
   max-width: 13rem;
 }
 .balance-table .col-metric {
-  min-width: 11rem;
-}
-.balance-table .col-amount {
-  width: 12rem;
-  max-width: none;
-  overflow-wrap: normal;
-}
-.balance-table .col-dates {
-  width: 16rem;
-  min-width: 14rem;
-}
-.balance-table .col-lineage {
   min-width: 9rem;
 }
+.balance-table .col-amount {
+  width: 1%;
+  max-width: none;
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+.balance-table .col-dates {
+  min-width: 11rem;
+}
+.balance-table .col-lineage {
+  min-width: 8rem;
+}
 .balance-table .col-detail {
-  width: 5rem;
   min-width: 5rem;
+}
+
+/* ── run, artifact and evidence tables ─────────────────────────────── */
+
+.fetch-run-table {
+  min-width: 54rem;
+}
+.parse-run-table {
+  min-width: 60rem;
+}
+.artifact-table {
+  min-width: 56rem;
+}
+.evidence-run-table {
+  min-width: 56rem;
+}
+.evidence-file-table {
+  min-width: 44rem;
+}
+
+/* The run disclosure keeps its summary on one line; the tool name and the
+ * external run id it opens on may be long tokens, and those wrap. */
+.fetch-run-table .col-run {
+  min-width: 12rem;
+}
+.fetch-run-table .col-run summary {
+  white-space: nowrap;
+}
+.fetch-run-table .col-run p {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
 }
 
 /* ── identity table ────────────────────────────────────────────────── */
@@ -304,18 +358,47 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── responsive ────────────────────────────────────────────────────── */
+/* ── scroll hint ───────────────────────────────────────────────────── */
 
-/* Every table in the region has a minimum width, so on a narrow screen the
- * region always scrolls and the hint is always true. */
-@media (max-width: 760px) {
+/* The hint appears only while the region really overflows: a scroll
+ * progress timeline is inactive when there is nothing to scroll, so the
+ * animation that reveals the hint never applies to a table that fits, at any
+ * width. Engines without scroll timelines show it on narrow screens, where
+ * every table's minimum width exceeds the region. */
+.table-scroll:has(table)::before {
+  content: "左右にスクロールして全項目を確認できます →";
+  display: block;
+  position: sticky;
+  left: 0;
+  max-height: 0;
+  padding: 0 var(--space-4);
+  overflow: hidden;
+  visibility: hidden;
+  color: var(--text-2);
+  font: var(--text-xs) / 1.7 var(--sans);
+}
+
+@supports (animation-timeline: scroll()) {
   .table-scroll:has(table)::before {
-    content: "左右にスクロールして全項目を確認できます →";
-    display: block;
-    position: sticky;
-    left: 0;
-    padding: var(--space-2) var(--space-4);
-    color: var(--text-2);
-    font: var(--text-xs) var(--sans);
+    animation: table-scroll-hint linear both;
+    animation-timeline: scroll(nearest inline);
+  }
+  @keyframes table-scroll-hint {
+    from,
+    to {
+      max-height: 4rem;
+      padding-block: var(--space-2);
+      visibility: visible;
+    }
+  }
+}
+
+@supports not (animation-timeline: scroll()) {
+  @media (max-width: 760px) {
+    .table-scroll:has(table)::before {
+      max-height: 4rem;
+      padding-block: var(--space-2);
+      visibility: visible;
+    }
   }
 }

@@ -51,8 +51,8 @@ export function CollectionControls({ kind }: { kind: string }) {
   return (
     <QueryBoundary query={options} label="全記録の絞り込み">
       {(data) => (
-        <section className="panel-body" aria-label="全記録の絞り込み">
-          <p>保存された全記録から絞り込み、500件ずつ読み込みます。</p>
+        <section className="panel" aria-label="全記録の絞り込み">
+          <div className="panel-note">保存された全記録から絞り込み、500件ずつ読み込みます。</div>
           <div className="filter-grid">
             <label className="filter-field">
               取得元
@@ -173,15 +173,24 @@ export function CollectionControls({ kind }: { kind: string }) {
               {invalidDates ? <p role="alert">開始日を終了日以前にしてください。</p> : null}
             </form>
           ) : null}
-          {params.size ? (
-            <button className="button" onClick={() => navigate(`/${kind}`)}>
-              条件をクリア
-            </button>
-          ) : null}
-          {params.has("offset") || params.has("cursor") || params.has("latestOffset") ? (
-            <button className="button" onClick={() => change(source, account)}>
-              最初のページへ
-            </button>
+          {params.size ||
+          params.has("offset") ||
+          params.has("cursor") ||
+          params.has("latestOffset") ? (
+            <div className="panel-body">
+              <div className="button-row">
+                {params.size ? (
+                  <button className="button" type="button" onClick={() => navigate(`/${kind}`)}>
+                    条件をクリア
+                  </button>
+                ) : null}
+                {params.has("offset") || params.has("cursor") || params.has("latestOffset") ? (
+                  <button className="button" type="button" onClick={() => change(source, account)}>
+                    最初のページへ
+                  </button>
+                ) : null}
+              </div>
+            </div>
           ) : null}
         </section>
       )}
