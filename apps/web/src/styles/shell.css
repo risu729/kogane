@@ -16,7 +16,7 @@
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  /* Nine destinations plus the note and footer can exceed a short viewport;
+  /* Ten destinations plus the note and footer can exceed a short viewport;
    * the sidebar then scrolls on its own instead of clipping its footer. */
   overflow-y: auto;
 }
