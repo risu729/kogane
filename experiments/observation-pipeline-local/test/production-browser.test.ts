@@ -225,7 +225,7 @@ describe.if(runnable)("combined production client", () => {
         ["/", "Demo Bank"],
         ["/transactions", HOSTILE_DESCRIPTION],
         ["/balances", "248,820"],
-        ["/positions", "EXAMPLE <FUND>"],
+        ["/positions", "Example <Fund>"],
         ["/artifacts", "statement"],
         [`/artifacts/${fixture.artifactId}`, "現行の解析"],
         [`/observations/transaction/${observation.id}`, "json:$.rows[0]"],

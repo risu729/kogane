@@ -258,7 +258,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
                           onClick={header.column.getToggleSortingHandler()}
                         >
                           <table.FlexRender header={header} />
-                          <span aria-hidden="true">
+                          <span className="sort-arrow" aria-hidden="true">
                             {sorted === "asc" ? " ↑" : sorted === "desc" ? " ↓" : " ↕"}
                           </span>
                         </button>

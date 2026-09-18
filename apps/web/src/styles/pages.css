@@ -1,0 +1,402 @@
+/* Page-specific layouts: overview statistics and source cards, positions,
+ * observation lists, identities, rewards, settlement and card ownership. */
+
+/* ── overview ──────────────────────────────────────────────────────── */
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.overview-stat {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: var(--space-6);
+  min-width: 0;
+}
+
+.overview-stat-label {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.overview-stat-value {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--text-3xl);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  margin: var(--space-4) 0 var(--space-3);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.overview-stat > span:last-child {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.overview-stat > a:last-child {
+  font-size: var(--text-xs);
+  color: var(--link);
+}
+
+.overview-stat p {
+  margin: 0;
+}
+
+@media (max-width: 1150px) {
+  .overview-stat {
+    padding: var(--space-5);
+  }
+}
+
+@media (max-width: 760px) {
+  .overview-grid {
+    gap: var(--space-2);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .overview-stat {
+    padding: var(--space-4);
+  }
+  .overview-stat:last-child {
+    grid-column: 1 / -1;
+  }
+  .overview-stat-value {
+    font-size: var(--text-2xl);
+  }
+  .overview-stat-label {
+    font-size: var(--text-xs);
+  }
+}
+
+/* ── source cards ──────────────────────────────────────────────────── */
+
+.source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.source-card {
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  overflow-wrap: anywhere;
+}
+
+.source-card h3 {
+  font-family: var(--sans);
+  font-size: var(--text-lg);
+  margin-bottom: var(--space-2);
+}
+
+.source-card p {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  margin: var(--space-1) 0;
+}
+
+.source-card strong {
+  display: block;
+  font-size: var(--text-md);
+  margin-top: var(--space-4);
+}
+
+.source-card .detail-disclosure {
+  margin-bottom: 0;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+}
+
+@media (max-width: 760px) {
+  .source-grid {
+    padding: var(--space-4);
+  }
+  .source-card {
+    padding: var(--space-4);
+  }
+}
+
+/* ── positions ─────────────────────────────────────────────────────── */
+
+.position-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  margin-bottom: var(--space-4);
+  display: grid;
+  grid-template-columns: minmax(280px, 22rem) minmax(0, 1fr);
+}
+
+.position-facts {
+  padding: var(--space-3);
+  border-right: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.position-valuations {
+  padding: var(--space-3);
+  min-width: 0;
+}
+
+@media (max-width: 860px) {
+  .position-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .position-facts {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+.position-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.security-code {
+  font-family: var(--mono);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.security-name {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.quantity {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--space-2);
+}
+
+/* One block per currency, so the page cannot be read as a set of figures
+ * waiting to be added up. The rule is structural, not just stated. */
+.currency-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-2);
+}
+
+.currency-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-3);
+}
+
+.currency-group-body {
+  padding: var(--space-2);
+}
+
+.currency-label {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: var(--text-md);
+}
+
+.figure {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.figure-metric {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+.figure-amount {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.figure-currency {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  padding: 0 0.3em;
+}
+
+.figure-asof {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.figure-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+}
+
+/* ── observation lists ─────────────────────────────────────────────── */
+
+.obs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+
+.obs-list li {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.obs-list li:last-child {
+  border-bottom: none;
+}
+
+.obs-summary {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* ── identities ────────────────────────────────────────────────────── */
+
+.identity-page {
+  min-width: 0;
+}
+.identity-page h2,
+.identity-page p {
+  overflow-wrap: anywhere;
+}
+.identity-page form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: end;
+}
+.identity-page form label {
+  min-width: 0;
+}
+.identity-page input {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* ── reward programmes (A11) ───────────────────────────────────────── */
+
+/* A quantity always carries its unit: this number is not yen unless it says so. */
+.reward-quantity .reward-unit {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+/* Unconfirmed is a word, never only a colour. */
+.reward-unknown {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.reward-block {
+  margin-top: var(--space-4);
+}
+
+.reward-block h3 {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-1);
+}
+
+.reward-reasons {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-4);
+  color: var(--muted);
+}
+
+.reward-caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── settlement and card ownership ─────────────────────────────────── */
+
+/* A written reason precedes every reviewed settlement decision. */
+.settlement-reason {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: var(--space-2) 0 var(--space-4);
+  padding: var(--space-3);
+  font: inherit;
+  resize: vertical;
+}
+
+.settlement-history {
+  overflow-wrap: anywhere;
+}
+
+.settlement-targets {
+  min-width: 40rem;
+}
+
+.ownership-form {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+.ownership-form > input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ownership-evidence {
+  display: flex;
+  align-items: start;
+  gap: var(--space-2);
+}
+
+@media (max-width: 760px) {
+  .ownership-form {
+    padding: var(--space-4);
+  }
+}

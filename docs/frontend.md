@@ -50,6 +50,39 @@ query cache and hide its records. A failed retry cannot restore them; a successf
 response is required. Connection metadata gates observation pages as well. Other
 refresh failures retain previously authorized records with an explicit warning.
 
+## Design tokens and stylesheet layout
+
+`apps/web/src/styles.css` is an index of `@import` lines; the rules live in
+`apps/web/src/styles/`, imported in cascade order:
+
+| File             | Holds                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `tokens.css`     | Every colour, type size, spacing step, radius and shadow, as `:root` custom properties                                                   |
+| `base.css`       | Reset, body, links, focus ring, headings, `summary`, code, value and list helpers                                                        |
+| `shell.css`      | App shell: sidebar, brand, navigation, workspace bar, source notice, main, footer                                                        |
+| `components.css` | Panels and note tones, badges, buttons, filters, key/value grids, states, pagination, disclosures, tiles, provenance chain, code preview |
+| `tables.css`     | Scroll region, cell defaults, sortable headers, the transaction/balance/identity column contracts                                        |
+| `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership                         |
+
+`balance-display.css` stays beside its component. Responsive rules sit next to
+the rule they modify, not in one media block, so page work touches one file.
+
+The scales in `tokens.css`:
+
+- Type: `--text-xs` (11px) through `--text-3xl` (32px) in eight steps. Nothing
+  renders below `--text-xs`; the smallest-text colour `--text-3` clears WCAG AA
+  on every surface it is printed on (the ratios are in the file).
+- Spacing: `--space-1` (4px) to `--space-8` (40px) on a 4px grid.
+- Radii: `--radius-sm` (controls, badges), `--radius-md` (nested cards,
+  disclosures), `--radius-lg` (panels; `--radius` is its alias).
+- Tones: `--ok-*`, `--warn-*`, `--bad-*`, `--sup-*` triples (foreground,
+  background, border) shared by badges, notes and states; `--code-*` for the
+  evidence preview palette.
+
+Rule: new CSS uses tokens. Raw colours, pixel sizes and radii belong only in
+`tokens.css`; a value that has no token gets one there first. The brand mark's
+drawn dimensions are the one documented exception.
+
 ## API metadata and capabilities
 
 `/api/meta` describes the connection. Its `source.kind` (`local-store`,

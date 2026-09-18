@@ -142,46 +142,48 @@ function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
           currencies.map((currency) => (
             <section className="currency-group" key={currency}>
               <div className="currency-group-head">
-                <span>{currency}</span>
+                <span className="currency-label">{currency}</span>
                 <span>通貨別の報告値</span>
               </div>
-              <div className="figures">
-                {valuations
-                  .filter((value) => value.currency === currency)
-                  .map((value) => (
-                    <div className="figure" key={value.id}>
-                      <div className="figure-metric">{value.metric}</div>
-                      <OrganizedSourceAccount
-                        source={value.source_id}
-                        account={value.source_account}
-                        organization={value.organization}
-                      />
-                      <OrganizedInstrumentContext
-                        organization={value.organization}
-                        role="security"
-                      />
-                      <OrganizedInstrumentContext
-                        organization={value.organization}
-                        role="unit"
-                        original={value.currency}
-                      />
-                      <div className="figure-amount">
-                        <Amount
-                          minor={value.amount_minor}
-                          unit={value.currency}
-                          text={value.amount_text}
+              <div className="currency-group-body">
+                <div className="figures">
+                  {valuations
+                    .filter((value) => value.currency === currency)
+                    .map((value) => (
+                      <div className="figure" key={value.id}>
+                        <div className="figure-metric">{value.metric}</div>
+                        <OrganizedSourceAccount
+                          source={value.source_id}
+                          account={value.source_account}
+                          organization={value.organization}
                         />
+                        <OrganizedInstrumentContext
+                          organization={value.organization}
+                          role="security"
+                        />
+                        <OrganizedInstrumentContext
+                          organization={value.organization}
+                          role="unit"
+                          original={value.currency}
+                        />
+                        <div className="figure-amount">
+                          <Amount
+                            minor={value.amount_minor}
+                            unit={value.currency}
+                            text={value.amount_text}
+                          />
+                        </div>
+                        <div className="figure-foot">
+                          <span>
+                            基準日: <Nullable value={value.as_of} />
+                          </span>
+                          <ObservationLink kind="valuation" id={value.id}>
+                            詳細
+                          </ObservationLink>
+                        </div>
                       </div>
-                      <div className="figure-foot">
-                        <span>
-                          基準日: <Nullable value={value.as_of} />
-                        </span>
-                        <ObservationLink kind="valuation" id={value.id}>
-                          詳細
-                        </ObservationLink>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                </div>
               </div>
             </section>
           ))
