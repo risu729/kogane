@@ -193,7 +193,31 @@ summary:hover {
   min-width: 14ch;
 }
 
+/* Present for assistive technology and search, drawn nowhere: table captions
+ * whose text already appears as the panel title, and the like. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* ── list helpers ──────────────────────────────────────────────────── */
+
+/* A bulleted list set in body type, with the indent on the spacing grid. */
+.plain-list {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-md);
+}
+
+.plain-list li + li {
+  margin-top: var(--space-1);
+}
 
 .warning-list {
   margin: var(--space-1) 0 0;

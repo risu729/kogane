@@ -10,7 +10,7 @@
 //     provider-observed or policy-estimated, and every reason code has text;
 //     colour alone never carries the meaning.
 import { type ReactNode } from "react";
-import { EmptyState, Panel, QueryBoundary } from "../ui.tsx";
+import { Badge, EmptyState, Kv, KvRow, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
   useRewardExpiry,
   useRewardHoldings,
@@ -78,11 +78,24 @@ function reasonText(code: string): string {
   return REASON_LABELS[code] ?? code;
 }
 
+/**
+ * A DOM id for a panel heading, built from the API's reference strings so that
+ * the panel's `aria-labelledby` points at a real element. Only id-safe
+ * characters survive; the references themselves are still printed verbatim.
+ */
+function domId(prefix: string, ...parts: string[]): string {
+  return [prefix, ...parts].join("-").replace(/[^A-Za-z0-9_-]+/g, "-");
+}
+
+/**
+ * A native quantity, set like an <Amount>: mono tabular digits with the unit
+ * attached and muted. This number is not yen unless the unit says so.
+ */
 function Quantity({ quantity }: { quantity: RewardQuantity }): ReactNode {
   if (quantity.value.status !== "exact")
     return (
-      <span className="reward-quantity">
-        <span className="reward-unknown">未確定</span>
+      <span>
+        <Badge tone="warn">未確定</Badge>{" "}
         <span className="reward-unit">{quantity.value.reasonCode}</span>
       </span>
     );
@@ -91,21 +104,20 @@ function Quantity({ quantity }: { quantity: RewardQuantity }): ReactNode {
   const digits = (negative ? coefficient.slice(1) : coefficient).padStart(scale + 1, "0");
   const text = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
   return (
-    <span className="reward-quantity">
-      <strong>{`${negative ? "-" : ""}${text}`}</strong>{" "}
-      {/* The unit is always shown: this number is not yen unless the unit says so. */}
-      <span className="reward-unit">{quantity.unitRef}</span>
+    <span className="amount">
+      {`${negative ? "-" : ""}${text}`} <span className="reward-unit">{quantity.unitRef}</span>
     </span>
   );
 }
 
+/** An unconfirmed date is a warning in words; an absent one is a missing value. */
 function Time({ time }: { time: RewardTime | null }): ReactNode {
-  if (time === null) return <span className="reward-unknown">期限の表示なし</span>;
+  if (time === null) return <Nullable value={null} placeholder="期限の表示なし" />;
   if (time.kind === "unknown")
     return (
-      <span className="reward-unknown" title={time.reasonCode}>
+      <Badge tone="warn" title={time.reasonCode}>
         期限未確認
-      </span>
+      </Badge>
     );
   if (time.kind === "period")
     return (
@@ -124,7 +136,7 @@ function Time({ time }: { time: RewardTime | null }): ReactNode {
 function Codes({ codes }: { codes: string[] }): ReactNode {
   if (codes.length === 0) return null;
   return (
-    <ul className="reward-reasons">
+    <ul className="warning-list">
       {codes.map((code) => (
         <li key={code}>{reasonText(code)}</li>
       ))}
@@ -133,8 +145,10 @@ function Codes({ codes }: { codes: string[] }): ReactNode {
 }
 
 function Holding({ holding }: { holding: RewardHoldingRow }): ReactNode {
+  const caption = "保有内訳";
   return (
     <Panel
+      id={domId("reward-holding", holding.programId, holding.holdingRef)}
       title={`${holding.programRef}（${HOLDING_KIND_LABELS[holding.holdingKind] ?? holding.holdingKind}）`}
       note={
         <>
@@ -143,9 +157,9 @@ function Holding({ holding }: { holding: RewardHoldingRow }): ReactNode {
         </>
       }
     >
-      <div className="table-scroll">
-        <table>
-          <caption className="reward-caption">保有内訳</caption>
+      <div className="table-scroll" role="region" aria-label={caption} tabIndex={0}>
+        <table className="reward-holding-table">
+          <caption className="visually-hidden">{caption}</caption>
           <thead>
             <tr>
               <th scope="col">区分</th>
@@ -180,57 +194,61 @@ function Holding({ holding }: { holding: RewardHoldingRow }): ReactNode {
           </tbody>
         </table>
       </div>
-      {holding.qualificationMeasures.length > 0 ? (
-        <div className="reward-block">
-          <h3>資格指標（利用できる量ではありません）</h3>
-          <ul>
-            {holding.qualificationMeasures.map((measure) => (
-              <li key={measure.measureRef}>
-                {measure.metricRef}: <Quantity quantity={measure.quantity} />（
-                <Time time={measure.period} />）
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {holding.excluded.length > 0 ? (
-        <div className="reward-block">
-          <h3>合計に含めていないもの</h3>
-          <ul>
-            {holding.excluded.map((row) => (
-              <li key={row.bucketRef}>
-                {BUCKET_LABELS[row.kind] ?? row.kind}: {reasonText(row.reasonCode)}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      <div className="reward-block">
-        <h3>会員資格</h3>
-        {holding.membership.length === 0 ? (
-          <p>会員資格の記録はありません。</p>
-        ) : (
-          <ul>
-            {holding.membership.map((state) => (
-              <li key={`${state.tier}${state.source}`}>
-                {state.tier}（<Time time={state.valid} />）
-                {state.source === "provider" ? "取得元で確認" : "自己申告"}
-              </li>
-            ))}
-          </ul>
-        )}
+      <div className="panel-body">
+        {holding.qualificationMeasures.length > 0 ? (
+          <section className="reward-block">
+            <h3>資格指標（利用できる量ではありません）</h3>
+            <ul className="plain-list">
+              {holding.qualificationMeasures.map((measure) => (
+                <li key={measure.measureRef}>
+                  {measure.metricRef}: <Quantity quantity={measure.quantity} />（
+                  <Time time={measure.period} />）
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {holding.excluded.length > 0 ? (
+          <section className="reward-block">
+            <h3>合計に含めていないもの</h3>
+            <ul className="plain-list">
+              {holding.excluded.map((row) => (
+                <li key={row.bucketRef}>
+                  {BUCKET_LABELS[row.kind] ?? row.kind}: {reasonText(row.reasonCode)}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        <section className="reward-block">
+          <h3>会員資格</h3>
+          {holding.membership.length === 0 ? (
+            <p className="reward-block-text">会員資格の記録はありません。</p>
+          ) : (
+            <ul className="plain-list">
+              {holding.membership.map((state) => (
+                <li key={`${state.tier}${state.source}`}>
+                  {state.tier}（<Time time={state.valid} />）
+                  {state.source === "provider" ? "取得元で確認" : "自己申告"}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <p className="footnote">
+          表示されている量を円などへ換算した金額は出していません。換金の目安は、条件・手数料・期限を伴う
+          個別の交換条件を指定したときにだけ算出できます。
+        </p>
       </div>
-      <p className="footnote">
-        表示されている量を円などへ換算した金額は出していません。換金の目安は、条件・手数料・期限を伴う
-        個別の交換条件を指定したときにだけ算出できます。
-      </p>
     </Panel>
   );
 }
 
 function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
+  const caption = "期限の内訳";
   return (
     <Panel
+      id={domId("reward-expiry", row.holdingRef, row.ruleRef)}
       title={row.ruleRef}
       note={
         <>
@@ -241,9 +259,9 @@ function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
         </>
       }
     >
-      <div className="table-scroll">
-        <table>
-          <caption className="reward-caption">期限の内訳</caption>
+      <div className="table-scroll" role="region" aria-label={caption} tabIndex={0}>
+        <table className="reward-expiry-table">
+          <caption className="visually-hidden">{caption}</caption>
           <thead>
             <tr>
               <th scope="col">対象</th>
@@ -278,14 +296,20 @@ function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
           </tbody>
         </table>
       </div>
-      <Codes codes={row.uncertaintyCodes} />
+      {row.uncertaintyCodes.length > 0 ? (
+        <div className="panel-body">
+          <Codes codes={row.uncertaintyCodes} />
+        </div>
+      ) : null}
     </Panel>
   );
 }
 
 function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
+  const codes = [...new Set([...row.reasonCodes, ...row.uncertaintyCodes])];
   return (
     <Panel
+      id={domId("reward-read-expiry", row.holdingRef, row.ruleRef, row.bucketRef)}
       title={`${row.programId} ／ ${BUCKET_LABELS[row.bucketKind] ?? row.bucketKind}`}
       note={
         <>
@@ -293,25 +317,22 @@ function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
         </>
       }
     >
-      <dl>
-        <dt>数量</dt>
-        <dd>
-          <Quantity quantity={row.quantity} />
-        </dd>
-        <dt>期限</dt>
-        <dd>{row.expiresOn ?? "期限未確認"}</dd>
-        <dt>根拠</dt>
-        <dd>{BASIS_LABELS[row.basis] ?? row.basis}</dd>
-        <dt>取得元の表示</dt>
-        <dd>
-          <Time time={row.providerObserved} />
-        </dd>
-        <dt>規約からの算定</dt>
-        <dd>
-          <Time time={row.policyEstimated} />
-        </dd>
-      </dl>
-      <Codes codes={[...new Set([...row.reasonCodes, ...row.uncertaintyCodes])]} />
+      <div className="panel-body">
+        <Kv>
+          <KvRow label="数量">
+            <Quantity quantity={row.quantity} />
+          </KvRow>
+          <KvRow label="期限">{row.expiresOn ?? <Badge tone="warn">期限未確認</Badge>}</KvRow>
+          <KvRow label="根拠">{BASIS_LABELS[row.basis] ?? row.basis}</KvRow>
+          <KvRow label="取得元の表示">
+            <Time time={row.providerObserved} />
+          </KvRow>
+          <KvRow label="規約からの算定">
+            <Time time={row.policyEstimated} />
+          </KvRow>
+        </Kv>
+        <Codes codes={codes} />
+      </div>
     </Panel>
   );
 }
