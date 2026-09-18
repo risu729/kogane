@@ -23,6 +23,7 @@ import {
 } from "../balance-display.tsx";
 import { Link } from "../router.tsx";
 import { BalancesLatestPage } from "./BalancesLatest.tsx";
+import { CollectionControls } from "../collection-controls.tsx";
 export function BalancesPage({
   view = "balances",
 }: {
@@ -31,7 +32,7 @@ export function BalancesPage({
   // The read model is used when the server advertises it, and the previous
   // list stays in place otherwise; the page never branches on the name of the
   // connection.
-  const { balanceReadModel } = useFeatures();
+  const { balanceReadModel, serverFilters } = useFeatures();
   const query = useBalances(view);
   const summaries = view === "summaries";
   return (
@@ -47,6 +48,7 @@ export function BalancesPage({
           {summaries ? "保有残高を見る" : "期間実績・請求を見る"}
         </Link>
       </div>
+      {serverFilters ? <CollectionControls kind={view} /> : null}
       {balanceReadModel ? <BalancesLatestPage view={view} /> : null}
       <QueryBoundary query={query} label={summaries ? "実績・請求" : "残高"}>
         {(data) => (
@@ -205,13 +207,15 @@ function LatestBalances({
   const view = pageWindow(rows, page);
   return (
     <section aria-label={summaries ? "最新取得の期間実績・請求" : "項目ごとの最新の記録"}>
-      <h2 id="latest-balances">
-        {summaries ? "最新取得の期間実績・請求" : "項目ごとの最新の記録"}
-      </h2>
-      <p className="footnote">
-        受信した最新の記録 {available}件中、条件に一致する{rows.length}
-        件。各区分の件数はこの表示ページ内です。
-      </p>
+      <div className="section-head">
+        <h2 id="latest-balances">
+          {summaries ? "最新取得の期間実績・請求" : "項目ごとの最新の記録"}
+        </h2>
+        <p className="footnote">
+          受信した最新の記録 {available}件中、条件に一致する{rows.length}
+          件。各区分の件数はこの表示ページ内です。
+        </p>
+      </div>
       {BALANCE_GROUPS.map((group) => {
         const grouped = view.rows.filter((row) =>
           (group.kinds as readonly string[]).includes(balanceMeaning(row).kind),
@@ -233,7 +237,7 @@ function LatestBalances({
             : "表示対象の記録がまだありません。金額がゼロであることを意味しません。"}
         </p>
       ) : null}
-      <Pager {...view} total={rows.length} onChange={setPage} />
+      <Pager {...view} total={rows.length} onChange={setPage} bare />
     </section>
   );
 }

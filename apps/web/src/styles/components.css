@@ -526,8 +526,7 @@
 
 /* ── pagination ────────────────────────────────────────────────────── */
 
-.pagination,
-.page-actions {
+.pagination {
   padding: var(--space-4) var(--space-6);
   display: flex;
   flex-wrap: wrap;
@@ -539,22 +538,24 @@
   border-top: 1px solid var(--border);
 }
 
-.pagination .button,
-.page-actions .button {
+.pagination .button {
   min-width: 60px;
 }
 
-/* Page-level actions sit on the page, not in a panel: no inset, no rule. */
-.page-actions {
-  padding-inline: 0;
+/* A pager that closes a list of cards or panels in page flow: no panel inset
+ * and no rule, so it reads as the list's last line. */
+.pagination-bare {
+  padding: 0;
   border-top: 0;
-  justify-content: flex-start;
 }
 
 @media (max-width: 760px) {
   .pagination {
     padding: var(--space-3) var(--space-4);
     justify-content: center;
+  }
+  .pagination-bare {
+    padding: 0;
   }
 }
 

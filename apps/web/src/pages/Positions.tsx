@@ -19,14 +19,17 @@ import {
   OrganizedSourceAccount,
   organizedInstrument,
 } from "../organization.tsx";
+import { CollectionControls } from "../collection-controls.tsx";
 export function PositionsPage(): ReactNode {
   const query = usePositions();
+  const { serverFilters } = useFeatures();
   return (
     <>
       <div className="page-head">
         <h1>保有資産</h1>
         <p className="lede">取得元が報告した保有数量と評価額を、通貨ごとに確認できます。</p>
       </div>
+      {serverFilters ? <CollectionControls kind="positions" /> : null}
       <details className="detail-disclosure">
         <summary>評価額の対応関係について</summary>
         <p>
@@ -49,16 +52,15 @@ function PositionList({ entries }: { entries: PositionWithValuations[] }): React
   return (
     <>
       {!serverFilters ? (
-        <section className="panel">
-          <div className="panel-body">
-            <RecordControls
-              rows={entries.map((entry) => entry.position)}
-              filters={filters}
-              onChange={(next) => {
-                setFilters(next);
-                setPage(0);
-              }}
-            />
+        <section className="panel" aria-label="保有資産の表示条件">
+          <RecordControls
+            rows={entries.map((entry) => entry.position)}
+            filters={filters}
+            onChange={(next) => {
+              setFilters(next);
+              setPage(0);
+            }}
+          >
             <button
               className="button"
               type="button"
@@ -69,10 +71,10 @@ function PositionList({ entries }: { entries: PositionWithValuations[] }): React
             >
               条件をクリア
             </button>
-            <p className="footnote">
-              保存された保有資産 {entries.length}件中 {filtered.length}
-              件が条件に一致しています。取得元の全保有資産が揃っていることを示す件数ではありません。
-            </p>
+          </RecordControls>
+          <div className="panel-note" role="status" aria-live="polite" aria-atomic="true">
+            保存された保有資産 {entries.length}件中 {filtered.length}
+            件が条件に一致しています。取得元の全保有資産が揃っていることを示す件数ではありません。
           </div>
         </section>
       ) : null}
@@ -86,7 +88,7 @@ function PositionList({ entries }: { entries: PositionWithValuations[] }): React
       {view.rows.map((entry) => (
         <PositionCard key={entry.position.id} entry={entry} />
       ))}
-      <Pager {...view} total={filtered.length} onChange={setPage} />
+      <Pager {...view} total={filtered.length} onChange={setPage} bare />
     </>
   );
 }

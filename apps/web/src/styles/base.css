@@ -130,6 +130,20 @@ h4 {
   margin-top: var(--space-6);
 }
 
+/* A sub-heading in page flow between panels: set off from the panel above it,
+ * close to the group it introduces. */
+.section-head {
+  margin: var(--space-6) 0 var(--space-4);
+}
+
+.section-head h2 {
+  font-size: var(--text-lg);
+}
+
+.section-head .footnote {
+  margin-top: var(--space-1);
+}
+
 @media (max-width: 760px) {
   .page-head {
     margin-bottom: var(--space-6);

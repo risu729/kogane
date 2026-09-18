@@ -18,7 +18,6 @@ import { ObservationDetailPage } from "./pages/ObservationDetail.tsx";
 import { NotFoundPage } from "./pages/NotFound.tsx";
 import { EvidenceContent } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
-import { CollectionControls } from "./collection-controls.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
@@ -199,20 +198,10 @@ export function App(): ReactNode {
               <h1>表示対象の記録がありません</h1>
               <p>接続先を確認してください。</p>
             </section>
+          ) : evidenceRoute ? (
+            <EvidenceContent observationsAvailable />
           ) : (
-            <>
-              {features.serverFilters &&
-              ["transactions", "balances", "summaries", "positions", "artifacts"].includes(
-                route.name,
-              ) ? (
-                <CollectionControls kind={route.name} />
-              ) : null}
-              {evidenceRoute ? (
-                <EvidenceContent observationsAvailable />
-              ) : (
-                <View key={path + window.location.search} route={route} />
-              )}
-            </>
+            <View key={path + window.location.search} route={route} />
           )
         }
       </QueryBoundary>
