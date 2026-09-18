@@ -24,6 +24,9 @@
   --link: #716020;
   --focus: #8b6e20;
   --gold: #a48235;
+  /* Gold as small text: --gold measures 3.33:1 on --bg, so eyebrows and
+   * other gold type use --gold-deep (5.33:1 on --bg, 4.96:1 on --panel-3). */
+  --gold-deep: #7d6224;
   --gold-soft: #eee7d3;
   --ink: #293d35;
   --on-ink: #fffefa;

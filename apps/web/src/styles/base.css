@@ -89,7 +89,7 @@ h4 {
 }
 
 .page-eyebrow {
-  color: var(--gold);
+  color: var(--gold-deep);
   font-size: var(--text-xs);
   letter-spacing: 0.14em;
   margin: 0 0 var(--space-2);

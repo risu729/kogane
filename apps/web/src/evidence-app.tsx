@@ -8,6 +8,7 @@ import { useEvidenceMeta } from "./evidence-api.ts";
 import { EvidenceBoundary } from "./evidence-ui.tsx";
 import { EvidenceArtifactPage, EvidenceHistory, EvidenceRunPage } from "./pages/Evidence.tsx";
 import { Link, usePath } from "./router.tsx";
+import { AppShell, NAV_ICONS, type NavItem } from "./app-shell.tsx";
 import { EmptyState } from "./ui.tsx";
 import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract.ts";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
@@ -108,87 +109,56 @@ export function EvidenceApp({
     previous.current = path;
   }, [path, route.title]);
 
+  const navItems: NavItem[] = [
+    ...(observationsAvailable
+      ? [
+          { to: "/", label: "ホーム", icon: NAV_ICONS.home, current: false },
+          { to: "/transactions", label: "取引", icon: NAV_ICONS.transactions, current: false },
+          { to: "/balances", label: "残高", icon: NAV_ICONS.balances, current: false },
+          { to: "/positions", label: "保有資産", icon: NAV_ICONS.positions, current: false },
+          { to: "/artifacts", label: "原本・証跡", icon: NAV_ICONS.artifacts, current: false },
+        ]
+      : []),
+    {
+      to: "/evidence",
+      label: observationsAvailable ? "取得履歴" : "取得履歴・原本",
+      icon: NAV_ICONS.evidence,
+      current: route.kind === "history",
+    },
+  ];
   return (
-    <div className="app-shell">
-      <a className="skip-link" href="#main">
-        本文へ移動
-      </a>
-      <aside className="sidebar">
-        <Link to="/" className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            k
-          </span>
-          <span>
-            <span className="brand-name">
-              kogane<span className="brand-dot">.</span>
-            </span>
-            <span className="brand-sub">保存された記録を、たどる。</span>
-          </span>
-        </Link>
-        <p className="nav-label">ライブラリ</p>
-        <nav className="nav" aria-label="メインナビゲーション">
-          {observationsAvailable ? (
-            <>
-              <Link to="/">ホーム</Link>
-              <Link to="/transactions">取引</Link>
-              <Link to="/balances">残高</Link>
-              <Link to="/positions">保有資産</Link>
-              <Link to="/artifacts">原本・証跡</Link>
-            </>
-          ) : null}
-          <Link to="/evidence" current={route.kind === "history"}>
-            {observationsAvailable ? "取得履歴" : "取得履歴・原本"}
-          </Link>
-        </nav>
-        <div className="sidebar-note">
-          <strong>記録と、その根拠。</strong>
-          <p>保存が完了した収集記録から、取得元の応答や収集内容を確認できます。</p>
-          <span className="read-only-label">閲覧専用</span>
-        </div>
-        <div className="sidebar-footer">
-          KOGANE <span>EVIDENCE BROWSER</span>
-        </div>
-      </aside>
-      <div className="workspace">
-        <header className="workspace-bar">
-          <div className="workspace-caption">
-            マイライブラリ <span>/</span> 保存された証跡
-          </div>
-          <button
-            className="button refresh-button"
-            disabled={fetching}
-            onClick={() => {
-              void client.invalidateQueries({ queryKey: ["evidence-v1"], refetchType: "active" });
-            }}
-          >
-            {fetching ? "更新中…" : "表示を更新"}
-          </button>
-        </header>
-        <div className="source-notice">
-          <div className="source-identity">
-            <span
-              className={`connection-dot${metadata.isSuccess ? " connected" : ""}`}
-              aria-hidden="true"
-            />
-            <span role="status">
-              {metadata.isPending
-                ? "接続を確認中"
-                : metadata.isSuccess
-                  ? "中央保管庫に接続"
-                  : "接続を確認できません"}
-            </span>
-          </div>
-          <p>接続状態は、収集結果やデータの新しさを表すものではありません。</p>
-        </div>
-        <main id="main" ref={main} tabIndex={-1}>
-          <ParsingHealthNotice health={parsingHealth} />
-          <EvidenceContent observationsAvailable={observationsAvailable} />
-        </main>
-        <footer className="workspace-footer">
-          <span>保護された保存記録を、読み取り専用で表示しています。</span>
-          <span>この画面から金融機関への接続・収集は実行しません。</span>
-        </footer>
-      </div>
-    </div>
+    <AppShell
+      tagline="保存された記録を、たどる。"
+      navItems={navItems}
+      note={{
+        title: "記録と、その根拠。",
+        body: "保存が完了した収集記録から、取得元の応答や収集内容を確認できます。",
+      }}
+      caption="保存された証跡"
+      connection={{
+        connected: metadata.isSuccess,
+        label: metadata.isPending
+          ? "接続を確認中"
+          : metadata.isSuccess
+            ? "中央保管庫に接続"
+            : "接続を確認できません",
+        detail: "接続状態は、収集結果やデータの新しさを表すものではありません。",
+      }}
+      refresh={{
+        refreshing: fetching,
+        onRefresh: () => {
+          if (client.isFetching({ queryKey: ["evidence-v1"] }) > 0) return;
+          void client.invalidateQueries({ queryKey: ["evidence-v1"], refetchType: "active" });
+        },
+      }}
+      footer={[
+        "保護された保存記録を、読み取り専用で表示しています。",
+        "この画面から金融機関への接続・収集は実行しません。",
+      ]}
+      mainRef={main}
+    >
+      <ParsingHealthNotice health={parsingHealth} />
+      <EvidenceContent observationsAvailable={observationsAvailable} />
+    </AppShell>
   );
 }
