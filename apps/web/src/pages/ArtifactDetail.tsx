@@ -4,7 +4,10 @@ import { Link } from "../router.tsx";
 import {
   CellValue,
   KindBadge,
+  Kv,
+  KvRow,
   LineageBadge,
+  Notice,
   ObservationLink,
   Panel,
   QueryBoundary,
@@ -33,6 +36,11 @@ const LABELS: Record<string, string> = {
   fetch_status: "収集結果",
   started_at: "開始日時",
   completed_at: "完了日時",
+  parse_run_count: "解析回数",
+  transaction_count: "取引の記録数",
+  balance_count: "残高の記録数",
+  position_count: "保有資産の記録数",
+  valuation_count: "評価額の記録数",
 };
 export function ArtifactDetailPage({ id }: { id: number }): ReactNode {
   const query = useArtifact(id);
@@ -50,39 +58,30 @@ export function ArtifactDetailPage({ id }: { id: number }): ReactNode {
           <>
             <Panel id="artifact-record" title="取得した資料">
               <div className="panel-body">
-                <dl className="kv">
-                  <dt>取得元</dt>
-                  <dd>{data.artifact.source_id}</dd>
-                  <dt>取得日時</dt>
-                  <dd>{data.artifact.fetched_at}</dd>
-                  <dt>収集結果</dt>
-                  <dd>
+                <Kv>
+                  <KvRow label="取得元">{data.artifact.source_id}</KvRow>
+                  <KvRow label="取得日時">{data.artifact.fetched_at}</KvRow>
+                  <KvRow label="収集結果">
                     <StatusBadge status={data.artifact.fetch_status} />
-                  </dd>
-                  <dt>原本データ</dt>
-                  <dd>
+                  </KvRow>
+                  <KvRow label="原本データ">
                     <RawLink sha256={data.artifact.sha256}>保存された原本を開く ↗</RawLink>
-                  </dd>
-                </dl>
+                  </KvRow>
+                </Kv>
               </div>
             </Panel>
             <details className="detail-disclosure">
               <summary>原本・収集の技術情報</summary>
-              <div className="panel-body">
-                <dl className="kv">
-                  {Object.entries(data.artifact).map(([key, value]) => (
-                    <div key={key} className="kv-entry">
-                      <dt>{displayLabel(LABELS, key)}</dt>
-                      <dd>
-                        <CellValue value={value} />
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-                <p>
-                  URLは取得時の記録として表示しています。原本データは保存時のバイト列で提供され、隔離された表示と形式判定の保護が適用されます。
-                </p>
-              </div>
+              <Kv>
+                {Object.entries(data.artifact).map(([key, value]) => (
+                  <KvRow key={key} label={displayLabel(LABELS, key)}>
+                    <CellValue value={value} />
+                  </KvRow>
+                ))}
+              </Kv>
+              <p className="footnote">
+                URLは取得時の記録として表示しています。原本データは保存時のバイト列で提供され、隔離された表示と形式判定の保護が適用されます。
+              </p>
             </details>
             <Panel
               id="parse-runs"
@@ -120,13 +119,22 @@ function ParseRunCard({ run }: { run: ParseRunDetail }): ReactNode {
       </div>
       <div className="chain-body">
         <p>{run.parsed_at}</p>
-        <details>
+        <details className="inline-disclosure">
           <summary>解析方法・バージョン</summary>
-          <code>
-            {run.parser_name}@{run.parser_version}
-          </code>
+          <p>
+            <code className="wrap-any">
+              {run.parser_name}@{run.parser_version}
+            </code>
+          </p>
         </details>
-        {run.error === null ? null : <p className="state state-error">{run.error}</p>}
+        {run.error === null ? null : (
+          <Notice tone="bad" role="alert">
+            <strong>解析エラー</strong>
+            <p>
+              <code>{run.error}</code>
+            </p>
+          </Notice>
+        )}
         <WarningList warnings={run.warnings} />
         <h4>読み取った記録（{run.observations.length}件）</h4>
         {view.rows.length ? (

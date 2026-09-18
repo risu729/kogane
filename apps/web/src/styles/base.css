@@ -206,17 +206,21 @@ summary:hover {
   white-space: nowrap;
 }
 
-/* ── list helpers ──────────────────────────────────────────────────── */
-
-/* A bulleted list set in body type, with the indent on the spacing grid. */
-.plain-list {
-  margin: 0;
-  padding-left: var(--space-5);
-  font-size: var(--text-md);
+/* Unbroken provider strings (URLs, run ids, hashes) wrap inside their box. */
+.wrap-any {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-.plain-list li + li {
-  margin-top: var(--space-1);
+/* ── list helpers ──────────────────────────────────────────────────── */
+
+/* A list that is a stack of items, not a bulleted aside. */
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
 }
 
 .warning-list {
