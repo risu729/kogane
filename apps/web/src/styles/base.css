@@ -193,22 +193,21 @@ summary:hover {
   min-width: 14ch;
 }
 
+/* Unbroken provider strings (URLs, run ids, hashes) wrap inside their box. */
+.wrap-any {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* ── list helpers ──────────────────────────────────────────────────── */
 
-/* A bulleted list inside prose or a panel body: a modest indent and a
- * little air between items, instead of the browser's 40px default. */
+/* A list that is a stack of items, not a bulleted aside. */
 .plain-list {
-  margin: var(--space-2) 0 var(--space-3);
-  padding-left: var(--space-5);
-  font-size: var(--text-md);
-}
-
-.plain-list li + li {
-  margin-top: var(--space-1);
-}
-
-.plain-list:last-child {
-  margin-bottom: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
 }
 
 .warning-list {

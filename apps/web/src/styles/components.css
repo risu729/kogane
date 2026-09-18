@@ -361,12 +361,14 @@
   font-size: var(--text-md);
 }
 
+/* The label column sizes to the longest label but never past 14rem, so a
+ * long Japanese label wraps instead of squeezing the value column. */
 .kv dt {
   font-family: var(--sans);
   color: var(--text-3);
   padding: var(--space-2) var(--space-5) var(--space-2) 0;
   border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+  max-width: 14rem;
 }
 
 .kv dd {
@@ -482,6 +484,36 @@
   }
 }
 
+/* ── notices in page flow ──────────────────────────────────────────── */
+
+/* A Notice outside a panel head gets the frame a panel would have given it. */
+.panel-note:not(.panel > *) {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0 0 var(--space-6);
+  overflow-wrap: anywhere;
+}
+
+.panel-note-warn:not(.panel > *) {
+  border-color: var(--warn-border);
+}
+
+.panel-note-bad:not(.panel > *) {
+  border-color: var(--bad-border);
+}
+
+.panel-note strong {
+  display: block;
+}
+
+.panel-note p {
+  margin: 0;
+}
+
+.panel-note strong + p {
+  margin-top: var(--space-1);
+}
+
 /* ── pagination ────────────────────────────────────────────────────── */
 
 .pagination,
@@ -527,7 +559,19 @@
   min-width: 0;
 }
 
+/* A light disclosure for a line or two of secondary text; it looks the same
+ * inside a table cell and inside a panel or card body. */
+.inline-disclosure {
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.inline-disclosure p {
+  margin: var(--space-1) 0 0;
+}
+
 .detail-disclosure summary,
+.inline-disclosure summary,
 td summary {
   cursor: pointer;
   color: var(--text-2);
@@ -641,6 +685,7 @@ td summary {
   border-radius: var(--radius);
   background: var(--panel);
   margin-bottom: var(--space-3);
+  min-width: 0;
 }
 
 /* A superseded parse run is tinted whole, head included, so it can never be
@@ -665,32 +710,44 @@ td summary {
   background: var(--panel-2);
 }
 
+/* Stage eyebrow over the step title: the numbered rail gives the order, the
+ * eyebrow names the kind of record each step holds. */
+.chain-heading {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
 .chain-stage {
   font-family: var(--mono);
   font-size: var(--text-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
+  line-height: 1.4;
 }
 
 .chain-title {
-  font-family: var(--mono);
   font-weight: 600;
   font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
 }
 
 .chain-body {
   padding: var(--space-2) var(--space-3);
+  min-width: 0;
 }
 
-.chain-arrow {
-  color: var(--text-2);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 0 0 var(--space-3) 0;
-  display: block;
+.chain-body > p:first-child {
+  margin-top: var(--space-1);
+}
+
+.chain-body .detail-disclosure {
+  margin: var(--space-3) 0;
+}
+
+.chain-body .panel-note {
+  margin: var(--space-2) 0 var(--space-3);
 }
 
 @media (max-width: 760px) {
