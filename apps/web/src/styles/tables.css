@@ -144,20 +144,68 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
 }
 
 .source-account,
-.organized-account,
 .identity-preview {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
+/* The organised view of one stored source/account: product claim, current
+ * label, stored identifiers and connection, each on its own line. */
+.organized-account {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.organized-account > .table-secondary,
+.organized-account > .financial-product-summary,
+.organized-account > .source-account {
+  margin-top: 0;
+}
+
+.organized-account .detail-disclosure {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+}
+
+.organized-label {
+  overflow-wrap: anywhere;
+}
+
+/* A product claim is a secondary line unless it is the cell's main line. */
 .financial-product-summary {
   margin-top: var(--space-1);
+  color: var(--text-2);
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
+}
+
+.financial-product-summary.is-primary {
+  color: var(--text);
+  font-size: inherit;
+}
+
+.financial-product-summary.is-primary > .financial-product-name {
+  font-weight: 600;
+}
+
+.financial-product-summary .table-secondary {
+  margin-top: 0;
 }
 
 .financial-product-details {
   margin-top: var(--space-2);
   overflow-wrap: anywhere;
+}
+
+.financial-product-details > p {
+  margin: var(--space-2) 0 0;
+}
+
+.financial-product-details > .detail-disclosure {
+  margin: var(--space-3) 0 0;
 }
 
 .identity-details {
@@ -287,21 +335,10 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
   min-width: 5rem;
 }
 
-/* ── identity table ────────────────────────────────────────────────── */
+/* ── identity coverage table ───────────────────────────────────────── */
 
-.identity-page table {
+.identity-coverage-table {
   min-width: 52rem;
-}
-.identity-page th {
-  white-space: nowrap;
-}
-.identity-page td:first-child {
-  overflow-wrap: anywhere;
-  max-width: 18rem;
-}
-.identity-page td:not(:first-child) {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 /* ── responsive ────────────────────────────────────────────────────── */
