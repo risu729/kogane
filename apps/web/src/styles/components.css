@@ -136,7 +136,7 @@
   line-height: 1.5;
   gap: var(--space-2);
   display: inline-flex;
-  min-height: 38px;
+  min-height: var(--control-height);
 }
 
 /* An <a class="button"> keeps its box border; the link underline never leaks in. */
@@ -164,6 +164,17 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-3);
+}
+
+.button-row .button {
+  min-width: 0;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .button-row .button {
+    flex: 1 1 100%;
+  }
 }
 
 /* ── filters and toolbars ──────────────────────────────────────────── */
@@ -203,7 +214,7 @@
   text-overflow: ellipsis;
   width: 100%;
   min-width: 0;
-  min-height: 38px;
+  min-height: var(--control-height);
   padding: var(--space-2) var(--space-3);
   font: inherit;
   font-size: var(--text-sm);
@@ -241,6 +252,103 @@
     padding: var(--space-4);
     gap: var(--space-3);
   }
+}
+
+/* ── form fields ───────────────────────────────────────────────────── */
+
+/* A labelled block field: the label above the control, the control sharing
+ * the look of a filter input. Help text goes in a .footnote after the control. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+.field input,
+.field textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+.field .footnote {
+  margin: 0;
+}
+
+/* A native checkbox beside its label, with the whole row as the hit area. */
+.check-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--space-7);
+  padding: var(--space-1) 0;
+  color: var(--text);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.check-field input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: var(--check-size);
+  height: var(--check-size);
+  margin: 1px 0 0;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+/* ── notices ───────────────────────────────────────────────────────── */
+
+/* A toned block inside a panel body: warn for a blocker the reader can
+ * resolve, bad for a failed action or a record that no longer matches. */
+.notice {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: var(--text-md);
+}
+
+.notice-warn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.notice-bad {
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.notice > :first-child {
+  margin-top: 0;
+}
+
+.notice > :last-child {
+  margin-bottom: 0;
+}
+
+.notice a {
+  color: inherit;
 }
 
 /* ── key/value grids ───────────────────────────────────────────────── */

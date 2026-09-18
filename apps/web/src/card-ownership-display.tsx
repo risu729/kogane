@@ -39,8 +39,8 @@ export function CardOwnershipDetails({ side }: { side: CardOwnershipSide }): Rea
         </KvRow>
       </Kv>
       {side.blockers.length > 0 ? (
-        <div role="note">
-          <ul>
+        <div role="note" className="notice notice-warn">
+          <ul className="plain-list">
             {side.blockers.map((code) => (
               <li key={code}>{BLOCKERS[code] ?? code}</li>
             ))}
@@ -48,7 +48,7 @@ export function CardOwnershipDetails({ side }: { side: CardOwnershipSide }): Rea
           <Link to="/identities">口座の整理を確認</Link>
         </div>
       ) : null}
-      <details className="settlement-history">
+      <details className="detail-disclosure settlement-history">
         <summary>現在の対応と記録済みの判断</summary>
         <p>
           口座: {side.accountId ?? "未解決"} · 対応の版: {side.mappingRevision} ·
@@ -58,7 +58,7 @@ export function CardOwnershipDetails({ side }: { side: CardOwnershipSide }): Rea
         {side.claims.length === 0 ? (
           <p>この関係に記録済みの保有者はいません。</p>
         ) : (
-          <ul>
+          <ul className="plain-list">
             {side.claims.map((claim) => (
               <li key={claim.id}>
                 {ownerLabel(claim.partyRef)} ·{" "}
