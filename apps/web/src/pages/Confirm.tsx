@@ -216,14 +216,19 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       : purchase.data?.items[0]?.candidates.find(
           (candidate) => candidate.proposalId === linkProposalId,
         );
+  // The action is the server's (the proposal target's next status in the
+  // simulation), never inferred here from the candidate's statuses.
   const linkAction =
-    report.data && linkCandidate
-      ? purchaseLinkAction(report.data.simulation.kind, linkCandidate)
+    report.data && linkProposalId !== null
+      ? purchaseLinkAction(
+          report.data.simulation.kind,
+          report.data.simulation.targets,
+          linkProposalId,
+        )
       : null;
   const linkPinsMatch =
     report.data !== undefined &&
     linkCandidate !== undefined &&
-    linkAction !== null &&
     purchaseLinkPinsMatch(report.data.expectedRevisions, linkCandidate);
   const linkActionAllowed =
     linkCandidate !== undefined &&
@@ -444,12 +449,14 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       empty="計画した候補が、対象の利用に見つかりません。承認・確定できません。"
                     >
                       {() =>
-                        linkCandidate === undefined || linkAction === null ? null : (
+                        linkCandidate === undefined ? null : (
                           <>
-                            <p>
-                              <strong>{CANDIDATE_ACTION_LABELS[linkAction]}</strong>:{" "}
-                              {candidateEffect(linkCandidate, linkAction)}
-                            </p>
+                            {linkAction === null ? null : (
+                              <p>
+                                <strong>{CANDIDATE_ACTION_LABELS[linkAction]}</strong>:{" "}
+                                {candidateEffect(linkCandidate, linkAction)}
+                              </p>
+                            )}
                             <Kv>
                               <KvRow label="候補の状態">
                                 <CandidateStatusBadge candidate={linkCandidate} />{" "}

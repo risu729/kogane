@@ -167,20 +167,31 @@ each appears only where `commands` is advertised:
 
 The payload is the candidate's own `relation` plus the reason. The page builds
 no relation end and no evidence ref. The confirmation screen opens only when the
-plan pins these at exactly the revisions shown:
+plan does the chosen action (the proposal target's next status in the plan:
+`accepted`, `rejected` or `withdrawn`) and pins these at exactly the revisions
+shown:
 
 - `proposal:<id>`;
 - the `pending_to_posted` relation triple;
 - `card-purchase:<event id>` for each side a live event holds, whatever the
   action (a merged link is one event, so one pin).
 
-The confirmation screen reads the candidate back from the pinned purchase and
-shows each pin beside the candidate's value. It names the
-`review:card-purchase-link` invalidation and describes the effect in words:
+A withdrawal of a merged link also pins the posted event the merge absorbed, at 0. The page leaves that pin to the server and never reads the absorbed event.
+
+The confirmation screen reads the candidate back from a pinned purchase with a
+live revision and shows each pin beside the candidate's value. The action it
+names is the one the server's simulation states, never inferred from the
+candidate. It names the `review:card-purchase-link` invalidation and describes
+the effect in words:
 
 - A merge keeps the pending-origin event and absorbs the posted one, which
-  takes that event from `authorized` to `captured`.
-- A split restores the two records.
+  takes that event from `authorized` (or `unknown`, once its row left the
+  provider's display) to `captured`. An authorized pending row's amount leaves
+  the authorized figure, since that purchase is now captured.
+- A split of a merged link restores the posted event as captured and returns
+  the pending-origin event to its pending row as `unknown`
+  (`conflicting_evidence`), outside every figure. A withdrawal of a link that
+  was never merged touches no event.
 - A reject leaves both records as they are.
 
 None of these adds or removes an amount, and the captured figure stays the same.

@@ -383,10 +383,12 @@ plan's kind or invalidation:
 | invalidation `review:card-ownership`     | the account mapping and ownership claims                       |
 | invalidation `review:card-purchase-link` | the pending-to-posted candidate, read from its pinned purchase |
 
-The pinned purchase is the one a `card-purchase:<event id>` pin names (see
+The pinned purchase is the one a `card-purchase:<event id>` pin at a live
+revision names; the action is the one the simulation's `proposal:<id>` target
+states (see
 [card-settlements.md](card-settlements.md#reviewing-a-pending-to-posted-link)).
-A missing item, a changed pin or an action the server no longer offers disables
-Approve and Commit.
+A missing item, a changed pin, or an action that is unstated or no longer
+offered disables Approve and Commit.
 
 One operation id is derived per approval, so a resend of the same confirmation
 is the same operation and a lost response never commits twice.
@@ -462,11 +464,12 @@ already recorded is never undone by a DELETE — an undo is a new revision
 - `packages/application/test/command.test.ts` (11 tests): the closed kind list,
   payloads that reject a caller-supplied impact/approval/revisions, digest
   sensitivity to every input, grants, and the error table.
-- `apps/web/test/confirm.browser.test.ts` (7 tests): read-only
+- `apps/web/test/confirm.browser.test.ts` (8 tests): read-only
   without the capability, no action on a stale plan, accepted vs published
   shown distinctly, and a pending-to-posted review shown against the candidate
   it pins. That review can be approved and committed only while every pin, the
-  offered action and the candidate itself are unchanged.
+  offered action and the candidate itself are unchanged, and while the
+  simulation states an action that matches the plan's kind.
 - `services/processor/test/balance-projection.test.ts` "the
   dispatcher routes the balance-projection target to that processor": a
   `balance-projection` row reaches A07's real processor and rebuilds the

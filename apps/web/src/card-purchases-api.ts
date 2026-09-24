@@ -70,18 +70,32 @@ export function purchaseLinkPlanRequest(
   };
 }
 
+/** The proposal status a review plan moves `proposal:<id>` to, per action. */
+const PLANNED_PROPOSAL_STATUS: Record<PendingPostedAction, string> = {
+  accept: "accepted",
+  reject: "rejected",
+  withdraw: "withdrawn",
+};
+
 /**
- * What a planned `relation.accept` / `relation.reject` is for this candidate:
- * a reject of an accepted link is its withdrawal.
+ * What a planned `relation.accept` / `relation.reject` does, as the server
+ * states it: it resolves the action from the proposal and the relation (a
+ * reject of an accepted link is its withdrawal) and names it as the proposal
+ * target's next status. The client never infers it from the candidate's
+ * statuses. Null when the plan has no such target or its status disagrees
+ * with the kind.
  */
 export function purchaseLinkAction(
   kind: string,
-  candidate: CardPurchaseCandidate,
+  targets: readonly { subjectRef: string; proposedTargetRef: string | null }[],
+  proposalId: string,
 ): PendingPostedAction | null {
-  if (kind === "relation.accept") return "accept";
-  if (kind === "relation.reject")
-    return candidate.relationStatus === "accepted" ? "withdraw" : "reject";
-  return null;
+  const proposal = targets.find((target) => target.subjectRef === PROPOSAL_PREFIX + proposalId);
+  const action = (Object.keys(PLANNED_PROPOSAL_STATUS) as PendingPostedAction[]).find(
+    (entry) => PLANNED_PROPOSAL_STATUS[entry] === proposal?.proposedTargetRef,
+  );
+  if (action === undefined || kind !== purchaseLinkKind(action)) return null;
+  return action;
 }
 
 /** One subject a review plan pins, beside what the candidate on screen says it is at. */

@@ -571,17 +571,22 @@ export function CandidateCodes({ candidate }: { candidate: CardPurchaseCandidate
 /**
  * What a decision does to the purchase records, in words. The figures stay
  * the server's: no decision adds or removes an amount, and the captured
- * figure stays as it is.
+ * figure stays as it is. A merge of a still-authorized pending row takes its
+ * amount out of the authorized figure, since that purchase is now captured.
  */
 export function candidateEffect(
   candidate: CardPurchaseCandidate,
   action: PendingPostedAction,
 ): string {
   if (action === "accept")
-    return `2件の利用の記録を1件にまとめます。未確定の明細の記録が残り、状態が ${sideStateWord(candidate.pending)} → 確定 になります。確定の明細の記録はこの1件に統合されます。金額の追加や削除はなく、確定の合計は変わりません。`;
+    return `2件の利用の記録を1件にまとめます。未確定の明細の記録が残り、状態が ${sideStateWord(candidate.pending)} → 確定 になります。確定の明細の記録はこの1件に統合されます。金額の追加や削除はなく、確定の合計は変わりません。${
+      candidate.pending.state === "authorized"
+        ? "未確定の明細の金額は、確定の明細に置き換わるため未確定の合計から外れます。"
+        : ""
+    }`;
   if (action === "withdraw")
     return candidateMerged(candidate)
       ? "統合した1件の利用を、元の2件の記録に戻します。確定の明細は確定の利用として戻り、未確定の明細の記録は根拠の食い違いで保留として合計に含めません。以前の版と履歴は残ります。金額の追加や削除はなく、確定の合計は変わりません。"
-      : "同一の利用とした判断を取り消します。統合された記録はないため、どの利用の記録も変わりません。";
+      : "同一の利用とした判断を取り消します。統合された記録はないため、どの利用の記録も変わらず、金額や合計も変わりません。";
   return "この候補を別の利用として閉じます。2件の記録はそのまま残り、金額や合計は変わりません。";
 }

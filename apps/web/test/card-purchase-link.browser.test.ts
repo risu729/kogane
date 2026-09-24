@@ -9,7 +9,9 @@
 //    candidate's own `relation` and the operator's reason, nothing built
 //    locally, and opens the confirmation screen only for a plan pinned to
 //    what was on screen,
-//  * a merged purchase offers only the withdrawal, which is a reject.
+//  * a plan that does anything but the chosen decision is not opened either,
+//  * a merged purchase offers only the withdrawal, which is a reject; its plan
+//    also pins the absorbed posted event at 0, which the page accepts.
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -26,11 +28,13 @@ import type {
   CardPurchaseView,
 } from "../../../packages/domain/src/card-purchase-view.ts";
 import {
-  linkPlanPins,
+  linkPlanTargets,
   mergedCandidate,
   mergedPurchase,
   PENDING_EVENT,
+  plannedProposalStatus,
   POSTED_EVENT,
+  serverPlanPins,
 } from "./card-purchase-link-fixture.ts";
 
 const client = join(import.meta.dir, "../dist-production");
@@ -50,6 +54,8 @@ describe.if(runnable)("pending-to-posted link review", () => {
   let candidate: CardPurchaseCandidate = linkCandidate();
   /** Added to the proposal pin a plan answers with, as if the candidate moved meanwhile. */
   let pinDrift = 0;
+  /** The proposal's next status a plan names instead of the one its kind and candidate imply. */
+  let plannedStatus: string | null = null;
   /** The kind the last plan request named; a simulation answers for that plan. */
   let plannedKind = "relation.accept";
   const requests: URL[] = [];
@@ -60,6 +66,7 @@ describe.if(runnable)("pending-to-posted link review", () => {
     merged = false;
     candidate = linkCandidate();
     pinDrift = 0;
+    plannedStatus = null;
     plannedKind = "relation.accept";
     requests.length = 0;
     posted.length = 0;
@@ -104,16 +111,18 @@ describe.if(runnable)("pending-to-posted link review", () => {
           posted.push({ operation, body });
           if (operation === "plan") plannedKind = String(body.kind);
           const shown = merged ? mergedCandidate() : candidate;
-          const pins = linkPlanPins(shown);
+          // What the server pins and names: the candidate's subjects (plus the
+          // absorbed event at 0 for a merged link) and the proposal's next status.
+          const pins = serverPlanPins(shown);
           pins[`proposal:${shown.proposalId}`] = shown.proposalRevision + pinDrift;
           const simulation = {
             kind: plannedKind,
-            targets: Object.entries(pins).map(([subjectRef, currentRevision]) => ({
-              subjectRef,
-              currentRevision,
-              currentTargetRef: null,
-              proposedTargetRef: null,
-            })),
+            targets: linkPlanTargets(
+              shown,
+              plannedKind,
+              pins,
+              plannedStatus ?? plannedProposalStatus(shown, plannedKind),
+            ),
             before: { attributedObservations: 0, relations: shown.relationRevision },
             after: { attributedObservations: 0, relations: shown.relationRevision + 1 },
             invalidations: ["review:card-purchase-link"],
@@ -352,6 +361,22 @@ describe.if(runnable)("pending-to-posted link review", () => {
     await page.close();
   }, 30_000);
 
+  test("a plan that does anything but the chosen decision is not opened", async () => {
+    // Chosen: treat the rows as two purchases. The server, reading a link that
+    // was accepted meanwhile, planned its withdrawal instead.
+    plannedStatus = "withdrawn";
+    const page = await openDetail();
+    await page.getByLabel("判断の理由", { exact: true }).fill("利用先が異なっていた");
+    await page.getByRole("button", { name: "別の利用として扱う", exact: true }).click();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "候補または利用の記録が更新されています" })
+      .waitFor();
+    expect(new URL(page.url()).pathname).toBe(`/purchases/${POSTED_EVENT}`);
+    expect(posted.map((row) => row.operation)).toEqual(["plan"]);
+    await page.close();
+  }, 30_000);
+
   test("a merged purchase shows its accepted link with only the withdrawal, which is a reject", async () => {
     merged = true;
     const page = await openDetail(PENDING_EVENT);
@@ -380,11 +405,21 @@ describe.if(runnable)("pending-to-posted link review", () => {
     const confirm = page.getByRole("region", { name: "未確定と確定の明細の対応", exact: true });
     await confirm.getByText("統合を取り消す", { exact: true }).waitFor();
     expect(await confirm.innerText()).toContain("元の2件の記録に戻します");
+    // The absorbed posted event, pinned at 0, is neither read nor a mismatch.
+    expect(requests.map((url) => url.searchParams.get("eventId"))).not.toContain(POSTED_EVENT);
+    expect(await confirm.getByText("不一致", { exact: true }).count()).toBe(0);
+    expect(await page.getByRole("button", { name: "承認する", exact: true }).isDisabled()).toBe(
+      false,
+    );
     await page.close();
   }, 30_000);
 
   test("list, review and confirmation fit a phone width without sideways page scroll", async () => {
     const page = await openList();
+    // Measure the page with the candidate on it, not a page still loading.
+    await page
+      .getByRole("region", { name: "確認待ちの未確定・確定の対応候補", exact: true })
+      .waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     const fits = () =>
       page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
@@ -397,6 +432,11 @@ describe.if(runnable)("pending-to-posted link review", () => {
     await page.getByLabel("判断の理由", { exact: true }).fill("同じ利用と確認した");
     await page.getByRole("button", { name: "同一の利用として統合", exact: true }).click();
     await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    // The candidate read back from the purchase is part of what must fit.
+    await page
+      .getByRole("region", { name: "未確定と確定の明細の対応", exact: true })
+      .getByRole("list", { name: "未確定の明細と確定の明細" })
+      .waitFor();
     await page.getByRole("button", { name: "承認する", exact: true }).waitFor();
     expect(await fits()).toBe(true);
     if (prefix)

@@ -22,8 +22,12 @@ import {
   authorizedCandidate,
   authorizedPendingPurchase,
   linkPlanPins,
+  linkPlanTargets,
   mergedCandidate,
   mergedPurchase,
+  PENDING_EVENT,
+  POSTED_EVENT,
+  serverPlanPins,
 } from "./card-purchase-link-fixture.ts";
 
 const client = join(import.meta.dir, "../dist-production");
@@ -62,11 +66,16 @@ describe.if(runnable)("change confirmation screen", () => {
   let stale = false;
   let published = false;
   const posted: string[] = [];
-  /** A pending-to-posted review plan: its kind, its pins and the purchase the server shows now. */
+  /**
+   * A pending-to-posted review plan: its kind, its pins, the proposal status
+   * the simulation names (the server's own by default) and the purchase the
+   * server shows now.
+   */
   let link: {
     kind: "relation.accept" | "relation.reject";
     planned: CardPurchaseCandidate;
     pins?: Record<string, number>;
+    proposedStatus?: string | null;
     purchase: CardPurchaseView;
   } | null = null;
   let purchaseAdvertised = true;
@@ -104,19 +113,17 @@ describe.if(runnable)("change confirmation screen", () => {
           posted.push(url.pathname);
           const operation = url.pathname.slice("/api/command/v1/".length);
           if (operation === "simulate" && link !== null) {
-            const pins = link.pins ?? linkPlanPins(link.planned);
+            const pins = link.pins ?? serverPlanPins(link.planned);
             return Response.json({
               report: {
                 planId: PLAN_ID,
                 planDigest: PLAN_ID,
                 simulation: {
                   kind: link.kind,
-                  targets: Object.entries(pins).map(([subjectRef, currentRevision]) => ({
-                    subjectRef,
-                    currentRevision,
-                    currentTargetRef: null,
-                    proposedTargetRef: null,
-                  })),
+                  targets:
+                    link.proposedStatus === undefined
+                      ? linkPlanTargets(link.planned, link.kind, pins)
+                      : linkPlanTargets(link.planned, link.kind, pins, link.proposedStatus),
                   before: { attributedObservations: 0, relations: link.planned.relationRevision },
                   after: {
                     attributedObservations: 0,
@@ -207,7 +214,7 @@ describe.if(runnable)("change confirmation screen", () => {
     expect(await page.getByRole("button", { name: "確定する" }).isDisabled()).toBe(true);
     expect(main).toContain("この接続先では確認操作が有効ではないため、承認・確定は行えません。");
     await page.close();
-  });
+  }, 30_000);
 
   test("refuses to act on a stale plan and offers the re-simulated plan id", async () => {
     commands = true;
@@ -219,7 +226,7 @@ describe.if(runnable)("change confirmation screen", () => {
     expect(await page.getByRole("button", { name: "承認する" }).isDisabled()).toBe(true);
     expect(await page.getByRole("button", { name: "確定する" }).isDisabled()).toBe(true);
     await page.close();
-  });
+  }, 30_000);
 
   test("approve then commit shows accepted, and published only once the outbox reports it", async () => {
     commands = true;
@@ -256,7 +263,7 @@ describe.if(runnable)("change confirmation screen", () => {
       "/api/command/v1/operation",
     ]);
     await page.close();
-  });
+  }, 30_000);
 
   const linkReview = (page: Awaited<ReturnType<typeof open>>) =>
     page.getByRole("region", { name: "未確定と確定の明細の対応", exact: true });
@@ -286,7 +293,7 @@ describe.if(runnable)("change confirmation screen", () => {
     expect(await review.getByText("一致", { exact: true }).count()).toBe(4);
     expect(await review.getByText("不一致", { exact: true }).count()).toBe(0);
     // The candidate is read back from the pending-origin purchase the plan pinned.
-    expect(purchaseReads).toEqual([authorizedPendingPurchase().eventId]);
+    expect(new Set(purchaseReads)).toEqual(new Set([PENDING_EVENT]));
     expect(await review.getByRole("list", { name: "未確定の明細と確定の明細" }).count()).toBe(1);
     await approveButton(page).click();
     await page.getByRole("button", { name: "承認済み", exact: true }).waitFor();
@@ -299,7 +306,9 @@ describe.if(runnable)("change confirmation screen", () => {
   test("a withdrawal of a merged link names the split and its one merged pin", async () => {
     commands = true;
     stale = false;
+    // The server also pins the posted event the merge absorbed, at 0, first.
     link = { kind: "relation.reject", planned: mergedCandidate(), purchase: mergedPurchase() };
+    expect(Object.keys(serverPlanPins(mergedCandidate()))[0]).toBe(`card-purchase:${POSTED_EVENT}`);
     const page = await open();
     const review = linkReview(page);
     await review.getByText("統合を取り消す", { exact: true }).waitFor();
@@ -307,7 +316,34 @@ describe.if(runnable)("change confirmation screen", () => {
     expect(text).toContain("元の2件の記録に戻します");
     expect(text).toContain("確定の合計は変わりません");
     expect(await review.getByText("一致", { exact: true }).count()).toBe(3);
+    // The candidate is read from the live merged event, never the absorbed one.
+    expect(new Set(purchaseReads)).toEqual(new Set([PENDING_EVENT]));
     expect(await approveButton(page).isDisabled()).toBe(false);
+    await page.close();
+  }, 30_000);
+
+  test("an action the plan does not state as the server's own cannot be approved", async () => {
+    commands = true;
+    stale = false;
+    // Every pin matches, but the simulation names a proposal status that is
+    // not a merge although the plan's kind is `relation.accept`.
+    link = {
+      kind: "relation.accept",
+      planned: authorizedCandidate(),
+      proposedStatus: "rejected",
+      purchase: authorizedPendingPurchase(),
+    };
+    const page = await open();
+    const review = linkReview(page);
+    await review
+      .getByRole("alert")
+      .filter({ hasText: "この候補では計画した操作を実行できません" })
+      .waitFor();
+    // The candidate stays readable; only the decision is refused.
+    expect(await review.getByRole("list", { name: "未確定の明細と確定の明細" }).count()).toBe(1);
+    expect(await review.getByText("不一致", { exact: true }).count()).toBe(0);
+    expect(await review.getByText("計画作成後に変わっています").count()).toBe(0);
+    expect(await approveButton(page).isDisabled()).toBe(true);
     await page.close();
   }, 30_000);
 

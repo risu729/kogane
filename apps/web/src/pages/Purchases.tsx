@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, useFeatures } from "../api.ts";
 import {
+  purchaseLinkAction,
   purchaseLinkPinsMatch,
   purchaseLinkPlanRequest,
   useCardPurchase,
@@ -127,8 +128,16 @@ function CandidateDecision({ candidate }: { candidate: CardPurchaseCandidate }):
         purchaseLinkPlanRequest(candidate, action, reason.trim()),
         new AbortController().signal,
       );
-      // A plan pinned to anything but what is on screen needs another look.
-      if (!purchaseLinkPinsMatch(response.plan.expectedRevisions, candidate))
+      // A plan pinned to anything but what is on screen, or doing anything but
+      // what was chosen, needs another look.
+      if (
+        !purchaseLinkPinsMatch(response.plan.expectedRevisions, candidate) ||
+        purchaseLinkAction(
+          response.plan.kind,
+          response.plan.simulation.targets,
+          candidate.proposalId,
+        ) !== action
+      )
         throw new Error(
           "候補または利用の記録が更新されています。表示を更新して、内容を確認し直してください。",
         );

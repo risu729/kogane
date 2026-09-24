@@ -94,3 +94,50 @@ export function linkPlanPins(candidate: CardPurchaseCandidate): Record<string, n
       pins[`card-purchase:${side.eventId}`] = side.revision;
   return pins;
 }
+
+/**
+ * The pins the server gives a review plan of this candidate: the candidate's
+ * own, plus, for the withdrawal of a merged link, the posted event the merge
+ * absorbed, pinned at 0 (it has no live revision until the split restores
+ * it). The absorbed pin comes first so a reader cannot rely on the order.
+ */
+export function serverPlanPins(candidate: CardPurchaseCandidate): Record<string, number> {
+  const merged =
+    candidate.pending.eventId !== null && candidate.pending.eventId === candidate.posted.eventId;
+  return merged && candidate.relationStatus === "accepted"
+    ? { [`card-purchase:${POSTED_EVENT}`]: 0, ...linkPlanPins(candidate) }
+    : linkPlanPins(candidate);
+}
+
+/** The next status a review plan names for the proposal: a reject of an accepted link withdraws it. */
+export function plannedProposalStatus(
+  candidate: CardPurchaseCandidate,
+  kind: string,
+): "accepted" | "rejected" | "withdrawn" {
+  if (kind === "relation.accept") return "accepted";
+  return candidate.relationStatus === "accepted" ? "withdrawn" : "rejected";
+}
+
+/**
+ * A review plan's simulation targets as the server lists them: one per pin,
+ * the proposal target naming its current and next status.
+ */
+export function linkPlanTargets(
+  candidate: CardPurchaseCandidate,
+  kind: string,
+  pins: Record<string, number>,
+  proposedStatus: string | null = plannedProposalStatus(candidate, kind),
+): {
+  subjectRef: string;
+  currentRevision: number;
+  currentTargetRef: string | null;
+  proposedTargetRef: string | null;
+}[] {
+  const proposal = `proposal:${candidate.proposalId}`;
+  return Object.entries(pins).map(([subjectRef, currentRevision]) => ({
+    subjectRef,
+    currentRevision,
+    currentTargetRef: subjectRef === proposal ? candidate.proposalStatus : null,
+    proposedTargetRef: subjectRef === proposal ? proposedStatus : null,
+  }));
+}

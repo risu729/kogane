@@ -112,8 +112,9 @@ A review candidate (a card settlement on カード照合, a pending-to-posted li
 カード利用) is one panel. Its `.settlement-head` holds the title, a status
 `Badge` and the identifying `.settlement-facts`. The review sits under a
 `.settlement-disclosure` that starts open only while a decision is due. The
-decision is a `.settlement-decision`: a required `.settlement-reason` and a
-button for each action the server offers, and nothing else.
+decision is a `.settlement-decision`: a required `.settlement-reason`, a button
+per action the candidate allows, and a footnote that planning decides nothing.
+The pending-to-posted review also states each action's effect in words.
 
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.
