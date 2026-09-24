@@ -1,7 +1,11 @@
 // Synthetic `GET /api/v2/card-purchases` payloads for the contract and browser
 // tests. Every id, account, merchant and amount is invented.
 import { CARD_USAGE_EXCLUSIONS } from "../../domain/src/card-purchase.ts";
-import type { CardPurchasePage, CardPurchaseView } from "../../domain/src/card-purchase-view.ts";
+import type {
+  CardPurchaseCandidate,
+  CardPurchasePage,
+  CardPurchaseView,
+} from "../../domain/src/card-purchase-view.ts";
 import type { TemporalValue } from "../../domain/src/time.ts";
 import { exactQuantity, integerDecimal, type Quantity } from "../../domain/src/values.ts";
 
@@ -71,6 +75,7 @@ export function capturedPurchase(): CardPurchaseView {
       },
     ],
     historyTruncated: false,
+    candidates: [],
     explanationRefs: [
       `event:${id}@1`,
       `leg:${id}@1#0`,
@@ -188,6 +193,71 @@ function capturedRefund(): CardPurchaseView {
       },
     ],
     explanationRefs: [`event:${id}@1`, "transaction:24@parse_run:7"],
+  };
+}
+
+/**
+ * A heuristic pending-to-posted candidate between the retired pending row of
+ * `retiredPurchase` (transaction:23) and the posted row of `capturedPurchase`
+ * (transaction:21), still open: it may be accepted (merge) or rejected.
+ */
+export function linkCandidate(
+  overrides: Partial<CardPurchaseCandidate> = {},
+): CardPurchaseCandidate {
+  const proposalId = `rp_${"9".repeat(64)}`;
+  const pending = { kind: "transaction" as const, id: "transaction:23", revision: "parse_run:6" };
+  const posted = { kind: "transaction" as const, id: "transaction:21", revision: "parse_run:7" };
+  return {
+    proposalId,
+    proposalStatus: "proposed",
+    proposalRevision: 0,
+    relationStatus: null,
+    relationRevision: 0,
+    providerLinked: false,
+    rationaleCodes: [
+      "status_pending_to_posted",
+      "same_identifier_namespace",
+      "same_source_account",
+      "no_provider_link_id",
+      "same_statement_period",
+    ],
+    rejectionConditions: [
+      "provider_link_absent",
+      "counterparty_differs",
+      "amount_differs",
+      "candidate_not_unique",
+    ],
+    pending: {
+      ref: pending,
+      eventId: eventId("purchase", "5"),
+      revision: 2,
+      state: "unknown",
+      displayedAmount: jpy(-800),
+      usageDate: "2026-08-03",
+    },
+    posted: {
+      ref: posted,
+      eventId: eventId("purchase", "1"),
+      revision: 1,
+      state: "captured",
+      displayedAmount: jpy(-1234),
+      usageDate: "2026-08-15",
+    },
+    actions: ["accept", "reject"],
+    blockers: [],
+    relation: {
+      relationKind: "pending_to_posted",
+      fromRef: pending.id,
+      toRef: posted.id,
+      validFrom: null,
+      validTo: null,
+      evidenceRefs: [
+        `reconciliation-proposal:${proposalId}`,
+        "transaction:23@parse_run:6",
+        "transaction:21@parse_run:7",
+      ],
+    },
+    ...overrides,
   };
 }
 

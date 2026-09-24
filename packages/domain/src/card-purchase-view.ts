@@ -8,6 +8,12 @@ import type {
   CardUsageExclusion,
 } from "./card-purchase.ts";
 import type { EventState, SourceFactRef, UnknownStateReason } from "./events.ts";
+import type {
+  PendingPostedAction,
+  PendingPostedBlocker,
+  PendingPostedRelation,
+} from "./pending-posted-review.ts";
+import type { ProposalStatus, RationaleCode, RejectionConditionCode } from "./reconcile.ts";
 import type { TemporalValue } from "./time.ts";
 import type { Quantity } from "./values.ts";
 
@@ -71,6 +77,52 @@ export interface CardPurchaseRevisionEntry {
   createdAt: string;
 }
 
+/** One side of a pending-to-posted candidate: the row the matcher compared and its live event. */
+export interface CardPurchaseCandidateSide {
+  /** The proposal's target, pinned to the parse run the matcher read it in. */
+  ref: SourceFactRef;
+  /** The live recognised event holding that row's recognition key, or null when none does. */
+  eventId: string | null;
+  /** That event's live revision; a plan pins it as `card-purchase:<eventId>`. */
+  revision: number | null;
+  state: EventState | null;
+  /** The row's own decimal-v1 amount as the provider displayed it (outflow negative). */
+  displayedAmount: Quantity | null;
+  /** The row's provider usage date, `YYYY-MM-DD`. */
+  usageDate: string | null;
+}
+
+/**
+ * A stage-B reconciliation proposal that names one of this event's provider
+ * rows: the pending row and the posted row it may be the same purchase as.
+ * Reviewing it is `relation.accept` (merge) or `relation.reject` (reject, or
+ * withdraw an accepted link, which splits the merged event) with `relation`
+ * plus a reason as the payload.
+ */
+export interface CardPurchaseCandidate {
+  /** `reconciliation_proposals.id`. */
+  proposalId: string;
+  proposalStatus: ProposalStatus;
+  /** Decisions recorded on `proposal:<id>`; a plan pins it under that subject. */
+  proposalRevision: number;
+  /** The latest `entity_relations` status of the triple, or null when it has none. */
+  relationStatus: "proposed" | "accepted" | "rejected" | "released" | null;
+  /** Rows of the triple; a plan pins it as `relation:pending_to_posted|<from>|<to>`. */
+  relationRevision: number;
+  /** The provider itself linked the pair (a provider link id); otherwise a heuristic candidate. */
+  providerLinked: boolean;
+  rationaleCodes: RationaleCode[];
+  rejectionConditions: RejectionConditionCode[];
+  pending: CardPurchaseCandidateSide;
+  posted: CardPurchaseCandidateSide;
+  /** What a review may do now (`pendingPostedReview`); empty when closed. */
+  actions: PendingPostedAction[];
+  /** Why `accept` (or `withdraw`) is not offered. */
+  blockers: PendingPostedBlocker[];
+  /** The relation payload to plan, apart from its `reason`. */
+  relation: PendingPostedRelation;
+}
+
 /** Read-side view of one recognised purchase or refund; stored facts stay in the domain contract. */
 export interface CardPurchaseView {
   eventId: string;
@@ -92,6 +144,8 @@ export interface CardPurchaseView {
   settlement: CardPurchaseSettlementLink | null;
   history: CardPurchaseRevisionEntry[];
   historyTruncated: boolean;
+  /** Pending-to-posted candidates naming one of this event's rows, newest first (at most 10). */
+  candidates: CardPurchaseCandidate[];
   explanationRefs: string[];
 }
 
