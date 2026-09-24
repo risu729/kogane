@@ -394,7 +394,7 @@ export function candidateOpen(candidate: CardPurchaseCandidate): boolean {
 }
 
 /** Both rows are held by one live event: the link was merged. */
-export function candidateMerged(candidate: CardPurchaseCandidate): boolean {
+function candidateMerged(candidate: CardPurchaseCandidate): boolean {
   return (
     candidate.pending.eventId !== null && candidate.pending.eventId === candidate.posted.eventId
   );
