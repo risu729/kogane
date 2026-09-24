@@ -383,6 +383,24 @@ After a commit the receipt panel distinguishes `受理` (accepted) from
 `反映済み` (published) and offers a re-check rather than claiming completion
 (addendum 11 §5).
 
+A plan that reviews something shown elsewhere adds a panel that reads the
+reviewed item back from the server. The panel compares the plan's pins with that
+item, and approval waits until every pin matches. The panel is chosen by the
+plan's kind or invalidation:
+
+| Plan                                     | Panel                                                            |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| `card-settlement.*`                      | the settlement candidate                                         |
+| invalidation `review:card-ownership`     | the account mapping and ownership claims                         |
+| invalidation `review:card-purchase-link` | the pending-to-posted candidate, read from the purchases it pins |
+
+The candidate is taken from whichever purchase lists it among those that
+`card-purchase:<event id>` pins at a live revision name; the action is the one
+the simulation's `proposal:<id>` target states (see
+[card-settlements.md](card-settlements.md#reviewing-a-pending-to-posted-link)).
+A missing item, a changed pin, or an action that is unstated or no longer
+offered disables Approve and Commit.
+
 One operation id is derived per approval, so a resend of the same confirmation
 is the same operation and a lost response never commits twice.
 
@@ -459,9 +477,12 @@ already recorded is never undone by a DELETE — an undo is a new revision
 - `packages/application/test/command.test.ts` (11 tests): the closed kind list,
   payloads that reject a caller-supplied impact/approval/revisions, digest
   sensitivity to every input, grants, and the error table.
-- `apps/web/test/confirm.browser.test.ts` (3 tests): read-only
-  without the capability, no action on a stale plan, and accepted vs published
-  shown distinctly.
+- `apps/web/test/confirm.browser.test.ts` (8 tests): read-only
+  without the capability, no action on a stale plan, accepted vs published
+  shown distinctly, and a pending-to-posted review shown against the candidate
+  it pins. That review can be approved and committed only while every pin, the
+  offered action and the candidate itself are unchanged, and while the
+  simulation states an action that matches the plan's kind.
 - `services/processor/test/balance-projection.test.ts` "the
   dispatcher routes the balance-projection target to that processor": a
   `balance-projection` row reaches A07's real processor and rebuilds the

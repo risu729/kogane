@@ -145,12 +145,82 @@ list does not prove there were no purchases: installment, revolving and bonus
 rows and rows the recognition writer has not reached are counted as
 unrecognised instead.
 
+### Reviewing a pending-to-posted link
+
+A pending row and the posted row that replaced it stay two recognised events
+until an operator decides otherwise. Amount and date closeness never merge
+anything by itself. When a stage-B reconciliation proposal names one of a
+purchase's rows, the explanation lists the proposal after the 利用 → 請求 → 引落
+chain. At most ten are listed for each row of the purchase, newest first; among
+proposals written together, the pair with most in common comes first. The list
+page shows each open candidate on the page once, between the coverage note and
+利用の一覧.
+
+Each candidate shows:
+
+- both rows as the provider displayed them: usage date, the row's own signed
+  amount, the state and revision of the event that holds the row, and a link to
+  the record and its original;
+- whether the provider itself linked the two rows;
+- the rationale codes, the conditions that would make the rows two different
+  purchases, and any blocker.
+
+Only the actions the server offers appear. Each needs a written reason, and
+each appears only where `commands` is advertised:
+
+| Button               | Command           | Offered on                                                        |
+| -------------------- | ----------------- | ----------------------------------------------------------------- |
+| 同一の利用として統合 | `relation.accept` | an open candidate with no blocker                                 |
+| 別の利用として扱う   | `relation.reject` | an open candidate                                                 |
+| 統合を取り消す       | `relation.reject` | an accepted link; withdrawing it splits the merged purchase again |
+
+The payload is the candidate's own `relation` plus the reason. The page builds
+no relation end and no evidence ref. The confirmation screen opens only when the
+plan does the chosen action (the proposal target's next status in the plan:
+`accepted`, `rejected` or `withdrawn`) and pins these at exactly the revisions
+shown:
+
+- `proposal:<id>`;
+- the `pending_to_posted` relation triple;
+- `card-purchase:<event id>` for each side a live event holds, whatever the
+  action (a merged link is one event, so one pin).
+
+A withdrawal of a merged link also pins the posted event the merge absorbed at
+revision 0. The page leaves that pin to the server and never reads the absorbed
+event.
+
+The confirmation screen reads back every purchase the plan pins at a live
+revision and takes the candidate from the one that lists it: each side lists at
+most ten candidates per row, so a busy month may list it on one side only. It
+shows each pin beside the candidate's value. The action it
+names is the one the server's simulation states, never inferred from the
+candidate. It names the `review:card-purchase-link` invalidation and describes
+the effect in words:
+
+- A merge keeps the pending-origin event and absorbs the posted one, which
+  takes that event from `authorized` (or `unknown`, once its row left the
+  provider's display) to `captured`. An authorized pending row's amount leaves
+  the authorized figure, since that purchase is now captured.
+- A split of a merged link restores the posted event as captured and returns
+  the pending-origin event to its pending row as `unknown`
+  (`conflicting_evidence`), outside every figure. A withdrawal of a link that
+  was never merged touches no event.
+- A reject leaves both records as they are.
+
+None of these adds or removes an amount, and the captured figure stays the same.
+Approval is refused while any of these is missing or changed: a pin, the offered
+action, or the candidate itself. The route is operator-only, so an agent sees
+neither the candidates nor the actions.
+
 ## Verification
 
 Synthetic tests cover authoritative totals, missing/ambiguous dates and totals,
 refunds, unconfirmed pages, ownership blockers, stale plans, idempotent decisions,
 allocation conflicts and withdrawal history. Browser tests exercise the explicit
 review/approval flow and refuse a detail revision that changed after planning.
+The pending-to-posted review is tested the same way. Its plans carry the
+candidate's own relation, and its confirmation refuses a pin, action or
+candidate that changed after planning.
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.
