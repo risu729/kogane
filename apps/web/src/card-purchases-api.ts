@@ -1,11 +1,18 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { getJson, useFeatures } from "./api.ts";
 import type {
+  CardPurchaseCandidate,
   CardPurchasePage,
   CardPurchaseView,
 } from "../../../packages/domain/src/card-purchase-view.ts";
+import {
+  CARD_PURCHASE_SUBJECT_PREFIX as CARD_PURCHASE_PREFIX,
+  PENDING_POSTED_INVALIDATION,
+  PROPOSAL_SUBJECT_PREFIX as PROPOSAL_PREFIX,
+  type PendingPostedAction,
+} from "../../../packages/domain/src/pending-posted-review.ts";
 
-export type { CardPurchaseView };
+export type { CardPurchaseCandidate, CardPurchaseView, PendingPostedAction };
 const CARD_PURCHASES_PATH = "/api/v2/card-purchases";
 
 /** One page of recognised purchases; `period` is a statement month (`YYYY-MM`) or none. */
@@ -21,17 +28,169 @@ export function useCardPurchases(offset: number, period: string | null) {
   });
 }
 
-/** One purchase by its event id, with the page it was read in (for its summary). */
-export function useCardPurchase(eventId: string) {
-  const features = useFeatures();
-  return useQuery({
+function cardPurchaseQuery(eventId: string, enabled: boolean) {
+  return {
     queryKey: ["card-purchases", "detail", eventId],
-    enabled: features.known && features.cardPurchaseRecognition,
-    queryFn: ({ signal }) =>
+    enabled,
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
       getJson<CardPurchasePage>(
         `${CARD_PURCHASES_PATH}?eventId=${encodeURIComponent(eventId)}`,
         signal,
       ),
     retry: false,
-  });
+  };
+}
+
+/** One purchase by its event id, with the page it was read in (for its summary). */
+export function useCardPurchase(eventId: string) {
+  const features = useFeatures();
+  return useQuery(cardPurchaseQuery(eventId, features.known && features.cardPurchaseRecognition));
+}
+
+/** Several purchases by event id, each its own read (the same cache as `useCardPurchase`). */
+export function useCardPurchaseReads(eventIds: readonly string[]) {
+  const features = useFeatures();
+  const enabled = features.known && features.cardPurchaseRecognition;
+  return useQueries({ queries: eventIds.map((eventId) => cardPurchaseQuery(eventId, enabled)) });
+}
+
+// ── reviewing a pending-to-posted link ───────────────────────────────
+//
+// The review rides on `relation.accept` / `relation.reject`. The payload is the
+// candidate's own `relation` plus the operator's reason: the client never
+// builds relation ends or evidence refs itself. `withdraw` is `relation.reject`
+// of an accepted link, which splits the merged purchase again.
+
+/** The invalidation a pending-to-posted review plan carries (the confirmation screen keys on it). */
+export const PURCHASE_LINK_INVALIDATION = PENDING_POSTED_INVALIDATION;
+
+function purchaseLinkKind(action: PendingPostedAction): "relation.accept" | "relation.reject" {
+  return action === "accept" ? "relation.accept" : "relation.reject";
+}
+
+/** The `POST /api/command/v1/plan` body of one review. */
+export function purchaseLinkPlanRequest(
+  candidate: CardPurchaseCandidate,
+  action: PendingPostedAction,
+  reason: string,
+): Record<string, unknown> {
+  return {
+    kind: purchaseLinkKind(action),
+    payload: { ...candidate.relation, reason },
+    baseContextId: `card-purchase-link:${candidate.proposalId}`,
+  };
+}
+
+/** The proposal status a review plan moves `proposal:<id>` to, per action. */
+const PLANNED_PROPOSAL_STATUS: Record<PendingPostedAction, string> = {
+  accept: "accepted",
+  reject: "rejected",
+  withdraw: "withdrawn",
+};
+
+/**
+ * What a planned `relation.accept` / `relation.reject` does, as the server
+ * states it: it resolves the action from the proposal and the relation (a
+ * reject of an accepted link is its withdrawal) and names it as the proposal
+ * target's next status. The client never infers it from the candidate's
+ * statuses. Null when the plan has no such target or its status disagrees
+ * with the kind.
+ */
+export function purchaseLinkAction(
+  kind: string,
+  targets: readonly { subjectRef: string; proposedTargetRef: string | null }[],
+  proposalId: string,
+): PendingPostedAction | null {
+  const proposal = targets.find((target) => target.subjectRef === PROPOSAL_PREFIX + proposalId);
+  const action = (Object.keys(PLANNED_PROPOSAL_STATUS) as PendingPostedAction[]).find(
+    (entry) => PLANNED_PROPOSAL_STATUS[entry] === proposal?.proposedTargetRef,
+  );
+  if (action === undefined || kind !== purchaseLinkKind(action)) return null;
+  return action;
+}
+
+/** One subject a review plan pins, beside what the candidate on screen says it is at. */
+export interface PurchaseLinkPin {
+  subjectRef: string;
+  role: "proposal" | "relation" | "pending" | "posted";
+  /** The candidate's own revision of that subject. */
+  shown: number;
+}
+
+/**
+ * The pins a review plan of this candidate carries, whatever the action: the
+ * proposal's decisions, the relation triple's rows and the live revision of
+ * each side's event (one pin when both rows are one merged event). A reject
+ * pins the events too: the reviewer decided about the events on screen.
+ */
+export function purchaseLinkPins(candidate: CardPurchaseCandidate): PurchaseLinkPin[] {
+  const { relation } = candidate;
+  const pins: PurchaseLinkPin[] = [
+    {
+      subjectRef: PROPOSAL_PREFIX + candidate.proposalId,
+      role: "proposal",
+      shown: candidate.proposalRevision,
+    },
+    {
+      subjectRef: `relation:${relation.relationKind}|${relation.fromRef}|${relation.toRef}`,
+      role: "relation",
+      shown: candidate.relationRevision,
+    },
+  ];
+  for (const role of ["pending", "posted"] as const) {
+    const side = candidate[role];
+    if (side.eventId === null || side.revision === null) continue;
+    const subjectRef = CARD_PURCHASE_PREFIX + side.eventId;
+    if (pins.some((pin) => pin.subjectRef === subjectRef)) continue;
+    pins.push({ subjectRef, role, shown: side.revision });
+  }
+  return pins;
+}
+
+/**
+ * True when the plan pins every subject of the candidate at the candidate's
+ * revision. Extra pins (the posted event a merge absorbed, pinned at 0) are
+ * the server's to check.
+ */
+export function purchaseLinkPinsMatch(
+  expected: Record<string, number>,
+  candidate: CardPurchaseCandidate,
+): boolean {
+  return purchaseLinkPins(candidate).every(
+    (pin) => Object.hasOwn(expected, pin.subjectRef) && expected[pin.subjectRef] === pin.shown,
+  );
+}
+
+/** The proposal a review plan is about, from its pinned `proposal:<id>` subject. */
+export function plannedProposalId(subjects: readonly string[]): string | null {
+  const ids = [
+    ...new Set(
+      subjects
+        .filter((ref) => ref.startsWith(PROPOSAL_PREFIX))
+        .map((ref) => ref.slice(PROPOSAL_PREFIX.length)),
+    ),
+  ];
+  return ids.length === 1 && ids[0] !== "" ? ids[0]! : null;
+}
+
+/**
+ * The purchases to read the candidate from: every planned
+ * `card-purchase:<id>` subject pinned at a live revision (an event absorbed
+ * by a merge is pinned at 0 and has no page of its own). Each side's page
+ * lists at most ten candidates per row, so the candidate may be on only one
+ * of them; the plan's subjects are stored sorted, so their order says
+ * nothing about which side is which.
+ */
+export function plannedPurchaseEventIds(
+  subjects: readonly string[],
+  expected: Record<string, number>,
+): string[] {
+  const ids = [
+    ...new Set(
+      subjects
+        .filter((ref) => ref.startsWith(CARD_PURCHASE_PREFIX))
+        .map((ref) => ref.slice(CARD_PURCHASE_PREFIX.length)),
+    ),
+  ].filter((id) => /^(?:purchase|refund)_[0-9a-f]{64}$/u.test(id));
+  return ids.filter((id) => (expected[CARD_PURCHASE_PREFIX + id] ?? 1) > 0);
 }

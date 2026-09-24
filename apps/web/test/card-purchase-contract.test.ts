@@ -1,17 +1,38 @@
 import { describe, expect, test } from "bun:test";
 import {
   capturedPurchase,
+  linkCandidate,
   purchasePage,
   retiredPurchase,
 } from "../../../packages/application/test/card-purchase-view-fixture.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { validCardPurchasePage } from "../../../packages/observation-shared/src/card-purchase-contract.ts";
+import type { CardPurchaseCandidate } from "../../../packages/domain/src/card-purchase-view.ts";
 import {
   validApiCapabilities,
   validApiResponse,
 } from "../../../packages/observation-shared/src/api-validation.ts";
 import { clientFeatures } from "../src/capabilities.ts";
+import {
+  plannedProposalId,
+  plannedPurchaseEventIds,
+  purchaseLinkAction,
+  purchaseLinkPinsMatch,
+  purchaseLinkPlanRequest,
+} from "../src/card-purchases-api.ts";
+import { candidateEffect } from "../src/purchase-display.tsx";
 import { matchRoute } from "../src/router.tsx";
+import {
+  authorizedCandidate,
+  authorizedPendingPurchase,
+  linkPlanPins,
+  linkPlanTargets,
+  mergedCandidate,
+  mergedPurchase,
+  PENDING_EVENT,
+  POSTED_EVENT,
+  serverPlanPins,
+} from "./card-purchase-link-fixture.ts";
 
 const path = "/api/v2/card-purchases";
 const clone = <T>(value: T): T => structuredClone(value);
@@ -173,5 +194,126 @@ describe("card purchase HTTP contract", () => {
       "/purchases/arbitrary",
     ])
       expect(matchRoute(path).name).toBe("notFound");
+  });
+});
+
+describe("pending-to-posted review from the web client", () => {
+  test("the pages the browser tests serve are pages the client accepts", () => {
+    for (const items of [
+      [{ ...capturedPurchase(), candidates: [linkCandidate()] }],
+      [authorizedPendingPurchase()],
+      [mergedPurchase()],
+    ])
+      expect(validApiResponse(path, purchasePage(items))).toBe(true);
+  });
+
+  test("a plan request carries the candidate's relation unchanged, plus the reason", () => {
+    const candidate = linkCandidate();
+    for (const [action, kind] of [
+      ["accept", "relation.accept"],
+      ["reject", "relation.reject"],
+      ["withdraw", "relation.reject"],
+    ] as const)
+      expect(purchaseLinkPlanRequest(candidate, action, "確認した")).toEqual({
+        kind,
+        payload: { ...candidate.relation, reason: "確認した" },
+        baseContextId: `card-purchase-link:${candidate.proposalId}`,
+      });
+  });
+
+  test("the planned action is the one the server names for the proposal, never inferred", () => {
+    const candidate = linkCandidate();
+    const pins = linkPlanPins(candidate);
+    const merged = mergedCandidate();
+    const action = (kind: string, subject: CardPurchaseCandidate, status?: string | null) =>
+      purchaseLinkAction(
+        kind,
+        status === undefined
+          ? linkPlanTargets(subject, kind, linkPlanPins(subject))
+          : linkPlanTargets(subject, kind, linkPlanPins(subject), status),
+        subject.proposalId,
+      );
+    expect(action("relation.accept", candidate)).toBe("accept");
+    expect(action("relation.reject", candidate)).toBe("reject");
+    // A planned reject of an accepted link is its withdrawal, because the server says so.
+    expect(action("relation.reject", merged)).toBe("withdraw");
+    // The candidate's statuses alone decide nothing: the plan's statement wins.
+    expect(action("relation.reject", merged, "rejected")).toBe("reject");
+    expect(action("relation.reject", candidate, "withdrawn")).toBe("withdraw");
+    // A status that disagrees with the kind, or none at all, is no action.
+    expect(action("relation.accept", candidate, "rejected")).toBeNull();
+    expect(action("relation.reject", candidate, "accepted")).toBeNull();
+    expect(action("relation.accept", candidate, null)).toBeNull();
+    expect(action("relation.accept", candidate, "proposed")).toBeNull();
+    expect(action("identity.assign", candidate, "accepted")).toBeNull();
+    // Another proposal's target says nothing about this one.
+    expect(
+      purchaseLinkAction(
+        "relation.accept",
+        linkPlanTargets(candidate, "relation.accept", pins),
+        "rp_other",
+      ),
+    ).toBeNull();
+  });
+
+  test("every effect says no amount is added or removed; a merge of an authorized row names its figure", () => {
+    const retired = linkCandidate();
+    const authorized = authorizedCandidate();
+    const merged = mergedCandidate();
+    const effects = [
+      candidateEffect(retired, "accept"),
+      candidateEffect(authorized, "accept"),
+      candidateEffect(retired, "reject"),
+      candidateEffect(merged, "withdraw"),
+      candidateEffect(linkCandidate({ relationStatus: "accepted" }), "withdraw"),
+    ];
+    for (const effect of effects)
+      expect(effect).toMatch(/金額(の追加や削除はなく|や合計は変わりません|や合計も変わりません)/u);
+    for (const effect of [effects[0]!, effects[1]!, effects[3]!])
+      expect(effect).toContain("確定の合計は変わりません");
+    expect(effects[0]).toContain("状態不明 → 確定");
+    expect(effects[1]).toContain("未確定 → 確定");
+    // Only a still-authorized pending row leaves the authorized figure.
+    expect(effects[1]).toContain("未確定の合計から外れます");
+    expect(effects[0]).not.toContain("未確定の合計");
+    expect(effects[3]).toContain("元の2件の記録に戻します");
+    expect(effects[4]).toContain("どの利用の記録も変わらず");
+  });
+
+  test("a plan matches only when it pins every subject of the candidate at the candidate's revision", () => {
+    const candidate = authorizedCandidate();
+    const pins = linkPlanPins(candidate);
+    // The proposal, the relation triple and both held events, whatever the action.
+    expect(Object.keys(pins)).toHaveLength(4);
+    expect(purchaseLinkPinsMatch(pins, candidate)).toBe(true);
+    for (const ref of Object.keys(pins)) {
+      expect(purchaseLinkPinsMatch({ ...pins, [ref]: pins[ref]! + 1 }, candidate)).toBe(false);
+      const without = Object.fromEntries(Object.entries(pins).filter(([key]) => key !== ref));
+      expect(purchaseLinkPinsMatch(without, candidate)).toBe(false);
+    }
+    // A merged link pins its one event once; the absorbed event pinned at 0 is the server's to check.
+    const merged = mergedCandidate();
+    const mergedPins = serverPlanPins(merged);
+    expect(mergedPins[`card-purchase:${POSTED_EVENT}`]).toBe(0);
+    expect(Object.keys(linkPlanPins(merged))).toHaveLength(3);
+    expect(purchaseLinkPinsMatch(mergedPins, merged)).toBe(true);
+  });
+
+  test("the confirmation screen finds the proposal and a live purchase among the planned subjects", () => {
+    const merged = mergedCandidate();
+    const expected = { ...linkPlanPins(merged), [`card-purchase:${POSTED_EVENT}`]: 0 };
+    const subjects = Object.keys(expected);
+    expect(plannedProposalId(subjects)).toBe(merged.proposalId);
+    // The absorbed posted event has no live revision (and no page); the survivor is read.
+    expect(plannedPurchaseEventIds([...subjects].reverse(), expected)).toEqual([PENDING_EVENT]);
+    expect(plannedPurchaseEventIds(["card-purchase:event_other"], {})).toEqual([]);
+    // Both live sides of an open candidate are read, whatever order the plan stored them in.
+    const open = authorizedCandidate();
+    const pins = linkPlanPins(open);
+    expect(new Set(plannedPurchaseEventIds(Object.keys(pins).sort(), pins))).toEqual(
+      new Set([PENDING_EVENT, POSTED_EVENT]),
+    );
+    expect(plannedProposalId(["proposal:a", "proposal:b"])).toBeNull();
+    expect(plannedProposalId(["relation:x"])).toBeNull();
   });
 });

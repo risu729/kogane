@@ -3,30 +3,67 @@
 // derives another (no transitive closure, SC06), and rejecting one appends a
 // new claim rather than deleting the old.
 //
+// Two reviews ride on these kinds with an evidence marker: the card ownership
+// review (`card-settlement:<id>`) and the pending-to-posted link review
+// (`reconciliation-proposal:<id>`), which also records the `proposal:`
+// decision, resolves the proposal and merges or splits the purchase events.
+//
 // Every statement is joined to the commit's receipt guard, so the whole set is
 // a no-op when the reservation failed.
 import { commandKey, type MutationInput, type MutationWrites } from "../command/contract.ts";
 import { relationPayload, relationSubjectRef } from "./sql.ts";
 
 import { ownershipReviewRequested } from "../../../domain/src/ownership-review.ts";
+import {
+  PENDING_POSTED_RELATION_KIND,
+  pendingPostedReviewRequested,
+} from "../../../domain/src/pending-posted-review.ts";
 import { prepareOwnershipReview } from "./ownership-review.ts";
+import { pendingPostedWrites, preparePendingPostedReview } from "./pending-posted-review.ts";
 
 export async function relationMutation(input: MutationInput): Promise<MutationWrites | null> {
   const { plan, principal, operationId, now, guard } = input;
   if (plan.kind !== "relation.accept" && plan.kind !== "relation.reject") return null;
   const relation = relationPayload(plan.payload);
+  // Re-checked at commit, not only at planning: a stored plan (one made
+  // before the review existed, say) never writes a bare `pending_to_posted`
+  // relation that would claim the link without merging the two events.
+  if (
+    pendingPostedReviewRequested(relation.evidenceRefs) !==
+    (relation.relationKind === PENDING_POSTED_RELATION_KIND)
+  )
+    return null;
   const ownership = ownershipReviewRequested(relation.evidenceRefs)
     ? await prepareOwnershipReview(input.store, relation)
     : null;
   if (ownership && !ownership.ok) return null;
+  const link = pendingPostedReviewRequested(relation.evidenceRefs)
+    ? await preparePendingPostedReview(input.store, plan.kind, relation, operationId)
+    : null;
+  if (link && !link.ok) return null;
   const subjectRef = relationSubjectRef(relation);
   const revision = (plan.expectedRevisions[subjectRef] ?? 0) + 1;
   const decisionId = await commandKey("dr", ["command", operationId]);
   const relationId = await commandKey("rel", ["command", operationId]);
   const accept = plan.kind === "relation.accept";
   const evidence = JSON.stringify(relation.evidenceRefs);
+  const review = link?.ok
+    ? await pendingPostedWrites({
+        review: link.review,
+        relation,
+        principal,
+        operationId,
+        now,
+        guard,
+      })
+    : null;
+  const precondition = ownership?.ok
+    ? ownership.review.precondition
+    : link?.ok
+      ? link.review.precondition
+      : undefined;
   return {
-    ...(ownership?.ok ? { precondition: ownership.review.precondition } : {}),
+    ...(precondition ? { precondition } : {}),
     decisionRevisionId: decisionId,
     result: {
       relationId,
@@ -36,6 +73,7 @@ export async function relationMutation(input: MutationInput): Promise<MutationWr
       status: accept ? "accepted" : "rejected",
       revision,
       decisionRevisionId: decisionId,
+      ...(review ? review.result : {}),
     },
     writes: [
       // The 0029 ledger keeps recording every judgement operation, so the
@@ -90,6 +128,7 @@ export async function relationMutation(input: MutationInput): Promise<MutationWr
           ...guard.binds,
         ],
       },
+      ...(review ? review.writes : []),
     ],
   };
 }
