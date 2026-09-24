@@ -136,6 +136,7 @@ test("the flag summary names every lane flag of the configuration", () => {
   expect(Object.keys(flags).sort()).toEqual([
     "BALANCE_PROJECTION_ENABLED",
     "OPS_DISPATCH_ENABLED",
+    "PURCHASE_RECOGNITION_ENABLED",
     "RECONCILIATION_ENABLED",
     "RELEASE_CANDIDATES_ENABLED",
     "REPORTS_ENABLED",

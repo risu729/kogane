@@ -3,6 +3,9 @@
 // production schema including triggers. No real provider data is seeded.
 import { readdirSync, readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+// Reads Miniflare's synchronous proxy replies only once they are queued; also
+// preloaded for every test file by bunfig.toml.
+import "./miniflare-sync-proxy.ts";
 import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations.ts";
 
 export const migrationDir = new URL(

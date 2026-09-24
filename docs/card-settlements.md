@@ -88,6 +88,16 @@ evidence. Statement payment totals do not prove principal, fees or the unpaid
 balance, so an obligation principal or exact liability reduction is not invented.
 The screen keeps fee breakdown and net-asset impact unknown.
 
+Card purchases now exist separately, recognised from the usage rows themselves
+by the [card purchase recognition](economic-events.md#card-purchase-recognition)
+lane (behind `PURCHASE_RECOGNITION_ENABLED`, off until enabled): each is a
+`purchase` or `refund` event with one `purchase-recognition` leg and no cash
+leg. Settlement still adds none. Its event carries the cash movement and an
+unresolved obligation change, never a `purchase-recognition` leg, so a card
+charge is counted once as a purchase and its payment once as cash. No purchase
+is allocated to a statement: statement totals are not decomposed into
+purchases.
+
 A successful source collector, parser or candidate scan is not proof of complete
 card history. Missing ownership, unavailable exact dates, unsupported bank
 adapters and stale evidence remain visible limitations. This milestone does not

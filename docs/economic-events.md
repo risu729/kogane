@@ -28,7 +28,12 @@ produce the complete economic event or its balance effect.
 | Producing candidates from published observations          | The rule job, whenever `RECONCILIATION_ENABLED` is on     |
 | Accepting a candidate                                     | A decision in the decision log, through a guarded command |
 | Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision       |
+| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision     |
 | Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)  |
+
+[Card purchase recognition](#card-purchase-recognition) runs only while
+`PURCHASE_RECOGNITION_ENABLED` is on, and only for single-payment rows with an
+exact amount and a stable card identity.
 
 A confidence number is not produced anywhere. A candidate carries rationale
 codes and rejection conditions, which is what a reviewer needs; a score is at
@@ -66,8 +71,9 @@ its amount twice into the same live set does not (INV06).
 
 ### Card purchase recognition (migration `0047_card_purchase_recognition.sql`)
 
-Schema only: no writer runs yet, and no deployed build reads these objects.
-A recognised card purchase will be an ordinary `purchase` or `refund` event
+The writer is the `purchase_recognition` lane
+([below](#card-purchase-recognition)), which ships off.
+A recognised card purchase is an ordinary `purchase` or `refund` event
 revision on the `purchase-recognition` basis with a `rule` decision; 0047 adds
 the sidecar that says which policy wrote each revision and from which provider
 rows. The contract is `packages/domain/src/card-purchase.ts`, and the guarded
@@ -216,6 +222,207 @@ authenticated command route; there is no public write route today.
 Undoing an acceptance is never a DELETE: a later decision appends a new revision
 and the old one stays readable.
 
+## Card purchase recognition
+
+`services/processor/src/card-purchase-job.ts` is the `purchase_recognition`
+lane. It turns adopted Vpass and MyJCB usage rows into `purchase` and `refund`
+events on the `purchase-recognition` basis, through the contract, the guarded
+batch and the schema of
+[migration 0047](#card-purchase-recognition-migration-0047_card_purchase_recognitionsql).
+It ships off: `PURCHASE_RECOGNITION_ENABLED` is `"0"` in the committed
+configuration.
+
+### What is automatic, and why
+
+Recognising one posted usage row as a purchase asserts no correspondence
+between two claims (INV07). The provider itself states that the charge was
+posted to that card, inside one verified namespace (source + producer +
+external id namespace + source account). A row is **adopted** when its parse
+run is published and it belongs to the latest complete snapshot, the one
+definition of "current" in `packages/read-model/src/card-usage.ts`
+(`currentCardUsageSql`). Each revision is still a recorded decision: one
+`decision_revisions` row with `subject_kind='relation'`,
+`subject_ref='event:<id>'`, `method='rule'`,
+`actor_id='rule:card-purchase-recognition-v1'`, no operation, `accept` for the
+first revision and `supersede` for every later one, and the reason
+`card-purchase-recognition-v1:<action>`. No provider text is stored in the
+decision, the event or the sidecar.
+
+The scope is deliberately narrow. Only a single-payment row (`1回払い`,
+`一回払い`) with an exact, non-zero JPY amount, a usage date and a stable card
+identity is recognised. Every other row is skipped with a code from a closed
+set and never guessed (INV05): `account_not_resolved`,
+`card_identity_unstable`, `amount_not_exact`, `amount_zero`,
+`unit_unsupported`, `payment_type_unsupported`, `installment_amount_differs`,
+`payment_split_unknown`, `refund_shape_unverified`, `status_unsupported` and
+`date_absent`. Installment, revolving and bonus rows are never recognised, and
+a MyJCB row needs its usage and payment amounts to agree. A Vpass row needs the
+trusted importer card binding (identity family `vpass-card-binding`): a card
+ordinal is not an identity. A mapping whose status is `unresolved` names a
+placeholder, not a card, and counts as no account.
+
+These stay reviewed decisions and are never automatic: linking a pending row to
+its posted row as one purchase (until then they are separate events),
+allocating a refund to a purchase, declaring an old row and a renamed row the
+same purchase after an external id change, a card statement against a bank
+debit ([card settlements](card-settlements.md)), and "this row is not a
+purchase".
+
+### Mapping
+
+| Provider row                                                     | Event                                                 |
+| ---------------------------------------------------------------- | ----------------------------------------------------- |
+| Vpass `posted` (web family), MyJCB `confirmed`                   | state `captured`                                      |
+| Vpass `unconfirmed` (customized family), MyJCB `unconfirmed`     | state `authorized`                                    |
+| Amount below zero (an outflow)                                   | kind `purchase`, one `decrease` leg                   |
+| Amount above zero (Vpass sale code 6, a positive web row, MyJCB) | kind `refund`, one `increase` leg, no allocation      |
+| Row no longer current                                            | state `unknown`, `provider_status_absent`, **no leg** |
+
+- **Event id**: `purchase_` or `refund_` and the sha256 of the policy and the
+  recognition key that first recognised it. A key a live event holds keeps that
+  event.
+- **Effective time**: the provider usage date as an `Asia/Tokyo` local date,
+  never the statement or payment date.
+- **Evidence**: `SourceFactRef` objects,
+  `{kind:"transaction",id:"transaction:<obs>",revision:"parse_run:<n>"}`.
+- **Legs**: exactly one `purchase-recognition` leg on
+  `account:<resolved card account>` with the exact magnitude. No cash-movement
+  leg (the bank debit is the settlement's), no obligation-change leg and no
+  allocation. Only `captured` counts as captured; `authorized` is shown apart
+  and never added to it; `unknown` has no leg.
+- `reconciliationSignals` derives a balance from `cash-movement` legs only, so
+  a recognised purchase on `account:<card>` does not move a derived card
+  balance.
+
+### Revisions, retirement and idempotency
+
+The content digest covers kind, state, effective time, basis, legs and keys,
+and excludes observation ids, parse-run ids and the policy release, so a
+re-fetch that shows the same row is not a revision. Per key the lane writes:
+
+| Action      | When                                                                                                                                |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `recognize` | No live event holds the key                                                                                                         |
+| `revise`    | The content changed: the account mapping, the amount or the date, or a retired row reappeared (`unknown → captured`, same event)    |
+| `reanchor`  | Same content, but a parse run the live evidence cites is no longer published (a published replay): the key moves to the current row |
+| `retire`    | A live `authorized` or `captured` event none of whose keys is current any more (`staleCardPurchaseKeysSql`)                         |
+
+A different kind for a held key is never a revision; it is counted as a
+conflict and left for review. Every revision is one guarded `db.batch`
+(`cardPurchaseRecognitionWrites`), and its decision id is a digest of event,
+revision, content digest and action. A replay, a stale plan or a concurrent
+duplicate writes nothing in any table, and the 0047 trigger lets at most one
+live revision hold a key.
+
+A retired event keeps its keys, so no other event can take the row. Typical
+retirements: a Vpass month's customized capture replaced by its web capture
+(the pending events are retired, the posted rows become separate captured
+events); a card ordinal change under one resolved account (old events retired,
+new ones captured, the captured total unchanged); a parser change of external
+ids (retire and recreate: churn, never a double count). The retire pass runs
+before recognition in every tick, and when it fills its page and retires every
+event on it, recognition waits a tick (bounded: see [Bounds](#bounds)), so the old
+events of a changed key are retired before their replacements are recognised
+and the captured total never counts one purchase twice. An event that still
+holds one current key is not stale, and an event holding several keys (a
+reviewed merge) is left to its reviewed flow and counted as a conflict. A row
+that stays current but can no longer be recognised (its binding lost, say)
+keeps its last revision: the provider still shows it.
+
+Accepting a [card settlement](card-settlements.md) adds a cash-movement leg and
+an unresolved obligation-change leg and never a `purchase-recognition` leg, so
+a card charge is counted once as a purchase and its payment once as cash. No
+purchase is allocated to a statement.
+
+### Bounds
+
+One tick (every five minutes) retires at most 100 events (`RETIRE_LIMIT`),
+reads at most 500 current usage rows after the scan cursor (`SCAN_LIMIT`) and
+writes at most 200 events (`WRITE_LIMIT`), each as its own batch. The
+operational cursor `card_purchase_scan_cursor` stops at the last row handled
+when the write budget runs out, and wraps to 0 after the last page (an exactly
+full last page wraps on the next tick, whose page is empty) because a row below
+it can become current again. The cursor moves only from the value the tick
+read, so a tick that overlapped it never pulls it back. The current-usage query
+runs twice per tick (stale keys, then the page).
+
+Recognition waits for the retire pass only while that pass fills its page and
+retires every event on it. The wait is bounded: each such tick takes 100 keys
+out of the live `authorized` and `captured` set, and nothing refills that set
+while recognition, its only writer, waits. So after a key change touching K
+recognised rows, recognition runs again within ⌈K / 100⌉ ticks: a
+2,000-row parser re-key waits at most 20 ticks (100 minutes), and 10,000 rows
+all changing key at once at most 100 ticks (about 8 hours 20 minutes). A page
+with any conflict or failed batch never defers, so keys the pass cannot
+retire, however many, never hold recognition back. The log line carries
+counts only:
+
+```json
+{
+  "event": "purchase_recognition",
+  "scanned": 500,
+  "recognized": 0,
+  "revised": 0,
+  "reanchored": 0,
+  "retired": 0,
+  "skipped": { "payment_type_unsupported": 12 },
+  "conflicts": 0,
+  "failed": 0,
+  "deferred": false
+}
+```
+
+`conflicts` counts plans the stored state refused (a stale or replayed batch, a
+held key, a refused transition, a multi-key event), `failed` counts batches D1
+rejected with an error (nothing of them is written), and `deferred` marks a tick
+whose recognition waited because the retire pass retired a whole full page.
+
+### Flag, deploy and rollback
+
+| Flag                           | Where                     | Default | Effect when on                                                                             |
+| ------------------------------ | ------------------------- | ------- | ------------------------------------------------------------------------------------------ |
+| `PURCHASE_RECOGNITION_ENABLED` | `services/processor` vars | `"0"`   | The `purchase_recognition` lane runs right after `reconciliation_sweep` and writes events. |
+
+`"1"` or `"true"` turns it on; any other value leaves the lane unrun and silent.
+
+1. The release applies CORE `0047` before the Workers.
+2. Deploy `services/processor` with the flag `"0"`: the lane is skipped and
+   logs nothing.
+3. Set it to `"true"`: the backfill proceeds at most 200 events per tick.
+
+Rollback: set the flag back to `"0"`. The lane stops and every row it wrote
+stays. A wrong recognition is corrected by shipping a fixed policy whose sweep
+appends revisions, never by a DELETE. Builds from before this change never
+touch the 0047 tables.
+
+### Verified locally (synthetic data only)
+
+- `services/processor`: `test/card-purchase.test.ts`, over the deployed Vpass
+  and MyJCB parsers, the publication gate and the identity store on Miniflare
+  D1. The flag off runs nothing. A posted Vpass single payment is one captured
+  purchase with its rule decision, and a second sweep writes nothing. A
+  re-fetch is no revision. A customized month becomes authorized events; its
+  web capture retires them (no legs) and captures the posted rows only. MyJCB
+  usage equal to payment is captured and the installment slice is skipped. An
+  unpublished parse, an unidentified parse and a Vpass identity without the
+  binding recognise nothing. A refund is its own event with no allocation. An
+  account mapping change supersedes revision 1, which stays readable. A
+  published replay re-anchors. The trigger refuses a second live holder and a
+  duplicate batch writes nothing. A card ordinal change keeps the captured
+  total. An accepted card settlement adds no purchase leg, and purchases have
+  no cash leg. The write budget, the cursor wrap and the retire deferral hold;
+  an exactly full last page wraps on the next tick, a row that becomes current
+  below the cursor is reached after the wrap, and an overlapping tick's cursor
+  move is kept. Keys the retire pass cannot retire never defer recognition.
+  External ids and namespaces with slashes, plus signs, full-width, escaped and
+  control characters give the same key in SQLite and in the writer, so every
+  holder is found again. The log line carries counts only.
+  `test/lanes.test.ts` pins the lane order.
+- `packages/read-model`: `test/card-purchase-keys.test.ts` (stale keys and the
+  unrecognised count against current usage; a revision still holding one
+  current key is not stale) and `test/events.test.ts` (a purchase-recognition
+  leg does not move the derived balance).
+
 ## Read side
 
 `packages/read-model/src/events.ts` provides `createEventsReader(sql)`:
@@ -230,11 +437,14 @@ and the old one stays readable.
   settlements declared. When either side is not exact, `outstanding` is `null`
   with an `outstandingReasonCode`; it is never zero-filled (INV05).
 - `reconciliationSignals({ subjectRefs })` — the latest published
-  provider-reported balance beside the amount the adopted events imply, and
-  their `difference` with reason codes (`snapshot_boundary_unknown`,
+  provider-reported balance beside the amount the adopted events'
+  `cash-movement` legs imply, and their `difference` with reason codes (`snapshot_boundary_unknown`,
   `events_incomplete`, `timing_difference`, `fees_not_modelled`). It is a
   `difference` observation, never an adjustment entry, and nothing is written to
-  make the two agree (root review 09 §4).
+  make the two agree (root review 09 §4). Only `cash-movement` legs are read:
+  until card purchase recognition, legs of every basis were summed together,
+  which would have added a recognised purchase's `purchase-recognition` leg on
+  `account:<card>` to that account's cash legs (two bases are never summed).
 
 All arithmetic is done in `@kogane/domain` with exact decimals. No sum is
 computed by casting a coefficient to a SQLite INTEGER.

@@ -68,6 +68,13 @@ history. Unknown ownership or stale evidence blocks acceptance; payment allocati
 adds no duplicate cash movement or purchase expense. Complete purchase-event
 recognition, other bank adapters, partial payments and refunds remain to implement.
 
+[Card purchase recognition](docs/economic-events.md#card-purchase-recognition)
+is the first purchase-event writer: behind `PURCHASE_RECOGNITION_ENABLED`, off
+until enabled, it turns adopted Vpass/MyJCB single-payment usage rows into
+purchase and refund events, each with a recorded rule decision. Installment,
+revolving and bonus rows are never recognised, and a pending row is not yet
+linked to its posted row as one purchase.
+
 The [roadmap](docs/roadmap.md) records the current implementation limits,
 development order and acceptance criteria. Its main sequence is identity and
 data coverage → reconciliation/events → dated holdings and liabilities →

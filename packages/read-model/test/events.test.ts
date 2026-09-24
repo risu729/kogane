@@ -198,6 +198,27 @@ describe("provider-reported against event-derived", () => {
     ).toEqual({ n: 1 });
   });
 
+  test("only cash-movement legs derive a balance: a recognised card purchase on the same account adds nothing", async () => {
+    const db = seededDatabase();
+    // A card purchase recognised on the purchase-recognition basis decreases
+    // the same `account:card` subject. It is a different basis from the cash
+    // leg, so the derived balance stays −3,000 rather than −4,200.
+    db.exec(`${decision("dr_event_card", "event:ev-card-purchase")}
+INSERT INTO economic_event_revisions(event_id,revision,kind,state,unknown_reason,effective_time_json,basis,evidence_support_json,decision_revision_id,superseded_by,created_at)
+ VALUES('ev-card-purchase',1,'purchase','captured',NULL,${DATE},'purchase-recognition',
+  '[{"kind":"transaction","id":"transaction:1","revision":"parse_run:1"}]','dr_event_card',NULL,'2026-03-01T00:00:00Z');
+INSERT INTO economic_legs VALUES('ev-card-purchase',1,0,'account:card','JPY','exact','1200',0,NULL,'decrease','purchase-recognition');`);
+    const [signal] = await reader(db).reconciliationSignals({ subjectRefs: ["account:card"] });
+    expect(signal!.eventDerived.value).toMatchObject({ value: { coefficient: "-3000" } });
+    expect(signal!.difference?.value).toMatchObject({ value: { coefficient: "500" } });
+    // The purchase is still read on its own basis.
+    const purchases = await reader(db).activity({ basis: "purchase-recognition", offset: 0 });
+    expect(purchases.items.map((item) => item.eventId).sort()).toEqual([
+      "ev-card-purchase",
+      "ev-purchase-1",
+    ]);
+  });
+
   test("no adopted event leaves the derived side absent rather than zero", async () => {
     const db = seededDatabase();
     db.exec(

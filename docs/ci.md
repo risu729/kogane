@@ -85,8 +85,13 @@ mise run dry-run                      # every validated Worker configuration
 ```
 
 The root `checks` task composes `ci:root` and all workspace `ci` tasks, followed
-by `dry-run`. hk's `repository` check invokes this graph, never `check` or
-`verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the
+by `dry-run`. They run in parallel, so no test may depend on timing that only
+holds on an idle machine. The processor tests read Miniflare's synchronous
+Node-side proxy through `services/processor/test/miniflare-sync-proxy.ts`,
+preloaded by `services/processor/bunfig.toml`: under that load Miniflare's
+blocked caller could read its port before the helper thread's reply was on it,
+and that one early read failed every later call of the file. hk's `repository` check
+invokes this graph, never `check` or `verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the
 deployment ledger and existing operational instructions working. Workspace
 checks use native names; `ci:<short>` aliases are not retained. New code and docs
 should use `//<workspace>:<task>`.
