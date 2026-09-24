@@ -69,9 +69,11 @@ adds no duplicate cash movement or purchase expense. Complete purchase-event
 recognition, other bank adapters, partial payments and refunds remain to implement.
 
 [Card purchase recognition](docs/economic-events.md#card-purchase-recognition)
-is the first purchase-event writer: behind `PURCHASE_RECOGNITION_ENABLED`, off
-until enabled, it turns adopted Vpass/MyJCB single-payment usage rows into
-purchase and refund events, each with a recorded rule decision. Installment,
+is the first purchase-event writer: on in production since 2026-09-24
+(`PURCHASE_RECOGNITION_ENABLED`), it turns adopted Vpass/MyJCB single-payment
+usage rows into purchase and refund events, each with a recorded rule decision.
+When a later re-parse re-keys a row, its event is retired and the new key is
+recognised as a new event, so the purchase is not counted twice. Installment,
 revolving and bonus rows are never recognised, and a pending row is not yet
 linked to its posted row as one purchase.
 

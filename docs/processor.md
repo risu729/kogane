@@ -218,8 +218,9 @@ observation_sweep → collection_scan → identity_sweep → balance_projection
 ```
 
 `purchase_recognition` runs only while `PURCHASE_RECOGNITION_ENABLED` is `"1"`
-or `"true"` (it ships `"0"`); it turns adopted Vpass/MyJCB usage rows into
-purchase and refund events with rule decisions, bounded per tick
+or `"true"` (`"true"` in production since 2026-09-24); it turns adopted
+Vpass/MyJCB usage rows into purchase and refund events with rule decisions,
+bounded per tick
 ([economic-events.md](economic-events.md#card-purchase-recognition)).
 
 `collection_scan` sits after the parse sweep and before identity so a run
