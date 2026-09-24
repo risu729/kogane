@@ -14,8 +14,11 @@ import { exactQuantity, integerDecimal } from "../../domain/src/values.ts";
 import { approve } from "../src/command/approve.ts";
 import { commit } from "../src/command/commit.ts";
 import type {
+  BatchOutcome,
   ChangeKind,
+  CommandStore,
   MutationPlanners,
+  PreparedWrite,
   Principal,
   RelationPayload,
 } from "../src/command/contract.ts";
@@ -717,6 +720,153 @@ describe("pending-to-posted review", () => {
       ok: false,
       error: "invalid_command",
     });
+  });
+
+  test("every event of a page lists its own candidates, however many another event has", async () => {
+    const s = await scenario();
+    // After the pair's proposal, a busy month pairs the pending row with 205
+    // other posted rows: newer proposals than the pair's, all naming the
+    // pending event, one of them with the date and the amount in common.
+    const rows: [string, string, string, string][] = [];
+    for (let index = 0; index < 205; index += 1) {
+      const posted = {
+        kind: "transaction",
+        id: `transaction:${900_000 + index}`,
+        revision: "parse_run:1",
+      };
+      const close = index === 150;
+      rows.push([
+        `rp_busy_${index}`,
+        JSON.stringify([s.pending, posted]),
+        JSON.stringify([
+          "status_pending_to_posted",
+          "same_identifier_namespace",
+          "same_source_account",
+          "no_provider_link_id",
+          "same_statement_period",
+          ...(close ? ["date_within_window", "amount_equal"] : []),
+          "multiple_candidates",
+        ]),
+        (0xb000 + index).toString(16).padStart(64, "0"),
+      ]);
+    }
+    for (const [id, targets, rationale, digest] of rows)
+      s.w.run(
+        `INSERT INTO reconciliation_proposals(id,kind,stage,target_refs_json,method,policy_release,rationale_codes_json,
+          rejection_conditions_json,evidence_refs_json,status,decision_revision_id,proposal_digest,created_at)
+         VALUES(?,'pending_to_posted','B',?,'rule','reconciliation-rules-v1',?,'[]','[]','proposed',NULL,?,?)`,
+        id,
+        targets,
+        rationale,
+        digest,
+        T1,
+      );
+    const page = await queryCardPurchases(s.w.sql);
+    const listed = (eventId: string) =>
+      page.items
+        .find((item) => item.eventId === eventId)!
+        .candidates.map((entry) => entry.proposalId);
+    // The posted event still lists the pair's own proposal.
+    expect(listed(s.postedEvent)).toEqual([s.proposalId]);
+    // The pending event lists 10, newest first, the likely pair of that tick first.
+    const pending = listed(s.pendingEvent);
+    expect(pending).toHaveLength(10);
+    expect(pending[0]).toBe("rp_busy_150");
+    expect(pending).not.toContain(s.proposalId);
+  });
+
+  test("concurrent commits: a resend of the operation writes nothing more, another operation nothing at all", async () => {
+    const s = await scenario();
+    const payload = payloadOf(await candidateOf(s, s.postedEvent), "same purchase");
+    const plan = await planned(s, "relation.accept", payload);
+    const approval = await approved(s, plan.planId, plan.planDigest);
+    // Every commit reads, plans its merge and builds its batch before any of
+    // them writes; the batches then run one after another, in a chosen order.
+    const inner = sqliteCommandStore(s.w.db);
+    const held = new Map<number, () => void>();
+    // Each attempt's first batch (its commit batch) waits to be released.
+    const attempt = (index: number, operationId: string) => {
+      const store: CommandStore = {
+        ...inner,
+        batch: (writes: readonly PreparedWrite[]) =>
+          held.has(index)
+            ? inner.batch(writes)
+            : new Promise<readonly BatchOutcome[]>((resolve, reject) => {
+                expect(writes[0]!.binds[0]).toBe(operationId);
+                held.set(index, () => void inner.batch(writes).then(resolve, reject));
+              }),
+      };
+      return commit(store, {
+        operationId,
+        principal: OPERATOR,
+        planId: plan.planId,
+        approvalId: approval.approvalId,
+        planners: PLANNERS,
+        now: T1,
+      });
+    };
+    const results = [attempt(0, "op-race"), attempt(1, "op-race"), attempt(2, "op-race-other")];
+    while (held.size < 3) await new Promise((resolve) => setTimeout(resolve, 1));
+    const release = (index: number) => {
+      held.get(index)!();
+      return results[index]!;
+    };
+    expect(await release(0)).toMatchObject({ ok: true, replayed: false });
+    const once = snapshot(s.w.db);
+    expect(revisions(s.w.db, s.pendingEvent)).toHaveLength(3);
+    // The same operation's batch finds its own rows (every id is keyed by the
+    // operation) and replays the receipt; another operation's batch finds the
+    // plan committed and writes nothing, whatever its own statements are.
+    expect(await release(1)).toMatchObject({ ok: true, replayed: true });
+    expect(await release(2)).toMatchObject({ ok: false });
+    expect(snapshot(s.w.db)).toEqual(once);
+    expect(revisions(s.w.db, s.pendingEvent)).toHaveLength(3);
+    expect(
+      s.w.db
+        .query("SELECT count(*) AS n FROM decision_revisions WHERE subject_ref=?")
+        .get(`proposal:${s.proposalId}`),
+    ).toEqual({ n: 1 });
+  });
+
+  test("a bare pending_to_posted plan stored before the review existed never commits", async () => {
+    const s = await scenario();
+    const payload = payloadOf(await candidateOf(s, s.postedEvent), "same purchase");
+    const bare: RelationPayload = { ...payload, evidenceRefs: payload.evidenceRefs.slice(1) };
+    // The plan and its approval as an older build stored them: no marker.
+    const planId = "b".repeat(64);
+    const subject = `relation:pending_to_posted|${bare.fromRef}|${bare.toRef}`;
+    s.w.run(
+      `INSERT INTO change_plans(plan_id,kind,payload_json,base_context_id,expected_revisions_json,simulation_json,created_by,created_at,expires_at,status)
+       VALUES(?,'relation.accept',?,'x',?,?,?,?,?,'planned')`,
+      planId,
+      JSON.stringify(bare),
+      JSON.stringify({ [subject]: 0 }),
+      JSON.stringify({ outboxTargets: ["identity-projection"] }),
+      OPERATOR.id,
+      T0,
+      T2,
+    );
+    s.w.run(
+      `INSERT INTO approvals(approval_id,plan_id,plan_digest,approver_actor,approver_verification,scope_json,expires_at,uses_remaining,created_at)
+       VALUES('approval-bare',?,?,?,'server','[]',?,1,?)`,
+      planId,
+      planId,
+      OPERATOR.id,
+      T2,
+      T0,
+    );
+    const frozen = snapshot(s.w.db);
+    expect(
+      await commit(sqliteCommandStore(s.w.db), {
+        operationId: "op-bare",
+        principal: OPERATOR,
+        planId,
+        approvalId: "approval-bare",
+        planners: PLANNERS,
+        now: T1,
+      }),
+    ).toMatchObject({ ok: false, error: "invalid_command" });
+    expect(snapshot(s.w.db)).toEqual(frozen);
   });
 
   test("what cannot be one purchase is refused, but may still be rejected", async () => {

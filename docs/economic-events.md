@@ -435,6 +435,13 @@ the authorisation is no longer held apart. The merged event's statement is the
 posted row's (its sidecar is the posted row's), so it links to its statement
 and settlement unchanged.
 
+The rule never overrides a reviewer: it leaves a provider-linked pair to
+review once any decision other than a rule's is recorded about either event
+(a reviewed merge, or the split of a withdrawal), checked before the merge and
+again inside its batch. Otherwise a withdrawn link would be merged again as
+soon as either row is re-anchored, because the re-anchored pair is a new
+proposal that the provider link makes `autoAcceptable`.
+
 **Split.** Withdrawing an accepted link (`relation.reject` of an accepted
 triple) retires the merged event first, holding its pending key alone, in
 state `unknown` with `conflicting_evidence` and the pending row's own facts
@@ -446,6 +453,13 @@ revisions, so a first recognition could never be written for it, and the lane
 would find its key held by nobody forever. A merged event already retired
 splits into two retired events. The captured total is unchanged again, and
 every earlier revision stays readable.
+
+A withdrawn link is closed for good, a known limit: 0032 resolves a proposal
+once, so the proposal row stays `accepted` (the withdrawal supersedes the
+decision that accepted it), the triple's latest relation is `rejected`, and
+the candidate offers no action again. The same two rows can only be linked
+again through a new proposal, which the candidate pass writes when either
+row's event is re-anchored or revised onto a new observation.
 
 What stays proposal-only: every candidate without a provider link id, which
 is every one the deployed parsers produce today (no source supplies a
@@ -469,7 +483,11 @@ larger read skips every group that tick) and at most 200 per group
 (`CANDIDATE_GROUP_LIMIT`; a larger group is skipped and counted), writes at
 most 100 new proposals in one batch (`CANDIDATE_WRITE_LIMIT`; a pair already
 stored never takes that budget), and merges at most 20 provider-linked pairs
-(`LINK_MERGE_LIMIT`), each its own batch. A tick therefore issues at most
+(`LINK_MERGE_LIMIT`), each its own batch. Stage B pairs every pending event with
+every posted event of a group, so a group of 200 events is up to 10,000 pairs:
+the stored ones are looked up 1,000 digests at a time
+(`CANDIDATE_LOOKUP_CHUNK`, about 67 KB of bound JSON, far below D1's 2 MB value
+limit) and only until the write budget is full. A tick therefore issues at most
 about 320 guarded batches, and a deferred tick pairs nothing: the candidate
 pass follows the page.
 
@@ -566,22 +584,35 @@ touch the 0047 tables.
   is revised on an account correction, retired holding both keys when its
   posted row is gone and captured again when it reappears; a reviewed accept
   through the lifecycle on D1 merges, the lane then leaves the merged event
-  alone, and a withdrawal splits it without a new proposal.
+  alone, and a withdrawal splits it without a new proposal. The reconciliation
+  lane and the purchase lane propose one Vpass pair and one MyJCB pair (an
+  absolute payment month) once, under the same `rp_<digest>`, whichever runs
+  first; a provider-linked pair the reconciliation lane accepted is merged
+  once, with no second acceptance; the rule does not merge again a pair a
+  reviewer split, even after a re-anchor makes it a new provider-linked
+  proposal; and the stored pairs are looked up a bounded chunk at a time.
   `test/reconciliation.test.ts` checks the canonical relation ends and
   proposal evidence.
 - `packages/storage-d1`: `test/card-purchase-links.test.ts` (merge and split
   batches on the full CORE: order, cross-id supersession, replay and stale
   batches writing nothing, a key held elsewhere, the one-live-holder trigger
   refusing a merge without its pointer, a split restoring both holders and a
-  merge again after it, and the `proposal:` and `card-purchase:` revision
+  merge again after it, a merged event already retired splitting into two
+  retired events, and the `proposal:` and `card-purchase:` revision
   subjects).
 - `packages/domain`: `test/pending-posted-review.test.ts` (merge and split
   drafts, transitions, `conflicting_evidence`, the linked revision, what a
-  review may do, the marker and canonical ends).
+  review may do, the marker and canonical ends) and `test/reconcile.test.ts`
+  (the stored digest of a known pair pinned, unchanged by the evidence no
+  longer double-prefixing its refs).
 - `packages/application`: `test/pending-posted-plan.test.ts` (plan, simulate,
   approve and commit of an accept, a reject and a withdrawal; pins; stale
   event revisions and proposals decided elsewhere writing nothing; agents
-  refused; resends replaying the receipt) and
+  refused; resends replaying the receipt; concurrent commit batches of one
+  plan writing the review once, a resend of the operation and another
+  operation both writing nothing; a bare `pending_to_posted` plan stored
+  before the review existed refused at commit; every event of a page listing
+  its own candidates next to a busy one) and
   `packages/observation-shared/test/card-purchase-candidates.test.ts` (the
   `candidates` wire shape).
 - `packages/read-model`: `test/card-purchase-keys.test.ts` (stale keys and the
@@ -655,7 +686,12 @@ period); no allocation is read or written for it
 Each event also lists its `candidates` (at most 10, newest first): the
 [pending-to-posted](#pending-to-posted-links) proposals that name one of its
 provider rows, matched through the rows' recognition keys, with `proposal:<id>`
-added to its `explanationRefs`. A candidate carries the proposal's status and
+added to its `explanationRefs`. Proposals are selected per key (10 each), so a
+busy month's pairs never crowd another event of the page out; among proposals
+written in the same tick (a whole group's pairs usually are), the pair with a
+provider link id, then with a date within the window, an equal amount and an
+equal counterparty comes first, so the likely pair is not hidden behind
+similar rows. A candidate carries the proposal's status and
 decision count, the relation triple's latest status and row count, the rows'
 own amounts and dates with the live event each is held by (and its revision),
 the rationale and rejection codes, the review `actions` it allows now

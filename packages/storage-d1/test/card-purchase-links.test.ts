@@ -356,6 +356,77 @@ describe("pending-to-posted merge and split batches", () => {
     }
   }, 30_000);
 
+  test("a merged event already retired splits into two retired events", async () => {
+    const db = database();
+    try {
+      const { pending, posted, merge } = await pair(db);
+      const a = pending.revision.eventId;
+      const b = posted.revision.eventId;
+      await run(db, cardPurchaseMergeWrites({ merge, now: NOW }));
+      // Neither row is current any more: the lane retires the merged event
+      // holding both keys, with no leg.
+      const retired = await cardPurchaseRetirement({
+        live: merge.draft.revision,
+        keys: merge.draft.keys,
+        sidecar: merge.draft.sidecar,
+      });
+      const retirement = cardPurchaseRecognitionWrites({
+        draft: retired!,
+        expectedRevision: 2,
+        now: NOW,
+      });
+      expect((await run(db, retirement)).every((changes) => changes > 0)).toBe(true);
+      expect(figures(db)).toEqual({ captured: "0", authorized: "0", unresolved: 1 });
+      const split = await cardPurchaseSplit({
+        merged: live(retired!),
+        pendingSidecar: pending.sidecar,
+        absorbed: { eventId: b, revision: 1 },
+      });
+      if (!split) throw new Error("split rejected");
+      expect([split.retire.action, split.restore.action]).toEqual(["retire", "retire"]);
+      const writes = cardPurchaseSplitWrites({ split, now: NOW });
+      expect((await run(db, writes)).every((changes) => changes > 0)).toBe(true);
+      expect(
+        db
+          .query(
+            `SELECT r.event_id,r.revision,r.state,r.unknown_reason,c.action,
+              (SELECT count(*) FROM economic_legs l WHERE l.event_id=r.event_id AND l.revision=r.revision) AS legs
+             FROM current_economic_events r JOIN card_purchase_recognitions c USING(event_id,revision)
+             ORDER BY r.event_id=?`,
+          )
+          .all(a),
+      ).toEqual([
+        {
+          event_id: b,
+          revision: 2,
+          state: "unknown",
+          unknown_reason: "provider_status_absent",
+          action: "retire",
+          legs: 0,
+        },
+        {
+          event_id: a,
+          revision: 4,
+          state: "unknown",
+          unknown_reason: "conflicting_evidence",
+          action: "retire",
+          legs: 0,
+        },
+      ]);
+      expect(holders(db)).toEqual([
+        { event_id: a, revision: 4, role: "pending" },
+        { event_id: b, revision: 2, role: "posted" },
+      ]);
+      expect(figures(db)).toEqual({ captured: "0", authorized: "0", unresolved: 2 });
+      // A replay writes nothing anywhere.
+      const after = snapshot(db);
+      expect(await run(db, writes)).toEqual(writes.map(() => 0));
+      expect(snapshot(db)).toEqual(after);
+    } finally {
+      db.close();
+    }
+  }, 30_000);
+
   test("proposal: and card-purchase: subjects answer the decision count and the live revision", async () => {
     const db = database();
     try {

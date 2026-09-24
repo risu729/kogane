@@ -39,8 +39,14 @@ import {
 } from "../../../domain/src/reconcile.ts";
 import { exactQuantity, normalizeDecimal, type Quantity } from "../../../domain/src/values.ts";
 
-/** Proposals one call resolves; a page asks for the candidates of at most 50 events. */
-const CANDIDATE_LIMIT = 200;
+/**
+ * Proposals selected per recognition key, newest first. A page lists at most
+ * 10 candidates per event, and an event holds a key per row it shows, so each
+ * key keeps its own 10: stage B pairs every pending row with every posted row
+ * of a statement period, and one busy month must not crowd the other events
+ * of the page out of a shared limit.
+ */
+const CANDIDATES_PER_KEY = 10;
 
 /** Structural: both `SqlExecutor` (queries) and `CommandStore` (commands) satisfy it. */
 export interface CandidateReader {
@@ -81,14 +87,23 @@ interface RelationRow {
 
 /**
  * `?1` a JSON array of recognition keys (a proposal is selected when one of
- * its targets has one of them) or NULL, `?2` one proposal id or NULL, `?3`
- * the number of proposals. The target key is the cited row's own
+ * its targets has one of them, at most `?3` per key) or NULL, `?2` one
+ * proposal id or NULL. The target key is the cited row's own
  * `json_array(source, producer, namespace, source account, external id)`;
  * a target that is not a canonical `transaction:<id>` pinned to its own parse
  * run finds no row and so no key.
+ *
+ * Newest first; proposals written in one tick (a whole group's pairs usually
+ * are) are ordered by how much the matcher found in common: a provider link
+ * id first, then a date within the window, an equal amount and an equal
+ * counterparty, so the likely pair is not hidden behind similar rows.
  */
 const CANDIDATE_TARGETS_SQL = `WITH proposals AS MATERIALIZED (
-  SELECT p.id,p.status,p.target_refs_json,p.rationale_codes_json,p.rejection_conditions_json,p.created_at
+  SELECT p.id,p.status,p.target_refs_json,p.rationale_codes_json,p.rejection_conditions_json,p.created_at,
+   4*(instr(p.rationale_codes_json,'"provider_link_id_equal"')>0)
+   +(instr(p.rationale_codes_json,'"date_within_window"')>0)
+   +(instr(p.rationale_codes_json,'"amount_equal"')>0)
+   +(instr(p.rationale_codes_json,'"counterparty_equal"')>0) AS relevance
   FROM reconciliation_proposals p
   WHERE p.kind='pending_to_posted' AND p.stage='B' AND (?2 IS NULL OR p.id=?2)
 ), targets AS MATERIALIZED (
@@ -111,11 +126,14 @@ const CANDIDATE_TARGETS_SQL = `WITH proposals AS MATERIALIZED (
   LEFT JOIN acquisition_sessions ses ON ses.id=fr.acquisition_session_id
   LEFT JOIN observation_decimal_values dv ON dv.kind='transaction' AND dv.observation_id=o.id
    AND dv.policy_version='decimal-v1'
+), ranked AS (
+  SELECT keyed.proposal_id,row_number() OVER (PARTITION BY keyed.recognition_key
+    ORDER BY p.created_at DESC,p.relevance DESC,p.id) AS key_position
+  FROM keyed JOIN proposals p ON p.id=keyed.proposal_id
+  WHERE keyed.recognition_key IN (SELECT value FROM json_each(?1))
 ), selected AS (
-  SELECT p.id,p.created_at FROM proposals p
-  WHERE ?1 IS NULL OR p.id IN (SELECT proposal_id FROM keyed
-   WHERE recognition_key IN (SELECT value FROM json_each(?1)))
-  ORDER BY p.created_at DESC,p.id LIMIT ?3
+  SELECT p.id,p.created_at,p.relevance FROM proposals p
+  WHERE ?1 IS NULL OR p.id IN (SELECT proposal_id FROM ranked WHERE key_position<=?3)
 )
 SELECT p.id AS proposal_id,p.status,p.rationale_codes_json,p.rejection_conditions_json,
  (SELECT max(d.revision) FROM decision_revisions d
@@ -135,7 +153,7 @@ LEFT JOIN card_purchase_recognition_keys held ON held.recognition_key=target.rec
   AND live.revision=held.revision AND live.superseded_by IS NULL)
 LEFT JOIN economic_event_revisions r ON r.event_id=held.event_id AND r.revision=held.revision
 LEFT JOIN card_purchase_recognitions c ON c.event_id=held.event_id AND c.revision=held.revision
-ORDER BY s.created_at DESC,p.id,target.position`;
+ORDER BY s.created_at DESC,s.relevance DESC,p.id,target.position`;
 
 /**
  * Per `[from, to]` triple of `?1`: the relation rows it has (what a plan pins
@@ -257,14 +275,13 @@ function targetOf(row: TargetRow): ResolvedTarget | null {
 export async function loadPendingPostedCandidates(
   reader: CandidateReader,
   filter: { keys: readonly string[] } | { proposalId: string },
-  limit = CANDIDATE_LIMIT,
 ): Promise<LoadedCandidate[]> {
   const byKeys = "keys" in filter;
   if (byKeys && filter.keys.length === 0) return [];
   const rows = await reader.all<TargetRow>(CANDIDATE_TARGETS_SQL, [
     byKeys ? JSON.stringify([...new Set(filter.keys)]) : null,
     byKeys ? null : filter.proposalId,
-    limit,
+    CANDIDATES_PER_KEY,
   ]);
   const grouped = new Map<string, TargetRow[]>();
   for (const row of rows)

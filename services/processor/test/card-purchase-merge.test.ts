@@ -571,44 +571,72 @@ async function pairDigest(targets: readonly SourceFactRef[]): Promise<string> {
 }
 
 test("the reconciliation lane and the purchase lane propose one pair once, under one digest, whichever runs first", async () => {
-  for (const order of ["reconciliation first", "purchases first"] as const) {
-    const w = await world();
-    await pendingThenPosted(w, [POSTED]);
-    if (order === "reconciliation first") {
-      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 1 });
-      // The purchase lane pairs the same two rows and finds the pair stored.
-      expect(counts(await w.sweep())).toEqual({ ...NOTHING, retired: 1, recognized: 1 });
-    } else {
-      expect(counts(await w.sweep())).toEqual({
-        ...NOTHING,
-        retired: 1,
-        recognized: 1,
-        proposed: 1,
-      });
+  const myjcbRow: UsageRow = {
+    date: "2026/05/10",
+    merchant: "架空店舗J",
+    amount: "800",
+    paymentType: "1回払い",
+  };
+  // A Vpass month whose pending capture the posted one replaced, and a MyJCB
+  // pending and confirmed capture under one absolute payment month (#238:
+  // the only MyJCB shape the reconciliation lane pairs).
+  const sources = {
+    vpass: {
+      seed: async (w: World) => {
+        await pendingThenPosted(w, [POSTED]);
+      },
+      lane: { ...NOTHING, retired: 1, recognized: 1 },
+    },
+    myjcb: {
+      seed: async (w: World) => {
+        for (const state of ["unconfirmed", "confirmed"] as const)
+          await w.myjcb({
+            state,
+            period: "2026-06",
+            fetchedAt: "2026-06-12T00:00:00.000Z",
+            rows: [myjcbRow],
+          });
+      },
+      lane: { ...NOTHING, recognized: 2 },
+    },
+  };
+  for (const [source, { seed, lane }] of Object.entries(sources))
+    for (const order of ["reconciliation first", "purchases first"] as const) {
+      const w = await world();
+      await seed(w);
+      if (order === "reconciliation first") {
+        expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 1 });
+        // The purchase lane pairs the same two rows and finds the pair stored.
+        expect(counts(await w.sweep())).toEqual(lane);
+      } else {
+        expect(counts(await w.sweep())).toEqual({ ...lane, proposed: 1 });
+        expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 0 });
+      }
+      const stored = await w.all<{
+        id: string;
+        proposal_digest: string;
+        target_refs_json: string;
+      }>("SELECT id,proposal_digest,target_refs_json FROM reconciliation_proposals");
+      expect({ source, order, stored: stored.length }).toEqual({ source, order, stored: 1 });
+      const digest = await pairDigest(JSON.parse(stored[0]!.target_refs_json) as SourceFactRef[]);
+      expect(stored[0]).toMatchObject({ id: `rp_${digest}`, proposal_digest: digest });
+      // The pair the purchase lane compares is exactly that stored row's targets.
+      const [pendingKey, postedKey] = await w.all<{
+        observation_id: number;
+        parse_run_id: number;
+      }>("SELECT observation_id,parse_run_id FROM current_card_purchase_keys ORDER BY role");
+      expect(JSON.parse(stored[0]!.target_refs_json)).toEqual(
+        [pendingKey!, postedKey!].map((key) => ({
+          kind: "transaction",
+          id: `transaction:${key.observation_id}`,
+          revision: `parse_run:${key.parse_run_id}`,
+        })),
+      );
+      expect(counts(await w.sweep())).toEqual(NOTHING);
       expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 0 });
+      await disposeWorlds();
     }
-    const stored = await w.all<{ id: string; proposal_digest: string; target_refs_json: string }>(
-      "SELECT id,proposal_digest,target_refs_json FROM reconciliation_proposals",
-    );
-    expect(stored).toHaveLength(1);
-    const digest = await pairDigest(JSON.parse(stored[0]!.target_refs_json) as SourceFactRef[]);
-    expect(stored[0]).toMatchObject({ id: `rp_${digest}`, proposal_digest: digest });
-    // The pair the purchase lane compares is exactly that stored row's targets.
-    const [pendingKey, postedKey] = await w.all<{ observation_id: number; parse_run_id: number }>(
-      "SELECT observation_id,parse_run_id FROM current_card_purchase_keys ORDER BY role",
-    );
-    expect(JSON.parse(stored[0]!.target_refs_json)).toEqual(
-      [pendingKey!, postedKey!].map((key) => ({
-        kind: "transaction",
-        id: `transaction:${key.observation_id}`,
-        revision: `parse_run:${key.parse_run_id}`,
-      })),
-    );
-    expect(counts(await w.sweep())).toEqual(NOTHING);
-    expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 0 });
-    await disposeWorlds();
-  }
-}, 180_000);
+}, 300_000);
 
 test("a provider-linked pair the reconciliation lane accepted is merged once, without a second acceptance", async () => {
   const w = await world();
