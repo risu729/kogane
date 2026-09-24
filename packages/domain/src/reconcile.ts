@@ -261,10 +261,9 @@ function proposal(input: {
     policyRelease: input.policyRelease,
     rationaleCodes: input.rationaleCodes,
     rejectionConditions: input.rejectionConditions,
-    evidenceRefs: [
-      `${input.left.ref.kind}:${input.left.ref.id}`,
-      `${input.right.ref.kind}:${input.right.ref.id}`,
-    ],
+    // A SourceFactRef id already carries its kind (`transaction:<id>`); it is
+    // cited as it is, never prefixed a second time.
+    evidenceRefs: [input.left.ref.id, input.right.ref.id],
     // A rule never writes an acceptance; the job records the decision.
     status: "proposed",
     decisionRevisionRef: null,

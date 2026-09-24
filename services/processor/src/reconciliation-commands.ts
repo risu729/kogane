@@ -12,6 +12,7 @@
 // Undoing an acceptance is not a DELETE: a later `supersede` decision appends
 // a new revision and the reports that cite the old one keep resolving.
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
+import { validSourceFactRef } from "../../../packages/domain/src/events.ts";
 import {
   RECONCILIATION_KINDS,
   type ReconciliationKind,
@@ -121,6 +122,11 @@ function replayOrConflict(
  * The two claims an accepted relation connects. Only a two-ended proposal can
  * become an `entity_relations` row; a wider candidate set is refused here
  * rather than silently reduced to its first two members.
+ *
+ * An end is the target's own `SourceFactRef` id, which already carries its
+ * kind (`transaction:<id>`), exactly as the pending-to-posted review names it
+ * (packages/domain/src/pending-posted-review.ts). A ref whose id does not
+ * start with its kind is refused rather than prefixed.
  */
 function relationEnds(row: ProposalRow): { from: string; to: string } | null {
   let refs: unknown;
@@ -130,13 +136,9 @@ function relationEnds(row: ProposalRow): { from: string; to: string } | null {
     return null;
   }
   if (!Array.isArray(refs) || refs.length !== 2) return null;
-  const ends = refs.map((ref) => {
-    if (!ref || typeof ref !== "object" || Array.isArray(ref)) return null;
-    const entry = ref as Record<string, unknown>;
-    return typeof entry.kind === "string" && typeof entry.id === "string"
-      ? `${entry.kind}:${entry.id}`
-      : null;
-  });
+  const ends = refs.map((ref: unknown) =>
+    validSourceFactRef(ref) && ref.id.startsWith(`${ref.kind}:`) ? ref.id : null,
+  );
   const [from, to] = ends;
   if (!from || !to || from === to) return null;
   return { from, to };

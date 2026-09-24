@@ -395,6 +395,26 @@ describe("proposal contract", () => {
     });
   });
 
+  test("the stored digest of a pair is pinned and ignores how the evidence cites the rows", async () => {
+    // `reconciliation_proposals.proposal_digest` is this digest, and a writer
+    // inserts only `WHERE NOT EXISTS` a row with it. The pinned value is what
+    // the matcher produced before its evidence stopped double-prefixing the
+    // refs (`transaction:transaction:1`), so every stored proposal keeps its
+    // digest and no decided pair is proposed again beside its old row.
+    const [proposal] = stageBProposals([
+      fact({ id: "1", settlementState: "pending" }),
+      fact({ id: "2", settlementState: "posted" }),
+    ]);
+    expect(proposal!.evidenceRefs).toEqual(["transaction:1", "transaction:2"]);
+    const pinned = "7a3b4973d327ff4bfe531d1d6560d4937e4432d88be88d0fa24a47a31463a515";
+    expect(await canonicalDigest(proposalIdentity(proposal!))).toBe(pinned);
+    const historical = {
+      ...proposal!,
+      evidenceRefs: ["transaction:transaction:1", "transaction:transaction:2"],
+    };
+    expect(await canonicalDigest(proposalIdentity(historical))).toBe(pinned);
+  });
+
   test("a proposal claiming auto-acceptance without provider evidence is invalid", () => {
     const proposals = stageBProposals([
       fact({ id: "1", settlementState: "pending" }),

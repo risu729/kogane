@@ -47,10 +47,15 @@ Concrete limits in the current code:
   `PURCHASE_RECOGNITION_ENABLED` (on in production since 2026-09-24; existing
   rows are worked through in bounded five-minute ticks: at most 100 events
   retired and at most 200 guarded recognition writes, so at most 300 event
-  mutations per tick). Installment, revolving and bonus rows, amountless rows
-  and rows without a stable card identity are excluded. Excluding a row by
-  decision and linking a pending row to its posted row as one purchase are not
-  available yet.
+  mutations per tick, plus the candidate pass's one proposal batch and at most
+  20 provider-linked merges). Installment, revolving and bonus rows, amountless
+  rows and rows without a stable card identity are excluded. A pending row and
+  its posted row can now be
+  [linked as one purchase](economic-events.md#pending-to-posted-links) by a
+  reviewed decision (or by the rule for a pair the provider itself links, which
+  no deployed source does yet); candidates are proposed, never merged by
+  amount and date. Excluding a row by decision and allocating a refund to a
+  purchase are not available yet.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
@@ -70,9 +75,10 @@ Concrete limits in the current code:
   debit to an operator, with captured, authorized, refund and unresolved
   figures kept apart. It is not a complete card history: excluded shapes and
   rows the recognition writer has not reached are only counted, a pending row
-  and its posted row are separate events until a reviewed link merges them,
-  agents cannot read it, and no statement-versus-purchases difference is
-  computed.
+  and its posted row are separate events until a reviewed link merges them
+  (the purchases page lists each purchase's candidates and reviews them
+  through the change lifecycle), agents cannot read it, and no
+  statement-versus-purchases difference is computed.
 
 ## Delivery order and the next milestone
 
@@ -95,9 +101,10 @@ finishing a representative bank, card, broker or rewards flow.
 **The current milestone is to complete card usage → statement → bank debit
 coverage without counting an expense twice.** The first statement/debit review
 slice is implemented, and so is the first purchase-event writer for supported
-single-payment card usage (on in production since 2026-09-24); source
-ownership, supported bank coverage, pending-to-posted purchase linking, partial
-payments and refund handling still need completion.
+single-payment card usage (on in production since 2026-09-24), with reviewed
+pending-to-posted purchase linking and its review screen; source ownership,
+supported bank coverage, partial payments and refund handling still need
+completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The numbered phases below retain the original layer identifiers. They describe

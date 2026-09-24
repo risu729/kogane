@@ -460,18 +460,24 @@ export function cardPurchaseContent(
   };
 }
 
-/** `dr_cp_<sha256>`: one decision per (event, revision, content, action). */
+/**
+ * `dr_cp_<sha256>`: one decision per (event, revision, content, action). A
+ * reviewed merge or split also names the operation that decided it, so a
+ * human's decision and the rule's are never the same row.
+ */
 export async function cardPurchaseDecisionId(input: {
   eventId: string;
   revision: number;
   contentDigest: string;
   action: CardPurchaseAction;
+  operationId?: string | null;
 }): Promise<string> {
   return `dr_cp_${await canonicalDigest({
     eventId: input.eventId,
     revision: input.revision,
     contentDigest: input.contentDigest,
     action: input.action,
+    ...(input.operationId == null ? {} : { operationId: input.operationId }),
   })}`;
 }
 
@@ -502,15 +508,22 @@ async function draft(
   body: Omit<EconomicEventRevision, "decisionRevisionRef" | "supersededBy">,
   keys: CardPurchaseKey[],
   sidecar: CardPurchaseSidecar,
+  operationId: string | null = null,
 ): Promise<CardPurchaseDraft | null> {
   const content = cardPurchaseContent(body, keys);
-  if (content === null || keys.length === 0) return null;
+  if (
+    content === null ||
+    keys.length === 0 ||
+    new Set(keys.map((key) => key.key)).size !== keys.length
+  )
+    return null;
   const contentDigest = await canonicalDigest(content);
   const decisionRevisionId = await cardPurchaseDecisionId({
     eventId: body.eventId,
     revision: body.revision,
     contentDigest,
     action,
+    operationId,
   });
   const revision: EconomicEventRevision = {
     ...body,
@@ -645,6 +658,303 @@ export async function cardPurchaseRetirement(input: {
     input.keys.map((key) => ({ ...key })),
     { ...sidecar, facts: { ...sidecar.facts } },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Pending-to-posted links: merge and split (card purchase plan §1.2)
+// ---------------------------------------------------------------------------
+
+/** A live recognised revision with its keys and sidecar, as a merge or split reads it. */
+export interface CardPurchaseLive {
+  revision: EconomicEventRevision;
+  keys: readonly CardPurchaseKey[];
+  sidecar: CardPurchaseSidecar;
+}
+
+/** One event revision a batch expects in place: `eventId@revision`. */
+export interface CardPurchaseRevisionRef {
+  eventId: string;
+  revision: number;
+}
+
+/**
+ * A reviewed or provider-linked merge. The survivor (the pending-origin event)
+ * gains revision n+1 holding the posted key and the pending key, and the
+ * absorbed posted event's live revision is superseded by it across ids.
+ */
+export interface CardPurchaseMergeDraft {
+  /** The survivor's new revision, action `merge`. */
+  draft: CardPurchaseDraft;
+  /** The survivor's live revision it supersedes. */
+  survivor: CardPurchaseRevisionRef;
+  /** The posted event's live revision it supersedes across ids. */
+  absorbed: CardPurchaseRevisionRef;
+}
+
+/**
+ * A withdrawn link split apart again: the merged event is retired holding its
+ * pending key(s) alone (`unknown`, `conflicting_evidence`: the reviewer said
+ * the authorisation is not this charge, and nothing tells what it became),
+ * and the absorbed posted event gets a new live revision holding its posted
+ * key again, with the merged revision's posted content.
+ */
+export interface CardPurchaseSplitDraft {
+  /** The merged event's new revision: a `retire` holding the pending key(s). */
+  retire: CardPurchaseDraft;
+  /** The absorbed event's new revision: a `split` (or a `retire` when the merged event was unknown). */
+  restore: CardPurchaseDraft;
+  /** The merged event's live revision. */
+  survivor: CardPurchaseRevisionRef;
+  /** The absorbed event's last revision, superseded by the merge, with nothing after it. */
+  absorbed: CardPurchaseRevisionRef;
+}
+
+/** A state change a writer may record: a correction inside one state, or an `eventTransition`. */
+function allowedChange(kind: EconomicEventKind, from: EventState, to: EventState): boolean {
+  return from === to || eventTransition(kind, from, to).ok;
+}
+
+function liveRecognised(live: CardPurchaseLive): boolean {
+  const { revision } = live;
+  return (
+    validEconomicEventRevision(revision) &&
+    revision.supersededBy === null &&
+    (revision.kind === "purchase" || revision.kind === "refund") &&
+    revision.basis === CARD_PURCHASE_BASIS &&
+    live.keys.length > 0 &&
+    validCardPurchaseFacts(live.sidecar.facts)
+  );
+}
+
+function refKey(ref: SourceFactRef): string {
+  return `${ref.kind}\u0000${ref.id}\u0000${ref.revision}`;
+}
+
+/** Posted evidence first, then pending, each row once. */
+function linkedEvidence(posted: readonly SourceFactRef[], pending: readonly SourceFactRef[]) {
+  const seen = new Set<string>();
+  return [...posted, ...pending].filter((ref) => {
+    const key = refKey(ref);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** The one purchase-recognition leg of a revision, re-homed to another event revision. */
+function movedLeg(leg: EconomicLeg, eventId: string, revision: number): EconomicLeg {
+  return { ...leg, eventId, revision, legIndex: 0 };
+}
+
+const copyKey = (key: CardPurchaseKey): CardPurchaseKey => ({ ...key });
+const copySidecar = (sidecar: CardPurchaseSidecar): CardPurchaseSidecar => ({
+  ...sidecar,
+  facts: { ...sidecar.facts },
+});
+
+/**
+ * Merge a pending-origin event and a posted event into one purchase. The
+ * survivor is the pending-origin event, so its history reads `authorized →
+ * captured` (or `authorized → unknown → captured` once the pending row had
+ * left the provider's display); its new revision carries the posted row's
+ * content, evidence and leg, and holds the posted key and the pending key.
+ * The captured total is unchanged: the posted event's leg moves, it is not
+ * added. Null when the two events cannot be one purchase: other kinds, other
+ * card accounts, a side that already holds a link, or a posted event that is
+ * not captured.
+ */
+export async function cardPurchaseMerge(input: {
+  survivor: CardPurchaseLive;
+  absorbed: CardPurchaseLive;
+  /** The reviewed operation, or null for the rule's provider-linked merge. */
+  operationId?: string | null;
+}): Promise<CardPurchaseMergeDraft | null> {
+  const { survivor, absorbed } = input;
+  if (!liveRecognised(survivor) || !liveRecognised(absorbed)) return null;
+  const a = survivor.revision;
+  const b = absorbed.revision;
+  const pendingKey = survivor.keys[0]!;
+  const postedKey = absorbed.keys[0]!;
+  const leg = b.legs[0];
+  if (
+    a.eventId === b.eventId ||
+    a.kind !== b.kind ||
+    survivor.keys.length !== 1 ||
+    absorbed.keys.length !== 1 ||
+    pendingKey.role !== "pending" ||
+    postedKey.role !== "posted" ||
+    pendingKey.key === postedKey.key ||
+    survivor.sidecar.sourceId !== absorbed.sidecar.sourceId ||
+    survivor.sidecar.accountId !== absorbed.sidecar.accountId ||
+    (a.state !== "authorized" && a.state !== "unknown") ||
+    b.state !== "captured" ||
+    b.legs.length !== 1 ||
+    leg === undefined ||
+    leg.basis !== CARD_PURCHASE_BASIS ||
+    !allowedChange(a.kind, a.state, "captured")
+  )
+    return null;
+  const revision = a.revision + 1;
+  const merged = await draft(
+    "merge",
+    {
+      eventId: a.eventId,
+      revision,
+      kind: a.kind,
+      state: "captured",
+      unknownReason: null,
+      effectiveTime: b.effectiveTime,
+      basis: CARD_PURCHASE_BASIS,
+      evidenceSupport: linkedEvidence(b.evidenceSupport, [cardUsageRef(pendingKey)]),
+      legs: [movedLeg(leg, a.eventId, revision)],
+    },
+    [copyKey(postedKey), copyKey(pendingKey)],
+    copySidecar(absorbed.sidecar),
+    input.operationId ?? null,
+  );
+  return merged === null
+    ? null
+    : {
+        draft: merged,
+        survivor: { eventId: a.eventId, revision: a.revision },
+        absorbed: { eventId: b.eventId, revision: b.revision },
+      };
+}
+
+/**
+ * The next revision of a merged event from its current posted row: the
+ * single-row draft of that row, still holding the pending key(s) it merged
+ * and citing their rows after the posted one. `revise` when the content
+ * changed, `reanchor` when only the posted row's parse run moved. Null when
+ * the row is not a posted row of this event or the keys do not fit.
+ */
+export async function cardPurchaseLinkedRevision(input: {
+  action: "revise" | "reanchor";
+  eventId: string;
+  revision: number;
+  /** The current posted row of the merged event. */
+  fact: CardUsageFact;
+  /** The pending key(s) the live revision holds, kept as they are. */
+  pendingKeys: readonly CardPurchaseKey[];
+}): Promise<CardPurchaseDraft | null> {
+  const single = await cardPurchaseRevision({
+    action: input.action,
+    eventId: input.eventId,
+    revision: input.revision,
+    fact: input.fact,
+  });
+  const postedKey = single?.keys[0];
+  if (
+    single === null ||
+    postedKey === undefined ||
+    single.revision.state !== "captured" ||
+    input.pendingKeys.length === 0 ||
+    input.pendingKeys.some((key) => key.role !== "pending" || key.key === postedKey.key)
+  )
+    return null;
+  return draft(
+    input.action,
+    {
+      ...single.revision,
+      evidenceSupport: linkedEvidence(
+        single.revision.evidenceSupport,
+        input.pendingKeys.map(cardUsageRef),
+      ),
+    },
+    [...single.keys, ...input.pendingKeys.map(copyKey)],
+    single.sidecar,
+  );
+}
+
+/**
+ * Split a withdrawn link: the merged event (holding one posted key and its
+ * pending key(s)) is retired holding the pending key(s) alone, with the
+ * pending row's own sidecar and usage date, and the absorbed posted event
+ * gets revision m+1 with the merged revision's posted content, key, leg and
+ * evidence. The posted event is restored rather than recognised anew: its id
+ * already has revisions, so a first recognition could never be written, and
+ * the sweep would find its key held by nobody forever. The captured total is
+ * unchanged: the leg moves back. Null when the merged event is not exactly one
+ * posted key and pending key(s), or a transition is not allowed.
+ */
+export async function cardPurchaseSplit(input: {
+  merged: CardPurchaseLive;
+  /** The merged event's last pending-only sidecar (the row it was before the merge). */
+  pendingSidecar: CardPurchaseSidecar;
+  /** The absorbed event's last revision (superseded by the merge). */
+  absorbed: CardPurchaseRevisionRef;
+  operationId?: string | null;
+}): Promise<CardPurchaseSplitDraft | null> {
+  const { merged, pendingSidecar, absorbed } = input;
+  if (!liveRecognised(merged) || !validCardPurchaseFacts(pendingSidecar.facts)) return null;
+  const a = merged.revision;
+  const posted = merged.keys.filter((key) => key.role === "posted");
+  const pending = merged.keys.filter((key) => key.role === "pending");
+  const captured = a.state === "captured";
+  if (
+    absorbed.eventId === a.eventId ||
+    !EVENT_ID.test(absorbed.eventId) ||
+    EVENT_ID.exec(absorbed.eventId)?.[1] !== a.kind ||
+    !Number.isSafeInteger(absorbed.revision) ||
+    absorbed.revision < 1 ||
+    posted.length !== 1 ||
+    pending.length === 0 ||
+    posted.length + pending.length !== merged.keys.length ||
+    pendingSidecar.facts.providerStatus !== "unconfirmed" ||
+    pendingSidecar.sourceId !== merged.sidecar.sourceId ||
+    (captured ? a.legs.length !== 1 : a.state !== "unknown" || a.legs.length !== 0) ||
+    !allowedChange(a.kind, a.state, "unknown")
+  )
+    return null;
+  const operationId = input.operationId ?? null;
+  const retire = await draft(
+    "retire",
+    {
+      eventId: a.eventId,
+      revision: a.revision + 1,
+      kind: a.kind,
+      state: "unknown",
+      unknownReason: "conflicting_evidence",
+      effectiveTime: {
+        kind: "local-date",
+        value: pendingSidecar.facts.usageDate,
+        zone: CARD_PURCHASE_ZONE,
+        basis: "provider",
+      },
+      basis: CARD_PURCHASE_BASIS,
+      evidenceSupport: pending.map(cardUsageRef),
+      legs: [],
+    },
+    pending.map(copyKey),
+    copySidecar(pendingSidecar),
+    operationId,
+  );
+  const revision = absorbed.revision + 1;
+  const restore = await draft(
+    captured ? "split" : "retire",
+    {
+      eventId: absorbed.eventId,
+      revision,
+      kind: a.kind,
+      state: a.state,
+      unknownReason: captured ? null : (a.unknownReason ?? "provider_status_absent"),
+      effectiveTime: a.effectiveTime,
+      basis: CARD_PURCHASE_BASIS,
+      evidenceSupport: posted.map(cardUsageRef),
+      legs: a.legs.map((leg) => movedLeg(leg, absorbed.eventId, revision)),
+    },
+    posted.map(copyKey),
+    copySidecar(merged.sidecar),
+    operationId,
+  );
+  return retire === null || restore === null
+    ? null
+    : {
+        retire,
+        restore,
+        survivor: { eventId: a.eventId, revision: a.revision },
+        absorbed: { ...absorbed },
+      };
 }
 
 export type CardPurchaseNextAction = "none" | "recognize" | "revise" | "reanchor" | "blocked";
