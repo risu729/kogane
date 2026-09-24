@@ -33,7 +33,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
       "4f416ffcee43ae0425a5597adefd33636d2a8e8b3ab103c00b95d0603d4bb2f8",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
-      "6ccf31ccb00601c453178b9ef307bd0cae533c71525139e3fa22a401ecc41358",
+      "8edfcc64f348642f0cc143cc8c2627b004ebd4f19bc52665e3750632a2acd2df",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
       "a89829e4856c7baa3abcda2e25762b7debf4a22fddc777756adb920ed8951621",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
@@ -176,8 +176,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-canonical-evidence-boundary": {
-      version: "1.1.1",
-      codeDigest: "d990ababfa03e8abebf7d2dbde28256e999bd9b23962775e4deb712bec9832c7",
+      version: "1.1.2",
+      codeDigest: "76e7e68579812dd45c9b87e416ddaf1b33767fa0c314ac7706f02d5cfca04046",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -189,8 +189,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-ledger": {
-      version: "1.1.1",
-      codeDigest: "d990ababfa03e8abebf7d2dbde28256e999bd9b23962775e4deb712bec9832c7",
+      version: "1.1.2",
+      codeDigest: "76e7e68579812dd45c9b87e416ddaf1b33767fa0c314ac7706f02d5cfca04046",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -202,8 +202,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-past-month-balances": {
-      version: "1.1.1",
-      codeDigest: "d990ababfa03e8abebf7d2dbde28256e999bd9b23962775e4deb712bec9832c7",
+      version: "1.1.2",
+      codeDigest: "76e7e68579812dd45c9b87e416ddaf1b33767fa0c314ac7706f02d5cfca04046",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -215,8 +215,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-statement-total": {
-      version: "1.0.1",
-      codeDigest: "d990ababfa03e8abebf7d2dbde28256e999bd9b23962775e4deb712bec9832c7",
+      version: "1.1.0",
+      codeDigest: "76e7e68579812dd45c9b87e416ddaf1b33767fa0c314ac7706f02d5cfca04046",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

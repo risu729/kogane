@@ -38,7 +38,7 @@ const PAST_ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-past-months\.json$
 
 export const myJcbCreditLedger: Parser = {
   name: "myjcb-credit-ledger",
-  version: "1.1.1",
+  version: "1.1.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -178,7 +178,7 @@ export const myJcbCreditLedger: Parser = {
 
 export const myJcbPastMonthBalances: Parser = {
   name: "myjcb-credit-past-month-balances",
-  version: "1.1.1",
+  version: "1.1.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -284,22 +284,89 @@ export const myJcbPastMonthBalances: Parser = {
 };
 
 type StatementNode = DefaultTreeAdapterMap["node"];
-function statementNodes(node: StatementNode, tag: string): DefaultTreeAdapterMap["element"][] {
-  const result: DefaultTreeAdapterMap["element"][] = [];
-  if ("tagName" in node && node.tagName === tag) result.push(node);
+type StatementElement = DefaultTreeAdapterMap["element"];
+function statementElements(
+  node: StatementNode,
+  predicate: (element: StatementElement) => boolean,
+): StatementElement[] {
+  const result: StatementElement[] = [];
+  if ("tagName" in node && predicate(node)) result.push(node);
   if ("childNodes" in node)
-    for (const child of node.childNodes) result.push(...statementNodes(child, tag));
+    for (const child of node.childNodes) result.push(...statementElements(child, predicate));
   return result;
+}
+function statementNodes(node: StatementNode, tag: string): StatementElement[] {
+  return statementElements(node, (element) => element.tagName === tag);
+}
+function statementClassNodes(node: StatementNode, className: string): StatementElement[] {
+  return statementElements(node, (element) =>
+    (element.attrs.find((attribute) => attribute.name === "class")?.value ?? "")
+      .split(/\s+/u)
+      .includes(className),
+  );
 }
 function statementText(node: StatementNode): string {
   if ("value" in node) return node.value;
   return "childNodes" in node ? node.childNodes.map(statementText).join("") : "";
 }
 
-/** HTML has the exact due date that the past-month summary intentionally lacks. */
+/** The heading of a closed statement page: the page's own statement that it is confirmed. */
+const CONFIRMED_STATEMENT_HEADING = "カードご利用代金明細(確定分)";
+
+/**
+ * The statement state the page states about itself (statement parser 1.1.0,
+ * docs/observations.md). A closed statement carries exactly one
+ * `CONFIRMED_STATEMENT_HEADING` h1, and each ledger header displays the
+ * amount label of one state: the fourth label of `CONFIRMED_HEADERS`
+ * (`今回のお支払い金額`) or of `UNCONFIRMED_HEADERS` (`ご利用金額`).
+ *
+ * - the heading, with confirmed or no amount headers: `confirmed`;
+ * - no heading and unconfirmed amount headers: `unconfirmed`;
+ * - no heading otherwise: `unknown`. A confirmed header without the heading
+ *   proves nothing more: the page does not state that it is closed, so no
+ *   total is read from it, exactly as before;
+ * - more than one heading, a header with both labels, ledgers that disagree,
+ *   or the heading over an unconfirmed header: the page contradicts itself
+ *   and the parse fails.
+ *
+ * The collector manifest's state is not an input: it is recorded beside the
+ * result as a cross-check (`_kogane.manifestStatementState`).
+ */
+function statementPageState(document: StatementNode): "confirmed" | "unconfirmed" | "unknown" {
+  const headings = statementNodes(document, "h1").filter(
+    (node) => statementText(node).replace(/\s+/gu, "") === CONFIRMED_STATEMENT_HEADING,
+  ).length;
+  const amountHeaders = new Set(
+    statementClassNodes(document, "detail-list-01").flatMap((ledger) => {
+      const head = statementClassNodes(ledger, "head")[0];
+      const text = head ? statementText(head).replace(/\s+/gu, "") : "";
+      const confirmed = text.includes(CONFIRMED_HEADERS[3]!);
+      const unconfirmed = text.includes(UNCONFIRMED_HEADERS[3]!);
+      if (confirmed && unconfirmed) return ["both"];
+      return confirmed ? ["confirmed"] : unconfirmed ? ["unconfirmed"] : [];
+    }),
+  );
+  if (
+    headings > 1 ||
+    amountHeaders.has("both") ||
+    amountHeaders.size > 1 ||
+    (headings === 1 && amountHeaders.has("unconfirmed"))
+  )
+    throw new Error("myjcb statement confirmation conflicts");
+  if (headings === 1) return "confirmed";
+  return amountHeaders.has("unconfirmed") ? "unconfirmed" : "unknown";
+}
+
+/**
+ * HTML has the exact due date that the past-month summary intentionally lacks.
+ * Since 1.1.0 the statement state is the page's own (`statementPageState`),
+ * so a closed statement the collector's manifest recorded as `unconfirmed`
+ * (every position-1 page before the collector decided from the page) is read
+ * as the confirmed statement it is.
+ */
 export const myJcbCreditStatement: Parser = {
   name: "myjcb-credit-statement-total",
-  version: "1.0.1",
+  version: "1.1.0",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.dataset === "credit-detail" &&
@@ -314,18 +381,17 @@ export const myJcbCreditStatement: Parser = {
     const headings = statementNodes(document, "h2").map((node) =>
       statementText(node).replace(/\s+/gu, ""),
     );
-    const confirmed = statementNodes(document, "h1").filter(
-      (node) => statementText(node).replace(/\s+/gu, "") === "カードご利用代金明細(確定分)",
-    ).length;
-    if (
-      confirmed !== 1 ||
-      artifact.statementState === "unconfirmed" ||
-      artifact.statementState === "unknown"
-    ) {
-      if (confirmed > 1 || (confirmed === 1 && artifact.statementState === "unconfirmed"))
-        throw new Error("myjcb statement confirmation conflicts");
-      return { observations: [], warnings: ["statement_total_not_confirmed"] };
-    }
+    const pageState = statementPageState(document);
+    const manifestState = artifact.statementState ?? null;
+    // The manifest alone disagreeing never fails the parse: it is the
+    // collector's earlier reading of these same bytes. People see it here,
+    // and a total records it in `_kogane.manifestStatementState`.
+    const stateWarnings =
+      manifestState !== null && manifestState !== pageState
+        ? ["statement_state_differs_from_manifest"]
+        : [];
+    if (pageState !== "confirmed")
+      return { observations: [], warnings: ["statement_total_not_confirmed", ...stateWarnings] };
     if (/\/credit-detail-00\.html$/u.test(artifact.artifactKey ?? ""))
       throw new Error("myjcb detailMonth 0 cannot be finalized");
     const periods = headings.flatMap((text) => {
@@ -336,7 +402,8 @@ export const myJcbCreditStatement: Parser = {
     const totals = statementNodes(document, "dt").filter((node) =>
       statementText(node).includes("お支払い金額合計"),
     );
-    if (totals.length === 0) return { observations: [], warnings: ["statement_total_missing"] };
+    if (totals.length === 0)
+      return { observations: [], warnings: ["statement_total_missing", ...stateWarnings] };
     if (totals.length !== 1) throw new Error("myjcb statement total is ambiguous");
     const total = totals[0]!;
     const label = statementText(total).replace(/\s+/gu, "");
@@ -384,6 +451,8 @@ export const myJcbCreditStatement: Parser = {
               statementMonth: period.replace("-", ""),
               paymentDate,
               statementState: "confirmed",
+              statementStateBasis: "page-heading",
+              manifestStatementState: manifestState,
               sourceAccountScope: "root-statement-aggregate",
               amountSign: "provider-statement-total",
               snapshotSemantics: "provider-reported-monthly-payment-amount",
@@ -391,14 +460,14 @@ export const myJcbCreditStatement: Parser = {
           },
         },
       ],
-      warnings: [],
+      warnings: stateWarnings,
     };
   },
 };
 
 export const myJcbEvidenceOnly: Parser = {
   name: "myjcb-canonical-evidence-boundary",
-  version: "1.1.1",
+  version: "1.1.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (

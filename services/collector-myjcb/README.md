@@ -147,6 +147,7 @@ collectorは、おまとめ設定追加・解除、初期表示変更、支払�
 - allowlist外のmethod/path/query、cross-origin遷移
 - password login無効、規約同意、新規登録、端末登録
 - response size上限8 MiB、未知charset、seq範囲外、cookie domain/count/size異常
+- クレジット明細pageの`(確定分)` h1とledger headerの状態が矛盾する、または確定明細でないpageにexport linkがある（`credit-statement-state`、次節）
 - token/cookie/credentialを保存しそうな状態
 
 scheduled runは同じconnectionを自動再試行しない。次回の日次runは新規browser/loginで開始する。
@@ -160,6 +161,18 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 クレジット初期menuでは観測された月だけを取得し、`detailPastJson`の9〜17候補は`detailAvailableFlag=true`だけを追加する。例ではolder 9候補中10/13だけがavailableだったため、全offset総当たりをしない。API failureやhidden `generalJsonShikibetuId`欠落時は停止する。JSON-RPCは`method=execute`、`params=[{generalJsonShikibetuId}]`、official JSと同じ`0301006`＋2桁counter形のIDを使う。
 
 `detailMonth=0`はmutable `unconfirmed` snapshotで、exportなしの`.detail-list-01`をHTML＋parsed JSONとして保存する。確定月も同ledger componentを持ち、CSV/OFXと突合できる。export linkがその月のHTMLに実在する場合だけCSV/PDF/OFXを取得し、notice PDFは除外する。CSVはmetadata行の後に現れるexact 12-column headerを探し、CP932 bytesをそのまま保存する。
+
+月の明細状態はexport linkの有無ではなく、page自身から決める（`src/parsers.ts`の`creditStatementState`）。調査したconnectionにはどの月にもexport linkがないため、以前の「`detailMonth<=1`でexportなしなら`unconfirmed`」という規則は、position 1の締め済み明細を`unconfirmed`と記録していた。
+
+- `<h1>カードご利用代金明細(確定分)</h1>`がちょうど一つあり、ledger headerの金額labelが`今回のお支払い金額`またはなし: `confirmed`
+- h1がなく、金額labelが`ご利用金額`: `unconfirmed`
+- h1もledgerもない: `unknown`（ledger artifactは作らない）
+- `detailMonth=0`: 常に`unconfirmed`
+- それ以外は`credit-statement-state`で停止する: h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と`ご利用金額`、h1なしの`今回のお支払い金額`、状態を示さないpage上のledger、確定を示すposition 0、確定明細でないpageのexport link。停止時のlogにはh1の個数とlabel codeだけを出す。
+
+行を持つledgerは、状態に対応するheader一式（`ご利用日`、`ご利用先など`、`支払区分`、`今回のお支払い金額`または`ご利用金額`）をheadに表示していなければならない（`credit-ledger-headers`）。これにより、ledger JSONの`headers`はpageで確認した事実になる。確定ledgerはexpandedの`ご利用金額`を、未確定ledgerは`今回のお支払い金額`を読む。
+
+既存captureのraw evidenceとmanifestは書き換えない。position-1 pageの確定totalは`myjcb-credit-statement-total@1.1.0`がpageから読み直す。ledger JSONにはpageの証拠がないため、既存のposition-1 ledger行は`unconfirmed`のまま残る。これらの行は修正後の最初の成功runでcurrentでなくなる。詳細は`docs/sources/myjcb.md`の「明細状態の判定」と`docs/observations.md`のrelease noteにある。
 
 ## R2 layout
 
@@ -214,7 +227,7 @@ services/collector-myjcb/scripts/backfill-raw-evidence.sh
 
 ## synthetic test
 
-`test/fixtures`は架空merchant・架空額・架空token/card番号だけを持つ手書きHTMLであり、MyJCB/Okura/mnieのHTMLをcopyしていない。testはroute allowlist、cross-origin/unknown method拒否、cookie domain/path、card/month parser、token/card番号redactionを検証する。
+`test/fixtures`は架空merchant・架空額・架空token/card番号だけを持つ手書きHTMLであり、MyJCB/Okura/mnieのHTMLをcopyしていない。testはroute allowlist、cross-origin/unknown method拒否、cookie domain/path、card/month parser、token/card番号redactionを検証する。`test/credit-statement-state.test.ts`は、export linkのない`(確定分)` pageを`confirmed`、position 0と未確定header pageを`unconfirmed`とすること、h1とheaderの矛盾で`credit-statement-state`停止になることを、架空pageと`collectCredit`の架空clientで検証する。
 
 ## public prior art boundary
 

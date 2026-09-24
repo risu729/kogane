@@ -14,6 +14,28 @@ export interface CreditLedgerSnapshot {
   }[];
 }
 
+/** The statement state the collector records for one credit detail page. */
+export type CreditStatementState = "confirmed" | "unconfirmed" | "unknown";
+
+/**
+ * The heading a closed MyJCB credit statement page carries. It is the page's
+ * own statement that its ledger is the confirmed (確定) one, so it is compared
+ * exactly after whitespace removal, never searched for as a substring.
+ */
+export const CONFIRMED_STATEMENT_HEADING = "カードご利用代金明細(確定分)";
+
+/**
+ * The ledger header sets of a confirmed and of an unconfirmed page. The fourth
+ * label is the one amount the summary row displays: this statement's payment
+ * on a confirmed page, the usage amount on an unconfirmed one
+ * (docs/sources/myjcb.md; the Layer B contract is `CONFIRMED_HEADERS` and
+ * `UNCONFIRMED_HEADERS` in packages/parsers/src/parsers/myjcb.ts).
+ */
+const CONFIRMED_LEDGER_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
+const UNCONFIRMED_LEDGER_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"];
+const CONFIRMED_AMOUNT_HEADER = CONFIRMED_LEDGER_HEADERS[3]!;
+const UNCONFIRMED_AMOUNT_HEADER = UNCONFIRMED_LEDGER_HEADERS[3]!;
+
 export interface PastMonthAvailability {
   readonly detailMonth: number;
   readonly available: boolean;
@@ -183,15 +205,14 @@ export function parseCreditLedger(
   const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u.test(
     nodeText(ledger),
   );
-  const headers =
-    state === "unconfirmed"
-      ? ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"]
-      : ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
+  const headers = state === "unconfirmed" ? UNCONFIRMED_LEDGER_HEADERS : CONFIRMED_LEDGER_HEADERS;
   const headerText = header ? normalizeText(nodeText(header)) : "";
-  const requiredCoreHeaders = hasEmptyMarker
-    ? ["ご利用日", "ご利用先など"]
-    : ["ご利用日", "ご利用先など", "支払区分"];
-  if (requiredCoreHeaders.some((label) => !headerText.includes(label))) {
+  // A ledger with rows must display the whole header set of its state: the
+  // fourth label says which amount the summary cell holds, so `headers` in the
+  // stored ledger is a checked fact about the page, not an assumption. An
+  // empty ledger only has to be recognisably the same component.
+  const requiredHeaders = hasEmptyMarker ? ["ご利用日", "ご利用先など"] : headers;
+  if (requiredHeaders.some((label) => !headerText.includes(label))) {
     throw new StopConditionError(`MyJCB ${state} ledger headers changed`, "credit-ledger-headers");
   }
   const expandedLabels =
@@ -253,7 +274,83 @@ export function parseCreditLedger(
       }
       return [{ summaryCells, expanded }];
     });
-  return { state, headers, rows };
+  return { state, headers: [...headers], rows };
+}
+
+/**
+ * The statement state of the credit detail page fetched as `detailMonth=N`,
+ * decided from the page itself and never from whether it offers export links.
+ *
+ * The page states its state twice: a closed statement carries exactly one
+ * `CONFIRMED_STATEMENT_HEADING` h1, and every ledger header displays the
+ * amount label of one state (`今回のお支払い金額` confirmed, `ご利用金額`
+ * unconfirmed). The two must agree:
+ *
+ * - the heading and a confirmed (or no) amount header: `confirmed`;
+ * - no heading and an unconfirmed amount header: `unconfirmed`;
+ * - neither, on a page without a ledger: `unknown`, as before;
+ * - anything else stops the collection (`credit-statement-state`): more than
+ *   one heading, a header with both labels, ledgers that disagree, the heading
+ *   over an unconfirmed header, a confirmed header without the heading, or a
+ *   ledger whose page states no state at all.
+ *
+ * `detailMonth=0` is the mutable current month and is always `unconfirmed`;
+ * a position-0 page that states it is confirmed stops the collection too.
+ */
+export function creditStatementState(html: string, detailMonth: number): CreditStatementState {
+  const document = parse(html);
+  const headings = findElements(
+    document,
+    (element) =>
+      element.tagName === "h1" && compactText(nodeText(element)) === CONFIRMED_STATEMENT_HEADING,
+  ).length;
+  const ledgers = findElements(document, (element) => hasClass(element, "detail-list-01"));
+  const amountHeaders = new Set(
+    ledgers.flatMap((ledger): ("confirmed" | "unconfirmed" | "both")[] => {
+      const header = findElements(ledger, (element) => hasClass(element, "head"))[0];
+      const text = header ? compactText(nodeText(header)) : "";
+      const confirmed = text.includes(CONFIRMED_AMOUNT_HEADER);
+      const unconfirmed = text.includes(UNCONFIRMED_AMOUNT_HEADER);
+      if (confirmed && unconfirmed) return ["both"];
+      return confirmed ? ["confirmed"] : unconfirmed ? ["unconfirmed"] : [];
+    }),
+  );
+  const pageState: CreditStatementState | "conflict" =
+    headings > 1 || amountHeaders.has("both") || amountHeaders.size > 1
+      ? "conflict"
+      : headings === 1
+        ? amountHeaders.has("unconfirmed")
+          ? "conflict"
+          : "confirmed"
+        : amountHeaders.has("confirmed")
+          ? "conflict"
+          : amountHeaders.has("unconfirmed")
+            ? "unconfirmed"
+            : "unknown";
+  const stop = (message: string): never => {
+    // Counts and label codes only: the page's text never reaches the log.
+    console.warn(
+      JSON.stringify({
+        event: "myjcb-credit-statement-state",
+        detailMonth,
+        confirmedHeadings: headings,
+        ledgerCount: ledgers.length,
+        amountHeaders: [...amountHeaders].sort(),
+      }),
+    );
+    throw new StopConditionError(message, "credit-statement-state");
+  };
+  if (pageState === "conflict") {
+    return stop("MyJCB credit detail heading and ledger headers disagree on the statement state");
+  }
+  if (detailMonth === 0) {
+    if (pageState === "confirmed") return stop("MyJCB detailMonth 0 stated a confirmed statement");
+    return "unconfirmed";
+  }
+  if (pageState === "unknown" && ledgers.length > 0) {
+    return stop("MyJCB credit detail ledger has no stated statement state");
+  }
+  return pageState;
 }
 
 function safeClassNames(element: HtmlElement): string[] {
@@ -394,6 +491,10 @@ function decodeHtml(value: string): string {
 
 function normalizeText(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
+}
+
+function compactText(value: string): string {
+  return value.replace(/\s+/gu, "");
 }
 
 function findElements(node: HtmlNode, predicate: (element: HtmlElement) => boolean): HtmlElement[] {

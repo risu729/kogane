@@ -318,6 +318,7 @@ Workers内でdownloadした任意JavaScriptを`eval`せず、保護scriptを手�
 - **JSON/HTML境界**: 本人操作のnetwork captureで、取引行を返すJSON endpointは確認できなかった。`detailPastJson`は取得可能月、`detailReplaceJson`はUI/payment metadataだけで、未確定取引行はserver-rendered detail HTMLに存在する。確定月は公式CSVを正規sourceとして優先できるが、未確定はexport不可なのでHTML parserが必要である。第一connectionの成功Worker runでもcredit detail 11、ledger 6に対してexport link/artifactは0だったため、このIDはHTMLを捨てると取得不能になる。従ってPoCは全月blind HTML scrapingではなく、JSONでavailable月を絞り、exportがある確定月はCSV/PDF/OFXを優先し、それ以外だけHTML ledgerを使う方向へ最適化する。
 - 未確定`detailMonth=0`はexportなしで、`.detail-list-01`の`.head`とrepeated `.content`をparseする。summary labelsは`ご利用日`、`ご利用先など`／`支払区分`、`ご利用金額`、expanded labelsは`今回のお支払い金額`、`摘要`、`今回回数`、`備考`、`訂正サイン`だった。
 - 確定月HTMLにも同ledger componentがあり、summary labelsは`ご利用日`、`ご利用先など`／`支払区分`、`今回のお支払い金額`、expanded labelsは`ご利用金額`、`摘要`、`今回回数`、`備考`、`訂正サイン`だった。CSV/OFXと突合できる。
+- 確定明細のpageは`<h1>カードご利用代金明細(確定分)</h1>`を一つだけ持つ。production evidenceの集計（read-only、値は記録していない）では、全`credit-detail-01.html` captureがこのh1をちょうど一つ持っていた。position 1は最新の締め済み明細であり、export linkがなくても確定明細である。状態の判定は[明細状態の判定](#明細状態の判定2026-09-24)を参照。
 - 確定月のGET exportは`detailDbPdf.html?...&output=pdf`、`detail.html?...&output=csv`、`detail.html?...&output=money`。CSVはCP932で、先頭metadata行ではなく後続行に`ご利用者`、`カテゴリ`、`ご利用日`、`ご利用先など`、`ご利用金額(￥)`、`支払区分`、`今回回数`、`訂正サイン`、`お支払い金額(￥)`、`国内／海外`、`摘要`、`備考`のexact 12-column headerがある。PDFは`%PDF-1.4`、OFXは1.xの`CREDITCARDMSGSRSV1`／`CCSTMTRS`／`BANKTRANLIST`／`LEDGERBAL`を確認した。`detailNewspdf.html`はnoticeなので除外する。
 - `/iss-pc/member/detailsinvoice/detailsInvoiceList.html`は別のinvoice surfaceで、第一IDでは上記statement export controlsを持たなかった。明細取得routeとして混同しない。
 
@@ -346,6 +347,32 @@ checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査し�
 日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼び、GitHub Actions cronを使わない。手動`POST /trigger`のBearerはSHA-256で固定長化してから`crypto.subtle.timingSafeEqual`で比較する。ただしCron/manual overlap lockは未実装で、同一IDの同時login/readを防ぐDurable Object lockまたはQueue直列化をdeploy/merge前要件とする。
 
 実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`services/collector-myjcb/README.md`に集約した。公開AGPL prior artの観測は、PR #24調査時点のOkura commit `afc6057fba78b5bfd6364654548fbfd91c76692a`とPoC照合時点の`bbf11e032aba4a380009508e91954361a3f9d658`を区別し、protocol確認だけに使った。
+
+## 明細状態の判定（2026-09-24）
+
+以前のcollectorは月の明細状態をexport linkの有無から決めていた。`detailMonth<=1`でexport linkがない月は`unconfirmed`、それ以外は`confirmed`とした。調査したconnectionではどの月にもexport linkがない。そのためposition 1の最新の締め済み明細は常に`unconfirmed`として記録された。このpageは`(確定分)`のh1を持つので、`myjcb-credit-statement-total@1.0.1`はmanifestとの矛盾として全position-1 pageを`parser_rejected`にした。また、そのledger行は`unconfirmed`として保存され、card purchase recognitionは締め済みの請求を`authorized`（保留）の購入として扱った。
+
+collectorは状態をpage自身から決める（`services/collector-myjcb/src/parsers.ts`の`creditStatementState`）。pageは状態を二か所で示す。一つは`カードご利用代金明細(確定分)`のh1で、もう一つはledger headerの金額label（確定は`今回のお支払い金額`、未確定は`ご利用金額`。parserの`CONFIRMED_HEADERS`／`UNCONFIRMED_HEADERS`の4番目）である。
+
+| `(確定分)` h1 | ledger headerの金額label     | 記録する状態                          |
+| ------------- | ---------------------------- | ------------------------------------- |
+| 1個           | `今回のお支払い金額`／なし   | `confirmed`                           |
+| 1個           | `ご利用金額`                 | 停止（`credit-statement-state`）      |
+| なし          | `ご利用金額`                 | `unconfirmed`                         |
+| なし          | `今回のお支払い金額`         | 停止                                  |
+| なし          | なし                         | ledgerがなければ`unknown`、あれば停止 |
+| 2個以上       | 任意                         | 停止                                  |
+| 任意          | 両方、またはledger間で不一致 | 停止                                  |
+
+`detailMonth=0`は常に`unconfirmed`である。position 0のpageが確定を示した場合も停止する。export linkは状態の根拠にしない。ただし、確定明細でないpageにexport linkがあれば停止する。exportは`confirmed`として記録されるためである。行を持つledgerのheaderは、その状態のheader一式（4 label）を全部表示していなければならない。これにより、ledger artifactの`headers`はpageで確認済みの事実になる。停止時のlogにはh1の個数とlabel codeだけを出し、page本文は出さない。修正後の最初のrunから、position 1は`confirmed`として保存される。そのledgerは、未確定labelでは読めなかった`ご利用金額`も保持する。
+
+既存captureのraw evidenceとmanifestは書き換えない。解釈はversion付きparserで直す。
+
+- 明細total（`myjcb-credit-statement-total@1.1.0`）: 状態をpageから読み、manifestの状態は照合用として`_kogane.manifestStatementState`に記録する（不一致時はwarning `statement_state_differs_from_manifest`）。失敗させるのはpage自身が矛盾する場合（h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と未確定header）だけで、manifestだけが違う場合は失敗させない。h1のないpageは1.0.1と同じくtotalを出さない。1.0.1で`parser_rejected`だったposition-1 pageは、repair laneの再parseまたはbounded replayで、正確な支払日を持つtotalを公開する。1.0.1のerror runは履歴として残る。
+- ledger（`myjcb-credit-ledger@1.1.2`）: 同じmoduleのdigest変更によるversion bumpだけで、挙動は変えない。parserは一artifactしか見ない。`credit-ledger-NN.json`の`state`はcollectorの判断であり、`headers`もその判断から書かれていて、pageの証拠を含まない。確定pageを未確定labelで読んだため、`ご利用金額`も保存されていない。さらにread modelのsnapshot区分は、manifestが書いたappend-onlyの`observation_artifact_metadata.statement_state`を使う。したがってparserで行の状態を直すことはできない。既存のposition-1行は、当時collectorが述べた記録として`unconfirmed`のまま残る。
+- 既存行は、修正後collectorの最初の成功runでcurrentでなくなる。connectionの未確定captureは一つのsnapshot slotを共有し、その最新は以後常にposition 0になる。同じ明細はposition 1で`confirmed`として別slot（`detailMonth-1`）に再取得される。以前はposition 0と1が同じslotを奪い合い、片方しかcurrentにならなかった。purchase laneはcurrentでなくなった`authorized` eventを`unknown`へretireし、確定行を`captured`として新しいeventで認識する。状態はfingerprintとexternal idに含まれるため、同じeventのreviseにはならない。
+
+release noteと再parse手順は`docs/observations.md`の「MyJCB statement state from the page (statement parser 1.1.0)」にある。
 
 ## 共通 DATA R2 への切替 (U09)
 
