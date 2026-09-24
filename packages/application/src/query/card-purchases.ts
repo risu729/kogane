@@ -88,10 +88,15 @@ export interface CardPurchaseQuery {
   eventId?: string;
 }
 
-interface LiveRow {
+/**
+ * One row of the whole-filter selection: only what the figures, the order and
+ * the statement links need. The evidence, the decision and the stored facts
+ * of an event are read for the page's events alone (PAGE_SQL), so a filter of
+ * thousands of events transfers a few hundred bytes per event.
+ */
+interface SelectionRow {
   event_id: string;
   revision: number;
-  action: CardPurchaseAction;
   kind: CardPurchaseKind;
   state: EventState;
   unknown_reason: UnknownStateReason | null;
@@ -100,9 +105,6 @@ interface LiveRow {
   statement_period: string | null;
   provider_status: string | null;
   usage_date: string | null;
-  effective_time_json: string;
-  evidence_support_json: string;
-  decision_revision_id: string;
   leg_index: number | null;
   subject_ref: string | null;
   unit_ref: string | null;
@@ -114,17 +116,25 @@ interface LiveRow {
   basis: RecognitionBasis | null;
 }
 interface LiveEvent {
-  revision: EconomicEventRevision;
-  action: CardPurchaseAction;
+  eventId: string;
+  revision: number;
+  kind: CardPurchaseKind;
+  state: EventState;
+  unknownReason: UnknownStateReason | null;
   accountId: string;
   sourceId: CardPurchaseSourceId;
   statementPeriod: string | null;
   posted: boolean;
+  /** The provider usage date (`facts_json.usageDate`), which is also the event's effective date. */
   usageDate: string;
+  legs: EconomicLeg[];
 }
-interface FactsRow {
+/** The page's own columns, read for at most one page of events. */
+interface PageRow {
   event_id: string;
   facts_json: string;
+  evidence_support_json: string;
+  decision_revision_id: string;
 }
 interface KeyRow {
   event_id: string;
@@ -185,24 +195,27 @@ interface CurrentRow {
 /**
  * Every live purchase/refund revision the filter selects, with its one leg (a
  * retirement has none, so the leg columns are NULL). At most one leg per
- * revision is a 0047 invariant, so a row is an event.
+ * revision is a 0047 invariant, so a row is an event. Only the columns the
+ * figures, the order and the statement links read; the rest is PAGE_SQL's.
  */
-const LIVE_SQL = `SELECT c.event_id,c.revision,c.action,c.kind,c.state,c.unknown_reason,c.account_id,c.source_id,
+const SELECTION_SQL = `SELECT c.event_id,c.revision,c.kind,c.state,c.unknown_reason,c.account_id,c.source_id,
   c.statement_period,json_extract(c.facts_json,'$.providerStatus') AS provider_status,
   json_extract(c.facts_json,'$.usageDate') AS usage_date,
-  r.effective_time_json,r.evidence_support_json,r.decision_revision_id,
   l.leg_index,l.subject_ref,l.unit_ref,l.value_status,l.coefficient,l.scale,l.value_reason_code,l.role,l.basis
  FROM current_card_purchase_recognitions c
- JOIN economic_event_revisions r ON r.event_id=c.event_id AND r.revision=c.revision
  LEFT JOIN economic_legs l ON l.event_id=c.event_id AND l.revision=c.revision
  WHERE (?1 IS NULL OR c.statement_period=?1) AND (?2 IS NULL OR c.event_id=?2)
- ORDER BY c.event_id,l.leg_index
  LIMIT ?3`;
 
-/** The stored facts of the page's live revisions, validated before anything is shown. */
-const FACTS_SQL = `SELECT c.event_id,c.facts_json FROM card_purchase_recognitions c
+/**
+ * The stored facts (validated before anything is shown), the evidence and the
+ * decision of the page's live revisions, by the exact revision selected.
+ */
+const PAGE_SQL = `SELECT c.event_id,c.facts_json,r.evidence_support_json,r.decision_revision_id
+ FROM card_purchase_recognitions c
  JOIN json_each(?1) selected ON c.event_id=json_extract(selected.value,'$.eventId')
-  AND c.revision=json_extract(selected.value,'$.revision')`;
+  AND c.revision=json_extract(selected.value,'$.revision')
+ JOIN economic_event_revisions r ON r.event_id=c.event_id AND r.revision=c.revision`;
 
 /** The provider rows of the page's live revisions: posted first, then pending. */
 const KEYS_SQL = `SELECT k.event_id,k.recognition_key,k.role,k.observation_id,k.parse_run_id,
@@ -223,12 +236,17 @@ const HISTORY_SQL = `SELECT event_id,revision,action,state,unknown_reason,decisi
   JOIN economic_event_revisions r ON r.event_id=c.event_id AND r.revision=c.revision
  ) WHERE ordinal<=?2 ORDER BY event_id,revision DESC`;
 
-/** The newest purchase-recognition leg up to the live revision: the last known amount. */
+/**
+ * The newest purchase-recognition leg up to the live revision: the last known
+ * amount. `CROSS JOIN` keeps the page's events as the outer loop: without
+ * table statistics (D1 is never analyzed) the planner otherwise walks every
+ * purchase-recognition leg ever written through `economic_legs_basis`.
+ */
 const LAST_AMOUNT_SQL = `SELECT event_id,revision,unit_ref,value_status,coefficient,scale,value_reason_code FROM (
   SELECT l.event_id,l.revision,l.unit_ref,l.value_status,l.coefficient,l.scale,l.value_reason_code,
    ROW_NUMBER() OVER (PARTITION BY l.event_id ORDER BY l.revision DESC,l.leg_index) AS ordinal
-  FROM economic_legs l
-  JOIN json_each(?1) selected ON l.event_id=json_extract(selected.value,'$.eventId')
+  FROM json_each(?1) selected
+  CROSS JOIN economic_legs l ON l.event_id=json_extract(selected.value,'$.eventId')
    AND l.revision<=json_extract(selected.value,'$.revision')
   WHERE l.basis='purchase-recognition'
  ) WHERE ordinal=1`;
@@ -309,8 +327,8 @@ function parseJson(text: string, code: string): unknown {
   }
 }
 
-/** Group the live rows (one per leg) into revisions the domain summary reads. */
-function liveEvents(rows: readonly LiveRow[]): LiveEvent[] {
+/** Group the selected rows (one per leg) into events. */
+function liveEvents(rows: readonly SelectionRow[]): LiveEvent[] {
   const events = new Map<string, LiveEvent>();
   for (const row of rows) {
     let event = events.get(row.event_id);
@@ -318,36 +336,22 @@ function liveEvents(rows: readonly LiveRow[]): LiveEvent[] {
       if (row.usage_date === null || !validLocalDateText(row.usage_date))
         throw new Error("card_purchase_facts_invalid");
       event = {
-        revision: {
-          eventId: row.event_id,
-          revision: row.revision,
-          kind: row.kind,
-          state: row.state,
-          unknownReason: row.unknown_reason,
-          effectiveTime: parseJson(
-            row.effective_time_json,
-            "card_purchase_event_invalid",
-          ) as TemporalValue,
-          basis: "purchase-recognition",
-          evidenceSupport: parseJson(
-            row.evidence_support_json,
-            "card_purchase_event_invalid",
-          ) as SourceFactRef[],
-          decisionRevisionRef: row.decision_revision_id,
-          supersededBy: null,
-          legs: [],
-        },
-        action: row.action,
+        eventId: row.event_id,
+        revision: row.revision,
+        kind: row.kind,
+        state: row.state,
+        unknownReason: row.unknown_reason,
         accountId: row.account_id,
         sourceId: row.source_id,
         statementPeriod: row.statement_period,
         posted: row.provider_status === "posted" || row.provider_status === "confirmed",
         usageDate: row.usage_date,
+        legs: [],
       };
       events.set(row.event_id, event);
     }
     if (row.leg_index === null || row.unit_ref === null) continue;
-    const leg: EconomicLeg = {
+    event.legs.push({
       eventId: row.event_id,
       revision: row.revision,
       legIndex: row.leg_index,
@@ -361,17 +365,38 @@ function liveEvents(rows: readonly LiveRow[]): LiveEvent[] {
       ),
       role: row.role ?? "unresolved",
       basis: row.basis ?? "unknown",
-    };
-    event.revision.legs.push(leg);
+    });
   }
   return [...events.values()];
+}
+
+/**
+ * The live revision as `cardPurchaseSummary` reads it: kind, state,
+ * supersession and legs. Its evidence and decision are never read by the
+ * summary, so the whole-filter selection does not carry them; the effective
+ * time is the usage date the recognition writer sets it to.
+ */
+function summaryRevision(event: LiveEvent): EconomicEventRevision {
+  return {
+    eventId: event.eventId,
+    revision: event.revision,
+    kind: event.kind,
+    state: event.state,
+    unknownReason: event.unknownReason,
+    effectiveTime: { kind: "local-date", value: event.usageDate, zone: ZONE, basis: "provider" },
+    basis: "purchase-recognition",
+    evidenceSupport: [],
+    decisionRevisionRef: "",
+    supersededBy: null,
+    legs: event.legs,
+  };
 }
 
 /** Newest usage first; the event id breaks ties, so the order is total and pages are stable. */
 function byUsageDate(a: LiveEvent, b: LiveEvent): number {
   if (a.usageDate !== b.usageDate) return a.usageDate < b.usageDate ? 1 : -1;
-  const x = a.revision.eventId,
-    y = b.revision.eventId;
+  const x = a.eventId,
+    y = b.eventId;
   return x < y ? 1 : x > y ? -1 : 0;
 }
 
@@ -441,10 +466,14 @@ export async function queryCardPurchases(
   if (eventId !== null && !CARD_PURCHASE_EVENT_ID.test(eventId))
     throw new Error("invalid_event_id");
 
-  const rows = await sql.all<LiveRow>(LIVE_SQL, [period, eventId, CARD_PURCHASE_SUMMARY_LIMIT + 1]);
+  const rows = await sql.all<SelectionRow>(SELECTION_SQL, [
+    period,
+    eventId,
+    CARD_PURCHASE_SUMMARY_LIMIT + 1,
+  ]);
   if (rows.length > CARD_PURCHASE_SUMMARY_LIMIT) throw new CardPurchaseLimitError();
   const events = liveEvents(rows).sort(byUsageDate);
-  const totals = cardPurchaseSummary(events.map((event) => event.revision));
+  const totals = cardPurchaseSummary(events.map(summaryRevision));
   if (!totals.ok) throw new Error("card_purchase_amount_invalid");
 
   // Statements and their settlements, for every posted event of the filter:
@@ -477,21 +506,26 @@ export async function queryCardPurchases(
 
   const page = events.slice(offset, offset + CARD_PURCHASE_PAGE_SIZE);
   const selected = JSON.stringify(
-    page.map((event) => ({ eventId: event.revision.eventId, revision: event.revision.revision })),
+    page.map((event) => ({ eventId: event.eventId, revision: event.revision })),
   );
-  const [factRows, keyRows, historyRows, amountRows] =
+  const [pageRows, keyRows, historyRows, amountRows] =
     page.length === 0
       ? [[], [], [], []]
       : await Promise.all([
-          sql.all<FactsRow>(FACTS_SQL, [selected]),
+          sql.all<PageRow>(PAGE_SQL, [selected]),
           sql.all<KeyRow>(KEYS_SQL, [selected]),
           sql.all<HistoryRow>(HISTORY_SQL, [selected, CARD_PURCHASE_HISTORY_LIMIT + 1]),
           sql.all<AmountRow>(LAST_AMOUNT_SQL, [selected]),
         ]);
-  for (const row of factRows)
+  const details = new Map<string, { evidence: unknown[]; decisionRevisionId: string }>();
+  for (const row of pageRows) {
     if (!validCardPurchaseFacts(parseJson(row.facts_json, "card_purchase_facts_invalid")))
       throw new Error("card_purchase_facts_invalid");
-  if (factRows.length !== page.length) throw new Error("card_purchase_facts_invalid");
+    const evidence = parseJson(row.evidence_support_json, "card_purchase_event_invalid");
+    if (!Array.isArray(evidence)) throw new Error("card_purchase_event_invalid");
+    details.set(row.event_id, { evidence, decisionRevisionId: row.decision_revision_id });
+  }
+  if (details.size !== page.length) throw new Error("card_purchase_facts_invalid");
 
   // One pass over current usage: the page's current keys and the unrecognised count.
   const current = await sql.all<CurrentRow>(CURRENT_SQL, [
@@ -506,8 +540,8 @@ export async function queryCardPurchases(
   if (typeof unrecognizedCurrentRows !== "number") throw new Error("card_usage_count_missing");
 
   const items = page.map((event): CardPurchaseView => {
-    const { revision } = event;
-    const id = revision.eventId;
+    const id = event.eventId;
+    const detail = details.get(id)!;
     const sourceRows: CardPurchaseSourceRow[] = keyRows
       .filter((row) => row.event_id === id)
       .map((row) => ({
@@ -522,7 +556,7 @@ export async function queryCardPurchases(
         current: currentKeys.has(row.recognition_key),
         rawLocator: row.raw_locator,
       }));
-    const leg = revision.legs.find((entry) => entry.basis === "purchase-recognition") ?? null;
+    const leg = event.legs.find((entry) => entry.basis === "purchase-recognition") ?? null;
     const last = amountRows.find((row) => row.event_id === id);
     const lastKnownAmount =
       leg?.quantity ??
@@ -561,12 +595,12 @@ export async function queryCardPurchases(
       }));
     const explanationRefs = [
       ...new Set([
-        `event:${id}@${revision.revision}`,
-        ...revision.legs.map((entry) => `leg:${id}@${revision.revision}#${entry.legIndex}`),
-        `decision_revision:${revision.decisionRevisionRef}`,
+        `event:${id}@${event.revision}`,
+        ...event.legs.map((entry) => `leg:${id}@${event.revision}#${entry.legIndex}`),
+        `decision_revision:${detail.decisionRevisionId}`,
         ...sourceRows.map((row) => refText(row.ref)),
         // Recognition stores SourceFactRef objects; anything else is not a citation.
-        ...revision.evidenceSupport.filter(validSourceFactRef).map(refText),
+        ...detail.evidence.filter(validSourceFactRef).map(refText),
         ...(statement.status === "linked" ? [refText(statement.ref)] : []),
         ...(settlement === null
           ? []
@@ -584,10 +618,10 @@ export async function queryCardPurchases(
     ];
     return {
       eventId: id,
-      revision: revision.revision,
-      kind: revision.kind as CardPurchaseKind,
-      state: revision.state,
-      unknownReason: revision.unknownReason,
+      revision: event.revision,
+      kind: event.kind,
+      state: event.state,
+      unknownReason: event.unknownReason,
       sourceId: event.sourceId,
       accountId: event.accountId,
       usageDate: event.usageDate,

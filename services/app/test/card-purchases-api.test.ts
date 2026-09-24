@@ -120,6 +120,26 @@ function withoutPurchaseSchema(db: D1Database): D1Database {
   });
 }
 
+/**
+ * A store past the summary bound: the whole-filter selection yields one row
+ * more than the bound it asks for (`?3`), as thousands of live events would.
+ */
+function overfull(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          target.prepare(
+            sql.includes("FROM current_card_purchase_recognitions c") && sql.includes("LIMIT ?3")
+              ? "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?3) SELECT i AS event_id,?1 AS period,?2 AS event FROM n"
+              : sql,
+          );
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 async function call(
   path = PATH,
   options: {
@@ -127,6 +147,7 @@ async function call(
     method?: string;
     enabled?: boolean;
     schema?: boolean;
+    full?: boolean;
   } = {},
 ) {
   const subject = options.subject === undefined ? "synthetic-operator" : options.subject;
@@ -150,7 +171,12 @@ async function call(
     }),
     {
       ...env,
-      DB: options.schema === false ? withoutPurchaseSchema(env.DB) : env.DB,
+      DB:
+        options.schema === false
+          ? withoutPurchaseSchema(env.DB)
+          : options.full
+            ? overfull(env.DB)
+            : env.DB,
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: "fixture-audience",
       EVENTS_V2_ENABLED: options.enabled === false ? "0" : "true",
@@ -166,7 +192,10 @@ async function counts() {
       (SELECT count(*) FROM economic_legs) AS legs,
       (SELECT count(*) FROM allocations) AS allocations,
       (SELECT count(*) FROM decision_revisions) AS decisions,
-      (SELECT count(*) FROM card_purchase_recognitions) AS recognitions`,
+      (SELECT count(*) FROM card_purchase_recognitions) AS recognitions,
+      (SELECT count(*) FROM card_purchase_recognition_keys) AS keys,
+      (SELECT count(*) FROM card_settlement_decisions) AS settlements,
+      (SELECT source_revision FROM core_source_revision WHERE id=1) AS source_revision`,
   ).first();
 }
 
@@ -193,6 +222,8 @@ describe("card purchase explanation boundary", () => {
       summary: { unresolved: 0, events: 1, settlementAddsPurchaseExpense: false },
       coverage: { scope: "card-purchase-recognition", completeTransactionHistory: false },
     });
+    expect((await call(`${PATH}?eventId=${eventId}`)).status).toBe(200);
+    expect((await call(`${PATH}?eventId=refund_${"0".repeat(64)}`)).status).toBe(404);
     expect(await counts()).toEqual(before);
   });
 
@@ -245,6 +276,16 @@ describe("card purchase explanation boundary", () => {
     expect(detail.status).toBe(200);
     expect(((await detail.json()) as { items: unknown[] }).items).toHaveLength(1);
     expect((await call(`${PATH}?eventId=refund_${"0".repeat(64)}`)).status).toBe(404);
+  });
+
+  it("refuses a filter past the summary bound with 413 rather than a partial sum", async () => {
+    const before = await counts();
+    const response = await call(PATH, { full: true });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: "result_limit_exceeded" });
+    // A statement period narrows the filter; the refusal writes nothing either.
+    expect((await call(`${PATH}?period=2026-09`, { full: true })).status).toBe(413);
+    expect(await counts()).toEqual(before);
   });
 
   it("advertises the capability only when the route is served", async () => {

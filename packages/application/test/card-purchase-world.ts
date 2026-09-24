@@ -594,6 +594,68 @@ export class PurchaseWorld {
     return { proposalId, eventId, allocationId };
   }
 
+  /**
+   * `card-settlement.withdraw` of an accepted review, as the command writes it:
+   * revision 2 of the review, its settlement event (`unknown`, no leg) and its
+   * allocation decision, and the allocation withdrawal. Nothing is deleted.
+   */
+  withdraw(settled: {
+    proposalId: string;
+    eventId: string | null;
+    allocationId: string | null;
+  }): void {
+    const { proposalId, eventId, allocationId } = settled;
+    if (eventId === null || allocationId === null) throw new Error("only an accepted review");
+    const n = this.next();
+    const createdAt = "2026-09-25T00:00:00Z";
+    const decision = (id: string, subject: string) =>
+      this.run(
+        `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+         VALUES(?,'relation',?,2,'supersede','manual','synthetic-operator',NULL,'synthetic withdrawal','[]',1,NULL,?)`,
+        id,
+        subject,
+        createdAt,
+      );
+    decision(`dr_withdraw_${n}`, `card-settlement:${proposalId}`);
+    decision(`dr_withdraw_event_${n}`, `event:${eventId}`);
+    decision(`dr_withdraw_allocation_${n}`, `allocation:${allocationId}`);
+    const occurred = (
+      this.db
+        .query(
+          "SELECT effective_time_json FROM economic_event_revisions WHERE event_id=? AND revision=1",
+        )
+        .get(eventId) as { effective_time_json: string }
+    ).effective_time_json;
+    this.run(
+      `INSERT INTO economic_event_revisions(event_id,revision,kind,state,unknown_reason,effective_time_json,basis,evidence_support_json,decision_revision_id,superseded_by,created_at)
+       VALUES(?,2,'card_settlement','unknown','conflicting_evidence',?,'cash-movement','["withdrawn"]',?,NULL,?)`,
+      eventId,
+      occurred,
+      `dr_withdraw_event_${n}`,
+      createdAt,
+    );
+    this.run(
+      "UPDATE economic_event_revisions SET superseded_by=? WHERE event_id=? AND revision=1",
+      `${eventId}@2`,
+      eventId,
+    );
+    this.run(
+      "INSERT INTO card_settlement_allocation_withdrawals(settlement_id,decision_revision_id,created_at) VALUES(?,?,?)",
+      allocationId,
+      `dr_withdraw_allocation_${n}`,
+      createdAt,
+    );
+    this.run(
+      `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+       VALUES(?,2,'withdrawn',?,?,NULL,?,?)`,
+      proposalId,
+      `dr_withdraw_${n}`,
+      eventId,
+      allocationId,
+      createdAt,
+    );
+  }
+
   close(): void {
     this.db.close();
   }

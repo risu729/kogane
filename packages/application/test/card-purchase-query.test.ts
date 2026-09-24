@@ -10,7 +10,11 @@ import { currentCardUsageSql, type CurrentCardUsageRow } from "../../read-model/
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { baseWorld, PRODUCER, VPASS_NAMESPACE } from "../../read-model/test/card-usage-fixture.ts";
 import { factOf } from "../../storage-d1/test/card-purchase-fixture.ts";
-import { CARD_PURCHASE_PAGE_SIZE, queryCardPurchases } from "../src/query/card-purchases.ts";
+import {
+  CARD_PURCHASE_PAGE_SIZE,
+  CardPurchaseLimitError,
+  queryCardPurchases,
+} from "../src/query/card-purchases.ts";
 import { PurchaseWorld, recognise } from "./card-purchase-world.ts";
 
 const worlds: { close(): void }[] = [];
@@ -28,23 +32,56 @@ const jpy = (coefficient: string) => ({
   value: { status: "exact", value: { coefficient, scale: 0 } },
 });
 
-/** Every row of every table a read could conceivably touch, to prove it wrote nothing. */
-function tables(db: Database): Record<string, number> {
-  return Object.fromEntries(
-    [
-      "decision_revisions",
-      "economic_event_revisions",
-      "economic_legs",
-      "allocations",
-      "card_purchase_recognitions",
-      "card_purchase_recognition_keys",
-      "card_settlement_candidates",
-      "card_settlement_decisions",
-    ].map((table) => [
-      table,
-      (db.query(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n,
-    ]),
-  );
+/**
+ * Every table's row count, the CORE source revision and the connection's
+ * change counter (which an UPDATE of a pointer also moves): a read changes
+ * none of them.
+ */
+function tables(db: Database): Record<string, unknown> {
+  const names = (
+    db
+      .query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      )
+      .all() as { name: string }[]
+  ).map((row) => row.name);
+  return {
+    counts: Object.fromEntries(
+      names.map((name) => [
+        name,
+        (db.query(`SELECT count(*) AS n FROM "${name}"`).get() as { n: number }).n,
+      ]),
+    ),
+    sourceRevision: db.query("SELECT * FROM core_source_revision").all(),
+    changes: (db.query("SELECT total_changes() AS n").get() as { n: number }).n,
+  };
+}
+
+/**
+ * The world's executor, except that the whole-filter selection returns one
+ * row more than it asked for, as a store past the bound would; every query
+ * is recorded.
+ */
+function overfull(inner: SqlExecutor): {
+  sql: SqlExecutor;
+  queries: { sql: string; args: readonly unknown[] }[];
+} {
+  const queries: { sql: string; args: readonly unknown[] }[] = [];
+  return {
+    queries,
+    sql: {
+      all: async <T>(query: string, args: readonly unknown[]): Promise<T[]> => {
+        queries.push({ sql: query, args });
+        if (query.includes("FROM current_card_purchase_recognitions c"))
+          return Array.from({ length: Number(args.at(-1)) }, () => ({}) as T);
+        return inner.all<T>(query, args);
+      },
+      first: (query, args) => {
+        queries.push({ sql: query, args });
+        return inner.first(query, args);
+      },
+    },
+  };
 }
 
 describe("card purchase explanation", () => {
@@ -457,6 +494,208 @@ describe("card purchase explanation", () => {
       value: { coefficient: "1830", scale: 0 },
     });
     expect((await queryCardPurchases(w.sql, { offset: 60 })).items).toEqual([]);
+  });
+
+  test("no read writes: the list, a period, an exact id, an unknown id and a refused filter", async () => {
+    const w = world();
+    const eventId = await w.recognise(factOf(1));
+    await w.retire(await w.recognise(factOf(2)));
+    const statement = w.statement({
+      source: "vpass",
+      sourceAccount: "vpass:card-001",
+      accountId: "acct-card",
+      period: "2026-09",
+      total: 1734,
+      paymentDate: "2026-10-10",
+    });
+    w.settle({
+      statement,
+      bank: w.bankDebit(1734),
+      source: "vpass",
+      accountId: "acct-card",
+      period: "2026-09",
+      total: 1734,
+      status: "accepted",
+    });
+    const before = tables(w.db);
+    expect(before.sourceRevision).toHaveLength(1);
+    await queryCardPurchases(w.sql);
+    await queryCardPurchases(w.sql, { period: "2026-09", offset: 50 });
+    await queryCardPurchases(w.sql, { eventId });
+    await queryCardPurchases(w.sql, { eventId: `refund_${"0".repeat(64)}` });
+    await expect(queryCardPurchases(overfull(w.sql).sql)).rejects.toBeInstanceOf(
+      CardPurchaseLimitError,
+    );
+    expect(tables(w.db)).toEqual(before);
+  });
+
+  test("a filter past the bound is refused before anything is summed or linked", async () => {
+    const w = world();
+    await w.recognise(factOf(1));
+    const probe = overfull(w.sql);
+    await expect(queryCardPurchases(probe.sql)).rejects.toBeInstanceOf(CardPurchaseLimitError);
+    // One bounded selection (bound + 1 rows asked for) and nothing after it:
+    // no statement, settlement or page read, and no partial figure.
+    expect(probe.queries).toHaveLength(1);
+    expect(probe.queries[0]!.args.at(-1)).toBe(10_001);
+    // Within the bound the same read answers.
+    expect((await queryCardPurchases(w.sql)).summary.events).toBe(1);
+  });
+
+  test("a withdrawn review is named without its debit; a later accepted review is shown", async () => {
+    const w = world();
+    const eventId = await w.recognise(factOf(1));
+    const statement = w.statement({
+      source: "vpass",
+      sourceAccount: "vpass:card-001",
+      accountId: "acct-card",
+      period: "2026-09",
+      total: 1734,
+      paymentDate: "2026-10-10",
+    });
+    const first = w.settle({
+      statement,
+      bank: w.bankDebit(1734),
+      source: "vpass",
+      accountId: "acct-card",
+      period: "2026-09",
+      total: 1734,
+      status: "accepted",
+      createdAt: "2026-10-11T00:00:00Z",
+    });
+    w.withdraw(first);
+    const [withdrawn] = (await queryCardPurchases(w.sql, { eventId })).items;
+    expect(withdrawn!.settlement).toMatchObject({
+      proposalId: first.proposalId,
+      reviewStatus: "withdrawn",
+      settlementEventId: null,
+      allocationId: null,
+      bankDebit: null,
+    });
+    expect(withdrawn!.settlement!.decisionRevisionId).toMatch(/^dr_withdraw_/u);
+    expect(withdrawn!.explanationRefs).not.toContain(`allocation:${first.allocationId}`);
+    const bank = w.bankDebit(1734);
+    const second = w.settle({
+      statement,
+      bank,
+      source: "vpass",
+      accountId: "acct-card",
+      period: "2026-09",
+      total: 1734,
+      status: "accepted",
+      // Older than the withdrawal: the accepted review wins on status, not on time.
+      createdAt: "2026-10-01T00:00:00Z",
+    });
+    const [reaccepted] = (await queryCardPurchases(w.sql, { eventId })).items;
+    expect(reaccepted!.settlement).toMatchObject({
+      proposalId: second.proposalId,
+      reviewStatus: "accepted",
+      settlementEventId: second.eventId,
+      allocationId: second.allocationId,
+      bankDebit: { ref: { id: `transaction:${bank.observationId}` } },
+    });
+    // Withdrawing and re-accepting a settlement changes no purchase figure.
+    expect(reaccepted!.amount).toEqual(withdrawn!.amount);
+  });
+
+  test("two cards of one source in one month each join their own account's statement", async () => {
+    const w = world();
+    const first = await w.recognise(factOf(1));
+    const second = await w.recognise(
+      w.usage({
+        externalId: "vpass:card-003:202609:web:row-z:0",
+        sourceAccount: "vpass:card-003",
+        accountId: "acct-card-2",
+        amount: -777,
+      }),
+    );
+    const own = w.statement({
+      source: "vpass",
+      sourceAccount: "vpass:card-001",
+      accountId: "acct-card",
+      period: "2026-09",
+      total: 1234,
+      paymentDate: "2026-10-10",
+      recordedAtMs: 2000,
+    });
+    const other = w.statement({
+      source: "vpass",
+      sourceAccount: "vpass:card-003",
+      accountId: "acct-card-2",
+      period: "2026-09",
+      total: 777,
+      paymentDate: "2026-10-10",
+      // Newer than the first card's statement: newest-first is per account.
+      recordedAtMs: 9000,
+    });
+    const settled = w.settle({
+      statement: other,
+      bank: w.bankDebit(777),
+      source: "vpass",
+      accountId: "acct-card-2",
+      period: "2026-09",
+      total: 777,
+      status: "accepted",
+    });
+    const page = await queryCardPurchases(w.sql);
+    const item = (id: string) => page.items.find((entry) => entry.eventId === id)!;
+    expect(item(first).statement).toMatchObject({ ref: { id: `balance:${own.observationId}` } });
+    expect(item(first).settlement).toBeNull();
+    expect(item(second).statement).toMatchObject({ ref: { id: `balance:${other.observationId}` } });
+    expect(item(second).settlement).toMatchObject({ proposalId: settled.proposalId });
+    expect(
+      page.summary.statementTotals.map((entry) => [entry.accountId, entry.total.value]),
+    ).toEqual([
+      [
+        "acct-card",
+        {
+          status: "exact",
+          value: { coefficient: "1234", scale: 0 },
+          normalizationVersion: "decimal-v1",
+        },
+      ],
+      [
+        "acct-card-2",
+        {
+          status: "exact",
+          value: { coefficient: "777", scale: 0 },
+          normalizationVersion: "decimal-v1",
+        },
+      ],
+    ]);
+  });
+
+  test("page reads start from the page's events, never from every leg or key", async () => {
+    // A CORE store has no table statistics (D1 is never analyzed), so each
+    // plan is the one production gets. Only the whole-filter selection may
+    // scan, and it scans the sidecar, not the legs or the keys.
+    const w = world();
+    const eventId = await w.recognise(factOf(1));
+    await w.revise(eventId, factOf(4));
+    await w.retire(await w.recognise(factOf(2)));
+    expect(
+      w.db.query("SELECT count(*) AS n FROM sqlite_master WHERE name='sqlite_stat1'").get(),
+    ).toEqual({ n: 0 });
+    const plans: string[] = [];
+    const explained: SqlExecutor = {
+      all: async <T>(query: string, args: readonly unknown[]): Promise<T[]> => {
+        const plan = w.db.query(`EXPLAIN QUERY PLAN ${query}`).all(...(args as never[])) as {
+          detail: string;
+        }[];
+        plans.push(...plan.map((step) => step.detail));
+        return w.sql.all<T>(query, args);
+      },
+      first: (query, args) => w.sql.first(query, args),
+    };
+    const page = await queryCardPurchases(explained);
+    expect(page.items).toHaveLength(2);
+    expect(plans.length).toBeGreaterThan(0);
+    const walks = plans.filter(
+      (detail) =>
+        /\bSCAN (?:l|economic_legs|k|card_purchase_recognition_keys)\b/u.test(detail) ||
+        detail.includes("economic_legs_basis"),
+    );
+    expect(walks).toEqual([]);
   });
 
   test("a statement period and an exact event id narrow the read", async () => {
