@@ -228,6 +228,10 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   },
   // reconciliation_proposals → CORE
   reconciliation_proposals: { classification: "core-keep", planRow: "reconciliation proposals" },
+  reconciliation_scan_cursor: {
+    classification: "operational-mutable",
+    planRow: "bounded reconciliation scan progress",
+  },
   // economic_event_revisions, legs, allocations, obligations, settlements → CORE
   allocations: { classification: "core-keep", planRow: "economic events" },
   economic_event_revisions: { classification: "core-keep", planRow: "economic events" },

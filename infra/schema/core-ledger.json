@@ -694,6 +694,12 @@
         }
       ],
       "sha256": "4ae010e7a881b839cd376fec814c1bc518b62b04b7c0c7e75b72a38077f4875b"
+    },
+    {
+      "file": "0048_reconciliation_scan_cursor.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "0f9070502acdd474307855e88dee3447aba44a2909a7fd33b6e7f9c88fc60b13"
     }
   ],
   "tables": [
@@ -11035,6 +11041,39 @@
       "sqlSha256": "388ad3293150043e"
     },
     {
+      "name": "reconciliation_scan_cursor",
+      "classification": "operational-mutable",
+      "planRow": "bounded reconciliation scan progress",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "last_observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "source_id"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "55cd20581437a930"
+    },
+    {
       "name": "release_activation_events",
       "classification": "core-keep",
       "planRow": "parser releases and activations",
@@ -16544,7 +16583,7 @@
     }
   ],
   "summary": {
-    "tableCount": 109,
+    "tableCount": 110,
     "viewCount": 39,
     "triggerCount": 398,
     "explicitIndexCount": 109,
@@ -16656,7 +16695,8 @@
         "observation_lane_state",
         "observation_parse_jobs",
         "observation_replay_plans",
-        "observation_work_items"
+        "observation_work_items",
+        "reconciliation_scan_cursor"
       ],
       "unclassified-keep": [
         "dataset_snapshot_policies",
@@ -16700,6 +16740,7 @@
       "producers",
       "published_parse_runs",
       "reconciliation_proposals",
+      "reconciliation_scan_cursor",
       "retention_classes",
       "settlement_relations",
       "source_external_ids",
@@ -16749,6 +16790,6 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "d279b999f15a9b1b0c1b64a089f058c18fd2ddf70a45d58d7adc6b06dd5608c0"
+    "schemaSha256": "6a022ab8258385c3ca02701b3868ac274819b93091b398f3eb807eedba8642f5"
   }
 }
