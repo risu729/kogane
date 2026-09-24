@@ -8,6 +8,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CARD_USAGE_PAGE_LIMIT,
+  CARD_USAGE_TEXT_BOUND,
   CURRENT_CARD_USAGE_SQL,
   type CurrentCardUsageRow,
   currentCardUsageSql,
@@ -59,20 +60,32 @@ function transactions(db: Database): TransactionRow[] {
   return db.query(page.sql).all(...(page.args as never[])) as TransactionRow[];
 }
 
+function productionSchema(): Database {
+  const db = new Database(":memory:");
+  for (const name of readdirSync(MIGRATIONS)
+    .filter((entry) => entry.endsWith(".sql"))
+    .sort())
+    db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
+  return db;
+}
+
 const ids = (rows: readonly { observation_id: number }[]): number[] =>
   rows.map((row) => row.observation_id);
 
 /**
- * The query's keyed identity lookup agrees with the named
- * `current_identity_observations` view and `current_account_mappings`.
+ * The query's per-parse identity lookup agrees with the named
+ * `current_identity_observations` view, `current_account_mappings` and
+ * `identity_run_contexts`, field by field, including "no identity".
  */
 function expectNamedIdentity(db: Database, rows: readonly CurrentCardUsageRow[]): void {
   for (const row of rows) {
     const named = db
       .query(
-        `SELECT o.source_account_id, m.account_id, o.policy_version
+        `SELECT o.source_account_id, m.account_id, m.status AS account_status,
+                o.policy_version, ctx.policy_family
            FROM current_identity_observations o
            JOIN current_account_mappings m ON m.source_account_id = o.source_account_id
+           JOIN identity_run_contexts ctx ON ctx.identity_run_id = o.identity_run_id
           WHERE o.kind = 'transaction' AND o.observation_id = ?`,
       )
       .all(row.observation_id);
@@ -83,7 +96,9 @@ function expectNamedIdentity(db: Database, rows: readonly CurrentCardUsageRow[])
             {
               source_account_id: row.source_account_id,
               account_id: row.account_id,
+              account_status: row.account_status,
               policy_version: row.policy_version,
+              policy_family: row.policy_family,
             },
           ],
     );
@@ -148,12 +163,36 @@ describe("the Transactions page composes the shared snapshot currentness", () =>
 
 describe("current card usage", () => {
   test("compiles on the full production schema and is empty on an empty store", () => {
-    const db = new Database(":memory:");
-    for (const name of readdirSync(MIGRATIONS)
-      .filter((entry) => entry.endsWith(".sql"))
-      .sort())
-      db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
+    const db = productionSchema();
     expect(usage(db)).toEqual([]);
+    db.close();
+  });
+
+  test("the identity lookup runs once per current parse, after currentness", () => {
+    // Per observation, the Vpass binding provenance behind
+    // `eligible_identity_runs` was re-checked for every row of every card
+    // artifact before the snapshot filter, which grew quadratically with the
+    // store (bun:sqlite, 180 synthetic days of captures: about 7 s, now under 0.1 s).
+    const db = productionSchema();
+    const page = currentCardUsageSql({ afterId: 0, limit: 500 });
+    const plan = db.query(`EXPLAIN QUERY PLAN ${page.sql}`).all(...(page.args as never[])) as {
+      id: number;
+      parent: number;
+      detail: string;
+    }[];
+    const byId = new Map(plan.map((step) => [step.id, step]));
+    const within = (step: { parent: number }, detail: string): boolean => {
+      for (let at = byId.get(step.parent); at !== undefined; at = byId.get(at.parent))
+        if (at.detail === detail) return true;
+      return false;
+    };
+    const details = plan.map((step) => step.detail);
+    expect(details).toContain("MATERIALIZE current_rows");
+    expect(details).toContain("MATERIALIZE parse_identity");
+    const bindingChecks = plan.filter((step) => step.detail.includes("identity_vpass_bindings"));
+    expect(bindingChecks.length).toBeGreaterThan(0);
+    for (const step of bindingChecks)
+      expect(within(step, "MATERIALIZE parse_identity"), step.detail).toBe(true);
     db.close();
   });
 
@@ -656,10 +695,11 @@ describe("current card usage", () => {
     });
   });
 
-  test("one recognition key yields one row: its latest observation", () => {
-    // The Vpass fingerprint counts occurrences per page, so an identical row
-    // on two pages of one customized capture carries one external id. The
-    // page lists both rows; the recognition key can hold only one.
+  test("known limit: identical Vpass rows on two pages of one capture share one key, so one is current", () => {
+    // The Vpass parser counts occurrences per page artifact, so an identical
+    // row on two pages of one customized capture carries one external id. The
+    // Transactions page lists both rows; the recognition key can hold only one,
+    // the later observation. Documented in card-usage.ts and docs/read-model.md.
     const store = new CardStore();
     const run = store.run("vpass");
     const binding = store.bind(run, "card-001", TOKEN_A);
@@ -695,10 +735,265 @@ describe("current card usage", () => {
         token: TOKEN_A,
       });
     const shown = transactions(store.db);
+    expect(shown.map((row) => row.id).sort((left, right) => left - right)).toEqual(
+      pages.flatMap((page) => page.observations),
+    );
     expect(shown.map((row) => row.external_id)).toEqual([
       shown[0]!.external_id,
       shown[0]!.external_id,
     ]);
     expect(ids(usage(store.db))).toEqual(pages[1]!.observations);
+  });
+
+  test("a month that flips family under a new card ordinal leaves no pending row current", () => {
+    // Why the Vpass slot is the statement month alone: the customized
+    // (pending) capture sits under card-001, the web (posted) capture of the
+    // same month under card-002, so step 2 keeps both. A slot that also held
+    // the provider state would keep the stale pending row current next to the
+    // posted one.
+    const store = new CardStore();
+    const card = vpassCard(TOKEN_A, "acct-card-a");
+    const may = store.run("vpass");
+    const pending = store.vpassPage({
+      run: may,
+      card: "card-001",
+      month: "202605",
+      family: "customized",
+      fetchedAt: "2026-05-10T00:00:00.000Z",
+      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払い" }],
+    });
+    store.identify(pending, card, {
+      version: 2,
+      bindingArtifact: store.bind(may, "card-001", TOKEN_A),
+      token: TOKEN_A,
+    });
+    const june = store.run("vpass");
+    const binding = store.bind(june, "card-002", TOKEN_A);
+    const posted = store.vpassPage({
+      run: june,
+      card: "card-002",
+      month: "202605",
+      family: "web",
+      fetchedAt: "2026-06-10T00:00:00.000Z",
+      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" }],
+    });
+    // Until identity runs for the new ordinal its rows resolve to no account,
+    // so they cannot shadow anything yet: both captures are current.
+    expect(usage(store.db).map((row) => [row.observation_id, row.account_id])).toEqual([
+      [pending.observations[0]!, "acct-card-a"],
+      [posted.observations[0]!, null],
+    ]);
+    store.identify(posted, card, { version: 2, bindingArtifact: binding, token: TOKEN_A });
+    expect(
+      usage(store.db).map((row) => [row.observation_id, row.display_state, row.snapshot_unit]),
+    ).toEqual([[posted.observations[0]!, "posted", "card-002"]]);
+    // The Transactions page knows no accounts and still lists both ordinals.
+    expect(cardTransactionIds(store.db)).toEqual([...pending.observations, ...posted.observations]);
+  });
+
+  test("a MyJCB confirmed capture never retires the unconfirmed capture; a newer unconfirmed one does", () => {
+    // Plan §4: stale unconfirmed snapshots coexist with confirmed ones. The
+    // states are separate slots, reported as pending and posted, never summed.
+    const store = new CardStore();
+    const root = myjcbRoot("conn-a", "acct-jcb");
+    const usageRow: UsageRow = {
+      date: "2026/05/10",
+      merchant: "架空店舗I",
+      amount: "800",
+      paymentType: "1回払い",
+      other: "800",
+    };
+    const pending = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 0,
+      state: "unconfirmed",
+      period: "202606",
+      fetchedAt: "2026-05-20T00:00:00.000Z",
+      rows: [usageRow],
+    });
+    store.identify(pending, root, { version: 1 });
+    const posted = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "202606",
+      fetchedAt: "2026-06-12T00:00:00.000Z",
+      rows: [usageRow],
+    });
+    store.identify(posted, root, { version: 1 });
+    expect(usage(store.db).map((row) => [row.observation_id, row.display_state])).toEqual([
+      [pending.observations[0]!, "pending"],
+      [posted.observations[0]!, "posted"],
+    ]);
+    // An empty newer unconfirmed capture is a complete snapshot of "nothing pending".
+    store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 0,
+      state: "unconfirmed",
+      period: "202607",
+      fetchedAt: "2026-06-20T00:00:00.000Z",
+      rows: [],
+    });
+    expect(ids(usage(store.db))).toEqual(posted.observations);
+    expect(ids(usage(store.db))).toEqual(cardTransactionIds(store.db));
+  });
+
+  test("identity equals the named views for every mapping status and policy fallback", () => {
+    const store = new CardStore();
+    const run = store.run("vpass");
+    const page = (card: string): Parsed =>
+      store.vpassPage({
+        run,
+        card,
+        month: "202605",
+        family: "web",
+        fetchedAt: "2026-06-10T00:00:00.000Z",
+        rows: [
+          { date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1回払い" },
+        ],
+      });
+    const perRun = (card: string) => ({
+      ref: `sa-${card}-run-${run}`,
+      reference: [`vpass:${card}`, "fetch-run", String(run)],
+      account: `acct-${card}-run-${run}`,
+      status: "unresolved" as const,
+    });
+    // card-001: v1 and v2 sealed, so v2 (the binding family) wins; its mapping
+    // is then superseded by a manual `identified` revision.
+    const bindingA = store.bind(run, "card-001", TOKEN_A);
+    const bound = page("card-001");
+    store.identify(bound, perRun("card-001"), { version: 1 });
+    const cardA = vpassCard(TOKEN_A, "acct-card-a");
+    store.identify(bound, cardA, { version: 2, bindingArtifact: bindingA, token: TOKEN_A });
+    store.mapAccount({ ...cardA, account: "acct-card-a-reviewed", status: "identified" }, "manual");
+    // card-002: the v2 run is not sealed, so the sealed v1 run organizes it.
+    const bindingB = store.bind(run, "card-002", TOKEN_B);
+    const unsealed = page("card-002");
+    store.identify(unsealed, perRun("card-002"), { version: 1 });
+    store.identify(
+      unsealed,
+      vpassCard(TOKEN_B, "acct-card-b"),
+      { version: 2, bindingArtifact: bindingB, token: TOKEN_B },
+      false,
+    );
+    // card-003: the v2 run was sealed, then its binding run was excluded, so
+    // `eligible_identity_runs` drops it and the v1 run organizes it again.
+    const bindingC = store.bind(run, "card-003", TOKEN_C);
+    const excluded = page("card-003");
+    store.identify(excluded, perRun("card-003"), { version: 1 });
+    store.identify(excluded, vpassCard(TOKEN_C, "acct-card-c"), {
+      version: 2,
+      bindingArtifact: bindingC,
+      token: TOKEN_C,
+    });
+    const beforeExclusion = usage(store.db).find(
+      (row) => row.observation_id === excluded.observations[0],
+    );
+    expect(beforeExclusion?.policy_family).toBe("vpass-card-binding");
+    store.excludeBinding(bindingC);
+    // card-004: never identified.
+    const none = page("card-004");
+    const ledger = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "202605",
+      fetchedAt: "2026-06-12T00:00:00.000Z",
+      rows: [
+        { date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払い" },
+      ],
+    });
+    store.identify(ledger, myjcbRoot("conn-a", "acct-jcb"), { version: 1 });
+
+    const rows = usage(store.db);
+    const view = (parsed: Parsed) =>
+      rows.find((row) => row.observation_id === parsed.observations[0])!;
+    const identity = (row: CurrentCardUsageRow) => [
+      row.account_id,
+      row.account_status,
+      row.policy_version,
+      row.policy_family,
+    ];
+    expect(identity(view(bound))).toEqual([
+      "acct-card-a-reviewed",
+      "identified",
+      2,
+      "vpass-card-binding",
+    ]);
+    expect(identity(view(unsealed))).toEqual([
+      `acct-card-002-run-${run}`,
+      "unresolved",
+      1,
+      "identity-default",
+    ]);
+    expect(identity(view(excluded))).toEqual([
+      `acct-card-003-run-${run}`,
+      "unresolved",
+      1,
+      "identity-default",
+    ]);
+    expect(identity(view(none))).toEqual([null, null, null, null]);
+    expect(identity(view(ledger))).toEqual(["acct-jcb", "aggregate", 1, "identity-default"]);
+    expectNamedIdentity(store.db, rows);
+  });
+
+  test("provider extras are NULL, never an error, for malformed, non-text, empty or oversized values", () => {
+    const store = new CardStore();
+    const run = store.run("vpass");
+    const binding = store.bind(run, "card-001", TOKEN_A);
+    const page = store.vpassPage({
+      run,
+      card: "card-001",
+      month: "202605",
+      family: "customized",
+      fetchedAt: "2026-05-10T00:00:00.000Z",
+      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1回払い" }],
+    });
+    store.identify(page, vpassCard(TOKEN_A, "acct-card-a"), {
+      version: 2,
+      bindingArtifact: binding,
+      token: TOKEN_A,
+    });
+    const customized = (row: Record<string, unknown>, kogane: Record<string, unknown> = {}) =>
+      JSON.stringify({ ...row, _kogane: { statementFamily: "customized", ...kogane } });
+    const malformed = store.appendRow(page, {
+      externalId: "synthetic-malformed",
+      extraJson: '{"_kogane":{"statementFamily":"customized"',
+    });
+    const oversized = store.appendRow(page, {
+      externalId: "synthetic-oversized",
+      extraJson: customized(
+        { bunkatsuYaku: "x".repeat(CARD_USAGE_TEXT_BOUND + 1) },
+        { statementMonth: 202605, providerSaleCode: "" },
+      ),
+    });
+    const atBound = store.appendRow(page, {
+      externalId: "synthetic-at-bound",
+      extraJson: customized({ bunkatsuYaku: "y".repeat(CARD_USAGE_TEXT_BOUND) }),
+    });
+    // Rows without an external id have no key and are never merged.
+    const keyless = [
+      store.appendRow(page, { externalId: null, extraJson: "{}" }),
+      store.appendRow(page, { externalId: null, extraJson: "{}" }),
+    ];
+
+    const rows = usage(store.db);
+    expect(ids(rows)).toEqual([...page.observations, malformed, oversized, atBound, ...keyless]);
+    const view = (id: number) => rows.find((row) => row.observation_id === id)!;
+    const extras = (row: CurrentCardUsageRow) => [
+      row.provider_family,
+      row.statement_period,
+      row.payment_type,
+      row.provider_sale_code,
+    ];
+    expect(extras(view(page.observations[0]!))).toEqual(["customized", "202605", "1回払い", "5"]);
+    expect(extras(view(malformed))).toEqual([null, null, null, null]);
+    expect(extras(view(oversized))).toEqual(["customized", null, null, null]);
+    expect(view(atBound).payment_type).toBe("y".repeat(CARD_USAGE_TEXT_BOUND));
+    for (const id of keyless) expect(view(id).recognition_key).toBeNull();
   });
 });

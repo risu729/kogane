@@ -498,16 +498,18 @@ export class CardStore {
   }
 
   /**
-   * A sealed identity run over every observation of one parse. Policy 2 is
-   * the `vpass-card-binding` family and needs the pinned trusted binding.
+   * An identity run over every observation of one parse, sealed unless
+   * `sealed` is false. Policy 2 is the `vpass-card-binding` family and needs
+   * the pinned trusted binding.
    */
   identify(
     parsed: Parsed,
     spec: AccountSpec,
     policy: { version: 1 } | { version: 2; bindingArtifact: number; token: string },
+    sealed = true,
   ): void {
     if (!this.accounts.has(spec.ref)) this.mapAccount(spec);
-    const run = `ir-${parsed.parse}`;
+    const run = `ir-${parsed.parse}-v${policy.version}`;
     const mapping = (
       this.db
         .query("SELECT id FROM current_account_mappings WHERE source_account_id=?")
@@ -540,16 +542,40 @@ export class CardStore {
     }
     for (const observation of parsed.observations)
       this.db.run("INSERT INTO identity_observations VALUES(?,?,'transaction',?,?,?,'[]')", [
-        `io-${observation}`,
+        `io-${run}-${observation}`,
         run,
         observation,
         spec.ref,
         mapping,
       ]);
-    this.db.run("INSERT INTO identity_run_seals VALUES(?,?,'2098-01-01')", [
-      run,
-      parsed.observations.length,
-    ]);
+    if (sealed)
+      this.db.run("INSERT INTO identity_run_seals VALUES(?,?,'2098-01-01')", [
+        run,
+        parsed.observations.length,
+      ]);
+  }
+
+  /**
+   * Annotates the binding run behind `bindingArtifact` as excluded from
+   * financial views, so the trusted binding (0020) and every identity run
+   * pinned to it stop being eligible, as later evidence exclusions do.
+   */
+  excludeBinding(bindingArtifact: number): void {
+    this.db.run(
+      "INSERT INTO fetch_run_annotations SELECT fetch_run_id,'exclude_from_financial_views' FROM fetch_artifacts WHERE id=?",
+      [bindingArtifact],
+    );
+  }
+
+  /** Appends a raw observation to an existing parse, for shapes no parser emits. */
+  appendRow(parsed: Parsed, row: { externalId: string | null; extraJson: string }): number {
+    const result = this.db.run(
+      `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,description,counterparty,as_of,observed_at,raw_locator,extra_json)
+       SELECT parse_run_id,source_account,?,status,amount_minor,amount_text,amount_scale,currency,description,counterparty,as_of,observed_at,'json:$.synthetic',?
+       FROM transaction_observations WHERE id=?`,
+      [row.externalId, row.extraJson, parsed.observations[0]!],
+    );
+    return Number(result.lastInsertRowid);
   }
 }
 

@@ -23,6 +23,15 @@
 //      i.e. step 2 alone;
 //   4. the latest observation of each recognition key.
 //
+// Known limit of step 4: the Vpass parser numbers repeated identical rows per
+// page artifact (`occurrence` in packages/parsers/src/parsers/vpass.ts), so two
+// identical rows on different pages of one capture share an external id and
+// so one key; only the later one is current, although the Transactions page
+// lists both. Telling them apart needs a parser identity change. The MyJCB
+// ledger is one artifact per snapshot, so its occurrence count is complete.
+// Both deployed parsers always emit an external id; a row without one has no
+// recognition key, is never merged with another row, and cannot be recognised.
+//
 // Amounts are the decimal-v1 projection of migration 0024, never a cast
 // integer. Provider extras are read at the exact `extra_json` paths the
 // deployed parsers emit; each is cited below. Nothing is classified here:
@@ -63,10 +72,10 @@ export interface CurrentCardUsageRow {
   external_id_namespace: string | null;
   source_account: string;
   external_id: string | null;
-  /** SQLite's `json_array` text of the five components; null without an external id. */
+  /** SQLite's `json_array` text of the five components; null without an external id (never recognised). */
   recognition_key: string | null;
 
-  // Identity: the `current_identity_observations` row (read by key) and its
+  // Identity: the `current_identity_observations` row (read per parse) and its
   // `current_account_mappings` revision, as the card settlement ownership
   // view (0044) and the Transactions page's `latest` organization resolve it.
   /** `source_accounts.id` the sealed identity run assigned; null before identity ran. */
@@ -74,9 +83,12 @@ export interface CurrentCardUsageRow {
   account_id: string | null;
   /** `account_mappings.status` of the current mapping. */
   account_status: "identified" | "provider-local" | "aggregate" | "unresolved" | null;
-  /** `identity_runs.policy_version`: 2 is the Vpass `vpass-card-binding` family. */
+  /** `identity_runs.policy_version`: orders runs of one parse; not a family (an override may record 3). */
   policy_version: number | null;
-  /** `identity_run_contexts.policy_family`, e.g. `vpass-card-binding` or `identity-default`. */
+  /**
+   * `identity_run_contexts.policy_family`: `vpass-card-binding` when a trusted
+   * importer card binding resolved the row, else `identity-default`.
+   */
   policy_family: string | null;
 
   // Provider display.
@@ -162,24 +174,25 @@ const DISPLAY_STATE = `CASE
             END`;
 
 /**
- * The identity observation of `t`: `current_identity_observations` (0026)
- * restated as a keyed lookup, the way `organizationSql` reads it for the
+ * The sealed identity run of each current parse: `current_identity_observations`
+ * (0026) restated per parse, the way `organizationSql` reads it for the
  * Transactions page. For a published parse on a successful fetch run, the
- * sealed eligible identity run with the highest policy version. The view
- * itself would materialize every source's identity catalogue on each call;
- * card-usage.test.ts proves both give the same row.
+ * sealed eligible identity run with the highest policy version (unique per
+ * parse, 0018). The view itself would materialize every source's identity
+ * catalogue on each call, and a per-row lookup would re-check the Vpass binding
+ * provenance behind `eligible_identity_runs` for every observation rather than
+ * once per parse; card-usage.test.ts proves the result equals the view.
  */
-const IDENTITY_LOOKUP = `LEFT JOIN identity_observations io
-           ON io.kind = 'transaction' AND io.observation_id = t.id
-          AND ${successfulFetchRuns.predicate("f")}
-          AND io.identity_run_id = (
-            SELECT run.id
-            FROM eligible_identity_runs run
-            JOIN identity_run_seals seal ON seal.identity_run_id = run.id
-            WHERE run.parse_run_id = t.parse_run_id
-            ORDER BY run.policy_version DESC
-            LIMIT 1
-          )`;
+const PARSE_IDENTITY = `parse_identity AS MATERIALIZED (
+         SELECT parses.parse_run_id,
+                (SELECT run.id
+                   FROM eligible_identity_runs run
+                   JOIN identity_run_seals seal ON seal.identity_run_id = run.id
+                  WHERE run.parse_run_id = parses.parse_run_id
+                  ORDER BY run.policy_version DESC
+                  LIMIT 1) AS identity_run_id
+         FROM (SELECT DISTINCT parse_run_id FROM current_rows WHERE run_succeeded) parses
+       )`;
 
 /** The row's columns, in the order the result returns them. */
 const COLUMNS = [
@@ -222,22 +235,17 @@ const COLUMNS = [
  * The whole query; `?1` is the exclusive observation id cursor and `?2` the
  * page size. Ranking runs over the complete current set before the cursor
  * applies, so a page boundary never changes which row is current.
+ *
+ * Steps 1 and 2 are materialized first (`current_rows`), so the identity
+ * lookup and the provider extras are evaluated for current rows only, never
+ * for the older captures every Vpass and MyJCB artifact keeps.
  */
-export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPASS_STATEMENT_SNAPSHOT_CTES}, card_usage AS (
+export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPASS_STATEMENT_SNAPSHOT_CTES}, current_rows AS MATERIALIZED (
          SELECT t.id AS observation_id, t.parse_run_id, fa.id AS fetch_artifact_id,
                 fa.fetch_run_id, t.raw_locator,
                 fa.source_id, fr.producer_id, ses.external_id_namespace,
                 t.source_account, t.external_id,
-                CASE WHEN t.external_id IS NOT NULL THEN json_array(
-                  fa.source_id, fr.producer_id, ses.external_id_namespace,
-                  t.source_account, t.external_id
-                ) END AS recognition_key,
-                io.source_account_id, mapping.account_id, mapping.status AS account_status,
-                -- Scalar lookups keep the view keyed; as a LEFT JOIN operand it is materialized whole.
-                (SELECT ctx.policy_version FROM identity_run_contexts ctx
-                  WHERE ctx.identity_run_id = io.identity_run_id) AS policy_version,
-                (SELECT ctx.policy_family FROM identity_run_contexts ctx
-                  WHERE ctx.identity_run_id = io.identity_run_id) AS policy_family,
+                (${successfulFetchRuns.predicate("f")}) AS run_succeeded,
                 t.status AS provider_status,
                 ${PROVIDER_FAMILY} AS provider_family,
                 ${DISPLAY_STATE} AS display_state,
@@ -273,14 +281,31 @@ export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPA
          LEFT JOIN observation_decimal_values dv
            ON dv.kind = 'transaction' AND dv.observation_id = t.id
           AND dv.policy_version = '${DECIMAL_POLICY_RELEASE}'
-         ${IDENTITY_LOOKUP}
-         LEFT JOIN current_account_mappings mapping
-           ON mapping.source_account_id = io.source_account_id
          WHERE ${activeStateProjection.predicate}
            AND (
              (${VPASS} AND snapshot.fetch_run_id IS NOT NULL)
              OR (${MYJCB} AND ${MYJCB_LEDGER_MEMBER})
            )
+       ), ${PARSE_IDENTITY}, card_usage AS (
+         SELECT current_rows.*,
+                CASE WHEN current_rows.external_id IS NOT NULL THEN json_array(
+                  current_rows.source_id, current_rows.producer_id,
+                  current_rows.external_id_namespace, current_rows.source_account,
+                  current_rows.external_id
+                ) END AS recognition_key,
+                io.source_account_id, mapping.account_id, mapping.status AS account_status,
+                -- Scalar lookups keep the view keyed; as a LEFT JOIN operand it is materialized whole.
+                (SELECT ctx.policy_version FROM identity_run_contexts ctx
+                  WHERE ctx.identity_run_id = io.identity_run_id) AS policy_version,
+                (SELECT ctx.policy_family FROM identity_run_contexts ctx
+                  WHERE ctx.identity_run_id = io.identity_run_id) AS policy_family
+         FROM current_rows
+         LEFT JOIN parse_identity ON parse_identity.parse_run_id = current_rows.parse_run_id
+         LEFT JOIN identity_observations io
+           ON io.identity_run_id = parse_identity.identity_run_id
+          AND io.kind = 'transaction' AND io.observation_id = current_rows.observation_id
+         LEFT JOIN current_account_mappings mapping
+           ON mapping.source_account_id = io.source_account_id
        ), representations AS (
          SELECT card_usage.*,
                 FIRST_VALUE(fetch_run_id) OVER (
