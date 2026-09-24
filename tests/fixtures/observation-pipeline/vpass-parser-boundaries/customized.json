@@ -36,7 +36,7 @@
         "meisaiList": [
           {
             "bunkatsuPay": "",
-            "bunkatsuYaku": "1回払い",
+            "bunkatsuYaku": "1",
             "genchiKin": "",
             "kanzanDate": "",
             "kanzanRate": "",
@@ -53,7 +53,7 @@
           },
           {
             "bunkatsuPay": "",
-            "bunkatsuYaku": "1回払い",
+            "bunkatsuYaku": "1",
             "genchiKin": "10.00",
             "kanzanDate": "26/08/17",
             "kanzanRate": "150.00",

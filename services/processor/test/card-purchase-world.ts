@@ -54,6 +54,13 @@ export interface UsageRow {
   date: string;
   merchant: string;
   amount: string;
+  /**
+   * The payment type where production rows carry it. Vpass: the one-digit
+   * code as the customized family writes it (`bunkatsuYaku`, `1` for a single
+   * payment); the web builder writes its digits full width into `data[6]`
+   * (`１`), as production web rows show it. MyJCB: the wording the combined
+   * `ご利用先など／支払区分` cell shows after the merchant (`1回払`).
+   */
   paymentType: string;
   /** MyJCB: the other amount of the row (usage when confirmed, payment when not). */
   other?: string;
@@ -65,6 +72,20 @@ function template(name: "web" | "customized"): Record<string, any> {
     readFileSync(new URL(`vpass-parser-boundaries/${name}.json`, FIXTURES), "utf8"),
   ) as Record<string, any>;
 }
+
+/** ASCII digits as the Vpass web family writes its payment-type code: full width (`1` → `１`). */
+const fullWidthDigits = (text: string): string =>
+  text.replace(/[0-9]/gu, (digit) => String.fromCharCode(digit.charCodeAt(0) + 0xfee0));
+
+/**
+ * The two-character on-screen label production MyJCB rows show in the summary
+ * cell the ledger parser takes for the payment type (synthetic text).
+ */
+const MYJCB_LABEL = "架空";
+
+/** A MyJCB combined `ご利用先など／支払区分` cell: the merchant, then the payment type. */
+const myjcbCombinedCell = (row: Pick<UsageRow, "merchant" | "paymentType">): string =>
+  row.paymentType === "" ? row.merchant : `${row.merchant} ${row.paymentType}`;
 
 function vpassPayload(family: "web" | "customized", month: string, rows: readonly UsageRow[]) {
   if (family === "web") {
@@ -80,7 +101,7 @@ function vpassPayload(family: "web" | "customized", month: string, rows: readonl
           row.date,
           row.merchant,
           row.amount,
-          row.paymentType,
+          fullWidthDigits(row.paymentType),
           "",
           "",
           "",
@@ -118,6 +139,11 @@ function vpassPayload(family: "web" | "customized", month: string, rows: readonl
   return payload;
 }
 
+/**
+ * A MyJCB canonical `credit-ledger` JSON in the production row shape: the
+ * merchant and the payment type share the combined `summaryCells[1]`, and the
+ * cell the parser takes for the payment type holds a two-character label.
+ */
 function ledgerPayload(
   detailMonth: number,
   period: string,
@@ -134,7 +160,7 @@ function ledgerPayload(
         ? ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"]
         : ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"],
     rows: rows.map((row) => ({
-      summaryCells: [row.date, row.merchant, row.paymentType, row.amount],
+      summaryCells: [row.date, myjcbCombinedCell(row), MYJCB_LABEL, row.amount],
       expanded:
         state === "confirmed"
           ? {

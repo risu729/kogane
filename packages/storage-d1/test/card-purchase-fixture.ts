@@ -67,7 +67,8 @@ const ROWS: readonly SeededRow[] = [
   vpass(3, 2, "vpass:card-001:202608:web:row-a:0", "posted", -1234),
   vpass(4, 3, "vpass:card-001:202608:web:row-a:0", "posted", -1300),
   {
-    // The shapes the MyJCB ledger parser emits (tests/fixtures/observation-pipeline/myjcb).
+    // The shapes production MyJCB rows carry: the payment type inside the
+    // combined ご利用先など／支払区分 cell, and display amounts.
     observationId: 5,
     parseRunId: 4,
     sourceId: "myjcb",
@@ -75,7 +76,7 @@ const ROWS: readonly SeededRow[] = [
     externalId: "myjcb-credit-ledger:confirmed:row-c:0",
     status: "confirmed",
     amount: -500,
-    paymentType: "一回払い",
+    paymentType: "synthetic merchant 1回払",
     usageDate: "2026-08-20",
     statementPeriod: "2026年9月お支払い分",
     usageAmountText: "500円",
@@ -98,7 +99,9 @@ function vpass(
     externalId,
     status,
     amount,
-    paymentType: "1回払い",
+    // The production payment-type code: full width on the web (posted) page,
+    // ASCII on the customized (unconfirmed) one.
+    paymentType: status === "posted" ? "１" : "1",
     usageDate: "2026-08-15",
     statementPeriod: "202609",
     usageAmountText: null,

@@ -137,8 +137,8 @@ async function recognizeAll(db: Database): Promise<Map<number, CardPurchaseDraft
 }
 
 const PENDING_ROWS: readonly UsageRow[] = [
-  { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払い" },
-  { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1回払い" },
+  { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1" },
+  { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1" },
 ];
 
 /** One bound Vpass card-month capture of card-001, identified through the trusted binding. */
@@ -176,7 +176,7 @@ function myjcbCapture(store: CardStore): Parsed {
     period: "2026年6月お支払い分",
     fetchedAt: "2026-05-12T00:00:00.000Z",
     rows: [
-      { date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払い" },
+      { date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払" },
       {
         date: "2026/04/21",
         merchant: "架空店舗H",
@@ -206,7 +206,7 @@ describe("recognition keys against current card usage", () => {
 
     // The web capture of the same card-month replaces the customized one.
     const posted = vpassCapture(store, "web", "2026-06-10T00:00:00.000Z", [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" },
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1" },
     ]);
     expect(usage(store.db).map((row) => row.observation_id)).toContain(posted.observations[0]!);
     const expected = pending.observations.map((observation): StaleCardPurchaseKeyRow => {
@@ -251,7 +251,7 @@ describe("recognition keys against current card usage", () => {
     vpassCapture(store, "customized", "2026-05-10T00:00:00.000Z", [PENDING_ROWS[0]!]);
     const [pending] = usage(store.db);
     vpassCapture(store, "web", "2026-06-10T00:00:00.000Z", [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" },
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1" },
     ]);
     const [posted] = usage(store.db);
     expect(posted!.observation_id).not.toBe(pending!.observation_id);
@@ -287,7 +287,7 @@ describe("recognition keys against current card usage", () => {
     // A later web capture no longer shows the posted row: now every key of
     // the revision is stale, and both are reported together.
     vpassCapture(store, "web", "2026-06-20T00:00:00.000Z", [
-      { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1回払い" },
+      { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1" },
     ]);
     expect(
       stale(store.db).map((row) => [row.event_id, row.recognition_key, row.key_count]),
@@ -313,7 +313,7 @@ describe("recognition keys against current card usage", () => {
     // the replaced pending rows are held but no longer current, so they do
     // not count (they are stale keys instead).
     vpassCapture(store, "web", "2026-06-10T00:00:00.000Z", [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" },
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1" },
     ]);
     expect(unrecognized(store.db)).toBe(2);
     await recognizeAll(store.db);

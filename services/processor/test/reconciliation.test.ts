@@ -641,6 +641,7 @@ interface LedgerRow {
   /** `YYYY/MM/DD`, as the collector copies the provider's cell. */
   date: string;
   merchant: string;
+  /** The wording the combined ご利用先など／支払区分 cell shows after the merchant. */
   paymentType: string;
   /** The summary amount cell: the usage while unconfirmed, this statement's payment once confirmed. */
   amount: string;
@@ -649,10 +650,11 @@ interface LedgerRow {
 }
 
 /**
- * One published `credit-ledger` capture of a MyJCB connection, in the shape the
- * collector writes (services/collector-myjcb/test/parsers.test.ts: `1,000円`
- * cells, `一回払い`), parsed by the deployed ledger parser and stored exactly
- * as it emits each row. Returns the observation ids in row order.
+ * One published `credit-ledger` capture of a MyJCB connection, in the shape
+ * production rows have (`1,000円` cells, the payment type such as `1回払` in
+ * the combined ご利用先など／支払区分 cell after the merchant), parsed by the
+ * deployed ledger parser and stored exactly as it emits each row. Returns the
+ * observation ids in row order.
  */
 async function seedLedger(
   connection: string,
@@ -676,7 +678,10 @@ async function seedLedger(
       state === "confirmed" ? "今回のお支払い金額" : "ご利用金額",
     ],
     rows: rows.map((row) => ({
-      summaryCells: [row.date, row.merchant, row.paymentType, row.amount],
+      // The production row shape: merchant and payment type share the combined
+      // ご利用先など／支払区分 cell; the cell the parser takes for the payment
+      // type holds a two-character label.
+      summaryCells: [row.date, `${row.merchant} ${row.paymentType}`, "架空", row.amount],
       expanded: {
         [state === "confirmed" ? "ご利用金額" : "今回のお支払い金額"]: row.other ?? row.amount,
         摘要: "",
@@ -795,7 +800,7 @@ async function unguardedFacts(connection: string): Promise<MatchFact[]> {
 }
 
 test("a MyJCB pending row and its confirmed row with 1,200円 texts become one reviewed candidate", async () => {
-  const purchase = { date: "2026/09/10", merchant: "架空書店", paymentType: "一回払い" };
+  const purchase = { date: "2026/09/10", merchant: "架空書店", paymentType: "1回払" };
   const [pending] = await seedLedger("conn-match", "unconfirmed", [
     { ...purchase, amount: "1,200円" },
   ]);
@@ -860,7 +865,7 @@ test("a MyJCB installment slice (usage 12,000 / payment 4,000) is never compared
   const slices = await seedLedger("conn-installment", "confirmed", [
     { ...purchase, paymentType: "分割払い", amount: "4,000円", other: "12,000円" },
     // A payment type that drifted to look single does not hide the slice.
-    { ...purchase, paymentType: "一回払い", amount: "4,000円", other: "12,000円" },
+    { ...purchase, paymentType: "1回払", amount: "4,000円", other: "12,000円" },
   ]);
   // Without the guard the matcher would pair the pending purchase with each slice.
   expect(stageBProposals(await unguardedFacts("conn-installment"))).toHaveLength(2);
@@ -870,7 +875,7 @@ test("a MyJCB installment slice (usage 12,000 / payment 4,000) is never compared
 });
 
 test("two MyJCB confirmed rows of the same amount stay two candidates, never one merge (SC03)", async () => {
-  const purchase = { date: "2026/09/15", merchant: "架空売店", paymentType: "一回払い" };
+  const purchase = { date: "2026/09/15", merchant: "架空売店", paymentType: "1回払" };
   const [pending] = await seedLedger("conn-twins", "unconfirmed", [
     { ...purchase, amount: "900円" },
   ]);
@@ -930,7 +935,7 @@ test("a proposal already decided is never proposed again", async () => {
 test("a relative MyJCB label (detailMonth-N) names no payment month, so nothing pairs under it", async () => {
   // The collector writes `detailMonth-N` for a month the past-months API does
   // not label; the same label names a different payment month next month.
-  const purchase = { date: "2026/09/20", merchant: "架空薬局", paymentType: "一回払い" };
+  const purchase = { date: "2026/09/20", merchant: "架空薬局", paymentType: "1回払" };
   const [pending] = await seedLedger(
     "conn-relative",
     "unconfirmed",
@@ -960,7 +965,7 @@ test("a MyJCB confirmed row re-captured by a later run is not proposed as the sa
   const row = {
     date: "2026/09/22",
     merchant: "架空文具",
-    paymentType: "一回払い",
+    paymentType: "1回払",
     amount: "700円",
   };
   const first = await seedLedger("conn-recapture", "confirmed", [row]);

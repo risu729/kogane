@@ -131,19 +131,14 @@ function captureDays(options: ScaleOptions): string[] {
   return [...monthly, ...daily];
 }
 
-/** Mostly single payments; the rest are shapes recognition leaves alone. */
-const PAYMENT_TYPES = [
-  "1回払い",
-  "1回払い",
-  "1回払い",
-  "1回払い",
-  "1回払い",
-  "1回払い",
-  "2回払い",
-  "2回払い",
-  "リボ",
-  "分割",
-];
+/**
+ * Mostly single payments, in each source's production shape (the Vpass code
+ * `1`, MyJCB's `1回払`); the rest are shapes recognition leaves alone.
+ */
+const PAYMENT_TYPES = {
+  vpass: ["1", "1", "1", "1", "1", "1", "2", "2", "5", "3"],
+  myjcb: ["1回払", "1回払", "1回払", "1回払", "1回払", "1回払", "2回払", "2回払", "リボ", "分割"],
+};
 
 type MonthRow = UsageRow & { day: number };
 
@@ -172,7 +167,8 @@ function monthPages(
   const days = daysIn(usage);
   const rows = Array.from({ length: count }, (_, index): MonthRow => {
     const day = 1 + Math.floor((index * days) / count);
-    const paymentType = PAYMENT_TYPES[Math.floor(next() * PAYMENT_TYPES.length)]!;
+    const types = PAYMENT_TYPES[vpassDate ? "vpass" : "myjcb"];
+    const paymentType = types[Math.floor(next() * types.length)]!;
     const yen = 100 + Math.floor(next() * 30_000);
     const refund = next() < 0.03;
     const dd = String(day).padStart(2, "0");

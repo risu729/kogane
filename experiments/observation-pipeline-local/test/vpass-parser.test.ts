@@ -92,7 +92,7 @@ describe("Vpass canonical Layer-B parser", () => {
       asOf: "2026-08-15",
       rawLocator: "json:$.body.content.WebMeisaiTopDisplayServiceBean.meisaiList[0]",
       extra: {
-        data: ["4K", "005", "", "26/08/15", "架空商店", "1,234", "1回払い", "", "", "", ""],
+        data: ["4K", "005", "", "26/08/15", "架空商店", "1,234", "１", "", "", "", ""],
         _kogane: {
           statementFamily: "web",
           providerSubtype: "4K/005",

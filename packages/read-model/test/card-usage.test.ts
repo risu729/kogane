@@ -127,18 +127,22 @@ describe("the Transactions page composes the shared snapshot currentness", () =>
     // description, counterparty, external_id, status, parser] per row.
     // vpass-statement-page@1.2.0 changed only the parser label and the id of
     // row 7, the one row on a later page (answer-001), which now names it.
+    // The fixture's move to the production payment-type shapes (the Vpass
+    // codes `１`/`1`, MyJCB's combined `<merchant> 1回払` cell and its
+    // two-character label) changed only the description, counterparty and
+    // fingerprint columns; every id, amount, date and status is as pinned.
     const pinned = [
-      '[19,"myjcb","myjcb:conn-a:root","2026-06-02","-300","-300","JPY","1回払い","架空店舗J","myjcb-credit-ledger:unconfirmed:43973f46589c6f9a489c7ed4218dc116:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
-      '[7,"vpass","vpass:card-001","2026-06-02","-3300","-3300","JPY","1回払い","架空店舗E","vpass:card-001:202606:customized:5b6f6dfe410320aa57f741f484c71cae:answer-001:0","unconfirmed","vpass-statement-page@1.2.0"]',
-      '[6,"vpass","vpass:card-001","2026-06-01","-1234","-1234","JPY","1回払い","架空店舗D","vpass:card-001:202606:customized:ea8cf62a0b9c5d36f0a122146a2e1a1a:0","unconfirmed","vpass-statement-page@1.2.0"]',
+      '[19,"myjcb","myjcb:conn-a:root","2026-06-02","-300","-300","JPY","架空","架空店舗J 1回払","myjcb-credit-ledger:unconfirmed:933c80ea937d61fe5f7ee1881f0119ba:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
+      '[7,"vpass","vpass:card-001","2026-06-02","-3300","-3300","JPY","1","架空店舗E","vpass:card-001:202606:customized:b865a357c66258e3595a021db53dfb27:answer-001:0","unconfirmed","vpass-statement-page@1.2.0"]',
+      '[6,"vpass","vpass:card-001","2026-06-01","-1234","-1234","JPY","1","架空店舗D","vpass:card-001:202606:customized:e625f5b7f35b3d23a6df2ed9341ed247:0","unconfirmed","vpass-statement-page@1.2.0"]',
       '[22,"smbc-bank","smbc-bank:ordinary-yen","2026-05-20","-500","-500","JPY","synthetic",null,"synthetic-bank-1","posted","synthetic-bank-history@1"]',
-      '[18,"myjcb","myjcb:conn-a:root","2026-05-10","-800","-800","JPY","1回払い","架空店舗I","myjcb-credit-ledger:unconfirmed:bb6bbdd395fa78f7170f01ed1d734c23:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
-      '[5,"vpass","vpass:card-001","2026-05-06",null,null,"JPY","1回払い","架空店舗C","vpass:card-001:202605:web:0702f13a372bb72634d3126c1fd1908a:0","posted","vpass-statement-page@1.2.0"]',
-      '[4,"vpass","vpass:card-001","2026-05-05","-5000","-5000","JPY","2回払い","架空店舗B","vpass:card-001:202605:web:1176787a086c350ee4e2c060982565ea:0","posted","vpass-statement-page@1.2.0"]',
-      '[3,"vpass","vpass:card-001","2026-05-03","-2000","-2000","JPY","1回払い","架空店舗A","vpass:card-001:202605:web:5ce5da3937a69cfd96ab9fdf5b2ba6a9:0","posted","vpass-statement-page@1.2.0"]',
-      '[17,"myjcb","myjcb:conn-a:root","2026-04-21","-4000","-4000","JPY","分割","架空店舗H","myjcb-credit-ledger:confirmed:375466d7e2ff11f3949a2a81daafb267:0","confirmed","myjcb-credit-ledger@1.1.1"]',
-      '[16,"myjcb","myjcb:conn-a:root","2026-04-20","-1000","-1000","JPY","1回払い","架空店舗G","myjcb-credit-ledger:confirmed:56609643544b87efe207ed214986fa93:0","confirmed","myjcb-credit-ledger@1.1.1"]',
-      '[14,"myjcb","myjcb:conn-a:root","2026-03-15","-2500","-2500","JPY","1回払い","架空店舗L","myjcb-credit-ledger:confirmed:2552391aa286539e07de30e0fe9e530a:0","confirmed","myjcb-credit-ledger@1.1.1"]',
+      '[18,"myjcb","myjcb:conn-a:root","2026-05-10","-800","-800","JPY","架空","架空店舗I 1回払","myjcb-credit-ledger:unconfirmed:f32e4a3b0b17730ff548bed596f7bc8b:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
+      '[5,"vpass","vpass:card-001","2026-05-06",null,null,"JPY","","架空店舗C","vpass:card-001:202605:web:b73cad7c67672c50c243b322a569b12c:0","posted","vpass-statement-page@1.2.0"]',
+      '[4,"vpass","vpass:card-001","2026-05-05","-5000","-5000","JPY","２","架空店舗B","vpass:card-001:202605:web:f84a958500574c19cfd5a2a3f1fb0715:0","posted","vpass-statement-page@1.2.0"]',
+      '[3,"vpass","vpass:card-001","2026-05-03","-2000","-2000","JPY","１","架空店舗A","vpass:card-001:202605:web:33214f40941f9024c65b166e9eac70d0:0","posted","vpass-statement-page@1.2.0"]',
+      '[17,"myjcb","myjcb:conn-a:root","2026-04-21","-4000","-4000","JPY","架空","架空店舗H 分割","myjcb-credit-ledger:confirmed:28b0598147b4713decd51977dab8e871:0","confirmed","myjcb-credit-ledger@1.1.1"]',
+      '[16,"myjcb","myjcb:conn-a:root","2026-04-20","-1000","-1000","JPY","架空","架空店舗G 1回払","myjcb-credit-ledger:confirmed:c1f3af2b2cad5e47f8b804c9fd1db53b:0","confirmed","myjcb-credit-ledger@1.1.1"]',
+      '[14,"myjcb","myjcb:conn-a:root","2026-03-15","-2500","-2500","JPY","架空","架空店舗L 1回払","myjcb-credit-ledger:confirmed:4a56d41235b7a7a6c1d4c53855be6402:0","confirmed","myjcb-credit-ledger@1.1.1"]',
     ];
     const { store } = baseWorld();
     expect(
@@ -229,8 +233,12 @@ describe("current card usage", () => {
         shown.as_of,
       ]);
       expect(row.provider_status).toBe(shown.status);
-      // The extra_json paths read the payment type each parser also wrote to `description`.
-      expect(row.payment_type).toBe(shown.description);
+      // The extra_json paths read the payment type where each parser also wrote
+      // it: Vpass to `description`; MyJCB inside the combined ご利用先など／支払区分
+      // cell, which its parser writes to `counterparty` (its `description` is
+      // the two-character label). An empty text reads as NULL.
+      const written = row.source_id === "myjcb" ? shown.counterparty : shown.description;
+      expect(row.payment_type).toBe(written === "" ? null : written);
     }
     expect(ids(rows)).not.toContain(world.bank.observations[0]!);
     expect(rows.every((row) => row.account_id !== null)).toBe(true);
@@ -259,8 +267,8 @@ describe("current card usage", () => {
       return parsed;
     };
     const pending = capture("customized", "2026-05-10T00:00:00.000Z", [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払い" },
-      { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1回払い" },
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1" },
+      { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1" },
     ]);
     expect(
       usage(store.db).map((row) => [
@@ -277,7 +285,7 @@ describe("current card usage", () => {
     ]);
 
     const posted = capture("web", "2026-06-10T00:00:00.000Z", [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" },
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1" },
     ]);
     const rows = usage(store.db);
     expect(
@@ -303,7 +311,7 @@ describe("current card usage", () => {
       month: "202606",
       family: "web",
       fetchedAt: "2026-07-01T00:00:00.000Z",
-      rows: [{ date: "26/06/09", merchant: "架空店舗M", amount: "600", paymentType: "1回払い" }],
+      rows: [{ date: "26/06/09", merchant: "架空店舗M", amount: "600", paymentType: "1" }],
     });
     // A newer capture whose second page was never parsed at all.
     const partial = store.run("vpass");
@@ -313,7 +321,7 @@ describe("current card usage", () => {
       month: "202605",
       family: "web",
       fetchedAt: "2026-07-02T00:00:00.000Z",
-      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1回払い" }],
+      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1" }],
     });
     store.vpassPage({
       run: partial,
@@ -360,7 +368,7 @@ describe("current card usage", () => {
       date,
       merchant,
       amount,
-      paymentType: "1回払い",
+      paymentType: "1",
     });
     // 2026-05-10: the card is ordinal card-001; card-005 is fetched but never identified.
     const may = store.run("vpass");
@@ -464,7 +472,7 @@ describe("current card usage", () => {
       date,
       merchant: "架空店舗J",
       amount,
-      paymentType: "1回払い",
+      paymentType: "1回払",
     });
     const first = store.run("myjcb");
     const oldConnection = [
@@ -664,7 +672,8 @@ describe("current card usage", () => {
       statement_period: "202605",
       snapshot_unit: "card-001",
       snapshot_fetched_at: "2026-06-10T00:00:00.000Z",
-      payment_type: "2回払い",
+      // Production web rows carry the payment-type code full width.
+      payment_type: "２",
       provider_sale_code: null,
       usage_amount_text: null,
     });
@@ -673,7 +682,7 @@ describe("current card usage", () => {
       provider_family: "customized",
       display_state: "pending",
       statement_period: "202606",
-      payment_type: "1回払い",
+      payment_type: "1",
       provider_sale_code: "5",
     });
     // SC04: an installment slice keeps its usage, payment and 今回回数 apart.
@@ -685,7 +694,8 @@ describe("current card usage", () => {
       display_state: "posted",
       statement_period: "202605",
       snapshot_unit: "conn-a",
-      payment_type: "分割",
+      // The combined ご利用先など／支払区分 cell, merchant and payment type together.
+      payment_type: "架空店舗H 分割",
       usage_amount_text: "12,000",
       payment_amount_text: "4,000",
       installment_count_text: "1",
@@ -719,7 +729,7 @@ describe("current card usage", () => {
       date: "26/05/03",
       merchant: "架空店舗A",
       amount: "500",
-      paymentType: "1回払い",
+      paymentType: "1",
     };
     const pages = [
       store.vpassPage({
@@ -780,7 +790,7 @@ describe("current card usage", () => {
       month: "202605",
       family: "customized",
       fetchedAt: "2026-05-10T00:00:00.000Z",
-      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払い" }],
+      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1" }],
     });
     store.identify(pending, card, {
       version: 2,
@@ -795,7 +805,7 @@ describe("current card usage", () => {
       month: "202605",
       family: "web",
       fetchedAt: "2026-06-10T00:00:00.000Z",
-      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" }],
+      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1" }],
     });
     // Until identity runs for the new ordinal its rows resolve to no account,
     // so they cannot shadow anything yet: both captures are current.
@@ -820,7 +830,7 @@ describe("current card usage", () => {
       date: "2026/05/10",
       merchant: "架空店舗I",
       amount: "800",
-      paymentType: "1回払い",
+      paymentType: "1回払",
       other: "800",
     };
     const pending = store.myjcbLedger({
@@ -871,9 +881,7 @@ describe("current card usage", () => {
         month: "202605",
         family: "web",
         fetchedAt: "2026-06-10T00:00:00.000Z",
-        rows: [
-          { date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1回払い" },
-        ],
+        rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1" }],
       });
     const perRun = (card: string) => ({
       ref: `sa-${card}-run-${run}`,
@@ -923,9 +931,7 @@ describe("current card usage", () => {
       state: "confirmed",
       period: "202605",
       fetchedAt: "2026-06-12T00:00:00.000Z",
-      rows: [
-        { date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払い" },
-      ],
+      rows: [{ date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払" }],
     });
     store.identify(ledger, myjcbRoot("conn-a", "acct-jcb"), { version: 1 });
 
@@ -971,7 +977,7 @@ describe("current card usage", () => {
       month: "202605",
       family: "customized",
       fetchedAt: "2026-05-10T00:00:00.000Z",
-      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1回払い" }],
+      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1" }],
     });
     store.identify(page, vpassCard(TOKEN_A, "acct-card-a"), {
       version: 2,
@@ -1010,7 +1016,7 @@ describe("current card usage", () => {
       row.payment_type,
       row.provider_sale_code,
     ];
-    expect(extras(view(page.observations[0]!))).toEqual(["customized", "202605", "1回払い", "5"]);
+    expect(extras(view(page.observations[0]!))).toEqual(["customized", "202605", "1", "5"]);
     expect(extras(view(malformed))).toEqual([null, null, null, null]);
     expect(extras(view(oversized))).toEqual(["customized", null, null, null]);
     expect(view(atBound).payment_type).toBe("y".repeat(CARD_USAGE_TEXT_BOUND));

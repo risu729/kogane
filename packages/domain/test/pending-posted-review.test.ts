@@ -46,7 +46,8 @@ function row(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
     providerStatus: "posted",
     amount: exactQuantity("JPY", integerDecimal(-1234), "decimal-v1"),
     usageDate: "2026-08-21",
-    paymentType: "1回払い",
+    // The web family's payment-type code as production shows it (full width).
+    paymentType: "１",
     statementPeriod: "202609",
     providerSaleCode: null,
     usageAmountText: null,
@@ -63,6 +64,8 @@ const PENDING = row({
   providerStatus: "unconfirmed",
   amount: exactQuantity("JPY", integerDecimal(-1200), "decimal-v1"),
   usageDate: "2026-08-20",
+  // The customized family writes the same code in ASCII.
+  paymentType: "1",
   providerSaleCode: "5",
 });
 

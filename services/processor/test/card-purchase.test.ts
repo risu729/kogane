@@ -96,7 +96,7 @@ const POSTED: UsageRow = {
   date: "26/05/03",
   merchant: "架空店舗A",
   amount: "1,234",
-  paymentType: "1回払い",
+  paymentType: "1",
 };
 
 const DEFAULT_STAGES = {
@@ -157,10 +157,7 @@ test("a posted single-payment Vpass row is one captured purchase with a rule dec
   const capture = await w.vpass({
     family: "web",
     fetchedAt: "2026-06-10T00:00:00.000Z",
-    rows: [
-      POSTED,
-      { date: "26/05/05", merchant: "架空店舗B", amount: "5,000", paymentType: "2回払い" },
-    ],
+    rows: [POSTED, { date: "26/05/05", merchant: "架空店舗B", amount: "5,000", paymentType: "2" }],
   });
   const first = await w.sweep();
   expect(first).toEqual({
@@ -246,7 +243,7 @@ test("a posted single-payment Vpass row is one captured purchase with a rule dec
     statement_period: "2026-05",
   });
   expect(validCardPurchaseFacts(JSON.parse(sidecar!["facts_json"]))).toBe(true);
-  expect(JSON.stringify(await w.snapshot())).not.toMatch(/架空|回払い/u);
+  expect(JSON.stringify(await w.snapshot())).not.toMatch(/架空|回払|１|２/u);
   expect(await w.totals()).toEqual({
     captured: "1234",
     authorized: "0",
@@ -293,8 +290,8 @@ test("customized → authorized; the web snapshot of the month → captured post
     family: "customized",
     fetchedAt: "2026-05-10T00:00:00.000Z",
     rows: [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払い" },
-      { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1回払い" },
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1" },
+      { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1" },
     ],
   });
   expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 2 });
@@ -317,10 +314,7 @@ test("customized → authorized; the web snapshot of the month → captured post
   await w.vpass({
     family: "web",
     fetchedAt: "2026-06-10T00:00:00.000Z",
-    rows: [
-      POSTED,
-      { date: "26/05/06", merchant: "架空店舗C", amount: "700", paymentType: "1回払い" },
-    ],
+    rows: [POSTED, { date: "26/05/06", merchant: "架空店舗C", amount: "700", paymentType: "1" }],
   });
   const flipped = await w.sweep();
   expect(counts(flipped)).toEqual({ ...NOTHING, recognized: 2, retired: 2 });
@@ -369,7 +363,7 @@ test("MyJCB: usage equal to payment is captured; the installment slice is skippe
         date: "2026/04/20",
         merchant: "架空店舗G",
         amount: "1,000",
-        paymentType: "1回払い",
+        paymentType: "1回払",
         other: "1,000",
       },
       // A single payment whose usage total differs from this statement's payment.
@@ -377,7 +371,7 @@ test("MyJCB: usage equal to payment is captured; the installment slice is skippe
         date: "2026/04/21",
         merchant: "架空店舗H",
         amount: "4,000",
-        paymentType: "1回払い",
+        paymentType: "1回払",
         other: "12,000",
         installment: "1",
       },
@@ -394,7 +388,7 @@ test("MyJCB: usage equal to payment is captured; the installment slice is skippe
     state: "unconfirmed",
     period: "2026年7月お支払い分",
     fetchedAt: "2026-05-12T00:00:00.000Z",
-    rows: [{ date: "2026/05/10", merchant: "架空店舗J", amount: "800", paymentType: "1回払い" }],
+    rows: [{ date: "2026/05/10", merchant: "架空店舗J", amount: "800", paymentType: "1回払" }],
   });
   const result = await w.sweep();
   expect(result).toMatchObject({
@@ -414,6 +408,129 @@ test("MyJCB: usage equal to payment is captured; the installment slice is skippe
     { source_id: "myjcb", statement_period: "2026-07", amount_check: "usage-equals-payment" },
   ]);
   expect(await w.count("SELECT count(*) AS n FROM economic_event_revisions")).toBe(2);
+}, 60_000);
+
+test("production-shaped rows are recognised: the Vpass code 1 (web １, customized 1) and MyJCB's 1回払 in the combined cell; other shapes are skipped with a reason", async () => {
+  // The shapes the 2026-09-24 production diagnosis found, where every row was
+  // skipped as payment_type_unsupported: a full-width digit in the web page's
+  // data[6] (blank on its amountless rows), an ASCII digit in the customized
+  // page's bunkatsuYaku, and MyJCB's 1回払 inside the combined ご利用先など／
+  // 支払区分 cell next to a two-character label. The world's builders write
+  // exactly these shapes.
+  const w = await world();
+  await w.vpass({
+    family: "web",
+    month: "202605",
+    fetchedAt: "2026-06-10T00:00:00.000Z",
+    rows: [
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1" },
+      { date: "26/05/04", merchant: "架空返金A", amount: "-500", paymentType: "1" },
+      // Amountless, with a blank payment type, as production shows it.
+      { date: "26/05/05", merchant: "架空店舗B", amount: "", paymentType: "" },
+      // A code no production row has shown yet: unverified, so excluded.
+      { date: "26/05/06", merchant: "架空店舗C", amount: "2,000", paymentType: "2" },
+      // The wording the synthetic fixtures used to invent is not a Vpass shape.
+      { date: "26/05/07", merchant: "架空店舗D", amount: "700", paymentType: "1回払い" },
+    ],
+  });
+  await w.vpass({
+    family: "customized",
+    month: "202606",
+    fetchedAt: "2026-06-10T00:00:00.000Z",
+    rows: [
+      { date: "26/06/01", merchant: "架空店舗E", amount: "1,500", paymentType: "1" },
+      { date: "26/06/02", merchant: "架空返金E", amount: "-300", paymentType: "1" },
+    ],
+  });
+  await w.myjcb({
+    state: "confirmed",
+    period: "2026年6月お支払い分",
+    fetchedAt: "2026-06-10T00:00:00.000Z",
+    rows: [
+      {
+        date: "2026/04/20",
+        merchant: "架空店舗G",
+        amount: "1,000",
+        paymentType: "1回払",
+        other: "1,000",
+      },
+      {
+        date: "2026/04/22",
+        merchant: "架空店舗I",
+        amount: "3,000",
+        paymentType: "分割払い",
+        other: "9,000",
+      },
+    ],
+  });
+  // A pending MyJCB row whose payment text is not readable stays unknown.
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "2026年7月お支払い分",
+    fetchedAt: "2026-06-10T00:00:00.000Z",
+    rows: [
+      { date: "2026/05/10", merchant: "架空店舗J", amount: "800", paymentType: "1回払", other: "" },
+    ],
+  });
+  const usage = await w.usage();
+  // What the read model hands the rule: the Vpass codes and the combined cell.
+  expect(
+    usage
+      .map((row) => `${row.source_id}:${row.provider_family}:${row.payment_type}`)
+      .sort((left, right) => left.localeCompare(right)),
+  ).toEqual(
+    [
+      "myjcb:confirmed:架空店舗G 1回払",
+      "myjcb:confirmed:架空店舗I 分割払い",
+      "myjcb:unconfirmed:架空店舗J 1回払",
+      "vpass:customized:1",
+      "vpass:customized:1",
+      "vpass:web:null",
+      "vpass:web:１",
+      "vpass:web:１",
+      "vpass:web:２",
+      "vpass:web:１回払い",
+    ].sort((left, right) => left.localeCompare(right)),
+  );
+  const result = await w.sweep();
+  expect(result).toMatchObject({
+    scanned: 10,
+    recognized: 5,
+    revised: 0,
+    reanchored: 0,
+    retired: 0,
+    skipped: { amount_not_exact: 1, payment_type_unsupported: 3, payment_split_unknown: 1 },
+    conflicts: 0,
+    failed: 0,
+  });
+  expect(await w.totals()).toEqual({
+    captured: "2234",
+    authorized: "1500",
+    capturedRefunds: "500",
+    authorizedRefunds: "300",
+    unresolved: 0,
+  });
+  expect(
+    await w.all(
+      `SELECT source_id,kind,state,json_extract(facts_json,'$.paymentType') AS payment_type
+       FROM current_card_purchase_recognitions ORDER BY source_id,state,kind`,
+    ),
+  ).toEqual([
+    { source_id: "myjcb", kind: "purchase", state: "captured", payment_type: "single-payment" },
+    { source_id: "vpass", kind: "purchase", state: "authorized", payment_type: "single-payment" },
+    { source_id: "vpass", kind: "refund", state: "authorized", payment_type: "single-payment" },
+    { source_id: "vpass", kind: "purchase", state: "captured", payment_type: "single-payment" },
+    { source_id: "vpass", kind: "refund", state: "captured", payment_type: "single-payment" },
+  ]);
+  // Only codes reach storage: no merchant, payment wording or code text.
+  expect(JSON.stringify(await w.snapshot())).not.toMatch(/架空|回払|分割|１|２/u);
+  // The whole current set fits one page, so the pass wraps the cursor: the
+  // next tick reads every row again, and a row skipped before (as every row
+  // was before this rule) is recognised the first tick the rule accepts it.
+  expect(await w.cursor()).toBe(0);
+  const again = await w.sweep();
+  expect(counts(again)).toEqual(NOTHING);
+  expect(again.scanned).toBe(10);
 }, 60_000);
 
 test("an unpublished parse, an unresolved account or a Vpass identity without the card binding recognises nothing", async () => {
@@ -474,10 +591,7 @@ test("a refund row is its own refund event with an increase leg and no allocatio
   await w.vpass({
     family: "web",
     fetchedAt: "2026-06-10T00:00:00.000Z",
-    rows: [
-      POSTED,
-      { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1回払い" },
-    ],
+    rows: [POSTED, { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1" }],
   });
   expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 2 });
   expect(
@@ -641,10 +755,7 @@ test("the key trigger refuses a second live holder, and a concurrent duplicate b
   await w.vpass({
     family: "web",
     fetchedAt: "2026-06-20T00:00:00.000Z",
-    rows: [
-      POSTED,
-      { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1回払い" },
-    ],
+    rows: [POSTED, { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1" }],
   });
   const raced = await Promise.all([w.sweep(), w.sweep()]);
   expect(raced[0]!.recognized + raced[1]!.recognized).toBe(1);
@@ -663,7 +774,7 @@ test("a card ordinal change under one resolved account retires the old events an
   const w = await world();
   const rows: UsageRow[] = [
     POSTED,
-    { date: "26/05/07", merchant: "架空店舗E", amount: "2,000", paymentType: "1回払い" },
+    { date: "26/05/07", merchant: "架空店舗E", amount: "2,000", paymentType: "1" },
   ];
   await w.vpass({ family: "web", card: "card-001", fetchedAt: "2026-06-10T00:00:00.000Z", rows });
   await w.sweep();
@@ -847,7 +958,7 @@ test("accepting a card settlement adds no purchase-recognition leg and leaves th
         date: "2026/04/20",
         merchant: "架空店舗G",
         amount: "1,000",
-        paymentType: "1回払い",
+        paymentType: "1回払",
         other: "1,000",
       },
     ],
@@ -894,8 +1005,8 @@ test("bounds: the write budget holds the cursor, the last page wraps to 0, and a
   const w = await world();
   const rows: UsageRow[] = [
     POSTED,
-    { date: "26/05/07", merchant: "架空店舗E", amount: "2,000", paymentType: "1回払い" },
-    { date: "26/05/08", merchant: "架空店舗F", amount: "300", paymentType: "1回払い" },
+    { date: "26/05/07", merchant: "架空店舗E", amount: "2,000", paymentType: "1" },
+    { date: "26/05/08", merchant: "架空店舗F", amount: "300", paymentType: "1" },
   ];
   const capture = await w.vpass({
     family: "web",
@@ -946,8 +1057,8 @@ test("log lines carry counts only: no amount, merchant, account or identifier", 
     family: "web",
     fetchedAt: "2026-06-10T00:00:00.000Z",
     rows: [
-      { date: "26/05/03", merchant: "架空店舗Z", amount: "98,765", paymentType: "1回払い" },
-      { date: "26/05/04", merchant: "架空店舗Y", amount: "43,210", paymentType: "リボ" },
+      { date: "26/05/03", merchant: "架空店舗Z", amount: "98,765", paymentType: "1" },
+      { date: "26/05/04", merchant: "架空店舗Y", amount: "43,210", paymentType: "2" },
     ],
   });
   const lines: string[] = [];
@@ -981,8 +1092,9 @@ test("log lines carry counts only: no amount, merchant, account or identifier", 
     "98,765",
     "43210",
     "架空",
-    "リボ",
-    "回払い",
+    // The payment-type codes as the web page shows them.
+    "１",
+    "２",
     "card-001",
     TOKEN_A,
     row!.account_id!,
@@ -1016,7 +1128,7 @@ test("keys with slashes, plus signs, full-width, escaped and control characters 
     date: `26/05/${String(index + 1).padStart(2, "0")}`,
     merchant: `架空店舗${index}`,
     amount: `${index + 1},000`,
-    paymentType: "1回払い",
+    paymentType: "1",
   }));
   await w.vpass({
     family: "web",
@@ -1029,7 +1141,7 @@ test("keys with slashes, plus signs, full-width, escaped and control characters 
     period: "2026年6月お支払い分",
     fetchedAt: "2026-05-12T00:00:00.000Z",
     namespace: 'ns/＋"\\\u0001é',
-    rows: [{ date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払い" }],
+    rows: [{ date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払" }],
     rewrite,
   });
   const rows = await w.usage();
@@ -1059,7 +1171,7 @@ test("keys the retire pass cannot retire never hold recognition back", async () 
     date: "26/05/07",
     merchant: "架空店舗E",
     amount: "2,000",
-    paymentType: "1回払い",
+    paymentType: "1",
   };
   await w.vpass({ family: "web", fetchedAt: "2026-06-10T00:00:00.000Z", rows: [POSTED, other] });
   expect(await w.sweep()).toMatchObject({ recognized: 2, conflicts: 0, deferred: false });
@@ -1104,8 +1216,8 @@ test("keys the retire pass cannot retire never hold recognition back", async () 
     family: "web",
     fetchedAt: "2026-06-20T00:00:00.000Z",
     rows: [
-      { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1回払い" },
-      { date: "26/05/10", merchant: "架空店舗F", amount: "300", paymentType: "1回払い" },
+      { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1" },
+      { date: "26/05/10", merchant: "架空店舗F", amount: "300", paymentType: "1" },
     ],
   });
   // The page is full (both stale keys), one event is retired and the other's
@@ -1132,16 +1244,13 @@ test("cursor: an exactly full last page wraps on the next tick, a row below the 
     card: "card-002",
     token: TOKEN_B,
     fetchedAt: "2026-06-10T00:00:00.000Z",
-    rows: [{ date: "26/05/02", merchant: "架空店舗L", amount: "400", paymentType: "1回払い" }],
+    rows: [{ date: "26/05/02", merchant: "架空店舗L", amount: "400", paymentType: "1" }],
     publish: false,
   });
   const capture = await w.vpass({
     family: "web",
     fetchedAt: "2026-06-10T00:00:00.000Z",
-    rows: [
-      POSTED,
-      { date: "26/05/07", merchant: "架空店舗E", amount: "2,000", paymentType: "1回払い" },
-    ],
+    rows: [POSTED, { date: "26/05/07", merchant: "架空店舗E", amount: "2,000", paymentType: "1" }],
   });
   const [a, b] = capture.observations;
   expect(late.observations[0]!).toBeLessThan(a!);

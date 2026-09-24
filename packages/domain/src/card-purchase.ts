@@ -48,13 +48,30 @@ export const CARD_PURCHASE_ZONE = "Asia/Tokyo";
 /** The one basis these events carry; a card purchase moves no cash by itself. */
 export const CARD_PURCHASE_BASIS: RecognitionBasis = "purchase-recognition";
 /**
- * Payment types that are a single payment, compared after NFKC and trimming:
- * Vpass writes `1回払い`, MyJCB's ledger writes `一回払い`
- * (tests/fixtures/observation-pipeline/myjcb). Anything else (2回払い, 分割,
- * リボ, ボーナス一括, blank, a wording this list does not know yet) is
- * `payment_type_unsupported`: drift fails safe.
+ * What a single payment looks like, per source, in the column the read model
+ * reads (`payment_type`, packages/read-model/src/card-usage.ts), as production
+ * rows carry it (read-only D1 diagnosis, 2026-09-24):
+ *
+ * - Vpass (web `data[6]`, customized `bunkatsuYaku`): a one-digit provider
+ *   code, full width on the web family (`１`) and ASCII on the customized one
+ *   (`1`). Neither the repository nor the provider documents the code table;
+ *   every production row shows the same digit and the owner's usage is single
+ *   payment, so exactly `1` after NFKC is a single payment. Every other code
+ *   (`2`, `5`, ...), a blank and any wording is `payment_type_unsupported`
+ *   until a real installment, revolving or bonus row is observed (fail-safe).
+ * - MyJCB: the combined `ご利用先など／支払区分` cell (`summaryCells[1]`),
+ *   which holds the merchant and the payment type (`1回払`). See
+ *   `myjcbSinglePayment`.
  */
-export const SINGLE_PAYMENT_TYPES = ["1回払い", "一回払い"] as const;
+export const VPASS_SINGLE_PAYMENT_CODE = "1";
+/**
+ * Words of a MyJCB payment type that is not one single payment: installments,
+ * revolving, bonus and cash advance (キャッシング1回払い is a loan, not a
+ * purchase). Any of them anywhere in the cell excludes the row, even when a
+ * merchant name is what contains it: a skipped purchase is safe, a guessed one
+ * is not.
+ */
+export const MYJCB_NOT_SINGLE_WORDS = ["分割", "リボ", "ボーナス", "キャッシング"] as const;
 /** Vpass rows need the trusted card binding; a card ordinal is not an identity. */
 export const VPASS_STABLE_IDENTITY_FAMILY = "vpass-card-binding";
 
@@ -101,8 +118,10 @@ export type CardPurchaseKeyRole = "posted" | "pending";
 
 /**
  * One current provider usage row, as the read model returns it. Every field is
- * a code, an identifier, an amount or a date: the merchant and any other
- * provider text are deliberately absent, so they cannot reach a stored fact.
+ * a code, an identifier, an amount or a date, except the provider texts the
+ * rules read: `paymentType` (for MyJCB the combined cell that also holds the
+ * merchant) and the MyJCB amount texts. No stored fact carries any of them;
+ * the sidecar stores codes (`CardPurchaseFacts`).
  */
 export interface CardUsageFact {
   observationId: number;
@@ -122,7 +141,12 @@ export interface CardUsageFact {
   amount: Quantity;
   /** Provider usage date, `YYYY-MM-DD`. Never the statement or payment date. */
   usageDate: string | null;
-  /** Provider payment type (支払区分); compared, never stored. */
+  /**
+   * Provider payment type (支払区分), as the read model's `payment_type`: the
+   * Vpass one-digit code, or MyJCB's combined `ご利用先など／支払区分` cell,
+   * which also holds the merchant. Read only by the single-payment rule; never
+   * stored or logged.
+   */
   paymentType: string | null;
   /** `_kogane.statementMonth` or `_kogane.period` as parsed; normalised by `statementPeriod`. */
   statementPeriod: string | null;
@@ -298,10 +322,38 @@ function isCardSource(value: string): value is CardPurchaseSourceId {
   return (CARD_PURCHASE_SOURCES as readonly string[]).includes(value);
 }
 
-function singlePayment(value: string | null): boolean {
+/**
+ * A payment count, `N回払` or `N回払い`, in ASCII digits (after NFKC) or kanji
+ * numerals, whitespace allowed inside. It never starts right after another
+ * digit, so a merchant name ending in a digit and written with no space
+ * before `1回払` reads as a larger count (`21回払`) and is excluded, never as 1.
+ */
+const MYJCB_PAYMENT_COUNT =
+  /(?<![0-9〇一二三四五六七八九十百千])([0-9]+|[〇一二三四五六七八九十百千]+)\s*回\s*払/gu;
+
+/**
+ * Whether a MyJCB combined `ご利用先など／支払区分` cell states one single
+ * payment: after NFKC it holds at least one payment count (`1回払`, `1回払い`,
+ * `一回払い`, `１ 回払`) and every count it holds is 1, and with whitespace
+ * removed it holds none of `MYJCB_NOT_SINGLE_WORDS`. `2回払`, `11回払`,
+ * `分割払い`, `リボ払`, `ボーナス1回払`, `キャッシング1回払い`, a cell without a
+ * count and an absent cell are not.
+ */
+export function myjcbSinglePayment(cell: string | null): boolean {
+  if (cell === null) return false;
+  const text = cell.normalize("NFKC");
+  const compact = text.replace(/\s+/gu, "");
+  if (MYJCB_NOT_SINGLE_WORDS.some((word) => compact.includes(word))) return false;
+  const counts = [...text.matchAll(MYJCB_PAYMENT_COUNT)].map((match) => match[1]);
+  return counts.length > 0 && counts.every((count) => count === "1" || count === "一");
+}
+
+/** The per-source single-payment rule (`VPASS_SINGLE_PAYMENT_CODE`, `myjcbSinglePayment`). */
+function singlePayment(sourceId: CardPurchaseSourceId, value: string | null): boolean {
   if (value === null) return false;
-  const normalized = value.normalize("NFKC").trim();
-  return (SINGLE_PAYMENT_TYPES as readonly string[]).includes(normalized);
+  return sourceId === "vpass"
+    ? value.normalize("NFKC") === VPASS_SINGLE_PAYMENT_CODE
+    : myjcbSinglePayment(value);
 }
 
 function exactOf(quantity: Quantity): ExactDecimal | null {
@@ -336,7 +388,8 @@ export function classifyCardUsage(fact: CardUsageFact): CardUsageClassification 
   if (fact.amount.unitRef !== "JPY") return fail("unit_unsupported");
   const sign = compareDecimals(amount, integerDecimal(0));
   if (sign === 0) return fail("amount_zero");
-  if (!singlePayment(fact.paymentType)) return fail("payment_type_unsupported");
+  if (!isCardSource(fact.sourceId) || !singlePayment(fact.sourceId, fact.paymentType))
+    return fail("payment_type_unsupported");
   const kind: CardPurchaseKind = sign < 0 ? "purchase" : "refund";
   // The observation sign is the inverse of the provider's liability sign.
   const magnitude = sign < 0 ? negateDecimal(amount) : amount;

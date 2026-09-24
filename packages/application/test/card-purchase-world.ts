@@ -144,7 +144,7 @@ export class PurchaseWorld {
     this.run(
       `INSERT INTO transaction_observations(id,parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,
         currency,description,counterparty,as_of,observed_at,raw_locator,extra_json)
-       VALUES(?,1,?,?,?,?,?,0,'JPY','1回払い',?,?,'2026-09-07T00:00:00Z',?,'{}')`,
+       VALUES(?,1,?,?,?,?,?,0,'JPY','１',?,?,'2026-09-07T00:00:00Z',?,'{}')`,
       id,
       sourceAccount,
       input.externalId,

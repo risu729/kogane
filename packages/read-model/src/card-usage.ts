@@ -118,7 +118,12 @@ export interface CurrentCardUsageRow {
   unit_ref: string | null;
 
   // Provider extras; null when absent, not text, empty or over the bound.
-  /** Vpass web `data[6]`, Vpass customized `bunkatsuYaku`, MyJCB `summaryCells[paymentTypeCellIndex]`. */
+  /**
+   * Where each source's payment type (支払区分) is: Vpass web `data[6]` and
+   * customized `bunkatsuYaku` (a one-digit code), MyJCB `summaryCells[1]`, the
+   * combined `ご利用先など／支払区分` cell (merchant and `1回払` together). Only
+   * the domain's single-payment rule reads it.
+   */
   payment_type: string | null;
   /** Vpass customized `_kogane.providerSaleCode` (`5` sale, `6` refund). */
   provider_sale_code: string | null;
@@ -141,19 +146,26 @@ const MYJCB = "fa.source_id = 'myjcb' AND p.parser_name = 'myjcb-credit-ledger'"
 
 // Field sources (packages/parsers/src/parsers/*.ts, as deployed):
 // - vpass.ts parseWeb: status 'posted'; `extra` is the provider row (`data`,
-//   positional: data[6] is the payment type, the same text as `description`)
-//   plus `_kogane.statementFamily` = 'web' and `_kogane.statementMonth`.
+//   positional: data[6] is the payment type, the same text as `description`;
+//   production rows carry a one-digit full-width code there, `１`) plus
+//   `_kogane.statementFamily` = 'web' and `_kogane.statementMonth`.
 // - vpass.ts parseCustomized: status 'unconfirmed'; `extra` is the provider
-//   row (`bunkatsuYaku` is the payment type, the same text as `description`)
-//   plus `_kogane.statementFamily` = 'customized', `_kogane.statementMonth`
+//   row (`bunkatsuYaku` is the payment type, the same text as `description`;
+//   production rows carry a one-digit ASCII code, `1`) plus
+//   `_kogane.statementFamily` = 'customized', `_kogane.statementMonth`
 //   and `_kogane.providerSaleCode` (the row's `uriageKbn`: '5' sale, '6' refund).
 // - myjcb.ts myJcbCreditLedger: status 'confirmed'/'unconfirmed'; `extra` is
-//   `summaryCells` (the payment type at `_kogane.paymentTypeCellIndex`, 2 or
-//   3, the same text as `description`), `expanded` (provider cells such as
-//   今回回数) and `_kogane.statementState`, `_kogane.period`,
-//   `_kogane.usageAmountText`, `_kogane.paymentAmountText`. The last two are
-//   the fields services/processor/src/reconciliation-job.ts `comparablePayment`
-//   already reads (usage == payment > 0).
+//   `summaryCells`, `expanded` (provider cells such as 今回回数) and
+//   `_kogane.statementState`, `_kogane.period`, `_kogane.usageAmountText`,
+//   `_kogane.paymentAmountText`. The last two are the fields
+//   services/processor/src/reconciliation-job.ts `comparablePayment` already
+//   reads (usage == payment > 0). The payment type is read from
+//   `summaryCells[1]`, the combined `ご利用先など／支払区分` cell, which holds
+//   it (`1回払`) in every production row. The cell the parser names
+//   `_kogane.paymentTypeCellIndex` (and copies to `description`) holds a
+//   two-character on-screen label in production, not the payment type, so it
+//   is not read; the evidence already holds the value, so no parser release is
+//   needed to read it here.
 const PROVIDER_FAMILY = `CASE WHEN ${VPASS} THEN ${extraText("$._kogane.statementFamily")}
             WHEN ${MYJCB} THEN ${extraText("$._kogane.statementState")} END`;
 const STATEMENT_PERIOD = `CASE WHEN ${VPASS} THEN ${extraText("$._kogane.statementMonth")}
@@ -163,11 +175,7 @@ const PAYMENT_TYPE = `CASE WHEN ${VPASS} THEN
                 WHEN 'web' THEN ${extraText("$.data[6]")}
                 WHEN 'customized' THEN ${extraText("$.bunkatsuYaku")}
               END
-            WHEN ${MYJCB} AND json_valid(t.extra_json) THEN
-              CASE json_extract(t.extra_json, '$._kogane.paymentTypeCellIndex')
-                WHEN 2 THEN ${extraText("$.summaryCells[2]")}
-                WHEN 3 THEN ${extraText("$.summaryCells[3]")}
-              END
+            WHEN ${MYJCB} THEN ${extraText("$.summaryCells[1]")}
             END`;
 const DISPLAY_STATE = `CASE
               WHEN ${VPASS} AND t.status = 'unconfirmed' THEN 'pending'

@@ -124,9 +124,10 @@ describe("Vpass external ids across the pages of one card-month", () => {
   }
 
   test("a first page keeps its 1.1.0 external ids, so a single-page month is unchanged", () => {
-    // Pinned from vpass-statement-page@1.1.0 on the unmodified fixtures. The
-    // first page emits exactly what 1.1.0 emitted; a later page is the only
-    // place 1.2.0 changes an id.
+    // Pinned from vpass-statement-page@1.1.0 (the parser of 1b8cb84~1) on the
+    // unmodified fixtures, re-pinned the same way when the fixtures took the
+    // production payment-type codes (`１`, `1`). The first page emits exactly
+    // what 1.1.0 emitted; a later page is the only place 1.2.0 changes an id.
     const ids = (family: Family) =>
       transactions(
         readFileSync(join(FIXTURES_ROOT, `vpass-parser-boundaries/${family}.json`)),
@@ -134,11 +135,11 @@ describe("Vpass external ids across the pages of one card-month", () => {
       ).map((row) => [row.externalId, kogane(row)["identityOrigin"]]);
     const origin = "sanitized-row+card+month+family+occurrence";
     expect(ids("web")).toEqual([
-      ["vpass:card-001:202608:web:55bcb21e1086a30a4b889450a24a5e0e:0", origin],
+      ["vpass:card-001:202608:web:d914f30977e2c3b5b822a8b35331fd19:0", origin],
     ]);
     expect(ids("customized")).toEqual([
-      ["vpass:card-001:202608:customized:0c6f4e70142b56c44298998293fa9680:0", origin],
-      ["vpass:card-001:202608:customized:8ca0db538641d9179f60c8a98c6da943:0", origin],
+      ["vpass:card-001:202608:customized:46df2517b9abc04bd87378490846ce87:0", origin],
+      ["vpass:card-001:202608:customized:e907b572a910edf6a1d4305873f1cbc2:0", origin],
     ]);
   });
 });
