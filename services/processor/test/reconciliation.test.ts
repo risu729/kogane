@@ -20,9 +20,15 @@ import { decideProposal, type ProposalCommand } from "../src/reconciliation-comm
 import {
   factOf,
   factPageQuery,
+  GROUP_LIMIT,
+  GROUP_READ_LIMIT,
+  LOOKUP_CHUNK,
   reconciliationEnabled,
   reconciliationSweep,
   RECONCILIATION_SLICES,
+  SCAN_LIMIT,
+  WRITE_BATCH,
+  WRITE_LIMIT,
   type ReconciliationSlice,
 } from "../src/reconciliation-job.ts";
 import { runScheduled } from "../src/worker.ts";
@@ -1183,6 +1189,22 @@ test("a provider row id seen in two captures is still a stage A pair, accepted a
 });
 
 test("a slice larger than one page is visited in full across ticks, then wraps", async () => {
+  // The bounds docs/economic-events.md documents for one tick.
+  expect({
+    SCAN_LIMIT,
+    GROUP_LIMIT,
+    GROUP_READ_LIMIT,
+    WRITE_LIMIT,
+    LOOKUP_CHUNK,
+    WRITE_BATCH,
+  }).toEqual({
+    SCAN_LIMIT: 1_000,
+    GROUP_LIMIT: 200,
+    GROUP_READ_LIMIT: 2_000,
+    WRITE_LIMIT: 500,
+    LOOKUP_CHUNK: 1_000,
+    WRITE_BATCH: 100,
+  });
   const slice = syntheticSlice("synthetic-paged");
   // A July purchase whose posted row sits two rows after its pending row, and
   // an August purchase that only later pages reach.

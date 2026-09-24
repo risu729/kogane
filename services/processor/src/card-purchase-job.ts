@@ -47,8 +47,8 @@
 //      no recognised period (MyJCB's relative `detailMonth-N` labels) —
 //      written as `reconciliation_proposals` under the matcher's own digest
 //      (idempotent). The recognition cursor cycles through every
-//      current row, so no pair is starved the way a first-1,000-rows read
-//      starves it. A pair the provider itself linked (`autoAcceptable`) is
+//      current row, so a pair is reached however many rows a source has. A
+//      pair the provider itself linked (`autoAcceptable`) is
 //      accepted and merged in one batch as a rule decision; every other pair
 //      stays a proposal for review.
 //
@@ -125,9 +125,10 @@ export const CANDIDATE_READ_LIMIT = 2_000;
 /** New proposals one tick writes, in one batch. */
 export const CANDIDATE_WRITE_LIMIT = 100;
 /**
- * Proposal digests one stored-proposal lookup binds. Stage B pairs every
- * pending event with every posted event of a group (a group of 200 events is
- * up to 10,000 pairs, and a tick reads up to 2,000 events), so one lookup of
+ * Proposal digests one stored-proposal lookup binds. Stage B pairs a pending
+ * event with every posted event of its group inside its matching window (a
+ * group of 200 events all inside one window is up to 10,000 pairs, and a tick
+ * reads up to 2,000 events), so one lookup of
  * every pair could bind a JSON array of megabytes, past D1's 2 MB value
  * limit; chunked, each lookup binds at most about 67 KB.
  */

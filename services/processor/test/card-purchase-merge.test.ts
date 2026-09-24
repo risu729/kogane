@@ -638,6 +638,54 @@ test("the reconciliation lane and the purchase lane propose one pair once, under
     }
 }, 300_000);
 
+test("both lanes leave a posted row outside the matching window unproposed", async () => {
+  // Both writers pair through `stageBProposals`, so the window moves them
+  // together: of three posted rows of the pending row's month, only the one on
+  // its day is proposed, once. The one dated a day before the authorisation
+  // and the one six days after it (the window is five) are never written.
+  const early: UsageRow = { ...POSTED, date: "26/05/02", amount: "1,200" };
+  const late: UsageRow = { ...POSTED, date: "26/05/09", amount: "1,200" };
+  for (const order of ["reconciliation first", "purchases first"] as const) {
+    const w = await world();
+    const { capture } = await pendingThenPosted(w, [early, POSTED, late]);
+    if (order === "reconciliation first") {
+      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({
+        proposed: 1,
+        written: 1,
+      });
+      expect(counts(await w.sweep())).toEqual({ ...NOTHING, retired: 1, recognized: 3 });
+    } else {
+      expect(counts(await w.sweep())).toEqual({
+        ...NOTHING,
+        retired: 1,
+        recognized: 3,
+        proposed: 1,
+      });
+      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({
+        proposed: 1,
+        known: 1,
+        written: 0,
+      });
+    }
+    const [stored, ...others] = await proposals(w);
+    expect({ order, others }).toEqual({ order, others: [] });
+    const [, posted] = JSON.parse(stored!.target_refs_json) as SourceFactRef[];
+    expect(capture.observations.map((id) => `transaction:${id}`)).toContain(posted!.id);
+    expect(
+      await w.all<{ as_of: string }>(
+        "SELECT as_of FROM transaction_observations WHERE 'transaction:'||id=?",
+        posted!.id,
+      ),
+    ).toEqual([{ as_of: "2026-05-03" }]);
+    // Alone in the window, the pair is not ambiguous, and its digest is the
+    // matcher's for the same two rows.
+    expect(JSON.parse(stored!.rationale_codes_json)).not.toContain("multiple_candidates");
+    const digest = await pairDigest(JSON.parse(stored!.target_refs_json) as SourceFactRef[]);
+    expect(stored!.id).toBe(`rp_${digest}`);
+    await disposeWorlds();
+  }
+}, 300_000);
+
 test("a provider-linked pair the reconciliation lane accepted is merged once, without a second acceptance", async () => {
   const w = await world();
   await pendingThenPosted(w, [POSTED], linked("provider-auth-4"));

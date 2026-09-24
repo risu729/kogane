@@ -205,13 +205,13 @@ const inGroups = `f.source_account IN (SELECT json_extract(value,'$[0]') FROM js
   AND json_extract(g.value,'$[1]')=coalesce(f.statement_period,''))`;
 
 /** How many published rows each group in ?3 holds. */
-export const groupSizeQuery = `WITH f AS (${sliceFacts})
+const groupSizeQuery = `WITH f AS (${sliceFacts})
 SELECT f.source_account,coalesce(f.statement_period,'') AS period,count(*) AS n
 FROM f WHERE ${inGroups}
 GROUP BY f.source_account,coalesce(f.statement_period,'')`;
 
 /** Every published row of the groups in ?3, at most ?4, so each group is paired whole. */
-export const groupFactQuery = `WITH f AS (${sliceFacts})
+const groupFactQuery = `WITH f AS (${sliceFacts})
 SELECT f.* FROM f WHERE ${inGroups}
 ORDER BY f.source_account,coalesce(f.statement_period,''),f.id
 LIMIT ?4`;
