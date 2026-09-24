@@ -105,7 +105,10 @@ recognised card purchase: 利用 → 請求 → 引落.
   account, the newest capture first. A card ordinal that changed under one
   account still joins; a statement whose account is not resolved joins nothing.
 - The statement's settlement review is found by the (source, account, period)
-  key an acceptance reserves. While it is accepted, the page shows its
+  key an acceptance reserves: an accepted review first, then one still
+  proposed, then a withdrawn and a rejected one, newest first within each, so
+  a settlement withdrawn and later accepted again under a new candidate shows
+  the new acceptance. While it is accepted, the page shows its
   `card_settlement` event, its `settlement` allocation and the bank debit its
   facts cite; a proposed, rejected or withdrawn review is named without a debit.
 - A statement that cannot be shown is a reason, never a zero: `not_posted` for a

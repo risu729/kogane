@@ -279,12 +279,27 @@ period); no allocation is read or written for it
 `summary` covers every live event the filter selects, not only the page:
 captured, authorized, captured refunds and authorized refunds per unit, with
 no combined field, and a count of unresolved events. A filter of more than
-10,000 live events is refused with 413 rather than partly summed. The provider
+10,000 live events is refused with `413 result_limit_exceeded`, the reader's
+answer for a set too large to return complete ([read model](read-model.md)),
+rather than partly summed; a statement period narrows it. The provider
 statement totals are listed beside the figures and are never subtracted from
 or compared with them, and `settlementAddsPurchaseExpense` is `false`.
 `coverage` says the list is not a complete transaction history, names the
-excluded shapes, and counts the current provider rows no live event holds.
-All figures are exact decimals added in `@kogane/domain`.
+excluded shapes, and counts the current provider rows no live event holds,
+across every statement month whatever the filter. All figures are exact
+decimals added in `@kogane/domain`.
+
+Cost per request: one selection of the filter's live events that carries only
+what the figures, the order and the statement links read (a few hundred bytes
+per event; evidence, facts and history are read for the page's 50 events
+only), one statement query and one settlement query over the (account,
+source, period) keys of those events, and one pass of the shared current card
+usage query (`packages/read-model/src/card-usage.ts`) for the `current` flags
+and the unrecognised count. That pass reads every current Vpass/MyJCB capture
+and dominates the cost: on a synthetic store of about 34,000 usage
+observations (180 days of daily captures) and 8,200 live events, the
+unfiltered first page took about 0.4 s in `bun:sqlite`, of which the usage
+pass was about 0.3 s and the selection about 0.04 s.
 
 The route needs a human principal with `interpretation.accept` (the card
 settlement review's guard), is GET-only, and answers 404 unless
