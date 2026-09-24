@@ -24,23 +24,32 @@ beforeAll(async () => {
   db = (await scaledStore(CI_SCALE)).store.db;
 }, 60_000);
 
-/** Runs every statement as given, or with the shipped current card usage query in its place. */
+/**
+ * Runs every statement as given, or with the shipped current card usage query
+ * in its place; `seen` collects the statements as given.
+ */
 function executor(legacy: boolean, seen: string[] = []): SqlExecutor {
+  // A function replacement: the query text is never read for `$` patterns.
   const text = (query: string): string =>
-    legacy ? query.replace(CURRENT_CARD_USAGE_SQL, LEGACY_CURRENT_CARD_USAGE_SQL) : query;
+    legacy ? query.replaceAll(CURRENT_CARD_USAGE_SQL, () => LEGACY_CURRENT_CARD_USAGE_SQL) : query;
   return {
     all: async <T>(query: string, args: readonly unknown[]): Promise<T[]> => {
       seen.push(query);
       return db.query(text(query)).all(...(args as SQLQueryBindings[])) as T[];
     },
-    first: async <T>(query: string, args: readonly unknown[]): Promise<T | null> =>
-      (db.query(text(query)).get(...(args as SQLQueryBindings[])) as T | null) ?? null,
+    first: async <T>(query: string, args: readonly unknown[]): Promise<T | null> => {
+      seen.push(query);
+      return (db.query(text(query)).get(...(args as SQLQueryBindings[])) as T | null) ?? null;
+    },
   };
 }
 
 describe("card purchases on a scaled store without statistics", () => {
   test("pages equal the ones the shipped current usage query produced", async () => {
-    const first = await queryCardPurchases(executor(false));
+    const seen: string[] = [];
+    const first = await queryCardPurchases(executor(false, seen));
+    // The legacy executor has something to swap, so the comparison is not new against new.
+    expect(seen.some((query) => query.includes(CURRENT_CARD_USAGE_SQL))).toBe(true);
     expect(first.items).toHaveLength(CARD_PURCHASE_PAGE_SIZE);
     expect(first.coverage.unrecognizedCurrentRows).toBeGreaterThan(0);
     expect(first).toEqual(await queryCardPurchases(executor(true)));
@@ -67,6 +76,6 @@ describe("card purchases on a scaled store without statistics", () => {
     // The wrapper's own relations: the materialized usage and the page's key list.
     const steps = explain(db, usage[0]!, [0, -1, "[]"]);
     expect(unboundedScans(steps, ["usage", "u", "json_each"])).toEqual([]);
-    expect(currentRowsDriver(steps)).toBe("SCAN candidate");
+    expect(currentRowsDriver(steps)).toMatch(/^SCAN candidate\b/u);
   });
 });

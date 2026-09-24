@@ -31,6 +31,7 @@ import {
   VPASS_NAMESPACE,
   vpassCard,
 } from "./card-usage-fixture";
+import { LEGACY_CURRENT_CARD_USAGE_SQL } from "./card-usage-legacy-sql";
 
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
 const TOKEN_C = `vpass-card-v1-${"c".repeat(64)}`;
@@ -50,9 +51,17 @@ interface TransactionRow {
   parser: string;
 }
 
+/**
+ * One page of current usage. Every scenario below is also a differential
+ * check: the page must equal what the shipped query text returns.
+ */
 function usage(db: Database, afterId = 0, limit = CARD_USAGE_PAGE_LIMIT): CurrentCardUsageRow[] {
   const page = currentCardUsageSql({ afterId, limit });
-  return db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
+  const rows = db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
+  expect(rows).toEqual(
+    db.query(LEGACY_CURRENT_CARD_USAGE_SQL).all(...(page.args as never[])) as CurrentCardUsageRow[],
+  );
+  return rows;
 }
 
 function transactions(db: Database): TransactionRow[] {

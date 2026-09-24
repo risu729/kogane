@@ -112,24 +112,29 @@ describe("current card usage on a scaled store without statistics", () => {
     const usage = explain(db, page.sql, page.args);
     expect(unboundedScans(usage)).toEqual([]);
     // Every observation is reached from the current captures, never from all runs.
-    expect(currentRowsDriver(usage)).toBe("SCAN candidate");
+    expect(currentRowsDriver(usage)).toMatch(/^SCAN candidate\b/u);
     const stale = explain(db, STALE_CARD_PURCHASE_KEYS_SQL, [...ALL_PAGES, 100]);
     // The one pass over live keys is the read's purpose: every live key is checked once.
     expect(unboundedScans(stale, ["k"])).toEqual([]);
     expect(perRowKeyProbes(stale)).toEqual([]);
-    expect(stale.map((step) => step.detail)).toContain(
-      "SEARCH held USING INDEX card_purchase_recognition_keys_key (recognition_key=?)",
-    );
+    expect(
+      stale.some((step) =>
+        /^SEARCH held USING (?:COVERING )?INDEX card_purchase_recognition_keys_key \(recognition_key=\?\)/u.test(
+          step.detail,
+        ),
+      ),
+    ).toBe(true);
     const count = explain(db, UNRECOGNIZED_CARD_USAGE_COUNT_SQL, ALL_PAGES);
     expect(unboundedScans(count, ["usage"])).toEqual([]);
 
-    // The checks see what the shipped plans did: every terminal report,
-    // artifact, parse and observation walked before the snapshot filter, and
-    // each live key probed once per current key.
+    // The checks see what the shipped plans did: on bun's SQLite, every
+    // terminal report (`SCAN t USING INDEX idx_fetch_run_reports_one_terminal`)
+    // and from it every artifact, parse and observation walked before the
+    // snapshot filter, and each live key probed once per current key. Only the
+    // failure is asserted, not which scan the planner picks for it.
     const legacy = explain(db, LEGACY_CURRENT_CARD_USAGE_SQL, page.args);
-    expect(unboundedScans(legacy)).toContain(
-      "SCAN t USING INDEX idx_fetch_run_reports_one_terminal",
-    );
+    expect(unboundedScans(legacy)).not.toEqual([]);
+    expect(currentRowsDriver(legacy)).not.toMatch(/^SCAN candidate\b/u);
     expect(
       perRowKeyProbes(explain(db, LEGACY_STALE_CARD_PURCHASE_KEYS_SQL, [...ALL_PAGES, 100])),
     ).not.toEqual([]);

@@ -20,6 +20,7 @@ import { cardPurchaseRecognitionWrites } from "../../storage-d1/src/atomic/card-
 import {
   type CurrentCardUsageRow,
   currentCardUsageSql,
+  type PageSql,
   STALE_CARD_PURCHASE_KEY_LIMIT,
   type StaleCardPurchaseKeyRow,
   staleCardPurchaseKeysSql,
@@ -34,24 +35,38 @@ import {
   type UsageRow,
   vpassCard,
 } from "./card-usage-fixture";
+import {
+  LEGACY_CURRENT_CARD_USAGE_SQL,
+  LEGACY_STALE_CARD_PURCHASE_KEYS_SQL,
+  LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
+} from "./card-usage-legacy-sql";
 
 const NOW = "2026-09-24T00:00:00.000Z";
 
+/**
+ * Runs one read and the shipped text it replaced (card-usage-legacy-sql.ts)
+ * with the same arguments: every scenario below is also a differential check.
+ */
+function read<T>(db: Database, page: PageSql, legacy: string): T[] {
+  const rows = db.query(page.sql).all(...(page.args as SQLQueryBindings[])) as T[];
+  expect(rows).toEqual(db.query(legacy).all(...(page.args as SQLQueryBindings[])) as T[]);
+  return rows;
+}
+
 function usage(db: Database): CurrentCardUsageRow[] {
-  const page = currentCardUsageSql({ afterId: 0, limit: 1000 });
-  return db.query(page.sql).all(...(page.args as SQLQueryBindings[])) as CurrentCardUsageRow[];
+  return read(db, currentCardUsageSql({ afterId: 0, limit: 1000 }), LEGACY_CURRENT_CARD_USAGE_SQL);
 }
 
 function stale(db: Database, limit = 100): StaleCardPurchaseKeyRow[] {
-  const page = staleCardPurchaseKeysSql(limit);
-  return db.query(page.sql).all(...(page.args as SQLQueryBindings[])) as StaleCardPurchaseKeyRow[];
+  return read(db, staleCardPurchaseKeysSql(limit), LEGACY_STALE_CARD_PURCHASE_KEYS_SQL);
 }
 
 function unrecognized(db: Database): number {
-  const page = unrecognizedCardUsageCountSql();
-  return (
-    db.query(page.sql).get(...(page.args as SQLQueryBindings[])) as UnrecognizedCardUsageCountRow
-  ).unrecognized;
+  return read<UnrecognizedCardUsageCountRow>(
+    db,
+    unrecognizedCardUsageCountSql(),
+    LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
+  )[0]!.unrecognized;
 }
 
 /** The fact the writer reads from one current usage row. */
@@ -303,6 +318,8 @@ describe("recognition keys against current card usage", () => {
     expect(unrecognized(store.db)).toBe(2);
     await recognizeAll(store.db);
     expect(unrecognized(store.db)).toBe(1);
+    const staleBefore = stale(store.db);
+    expect(staleBefore).toHaveLength(2);
 
     // A current row without an external id has no key and is never held.
     const [row] = usage(store.db).filter((entry) => entry.source_id === "myjcb");
@@ -310,6 +327,9 @@ describe("recognition keys against current card usage", () => {
     store.appendRow(parsed, { externalId: null, extraJson: "{}" });
     expect(usage(store.db).some((entry) => entry.recognition_key === null)).toBe(true);
     expect(unrecognized(store.db)).toBe(2);
+    // Nor does it hide a stale key: \`held_current\` is compared with \`NOT IN\`,
+    // which a NULL would turn into "no row is stale".
+    expect(stale(store.db)).toEqual(staleBefore);
   }, 30_000);
 
   test("both reads compile on an empty store and bound their page", () => {

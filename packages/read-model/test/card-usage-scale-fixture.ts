@@ -865,8 +865,11 @@ export function allCurrentUsage(
   }
 }
 
-/** The fact the recognition lane classifies (services/processor `cardUsageFactOf`). */
-function factOf(row: CurrentCardUsageRow): CardUsageFact | null {
+/**
+ * The fact the recognition lane classifies (services/processor `cardUsageFactOf`),
+ * or null for a row without an exact decimal-v1 amount.
+ */
+export function factOf(row: CurrentCardUsageRow): CardUsageFact | null {
   if (row.value_status !== "exact" || row.coefficient === null || row.scale === null) return null;
   return {
     observationId: row.observation_id,
