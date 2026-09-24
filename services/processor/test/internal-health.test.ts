@@ -17,6 +17,8 @@ import {
   releaseSha,
   serviceBindingRequest,
 } from "../src/internal-health.ts";
+import { laneTick, type LaneTickResult } from "../src/lane-ticks.ts";
+import { recordLaneTick } from "../../../packages/storage-d1/src/core/lane-ticks.ts";
 import { startPipeline } from "./harness.ts";
 
 let mf: Miniflare;
@@ -110,10 +112,70 @@ test("the answer carries the build identity, the stores, the flags and the curso
     "SHARED_R2_INGEST_ENABLED",
   );
   expect(health["collectionScan"]).toMatchObject({ lane: "collection_scan" });
+  // No lane has ticked in this fixture: no record, rather than an invented one.
+  expect(health["laneTicks"]).toEqual([]);
   // Nothing has been projected in this fixture, so the READ pointer is absent
   // — reported as absence, never as a fresh pointer.
   expect(health["readPointer"]).toEqual({ present: false });
 });
+
+test("the answer carries the latest tick of every recorded lane, counts only", async () => {
+  const at = Date.now() - 60_000;
+  const record = (lane: string, startedAtMs: number, tick: LaneTickResult) =>
+    recordLaneTick(env.DB, laneTick(lane, startedAtMs, startedAtMs + 250, tick)!);
+  await record("purchase_recognition", at - 300_000, { outcome: "failed", code: "TypeError" });
+  await record("purchase_recognition", at, {
+    outcome: "ran",
+    result: {
+      scanned: 3,
+      recognized: 1,
+      revised: 0,
+      reanchored: 0,
+      retired: 0,
+      skipped: { payment_type_unsupported: 2 },
+      conflicts: 0,
+      failed: 0,
+      deferred: false,
+      proposed: 0,
+      merged: 0,
+      groupsSkipped: 0,
+    },
+  });
+  await record("reconciliation_sweep", at, { outcome: "skipped-by-flag" });
+  const { status, body } = await internalHealthBody(env);
+  // A lane's record is diagnosis, not health: it never makes the answer 503.
+  expect(status).toBe(200);
+  const ticks = (body as Record<string, any>)["laneTicks"] as Record<string, unknown>[];
+  expect(ticks.map((tick) => tick["lane"])).toEqual([
+    "purchase_recognition",
+    "reconciliation_sweep",
+  ]);
+  expect(ticks[0]).toEqual({
+    lane: "purchase_recognition",
+    outcome: "ran",
+    errorCode: null,
+    startedAt: new Date(at).toISOString(),
+    durationMs: 250,
+    ageMs: expect.any(Number),
+    counts: {
+      scanned: 3,
+      recognized: 1,
+      revised: 0,
+      reanchored: 0,
+      retired: 0,
+      skipped: { payment_type_unsupported: 2 },
+      conflicts: 0,
+      failed: 0,
+      deferred: false,
+      proposed: 0,
+      merged: 0,
+      groupsSkipped: 0,
+    },
+  });
+  expect(ticks[0]!["ageMs"]).toBeGreaterThanOrEqual(60_000 - 250);
+  expect(ticks[1]).toMatchObject({ outcome: "skipped-by-flag", errorCode: null, counts: {} });
+  await env.DB.prepare("DELETE FROM processor_lane_ticks").run();
+}, 30000);
 
 test("the DATA probe is one head of a fixed key and writes nothing", async () => {
   const before = (await env.DATA.list()).objects.length;

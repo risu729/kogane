@@ -33,6 +33,13 @@ A bounded Processor sweep reads published observations, retaining provider
 identity and acquisition namespace. Exact same-unit amounts and nearby dates
 produce candidates only. They never cause automatic acceptance.
 
+The sweep is the `card_settlement_sweep` lane, right after
+`reconciliation_sweep` and under the same `RECONCILIATION_ENABLED` flag. It
+logs `{"event":"card_settlement_sweep","scanned":…,"proposed":…,"written":…}`
+(or `card_settlement_sweep_failed` with a safe code) and records each tick,
+including a `skipped-by-flag` one, in `processor_lane_ticks`
+([processor.md §6.1](processor.md#61-tick-records)).
+
 The `カード照合` page shows the source facts, evidence links, candidate rationale,
 current readiness blockers and decision history. An authenticated human operator
 can plan an acceptance or rejection; the confirmation page then simulates,
