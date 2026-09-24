@@ -264,6 +264,9 @@ describe.if(runnable)("explicit card ownership review", () => {
       .getByRole("button", { name: "この保有者の関係を却下する内容を確認", exact: true })
       .click();
     await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    // The page head renders before the server's simulation resolves; wait for
+    // every loading skeleton (plan and nested ownership evidence) to be gone.
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
     expect(posted.find((row) => row.operation === "plan")?.body.kind).toBe("relation.reject");
     expect(await page.locator("main").innerText()).toContain("の関係を却下します");
     expect(committed).toBe(false);
