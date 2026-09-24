@@ -1,7 +1,8 @@
 # Production rollout and feature controls
 
 The committed Wrangler configurations are the deployment authority. Production
-features were enabled on 2026-09-12 and the legacy path retired on 2026-09-13.
+features were enabled on 2026-09-12 and the legacy path retired on 2026-09-13;
+card purchase recognition was enabled on 2026-09-24.
 See [the retirement record](legacy-retirement.md) for resource and data verification.
 
 ## Production enablement — 2026-09-12
@@ -32,6 +33,28 @@ order; no migration or claim rewrite is needed.
 
 The table below retains the original **safe default** column for feature suspension; the
 production settings in `services/*/wrangler.jsonc` are the deployment authority.
+
+## Production enablement — 2026-09-24: card purchase recognition
+
+The owner, the only user of production, turned on
+`PURCHASE_RECOGNITION_ENABLED` (`"true"` in `services/processor/wrangler.jsonc`).
+The `purchase_recognition` lane turns adopted Vpass/MyJCB single-payment usage
+rows into purchase and refund events, each with a recorded `rule` decision. It
+works through the rows already published in bounded five-minute ticks: the
+retire pass retires at most 100 events and the recognition pass commits at most
+200 guarded writes (recognize, revise, reanchor), so one tick makes at most 300
+event mutations ([bounds](economic-events.md#bounds)).
+
+Prerequisites: CORE `0047`, which the release's migration step applies before
+the Workers deploy. The Vpass statement parser 1.2.0 (page-qualified external
+ids, [observations.md](observations.md#vpass-page-qualified-external-ids-statement-parser-120))
+is still draining through the repair lane. That drain is not a hard
+prerequisite: when a later re-parse re-keys a row, the lane retires the event
+recognised under the old key and recognises the new key as a new event, so the
+purchase is not counted twice.
+
+Rollback: set the var back to `"0"`. The lane is skipped; its events and
+decisions stay, and a fix appends revisions, never a DELETE.
 
 ## 1. How a flag is read
 
@@ -80,7 +103,7 @@ below is read by a migration.
 | `RELEASE_CANDIDATES_ENABLED`     | processor             | `"false"`               | The candidate parse lane writes `parse_run_candidates` and the release command routes are routed. Published results are unaffected.                                                                                                                                          | CORE `0027` and `0028` (both on `0026`); `GET /publication/consistency` reports `mismatches: 0`                                                                     | Set `"false"`. New candidates stop; the ones already written stay. **Once it has ever been on, the minimum rollback build is the release that introduced it**    |
 | `BALANCE_PROJECTION_ENABLED`     | processor **and** app | `"0"`                   | Processor: the balance projection is built. App: the v2 balance routes serve it. Both halves are needed for a reader to see anything.                                                                                                                                        | READ migrations through `0002`                                                                                                                                      | Set `"0"` on the app first, then the processor. The tables stay                                                                                                  |
 | `RECONCILIATION_ENABLED`         | processor             | `"0"`                   | The scheduled `reconciliation_sweep` lane runs and writes **candidates**. A candidate is never an accepted link: acceptance stays a recorded decision (INV07)                                                                                                                | CORE `0032`                                                                                                                                                         | Set `"0"`. The lane is skipped; the candidates stay                                                                                                              |
-| `PURCHASE_RECOGNITION_ENABLED`   | processor             | `"0"`                   | The `purchase_recognition` lane turns adopted Vpass/MyJCB single-payment usage rows into purchase and refund events, each with a recorded `rule` decision, at most 200 per tick ([economic-events.md](economic-events.md#card-purchase-recognition))                         | CORE `0047`                                                                                                                                                         | Set `"0"`. The lane is skipped; its events and decisions stay. Fixes append revisions, never a DELETE                                                            |
+| `PURCHASE_RECOGNITION_ENABLED`   | processor             | `"0"`                   | The `purchase_recognition` lane turns adopted Vpass/MyJCB single-payment usage rows into purchase and refund events with recorded `rule` decisions; one tick retires at most 100 events and commits at most 200 recognition writes ([bounds](economic-events.md#bounds))     | CORE `0047`                                                                                                                                                         | Set `"0"`. The lane is skipped; its events and decisions stay. Fixes append revisions, never a DELETE                                                            |
 | `REWARD_CLAIMS_ENABLED`          | processor             | `"false"`               | The `reward_claims_sweep` lane promotes published balance observations to typed reward claims for the three sources with recorded units                                                                                                                                      | CORE `0033`                                                                                                                                                         | Set `"false"`. The lane and its log line disappear                                                                                                               |
 | `REPORTS_ENABLED`                | processor             | `"false"`               | The report stage joins the stage list and report artifacts are written                                                                                                                                                                                                       | CORE `0034`                                                                                                                                                         | Set `"false"`. Existing artifacts stay readable — a stored report keeps its fixed body                                                                           |
 | `EVENTS_V2_ENABLED`              | app                   | `"0"`                   | `/api/v2/*` event routes are served **if** `economic_event_revisions` exists; `/api/meta` advertises `eventsV2`                                                                                                                                                              | CORE `0032`, plus `RECONCILIATION_ENABLED` for there to be anything to read                                                                                         | Set `"0"`. The routes 404 again and `/api/meta` stops advertising                                                                                                |

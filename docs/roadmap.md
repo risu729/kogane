@@ -5,7 +5,7 @@ not.** The next objective is to turn collected provider displays into connected
 transactions, explainable assets and liabilities, valuations, and eventually
 cost basis, P&L and tax outputs.
 
-This status was updated with the card statement settlement slice on 2026-09-13.
+This status was updated with the card purchase recognition slice on 2026-09-24.
 It distinguishes implemented contracts and calculation components from a feature
 that works with real inputs through its user interface. It is a repository
 assessment, not a new production acceptance run. Historical infrastructure
@@ -40,9 +40,13 @@ Concrete limits in the current code:
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind
-  `PURCHASE_RECOGNITION_ENABLED` (off until enabled). Installment, revolving
-  and bonus rows, amountless rows and rows without a stable card identity are
-  excluded. A pending row and its posted row can now be
+  `PURCHASE_RECOGNITION_ENABLED` (on in production since 2026-09-24; existing
+  rows are worked through in bounded five-minute ticks: at most 100 events
+  retired and at most 200 guarded recognition writes, so at most 300 event
+  mutations per tick, plus the candidate pass's one proposal batch and at most
+  20 provider-linked merges). Installment, revolving and bonus rows, amountless
+  rows and rows without a stable card identity are excluded. A pending row and
+  its posted row can now be
   [linked as one purchase](economic-events.md#pending-to-posted-links) by a
   reviewed decision (or by the rule for a pair the provider itself links, which
   no deployed source does yet); candidates are proposed, never merged by
@@ -93,9 +97,10 @@ finishing a representative bank, card, broker or rewards flow.
 **The current milestone is to complete card usage → statement → bank debit
 coverage without counting an expense twice.** The first statement/debit review
 slice is implemented, and so is the first purchase-event writer for supported
-single-payment card usage (off until enabled), with reviewed pending-to-posted
-purchase linking; source ownership, supported bank coverage, the linking
-screen, partial payments and refund handling still need completion.
+single-payment card usage (on in production since 2026-09-24), with reviewed
+pending-to-posted purchase linking; source ownership, supported bank coverage,
+the linking screen, partial payments and refund handling still need
+completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The numbered phases below retain the original layer identifiers. They describe
