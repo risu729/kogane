@@ -1,16 +1,25 @@
 // The first reconciliation vertical slice (A10): the bounded rule job over
-// published Vpass statement rows, the proposal store of migration 0032, and
-// the command that turns one candidate into an adopted relation through the
-// decision log. Synthetic rows only; no provider data is used anywhere.
+// published Vpass statement and MyJCB ledger rows, the proposal store of
+// migration 0032, and the command that turns one candidate into an adopted
+// relation through the decision log. Synthetic rows only; no provider data is
+// used anywhere.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
-import { stageAProposals } from "../../../packages/domain/src/reconcile.ts";
+import { canonicalDigest } from "../../../packages/domain/src/context.ts";
+import {
+  proposalIdentity,
+  stageAProposals,
+  stageBProposals,
+  type MatchFact,
+} from "../../../packages/domain/src/reconcile.ts";
+import { myJcbCreditLedger } from "../../../packages/parsers/src/parsers/myjcb.ts";
 import { vpassStatementPage } from "../../../packages/parsers/src/parsers/vpass.ts";
 import type { ArtifactMeta, TransactionObservation } from "../../../packages/parsers/src/types.ts";
 import { decideProposal, type ProposalCommand } from "../src/reconciliation-commands.ts";
 import {
   factOf,
+  factQuery,
   reconciliationEnabled,
   reconciliationSweep,
   RECONCILIATION_SLICES,
@@ -614,4 +623,361 @@ test("MyJCB full one-payment rows propose, installment slices do not mimic a pen
   const result = await reconciliationSweep(db, { slices: [myjcb] });
   expect(result.written).toBe(1);
   expect(result.autoAccepted).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// MyJCB rows as the deployed ledger parser emits them
+// ---------------------------------------------------------------------------
+
+const MYJCB: ReconciliationSlice = RECONCILIATION_SLICES.find(
+  (slice) => slice.sourceId === "myjcb",
+)!;
+/** One payment month, shown first by the unconfirmed ledger and then by the confirmed one. */
+const MYJCB_PERIOD = "2026年10月お支払い分";
+/** Every observation `seedLedger` stored, across the tests below. */
+const ledgerObservations: number[] = [];
+
+interface LedgerRow {
+  /** `YYYY/MM/DD`, as the collector copies the provider's cell. */
+  date: string;
+  merchant: string;
+  paymentType: string;
+  /** The summary amount cell: the usage while unconfirmed, this statement's payment once confirmed. */
+  amount: string;
+  /** The expanded amount (payment while unconfirmed, usage once confirmed); default `amount`. */
+  other?: string;
+}
+
+/**
+ * One published `credit-ledger` capture of a MyJCB connection, in the shape the
+ * collector writes (services/collector-myjcb/test/parsers.test.ts: `1,000円`
+ * cells, `一回払い`), parsed by the deployed ledger parser and stored exactly
+ * as it emits each row. Returns the observation ids in row order.
+ */
+async function seedLedger(
+  connection: string,
+  state: "unconfirmed" | "confirmed",
+  rows: readonly LedgerRow[],
+  period = MYJCB_PERIOD,
+): Promise<number[]> {
+  const artifactId = (nextArtifact += 1);
+  const parseId = (nextParse += 1);
+  const detailMonth = state === "unconfirmed" ? 0 : 1;
+  const key = `${connection}/credit-ledger-0${detailMonth}.json`;
+  const ledger = {
+    schemaVersion: 1,
+    detailMonth,
+    period,
+    state,
+    headers: [
+      "ご利用日",
+      "ご利用先など",
+      "支払区分",
+      state === "confirmed" ? "今回のお支払い金額" : "ご利用金額",
+    ],
+    rows: rows.map((row) => ({
+      summaryCells: [row.date, row.merchant, row.paymentType, row.amount],
+      expanded: {
+        [state === "confirmed" ? "ご利用金額" : "今回のお支払い金額"]: row.other ?? row.amount,
+        摘要: "",
+        今回回数: "1",
+        備考: "",
+        訂正サイン: "",
+      },
+    })),
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(ledger));
+  await seedArtifact(env, artifactId, "myjcb", "credit-ledger", key, bytes);
+  await db
+    .prepare(
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,?,'2026-10-01','pending','[]')",
+    )
+    .bind(parseId, artifactId, myJcbCreditLedger.name, myJcbCreditLedger.version)
+    .run();
+  const parsed = myJcbCreditLedger
+    .parse(bytes, {
+      id: artifactId,
+      sourceId: "myjcb",
+      runStatus: "success",
+      runFailureCount: 0,
+      dataset: "credit-ledger",
+      url: null,
+      mime: "application/json",
+      artifactKey: key,
+      statementState: state,
+      period,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      sha256: "0".repeat(64),
+    })
+    .observations.filter((row): row is TransactionObservation => row.kind === "transaction");
+  const ids: number[] = [];
+  for (const row of parsed) {
+    const inserted = await db
+      .prepare(
+        `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,description,counterparty,as_of,observed_at,raw_locator,extra_json)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+      )
+      .bind(
+        parseId,
+        row.sourceAccount,
+        row.externalId ?? null,
+        row.status ?? null,
+        row.amountMinor ?? null,
+        row.amountText ?? null,
+        row.amountScale ?? null,
+        row.currency ?? null,
+        row.description ?? null,
+        row.counterparty ?? null,
+        row.asOf ?? null,
+        row.observedAt ?? null,
+        row.rawLocator,
+        JSON.stringify(row.extra),
+      )
+      .first<{ id: number }>();
+    ids.push(inserted!.id);
+  }
+  await db.prepare("UPDATE parse_runs SET status='ok' WHERE id=?").bind(parseId).run();
+  await publishParse(db, parseId);
+  ledgerObservations.push(...ids);
+  return ids;
+}
+
+interface StoredProposal {
+  id: string;
+  kind: string;
+  stage: string;
+  status: string;
+  rationale: string[];
+  /** `transaction:<observation id>` of the pending side, then the posted side. */
+  targets: string[];
+}
+
+/** Stored proposals that cite any of the given observations. */
+async function citing(observations: readonly number[]): Promise<StoredProposal[]> {
+  const refs = new Set(observations.map((id) => `transaction:${id}`));
+  const rows = await db
+    .prepare(
+      "SELECT id,kind,stage,status,rationale_codes_json,target_refs_json FROM reconciliation_proposals ORDER BY id",
+    )
+    .all<{
+      id: string;
+      kind: string;
+      stage: string;
+      status: string;
+      rationale_codes_json: string;
+      target_refs_json: string;
+    }>();
+  return rows.results
+    .map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      stage: row.stage,
+      status: row.status,
+      rationale: JSON.parse(row.rationale_codes_json) as string[],
+      targets: (JSON.parse(row.target_refs_json) as { id: string }[]).map((ref) => ref.id),
+    }))
+    .filter((row) => row.targets.some((target) => refs.has(target)));
+}
+
+/** The facts of one connection exactly as the job reads them, before the installment guard. */
+async function unguardedFacts(connection: string): Promise<MatchFact[]> {
+  const rows = await db
+    .prepare(factQuery)
+    .bind(
+      MYJCB.sourceId,
+      JSON.stringify([...MYJCB.pendingStatuses, ...MYJCB.postedStatuses]),
+      1_000,
+    )
+    .all<Parameters<typeof factOf>[0]>();
+  return rows.results
+    .filter((row) => row.source_account === `myjcb:${connection}:root`)
+    .map((row) => factOf(row, MYJCB));
+}
+
+test("a MyJCB pending row and its confirmed row with 1,200円 texts become one reviewed candidate", async () => {
+  const purchase = { date: "2026/09/10", merchant: "架空書店", paymentType: "一回払い" };
+  const [pending] = await seedLedger("conn-match", "unconfirmed", [
+    { ...purchase, amount: "1,200円" },
+  ]);
+  const [posted] = await seedLedger("conn-match", "confirmed", [
+    { ...purchase, amount: "1,200円" },
+  ]);
+  // What the parser handed over and the job reads: display text, not digits.
+  const facts = await unguardedFacts("conn-match");
+  expect(facts).toHaveLength(2);
+  const texts = await db
+    .prepare(
+      "SELECT json_extract(extra_json,'$._kogane.usageAmountText') AS usage,json_extract(extra_json,'$._kogane.paymentAmountText') AS payment FROM transaction_observations WHERE id=?",
+    )
+    .bind(posted!)
+    .first<{ usage: string; payment: string }>();
+  expect(texts).toEqual({ usage: "1,200円", payment: "1,200円" });
+
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-02T00:00:00Z" });
+  expect(result).toMatchObject({ written: 1, autoAccepted: 0 });
+  const stored = await citing([pending!, posted!]);
+  expect(stored).toHaveLength(1);
+  expect(stored[0]).toMatchObject({
+    kind: "pending_to_posted",
+    stage: "B",
+    status: "proposed",
+    targets: [`transaction:${pending}`, `transaction:${posted}`],
+  });
+  expect(stored[0]!.rationale).toEqual(
+    expect.arrayContaining([
+      "no_provider_link_id",
+      "same_statement_period",
+      "date_within_window",
+      "amount_equal",
+      "counterparty_equal",
+    ]),
+  );
+  expect(stored[0]!.rationale).not.toContain("multiple_candidates");
+  // The stored row is the matcher's candidate, and the matcher never makes a
+  // MyJCB pair auto-acceptable: no source supplies a provider link id.
+  const [candidate, ...others] = stageBProposals(facts);
+  expect(others).toEqual([]);
+  expect(candidate).toMatchObject({
+    kind: "pending_to_posted",
+    stage: "B",
+    status: "proposed",
+    autoAcceptable: false,
+  });
+  expect(`rp_${await canonicalDigest(proposalIdentity(candidate!))}`).toBe(stored[0]!.id);
+  expect(
+    await db
+      .prepare("SELECT count(*) AS n FROM decision_revisions WHERE subject_ref=?")
+      .bind(`proposal:${stored[0]!.id}`)
+      .first<{ n: number }>(),
+  ).toEqual({ n: 0 });
+});
+
+test("a MyJCB installment slice (usage 12,000 / payment 4,000) is never compared", async () => {
+  const purchase = { date: "2026/09/12", merchant: "架空家電" };
+  const [pending] = await seedLedger("conn-installment", "unconfirmed", [
+    { ...purchase, paymentType: "分割払い", amount: "12,000円", other: "4,000円" },
+  ]);
+  const slices = await seedLedger("conn-installment", "confirmed", [
+    { ...purchase, paymentType: "分割払い", amount: "4,000円", other: "12,000円" },
+    // A payment type that drifted to look single does not hide the slice.
+    { ...purchase, paymentType: "一回払い", amount: "4,000円", other: "12,000円" },
+  ]);
+  // Without the guard the matcher would pair the pending purchase with each slice.
+  expect(stageBProposals(await unguardedFacts("conn-installment"))).toHaveLength(2);
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-02T00:00:00Z" });
+  expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
+  expect(await citing([pending!, ...slices])).toEqual([]);
+});
+
+test("two MyJCB confirmed rows of the same amount stay two candidates, never one merge (SC03)", async () => {
+  const purchase = { date: "2026/09/15", merchant: "架空売店", paymentType: "一回払い" };
+  const [pending] = await seedLedger("conn-twins", "unconfirmed", [
+    { ...purchase, amount: "900円" },
+  ]);
+  const twins = await seedLedger("conn-twins", "confirmed", [
+    { ...purchase, amount: "900円" },
+    { ...purchase, amount: "900円" },
+  ]);
+  expect(twins).toHaveLength(2);
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-02T00:00:00Z" });
+  expect(result).toMatchObject({ written: 2, autoAccepted: 0 });
+  const stored = await citing([pending!, ...twins]);
+  expect(stored).toHaveLength(2);
+  for (const row of stored) {
+    expect(row).toMatchObject({ kind: "pending_to_posted", stage: "B", status: "proposed" });
+    expect(row.rationale).toEqual(expect.arrayContaining(["amount_equal", "multiple_candidates"]));
+    expect(row.targets[0]).toBe(`transaction:${pending}`);
+  }
+  // Each twin is its own candidate; the two posted rows are not proposed as one row.
+  expect(stored.map((row) => row.targets[1]).sort()).toEqual(
+    twins.map((id) => `transaction:${id}`).sort(),
+  );
+});
+
+test("re-running the sweep over the same MyJCB rows writes no duplicate proposal", async () => {
+  const before = await proposals();
+  // The one matched pair and the two twin candidates above.
+  expect(await citing(ledgerObservations)).toHaveLength(3);
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-03T00:00:00Z" });
+  expect(result.scanned).toBeGreaterThanOrEqual(ledgerObservations.length);
+  expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
+  expect(await proposals()).toEqual(before);
+  expect(await citing(ledgerObservations)).toHaveLength(3);
+});
+
+test("a proposal already decided is never proposed again", async () => {
+  const [pair] = await citing(ledgerObservations);
+  const rejected = await decideProposal(db, {
+    operationId: "op-reject-myjcb",
+    actorId: "reviewer",
+    actorVerification: "server",
+    action: "reject",
+    proposalId: pair!.id,
+    expectedStatus: "proposed",
+    method: "manual",
+    reason: "reviewed against the ledger",
+  });
+  expect(rejected).toMatchObject({ ok: true });
+  const before = await proposals();
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-04T00:00:00Z" });
+  expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
+  expect(await proposals()).toEqual(before);
+  expect((await citing(ledgerObservations)).find((row) => row.id === pair!.id)?.status).toBe(
+    "rejected",
+  );
+});
+
+test("a relative MyJCB label (detailMonth-N) names no payment month, so nothing pairs under it", async () => {
+  // The collector writes `detailMonth-N` for a month the past-months API does
+  // not label; the same label names a different payment month next month.
+  const purchase = { date: "2026/09/20", merchant: "架空薬局", paymentType: "一回払い" };
+  const [pending] = await seedLedger(
+    "conn-relative",
+    "unconfirmed",
+    [{ ...purchase, amount: "1,200円" }],
+    "detailMonth-1",
+  );
+  const [posted] = await seedLedger(
+    "conn-relative",
+    "confirmed",
+    [{ ...purchase, amount: "1,200円" }],
+    "detailMonth-1",
+  );
+  // Grouped by the label alone the matcher would claim one statement period.
+  const [unguarded, ...others] = stageBProposals(await unguardedFacts("conn-relative"));
+  expect(others).toEqual([]);
+  expect(unguarded!.rationaleCodes).toContain("same_statement_period");
+  const before = await proposals();
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-05T00:00:00Z" });
+  expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
+  expect(await citing([pending!, posted!])).toEqual([]);
+  expect(await proposals()).toEqual(before);
+});
+
+test("a MyJCB confirmed row re-captured by a later run is not proposed as the same row", async () => {
+  // Stage A over MyJCB confirmed rows is left out: every daily run re-captures
+  // each listed month, and the lane only needs these rows for stage B.
+  const row = {
+    date: "2026/09/22",
+    merchant: "架空文具",
+    paymentType: "一回払い",
+    amount: "700円",
+  };
+  const first = await seedLedger("conn-recapture", "confirmed", [row]);
+  const second = await seedLedger("conn-recapture", "confirmed", [row]);
+  const [unguarded, ...others] = stageAProposals(await unguardedFacts("conn-recapture"));
+  expect(others).toEqual([]);
+  expect(unguarded).toMatchObject({ kind: "provider_same", stage: "A", autoAcceptable: false });
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-06T00:00:00Z" });
+  expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
+  expect(await citing([...first, ...second])).toEqual([]);
+  // A pending row of the same month still pairs with each capture, as a candidate.
+  const [pending] = await seedLedger("conn-recapture", "unconfirmed", [row]);
+  const paired = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-07T00:00:00Z" });
+  expect(paired).toMatchObject({ written: 2, autoAccepted: 0 });
+  const stored = await citing([pending!]);
+  expect(stored.map((proposal) => [proposal.stage, proposal.targets[0]])).toEqual([
+    ["B", `transaction:${pending}`],
+    ["B", `transaction:${pending}`],
+  ]);
 });

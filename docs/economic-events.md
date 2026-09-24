@@ -12,10 +12,10 @@ while both flags are off.
 
 ## Product delivery scope
 
-The implemented Vpass pending/posted slice below is the starting point for
-phases 6–7, not completion of reconciliation or event generation. The
+The implemented Vpass and MyJCB pending/posted slices below are the starting
+point for phases 6–7, not completion of reconciliation or event generation. The
 [next product milestone](roadmap.md#phases-67--reconciliation-and-economic-event-generation)
-adds MyJCB, card statements and bank debits, with review/correction and an
+builds on them with card statements and bank debits, review/correction and an
 explanation from purchase through settlement to source evidence. Event, leg,
 allocation and settlement tables still need continuous population from the
 supported transaction families. Matching two observations alone does not
@@ -115,12 +115,14 @@ are single payments; MyJCB's usage and payment texts (`1,200円`, `-500円`) are
 read with the MyJCB ledger parser's own amount grammar and must agree; the
 statement period is stored as `YYYY-MM`, the key `card_statement_facts.period`
 uses, from Vpass `statementMonth` and from MyJCB's `YYYY年M月お支払い分` label
-(any other label is stored as `NULL`, never guessed). One known gap is left
-alone on purpose: the reconciliation job's MyJCB installment guard, moved
-unchanged to `comparableCardPayment`, still reads only plain digits, so no
-real MyJCB confirmed row (`1,200円`) takes part in pending-to-posted matching.
-Widening it would start new production proposals and is a separate reviewed
-change; recognition does not depend on it.
+(any other label is stored as `NULL`, never guessed). The reconciliation job's
+MyJCB installment guard, `comparableCardPayment`, reads the same texts through
+the same rule (`myjcbAgreedAmount`): a confirmed row takes part in
+pending-to-posted matching only when its usage and payment agree and are
+positive, so an installment slice is never compared with a purchase. The job
+also admits a confirmed row only under a label `statementPeriod` reads as a
+payment month, so a label recognition stores as `NULL` (the collector's
+relative `detailMonth-N` fallback) never pairs rows either.
 
 ### Where the decisions live
 
@@ -188,16 +190,36 @@ widening that closed list. Settlement is not one of them: it is a first-class
 
 ## The vertical slice that runs
 
-`services/processor/src/reconciliation-job.ts` runs stage A and
-stage B over **one** source pair: **pending against posted inside the Vpass
-statement page**. That parser emits two provider displays of the same card and
-statement month — the `customized` family with provider status `unconfirmed`
-(a pending authorisation) and the `web` family with `posted` — under one
-`vpass:<card>` source account. It is the only pair in the deployed parser set
-where both sides of a pending/posted revision exist in one identifier
-namespace, so no cross-source ownership has to be established first. MyJCB's
-credit ledger has the same shape (`unconfirmed` / `confirmed` for one connection
-and period) and is the documented next entry in `RECONCILIATION_SLICES`.
+`services/processor/src/reconciliation-job.ts` runs stage A and stage B over
+the two entries of `RECONCILIATION_SLICES`, each **pending against posted
+inside one provider's own displays**:
+
+- **The Vpass statement page.** That parser emits two provider displays of the
+  same card and statement month — the `customized` family with provider status
+  `unconfirmed` (a pending authorisation) and the `web` family with `posted` —
+  under one `vpass:<card>` source account.
+- **The MyJCB credit ledger.** The `unconfirmed` and `confirmed` ledgers of one
+  connection and payment month, under one `myjcb:<connection>:root` source
+  account. A confirmed row's amount can be one installment slice, so it takes
+  part only when its usage and payment texts (`1,200円`) agree and are positive
+  (`comparableCardPayment`, read with the rule card purchase recognition uses);
+  an installment slice is never compared with a purchase. It also needs an
+  absolute payment month label (`2026年10月お支払い分`, read by
+  `statementPeriod`): the collector writes the relative fallback
+  `detailMonth-N` for every month the past-months API does not label, and that
+  position names a different payment month as months pass, so rows grouped
+  under it would claim `same_statement_period` falsely. A pair is therefore
+  proposed only when both ledgers carry the same absolute month. On the
+  connection surveyed in [the MyJCB source notes](sources/myjcb.md) the menu
+  lists months 0–8 and the API labels only months 9–17, so its unconfirmed
+  ledger and recent confirmed months carry `detailMonth-N` and this job
+  proposes no MyJCB pending-to-posted pair for them. A confirmed row takes part
+  in stage B only: its stage A pairs would be the same row re-captured by each
+  daily run, one collector-fingerprint candidate per pair of captures.
+
+These are the only pairs in the deployed parser set where both sides of a
+pending/posted revision exist in one identifier namespace, so no cross-source
+ownership has to be established first.
 
 Stage C is not run yet: it needs an established owner on both sides and a second
 source in the slice.
@@ -704,8 +726,10 @@ deleted to undo a decision — a new revision is appended instead.
 
 One sweep reads at most 1,000 published rows per slice, pairs inside groups of
 at most 200 facts (larger groups are counted and skipped), and writes at most
-500 proposals. Its log line carries counts only: no amount, account label or
-provider text. One API page is 200 rows.
+500 proposals. MyJCB confirmed rows join stage B only (see
+[the vertical slice](#the-vertical-slice-that-runs)). Its log line carries
+counts only: no amount, account label or provider text. One API page is 200
+rows.
 
 ## Verified locally (synthetic data only)
 
@@ -734,7 +758,12 @@ migration 0026.
   decision log with resend and conflicts, the provider-link auto-acceptance path
   on a synthetic source, the scheduled lane off by default, and migration 0032
   on 0017–0035 with seeded rows including its closed enums and append-only
-  triggers).
+  triggers; MyJCB ledgers seeded through the deployed parser: a `1,200円` pair,
+  an installment slice never compared, same-amount twins, re-runs and a decided
+  proposal writing nothing, a relative `detailMonth-N` label pairing nothing,
+  and a re-captured confirmed row kept out of stage A) and
+  `test/card-purchase-parser-shapes.test.ts` (recognition and the matching
+  guard never disagree on a parsed MyJCB row).
 - `services/app`: `test/events-api.test.ts` (capability gate, Access
   gate, GET-only, both routes, query validation) plus the pre-existing suites.
 
