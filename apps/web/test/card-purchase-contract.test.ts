@@ -222,26 +222,22 @@ describe("pending-to-posted review from the web client", () => {
     expect(purchaseLinkAction("identity.assign", candidate)).toBeNull();
   });
 
-  test("a plan matches only when every pin is the candidate's; holders are required to merge or split", () => {
+  test("a plan matches only when it pins every subject of the candidate at the candidate's revision", () => {
     const candidate = authorizedCandidate();
     const pins = linkPlanPins(candidate);
-    expect(purchaseLinkPinsMatch(pins, candidate, "accept")).toBe(true);
+    // The proposal, the relation triple and both held events, whatever the action.
+    expect(Object.keys(pins)).toHaveLength(4);
+    expect(purchaseLinkPinsMatch(pins, candidate)).toBe(true);
     for (const ref of Object.keys(pins)) {
-      expect(purchaseLinkPinsMatch({ ...pins, [ref]: pins[ref]! + 1 }, candidate, "reject")).toBe(
-        false,
-      );
+      expect(purchaseLinkPinsMatch({ ...pins, [ref]: pins[ref]! + 1 }, candidate)).toBe(false);
       const without = Object.fromEntries(Object.entries(pins).filter(([key]) => key !== ref));
-      expect(purchaseLinkPinsMatch(without, candidate, "accept")).toBe(false);
-      // A reject needs the proposal and relation pins; holder pins are compared when present.
-      expect(purchaseLinkPinsMatch(without, candidate, "reject")).toBe(
-        ref.startsWith("card-purchase:"),
-      );
+      expect(purchaseLinkPinsMatch(without, candidate)).toBe(false);
     }
-    // A merged link pins its one event once; an absorbed event pinned at 0 is not the candidate's.
+    // A merged link pins its one event once; the absorbed event pinned at 0 is the server's to check.
     const merged = mergedCandidate();
     const mergedPins = { ...linkPlanPins(merged), [`card-purchase:${POSTED_EVENT}`]: 0 };
     expect(Object.keys(linkPlanPins(merged))).toHaveLength(3);
-    expect(purchaseLinkPinsMatch(mergedPins, merged, "withdraw")).toBe(true);
+    expect(purchaseLinkPinsMatch(mergedPins, merged)).toBe(true);
   });
 
   test("the confirmation screen finds the proposal and a live purchase among the planned subjects", () => {

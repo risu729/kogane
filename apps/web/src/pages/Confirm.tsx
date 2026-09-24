@@ -19,7 +19,6 @@ import {
   purchaseLinkPinsMatch,
   useCardPurchase,
   type CardPurchaseCandidate,
-  type PendingPostedAction,
   type PurchaseLinkPin,
 } from "../card-purchases-api.ts";
 import {
@@ -81,20 +80,18 @@ const PIN_LABELS: Record<PurchaseLinkPin["role"], string> = {
 /** Each subject the plan pinned, against what the candidate on screen says it is at. */
 function PurchaseLinkPins({
   candidate,
-  action,
   expected,
 }: {
   candidate: CardPurchaseCandidate;
-  action: PendingPostedAction;
   expected: Record<string, number>;
 }): ReactNode {
   return (
     <Kv>
-      {purchaseLinkPins(candidate, action).map((pin) => {
+      {purchaseLinkPins(candidate).map((pin) => {
         const planned = Object.hasOwn(expected, pin.subjectRef)
           ? (expected[pin.subjectRef] ?? null)
           : null;
-        const matches = planned === null ? !pin.required : planned === pin.shown;
+        const matches = planned === pin.shown;
         return (
           <KvRow key={pin.subjectRef} label={PIN_LABELS[pin.role]}>
             計画時 <Nullable value={planned} placeholder="固定なし" /> · 表示中の候補 {pin.shown}{" "}
@@ -227,7 +224,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
     report.data !== undefined &&
     linkCandidate !== undefined &&
     linkAction !== null &&
-    purchaseLinkPinsMatch(report.data.expectedRevisions, linkCandidate, linkAction);
+    purchaseLinkPinsMatch(report.data.expectedRevisions, linkCandidate);
   const linkActionAllowed =
     linkCandidate !== undefined &&
     linkAction !== null &&
@@ -466,7 +463,6 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                             <h3>計画が固定した版</h3>
                             <PurchaseLinkPins
                               candidate={linkCandidate}
-                              action={linkAction}
                               expected={data.expectedRevisions}
                             />
                             <CandidateSides candidate={linkCandidate} />

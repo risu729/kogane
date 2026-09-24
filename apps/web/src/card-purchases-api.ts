@@ -5,7 +5,12 @@ import type {
   CardPurchasePage,
   CardPurchaseView,
 } from "../../../packages/domain/src/card-purchase-view.ts";
-import type { PendingPostedAction } from "../../../packages/domain/src/pending-posted-review.ts";
+import {
+  CARD_PURCHASE_SUBJECT_PREFIX as CARD_PURCHASE_PREFIX,
+  PENDING_POSTED_INVALIDATION,
+  PROPOSAL_SUBJECT_PREFIX as PROPOSAL_PREFIX,
+  type PendingPostedAction,
+} from "../../../packages/domain/src/pending-posted-review.ts";
 
 export type { CardPurchaseCandidate, CardPurchaseView, PendingPostedAction };
 const CARD_PURCHASES_PATH = "/api/v2/card-purchases";
@@ -46,9 +51,7 @@ export function useCardPurchase(eventId: string | null) {
 // of an accepted link, which splits the merged purchase again.
 
 /** The invalidation a pending-to-posted review plan carries (the confirmation screen keys on it). */
-export const PURCHASE_LINK_INVALIDATION = "review:card-purchase-link";
-const PROPOSAL_PREFIX = "proposal:";
-const CARD_PURCHASE_PREFIX = "card-purchase:";
+export const PURCHASE_LINK_INVALIDATION = PENDING_POSTED_INVALIDATION;
 
 function purchaseLinkKind(action: PendingPostedAction): "relation.accept" | "relation.reject" {
   return action === "accept" ? "relation.accept" : "relation.reject";
@@ -87,32 +90,26 @@ export interface PurchaseLinkPin {
   role: "proposal" | "relation" | "pending" | "posted";
   /** The candidate's own revision of that subject. */
   shown: number;
-  /** Whether the plan must pin it for this action. */
-  required: boolean;
 }
 
 /**
- * The pins a review plan of this candidate carries: the proposal's decisions,
- * the relation triple's rows and, for a merge or a split, the live revision
- * of each side's event (one pin when both rows are one merged event).
+ * The pins a review plan of this candidate carries, whatever the action: the
+ * proposal's decisions, the relation triple's rows and the live revision of
+ * each side's event (one pin when both rows are one merged event). A reject
+ * pins the events too: the reviewer decided about the events on screen.
  */
-export function purchaseLinkPins(
-  candidate: CardPurchaseCandidate,
-  action: PendingPostedAction,
-): PurchaseLinkPin[] {
+export function purchaseLinkPins(candidate: CardPurchaseCandidate): PurchaseLinkPin[] {
   const { relation } = candidate;
   const pins: PurchaseLinkPin[] = [
     {
       subjectRef: PROPOSAL_PREFIX + candidate.proposalId,
       role: "proposal",
       shown: candidate.proposalRevision,
-      required: true,
     },
     {
       subjectRef: `relation:${relation.relationKind}|${relation.fromRef}|${relation.toRef}`,
       role: "relation",
       shown: candidate.relationRevision,
-      required: true,
     },
   ];
   for (const role of ["pending", "posted"] as const) {
@@ -120,21 +117,22 @@ export function purchaseLinkPins(
     if (side.eventId === null || side.revision === null) continue;
     const subjectRef = CARD_PURCHASE_PREFIX + side.eventId;
     if (pins.some((pin) => pin.subjectRef === subjectRef)) continue;
-    pins.push({ subjectRef, role, shown: side.revision, required: action !== "reject" });
+    pins.push({ subjectRef, role, shown: side.revision });
   }
   return pins;
 }
 
-/** True when every pin the plan must carry is there, and every pin it carries is the candidate's. */
+/**
+ * True when the plan pins every subject of the candidate at the candidate's
+ * revision. Extra pins (the posted event a merge absorbed, pinned at 0) are
+ * the server's to check.
+ */
 export function purchaseLinkPinsMatch(
   expected: Record<string, number>,
   candidate: CardPurchaseCandidate,
-  action: PendingPostedAction,
 ): boolean {
-  return purchaseLinkPins(candidate, action).every((pin) =>
-    Object.hasOwn(expected, pin.subjectRef)
-      ? expected[pin.subjectRef] === pin.shown
-      : !pin.required,
+  return purchaseLinkPins(candidate).every(
+    (pin) => Object.hasOwn(expected, pin.subjectRef) && expected[pin.subjectRef] === pin.shown,
   );
 }
 

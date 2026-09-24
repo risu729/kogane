@@ -128,7 +128,7 @@ function CandidateDecision({ candidate }: { candidate: CardPurchaseCandidate }):
         new AbortController().signal,
       );
       // A plan pinned to anything but what is on screen needs another look.
-      if (!purchaseLinkPinsMatch(response.plan.expectedRevisions, candidate, action))
+      if (!purchaseLinkPinsMatch(response.plan.expectedRevisions, candidate))
         throw new Error(
           "候補または利用の記録が更新されています。表示を更新して、内容を確認し直してください。",
         );

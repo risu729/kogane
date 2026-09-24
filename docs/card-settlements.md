@@ -171,8 +171,8 @@ plan pins these at exactly the revisions shown:
 
 - `proposal:<id>`;
 - the `pending_to_posted` relation triple;
-- `card-purchase:<event id>` for each held side. A merge or a split needs this
-  pin; a reject is checked against it when the plan carries it.
+- `card-purchase:<event id>` for each side a live event holds, whatever the
+  action (a merged link is one event, so one pin).
 
 The confirmation screen reads the candidate back from the pinned purchase and
 shows each pin beside the candidate's value. It names the
