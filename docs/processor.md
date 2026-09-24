@@ -219,8 +219,11 @@ observation_sweep → collection_scan → identity_sweep → balance_projection
 
 `purchase_recognition` runs only while `PURCHASE_RECOGNITION_ENABLED` is `"1"`
 or `"true"` (it ships `"0"`); it turns adopted Vpass/MyJCB usage rows into
-purchase and refund events with rule decisions, bounded per tick
-([economic-events.md](economic-events.md#card-purchase-recognition)).
+purchase and refund events with rule decisions, then writes the
+pending-to-posted candidates of the groups it read and merges only the pairs
+a provider itself linked, bounded per tick
+([economic-events.md](economic-events.md#card-purchase-recognition)). A
+reviewed merge or split is the change lifecycle's commit, not this lane's.
 
 `collection_scan` sits after the parse sweep and before identity so a run
 found this tick can reach identity and parsing on the same tick.

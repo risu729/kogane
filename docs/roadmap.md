@@ -42,8 +42,12 @@ Concrete limits in the current code:
   trusted card identity into `purchase` and `refund` events, behind
   `PURCHASE_RECOGNITION_ENABLED` (off until enabled). Installment, revolving
   and bonus rows, amountless rows and rows without a stable card identity are
-  excluded. Excluding a row by decision and linking a pending row to its posted
-  row as one purchase are not available yet.
+  excluded. A pending row and its posted row can now be
+  [linked as one purchase](economic-events.md#pending-to-posted-links) by a
+  reviewed decision (or by the rule for a pair the provider itself links, which
+  no deployed source does yet); candidates are proposed, never merged by
+  amount and date. Excluding a row by decision and allocating a refund to a
+  purchase are not available yet.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
@@ -63,9 +67,10 @@ Concrete limits in the current code:
   debit to an operator, with captured, authorized, refund and unresolved
   figures kept apart. It is not a complete card history: excluded shapes and
   rows the recognition writer has not reached are only counted, a pending row
-  and its posted row are separate events until a reviewed link merges them,
-  agents cannot read it, and no statement-versus-purchases difference is
-  computed.
+  and its posted row are separate events until a reviewed link merges them
+  (the API lists the candidates and the review plans through the change
+  lifecycle; the screen for it is still to come), agents cannot read it, and
+  no statement-versus-purchases difference is computed.
 
 ## Delivery order and the next milestone
 
@@ -88,9 +93,9 @@ finishing a representative bank, card, broker or rewards flow.
 **The current milestone is to complete card usage → statement → bank debit
 coverage without counting an expense twice.** The first statement/debit review
 slice is implemented, and so is the first purchase-event writer for supported
-single-payment card usage (off until enabled); source ownership, supported bank
-coverage, pending-to-posted purchase linking, partial payments and refund
-handling still need completion.
+single-payment card usage (off until enabled), with reviewed pending-to-posted
+purchase linking; source ownership, supported bank coverage, the linking
+screen, partial payments and refund handling still need completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The numbered phases below retain the original layer identifiers. They describe

@@ -30,6 +30,8 @@ export const PROPOSAL_SUBJECT_PREFIX = "proposal:";
  */
 export const CARD_PURCHASE_SUBJECT_PREFIX = "card-purchase:";
 export const PENDING_POSTED_RELATION_KIND = "pending_to_posted";
+/** The invalidation a review plan carries, so a confirmation screen can tell it apart. */
+export const PENDING_POSTED_INVALIDATION = "review:card-purchase-link";
 
 /** What a review of one candidate may do now. `withdraw` is `relation.reject` of an accepted link. */
 export const PENDING_POSTED_ACTIONS = ["accept", "reject", "withdraw"] as const;
