@@ -506,9 +506,10 @@
 
 /* ── settlement and card ownership ─────────────────────────────────── */
 
-/* One reconciliation candidate: a panel whose head carries the facts that
- * identify it (source, amount, status), with the full review under a
- * disclosure that is open only while the candidate still needs a decision. */
+/* One reconciliation candidate (a card settlement on カード照合, a
+ * pending-to-posted usage link on カード利用): a panel whose head carries the
+ * facts that identify it (source, amount, status), with the full review under
+ * a disclosure that is open only while the candidate still needs a decision. */
 .settlement-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
