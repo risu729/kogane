@@ -44,6 +44,77 @@ account metadata still fails closed and must not be treated as repaired merely
 because the new version was deployed. Verify current descriptions and the new
 version's job outcomes after catch-up, without logging provider values.
 
+## Vpass page-qualified external ids (statement parser 1.2.0)
+
+`vpass-statement-page@1.1.0` built a transaction's external id from the
+sanitized row's fingerprint (with card, statement month and family) and an
+occurrence counter that restarted on every page artifact. One card-month
+snapshot spans several artifacts (`top-000`, `answer-001`, ... for the
+customized family; `top-000`, `top-001`, ... for the web family), so two
+byte-identical provider rows on different pages, such as two equal transit
+fares on one day, both had occurrence 0 and one external id. The Transactions
+page does not group Vpass rows by id and listed both, but every consumer keyed
+on the id saw one row: current card usage kept only the later observation, so
+one purchase could never be recognised, and reconciliation stage A proposed
+the two purchases as one provider row observed twice.
+
+Version 1.2.0 inserts the artifact-key page name before the counter on every
+page after the first: `vpass:<card>:<month>:<family>:<fingerprint>:answer-001:0`
+instead of `...:<fingerprint>:0`. The first page keeps the 1.1.0 id, and its
+observations are unchanged in every field, so every single-page month and every
+first-page row keeps its id. A later-page row keeps its fingerprint and changes
+only `externalId` and `_kogane.identityOrigin`, which reads
+`sanitized-row+card+month+family+page+occurrence` instead of
+`sanitized-row+card+month+family+occurrence`. No other field changes.
+
+Two alternatives were rejected. Counting occurrences over the whole card-month
+snapshot would make ids independent of pagination, but a parser sees exactly
+one artifact (see [the parser contract](#the-parser-contract)) and cannot count
+rows on other pages. Qualifying every page, the first included, is no more
+unique than this rule and would change every Vpass id (every id of a multi-page
+month, even if single-page months were exempted).
+
+The rule has one cost, and it is the same for any per-page rule. An id that
+names its page moves with the page: when rows are added or removed before a
+row between two captures and the provider moves it across a page boundary, the
+newer capture gives it a different id, where 1.1.0 kept the id of a row with no
+identical twin. A key-based consumer then sees one key end and another begin;
+no row is lost or merged. A row that stays on the first page is unaffected.
+
+Effect on what keys on the id:
+
+| Consumer                                                                           | Keys on                                                                                                   | Effect of 1.2.0                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transactions page (`listTransactions`)                                             | Observation id; Vpass rows are never grouped by external id                                               | Same rows. A later-page row shows its new external id.                                                                                                                                                                                                                                                                              |
+| Current card usage (`currentCardUsageSql`)                                         | Recognition key, `json_array(source_id, producer_id, external_id_namespace, source_account, external_id)` | Identical rows on different pages of one capture are two keys and two current rows ([read model](read-model.md#card-snapshot-currentness-and-current-card-usage)).                                                                                                                                                                  |
+| Card purchase recognition (migration 0047, `packages/domain/src/card-purchase.ts`) | Event id and key holder, from the recognition key                                                         | No writer runs yet, so no event holds a Vpass key and nothing is retired. Once one runs, an event recognised from a later-page row of a 1.1.0 parse loses its row when the re-parse publishes, is retired like any row no longer displayed, and the 1.2.0 key is recognised as a new event. First-page keys stay with their events. |
+| Reconciliation stage A (`services/processor/src/reconciliation-job.ts`, live)      | Equal external id inside one source account and statement period                                          | Identical rows on different pages of one capture are no longer proposed as `provider_same`. The same row in two captures is still proposed when it is on the first page in both, or on the same later page in both.                                                                                                                 |
+| Reconciliation stage B                                                             | Status, account, statement period, date and amount; not the external id                                   | No change in what is proposed.                                                                                                                                                                                                                                                                                                      |
+| Release comparison (`POST /release/compare`)                                       | Artifact, raw locator and external id                                                                     | A 1.2.0 candidate against a published 1.1.0 run matches every first-page row. Each later-page row is one `baseOnly` and one `candidateOnly` key at the same raw locator, which is the expected difference, not a regression.                                                                                                        |
+
+Existing proposals are untouched. A `reconciliation_proposals` row names the
+observations and the parse runs they were read in
+(`transaction:<id>@parse_run:<n>`), never an external id, and its digest covers
+those references. The 1.1.0 observations it names stay readable as superseded
+history, and so does any decision on it. As with any version bump, the re-parse
+gives every Vpass row a new observation under a new parse run, and the next
+sweeps write new proposals for those; that follows from the version bump and
+would happen with unchanged ids too.
+
+Deploying the parser changes nothing stored. Because `(artifact, parser,
+version)` is new, the repair lane creates `vpass-statement-page@1.2.0` jobs for
+every eligible historical artifact the parser accepts; a bounded replay plan for source `vpass`,
+dataset `statement-page`, version `1.2.0` ([observation lanes](observation-lanes.md#bounded-operator-replay))
+drains them sooner. Each successful re-parse supersedes that artifact's 1.1.0
+run through the normal publication path. During the drain a snapshot may mix
+versions, because currentness needs an active parse of every page of any
+version: a later page still at 1.1.0 keeps its old id, and can still share a
+key with the first page, until its own re-parse publishes. After catch-up,
+verify with counts only (no provider values) that no `statement-page` artifact
+still publishes a 1.1.0 run and that the 1.2.0 jobs finished without errors.
+`packages/parsers/test/vpass-page-identity.test.ts` pins the unchanged
+first-page ids and the new later-page ids for both families.
+
 ## What an observation is
 
 An observation is one statement of the form _source X said Y_. It is
@@ -1150,6 +1221,18 @@ observed with an empty provider amount; that row remains an amountless
 transaction with a parse warning rather than being assigned a guessed zero.
 Both families retain the complete provider row and explicit sign/mapping
 provenance in `extra`.
+
+The provider issues no row id. A transaction's external id is
+`vpass:<card>:<month>:<family>:<fingerprint>:<occurrence>` on the first page
+(`top-000`) and `vpass:<card>:<month>:<family>:<fingerprint>:<page>:<occurrence>`
+on every later page (`top-001`, `answer-001`, ...), where the fingerprint hashes
+the sanitized row with the card, month and family, and the occurrence counts
+byte-identical rows within that one page artifact. The page segment exists since
+1.2.0 and keeps identical rows on different pages apart; `_kogane.identityOrigin`
+states which form a row carries. The id is a collector fingerprint, not a
+provider identifier, and a row the provider moves across a page boundary between
+captures gets a new one. See
+[the 1.2.0 release note](#vpass-page-qualified-external-ids-statement-parser-120).
 
 The card label comes from Layer A's `fetch_units.unit_key`, not from redacted
 card data. The PoC mirrors it as `fetch_artifacts.fetch_unit_key`; schema v6

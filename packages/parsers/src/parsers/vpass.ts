@@ -78,7 +78,7 @@ interface Scope {
 
 export const vpassStatementPage: Parser = {
   name: "vpass-statement-page",
-  version: "1.1.0",
+  version: "1.2.0",
   accepts(artifact: ArtifactMeta): boolean {
     return (
       artifact.sourceId === SOURCE &&
@@ -178,19 +178,12 @@ function parseWeb(
       amountText === "" ? undefined : jpyInteger(amountText, `vpass web row ${index}.data[5]`);
     if (secondary === "007" && providerAmount === undefined)
       throw new Error(`vpass web row ${index}.data[5] must contain an amount`);
-    const fingerprint = stableFingerprint({
-      card: scope.card,
-      month: scope.month,
-      family: "web",
-      row,
-    });
-    const occurrence = occurrences.get(fingerprint) ?? 0;
-    occurrences.set(fingerprint, occurrence + 1);
+    const identity = rowIdentity(scope, "web", row, occurrences);
     const amount = providerAmount === undefined ? undefined : invertLiability(providerAmount);
     observations.push({
       kind: "transaction",
       sourceAccount: `vpass:${scope.card}`,
-      externalId: `vpass:${scope.card}:${scope.month}:web:${fingerprint}:${occurrence}`,
+      externalId: identity.externalId,
       status: "posted",
       ...(amount === undefined
         ? {}
@@ -213,7 +206,7 @@ function parseWeb(
           appMapping: secondary === "007" ? "InstallmentWithCurrency" : "InstallmentWithComment",
           providerAmountSign: "credit-liability-positive-refund-negative",
           observationSign: "outflow-negative-inflow-positive",
-          identityOrigin: "sanitized-row+card+month+family+occurrence",
+          identityOrigin: identity.origin,
         },
       },
     });
@@ -364,18 +357,11 @@ function parseCustomized(
     );
     const merchant = boundedString(row["kmName"], `vpass customized row ${index}.kmName`, false);
     const amount = invertLiability(providerAmount);
-    const fingerprint = stableFingerprint({
-      card: scope.card,
-      month: scope.month,
-      family: "customized",
-      row,
-    });
-    const occurrence = occurrences.get(fingerprint) ?? 0;
-    occurrences.set(fingerprint, occurrence + 1);
+    const identity = rowIdentity(scope, "customized", row, occurrences);
     return {
       kind: "transaction",
       sourceAccount: `vpass:${scope.card}`,
-      externalId: `vpass:${scope.card}:${scope.month}:customized:${fingerprint}:${occurrence}`,
+      externalId: identity.externalId,
       status: "unconfirmed",
       amountMinor: amount,
       amountText: String(amount),
@@ -397,12 +383,50 @@ function parseCustomized(
           providerSaleCode: saleCode,
           providerAmountSign: "credit-liability-positive-refund-negative",
           observationSign: "outflow-negative-inflow-positive",
-          identityOrigin: "sanitized-row+card+month+family+occurrence",
+          identityOrigin: identity.origin,
         },
       },
     };
   });
   return { observations, warnings: [] };
+}
+
+/**
+ * A transaction row's external id. The provider issues no row id, so the id is
+ * the sanitized row's fingerprint (with card, month and family) plus an
+ * occurrence counter that separates byte-identical rows. That counter only sees
+ * the page artifact being parsed, while one card-month snapshot spans several
+ * (`top-000`, `answer-001`, ... or `top-000`, `top-001`, ...), so an identical
+ * row on another page would get the same counter value and the same id. Since
+ * 1.2.0 every page after the first therefore adds its artifact-key page name
+ * before the counter, and the first page keeps the 1.1.0 id unchanged: every
+ * single-page month and every first-page row keeps its id, and the fingerprint
+ * itself is the same on every page. The cost: a row the provider moves across a
+ * page boundary between two captures (rows added or removed before it) gets a
+ * new id. Counting occurrences over the whole snapshot would avoid that, but a
+ * parser only ever sees one artifact. See docs/observations.md.
+ */
+function rowIdentity(
+  scope: Scope,
+  family: "web" | "customized",
+  row: Record<string, unknown>,
+  occurrences: Map<string, number>,
+): { externalId: string; origin: string } {
+  const fingerprint = stableFingerprint({ card: scope.card, month: scope.month, family, row });
+  const occurrence = occurrences.get(fingerprint) ?? 0;
+  occurrences.set(fingerprint, occurrence + 1);
+  const prefix = `vpass:${scope.card}:${scope.month}:${family}:${fingerprint}`;
+  if (scope.pageIndex === 0)
+    return {
+      externalId: `${prefix}:${occurrence}`,
+      origin: "sanitized-row+card+month+family+occurrence",
+    };
+  // The page name exactly as the artifact key spells it (ARTIFACT_KEY).
+  const page = `${scope.pageKind}-${String(scope.pageIndex).padStart(3, "0")}`;
+  return {
+    externalId: `${prefix}:${page}:${occurrence}`,
+    origin: "sanitized-row+card+month+family+page+occurrence",
+  };
 }
 
 function artifactScope(artifact: ArtifactMeta): Scope {
