@@ -45,26 +45,20 @@ VPC bindingは`network_id: "cf1:network"`ではなくTAMIAの`tunnel_id`を直�
 
 - 手動`mode=daily`: 現在月と直前月を再取得
 - 手動`mode=backfill`: 画面のselectorが提示した全月を1 sessionで取得
-- private R2: `raw/prestia-globalpass/YYYY/MM/DD/<run-id>/activity-YYYY-MM.html`
+- 共有DATA bucket（`kogane-raw-evidence`）: 各pageを`objects/<2 hex>/<sha256>`へ保存し、最後にterminal `runs/prestia-globalpass/<run-id>/terminal.json`を書く
 - manifest: hash、byte数、提示月、部分失敗を記録
 
-HTMLはContainerからNDJSONとして月ごとにstreamし、Workerは1件ずつR2へ保存する。全月をWorker memoryへまとめて載せない。pendingから確定への更新を取り込むため、日次相当もrun単位でappendする。15分枠を超える実測が出た場合だけ月単位Queueへ分割する。GitHub Actionsのscheduleは使わない。
+HTMLはContainerからNDJSONとして月ごとにstreamし、Workerはsanitize済みpage（最大15件）をterminalを書くまでmemoryに保持する。staging用のR2 objectは書かない。pendingから確定への更新を取り込むため、日次相当もrun単位でappendする。15分枠を超える実測が出た場合だけ月単位Queueへ分割する。GitHub Actionsのscheduleは使わない。
 
 WebSocket TCP relayは非hibernating接続である。対応するupstream TCP socketを復元できないため、このopaque tunnelをDurable Object WebSocket Hibernationで休止させない。isolate・network・Tunnelが切れたrunは部分失敗として記録し、次回に再取得する。
 
 ### Raw evidence v2 contract
 
-`globalpass-browser-poc-v2`では、ContainerのNDJSONを厳密な契約として扱う。metadataは必ず1回だけ受け取り、`availableMonths`は最大15か月の連続した降順、`selectedMonths`はdailyなら先頭2か月、backfillなら全月との完全一致を要求する。manifestには`selectedMonths`、`captureComplete`、`paginationStatus: "unproven"`、固定形のfailureを記録し、選択月と保存artifactが完全一致してfailureが0件のrunだけを`success`とする。失敗runも、R2自体へmanifestを書ける限り保存する。
+`globalpass-browser-poc-v2`では、ContainerのNDJSONを厳密な契約として扱う。metadataは必ず1回だけ受け取り、`availableMonths`は最大15か月の連続した降順、`selectedMonths`はdailyなら先頭2か月、backfillなら全月との完全一致を要求する。manifestには`selectedMonths`、`captureComplete`、`paginationStatus: "unproven"`、固定形のfailureを記録し、選択月と保存artifactが完全一致してfailureが0件のrunだけを`success`とする。失敗runも、DATAへterminalを書ける限り保存する。
 
-保存前には35件の既存HTML監査で確認した2種類の画面shapeだけを許可する。変動する非空の`nablarch_hidden`だけを`__KOGANE_REDACTED_DYNAMIC_VALUE__`へ置換し、空値は空のまま、明細選択に必要な`W131301.referenceDate`などは保持する。これとは別に、current-document fragmentの`href`は`#`へ、許可された`onclick`/`onchange`の値全体は`return false;`へ固定し、元fragmentやhandler引数をR2へ残さない。hidden field、inputの`id/name/type/value`重複、form action重複、URL-bearing attribute、inline event handlerは監査済みのexact inventoryだけを許可する。query付きURL、未知host/path/scheme、`formaction`、data URL、`srcset`、`ping`、CSSの`url()`/`@import`、meta refresh、SVG URL属性、`base`/`object`/`embed`/`iframe`などの未監査network/navigation sink、未知event属性・関数、ログイン画面、session/token文字列、UTF-8不整合を検出した場合はfail closedとし、そのHTMLをR2へ保存しない。Importerはこのcanonical HTML以外を拒否し、受理時もbytesを変更しない。artifact metadataは`source`、`runId`、`dataset`、`sha256`の4項目だけを持つ。
+保存前には35件の既存HTML監査で確認した2種類の画面shapeだけを許可する。変動する非空の`nablarch_hidden`だけを`__KOGANE_REDACTED_DYNAMIC_VALUE__`へ置換し、空値は空のまま、明細選択に必要な`W131301.referenceDate`などは保持する。これとは別に、current-document fragmentの`href`は`#`へ、許可された`onclick`/`onchange`の値全体は`return false;`へ固定し、元fragmentやhandler引数をR2へ残さない。hidden field、inputの`id/name/type/value`重複、form action重複、URL-bearing attribute、inline event handlerは監査済みのexact inventoryだけを許可する。query付きURL、未知host/path/scheme、`formaction`、data URL、`srcset`、`ping`、CSSの`url()`/`@import`、meta refresh、SVG URL属性、`base`/`object`/`embed`/`iframe`などの未監査network/navigation sink、未知event属性・関数、ログイン画面、session/token文字列、UTF-8不整合を検出した場合はfail closedとし、そのHTMLをR2へ保存しない。保存したpageはterminalへ`redacted` transformation（`globalpass-activity-sanitizer`）として記録する。
 
-manifest保存直後、private Service Binding `RAW_EVIDENCE_IMPORTER`の`/v1/prestia-globalpass/import-run`へ同期的に渡す。daily小runはsealed応答を厳密に検証する。12 artifactを超えるbackfill runの即時応答は中央stateを作らない`deferred`として受理し、管理token必須の`POST /backfill-raw-evidence?limit=1`で完全inventoryを10 artifactずつ転送する。`scripts/backfill-raw-evidence.sh`は所有者本人・mode 0600・symlink不可のtoken fileだけを読み、R2 scan cursorとmanifest内offsetを含むopaque cursorをローカルstateへ保存する。`deferredManifestCount`は失敗でなく進捗として扱い、最終chunkのseal後に次のsource objectへ進む。元R2 objectは削除しない。
-
-```sh
-scripts/backfill-raw-evidence.sh
-```
-
-既定のtoken fileは既存運用と同じ`~/.local/share/kogane/secrets/globalpass-worker-admin-token`である。別pathを使う場合だけ第1引数で指定する。
+runは`packages/collection`で共有DATA bucketへ直接書き、ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。private Service Binding `RAW_EVIDENCE_IMPORTER`、`POST /backfill-raw-evidence`、`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。backfill runも10 artifactずつの転送やdeferはなく、1回でterminalまで書く。
 
 1 runは最大15 HTML + 1 manifestで、実測も15分枠内に収まるためQueueは導入しない。Queue分割するとbrowser loginとTurnstileを月ごとに繰り返し、完全性の境界も複雑になる。時間上限超過が実測された場合にだけ再検討する。
 
@@ -93,7 +87,7 @@ scripts/sync-local-secrets.sh \
 - Container app: `kogane-globalpass-collector-poc-globalpasscollectorcontainer`
 - Container app ID: `a03ac341-52a7-4e81-9a7c-279a90cc4b0c`
 - Container上限: 2（通常収集は固定ID 1個、image rollout時の旧instance退避用に1枠）
-- R2 bucket: `kogane-globalpass-collector-poc`
+- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
 - Browser Run binding: `BROWSER`
 - VPC binding: TAMIA Tunnel `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33`を直接指定
 - Cron: `17 18 * * *`（毎日03:17 JST、Workers Cron）
@@ -106,7 +100,7 @@ timezone修正後に出口だけを変えたcontrolled A/Bでは、Container直�
 
 現行Worker versionは`2abc1133-83db-4c8d-b593-c82ec8ca4dcf`で、deploy出力上もschedule `17 18 * * *`を確認した。
 
-daily/backfillはR2へのmanifest保存を含む処理の成否にかかわらず、最後にephemeralな固定Container instanceへ`destroy()`を送る。破棄要求自体の失敗は収集結果へ混ぜず、構造化logへ記録する。`30s`のidle timeoutも残すが、relay使用後は`stop()` RPCがoutcome `ok`でもinstanceが`running`のまま残ることをlive確認したため、課金停止は`destroy()`で保証する。
+daily/backfillはDATAへの保存を含む処理の成否にかかわらず、最後にephemeralな固定Container instanceへ`destroy()`を送る。破棄要求自体の失敗は収集結果へ混ぜず、構造化logへ記録する。`30s`のidle timeoutも残すが、relay使用後は`stop()` RPCがoutcome `ok`でもinstanceが`running`のまま残ることをlive確認したため、課金停止は`destroy()`で保証する。
 
 2026-08-30のdeploy後daily run `8d498b19-dda5-4dfb-84b6-1239c4d9e765`は約52秒でstatus `success`、2026-08と2026-07のHTML 2件、failure 0だった。ただし同runの`stop` RPCがoutcome `ok`、app状態が`assigned: 0`でも、後のinstance一覧では`v18`が`running`だった。Chromium A/B rollout時にこの差を発見して旧`v18`を明示destroyし、収集後処理を`destroy()`へ変更した。
 

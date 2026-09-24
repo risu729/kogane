@@ -165,30 +165,30 @@ email handler, manual upload) can use it unchanged.
    `docs/authenticated-collectors.md` and `docs/credentials.md`. Sources that
    rarely change can stay manual forever.
 
-## Shared DATA target per collector (U09)
+## Shared DATA bucket per source (U09)
 
-Unified plan U09 (chapters 03, 12, 13; decisions D12/D13). Each collector
-gains a var `COLLECTION_TARGET` and an R2 binding `DATA` to the central
-bucket `kogane-raw-evidence`:
+Unified plan U09 (chapters 03, 12, 13; decisions D12/D13). Every collector
+holds one R2 binding, `DATA`, to the central bucket `kogane-raw-evidence` and
+persists each run through `packages/collection`
+([collection-contract.md](collection-contract.md)): content-addressed objects
+under `objects/<2 hex>/<sha256>` and, written last, the run's `terminal-v1`
+manifest at `runs/<source>/<runId>/terminal.json`. The Processor registers
+that terminal in process, from the R2 notification or its bounded `runs/`
+scan ([processor.md](processor.md)). The same bytes are never stored twice
+(G1-15).
 
-- `COLLECTION_TARGET=legacy` (the deployed default) is the existing path,
-  byte for byte: artifacts and the per-source manifest go to the collector's
-  own bucket and the importer service binding copies them centrally.
-- `COLLECTION_TARGET=shared` persists the run through
-  `packages/collection` (`docs/collection-contract.md`): content-addressed
-  objects under `objects/<2 hex>/<sha256>` and, written last, the run's
-  `terminal-v1` manifest at `runs/<source>/<runId>/terminal.json`. The
-  per-source bucket is not written and the importer is not called, so the
-  same bytes are never stored twice (G1-15).
-
-Only the exact string `shared` switches a collector; anything else — unset,
-misspelled, a half-applied deploy — stays on the legacy path. The legacy
-bucket binding stays in the config because it is the rollback target.
+This is the only collection path. The per-source buckets, the importer that
+copied a staged run into central storage, and the `COLLECTION_TARGET` switch
+that chose between the two paths were retired on 2026-09-13
+([legacy-retirement.md](legacy-retirement.md), [rollout.md](rollout.md)). No
+collector reads a target variable or holds an importer binding. Where a
+section below mentions the legacy path or the importer, it describes what the
+shared bytes were checked against, not a path that still runs.
 
 Rules that hold for every collector below:
 
-- The stored bytes are the ones that already reach central storage: the
-  collector's own sanitizer output. A provider response that carries
+- The stored bytes are the collector's own sanitizer output, the same bytes
+  the retired importer used to receive. A provider response that carries
   credentials, cookies or session material is never stored as it is.
 - `providerOutcome` is the run's own outcome (`success`/`partial`/`failed`)
   and is never widened; a `partial` run keeps its coverage gap (G1-08) and a
@@ -201,29 +201,29 @@ Rules that hold for every collector below:
   U08 dispatches collection operations; today the cron and the admin trigger
   leave them unset.
 - **One copy** (plan 00: the original is stored once; no standing
-  collector-side → central double copy). In shared mode the run is written
-  only into `DATA`. sbi-shinsei, globalpass and sbi-vc-trade hold every
-  artifact of a run in memory until the terminal is written, so nothing
-  structural depends on a staging object and the per-source staging bucket is
-  **not written** in shared mode; their end-to-end tests assert zero staging
-  puts. The one bounded exception is smbc-direct, whose chunks span Durable
-  Object alarms (see its section). The `SNAPSHOTS` binding stays declared for
-  legacy mode and for the legacy runs already in it (plan 03 §7) until U15
-  retires it.
-- Deploy order, per source: the Processor (U08) with
-  `SHARED_R2_INGEST_ENABLED` first, so a terminal is never written before
-  something can read it; then `COLLECTION_TARGET=shared` on this collector.
-  Rollback: set the var back to `legacy` and redeploy nothing else —
-  terminals already written stay valid and are picked up by the Processor's
-  bounded `runs/` scan. The collector keeps exactly one cron either way, so
-  switching a source never doubles provider access (11 §4).
+  collector-side → central double copy). A run is written only into `DATA`.
+  sbi-shinsei, globalpass and sbi-vc-trade hold every artifact of a run in
+  memory until the terminal is written, so nothing structural depends on a
+  staging object and nothing is staged; their end-to-end tests assert zero
+  staging puts. The one bounded exception is smbc-direct, whose chunks span
+  Durable Object alarms and are staged under its run prefix inside `DATA`
+  until the terminal is written (see its section).
+- Deploy order: the Processor before the collectors, so a terminal is never
+  written before something can read it
+  ([rollout.md §4](rollout.md#4-deployment-order)). There is no collector
+  legacy mode to roll back to, and a release that needs the retired Workers
+  or buckets is not a valid rollback target. Terminals already written stay
+  valid and are picked up by the Processor's bounded `runs/` scan. Moving to
+  the shared bucket added no cron or scheduler, so it never doubled provider
+  access (11 §4).
 
 ### Terminal `source` ids and CORE source ids
 
-A terminal names the collector's own source id, the same `EXTERNAL_SOURCE` the
-importer's adapter has always read from a staged manifest. The CORE source id
-is the importer adapter's `CENTRAL_SOURCE`. The Processor (U08) owns the
-mapping from this one table; no collector carries the CORE id.
+A terminal names the collector's own source id. The Processor maps it to the
+CORE source id through the closed table `COLLECTOR_SOURCE_IDS` in
+`packages/application/src/collection/descriptors.ts`
+([processor.md §3.1](processor.md#31-collector-ids-core-source-ids-and-producers));
+no collector carries the CORE id.
 
 | Collector Worker                   | Terminal `source` (`runs/<source>/…`) | CORE source id     |
 | ---------------------------------- | ------------------------------------- | ------------------ |
@@ -243,12 +243,12 @@ mapping from this one table; no collector carries the CORE id.
 | `manifest.json`                                  | `collector_manifest`         |
 
 Sanitizer: the collector's own `sanitizeWalletHtml` (Sony Bank Wallet
-statements), which the legacy path already applies before the importer
-forwards the object verbatim. Shared mode stores exactly those bytes and
+statements), the same pass the retired legacy path applied before the importer
+forwarded the object verbatim. The collector stores exactly those bytes and
 records the step as a `redacted` transformation with no retained input,
 because the provider HTML was deliberately not kept. Before a byte is planned
 it is re-checked (`assertCentralSafe`) against the invariants the importer
-enforces on the way to central storage: a wallet page that still carries a
+enforced on the way to central storage: a wallet page that still carries a
 `;jsessionid=` or a hidden-input value, or a JSON payload with a credential
 field (`loginPwd`, `password`, `csrf`, …), throws a stable code and the run
 writes no terminal instead of publishing the value (G3-08).
@@ -265,13 +265,9 @@ terminal's `artifacts[]` stays authoritative.
 
 Verified with synthetic fixtures in
 `services/collector-sony-bank/test/shared-collection.test.ts` (G1-01, G1-02,
-G1-08, G1-09, G1-15, G3-07, G3-08) and, for parity with the importer, in
-`services/collector-r2-importer/test/shared-target-parity.test.ts`: the same
-synthetic legacy run validated by the importer and mapped by the shared plan
-names the same digest for every artifact, and the shared `manifest.json` is
-the legacy manifest byte for byte with each `raw/…` key replaced by the
-content-addressed key. No provider was contacted and no production bucket was
-read or written.
+G1-08, G1-09, G1-15, G3-07, G3-08). The importer-side parity suite was removed
+with the importer ([legacy-retirement.md](legacy-retirement.md)). No provider
+was contacted and no production bucket was read or written.
 
 ### Money Forward ME (`services/collector-moneyforward`, `kogane-moneyforward-collector-poc`)
 
@@ -282,17 +278,16 @@ read or written.
 | `account-NN-month-YYYY-MM.html` | `provider_response`  |
 | `manifest.json`                 | `collector_manifest` |
 
-Sanitizer: none is applied to the pages — the legacy path stores exactly
-these bytes and the importer forwards them verbatim, because the collector
-keeps only the rendered aggregator pages and never the request headers,
-cookies or credential exchange that produced them. The one normalization the
-central path does apply is to the manifest, whose failure message is replaced
-by its failure code; shared mode writes that normalized manifest. (The
-importer also re-serializes its _parsed_ view of the manifest, so the central
-bytes today additionally carry `filename`, `kind`, `accountOrdinal` and
-`month` per artifact — values derived from the artifact key, not stated by the
-collector. The shared manifest is the collector's own record and does not
-carry them; the parity test pins exactly that difference.)
+Sanitizer: none is applied to the pages — the retired legacy path stored
+exactly these bytes and the importer forwarded them verbatim, because the
+collector keeps only the rendered aggregator pages and never the request
+headers, cookies or credential exchange that produced them. The one
+normalization is to the manifest, whose failure message is replaced by its
+failure code; the collector writes that normalized manifest. (The importer
+also re-serialized its _parsed_ view of the manifest, adding `filename`,
+`kind`, `accountOrdinal` and `month` per artifact — values derived from the
+artifact key, not stated by the collector. The collector's manifest is its own
+record and does not carry them.)
 
 Terminal fields: one unit per account (`account-NN`, `unitKind: account`),
 taken from the collector's own filename grammar — the run-wide
@@ -304,11 +299,9 @@ aggregator currently shows) listing the accounts as `unitKeys`.
 
 Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
-G1-02, G1-08, G1-09, G1-15, G3-07, G3-08) and, for parity with the importer,
-in `services/collector-r2-importer/test/shared-target-parity.test.ts` (every
-page digest identical; the manifest identical field by field with the keys
-substituted). No provider was contacted and no production bucket was read or
-written.
+G1-02, G1-08, G1-09, G1-15, G3-07, G3-08). The importer-side parity suite was
+removed with the importer ([legacy-retirement.md](legacy-retirement.md)). No
+provider was contacted and no production bucket was read or written.
 
 ### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
 
@@ -323,24 +316,23 @@ written.
 Sanitizer: the collector's own `redactedStatementHtml` (parse5 tree: scripts,
 styles, textareas, embedding elements and every URL-bearing attribute removed,
 every `value=` replaced by `[redacted]`, card numbers in text replaced), which
-is what the legacy path already stores. Shared mode adds `assertRedactedHtml`
-(`src/redaction.ts`), the invariants the central path enforces, checked again
-on the bytes about to leave the Worker: a redaction regression throws
-`artifact_html_redaction_invalid` and the run writes no terminal rather than
-publishing the page. The importer runs its own sanitizer pass over the stored
-page again on the way to central storage; the parity test proves that pass is
-the identity on collector output, so the shared bytes are the central bytes.
-Datasets the central path has never accepted (`debit-menu`, `debit-detail`,
-`credit-csv`, `credit-pdf`, `credit-ofx` — the importer refuses a manifest
-naming one with `manifest_dataset_unobserved`) are refused here the same way
-(`artifact_dataset_unobserved`): shared mode does not store centrally what the
-legacy path never let through. The collector manifest is written in its
-central shape — a connection blocker and a failure message become coarse codes
+is what the retired legacy path stored. The collector adds
+`assertRedactedHtml` (`src/redaction.ts`), the invariants the importer
+enforced, checked on the bytes about to leave the Worker: a redaction
+regression throws `artifact_html_redaction_invalid` and the run writes no
+terminal rather than publishing the page. With the importer's second sanitizer
+pass retired, this is the last check before `DATA`. Datasets the importer
+never accepted (`debit-menu`, `debit-detail`, `credit-csv`, `credit-pdf`,
+`credit-ofx` — it refused a manifest naming one with
+`manifest_dataset_unobserved`) are refused here the same way
+(`artifact_dataset_unobserved`): `DATA` holds nothing the legacy path never
+let through. The collector manifest is written in its central shape — a
+connection blocker and a failure message become coarse codes
 (`human-required`, `collector-failure`, `r2-write-failure`), so upstream free
 text never reaches the shared bucket either. (As for Money Forward, the
-importer's central bytes today also carry its parsed `connectionId`,
-`filename` and `ordinal` per artifact; the shared manifest keeps the
-collector's own artifact shape.)
+importer's central bytes also carried its parsed `connectionId`, `filename`
+and `ordinal` per artifact; the collector's manifest keeps its own artifact
+shape.)
 
 Terminal fields: one unit per connection (`<connectionId>`,
 `unitKind: connection`), so several cards in one run stay distinguishable and
@@ -357,12 +349,10 @@ login (G3-10, G3-11).
 
 Verified with synthetic fixtures in
 `services/collector-myjcb/test/shared-collection.test.ts` (G1-01, G1-02,
-G1-08, G1-09, G1-15, G1-16, G3-08, G3-11) and, for parity with the importer,
-in `services/collector-myjcb/test/shared-parity.test.ts` (the collector's
-redacted pages validated by the importer's `validateMyJcbRun` and mapped by
-the shared plan name the same digest for every artifact, and the importer's
-central bytes equal the legacy bytes). No provider was contacted and no
-production bucket was read or written.
+G1-08, G1-09, G1-15, G1-16, G3-08, G3-11) and
+`services/collector-myjcb/test/shared-parity.test.ts` (the shared plan stores
+the collector's redacted pages unchanged and keeps the manifest facts). No
+provider was contacted and no production bucket was read or written.
 
 ### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
 
@@ -375,47 +365,43 @@ production bucket was read or written.
 | `manifest.json`                          | `collector_manifest`         |
 
 Sanitizer: `vpass-json-sanitizer` v1 (`src/sanitize.ts`). Unlike the other
-collectors, the legacy Vpass path stores the raw response envelopes in its own
-bucket and the importer sanitizes them on the way to central storage — so a
-collector writing the shared bucket has to sanitize first. `src/sanitize.ts` is
-that transformation, with the same id, version and rules the importer applies
-today: every key naming authentication, a session, a device, a CSRF token or a
-card identify key is replaced wholesale; the card inventory keeps ordinal
-labels (`card-001`) and a placeholder reference instead of names and keys; the
-result is canonically encoded (sorted keys, trailing newline) and then
-re-checked, so output that still holds a sensitive value fails the run instead
-of being stored. The artifact keys are the ones central storage already uses,
-so the same run registers the same way.
+collectors, the retired legacy Vpass path stored the raw response envelopes in
+its own bucket and the importer sanitized them on the way to central storage —
+so the collector, which now writes the shared bucket itself, sanitizes first.
+`src/sanitize.ts` is that transformation, with the same id, version and rules
+the importer applied: every key naming authentication, a session, a device, a
+CSRF token or a card identify key is replaced wholesale; the card inventory
+keeps ordinal labels (`card-001`) and a placeholder reference instead of names
+and keys; the result is canonically encoded (sorted keys, trailing newline) and
+then re-checked, so output that still holds a sensitive value fails the run
+instead of being stored. The artifact keys are the ones central storage already
+uses, so the same run registers the same way.
 
 Terminal fields: one run **per card**, `runId = <session run id>-card-NNN`,
 all cards of one session carrying that session id as `acquisitionSessionRef`,
 so several cards stay distinguishable instead of collapsing into one run
-(G1-16) — the same mapping `VPASS_LEGACY_ADAPTER` uses when a legacy run is
-re-persisted. One unit per card (`unitKind: card`), a `statement-months`
+(G1-16). One unit per card (`unitKind: card`), a `statement-months`
 declared-coverage range over the months that were captured, one `terminal`
 report, `requestedScope.scopeKind = full_snapshot`. `coverageStatus` is
 `partial` even on success: a card exposes a rolling window of statement months,
 so a finished run is not a claim about the card's whole history.
 `producerVersion` is `vpass-worker-card-v1`, the schema version central
-storage records for a card-scoped Vpass run, and `manifest.json` holds exactly
-the summary central storage holds today.
+storage recorded for a card-scoped Vpass run, and `manifest.json` holds exactly
+the summary central storage held for one.
 
 A card (or a session that failed before a card was selected, as unit `run`)
 that collected nothing persists a `failed` terminal with no artifact at all
 (G1-09). Every stored object carries a `redacted` transformation with no
 retained input, because the provider envelope that held the session was
 deliberately not kept; note that this differs from the legacy central
-descriptors, which record a statement page as `extracted` from the stored
-snapshot — in shared mode there is no snapshot to extract from.
+descriptors, which recorded a statement page as `extracted` from the stored
+snapshot — the collector keeps no snapshot to extract from.
 
 Verified with synthetic fixtures in
 `services/collector-vpass/test/shared-collection.test.ts` (G1-01, G1-02,
-G1-08, G1-09, G1-15, G1-16, G3-07, G3-08) and, for parity with the importer,
-in `services/collector-r2-importer/test/shared-target-parity.test.ts`: the
-importer's `validateVpassRun` over a synthetic legacy snapshot and the shared
-plan over the same raw envelopes name the same digest for all six artifacts,
-`manifest.json` included. No provider was contacted and no production bucket
-was read or written.
+G1-08, G1-09, G1-15, G1-16, G3-07, G3-08). The importer-side parity suite was
+removed with the importer ([legacy-retirement.md](legacy-retirement.md)). No
+provider was contacted and no production bucket was read or written.
 
 ### `v-point` (`services/collector-vpoint`)
 
@@ -428,12 +414,12 @@ was read or written.
 | `collection-summary.json`    | `collector_summary` | the collector's own page/total counts                   |
 
 Sanitizer: the collector never stores a request, a header or a cookie — it
-stores the decoded JSON response text it already writes to the legacy bucket
-today, and those are the bytes the importer forwards to the central store. The
+stores the decoded JSON response text, the same bytes the retired legacy path
+wrote to its bucket and the importer forwarded to the central store. The
 session cookie lives in the `VPointSession` Durable Object and appears in no
-artifact. The collector manifest itself is _not_ stored as an artifact in
-shared mode: the terminal is the run record, so `manifest.json` (role
-`collector_manifest` centrally) has no shared-mode equivalent.
+artifact. The collector manifest itself is _not_ stored as an artifact: the
+terminal is the run record, so `manifest.json` (role `collector_manifest` for
+legacy runs) has no equivalent.
 
 Terminal: `source: v-point`, `producer: collector-vpoint`, `producerVersion:
 COLLECTOR_SCHEMA_VERSION` (`vpoint-worker-poc-v2`), `runId` the collector's own
@@ -444,12 +430,11 @@ stored artifact count, `providerOutcome` from the run status, `coverageStatus`
 `safeErrorCode` from the run's first safe failure code (`collector_failed` when
 a failure carried none). `ranges`, `reports` and `transformations` are empty.
 
-Not carried over to shared mode: the V Point Pay email reconciliation report.
-It is built by listing the legacy `raw/v-point-pay-email/` prefix, and in
-shared mode those notifications are content-addressed runs that no prefix
-enumerates — a report built from the legacy bucket alone would silently
-under-count them. Cross-source reconciliation belongs to the Processor, which
-reads terminals (03 §4). In `legacy` mode it is produced exactly as before.
+Not carried over: the V Point Pay email reconciliation report. It was built by
+listing the legacy `raw/v-point-pay-email/` prefix, and those notifications
+are now content-addressed runs that no prefix enumerates, so the collector no
+longer produces it. Cross-source reconciliation belongs to the Processor,
+which reads terminals (03 §4).
 
 ### `v-point-pay-email` (Email route of `services/collector-vpoint`)
 
@@ -462,8 +447,8 @@ Sanitizer: the existing email handling is unchanged — the envelope recipient
 must match `VPOINT_PAY_EMAIL_RECIPIENT`, a directly delivered message must come
 from the V Point Pay sender, and the stored event records
 `sourceVerification: source_unverified` because the Email event exposes no
-trusted SPF/DKIM result. The V Point _login code_ mail is never stored in
-either mode: it is parsed for the code and dropped.
+trusted SPF/DKIM result. The V Point _login code_ mail is never stored: it is
+parsed for the code and dropped.
 
 Terminal: `source: v-point-pay-email`, `runId` the SHA-256 of the stored
 message, `attemptId: message-<that digest>`, run window the message's own date,
@@ -471,8 +456,8 @@ message, `attemptId: message-<that digest>`, run window the message's own date,
 (`notification`/`message`), and one transformation (`extracted`,
 `vpoint-pay-email-parser`) from `notification.eml` to `normalized-event.json`.
 Every field is derived from the message, so a redelivery produces the same
-terminal digest and is answered `already_persisted` — the shared-target
-equivalent of the legacy duplicate check. `producerVersion` is part of that
+terminal digest and is answered `already_persisted`, which replaces the
+retired legacy duplicate check. `producerVersion` is part of that
 digest: a mail redelivered after a `COLLECTOR_SCHEMA_VERSION` bump is a
 `conflict`, and the handler then fails the delivery rather than overwrite the
 terminal already written for that message.
@@ -495,7 +480,7 @@ Durable Object and in the request headers `collectVPointPay` builds. None of
 them is an artifact, and a failure becomes a machine code
 (`credential_configuration_required`, `authentication_required`,
 `provider_protocol_failed`, `provider_http_failed`, `operation_failed`) rather
-than the redacted provider message the legacy manifest keeps — a terminal
+than the redacted provider message the legacy manifest kept — a terminal
 states codes only (12 §6).
 
 Terminal: `source: v-point-pay`, `producer: collector-vpoint-pay`,
@@ -510,9 +495,9 @@ guessed one.
 This collector is **stopped**: `/trigger`, `/probe` and `/reset-credentials`
 answer 410, there is no cron, and the notification mail this source is actually
 observed through is collected by `services/collector-vpoint` as
-`v-point-pay-email`. The shared target is therefore the path a future
-re-enable writes to; the Durable Object's single-collection-in-flight exclusion
-is unchanged by it (G3-14), and switching the target adds no scheduler.
+`v-point-pay-email`. A future re-enable writes to `DATA` like every other
+collector; the Durable Object's single-collection-in-flight exclusion is
+unchanged (G3-14), and nothing here adds a scheduler.
 
 ### `mobile-suica` (`services/collector-mobile-suica`)
 
@@ -524,8 +509,8 @@ is unchanged by it (G3-14), and switching the target adds no scheduler.
 
 Sanitizer: `src/sanitize.ts` (`sanitizeHistoryHtml`) replaces the hidden
 `baseVariable` session field with the redaction sentinel and proves the CP932
-round trip before anything is stored — the same bytes the importer verifies and
-forwards centrally today. The session envelope, the cookie header and the
+round trip before anything is stored — the same bytes the retired importer
+verified and forwarded centrally. The session envelope, the cookie header and the
 browser bootstrap never become artifacts.
 
 Terminal: `source: mobile-suica`, `producer: collector-mobile-suica`,
@@ -558,9 +543,9 @@ for this artifact, with the CP932 charset a constant of the source.
 | `foreign-trade-records.json`   | `collector_derived` | `foreign`  |
 
 The bytes are `JSON.stringify(artifact.body)` — the collector's re-encoded view
-of each response, exactly what it writes to the per-source bucket today and
-what the importer forwards centrally. A dataset is attributed to a unit by the
-same rule the importer uses (`foreign-` prefix → `foreign`).
+of each response, exactly what the retired legacy path wrote to the per-source
+bucket and the importer forwarded centrally. A dataset is attributed to a unit
+by the same rule the importer used (`foreign-` prefix → `foreign`).
 
 Sanitizer: the passkey credential, the handshake key and the MTS/GraphQL
 session ids stay in the secrets and in `src/sbi.ts`; none of them is an
@@ -569,7 +554,7 @@ artifact. A failure reaches the terminal only as a machine code
 `credential_configuration_required`, `authentication_required`,
 `provider_response_invalid`, `operation_failed`) derived through
 `safeErrorDetails`, never as the redacted provider message the legacy manifest
-keeps (12 §6).
+kept (12 §6).
 
 Terminal: `source: sbi-securities`, `producer: collector-sbi-securities`,
 `producerVersion: COLLECTOR_SCHEMA_VERSION` (`sbi-worker-poc-v1`), one unit per
@@ -602,17 +587,18 @@ source `sbi-shinsei-bank`).
 - Human-required: a rejected credential or refused login (`credential-shape`,
   `credential-validation`, `login-rejected`, `login-failed`) ends the run
   `failed` with `human_required_credentials`.
-- Staging: **not written** in shared mode. The four provider responses and the
-  normalized snapshot are held in memory until the terminal is written; the
-  `r2:<dataset>` failure operation then means "not admitted to the run"
-  (validation), not a staging put. `test/storage.test.ts` proves the described
-  manifest entry equals the one the legacy put returns.
-- Parity: `test/shared-collection.test.ts` digest-compares the shared bytes
-  against the importer's own `sanitizeProviderResponse` / `sanitizeManifest`
-  for the same synthetic fixture.
+- Staging: **none**. The four provider responses and the normalized snapshot
+  are held in memory until the terminal is written; the `r2:<dataset>` failure
+  operation means "not admitted to the run" (validation), not a staging put.
+  `test/storage.test.ts` proves the described manifest entry equals the one the
+  legacy put returns.
+- Sanitization: `test/shared-collection.test.ts` asserts the rotating token
+  never reaches a stored artifact and the stored manifest keeps only
+  allowlisted failure codes. The importer-side digest comparison was removed
+  with the importer ([legacy-retirement.md](legacy-retirement.md)).
 - Verified with synthetic fixtures only:
-  `test/shared-collection.test.ts` (decisions, sanitization, outcomes,
-  end-to-end target switch with a mocked container) and
+  `test/shared-collection.test.ts` (decisions, sanitization, outcomes, an
+  end-to-end DATA-only run with a mocked container) and
   `worker-test/shared-data-bucket.test.ts` (a real Miniflare R2 `DATA` bucket).
   No provider was contacted and no production bucket was read or written.
 
@@ -625,7 +611,7 @@ Processor maps it to the CORE source `global-pass`).
 | Artifact                  | Role                         | Bytes                                                      |
 | ------------------------- | ---------------------------- | ---------------------------------------------------------- |
 | `activity-<yyyy-mm>.html` | `sanitized_provider_capture` | the page `sanitizeGlobalPassActivityHtml` already produced |
-| `manifest.json`           | `collector_manifest`         | the collector manifest, the bytes legacy mode stages       |
+| `manifest.json`           | `collector_manifest`         | the collector manifest, the bytes legacy mode staged       |
 
 - `requestedScope`: `month_range` over the selected months (oldest to newest),
   `unitKeys: ["account"]`. A run whose container never reported its month list
@@ -649,16 +635,17 @@ Processor maps it to the CORE source `global-pass`).
   container change, which U09 does not make.
 - The shared persist is reported under the existing `central-import`
   diagnostics stage; the `globalpass-collection-stored` log line carries
-  `collectionTarget`, `sharedOutcome`, `terminalKey` and `terminalDigest`.
-- Staging: **not written** in shared mode. Every sanitized page is held in
-  memory until the terminal is written. `GET /latest` reads the staging bucket
-  and therefore shows legacy runs only.
-- Parity: `test/shared-worker.test.ts` runs the importer's own
-  `sanitizeGlobalPassHtml` (v2) over every page in `DATA` and asserts it
-  returns the bytes unchanged with the digest the terminal states.
+  `collectionTarget` (always `shared`), `sharedOutcome`, `terminalKey` and
+  `terminalDigest`.
+- Staging: **none**. Every sanitized page is held in memory until the terminal
+  is written.
+- Sanitization: `test/shared-worker.test.ts` asserts nothing in `DATA` carries
+  the session state, the password or the relay token. The importer-side
+  sanitizer comparison was removed with the importer
+  ([legacy-retirement.md](legacy-retirement.md)).
 - Verified with synthetic data only: `test/shared-collection.test.ts`
   (decisions, scope/ranges/units, outcomes, redaction),
-  `test/shared-worker.test.ts` (end-to-end target switch with a mocked
+  `test/shared-worker.test.ts` (an end-to-end DATA-only run with a mocked
   container) and `worker-test/shared-data-bucket.test.ts` (a real Miniflare R2
   `DATA` bucket).
 
@@ -671,7 +658,7 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 | Artifact         | Role                 | Bytes                                                       |
 | ---------------- | -------------------- | ----------------------------------------------------------- |
 | `<dataset>.json` | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped |
-| `manifest.json`  | `collector_manifest` | the collector manifest, the bytes legacy mode stages        |
+| `manifest.json`  | `collector_manifest` | the collector manifest, the bytes legacy mode staged        |
 
 - `requestedScope`: `full_snapshot`, `unitKeys: ["account"]`; one `account` unit
   of kind `collection`, the same unit the central descriptors use. No ranges.
@@ -695,23 +682,24 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   session error uses `session_unhealthy` instead. Nothing retries a login: the
   existing single, 6-hour-cooled-down re-authentication attempt is unchanged
   (G3-10, G3-11).
-- Shared mode removes the legacy path's deferral: with no service binding in
-  the chain there is no Worker invocation limit, so a run with more than eleven
-  artifacts finishes in place instead of being handed to the backfill route.
-- Staging: **not written** in shared mode. Every sanitized envelope is held in
-  memory until the terminal is written; the create-only terminal put in `DATA`
-  is the duplicate guard the staging `onlyIf` put used to be.
+- No deferral: with no service binding in the chain, a run with more than
+  eleven artifacts finishes in place. The retired importer path deferred such
+  a run to a backfill route, which no longer exists.
+- Staging: **none**. Every sanitized envelope is held in memory until the
+  terminal is written; the create-only terminal put in `DATA` is the duplicate
+  guard the staging `onlyIf` put used to be.
 - Parity: `test/shared-collection.test.ts` asserts the `DATA` bytes are the
-  staged encoding of the same sanitized body (the importer forwards this
-  source's staged bytes verbatim after checking `meta.secureKey` is absent),
-  and that an envelope still carrying `meta.secureKey` is refused with
+  staged encoding of the same sanitized body (the encoding the retired
+  importer forwarded verbatim after checking `meta.secureKey` was absent), and
+  that an envelope still carrying `meta.secureKey` is refused with
   `shared_secure_key_present` rather than planned.
 - Duplicate dispatch is still one run: the Durable Object's existing
   single-flight `runCollection` returns the in-flight summary (G3-14).
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
   `worker-test/shared-data-bucket.test.ts`, which drives the real Durable
-  Object and a real Miniflare R2 `DATA` bucket (its Miniflare config binds
-  `COLLECTION_TARGET=shared`; the deployed config still ships `legacy`).
+  Object and a real Miniflare R2 `DATA` bucket. (Its Miniflare config still
+  binds a `COLLECTION_TARGET` value that the Worker no longer reads; the
+  deployed config carries none.)
 
 ### smbc-direct (`kogane-smbc-direct-backfill-poc`)
 
@@ -727,39 +715,42 @@ Terminal source id `smbc-direct` (the Processor maps it to the CORE source
 | `balance.normalized.json`, `transactions/*.normalized.json` | `collector_derived`  | the collector's normalized counterparts     |
 | `manifest.json`                                             | `collector_manifest` | the exact manifest bytes written to staging |
 
-**Bounded exception to one-copy.** This is the only source whose shared mode
-still writes the per-source staging bucket, and the reason is structural, not
-convenience: the chunks are collected across many Durable Object alarms and the
-Durable Object keeps only their manifest entries, so the bytes of a finished run
-exist nowhere else until the terminal is written. Legacy mode is byte-for-byte
-unchanged; shared mode re-reads the run from staging at the end. What bounds
-the exception:
+**Bounded exception to one-copy.** This is the only source that still stages a
+run before its terminal, and the reason is structural, not convenience: the
+chunks are collected across many Durable Object alarms and the Durable Object
+keeps only their manifest entries, so the bytes of a finished run exist nowhere
+else until the terminal is written. Each chunk is staged in `DATA` under the
+run prefix `raw/smbc-direct/<yyyy>/<mm>/<dd>/<runId>/`, the key layout the
+retired per-source bucket used, and the run is re-read from there at the end.
+The retirement preserved the staged objects at those keys so that existing
+Durable Object progress resumes through `DATA`
+([legacy-retirement.md](legacy-retirement.md)). What bounds the exception:
 
-- the staging write happens only where legacy already writes it (no new keys);
+- the staging keys are the ones the per-source bucket used (no new keys);
 - the terminal is written by `persistRun`, last, after every content-addressed
   object in `DATA` has been put and verified, exactly like the other sources;
 - every re-read byte is verified against the manifest (size and digest) before
   it is planned, and a run larger than `MAX_SHARED_RUN_BYTES` is refused.
 
-**U15 removal path**: write each chunk's bytes content-addressed into `DATA`
-from the alarm that collected it (`persistRun` verifies and reuses an object
-that is already there), keep only the manifest entries in Durable Object state
-as today, and delete `readStagedArtifacts` and the staging round trip; the
-`SNAPSHOTS` binding then retires with the other legacy buckets. No terminal
+**Removal path** (not done; U15 retired the per-source bucket but kept this
+staging step): write each chunk's bytes content-addressed into `DATA` from the
+alarm that collected it (`persistRun` verifies and reuses an object that is
+already there), keep only the manifest entries in Durable Object state as
+today, and delete `readStagedArtifacts` and the staging round trip. No terminal
 format change is needed for that step.
 
 - **One terminal per backfill run.** The run is finished exactly once — when the
   last chunk lands, when it ends partial, or when it fails — and that is the only
   place the terminal is written, whatever the outcome.
-- The run's bytes are re-read from the staging bucket at that point (the
+- The run's bytes are re-read from the staging prefix at that point (the
   bounded exception above) and **verified against the manifest** (size and
   digest) before anything is planned; a byte that changed or vanished stops the
   run with no terminal. A run larger than `MAX_SHARED_RUN_BYTES` (48 MiB) is
   refused for the same reason rather than read into memory.
 - Parity: `test/shared-collection.test.ts` stores a Shift_JIS provider body
   through the staging re-read and asserts `DATA` holds the identical bytes
-  (the importer forwards this source's provider bytes verbatim after a
-  Shift_JIS round-trip check), and that the `manifest.json` object equals the
+  (the retired importer forwarded this source's provider bytes verbatim after
+  a Shift_JIS round-trip check), and that the `manifest.json` object equals the
   bytes `storeManifest` stages.
 - `requestedScope`: `date_range` over `DEFAULT_BACKFILL_FROM`…today,
   `unitKeys: ["account"]`; one `account` unit of kind `collection`. `ranges`:
@@ -782,8 +773,8 @@ format change is needed for that step.
   `waitingForHuman` while the person still has to act.
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
   `worker-test/shared-data-bucket.test.ts`, which stages a run into a real
-  Miniflare R2 bucket, re-reads it and writes the terminal into a real
-  Miniflare R2 `DATA` bucket.
+  Miniflare R2 `DATA` bucket, re-reads it and writes the objects and the
+  terminal into the same bucket.
 - Known, pre-existing and untouched: three of this package's bun tests fail
   under bun 1.4.0 because `mock.module("cloudflare:workers")` does not resolve
   in bare `bun test` discovery. The test task still runs `bun test ./test`, so

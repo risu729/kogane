@@ -49,40 +49,24 @@ TAMIA経路のCloudflare live run `0e999a32-6994-450e-a495-2daff0e7aeb1` は `st
 
 ## Worker surface
 
-| Trigger                                          | Behavior                                                                                                                                                     |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /health`                                    | schema version、source、live-read readiness のみ返す。                                                                                                       |
-| `POST /trigger`                                  | `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` 必須。実行時点のsnapshotを1回収集し、validated artifactとmanifestをR2へ保存。期間指定は受け付けない。          |
-| `POST /backfill-raw-evidence?limit=1&cursor=...` | 同じadmin認証でprivate Service Bindingへ1ページだけ転送する。cursorは任意、limitは1固定。                                                                    |
-| Cron `0 21 * * *`                                | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存・中央sealする。 |
+| Trigger           | Behavior                                                                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`     | schema version、source、live-read readiness のみ返す。                                                                                                           |
+| `POST /trigger`   | `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` 必須。実行時点のsnapshotを1回収集し、validated artifactとmanifestを共有DATA bucketへ保存。期間指定は受け付けない。 |
+| Cron `0 21 * * *` | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存する。               |
 
-R2 key:
+R2 key（共有DATA bucket `kogane-raw-evidence`）:
 
 ```text
-raw/sbi-shinsei/YYYY/MM/DD/<run-id>/manifest.json
-raw/sbi-shinsei/YYYY/MM/DD/<run-id>/<verified artifact>
+objects/<2 hex>/<sha256>                    manifest.jsonと各verified artifact
+runs/sbi-shinsei/<run-id>/terminal.json     最後に書くrunの完了記録（artifact keyとobjectの対応を持つ）
 ```
 
 unknown response や authentication response body は R2 に保存しません。4件のcore responseはauthenticated captureとローカル実行で検証し、strict schemaを通過した場合だけ保存します。read継続に使うtop-level `header.newToken`は同一page内でrotationした後、Containerから出す前に削除してJSONを再encodeします。
 
 現在の4 readはtop page由来のsnapshotです。manifestの`startedAt` / `completedAt`は実行時刻を表し、過去期間を取得済みとは記録しません。期間履歴を追加する場合は、期間を実際に送るread routeと取得範囲を別途検証してから導入します。
 
-manifestを最後に不変条件付きで保存した後、private Service Binding経由で中央raw-evidenceへ即時importする。中央側は元bytes、hash、metadata、schema、normalizedの再計算結果を検証してからsealする。中央が失敗してもsource R2はoutboxとして残るため、次でcursor付き再送できる。
-
-```bash
-services/collector-sbi-shinsei/scripts/backfill-raw-evidence.sh
-```
-
-初回本番確認は1 manifestだけで停止する。
-
-```bash
-KOGANE_STOP_AFTER_MANIFEST=1 \
-  services/collector-sbi-shinsei/scripts/backfill-raw-evidence.sh
-```
-
-スクリプトはR2 objectを1件ずつ走査し、失敗manifestでは停止する。canaryと通常完了の出力は件数だけで、object key、hash、本文を含めない。canaryはmanifest page後のcursorを保存しないため、その後のfull backfillで同じmanifestを冪等再送する。完了してもsource R2を削除しない。
-
-backfillのadmin token fileは、current user所有のregular file、非symlink、mode 0600でなければ拒否する。file descriptorを`O_NOFOLLOW`で開き、同じdescriptorを`fstat`してから読み取る。
+runは`packages/collection`で共有DATA bucketへ直接書き、4件のprovider responseとnormalized snapshotはterminalを書くまでmemoryに保持する。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。private Service Bindingによる中央importer呼出し、`POST /backfill-raw-evidence`、`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 Kuebiko capture で得た core response の field-name topology は synthetic fixture と strict validator に反映済みです。1 sample だけなので known field を optional として扱う箇所がありますが、unknown field、unknown nested item、unknown schema は拒否します。validator実装だけでは route を有効化せず、exact request builder とaccepted browser-contextでの実行成功も必要です。
 
@@ -107,12 +91,10 @@ rotationは保護されたtemporary fileから同じdirectoryの`.pending`を原
 bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --resume
 ```
 
-既存local tokenをrotationせずWorkerへ再同期する場合だけ`--sync`を使う。`.pending`が存在する間は`--sync`と新しい`--rotate`を拒否する。成功出力はsecret名とlocal pathだけであり、直後にcanaryを実行する。
+既存local tokenをrotationせずWorkerへ再同期する場合だけ`--sync`を使う。`.pending`が存在する間は`--sync`と新しい`--rotate`を拒否する。成功出力はsecret名とlocal pathだけである。以前canaryに使った`backfill-raw-evidence.sh`はrouteとともに廃止した。
 
 ```bash
 bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --sync
-KOGANE_STOP_AFTER_MANIFEST=1 \
-  services/collector-sbi-shinsei/scripts/backfill-raw-evidence.sh
 ```
 
 ローカルCLIは次の順でcredentialを読みます。
@@ -166,21 +148,20 @@ PoCを廃止するときは、次をまとめて削除します。現在はlive�
 
 - deployed WorkerとCron `0 21 * * *`;
 - Cloudflare secrets 3件（SBI credential、admin trigger、relay）;
-- success/failure manifestとartifactを含むR2 bucket;
+- （旧source専用R2 bucketは2026-09-13に削除済み。保存先の共有DATA bucketは他のcollectorとProcessorも使うため削除しない）;
 - Container applicationとimage revisions;
 - TAMIAの`tunnel_id`を直接指定するVPC binding設定;
 - local Docker test container/image（検証終了後に削除）。
 
 ### Failure diagnostics
 
-Collection failures emit a structured `*-collection-failure` event before teardown,
-manifest storage, or central import. Join on `runId`; use `phase` to distinguish
-collection from manifest-write, raw-evidence-import, teardown, and relay events.
-The source R2 manifest retains the same three failure fields (`operation`,
-`errorType`, `message`). Its bounded message includes the safe stage and available
-HTTP status; structured logs expose these as `diagnostics` fields. The central
-importer continues to normalize failure messages, so use the source manifest or
-Worker logs for diagnosis.
+Collection failures emit a structured `*-collection-failure` event before teardown
+or the DATA write. Join on `runId`; use `phase` to distinguish collection from
+teardown, relay and shared-persist events. The collector manifest stored in DATA
+retains the same three failure fields (`operation`, `errorType`, `message`). Its
+bounded message includes the safe stage and available HTTP status; structured logs
+expose these as `diagnostics` fields. Use that manifest or the Worker logs for
+diagnosis.
 
 No exception message, stack, cause, request URL, credential, response body, or
 unrecognized provider text is logged. Sony logs only fixed operation IDs/currencies

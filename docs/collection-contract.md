@@ -10,10 +10,12 @@ Cloudflare `Env`, no D1, no HTTP and no credentials, so a collector Worker and
 the Processor use the same implementation of "the terminal is the completion
 record" instead of two.
 
-Nothing in this package is wired into a deployed Worker yet. U09 gives each
-collector `COLLECTION_TARGET=shared` and a `DATA` binding, and U08 gives the
-Processor the terminal consumer; both stay behind `SHARED_R2_INGEST_ENABLED`,
-default off. Merged is not enabled.
+Every collector writes its runs through this package into its `DATA` binding
+(U09, [collection.md](collection.md#shared-data-bucket-per-source-u09)), and
+the Processor reads and registers them in process (U08,
+[processor.md](processor.md)). Collection is shared-only: the per-source
+buckets, the importer and the `COLLECTION_TARGET` switch were retired on
+2026-09-13 ([legacy-retirement.md](legacy-retirement.md)).
 
 ## Key layout
 
@@ -172,8 +174,8 @@ not honour the wildcard condition. The public Workers R2 reference does not
 document `"*"`, so it is verified here rather than assumed:
 `packages/collection/worker-test/r2-terminal.test.ts` runs against real
 workerd/Miniflare R2 and asserts that the second create-only put returns
-`null` and leaves the first object in place. The same pattern is already in
-production in `services/raw-evidence/src/store.ts`.
+`null` and leaves the first object in place. The retired `services/raw-evidence`
+Worker used the same pattern in production.
 
 ## Reading and re-checking
 
@@ -222,45 +224,19 @@ new revision instead of silently reusing the old one.
 record of record: a newer run succeeding does not tell you an older run is
 still unregistered.
 
-## Legacy layouts (`src/adapters.ts`)
+## Legacy layouts (retired)
 
-`LegacyCollectionAdapter` names what a legacy per-source bucket must answer to
-be re-persisted under this contract: the terminal suffixes, a `matchTerminalKey`
-that derives run identity from a key, the object keys the run needs, and a
-`toPersistPlan` that maps already-read bytes to a `terminal-v1` plan. It is a
-pure mapping: it reads no bucket, calls no service, and does not modify
-`services/collector-r2-importer`, whose import path is unchanged.
-
-**It stores no legacy byte verbatim.** Legacy responses carry the session
-envelope the importer strips before anything reaches central storage, and that
-sanitizer lives in the importer, not in this package. So every object in a plan
-is one the caller has already passed through a named sanitizer
-(`LegacyObject.sanitizer = { transformerId, transformerVersion }`), and the plan
-records that step as a `redacted` transformation whose input is the legacy key
-and whose output is the stored artifact. The legacy terminal record itself
-(`manifest.json` / `error.json`) is parsed for identity, timestamps, outcome and
-the declared statement months and is not stored; an error record's free-text
-`message` is never copied anywhere.
-
-`VPASS_LEGACY_ADAPTER` is the worked example, over the key grammar the importer
-already recognises (`vpass/<yyyy>/<mm>/<dd>/<runId>/[card-NNN/]{manifest,error}.json`,
-path date agreeing with the run id). One Vpass session visits several cards
-under one run timestamp, so each card becomes its own run (`<runId>-card-NNN`)
-and all of them carry the session timestamp as `acquisitionSessionRef`: the
-cards stay distinguishable instead of collapsing into one run whose provenance
-is lost (G1-16). A successful card run maps to `providerOutcome: success` with
-`coverageStatus: partial`, because a card exposes a rolling window of statement
-months and a finished run is not a claim about the card's whole history; an
-error record maps to `failed` / `unknown` / `collector_failed`.
-
-What it does **not** map: the importer's snapshot schema checks, its card and
-month inventory cross-checks, its legacy partial-error object layout
-(`session/`, `cards/`) and its sanitizer. Those stay in the importer until U08
-moves them behind the Processor; this adapter gives such a move one target
-shape, nothing more.
-
-Legacy buckets are not decommissioned by this change (plan 03 §7). They stay
-readable until nothing exists only there.
+This package no longer carries legacy adapters. `LegacyCollectionAdapter` and
+its Vpass example mapped a per-source bucket's layout to a `terminal-v1` plan
+while the importer (`services/collector-r2-importer`) still ran; both were
+removed with the importer, its Queues and the per-source buckets on
+2026-09-13. Every legacy object was copied to `objects/<first two hex>/<sha256>`
+in DATA and verified before the old buckets were deleted; the mapping and the
+historical repair outcomes are in [legacy-retirement.md](legacy-retirement.md).
+A collector writes only `terminal-v1` runs through this package. A Vpass
+session still becomes one run per card, and the card runs share an
+`acquisitionSessionRef` (G1-16; see
+[collection.md](collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc)).
 
 ## What this does not guarantee
 
@@ -296,7 +272,7 @@ name, balance or token.
 | G1-12 a late terminal for an older run is still found                              | `test/reader.test.ts`                                         |
 | G1-13 a corrupt terminal is blocked without stopping the scan                      | `test/reader.test.ts`                                         |
 | G1-14 missing / size-mismatched objects reported with codes, not ok                | `test/reader.test.ts`                                         |
-| G1-16 a multi-source session keeps one run per source                              | `test/manifest.test.ts`, `test/adapters.test.ts`              |
+| G1-16 a multi-source session keeps one run per source                              | `test/manifest.test.ts`                                       |
 
 Real R2 semantics (create-only conditional put, checksum rejection, native
 checksum presence, the whole persist/read/verify/list path through
@@ -318,12 +294,14 @@ needing the Processor are covered there.
 
 ## Flags, deploy order, rollback
 
-- Flags: none in this package. The consumers add `SHARED_R2_INGEST_ENABLED`
-  (Processor, U08) and `COLLECTION_TARGET` (collectors, U09), both default off
-  / `legacy`.
-- Deploy order when the consumers land: reader (Processor) before writer
-  (collectors), so a terminal is never written before something can read it.
-- Rollback: this package is pure and unreferenced by any deployed Worker, so
-  reverting the commit is the rollback. Once the consumers exist, rollback is
-  turning the flags off; terminals already written stay valid and are read on
-  the next scan.
+- Flags: none in this package. The Processor gates its consumer with
+  `SHARED_R2_INGEST_ENABLED` (U08), which production enables
+  ([rollout.md](rollout.md)). Collectors have no target flag: the
+  `COLLECTION_TARGET` switch was removed with the legacy path, and no collector
+  reads it.
+- Deploy order: reader (Processor) before writers (collectors), so a terminal
+  is never written before something can read it.
+- Rollback: turning `SHARED_R2_INGEST_ENABLED` off pauses registration;
+  terminals already written stay valid and are read on the next scan. There is
+  no legacy collection path to fall back to
+  ([legacy-retirement.md](legacy-retirement.md)).

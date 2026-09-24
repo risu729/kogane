@@ -1,6 +1,6 @@
 # Money Forward ME Worker collector PoC
 
-Money Forward IDのパスキーを使い、ブラウザなしのCloudflare WorkerからMoney Forward MEを読み取るPoCです。連携先一覧、口座詳細、画面で取得できる直近12か月の明細fragmentを、加工前のHTMLとして非公開R2へ保存します。
+Money Forward IDのパスキーを使い、ブラウザなしのCloudflare WorkerからMoney Forward MEを読み取るPoCです。連携先一覧、口座詳細、画面で取得できる直近12か月の明細fragmentを、加工前のHTMLとして非公開の共有DATA bucket（`kogane-raw-evidence`）へ保存します。
 
 ## 収集対象
 
@@ -39,7 +39,6 @@ unset BW_SESSION
 bun install
 mise run //services/collector-moneyforward:test
 mise run //services/collector-moneyforward:typecheck
-bunx wrangler r2 bucket create kogane-moneyforward-collector-poc
 ./scripts/sync-local-secrets.sh
 ./node_modules/.bin/wrangler deploy
 ./scripts/trigger.sh https://kogane-moneyforward-collector-poc.takuanimal.workers.dev
@@ -47,24 +46,14 @@ bunx wrangler r2 bucket create kogane-moneyforward-collector-poc
 
 Cronは毎日 `21:15 UTC`（日本時間06:15）です。GitHub Actionsはスケジューラに使いません。Money Forward側の銀行・カード更新を要求する処理はなく、最後にMoney Forwardへ同期済みの内容だけを保存します。
 
-## 中央raw-evidenceへのbackfill
+## 中央raw-evidenceへの保存
 
-collectorの管理Bearer付き`POST /backfill-raw-evidence?limit=1`は、公開URLを経由せずService
-Bindingで`kogane-collector-r2-importer`を呼びます。Importerは専用の中央credentialとsource
-policyを使い、private R2をread-only outboxとして1 objectずつ走査します。通常runは53 data
-artifactsとmanifestを持つため、5 artifactsずつ分割し、最終chunkだけterminal reportとsealを
-登録します。収集直後の自動importは行わず、historical replayは次のbounded scriptで明示的に
-実行します。
-
-```bash
-./scripts/backfill-raw-evidence.sh
-```
-
-scriptはAES-256-GCMで暗号化・認証されたcursorだけをmode 0600のlocal stateへ保存し、10万page上限とcursor
-stagnation guardを適用します。応答とログにはsource object key、hash、本文、金融値、認証値を
-含めません。専用client tokenまたはfingerprint keyをrotationした場合は旧cursorが拒否されるため、
-cursor fileを削除して先頭からidempotentに再走査します。中央へsealできた後もsource R2を変更・
-削除しません。
+runは`packages/collection`で共有DATA bucketへ直接書きます。各pageとmanifestを
+`objects/<2 hex>/<sha256>`へ保存し、最後に`runs/moneyforward-me/<run-id>/terminal.json`を書きます。
+Processorがterminalをin-processで登録します（[processor.md](../../docs/processor.md)）。
+`POST /backfill-raw-evidence`、`kogane-collector-r2-importer`へのService Binding、
+`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止しました
+（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 ## 2026-08-31の実データ検証
 
@@ -115,13 +104,12 @@ Oliveデビットは、銀行連携だけでは加盟店単位の利用履歴を
 PoCを廃止するときは次をまとめて削除します。
 
 - Worker: `kogane-moneyforward-collector-poc`
-- R2 bucket: `kogane-moneyforward-collector-poc`
 - Worker secrets: `MONEYFORWARD_CREDENTIAL_JSON`、`ADMIN_TRIGGER_TOKEN`
 - Cron: `15 21 * * *`
 - ローカル管理token: `/home/risu/.local/state/kogane/moneyforward-worker-admin-token`
 - ローカル照合metadata: `/home/risu/.local/state/kogane/moneyforward-bitwarden-match.json`
 
-R2には実データが入るため、bucket削除前に必要なsnapshotの保持先を確認します。
+共有DATA bucket（`kogane-raw-evidence`）は他のcollectorとProcessorも使うため削除しません。旧source専用bucket `kogane-moneyforward-collector-poc`は2026-09-13に削除済みです。
 
 ## Safe operational diagnostics
 

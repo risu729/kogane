@@ -2,10 +2,10 @@
 
 Vポイント本体の残高・期限bucket・SMBC由来内訳・最大3年の履歴、およびVマネー残高・
 最大3年の履歴を、認証済みVポイントMy Page sessionでfirst-party JSON APIから取得し、
-raw responseとmanifestをprivate R2へ保存するPoCである。VポイントPayとVpass明細は別の
+raw responseを共有DATA bucket（`kogane-raw-evidence`）へ保存するPoCである。VポイントPayとVpass明細は別の
 サービス・認証・台帳であるため含めない。
 
-保存済みrunはService Bindingで内部`kogane-collector-r2-importer`へ通知し、strict validation後に中央raw-evidenceへsealする。source R2は中央転送用のimmutable outboxであり、成功・失敗・backfill後のいずれも変更または削除しない。中央が失敗した場合、collection自体を成功扱いせず、同じmanifestを冪等に再送できる。
+runは`packages/collection`で共有DATA bucketへ直接書き、terminalを最後に書く。terminalが書けないrunは成功扱いにしない。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。`kogane-collector-r2-importer`へのService Binding、source専用bucket、backfill route/scriptは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 ## Runtime profile
 
@@ -84,18 +84,16 @@ collectionまで完了し、browser、TLS impersonation、Containerは不要だ�
 
 ## 保存内容
 
-各runは以下へ保存する。
+各runは次のartifactを共有DATA bucketの`objects/<2 hex>/<sha256>`へcontent-addressedで保存し、最後にterminal `runs/v-point/<run-id>/terminal.json`を書く。collector manifestはartifactとして保存せず、terminalがrunの記録になる。
 
 ```text
-raw/v-point/YYYY/MM/DD/<run-id>/
-  balance-info.json
-  smfg-point.json
-  history-page-0001.json
-  ...
-  vmoney-history-page-0001.json
-  ...
-  collection-summary.json
-  manifest.json
+balance-info.json
+smfg-point.json
+history-page-0001.json
+...
+vmoney-history-page-0001.json
+...
+collection-summary.json
 ```
 
 Vポイント履歴とVマネー履歴は毎run、`filter_date`を空にして公開上限の最大3年を全page
@@ -113,7 +111,7 @@ mise run //services/collector-vpoint:dry-run
 
 必要なCloudflare resources/secrets:
 
-- R2 bucket: `kogane-vpoint-collector-poc`
+- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
 - SQLite Durable Object: `VPointSession`
 - Email Routing rule: `kogane-vpoint-auth`（`vpoint@takuk.me`だけをWorkerへ配送）
 - Email Routing rule: `kogane-vpoint-pay`（`vpointpay@takuk.me`だけを同じWorkerへ配送）
@@ -121,31 +119,13 @@ mise run //services/collector-vpoint:dry-run
 - secret: `VPOINT_EMAIL_RECIPIENT`
 - secret: `VPOINT_EMAIL_FORWARD_TO`
 - secret: `ADMIN_TRIGGER_TOKEN`
-- Service Binding: `RAW_EVIDENCE_IMPORTER` → `kogane-collector-r2-importer`
 - Cron: `15 21 * * *`（毎日06:15 JST）
 
 manual triggerは`POST /trigger`に`Authorization: Bearer <ADMIN_TRIGGER_TOKEN>`を付ける。
 認証メール待ちはHTTP 202と`reauthenticationPending: true`、通常収集はHTTP 200、実エラーは
 HTTP 502を返す。`GET /health`は秘密値や口座データを返さない。
 
-historical outboxは次で1 objectずつbounded scanする。管理tokenはmode 0600のローカルfileから読み、標準出力にはpage・件数・固定failure codeだけを出す。本文、値、source object key、hash、tokenは出力しない。
-
-```bash
-services/collector-vpoint/scripts/backfill-raw-evidence.sh
-```
-
-VポイントPay通知メールのhistorical pairは、Vポイント本体のmanifestとは別の専用routeで
-1 objectずつ走査する。`.json`を見つけたときだけ対応EMLとの厳格なpair検証・中央sealを行い、
-`.eml`単体のscan pageはskipする。
-
-```bash
-services/collector-vpoint/scripts/backfill-vpoint-pay-email-raw-evidence.sh
-```
-
-新着通知のR2保存後は同じService Bindingを`waitUntil`から呼ぶ。中央が一時失敗しても通知の
-保存・転送を失敗扱いにせず、immutable R2 pairをhistorical backfillで再送できる。
-
-11件を超えるdata artifactを持つ将来runもskipしない。Importerは完全inventoryを固定し、最大8 artifactずつ転送する。HMAC署名済みcursorにscan位置・処理中manifest・offsetを保持し、sealが完了するまで次のR2 objectへ進まない。実R2 contractの再監査は`services/collector-r2-importer`で`bash scripts/audit-v-point-r2.sh`を実行する。この監査はR2をread-onlyで走査し、件数だけを出力する。
+旧source bucketのhistorical outbox（Vポイント本体のmanifestとVポイントPay通知メールのpair）は、2026-09-13に中央DATAへコピー・検証した後に削除した。`backfill-raw-evidence.sh`と`backfill-vpoint-pay-email-raw-evidence.sh`が呼んでいたroute、通知保存後に`waitUntil`から呼んでいたService Binding、`services/collector-r2-importer`の監査scriptも同時に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。両scriptも削除済みである。
 
 2026-09-05のread-only contract auditではsource R2のmanifest 24件（v1 5件、v2 19件、成功13件、失敗11件）とreconciliation参照10件がすべてstrict validatorへ適合した。旧reconciliation 3件は旧exact match policy、残り7件は現行exact policyであり、両方を明示的な互換契約として扱う。
 
@@ -163,10 +143,9 @@ Vマネー0件・1 page、9 artifact、failure 0のv2 manifestをR2から再読�
 
 1. Email Routing rules `kogane-vpoint-auth`、`kogane-vpoint-pay`
 2. Worker `kogane-vpoint-collector-poc`（Cron、secrets、`VPointSession` namespaceを含む）
-3. R2 bucket `kogane-vpoint-collector-poc`
 
-先にEmail Routing ruleを削除または無効化し、その後WorkerとR2を削除する。catch-all ruleは
-削除対象ではない。
+先にEmail Routing ruleを削除または無効化し、その後Workerを削除する。catch-all ruleと、
+他のcollectorとProcessorも使う共有DATA bucketは削除対象ではない。
 
 ## VポイントPayとapp archive
 
@@ -189,12 +168,12 @@ repositoryへ保存し、Koganeにはprovenance、hash、再現手順、sanitize
 - プリペイド残高加算のお知らせ
 - ご利用不可のお知らせ／カードがご利用頂けませんでした
 
-原本は`kogane-vpoint-pay-collector-poc` bucketの
-`raw/v-point-pay-email/YYYY/MM/DD/<sha256>.eml`、正規化結果は同じprefixの`.json`へ保存する。
-原本hashをkeyにするため、同じbackfillを再実行しても原本は増えない。正規化JSONはparserの
-修正を反映できるよう再生成する。Gmailから`message/rfc822`添付で転送された通知は元から
+原本（`notification.eml`）と正規化結果（`normalized-event.json`）は通知1通を1 runとして
+共有DATA bucketへcontent-addressedで保存し、最後にterminal
+`runs/v-point-pay-email/<原本のsha256>/terminal.json`を書く。run IDが原本hashなので、同じ通知を
+再転送しても`already_persisted`となり原本は増えない。Gmailから`message/rfc822`添付で転送された通知は元から
 Gmailに存在するためWorkerから戻さない。公式送信元から`vpointpay@takuk.me`へ直接届いた通知は、
-R2保存後に従来のGmail宛へ転送する。OTPや転送先確認メールなど対象外メールも従来どおり
+DATA保存後に従来のGmail宛へ転送する。OTPや転送先確認メールなど対象外メールも従来どおり
 転送する。この区別により、VポイントPayの登録メールをaliasへ変更してもGmailで通知を読め、
 Gmailからのbackfillは転送loopを起こさない。
 
@@ -208,13 +187,16 @@ Gmailからのbackfillは転送loopを起こさない。
 
 2. 検索結果を原本添付のまま`vpoint@takuk.me`へ転送する。Gmail APIを使う場合は
    `message/rfc822`を保持し、1 request最大10通で分割する。
-3. Vポイントcollectorを1回実行する。現在runのVポイント履歴と、保存済みの全通知を照合し、
-   `derived/v-point-pay-email-reconciliation/YYYY/MM/DD/<run-id>.json`へreportを保存する。
-4. reportの件数をGmail検索件数と突き合わせる。再実行は安全だが、欠落分だけ再転送してよい。
+3. 転送した通知はそれぞれ`v-point-pay-email` runとしてDATAへ保存される。再転送は安全
+   （`already_persisted`）だが、欠落分だけ再転送してよい。
 
 `vpoint@takuk.me`はVポイントWeb認証メールと過去メールbackfill専用、
 `vpointpay@takuk.me`はVポイントPayアプリの登録先および今後の公式通知専用とする。両routeは
 同じWorkerへ届くが、後者はコード抽出には使われない。通常のcatch-all転送ruleは残す。
+
+collectorのメール照合reportは旧source bucketの`raw/v-point-pay-email/`一覧に依存していたため、
+2026-09-13の退役以降は生成していない。source横断の照合はterminalを読むProcessorの責務である
+（[collection.md](../../docs/collection.md#v-point-servicescollector-vpoint)）。以下は当時の照合ruleの記録である。
 
 照合は次のexact ruleだけを使う。
 
