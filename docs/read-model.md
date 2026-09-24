@@ -130,6 +130,52 @@ A later page whose published parse is still 1.1.0 keeps its old id, and so can
 still share a key with the first page, until the re-parse that follows the
 release reaches it.
 
+#### Cost
+
+D1 never runs `ANALYZE`, so its planner has no table statistics. Measured on
+that basis: every CORE migration from 0001, no `sqlite_stat*` table, on
+`bun:sqlite` and on workerd's SQLite through Miniflare, over the synthetic store
+of `test/card-usage-scale-fixture.ts` at `FULL_SCALE` (three Vpass cards and a
+MyJCB connection, 24 statement months, 180 daily captures after 18 monthly
+ones, 2–3 pages of 30–60 rows per card-month): 268,575 transaction
+observations, 8,829 artifacts, 10,869 current rows, 6,517 live recognised
+events. Median wall time of the shipped plan and of the current one on
+`bun:sqlite`, and of the current one on workerd (— not measured):
+
+| Read                                           | Shipped   | Now    | Now, workerd |
+| ---------------------------------------------- | --------- | ------ | ------------ |
+| `currentCardUsageSql`, first page of 500       | 584 ms    | 411 ms | 520 ms       |
+| `currentCardUsageSql`, mid-cursor page of 500  | 559 ms    | 397 ms | —            |
+| `staleCardPurchaseKeysSql(100)`                | 10,786 ms | 503 ms | 589 ms       |
+| `unrecognizedCardUsageCountSql()`              | 597 ms    | 467 ms | 501 ms       |
+| `queryCardPurchases`, first unfiltered page    | 723 ms    | 536 ms | 927 ms       |
+| `queryCardPurchases`, first page of one period | 643 ms    | 463 ms | 546 ms       |
+
+About 300 ms of the unfiltered page on workerd is its whole-filter selection
+of all 6,517 live events crossing the D1 binding, not a card usage read.
+
+Doubling the history (360 daily captures, 522,943 observations, the same
+current rows) took the shipped first page from 584 to 791 ms and the current
+one from 411 to 462 ms. The shipped plan started `current_rows` from every
+fetch run's terminal report and walked every artifact, parse and observation of
+every source before the snapshot filter; it now starts from `card_artifacts`,
+the members of the current snapshots, and reaches the rest by key through
+`CROSS JOIN`s: `idx_parse_runs_artifact`, `idx_txn_obs_parse_run`, the
+primary keys behind `observation_fetch_artifacts` and `observation_fetch_runs`,
+`sqlite_autoindex_identity_observations_2` and the decimal-v1 primary key. The
+stale-key read probed each live revision's keys once per current key (quadratic
+in the live and current sets); it now names the revisions holding a current key
+once, through `card_purchase_recognition_keys_key`. No index was added: a
+partial index on the two card datasets saved about 10 ms. What still grows with
+history is the snapshot step shared with the Transactions page, which reads
+every artifact once per call (about 50 ms here, nearly all of it the 4,869 Vpass
+statement pages; 40,000 unrelated artifacts added 4 ms); the rest grows with the
+current rows, ranked whole before the cursor by design. `card-usage-scale.test.ts`
+compares every read with the shipped text (`card-usage-legacy-sql.ts`) on a
+smaller store and fails on a plan that scans observations, parses, runs, reports
+or identity rows whole; `KOGANE_CARD_USAGE_SCALE=full` builds this store and
+prints the timings.
+
 ## Parity proof
 
 `services/app/test/read-model-parity.test.ts` seeds one
