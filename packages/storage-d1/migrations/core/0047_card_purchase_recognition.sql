@@ -1,7 +1,10 @@
 -- Card purchase recognition (schema only; no writer runs yet). Additive only:
 -- no existing table, view, trigger or row is altered, and a Worker build that
 -- predates this migration keeps working because it never reads or writes the
--- objects below.
+-- objects below. The one new object on an existing table is the
+-- card_purchase_recognition_legs_sealed trigger on economic_legs; it fires
+-- only for a revision that already has a sidecar row here, which no existing
+-- writer (card settlements, reconciliation) ever creates.
 --
 -- A recognised purchase is an ordinary economic event (0032): a `purchase` or
 -- `refund` revision on the `purchase-recognition` basis with a rule decision
@@ -13,8 +16,9 @@
 -- event, so one provider row can never be counted as two purchases.
 
 -- One row per recognised event revision. facts_json carries codes, amounts and
--- dates only: its keys are allow-listed below, so no merchant or other
--- provider text can be stored in it.
+-- dates only: its keys and every value are checked below (closed code sets, a
+-- date, an exact decimal), so no merchant or other provider text can be
+-- stored in it.
 CREATE TABLE card_purchase_recognitions (
  event_id TEXT NOT NULL,
  revision INTEGER NOT NULL CHECK(revision>0),
@@ -36,16 +40,29 @@ CREATE TRIGGER card_purchase_recognitions_no_delete BEFORE DELETE ON card_purcha
 CREATE TRIGGER card_purchase_recognitions_no_replace BEFORE INSERT ON card_purchase_recognitions
 WHEN EXISTS(SELECT 1 FROM card_purchase_recognitions WHERE event_id=NEW.event_id AND revision=NEW.revision)
 BEGIN SELECT RAISE(ABORT,'card purchase recognition replacement is forbidden'); END;
--- The sidecar describes a live purchase/refund revision on the
--- purchase-recognition basis. A retirement is exactly the `unknown` state and
--- has no leg; every other revision has exactly one exact, positive
--- purchase-recognition leg on account:<account_id> (a purchase decreases net
--- position, a refund increases it) and therefore no cash-movement leg.
+-- The sidecar describes the one live revision of a purchase/refund event on
+-- the purchase-recognition basis (any earlier revision is already superseded,
+-- so the batch order is revision -> legs -> supersede -> sidecar -> keys). Its
+-- state is the displayed row's: `authorized` from an unconfirmed row,
+-- `captured` from a posted/confirmed one. A retirement is exactly the
+-- `unknown` state and has no leg; every other revision has exactly one exact,
+-- positive purchase-recognition leg on account:<account_id> (a purchase
+-- decreases net position, a refund increases it) and therefore no
+-- cash-movement leg. That leg is the magnitude of the displayed row's exact
+-- amount in facts_json, whose sign matches the kind (outflow negative: a
+-- purchase is negative, a refund positive).
 CREATE TRIGGER card_purchase_recognitions_guard BEFORE INSERT ON card_purchase_recognitions
 WHEN NOT EXISTS(SELECT 1 FROM economic_event_revisions r
   WHERE r.event_id=NEW.event_id AND r.revision=NEW.revision AND r.superseded_by IS NULL
   AND r.kind IN ('purchase','refund') AND r.basis='purchase-recognition'
-  AND (NEW.action='retire')=(r.state='unknown'))
+  AND (NEW.action='retire')=(r.state='unknown')
+  AND CASE r.state WHEN 'unknown' THEN 1
+   WHEN 'authorized' THEN json_extract(NEW.facts_json,'$.providerStatus')='unconfirmed'
+   WHEN 'captured' THEN json_extract(NEW.facts_json,'$.providerStatus') IN ('posted','confirmed') ELSE 0 END
+  AND (r.kind='purchase')=(json_extract(NEW.facts_json,'$.amount.value.value.coefficient') GLOB '-*')
+  AND json_extract(NEW.facts_json,'$.providerSaleCode') IS NOT CASE r.kind WHEN 'purchase' THEN '6' ELSE '5' END)
+ OR EXISTS(SELECT 1 FROM economic_event_revisions o
+  WHERE o.event_id=NEW.event_id AND o.revision<>NEW.revision AND o.superseded_by IS NULL)
  OR (NEW.action='retire' AND EXISTS(SELECT 1 FROM economic_legs l WHERE l.event_id=NEW.event_id AND l.revision=NEW.revision))
  OR (NEW.action<>'retire' AND (
   (SELECT count(*) FROM economic_legs l WHERE l.event_id=NEW.event_id AND l.revision=NEW.revision)<>1
@@ -55,9 +72,50 @@ WHEN NOT EXISTS(SELECT 1 FROM economic_event_revisions r
    AND l.basis='purchase-recognition' AND l.value_status='exact'
    AND l.coefficient<>'0' AND l.coefficient NOT GLOB '-*'
    AND l.subject_ref='account:'||NEW.account_id
-   AND l.role=CASE r.kind WHEN 'purchase' THEN 'decrease' ELSE 'increase' END)))
+   AND l.role=CASE r.kind WHEN 'purchase' THEN 'decrease' ELSE 'increase' END
+   AND l.unit_ref=json_extract(NEW.facts_json,'$.amount.unitRef')
+   AND l.coefficient=ltrim(json_extract(NEW.facts_json,'$.amount.value.value.coefficient'),'-')
+   AND l.scale=json_extract(NEW.facts_json,'$.amount.value.value.scale'))))
+BEGIN SELECT RAISE(ABORT,'card_purchase_recognition_invalid'); END;
+-- facts_json is exactly {providerStatus, amount, usageDate, paymentType,
+-- amountCheck, providerSaleCode} (packages/domain/src/card-purchase.ts
+-- validCardPurchaseFacts): each key once, codes from closed sets, a calendar
+-- date, and an exact non-zero decimal whose unit and version are codes. A
+-- string that is not one of these (a merchant name, the provider's payment
+-- wording) is refused wherever it is put.
+CREATE TRIGGER card_purchase_recognitions_facts BEFORE INSERT ON card_purchase_recognitions
+WHEN (SELECT count(*) FROM json_each(NEW.facts_json))<>6
  OR EXISTS(SELECT 1 FROM json_each(NEW.facts_json) f
   WHERE f.key NOT IN ('providerStatus','amount','usageDate','paymentType','amountCheck','providerSaleCode'))
+ OR json_extract(NEW.facts_json,'$.providerStatus') IS NOT CASE
+  WHEN json_extract(NEW.facts_json,'$.providerStatus')='unconfirmed' THEN 'unconfirmed'
+  WHEN NEW.source_id='vpass' THEN 'posted' ELSE 'confirmed' END
+ OR json_extract(NEW.facts_json,'$.paymentType') IS NOT 'single-payment'
+ OR json_extract(NEW.facts_json,'$.amountCheck') IS NOT CASE NEW.source_id
+  WHEN 'myjcb' THEN 'usage-equals-payment' ELSE 'provider-amount' END
+ OR NOT (json_type(NEW.facts_json,'$.providerSaleCode') IS 'null'
+  OR (json_type(NEW.facts_json,'$.providerSaleCode') IS 'text'
+   AND json_extract(NEW.facts_json,'$.providerSaleCode') IN ('5','6')))
+ OR json_type(NEW.facts_json,'$.usageDate') IS NOT 'text'
+ OR date(json_extract(NEW.facts_json,'$.usageDate')) IS NOT json_extract(NEW.facts_json,'$.usageDate')
+ OR json_type(NEW.facts_json,'$.amount') IS NOT 'object'
+ OR (SELECT count(*) FROM json_each(NEW.facts_json,'$.amount'))<>2
+ OR json_type(NEW.facts_json,'$.amount.unitRef') IS NOT 'text'
+ OR json_extract(NEW.facts_json,'$.amount.unitRef') NOT GLOB '[A-Z][A-Z][A-Z]'
+ OR json_type(NEW.facts_json,'$.amount.value') IS NOT 'object'
+ OR (SELECT count(*) FROM json_each(NEW.facts_json,'$.amount.value'))<>3
+ OR json_extract(NEW.facts_json,'$.amount.value.status') IS NOT 'exact'
+ OR json_type(NEW.facts_json,'$.amount.value.normalizationVersion') IS NOT 'text'
+ OR length(json_extract(NEW.facts_json,'$.amount.value.normalizationVersion')) NOT BETWEEN 1 AND 64
+ OR json_extract(NEW.facts_json,'$.amount.value.normalizationVersion') GLOB '*[^a-z0-9.-]*'
+ OR json_type(NEW.facts_json,'$.amount.value.value') IS NOT 'object'
+ OR (SELECT count(*) FROM json_each(NEW.facts_json,'$.amount.value.value'))<>2
+ OR json_type(NEW.facts_json,'$.amount.value.value.coefficient') IS NOT 'text'
+ OR NOT (json_extract(NEW.facts_json,'$.amount.value.value.coefficient') GLOB '[1-9]*'
+  OR json_extract(NEW.facts_json,'$.amount.value.value.coefficient') GLOB '-[1-9]*')
+ OR substr(json_extract(NEW.facts_json,'$.amount.value.value.coefficient'),2) GLOB '*[^0-9]*'
+ OR json_type(NEW.facts_json,'$.amount.value.value.scale') IS NOT 'integer'
+ OR json_extract(NEW.facts_json,'$.amount.value.value.scale') NOT BETWEEN 0 AND 4096
 BEGIN SELECT RAISE(ABORT,'card_purchase_recognition_invalid'); END;
 -- Once a revision has its sidecar, its legs are complete: no leg can be added
 -- to it later, so the one-leg rule above cannot be bypassed afterwards.
@@ -105,13 +163,16 @@ WHEN NOT EXISTS(SELECT 1 FROM card_purchase_recognitions c
   AND json_array(a.source_id,fr.producer_id,ses.external_id_namespace,t.source_account,t.external_id)=NEW.recognition_key
   AND NEW.role IS CASE WHEN t.status='unconfirmed' THEN 'pending' WHEN t.status IN ('posted','confirmed') THEN 'posted' END)
 BEGIN SELECT RAISE(ABORT,'card_purchase_key_invalid'); END;
--- The no-double-count invariant: a key has at most one live holder. A key
+-- The no-double-count invariant: a key has at most one live holder, counted
+-- per revision, so neither another event nor a second live revision of the
+-- same event can hold it (the same row again is left to *_no_replace). A key
 -- held by a superseded revision is free, so superseding (same event, or a
 -- reviewed cross-id merge) releases it before the new revision claims it.
 CREATE TRIGGER card_purchase_recognition_keys_one_live_holder BEFORE INSERT ON card_purchase_recognition_keys
 WHEN EXISTS(SELECT 1 FROM card_purchase_recognition_keys k
   JOIN economic_event_revisions r ON r.event_id=k.event_id AND r.revision=k.revision
-  WHERE k.recognition_key=NEW.recognition_key AND k.event_id<>NEW.event_id AND r.superseded_by IS NULL)
+  WHERE k.recognition_key=NEW.recognition_key AND r.superseded_by IS NULL
+  AND NOT (k.event_id=NEW.event_id AND k.revision=NEW.revision))
 BEGIN SELECT RAISE(ABORT,'card_purchase_key_held'); END;
 
 -- Reader views: "current" is the live revision, never the newest row.

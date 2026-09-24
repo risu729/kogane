@@ -16,7 +16,7 @@ const TIME = JSON.stringify({
   zone: "Asia/Tokyo",
   basis: "provider",
 });
-const FACTS = JSON.stringify({
+const FACT_VALUES = {
   providerStatus: "posted",
   amount: {
     unitRef: "JPY",
@@ -29,8 +29,19 @@ const FACTS = JSON.stringify({
   usageDate: "2026-08-15",
   paymentType: "single-payment",
   amountCheck: "provider-amount",
-  providerSaleCode: null,
-});
+  providerSaleCode: null as string | null,
+};
+const FACTS = JSON.stringify(FACT_VALUES);
+/** FACTS with the displayed row's signed amount replaced. */
+const factsWith = (coefficient: string, unitRef = "JPY") =>
+  JSON.stringify({
+    ...FACT_VALUES,
+    amount: {
+      ...FACT_VALUES.amount,
+      unitRef,
+      value: { ...FACT_VALUES.amount.value, value: { coefficient, scale: 0 } },
+    },
+  });
 const DIGEST = "d".repeat(64);
 const NEW_OBJECTS = [
   "card_purchase_recognition_keys",
@@ -44,6 +55,7 @@ const NEW_OBJECTS = [
   "card_purchase_recognition_legs_sealed",
   "card_purchase_recognitions",
   "card_purchase_recognitions_account",
+  "card_purchase_recognitions_facts",
   "card_purchase_recognitions_guard",
   "card_purchase_recognitions_no_delete",
   "card_purchase_recognitions_no_replace",
@@ -269,6 +281,30 @@ test("0047 is additive: pre-existing schema objects and rows unchanged", () => {
     expect(db.query("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
     // The settlement event is untouched and still accepts no sidecar.
     expect(() => sidecarRow(db, "ev:settlement-1", 1)).toThrow("card_purchase_recognition_invalid");
+    // The one new trigger on economic_legs never fires without a sidecar: a
+    // settlement written after 0047 keeps its cash leg and its unresolved
+    // obligation-change leg (the card-settlement-commands.ts shape).
+    revisionRow(db, "ev:settlement-2", 1, "card_settlement", "debited", "cash-movement");
+    legRow(db, "ev:settlement-2", 1, {
+      subject: "acct-bank",
+      coefficient: "10000",
+      basis: "cash-movement",
+    });
+    db.run(
+      `INSERT INTO economic_legs(event_id,revision,leg_index,subject_ref,unit_ref,value_status,coefficient,scale,
+        value_reason_code,role,basis) VALUES('ev:settlement-2',1,1,'acct-card','JPY','missing',NULL,NULL,
+        'statement_principal_and_fees_unknown','unresolved','obligation-change')`,
+    );
+    legRow(db, "ev:settlement-1", 1, {
+      index: 1,
+      subject: "acct-card",
+      basis: "obligation-change",
+    });
+    expect(
+      db
+        .query("SELECT count(*) AS n FROM economic_legs WHERE event_id LIKE 'ev:settlement-%'")
+        .get(),
+    ).toEqual({ n: 4 });
   } finally {
     db.close();
   }
@@ -390,10 +426,15 @@ test("a key has at most one live holder; superseding frees it", () => {
     // The holder itself may carry the key into its next revision.
     revisionRow(db, "purchase_a", 2);
     legRow(db, "purchase_a", 2, { coefficient: "1300" });
+    // While revision 1 is still live, revision 2 cannot take a sidecar: the
+    // event would have two live revisions and count twice.
+    expect(() =>
+      sidecarRow(db, "purchase_a", 2, { action: "revise", facts: factsWith("-1300") }),
+    ).toThrow("card_purchase_recognition_invalid");
     db.run(
       "UPDATE economic_event_revisions SET superseded_by='purchase_a@2' WHERE event_id='purchase_a' AND revision=1",
     );
-    sidecarRow(db, "purchase_a", 2, { action: "revise" });
+    sidecarRow(db, "purchase_a", 2, { action: "revise", facts: factsWith("-1300") });
     keyRow(db, "purchase_a", 2, 3);
     expect(() => keyRow(db, "purchase_b", 1, 3)).toThrow("card_purchase_key_held");
     // A superseded revision holds nothing: a reviewed cross-id supersession
@@ -428,6 +469,111 @@ test("a key has at most one live holder; superseding frees it", () => {
         )
         .all(),
     ).toEqual([{ event_id: "purchase_b", revision: 1, action: "recognize", state: "captured" }]);
+  } finally {
+    db.close();
+  }
+}, 30_000);
+
+test("a second live revision of the holder cannot hold the key either", () => {
+  const db = fixture();
+  try {
+    recognition(db, "purchase_a", 1);
+    // Defence in depth behind the sidecar guard: even with that guard gone, a
+    // second live revision of the same event is refused the key it would
+    // double count.
+    db.run("DROP TRIGGER card_purchase_recognitions_guard");
+    revisionRow(db, "purchase_a", 2);
+    legRow(db, "purchase_a", 2);
+    sidecarRow(db, "purchase_a", 2, { action: "revise" });
+    expect(() => keyRow(db, "purchase_a", 2, 3)).toThrow("card_purchase_key_held");
+    expect(() => keyRow(db, "purchase_a", 2, 1)).toThrow("card_purchase_key_held");
+  } finally {
+    db.close();
+  }
+}, 30_000);
+
+test("facts_json admits codes, amounts and dates only", () => {
+  const db = fixture();
+  try {
+    revisionRow(db, "purchase_a", 1);
+    legRow(db, "purchase_a", 1);
+    const refused = (facts: string, source?: string) =>
+      expect(() =>
+        sidecarRow(db, "purchase_a", 1, { facts, ...(source ? { source } : {}) }),
+      ).toThrow("card_purchase_recognition_invalid");
+    const edit = (patch: Record<string, unknown>) => JSON.stringify({ ...FACT_VALUES, ...patch });
+    const amount = (value: Record<string, unknown>, outer: Record<string, unknown> = {}) =>
+      edit({
+        amount: {
+          ...FACT_VALUES.amount,
+          ...outer,
+          value: { ...FACT_VALUES.amount.value, ...value },
+        },
+      });
+    // Provider or merchant text under an allowed key, in any position.
+    refused(edit({ paymentType: "1回払い" }));
+    refused(edit({ providerStatus: "synthetic merchant" }));
+    refused(edit({ amountCheck: "synthetic merchant" }));
+    refused(edit({ usageDate: "synthetic merchant" }));
+    refused(edit({ providerSaleCode: "synthetic merchant" }));
+    refused(amount({}, { unitRef: "synthetic merchant" }));
+    refused(amount({ normalizationVersion: "decimal v1 synthetic merchant" }));
+    refused(amount({}, { merchant: "synthetic merchant" }));
+    refused(amount({ value: { coefficient: "-1234", scale: 0, merchant: "synthetic merchant" } }));
+    // Every key exactly once: missing, extra and duplicated keys.
+    const { providerSaleCode: _dropped, ...missing } = FACT_VALUES;
+    refused(JSON.stringify(missing));
+    refused(edit({ merchant: "synthetic merchant" }));
+    refused(
+      FACTS.replace(
+        '"paymentType":"single-payment"',
+        '"paymentType":"single-payment","paymentType":"1回払い"',
+      ),
+    );
+    // Closed code sets, per source.
+    refused(edit({ providerStatus: "confirmed" }));
+    refused(edit({ providerStatus: "posted", amountCheck: "usage-equals-payment" }));
+    refused(edit({ providerStatus: "posted" }), "myjcb");
+    refused(edit({ providerSaleCode: "7" }));
+    refused(edit({ providerSaleCode: 5 }));
+    refused(edit({ providerSaleCode: "6" }));
+    // A calendar date, and an exact non-zero decimal.
+    refused(edit({ usageDate: "2026-02-30" }));
+    refused(edit({ usageDate: "2026/08/15" }));
+    refused(amount({ status: "missing" }));
+    for (const value of [
+      { coefficient: "0", scale: 0 },
+      { coefficient: "-12a4", scale: 0 },
+      { coefficient: "-1.5", scale: 0 },
+      { coefficient: "--1234", scale: 0 },
+      { coefficient: -1234, scale: 0 },
+      { coefficient: "-1234", scale: -1 },
+      { coefficient: "-1234", scale: "0" },
+    ])
+      refused(amount({ value }));
+    // The stored amount is the leg: same unit, magnitude and scale, sign by kind.
+    refused(factsWith("-1300"));
+    refused(factsWith("1234"));
+    refused(factsWith("-1234", "USD"));
+    // The state is the row's: a captured revision cannot rest on an unconfirmed row.
+    refused(edit({ providerStatus: "unconfirmed" }));
+    expect(db.query("SELECT count(*) AS n FROM card_purchase_recognitions").get()).toEqual({
+      n: 0,
+    });
+    sidecarRow(db, "purchase_a", 1);
+    // A pending refund (Vpass customized return, sale code 6) is the mirror image.
+    revisionRow(db, "refund_b", 1, "refund", "authorized");
+    legRow(db, "refund_b", 1, { coefficient: "400", role: "increase" });
+    sidecarRow(db, "refund_b", 1, {
+      facts: JSON.stringify({
+        ...JSON.parse(factsWith("400")),
+        providerStatus: "unconfirmed",
+        providerSaleCode: "6",
+      }),
+    });
+    expect(
+      db.query("SELECT event_id FROM current_card_purchase_recognitions ORDER BY event_id").all(),
+    ).toEqual([{ event_id: "purchase_a" }, { event_id: "refund_b" }]);
   } finally {
     db.close();
   }

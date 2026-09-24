@@ -67,6 +67,7 @@ const ROWS: readonly SeededRow[] = [
   vpass(3, 2, "vpass:card-001:202608:web:row-a:0", "posted", -1234),
   vpass(4, 3, "vpass:card-001:202608:web:row-a:0", "posted", -1300),
   {
+    // The shapes the MyJCB ledger parser emits (tests/fixtures/observation-pipeline/myjcb).
     observationId: 5,
     parseRunId: 4,
     sourceId: "myjcb",
@@ -74,11 +75,11 @@ const ROWS: readonly SeededRow[] = [
     externalId: "myjcb-credit-ledger:confirmed:row-c:0",
     status: "confirmed",
     amount: -500,
-    paymentType: "1回払い",
+    paymentType: "一回払い",
     usageDate: "2026-08-20",
-    statementPeriod: null,
-    usageAmountText: "500",
-    paymentAmountText: "500",
+    statementPeriod: "2026年9月お支払い分",
+    usageAmountText: "500円",
+    paymentAmountText: "500円",
   },
 ];
 
@@ -233,20 +234,38 @@ export function factOf(
   };
 }
 
-/** Row counts of every table a recognition writes, plus the allocations it must never write. */
+/** Every table a recognition writes, plus the allocations it must never write. */
+const WRITTEN_TABLES = [
+  "decision_revisions",
+  "economic_event_revisions",
+  "economic_legs",
+  "card_purchase_recognitions",
+  "card_purchase_recognition_keys",
+  "allocations",
+] as const;
+
+/** Row counts of every table a recognition writes. */
 export function counts(db: Database): Record<string, number> {
-  const tables = [
-    "decision_revisions",
-    "economic_event_revisions",
-    "economic_legs",
-    "card_purchase_recognitions",
-    "card_purchase_recognition_keys",
-    "allocations",
-  ];
   return Object.fromEntries(
-    tables.map((table) => [
+    WRITTEN_TABLES.map((table) => [
       table,
       (db.query(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n,
     ]),
   );
+}
+
+/**
+ * Every row of every table a recognition writes (so a moved `superseded_by`
+ * shows, not only a new row), plus the CORE source revision.
+ */
+export function snapshot(db: Database): Record<string, unknown> {
+  return {
+    ...Object.fromEntries(
+      WRITTEN_TABLES.map((table) => [
+        table,
+        db.query(`SELECT * FROM ${table} ORDER BY 1,2,3`).all(),
+      ]),
+    ),
+    core_source_revision: db.query("SELECT * FROM core_source_revision").all(),
+  };
 }

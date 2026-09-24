@@ -686,14 +686,14 @@
     },
     {
       "file": "0047_card_purchase_recognition.sql",
-      "statementCount": 19,
+      "statementCount": 20,
       "insertStatements": [
         {
           "table": "card_purchase_scan_cursor",
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "b578c9f855922a4afe3663c99045eb53f44f712e6e71d69555840cb8adc11f8d"
+      "sha256": "4ae010e7a881b839cd376fec814c1bc518b62b04b7c0c7e75b72a38077f4875b"
     }
   ],
   "tables": [
@@ -2908,6 +2908,7 @@
         }
       ],
       "triggers": [
+        "card_purchase_recognitions_facts",
         "card_purchase_recognitions_guard",
         "card_purchase_recognitions_no_delete",
         "card_purchase_recognitions_no_replace",
@@ -13808,7 +13809,7 @@
       "table": "card_purchase_recognition_keys",
       "timing": "BEFORE",
       "event": "INSERT",
-      "sqlSha256": "09cb55f55cc3f3f3"
+      "sqlSha256": "07f2feb1f003fc3c"
     },
     {
       "name": "card_purchase_recognition_legs_sealed",
@@ -13818,11 +13819,18 @@
       "sqlSha256": "37f4fa4f042a8ae4"
     },
     {
+      "name": "card_purchase_recognitions_facts",
+      "table": "card_purchase_recognitions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "1b2bd7cbcef15dbb"
+    },
+    {
       "name": "card_purchase_recognitions_guard",
       "table": "card_purchase_recognitions",
       "timing": "BEFORE",
       "event": "INSERT",
-      "sqlSha256": "7d91b42962b5766c"
+      "sqlSha256": "296df3dfc839c041"
     },
     {
       "name": "card_purchase_recognitions_no_delete",
@@ -16538,7 +16546,7 @@
   "summary": {
     "tableCount": 109,
     "viewCount": 39,
-    "triggerCount": 397,
+    "triggerCount": 398,
     "explicitIndexCount": 109,
     "byClassification": {
       "core-keep": [
@@ -16741,6 +16749,6 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "a4c922d5638808e7f38e22029c708b38d5f1699feef77343cb8e9f22e6cdb762"
+    "schemaSha256": "d279b999f15a9b1b0c1b64a089f058c18fd2ddf70a45d58d7adc6b06dd5608c0"
   }
 }

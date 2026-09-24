@@ -4,6 +4,7 @@ import type { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import {
   CARD_PURCHASE_ACTOR,
+  VPASS_STABLE_IDENTITY_FAMILY,
   cardPurchaseEventId,
   cardPurchaseRetirement,
   cardPurchaseRevision,
@@ -17,7 +18,8 @@ import {
 import { validSourceFactRef, type EconomicEventRevision } from "../../domain/src/events.ts";
 import { cardPurchaseRecognitionWrites } from "../src/atomic/card-purchase-recognition.ts";
 import type { SqlWrite } from "../src/core/operations.ts";
-import { counts, factOf, seedCardRows } from "./card-purchase-fixture.ts";
+import { VPASS_POLICY_FAMILY } from "../src/core/identity-policies/vpass.ts";
+import { counts, factOf, seedCardRows, snapshot } from "./card-purchase-fixture.ts";
 import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
 
 const NOW = "2026-09-24T00:00:00.000Z";
@@ -71,9 +73,6 @@ function rowsOf(db: Database, table: string, eventId: string, revision: number):
     .query(`SELECT * FROM ${table} WHERE event_id=? AND revision=? ORDER BY 1,2,3`)
     .all(eventId, revision);
 }
-
-const sourceRevision = (db: Database) =>
-  db.query("SELECT source_revision FROM core_source_revision WHERE id=1").get();
 
 /** The stored live revision, read back into the domain shape for the summary. */
 function liveEvent(db: Database, eventId: string): EconomicEventRevision {
@@ -209,15 +208,24 @@ describe("card purchase recognition batch", () => {
       ).toEqual([
         { event_id: eventId, revision: 1, role: "posted", observation_id: 1, parse_run_id: 1 },
       ]);
-      // MyJCB goes through the same batch.
+      // MyJCB goes through the same batch, from its own display text
+      // (一回払い, 500円) and its period label (2026年9月お支払い分), which is
+      // stored as the statement's YYYY-MM.
       await run(db, write(await draftOf(factOf(5)), null));
       expect(
         db
           .query(
-            "SELECT source_id,account_id,statement_period FROM current_card_purchase_recognitions WHERE source_id='myjcb'",
+            "SELECT source_id,account_id,statement_period,facts_json FROM current_card_purchase_recognitions WHERE source_id='myjcb'",
           )
           .all(),
-      ).toEqual([{ source_id: "myjcb", account_id: "acct-jcb", statement_period: null }]);
+      ).toEqual([
+        {
+          source_id: "myjcb",
+          account_id: "acct-jcb",
+          statement_period: "2026-09",
+          facts_json: expect.not.stringMatching(/円|回払い/u),
+        },
+      ]);
       expect(counts(db)["allocations"]).toBe(0);
     } finally {
       db.close();
@@ -229,13 +237,13 @@ describe("card purchase recognition batch", () => {
     try {
       const writes = write(await draftOf(factOf(1)), null);
       await run(db, writes);
-      const before = { counts: counts(db), revision: sourceRevision(db) };
+      const before = snapshot(db);
       expect(await run(db, writes)).toEqual(writes.map(() => 0));
       // A concurrent duplicate is the same batch built again: it also writes nothing.
       expect(await run(db, write(await draftOf(factOf(1)), null))).toEqual(writes.map(() => 0));
       // A re-fetch showing the same content plans the same decision and writes nothing.
       expect(await run(db, write(await draftOf(factOf(3)), null))).toEqual(writes.map(() => 0));
-      expect({ counts: counts(db), revision: sourceRevision(db) }).toEqual(before);
+      expect(snapshot(db)).toEqual(before);
     } finally {
       db.close();
     }
@@ -255,7 +263,7 @@ describe("card purchase recognition batch", () => {
         sidecar: first.sidecar,
       });
       await run(db, write(revise, 1));
-      const before = { counts: counts(db), revision: sourceRevision(db) };
+      const before = snapshot(db);
       const stale = write(retire!, 1);
       expect(await run(db, stale)).toEqual(stale.map(() => 0));
       // A first recognition of an event that already exists is stale too.
@@ -267,13 +275,127 @@ describe("card purchase recognition batch", () => {
         null,
       );
       expect(await run(db, other)).toEqual(other.map(() => 0));
-      expect({ counts: counts(db), revision: sourceRevision(db) }).toEqual(before);
+      // Every row of every table, superseded_by included, is as it was.
+      expect(snapshot(db)).toEqual(before);
       expect(db.query("SELECT event_id,revision FROM current_economic_events").all()).toEqual([
         { event_id: eventId, revision: 2 },
       ]);
       // A builder input that does not follow its expected revision is a programming error.
       expect(() => write(revise, null)).toThrow(RangeError);
       expect(() => write(revise, 2)).toThrow(RangeError);
+    } finally {
+      db.close();
+    }
+  }, 30_000);
+
+  test("concurrent batches for one key: the first to commit wins, the others write nothing in any table", async () => {
+    const db = database();
+    try {
+      // Every batch is planned against the same empty state before any commits.
+      const winner = write(await draftOf(factOf(1)), null);
+      const duplicate = write(await draftOf(factOf(1)), null);
+      // The same key read with another amount: same event id, other content.
+      const corrected = await draftOf(factOf(4));
+      const eventId = corrected.revision.eventId;
+      const otherContent = write(corrected, null);
+      // The same key claimed under another event id.
+      const otherEvent = write(
+        await draftOf(factOf(3), 1, "recognize", `purchase_${"0".repeat(64)}`),
+        null,
+      );
+      expect(corrected.decisionRevisionId).not.toBe((await draftOf(factOf(1))).decisionRevisionId);
+      expect((await run(db, winner)).every((count) => count > 0)).toBe(true);
+      const before = snapshot(db);
+      for (const loser of [duplicate, otherContent, otherEvent, winner])
+        expect(await run(db, loser)).toEqual(loser.map(() => 0));
+      expect(snapshot(db)).toEqual(before);
+      expect(db.query("SELECT event_id,revision FROM current_card_purchase_keys").all()).toEqual([
+        { event_id: eventId, revision: 1 },
+      ]);
+      const summary = cardPurchaseSummary([liveEvent(db, eventId)]);
+      expect(summary.ok && summary.summary.units[0]!.captured.value).toMatchObject({
+        value: { coefficient: "1234", scale: 0 },
+      });
+      // Had a loser slipped past its guard (here: the other event's batch with
+      // the key check removed from its decision), the one-live-holder trigger
+      // aborts the whole batch at its key row instead of counting the key twice.
+      const heldCheck =
+        /AND NOT EXISTS\(SELECT 1 FROM current_card_purchase_keys k[\s\S]*?json_each\(\?11\)\)\)/u;
+      expect(otherEvent[0]!.sql).toMatch(heldCheck);
+      const unguarded = [
+        {
+          ...otherEvent[0]!,
+          sql: otherEvent[0]!.sql.replace(heldCheck, "AND ?10 IS NOT NULL AND ?11 IS NOT NULL"),
+        },
+        ...otherEvent.slice(1),
+      ];
+      await expect(run(db, unguarded)).rejects.toThrow("card_purchase_key_held");
+      expect(snapshot(db)).toEqual(before);
+    } finally {
+      db.close();
+    }
+  }, 30_000);
+
+  test("unknown → captured: a retired purchase whose row reappears is re-recognised on the same event", async () => {
+    const db = database();
+    try {
+      const first = await draftOf(factOf(1));
+      const eventId = first.revision.eventId;
+      await run(db, write(first, null));
+      // The row vanished: retired, no leg, and it keeps its key.
+      const retired = (await cardPurchaseRetirement({
+        live: first.revision,
+        keys: first.keys,
+        sidecar: first.sidecar,
+      }))!;
+      await run(db, write(retired, 1));
+      expect(cardPurchaseSummary([liveEvent(db, eventId)])).toEqual({
+        ok: true,
+        summary: { units: [], unresolved: 1 },
+      });
+      // Another event cannot take the vanished row's key while it is retired.
+      const thief = write(
+        await draftOf(factOf(3), 1, "recognize", `purchase_${"0".repeat(64)}`),
+        null,
+      );
+      expect(await run(db, thief)).toEqual(thief.map(() => 0));
+      // The row reappears (a later fetch, observation 3): unknown → captured.
+      const back = await draftOf(factOf(3), 3, "revise", eventId);
+      expect(back.contentDigest).toBe(first.contentDigest);
+      expect(back.decisionRevisionId).not.toBe(first.decisionRevisionId);
+      expect((await run(db, write(back, 2))).every((count) => count > 0)).toBe(true);
+      expect(
+        revisionRows(db, eventId).map((row) => [
+          row["revision"],
+          row["state"],
+          row["superseded_by"],
+        ]),
+      ).toEqual([
+        [1, "captured", `${eventId}@2`],
+        [2, "unknown", `${eventId}@3`],
+        [3, "captured", null],
+      ]);
+      expect(
+        db
+          .query("SELECT decision_kind,previous_revision FROM decision_revisions WHERE id=?")
+          .get(back.decisionRevisionId),
+      ).toEqual({ decision_kind: "supersede", previous_revision: 2 });
+      expect(
+        db.query("SELECT event_id,revision,observation_id FROM current_card_purchase_keys").all(),
+      ).toEqual([{ event_id: eventId, revision: 3, observation_id: 3 }]);
+      // Counted once again, as captured, with nothing unresolved.
+      const summary = cardPurchaseSummary([liveEvent(db, eventId)]);
+      expect(summary.ok && summary.summary.unresolved).toBe(0);
+      expect(summary.ok && summary.summary.units[0]!.captured.value).toMatchObject({
+        value: { coefficient: "1234", scale: 0 },
+      });
+      expect(
+        db
+          .query(
+            "SELECT count(*) AS n FROM economic_legs l JOIN current_economic_events e ON e.event_id=l.event_id AND e.revision=l.revision",
+          )
+          .get(),
+      ).toEqual({ n: 1 });
     } finally {
       db.close();
     }
@@ -375,4 +497,10 @@ describe("card purchase recognition batch", () => {
       db.close();
     }
   }, 30_000);
+});
+
+test("the Vpass identity family named by the contract is the one the identity policy records", () => {
+  // identity_run_contexts.policy_family carries VPASS_POLICY_FAMILY for a run
+  // resolved through the trusted card binding (0029, identity-policies/vpass.ts).
+  expect(VPASS_STABLE_IDENTITY_FAMILY).toBe(VPASS_POLICY_FAMILY);
 });

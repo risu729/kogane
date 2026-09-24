@@ -82,15 +82,32 @@ batch that writes one revision is
 | `current_card_purchase_keys`         | Keys of live revisions.                                                                                                                                                                                                                                                     |
 | `card_purchase_scan_cursor`          | Operational singleton `(1, last_observation_id)`; outside the source-revision ledger.                                                                                                                                                                                       |
 
-Both sidecar tables are append-only. Their insert guards require a live
-`purchase`/`refund` revision on the `purchase-recognition` basis; a `retire`
+Both sidecar tables are append-only. Their insert guards require the event's
+only live revision, a `purchase`/`refund` on the `purchase-recognition` basis
+(so a batch writes revision → legs → supersede → sidecar → keys); a `retire`
 row is exactly the `unknown` state with no leg, and every other row has exactly
-one exact, positive `purchase-recognition` leg on `account:<account_id>` and
-no cash-movement leg (legs are sealed once the sidecar exists). A key must be
-the cited row's own key and match its parse run and provider status, and
-**at most one live event may hold a key**: the one-live-holder trigger is the
+one exact, positive `purchase-recognition` leg on `account:<account_id>`, equal
+to the magnitude of the displayed row's amount, and no cash-movement leg. Legs
+are sealed once the sidecar exists; that trigger on `economic_legs` fires only
+for a revision with a sidecar, so card settlements and every other existing
+writer are unaffected. `facts_json` is checked value by value (closed code
+sets, a calendar date, an exact decimal), not only by key. A key must be the
+cited row's own key and match its parse run and provider status, and **at most
+one live revision may hold a key**: the one-live-holder trigger is the
 no-double-count invariant. A superseded revision holds nothing, so a
 supersession releases its keys to the revision that replaced it.
+
+What the contract reads from the parsers: Vpass `1回払い` and MyJCB `一回払い`
+are single payments; MyJCB's usage and payment texts (`1,200円`, `-500円`) are
+read with the MyJCB ledger parser's own amount grammar and must agree; the
+statement period is stored as `YYYY-MM`, the key `card_statement_facts.period`
+uses, from Vpass `statementMonth` and from MyJCB's `YYYY年M月お支払い分` label
+(any other label is stored as `NULL`, never guessed). One known gap is left
+alone on purpose: the reconciliation job's MyJCB installment guard, moved
+unchanged to `comparableCardPayment`, still reads only plain digits, so no
+real MyJCB confirmed row (`1,200円`) takes part in pending-to-posted matching.
+Widening it would start new production proposals and is a separate reviewed
+change; recognition does not depend on it.
 
 ### Where the decisions live
 
