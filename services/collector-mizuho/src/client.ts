@@ -338,7 +338,11 @@ export function parseSession(value: string): MizuhoSession {
     form: { name: input.form.name, fields: { ...input.form.fields } },
   };
 }
-export function absorbCookies(cookies: Map<string, string>, response: Response, origin: string): void {
+export function absorbCookies(
+  cookies: Map<string, string>,
+  response: Response,
+  origin: string,
+): void {
   const headers = response.headers as Headers & { getSetCookie?: () => string[] };
   const combined = response.headers.get("set-cookie");
   const values =
