@@ -475,7 +475,13 @@ when the write budget runs out, and wraps to 0 after the last page (an exactly
 full last page wraps on the next tick, whose page is empty) because a row below
 it can become current again. The cursor moves only from the value the tick
 read, so a tick that overlapped it never pulls it back. The current-usage query
-runs twice per tick (stale keys, then the page).
+runs twice per tick (stale keys, then the page): about 0.5 s and 0.4 s on the
+scaled store of [the read model's cost measurement](read-model.md#cost), since
+both start from the current captures rather than the whole store and the stale
+read looks up the revisions holding a current key once, not per live key.
+Nothing in the tick is skipped when no evidence changed: every tick that writes
+moves the CORE source revision itself (its decision revisions), and the cursor
+still has to page through the current rows.
 
 The candidate pass then reads the recognised events of the groups the page
 touched, at most 2,000 in all (`CANDIDATE_READ_LIMIT`; a
