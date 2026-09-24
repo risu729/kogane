@@ -61,6 +61,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | worker | cron (UTC) | deployed |
 | --- | --- | --- |
 | kogane-globalpass-collector-poc | `17 18 * * *` | yes |
+| kogane-mizuho-collector | `25 21 * * *` | no |
 | kogane-mobile-suica-collector-poc | `10 21 * * *` | yes |
 | kogane-moneyforward-collector-poc | `15 21 * * *` | yes |
 | kogane-myjcb-collector-poc | `0 21 * * *` | yes |
@@ -320,7 +321,7 @@ No wrangler config.
 ### `services/collector-mizuho`
 
 - Disposition (Mizuho direct collector integration, 2026-09-13): `promoted-to-service` → services/collector-mizuho
-- Required verification: Production release enabled; owner-session trigger only, no cron. Provision trigger token out of band; verify authenticated cloud read separately. Unattended renewal is not implemented.
+- Required verification: Daily 06:25 JST login and collection with Worker secrets; additional authentication stops without retry. Provision credentials out of band and verify password login/cloud collection separately. Explicit-session trigger remains available.
 - Execution status: DEPLOYMENT_ENABLED (plan recorded `DEPLOYMENT_PENDING_VERIFICATION`)
 - Live resources: LIVE(buckets=kogane-raw-evidence)
 
@@ -338,10 +339,10 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: —
 - Service bindings: —
-- Crons: —
+- Crons: `25 21 * * *`
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): ADMIN_TRIGGER_TOKEN
+- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>MIZUHO_CUSTOMER_NUMBER<br>MIZUHO_LOGIN_PASSWORD
 
 ### `services/collector-mobile-suica`
 

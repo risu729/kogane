@@ -8,7 +8,11 @@
   "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
   "workers_dev": true,
   "preview_urls": false,
-  "secrets": { "required": ["ADMIN_TRIGGER_TOKEN"] },
+  "secrets": {
+    "required": ["ADMIN_TRIGGER_TOKEN", "MIZUHO_CUSTOMER_NUMBER", "MIZUHO_LOGIN_PASSWORD"]
+  },
+  // Daily at 06:25 JST, staggered after the other daily bank collectors.
+  "triggers": { "crons": ["25 21 * * *"] },
   "observability": { "enabled": true },
   "r2_buckets": [{ "binding": "DATA", "bucket_name": "kogane-raw-evidence" }],
   "vars": { "COLLECTOR_SCHEMA_VERSION": "mizuho-collector-v1" }

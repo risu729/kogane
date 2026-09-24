@@ -9,6 +9,8 @@ export default defineConfig({
         r2Buckets: ["DATA"],
         bindings: {
           ADMIN_TRIGGER_TOKEN: "local-test-only",
+          MIZUHO_CUSTOMER_NUMBER: "0000000000",
+          MIZUHO_LOGIN_PASSWORD: "syntheticpassword",
           COLLECTOR_SCHEMA_VERSION: "mizuho-collector-v1",
         },
       },
