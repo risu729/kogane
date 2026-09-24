@@ -92,7 +92,8 @@ the evidence must be exactly the proposal's own targets, canonical
 `transaction:<id>` refs, in that order (anything else is `invalid_command` or
 `incomplete_evidence`). A `pending_to_posted` relation without the marker is
 refused, because accepting one merges two purchase events and a bare relation
-would claim the link without moving them. What the command does is decided
+would claim the link without moving them; the commit re-checks it, so a plan
+stored before the review existed cannot write one either (`invalid_command`). What the command does is decided
 from the stored proposal, never from the caller
 (`packages/application/src/operations/pending-posted-review.ts`):
 
@@ -125,9 +126,19 @@ resolution — the 0032 trigger only lets a proposal be resolved by a
 batch of `packages/storage-d1/src/atomic/card-purchase-recognition.ts` with
 `manual` event decisions keyed by the operation. All of it is guarded on the
 receipt, so a moved pin writes nothing anywhere, and a resend replays the
-receipt. Agents cannot approve or commit it, like every other change. The
+receipt. Every id the batch writes is keyed by the operation (the event
+decisions' digest includes it), so a resend whose batch was built before the
+first commit landed finds its own rows and writes nothing more, and another
+operation of the same plan finds the plan committed and writes nothing. Agents cannot approve or commit it, like every other change. The
 receipt's `result` adds `proposalId`, `proposalDecisionRevisionId`, `review`
 (`accept`, `reject` or `withdraw`) and `eventRevisions`.
+
+A withdrawn link cannot be accepted again, a known limit: the proposal row
+stays `accepted` (0032 resolves a proposal once) and the triple's latest
+relation is `rejected`, so the candidate is closed. The two rows can be linked
+again only through a new proposal, which the purchase lane writes when either
+row's event moves to a new observation
+([economic-events.md](economic-events.md#pending-to-posted-links)).
 
 ## Tables (migration `0031_operations.sql`)
 
@@ -458,8 +469,10 @@ already recorded is never undone by a DELETE — an undo is a new revision
   unchanged, a withdrawal that splits it with its history kept, a rejection
   that pins the holders and moves no event, a stale event revision or a
   proposal decided elsewhere writing nothing, an agent refused approval and
-  commit, payloads the proposal does not give refused, and a resend replaying
-  the receipt. `services/processor/test/card-purchase-merge.test.ts` runs an
+  commit, payloads the proposal does not give refused, a resend replaying
+  the receipt, concurrent commit batches of one plan writing the review once,
+  and a bare `pending_to_posted` plan stored before the review existed refused
+  at commit. `services/processor/test/card-purchase-merge.test.ts` runs an
   accept and a withdrawal through the processor's planners on D1.
 - `packages/application/test/command.test.ts` (11 tests): the closed kind list,
   payloads that reject a caller-supplied impact/approval/revisions, digest

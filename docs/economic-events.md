@@ -12,10 +12,10 @@ while both flags are off.
 
 ## Product delivery scope
 
-The implemented Vpass pending/posted slice below is the starting point for
-phases 6–7, not completion of reconciliation or event generation. The
+The implemented Vpass and MyJCB pending/posted slices below are the starting
+point for phases 6–7, not completion of reconciliation or event generation. The
 [next product milestone](roadmap.md#phases-67--reconciliation-and-economic-event-generation)
-adds MyJCB, card statements and bank debits, with review/correction and an
+builds on them with card statements and bank debits, review/correction and an
 explanation from purchase through settlement to source evidence. Event, leg,
 allocation and settlement tables still need continuous population from the
 supported transaction families. Matching two observations alone does not
@@ -115,12 +115,14 @@ are single payments; MyJCB's usage and payment texts (`1,200円`, `-500円`) are
 read with the MyJCB ledger parser's own amount grammar and must agree; the
 statement period is stored as `YYYY-MM`, the key `card_statement_facts.period`
 uses, from Vpass `statementMonth` and from MyJCB's `YYYY年M月お支払い分` label
-(any other label is stored as `NULL`, never guessed). One known gap is left
-alone on purpose: the reconciliation job's MyJCB installment guard, moved
-unchanged to `comparableCardPayment`, still reads only plain digits, so no
-real MyJCB confirmed row (`1,200円`) takes part in pending-to-posted matching.
-Widening it would start new production proposals and is a separate reviewed
-change; recognition does not depend on it.
+(any other label is stored as `NULL`, never guessed). The reconciliation job's
+MyJCB installment guard, `comparableCardPayment`, reads the same texts through
+the same rule (`myjcbAgreedAmount`): a confirmed row takes part in
+pending-to-posted matching only when its usage and payment agree and are
+positive, so an installment slice is never compared with a purchase. The job
+also admits a confirmed row only under a label `statementPeriod` reads as a
+payment month, so a label recognition stores as `NULL` (the collector's
+relative `detailMonth-N` fallback) never pairs rows either.
 
 ### Where the decisions live
 
@@ -188,16 +190,36 @@ widening that closed list. Settlement is not one of them: it is a first-class
 
 ## The vertical slice that runs
 
-`services/processor/src/reconciliation-job.ts` runs stage A and
-stage B over **one** source pair: **pending against posted inside the Vpass
-statement page**. That parser emits two provider displays of the same card and
-statement month — the `customized` family with provider status `unconfirmed`
-(a pending authorisation) and the `web` family with `posted` — under one
-`vpass:<card>` source account. It is the only pair in the deployed parser set
-where both sides of a pending/posted revision exist in one identifier
-namespace, so no cross-source ownership has to be established first. MyJCB's
-credit ledger has the same shape (`unconfirmed` / `confirmed` for one connection
-and period) and is the documented next entry in `RECONCILIATION_SLICES`.
+`services/processor/src/reconciliation-job.ts` runs stage A and stage B over
+the two entries of `RECONCILIATION_SLICES`, each **pending against posted
+inside one provider's own displays**:
+
+- **The Vpass statement page.** That parser emits two provider displays of the
+  same card and statement month — the `customized` family with provider status
+  `unconfirmed` (a pending authorisation) and the `web` family with `posted` —
+  under one `vpass:<card>` source account.
+- **The MyJCB credit ledger.** The `unconfirmed` and `confirmed` ledgers of one
+  connection and payment month, under one `myjcb:<connection>:root` source
+  account. A confirmed row's amount can be one installment slice, so it takes
+  part only when its usage and payment texts (`1,200円`) agree and are positive
+  (`comparableCardPayment`, read with the rule card purchase recognition uses);
+  an installment slice is never compared with a purchase. It also needs an
+  absolute payment month label (`2026年10月お支払い分`, read by
+  `statementPeriod`): the collector writes the relative fallback
+  `detailMonth-N` for every month the past-months API does not label, and that
+  position names a different payment month as months pass, so rows grouped
+  under it would claim `same_statement_period` falsely. A pair is therefore
+  proposed only when both ledgers carry the same absolute month. On the
+  connection surveyed in [the MyJCB source notes](sources/myjcb.md) the menu
+  lists months 0–8 and the API labels only months 9–17, so its unconfirmed
+  ledger and recent confirmed months carry `detailMonth-N` and this job
+  proposes no MyJCB pending-to-posted pair for them. A confirmed row takes part
+  in stage B only: its stage A pairs would be the same row re-captured by each
+  daily run, one collector-fingerprint candidate per pair of captures.
+
+These are the only pairs in the deployed parser set where both sides of a
+pending/posted revision exist in one identifier namespace, so no cross-source
+ownership has to be established first.
 
 Stage C is not run yet: it needs an established owner on both sides and a second
 source in the slice.
@@ -413,6 +435,13 @@ the authorisation is no longer held apart. The merged event's statement is the
 posted row's (its sidecar is the posted row's), so it links to its statement
 and settlement unchanged.
 
+The rule never overrides a reviewer: it leaves a provider-linked pair to
+review once any decision other than a rule's is recorded about either event
+(a reviewed merge, or the split of a withdrawal), checked before the merge and
+again inside its batch. Otherwise a withdrawn link would be merged again as
+soon as either row is re-anchored, because the re-anchored pair is a new
+proposal that the provider link makes `autoAcceptable`.
+
 **Split.** Withdrawing an accepted link (`relation.reject` of an accepted
 triple) retires the merged event first, holding its pending key alone, in
 state `unknown` with `conflicting_evidence` and the pending row's own facts
@@ -424,6 +453,13 @@ revisions, so a first recognition could never be written for it, and the lane
 would find its key held by nobody forever. A merged event already retired
 splits into two retired events. The captured total is unchanged again, and
 every earlier revision stays readable.
+
+A withdrawn link is closed for good, a known limit: 0032 resolves a proposal
+once, so the proposal row stays `accepted` (the withdrawal supersedes the
+decision that accepted it), the triple's latest relation is `rejected`, and
+the candidate offers no action again. The same two rows can only be linked
+again through a new proposal, which the candidate pass writes when either
+row's event is re-anchored or revised onto a new observation.
 
 What stays proposal-only: every candidate without a provider link id, which
 is every one the deployed parsers produce today (no source supplies a
@@ -439,7 +475,13 @@ when the write budget runs out, and wraps to 0 after the last page (an exactly
 full last page wraps on the next tick, whose page is empty) because a row below
 it can become current again. The cursor moves only from the value the tick
 read, so a tick that overlapped it never pulls it back. The current-usage query
-runs twice per tick (stale keys, then the page).
+runs twice per tick (stale keys, then the page): about 0.5 s and 0.4 s on the
+scaled store of [the read model's cost measurement](read-model.md#cost), since
+both start from the current captures rather than the whole store and the stale
+read looks up the revisions holding a current key once, not per live key.
+Nothing in the tick is skipped when no evidence changed: every tick that writes
+moves the CORE source revision itself (its decision revisions), and the cursor
+still has to page through the current rows.
 
 The candidate pass then reads the recognised events of the groups the page
 touched, at most 2,000 in all (`CANDIDATE_READ_LIMIT`; a
@@ -447,7 +489,11 @@ larger read skips every group that tick) and at most 200 per group
 (`CANDIDATE_GROUP_LIMIT`; a larger group is skipped and counted), writes at
 most 100 new proposals in one batch (`CANDIDATE_WRITE_LIMIT`; a pair already
 stored never takes that budget), and merges at most 20 provider-linked pairs
-(`LINK_MERGE_LIMIT`), each its own batch. A tick therefore issues at most
+(`LINK_MERGE_LIMIT`), each its own batch. Stage B pairs every pending event with
+every posted event of a group, so a group of 200 events is up to 10,000 pairs:
+the stored ones are looked up 1,000 digests at a time
+(`CANDIDATE_LOOKUP_CHUNK`, about 67 KB of bound JSON, far below D1's 2 MB value
+limit) and only until the write budget is full. A tick therefore issues at most
 about 320 guarded batches, and a deferred tick pairs nothing: the candidate
 pass follows the page.
 
@@ -544,22 +590,35 @@ touch the 0047 tables.
   is revised on an account correction, retired holding both keys when its
   posted row is gone and captured again when it reappears; a reviewed accept
   through the lifecycle on D1 merges, the lane then leaves the merged event
-  alone, and a withdrawal splits it without a new proposal.
+  alone, and a withdrawal splits it without a new proposal. The reconciliation
+  lane and the purchase lane propose one Vpass pair and one MyJCB pair (an
+  absolute payment month) once, under the same `rp_<digest>`, whichever runs
+  first; a provider-linked pair the reconciliation lane accepted is merged
+  once, with no second acceptance; the rule does not merge again a pair a
+  reviewer split, even after a re-anchor makes it a new provider-linked
+  proposal; and the stored pairs are looked up a bounded chunk at a time.
   `test/reconciliation.test.ts` checks the canonical relation ends and
   proposal evidence.
 - `packages/storage-d1`: `test/card-purchase-links.test.ts` (merge and split
   batches on the full CORE: order, cross-id supersession, replay and stale
   batches writing nothing, a key held elsewhere, the one-live-holder trigger
   refusing a merge without its pointer, a split restoring both holders and a
-  merge again after it, and the `proposal:` and `card-purchase:` revision
+  merge again after it, a merged event already retired splitting into two
+  retired events, and the `proposal:` and `card-purchase:` revision
   subjects).
 - `packages/domain`: `test/pending-posted-review.test.ts` (merge and split
   drafts, transitions, `conflicting_evidence`, the linked revision, what a
-  review may do, the marker and canonical ends).
+  review may do, the marker and canonical ends) and `test/reconcile.test.ts`
+  (the stored digest of a known pair pinned, unchanged by the evidence no
+  longer double-prefixing its refs).
 - `packages/application`: `test/pending-posted-plan.test.ts` (plan, simulate,
   approve and commit of an accept, a reject and a withdrawal; pins; stale
   event revisions and proposals decided elsewhere writing nothing; agents
-  refused; resends replaying the receipt) and
+  refused; resends replaying the receipt; concurrent commit batches of one
+  plan writing the review once, a resend of the operation and another
+  operation both writing nothing; a bare `pending_to_posted` plan stored
+  before the review existed refused at commit; every event of a page listing
+  its own candidates next to a busy one) and
   `packages/observation-shared/test/card-purchase-candidates.test.ts` (the
   `candidates` wire shape).
 - `packages/read-model`: `test/card-purchase-keys.test.ts` (stale keys and the
@@ -633,7 +692,12 @@ period); no allocation is read or written for it
 Each event also lists its `candidates` (at most 10, newest first): the
 [pending-to-posted](#pending-to-posted-links) proposals that name one of its
 provider rows, matched through the rows' recognition keys, with `proposal:<id>`
-added to its `explanationRefs`. A candidate carries the proposal's status and
+added to its `explanationRefs`. Proposals are selected per key (10 each), so a
+busy month's pairs never crowd another event of the page out; among proposals
+written in the same tick (a whole group's pairs usually are), the pair with a
+provider link id, then with a date within the window, an equal amount and an
+equal counterparty comes first, so the likely pair is not hidden behind
+similar rows. A candidate carries the proposal's status and
 decision count, the relation triple's latest status and row count, the rows'
 own amounts and dates with the live event each is held by (and its revision),
 the rationale and rejection codes, the review `actions` it allows now
@@ -704,8 +768,10 @@ deleted to undo a decision — a new revision is appended instead.
 
 One sweep reads at most 1,000 published rows per slice, pairs inside groups of
 at most 200 facts (larger groups are counted and skipped), and writes at most
-500 proposals. Its log line carries counts only: no amount, account label or
-provider text. One API page is 200 rows.
+500 proposals. MyJCB confirmed rows join stage B only (see
+[the vertical slice](#the-vertical-slice-that-runs)). Its log line carries
+counts only: no amount, account label or provider text. One API page is 200
+rows.
 
 ## Verified locally (synthetic data only)
 
@@ -734,7 +800,12 @@ migration 0026.
   decision log with resend and conflicts, the provider-link auto-acceptance path
   on a synthetic source, the scheduled lane off by default, and migration 0032
   on 0017–0035 with seeded rows including its closed enums and append-only
-  triggers).
+  triggers; MyJCB ledgers seeded through the deployed parser: a `1,200円` pair,
+  an installment slice never compared, same-amount twins, re-runs and a decided
+  proposal writing nothing, a relative `detailMonth-N` label pairing nothing,
+  and a re-captured confirmed row kept out of stage A) and
+  `test/card-purchase-parser-shapes.test.ts` (recognition and the matching
+  guard never disagree on a parsed MyJCB row).
 - `services/app`: `test/events-api.test.ts` (capability gate, Access
   gate, GET-only, both routes, query validation) plus the pre-existing suites.
 

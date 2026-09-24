@@ -19,10 +19,25 @@ import {
 } from "../../../packages/application/src/index.ts";
 import { queryCardPurchases } from "../../../packages/application/src/query/card-purchases.ts";
 import type { SqlExecutor } from "../../../packages/read-model/src/reader.ts";
-import { CANDIDATE_WRITE_LIMIT, type CardPurchaseSweepResult } from "../src/card-purchase-job.ts";
+import { canonicalDigest } from "../../../packages/domain/src/context.ts";
+import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
+import {
+  DEFAULT_MATCH_OPTIONS,
+  proposalIdentity,
+  stageBProposals,
+  type MatchFact,
+} from "../../../packages/domain/src/reconcile.ts";
+import { exactQuantity, integerDecimal } from "../../../packages/domain/src/values.ts";
+import {
+  CANDIDATE_LOOKUP_CHUNK,
+  CANDIDATE_WRITE_LIMIT,
+  cardPurchaseSweep,
+  type CardPurchaseSweepResult,
+} from "../src/card-purchase-job.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
 import { reviseIdentity } from "../src/identity-store.ts";
-import { disposeWorlds, world, type UsageRow, type World } from "./card-purchase-world.ts";
+import { reconciliationSweep } from "../src/reconciliation-job.ts";
+import { disposeWorlds, NOW, world, type UsageRow, type World } from "./card-purchase-world.ts";
 
 afterEach(disposeWorlds);
 
@@ -533,4 +548,194 @@ test("a reviewed accept on D1 merges, the lane leaves the merged event alone, an
   // The split pair is not proposed again, and nothing else is left to do.
   expect(counts(await w.sweep())).toEqual(NOTHING);
   expect(await proposals(w)).toHaveLength(1);
+}, 120_000);
+
+/** The digest `proposalIdentity` gives the stage-B pair of two stored target refs, as either writer computes it. */
+async function pairDigest(targets: readonly SourceFactRef[]): Promise<string> {
+  const [left, right] = targets.map((ref, index): MatchFact => ({
+    ref,
+    scope: { sourceId: "vpass", credentialEpoch: "x", accountNamespace: "x" },
+    sourceAccount: "x",
+    externalId: null,
+    identifierOrigin: "collector-fingerprint",
+    providerLinkId: null,
+    settlementState: index === 0 ? "pending" : "posted",
+    quantity: exactQuantity("JPY", integerDecimal(-1200), "decimal-v1"),
+    occurred: { kind: "local-date", value: "2026-05-03", zone: null, basis: "provider" },
+    counterparty: null,
+    statementPeriod: null,
+    ownerRef: null,
+  }));
+  const [proposal] = stageBProposals([left!, right!], DEFAULT_MATCH_OPTIONS);
+  return canonicalDigest(proposalIdentity(proposal!));
+}
+
+test("the reconciliation lane and the purchase lane propose one pair once, under one digest, whichever runs first", async () => {
+  const myjcbRow: UsageRow = {
+    date: "2026/05/10",
+    merchant: "架空店舗J",
+    amount: "800",
+    paymentType: "1回払い",
+  };
+  // A Vpass month whose pending capture the posted one replaced, and a MyJCB
+  // pending and confirmed capture under one absolute payment month (#238:
+  // the only MyJCB shape the reconciliation lane pairs).
+  const sources = {
+    vpass: {
+      seed: async (w: World) => {
+        await pendingThenPosted(w, [POSTED]);
+      },
+      lane: { ...NOTHING, retired: 1, recognized: 1 },
+    },
+    myjcb: {
+      seed: async (w: World) => {
+        for (const state of ["unconfirmed", "confirmed"] as const)
+          await w.myjcb({
+            state,
+            period: "2026-06",
+            fetchedAt: "2026-06-12T00:00:00.000Z",
+            rows: [myjcbRow],
+          });
+      },
+      lane: { ...NOTHING, recognized: 2 },
+    },
+  };
+  for (const [source, { seed, lane }] of Object.entries(sources))
+    for (const order of ["reconciliation first", "purchases first"] as const) {
+      const w = await world();
+      await seed(w);
+      if (order === "reconciliation first") {
+        expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 1 });
+        // The purchase lane pairs the same two rows and finds the pair stored.
+        expect(counts(await w.sweep())).toEqual(lane);
+      } else {
+        expect(counts(await w.sweep())).toEqual({ ...lane, proposed: 1 });
+        expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 0 });
+      }
+      const stored = await w.all<{
+        id: string;
+        proposal_digest: string;
+        target_refs_json: string;
+      }>("SELECT id,proposal_digest,target_refs_json FROM reconciliation_proposals");
+      expect({ source, order, stored: stored.length }).toEqual({ source, order, stored: 1 });
+      const digest = await pairDigest(JSON.parse(stored[0]!.target_refs_json) as SourceFactRef[]);
+      expect(stored[0]).toMatchObject({ id: `rp_${digest}`, proposal_digest: digest });
+      // The pair the purchase lane compares is exactly that stored row's targets.
+      const [pendingKey, postedKey] = await w.all<{
+        observation_id: number;
+        parse_run_id: number;
+      }>("SELECT observation_id,parse_run_id FROM current_card_purchase_keys ORDER BY role");
+      expect(JSON.parse(stored[0]!.target_refs_json)).toEqual(
+        [pendingKey!, postedKey!].map((key) => ({
+          kind: "transaction",
+          id: `transaction:${key.observation_id}`,
+          revision: `parse_run:${key.parse_run_id}`,
+        })),
+      );
+      expect(counts(await w.sweep())).toEqual(NOTHING);
+      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 0 });
+      await disposeWorlds();
+    }
+}, 300_000);
+
+test("a provider-linked pair the reconciliation lane accepted is merged once, without a second acceptance", async () => {
+  const w = await world();
+  await pendingThenPosted(w, [POSTED], linked("provider-auth-4"));
+  expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({
+    written: 1,
+    autoAccepted: 1,
+  });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, retired: 1, recognized: 1, merged: 1 });
+  const [proposal] = await proposals(w);
+  expect(proposal).toMatchObject({ status: "accepted" });
+  // One acceptance (the reconciliation rule's), one relation, one merged event.
+  expect(
+    await w.count(
+      "SELECT count(*) AS n FROM decision_revisions WHERE subject_ref=?",
+      `proposal:${proposal!.id}`,
+    ),
+  ).toBe(1);
+  expect(await w.count("SELECT count(*) AS n FROM entity_relations")).toBe(1);
+  expect((await events(w)).map((event) => [event.state, event.roles])).toEqual([
+    ["captured", "posted,pending"],
+  ]);
+  expect(await w.totals()).toMatchObject({ captured: "1234", authorized: "0", unresolved: 0 });
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+}, 120_000);
+
+test("the rule never merges again a provider-linked pair a reviewer split, even after a re-anchor", async () => {
+  const w = await world();
+  const { capture } = await pendingThenPosted(w, [POSTED], linked("provider-auth-5"));
+  expect(await w.sweep()).toMatchObject({ merged: 1 });
+  const [merged] = await events(w);
+  const withdrawal = await candidateOf(w, merged!.event_id);
+  expect(withdrawal.actions).toEqual(["withdraw"]);
+  expect((await review(w, "relation.reject", withdrawal)).result).toMatchObject({
+    review: "withdraw",
+  });
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+  const split = await events(w);
+  expect(split.map((event) => [event.state, event.roles]).sort()).toEqual([
+    ["captured", "posted"],
+    ["unknown", "pending"],
+  ]);
+  // A published replay re-anchors the posted event on a new row: the pair
+  // is a new proposal, still provider-linked, and the rule leaves it to review.
+  await w.publish(await capture.replay({ publish: false }));
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, reanchored: 1, proposed: 1 });
+  expect((await events(w)).map((event) => [event.state, event.roles]).sort()).toEqual([
+    ["captured", "posted"],
+    ["unknown", "pending"],
+  ]);
+  const fresh = (await proposals(w)).filter((row) => row.status === "proposed");
+  expect(fresh).toHaveLength(1);
+  expect(JSON.parse(fresh[0]!.rationale_codes_json)).toContain("provider_link_id_equal");
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+  // A reviewer can still accept it.
+  const postedEvent = split.find((event) => event.roles === "posted")!.event_id;
+  const page = await queryCardPurchases(executor(w), { eventId: postedEvent });
+  expect(
+    page.items[0]!.candidates.find((entry) => entry.proposalId === fresh[0]!.id),
+  ).toMatchObject({ providerLinked: true, actions: ["accept", "reject"] });
+}, 120_000);
+
+test("the candidate pass looks up stored pairs a bounded chunk at a time", async () => {
+  const w = await world();
+  await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "26/05/07", amount: "800" }]);
+  expect(CANDIDATE_LOOKUP_CHUNK).toBe(1_000);
+  // Every stored-pair lookup binds its digests as one JSON array; record their sizes.
+  let lookups: number[] = [];
+  const db = new Proxy(w.db, {
+    get(target, property) {
+      if (property !== "prepare") {
+        const value = Reflect.get(target, property) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        if (!sql.includes("WHERE proposal_digest IN")) return statement;
+        return {
+          bind: (...args: unknown[]) => {
+            lookups.push((JSON.parse(args[0] as string) as unknown[]).length);
+            return statement.bind(...args);
+          },
+        };
+      };
+    },
+  });
+  const tick = async () => {
+    lookups = [];
+    const result = await cardPurchaseSweep(db, {
+      now: NOW,
+      candidateLookupChunk: 2,
+      candidateWriteLimit: 2,
+    });
+    return { proposed: result.proposed, lookups };
+  };
+  // Three pairs: the first chunk fills the budget, so the second is not read.
+  expect(await tick()).toEqual({ proposed: 2, lookups: [2] });
+  // The stored chunk takes no budget; the next chunk's new pair is written.
+  expect(await tick()).toEqual({ proposed: 1, lookups: [2, 1] });
+  expect(await tick()).toEqual({ proposed: 0, lookups: [2, 1] });
+  expect(await proposals(w)).toHaveLength(3);
 }, 120_000);

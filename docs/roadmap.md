@@ -35,8 +35,12 @@ Concrete limits in the current code:
   acceptance. Other bank adapters, partial payments, refunds and complete
   purchase recognition remain extensions; this is not complete event coverage.
 - [The pending/posted job](../services/processor/src/reconciliation-job.ts)
-  includes Vpass and the supported MyJCB usage/payment-equivalent subset.
-  An installment payment amount is not silently compared with a purchase amount.
+  proposes Vpass pairs and MyJCB pairs whose confirmed row's usage and payment
+  amounts (`1,200円`) agree and whose ledgers share an absolute payment month;
+  every pair stays a candidate for review. An installment payment amount is
+  not silently compared with a purchase amount. MyJCB ledgers labelled with the
+  collector's relative `detailMonth-N` fallback are not paired, which on the
+  surveyed connection covers its unconfirmed and recent confirmed months.
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind
@@ -72,9 +76,9 @@ Concrete limits in the current code:
   figures kept apart. It is not a complete card history: excluded shapes and
   rows the recognition writer has not reached are only counted, a pending row
   and its posted row are separate events until a reviewed link merges them
-  (the API lists the candidates and the review plans through the change
-  lifecycle; the screen for it is still to come), agents cannot read it, and
-  no statement-versus-purchases difference is computed.
+  (the purchases page lists each purchase's candidates and reviews them
+  through the change lifecycle), agents cannot read it, and no
+  statement-versus-purchases difference is computed.
 
 ## Delivery order and the next milestone
 
@@ -98,8 +102,8 @@ finishing a representative bank, card, broker or rewards flow.
 coverage without counting an expense twice.** The first statement/debit review
 slice is implemented, and so is the first purchase-event writer for supported
 single-payment card usage (on in production since 2026-09-24), with reviewed
-pending-to-posted purchase linking; source ownership, supported bank coverage,
-the linking screen, partial payments and refund handling still need
+pending-to-posted purchase linking and its review screen; source ownership,
+supported bank coverage, partial payments and refund handling still need
 completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
@@ -135,7 +139,7 @@ Contracts: [collection](collection.md), [observations](observations.md),
 
 ## Phases 6–7 — Reconciliation and economic event generation
 
-Build on Vpass pending/posted matching, then add MyJCB, card statement/payment
+Build on Vpass and MyJCB pending/posted matching, then add card statement/payment
 matching, bank transfers and securities transactions. Continuously generate
 corrigible events from adopted source observations; event tables and matching
 functions alone do not complete this stage.

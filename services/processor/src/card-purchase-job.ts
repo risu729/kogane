@@ -124,6 +124,14 @@ export const CANDIDATE_GROUP_LIMIT = 200;
 export const CANDIDATE_READ_LIMIT = 2_000;
 /** New proposals one tick writes, in one batch. */
 export const CANDIDATE_WRITE_LIMIT = 100;
+/**
+ * Proposal digests one stored-proposal lookup binds. Stage B pairs every
+ * pending event with every posted event of a group (a group of 200 events is
+ * up to 10,000 pairs, and a tick reads up to 2,000 events), so one lookup of
+ * every pair could bind a JSON array of megabytes, past D1's 2 MB value
+ * limit; chunked, each lookup binds at most about 67 KB.
+ */
+export const CANDIDATE_LOOKUP_CHUNK = 1_000;
 /** Provider-linked merges one tick commits, each its own batch. */
 export const LINK_MERGE_LIMIT = 20;
 
@@ -168,6 +176,8 @@ export interface CardPurchaseSweepOptions {
   retireLimit?: number;
   /** New proposals the candidate pass may write this tick. */
   candidateWriteLimit?: number;
+  /** Proposal digests one stored-proposal lookup binds, at most `CANDIDATE_LOOKUP_CHUNK`. */
+  candidateLookupChunk?: number;
 }
 
 /** The structural reader the shared application loaders take, over a D1 binding. */
@@ -631,9 +641,10 @@ async function candidatePass(
   db: D1Database,
   result: CardPurchaseSweepResult,
   rows: readonly CurrentCardUsageRow[],
-  limit: number,
+  limits: { write: number; lookup: number },
   now: string,
 ): Promise<string[]> {
+  const limit = limits.write;
   const groups = new Map<string, Group>();
   for (const row of rows) {
     const fact = cardUsageFactOf(row);
@@ -669,36 +680,39 @@ async function candidatePass(
     group.kinds.set(row.kind, [...(group.kinds.get(row.kind) ?? []), fact]);
     byGroup.set(key, group);
   }
-  const candidates: { id: string; digest: string; write: SqlWrite }[] = [];
-  const linked: string[] = [];
+  const proposals: ReconciliationProposal[] = [];
   for (const group of byGroup.values()) {
     if (group.size > CANDIDATE_GROUP_LIMIT) {
       result.groupsSkipped += 1;
       continue;
     }
     for (const members of group.kinds.values())
-      for (const proposal of stageBProposals(members, DEFAULT_MATCH_OPTIONS)) {
-        const candidate = await proposalWrite(proposal, now);
-        candidates.push(candidate);
-        if (proposal.autoAcceptable) linked.push(candidate.id);
-      }
+      for (const proposal of stageBProposals(members, DEFAULT_MATCH_OPTIONS))
+        proposals.push(proposal);
   }
-  if (candidates.length === 0) return linked;
+  const linked: string[] = [];
+  for (const proposal of proposals)
+    if (proposal.autoAcceptable) linked.push((await proposalWrite(proposal, now)).id);
   // Only proposals not stored yet take the write budget, so the pairs a
-  // group already proposed never starve its new ones.
-  const stored = new Set(
-    (
-      await page<{ proposal_digest: string }>(db, {
-        sql: `SELECT proposal_digest FROM reconciliation_proposals
+  // group already proposed never starve its new ones. The stored ones are
+  // looked up a bounded chunk at a time, until the budget is full.
+  const writes: SqlWrite[] = [];
+  for (let start = 0; start < proposals.length && writes.length < limit; start += limits.lookup) {
+    const chunk = await Promise.all(
+      proposals.slice(start, start + limits.lookup).map((proposal) => proposalWrite(proposal, now)),
+    );
+    const stored = new Set(
+      (
+        await page<{ proposal_digest: string }>(db, {
+          sql: `SELECT proposal_digest FROM reconciliation_proposals
 WHERE proposal_digest IN (SELECT value FROM json_each(?1))`,
-        args: [JSON.stringify(candidates.map((candidate) => candidate.digest))],
-      })
-    ).map((row) => row.proposal_digest),
-  );
-  const writes = candidates
-    .filter((candidate) => !stored.has(candidate.digest))
-    .slice(0, limit)
-    .map((candidate) => candidate.write);
+          args: [JSON.stringify(chunk.map((candidate) => candidate.digest))],
+        })
+      ).map((row) => row.proposal_digest),
+    );
+    for (const candidate of chunk)
+      if (writes.length < limit && !stored.has(candidate.digest)) writes.push(candidate.write);
+  }
   if (writes.length > 0) {
     try {
       const results = await db.batch(
@@ -712,6 +726,10 @@ WHERE proposal_digest IN (SELECT value FROM json_each(?1))`,
   return linked;
 }
 
+/** A decision someone other than a rule recorded about either of two events (`event:<id>`). */
+const REVIEWED_EVENT_SQL = `SELECT d.id FROM decision_revisions d
+ WHERE d.subject_kind='relation' AND d.subject_ref IN (?,?) AND d.method<>'rule' LIMIT 1`;
+
 /**
  * Accept and merge a pair the provider itself linked, as one batch of rule
  * decisions (card purchase plan §1.1): the merge (statement 1 carries the
@@ -719,6 +737,12 @@ WHERE proposal_digest IN (SELECT value FROM json_each(?1))`,
  * relation decision and row, and the proposal's resolution. A pair the
  * reconciliation lane already accepted by rule is merged without a second
  * acceptance. A heuristic pair is never merged here, whatever else agrees.
+ *
+ * The rule never overrides a reviewer: once a human decision is recorded
+ * about either event (a reviewed merge or a withdrawal's split), the pair is
+ * left to review. Without this, a withdrawn link would be merged again as
+ * soon as either row is re-anchored, because the re-anchored pair is a new
+ * proposal the provider link makes `autoAcceptable` again.
  */
 async function mergeLinked(
   db: D1Database,
@@ -743,13 +767,16 @@ async function mergeLinked(
       posted.holder !== null &&
       pending.holder.eventId !== posted.holder.eventId;
     if (!open && !acceptedApart) continue;
+    const events = [`event:${pending.holder?.eventId}`, `event:${posted.holder?.eventId}`];
+    if ((await page<{ id: string }>(db, { sql: REVIEWED_EVENT_SQL, args: events })).length > 0)
+      continue;
     const merge = await candidateMerge(reader, pending, posted, null);
     if (merge === null) {
       result.conflicts += 1;
       continue;
     }
     const relation = view.relation;
-    const state: SqlWrite = open
+    const proposalState: SqlWrite = open
       ? {
           sql: "EXISTS(SELECT 1 FROM reconciliation_proposals WHERE id=? AND status='proposed')",
           binds: [proposalId],
@@ -761,6 +788,12 @@ async function mergeLinked(
   ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1)='accepted'`,
           binds: [proposalId, PENDING_POSTED_RELATION_KIND, relation.fromRef, relation.toRef],
         };
+    // Re-checked inside the batch: a review committed since the read above
+    // leaves this merge unwritten.
+    const state: SqlWrite = {
+      sql: `${proposalState.sql}\n AND NOT EXISTS(${REVIEWED_EVENT_SQL})`,
+      binds: [...proposalState.binds, ...events],
+    };
     const writes = cardPurchaseMergeWrites({ merge, now, guard: state });
     if (open) {
       const mergeDecision = merge.draft.decisionRevisionId;
@@ -813,7 +846,8 @@ async function mergeLinked(
  * One bounded tick: at most `RETIRE_LIMIT` stale keys retired, then at most
  * `SCAN_LIMIT` current rows read and `WRITE_LIMIT` events written, then the
  * candidates of the groups those rows belong to (at most
- * `CANDIDATE_WRITE_LIMIT` new proposals in one batch and `LINK_MERGE_LIMIT`
+ * `CANDIDATE_WRITE_LIMIT` new proposals in one batch, the stored ones looked
+ * up `CANDIDATE_LOOKUP_CHUNK` digests at a time, and `LINK_MERGE_LIMIT`
  * provider-linked merges). Re-running it over unchanged rows writes nothing:
  * every revision's decision id is a digest of its event, revision, content and
  * action, the live content digest already matches, and a proposal is keyed by
@@ -868,7 +902,10 @@ export async function cardPurchaseSweep(
     db,
     result,
     rows,
-    bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
+    {
+      write: bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
+      lookup: bounded(options.candidateLookupChunk, CANDIDATE_LOOKUP_CHUNK, CANDIDATE_LOOKUP_CHUNK),
+    },
     now,
   );
   await mergeLinked(db, result, linked, now);

@@ -197,6 +197,24 @@ const PARSE_IDENTITY = `parse_identity AS MATERIALIZED (
          FROM (SELECT DISTINCT parse_run_id FROM current_rows WHERE run_succeeded) parses
        )`;
 
+/**
+ * The artifacts step 2 can keep: the members of each current Vpass snapshot
+ * (`VPASS_SNAPSHOT_MEMBER`, looked up through the snapshot's fetch run) and
+ * the current MyJCB captures. `current_rows` still applies every predicate of
+ * steps 1 and 2 itself, so this set decides only where its scan starts, never
+ * which rows it keeps. D1 is never analyzed, and without statistics the
+ * planner otherwise walks every terminal run report, artifact, parse and
+ * observation of every source before the snapshot filter: a cost that grows
+ * with the whole store instead of with the current captures.
+ */
+const CARD_ARTIFACTS = `card_artifacts AS MATERIALIZED (
+         SELECT fa.id
+         FROM current_vpass_snapshots snapshot
+         CROSS JOIN observation_fetch_artifacts fa ON ${VPASS_SNAPSHOT_MEMBER}
+         UNION
+         SELECT fetch_artifact_id FROM current_myjcb_snapshots
+       )`;
+
 /** The row's columns, in the order the result returns them. */
 const COLUMNS = [
   "observation_id",
@@ -241,9 +259,13 @@ const COLUMNS = [
  *
  * Steps 1 and 2 are materialized first (`current_rows`), so the identity
  * lookup and the provider extras are evaluated for current rows only, never
- * for the older captures every Vpass and MyJCB artifact keeps.
+ * for the older captures every Vpass and MyJCB artifact keeps. `current_rows`
+ * starts from `card_artifacts` and reaches every other relation by key; the
+ * `CROSS JOIN`s fix that order, because D1's planner has no statistics and
+ * would otherwise start from every fetch run's terminal report (the cost is
+ * measured in docs/read-model.md, "Cost").
  */
-export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPASS_STATEMENT_SNAPSHOT_CTES}, current_rows AS MATERIALIZED (
+export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPASS_STATEMENT_SNAPSHOT_CTES}, ${CARD_ARTIFACTS}, current_rows AS MATERIALIZED (
          SELECT t.id AS observation_id, t.parse_run_id, fa.id AS fetch_artifact_id,
                 fa.fetch_run_id, t.raw_locator,
                 fa.source_id, fr.producer_id, ses.external_id_namespace,
@@ -275,9 +297,13 @@ export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPA
                   AS payment_amount_text,
                 CASE WHEN ${MYJCB} THEN ${extraText('$.expanded."今回回数"')} END
                   AS installment_count_text
-         FROM ${activeStateProjection.observationChain("transaction_observations", "t")}
-         JOIN financial_fetch_runs fr ON fr.id = f.id
-         JOIN acquisition_sessions ses ON ses.id = fr.acquisition_session_id
+         FROM card_artifacts candidate
+         CROSS JOIN observation_fetch_artifacts fa ON fa.id = candidate.id
+         CROSS JOIN observation_fetch_runs f ON f.id = fa.fetch_run_id
+         CROSS JOIN financial_fetch_runs fr ON fr.id = f.id
+         CROSS JOIN acquisition_sessions ses ON ses.id = fr.acquisition_session_id
+         CROSS JOIN parse_runs p ON p.fetch_artifact_id = fa.id
+         CROSS JOIN transaction_observations t ON t.parse_run_id = p.id
          LEFT JOIN current_vpass_snapshots snapshot
            ON p.parser_name = 'vpass-statement-page'
           AND ${VPASS_SNAPSHOT_MEMBER}

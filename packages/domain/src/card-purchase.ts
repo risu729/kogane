@@ -203,17 +203,6 @@ export type CardUsageClassification =
 // ---------------------------------------------------------------------------
 
 /**
- * The reconciliation job's historical grammar, kept exactly for
- * `comparableCardPayment`: trimmed ASCII digits with optional thousands
- * separators and no sign. It does not read MyJCB's real display text
- * (`1,200円`); see `comparableCardPayment`.
- */
-function plainInteger(value: string | null): bigint | null {
-  if (value === null || !/^[0-9]+(?:,[0-9]{3})*$/u.test(value.trim())) return null;
-  return BigInt(value.trim().replaceAll(",", ""));
-}
-
-/**
  * A MyJCB display amount, read with the grammar the MyJCB ledger parser reads
  * its own amount cell with (`packages/parsers/src/parsers/myjcb.ts`
  * `jpyAmount`): NFKC, whitespace removed, an optional leading yen sign and
@@ -240,7 +229,9 @@ export type MyjcbAmountCheck =
  * MyJCB's posted amount can be an installment slice: the usage total and this
  * statement's payment differ. Only a row whose explicit usage and payment
  * totals are both readable and equal is one full payment. The amount is in the
- * provider's sign (a refund is negative).
+ * provider's sign (a refund is negative). This is the one MyJCB amount rule:
+ * recognition (`classifyCardUsage`) and pending-to-posted matching
+ * (`comparableCardPayment`) both read the texts through it.
  */
 export function myjcbAgreedAmount(
   usageAmountText: string | null,
@@ -255,17 +246,11 @@ export function myjcbAgreedAmount(
 
 /**
  * Whether a row may take part in pending-to-posted matching: a MyJCB confirmed
- * row only when usage equals payment and is positive; every other row is
- * unaffected. This is the reconciliation job's rule moved here unchanged,
- * grammar included (`plainInteger`).
- *
- * Known gap, deliberately not fixed here: real MyJCB rows display `1,200円`,
- * which that grammar does not read, so no real MyJCB confirmed row passes and
- * the live reconciliation lane proposes no MyJCB pending-to-posted pair.
- * Widening it would start new production proposals, which is a reviewed
- * change of its own. Recognition does not depend on it: `classifyCardUsage`
- * applies `myjcbAgreedAmount`, which reads the display grammar, to every MyJCB
- * row, pending or posted.
+ * row only when its usage and payment totals agree (`myjcbAgreedAmount`, so the
+ * texts are read as the ledger parser reads them: `1,200円`, `¥1,200`, full
+ * width) and are positive; every other row is unaffected. An installment slice
+ * (usage 12,000 / payment 4,000), an unreadable or missing text, a zero and a
+ * refund are never compared.
  */
 export function comparableCardPayment(row: {
   sourceId: string;
@@ -274,9 +259,8 @@ export function comparableCardPayment(row: {
   paymentAmountText: string | null;
 }): boolean {
   if (row.sourceId !== "myjcb" || row.status !== "confirmed") return true;
-  const usage = plainInteger(row.usageAmountText),
-    payment = plainInteger(row.paymentAmountText);
-  return usage !== null && usage > 0n && usage === payment;
+  const agreed = myjcbAgreedAmount(row.usageAmountText, row.paymentAmountText);
+  return agreed.ok && agreed.amount > 0n;
 }
 
 // ---------------------------------------------------------------------------

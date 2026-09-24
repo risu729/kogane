@@ -106,7 +106,7 @@ function bean(payload: Record<string, unknown>, name: string): Record<string, un
 }
 
 /** A Vpass `WebMeisaiTopDisplayServiceBean` page (posted rows, `4K/005`). */
-function webPayload(rows: readonly UsageRow[]): Uint8Array {
+export function webPayload(rows: readonly UsageRow[]): Uint8Array {
   const payload = template("web");
   bean(payload, "WebMeisaiTopDisplayServiceBean")["meisaiList"] = rows.map((row) => ({
     columnsSize: 11,
@@ -120,7 +120,7 @@ function webPayload(rows: readonly UsageRow[]): Uint8Array {
 }
 
 /** A Vpass `CustomizedMeisaiAnsDisplayServiceBean` page (unconfirmed rows). */
-function customizedPayload(month: string, rows: readonly UsageRow[]): Uint8Array {
+export function customizedPayload(month: string, rows: readonly UsageRow[]): Uint8Array {
   const payload = template("customized");
   const target = bean(payload, "CustomizedMeisaiAnsDisplayServiceBean");
   target["seikyuYM"] = month;
@@ -150,7 +150,7 @@ const CONFIRMED_HEADERS = ["ご利用日", "ご利用先など", "支払区分",
 const UNCONFIRMED_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"];
 
 /** A MyJCB canonical `credit-ledger` JSON as the collector writes it. */
-function ledgerPayload(
+export function ledgerPayload(
   detailMonth: number,
   period: string,
   state: "confirmed" | "unconfirmed",

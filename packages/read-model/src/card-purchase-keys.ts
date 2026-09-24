@@ -46,10 +46,22 @@ const ALL_PAGES = [0, -1] as const;
  * the event is still displayed (a merged pending key whose posted row is
  * current), so its other keys can never occupy the page. Ordered by event and
  * key so one event's keys stay together.
+ *
+ * `held_current` names, once per call, every revision that holds a current
+ * key, found from the current keys through the recognition key index, and each
+ * live key is then checked against it. Asked per live key instead ("does this
+ * revision hold a key IN the current keys?"), D1's statistics-free planner
+ * probes the revision's key index once for every current key, for every live
+ * key: seconds at a few thousand events (docs/read-model.md, "Cost").
  */
 export const STALE_CARD_PURCHASE_KEYS_SQL = `WITH current_keys AS MATERIALIZED (
          SELECT recognition_key FROM ${ALL_CURRENT_USAGE}
          WHERE recognition_key IS NOT NULL
+       ), held_current AS MATERIALIZED (
+         SELECT held.event_id, held.revision
+         FROM current_keys
+         CROSS JOIN card_purchase_recognition_keys held
+           ON held.recognition_key = current_keys.recognition_key
        )
        SELECT k.event_id, k.revision, k.recognition_key, k.role, k.observation_id,
               k.parse_run_id, c.kind, c.state,
@@ -59,9 +71,7 @@ export const STALE_CARD_PURCHASE_KEYS_SQL = `WITH current_keys AS MATERIALIZED (
        JOIN current_card_purchase_recognitions c
          ON c.event_id = k.event_id AND c.revision = k.revision
        WHERE c.state IN ('authorized', 'captured')
-         AND NOT EXISTS (SELECT 1 FROM card_purchase_recognition_keys held
-                          WHERE held.event_id = k.event_id AND held.revision = k.revision
-                            AND held.recognition_key IN (SELECT recognition_key FROM current_keys))
+         AND (k.event_id, k.revision) NOT IN (SELECT event_id, revision FROM held_current)
        ORDER BY k.event_id, k.recognition_key
        LIMIT ?3`;
 

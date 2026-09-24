@@ -64,7 +64,10 @@ import { loadPendingPostedCandidates } from "./card-purchase-candidates.ts";
 export const CARD_PURCHASE_PAGE_SIZE = 50;
 /** Revisions listed per event, newest first; older ones stay stored. */
 const CARD_PURCHASE_HISTORY_LIMIT = 20;
-/** Pending-to-posted candidates listed per event, newest first. */
+/**
+ * Pending-to-posted candidates listed per event, newest first and, within one
+ * tick's proposals, the pair with most in common first (card-purchase-candidates.ts).
+ */
 const CARD_PURCHASE_CANDIDATE_LIMIT = 10;
 /**
  * Live events one request may total. The figures cover the whole filter, so a
