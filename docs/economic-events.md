@@ -389,7 +389,9 @@ whose recognition waited because the retire pass retired a whole full page.
 1. The release applies CORE `0047` before the Workers.
 2. Deploy `services/processor` with the flag `"0"`: the lane is skipped and
    logs nothing.
-3. Set it to `"true"`: the backfill proceeds at most 200 events per tick.
+3. Set it to `"true"` (done on 2026-09-24): the backfill proceeds within the
+   [bounds](#bounds), at most 100 events retired and at most 200 recognition
+   writes per tick, so at most 300 event mutations.
 
 Rollback: set the flag back to `"0"`. The lane stops and every row it wrote
 stays. A wrong recognition is corrected by shipping a fixed policy whose sweep

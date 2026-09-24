@@ -41,10 +41,12 @@ Concrete limits in the current code:
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind
   `PURCHASE_RECOGNITION_ENABLED` (on in production since 2026-09-24; existing
-  rows are worked through at most 200 events per tick). Installment, revolving
-  and bonus rows, amountless rows and rows without a stable card identity are
-  excluded. Excluding a row by decision and linking a pending row to its posted
-  row as one purchase are not available yet.
+  rows are worked through in bounded five-minute ticks: at most 100 events
+  retired and at most 200 guarded recognition writes, so at most 300 event
+  mutations per tick). Installment, revolving and bonus rows, amountless rows
+  and rows without a stable card identity are excluded. Excluding a row by
+  decision and linking a pending row to its posted row as one purchase are not
+  available yet.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
