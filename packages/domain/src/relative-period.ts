@@ -52,7 +52,7 @@ const MYJCB_LABEL = /^detailMonth-(0|[1-9]|1[0-7])$/u;
  * off `P0 − N`, so the provider's numbering is not one uniform month offset
  * and a longer reach would be a guess.
  */
-export const MYJCB_RESOLVED_POSITIONS = 2;
+const MYJCB_RESOLVED_POSITIONS = 2;
 
 const yearMonth = (date: CivilDate): string =>
   `${String(date.year).padStart(4, "0")}-${String(date.month).padStart(2, "0")}`;
