@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { getJson, useFeatures } from "./api.ts";
 import type {
   CardPurchaseCandidate,
@@ -28,19 +28,30 @@ export function useCardPurchases(offset: number, period: string | null) {
   });
 }
 
-/** One purchase by its event id, with the page it was read in (for its summary). */
-export function useCardPurchase(eventId: string | null) {
-  const features = useFeatures();
-  return useQuery({
+function cardPurchaseQuery(eventId: string, enabled: boolean) {
+  return {
     queryKey: ["card-purchases", "detail", eventId],
-    enabled: eventId !== null && features.known && features.cardPurchaseRecognition,
-    queryFn: ({ signal }) =>
+    enabled,
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
       getJson<CardPurchasePage>(
-        `${CARD_PURCHASES_PATH}?eventId=${encodeURIComponent(eventId ?? "")}`,
+        `${CARD_PURCHASES_PATH}?eventId=${encodeURIComponent(eventId)}`,
         signal,
       ),
     retry: false,
-  });
+  };
+}
+
+/** One purchase by its event id, with the page it was read in (for its summary). */
+export function useCardPurchase(eventId: string) {
+  const features = useFeatures();
+  return useQuery(cardPurchaseQuery(eventId, features.known && features.cardPurchaseRecognition));
+}
+
+/** Several purchases by event id, each its own read (the same cache as `useCardPurchase`). */
+export function useCardPurchaseReads(eventIds: readonly string[]) {
+  const features = useFeatures();
+  const enabled = features.known && features.cardPurchaseRecognition;
+  return useQueries({ queries: eventIds.map((eventId) => cardPurchaseQuery(eventId, enabled)) });
 }
 
 // ── reviewing a pending-to-posted link ───────────────────────────────
@@ -163,14 +174,17 @@ export function plannedProposalId(subjects: readonly string[]): string | null {
 }
 
 /**
- * The purchase to read the candidate from: a planned `card-purchase:<id>`
- * subject, preferring one pinned at a live revision (an event absorbed by a
- * merge is pinned at 0 and has no page of its own).
+ * The purchases to read the candidate from: every planned
+ * `card-purchase:<id>` subject pinned at a live revision (an event absorbed
+ * by a merge is pinned at 0 and has no page of its own). Each side's page
+ * lists at most ten candidates per row, so the candidate may be on only one
+ * of them; the plan's subjects are stored sorted, so their order says
+ * nothing about which side is which.
  */
-export function plannedPurchaseEventId(
+export function plannedPurchaseEventIds(
   subjects: readonly string[],
   expected: Record<string, number>,
-): string | null {
+): string[] {
   const ids = [
     ...new Set(
       subjects
@@ -178,5 +192,5 @@ export function plannedPurchaseEventId(
         .map((ref) => ref.slice(CARD_PURCHASE_PREFIX.length)),
     ),
   ].filter((id) => /^(?:purchase|refund)_[0-9a-f]{64}$/u.test(id));
-  return ids.find((id) => (expected[CARD_PURCHASE_PREFIX + id] ?? 1) > 0) ?? null;
+  return ids.filter((id) => (expected[CARD_PURCHASE_PREFIX + id] ?? 1) > 0);
 }

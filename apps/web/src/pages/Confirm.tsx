@@ -13,11 +13,11 @@ import { CardOwnershipDetails, OWNERSHIP_ROLES, ownerLabel } from "../card-owner
 import {
   PURCHASE_LINK_INVALIDATION,
   plannedProposalId,
-  plannedPurchaseEventId,
+  plannedPurchaseEventIds,
   purchaseLinkAction,
   purchaseLinkPins,
   purchaseLinkPinsMatch,
-  useCardPurchase,
+  useCardPurchaseReads,
   type CardPurchaseCandidate,
   type PurchaseLinkPin,
 } from "../card-purchases-api.ts";
@@ -195,8 +195,9 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
     settlementActionAllowed;
 
   // A pending-to-posted review (relation.accept / relation.reject carrying
-  // the proposal marker): the candidate is read back from the purchase the
-  // plan pinned, and approval waits until every pin is what it shows.
+  // the proposal marker): the candidate is read back from the purchases the
+  // plan pinned (whichever lists it), and approval waits until every pin is
+  // what it shows.
   const requiresPurchaseLink =
     report.data?.simulation.invalidations.includes(PURCHASE_LINK_INVALIDATION) === true;
   const plannedSubjects = report.data
@@ -206,16 +207,25 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       ]
     : [];
   const linkProposalId = requiresPurchaseLink ? plannedProposalId(plannedSubjects) : null;
-  const linkEventId = requiresPurchaseLink
-    ? plannedPurchaseEventId(plannedSubjects, report.data?.expectedRevisions ?? {})
-    : null;
-  const purchase = useCardPurchase(linkEventId);
-  const linkCandidate =
-    linkProposalId === null
-      ? undefined
-      : purchase.data?.items[0]?.candidates.find(
-          (candidate) => candidate.proposalId === linkProposalId,
-        );
+  const linkEventIds = requiresPurchaseLink
+    ? plannedPurchaseEventIds(plannedSubjects, report.data?.expectedRevisions ?? {})
+    : [];
+  const purchaseReads = useCardPurchaseReads(linkEventIds);
+  const listed = (read: (typeof purchaseReads)[number]) =>
+    read.data?.items[0]?.candidates.find((candidate) => candidate.proposalId === linkProposalId);
+  const linkRead = purchaseReads.find((read) => listed(read) !== undefined);
+  const linkCandidate = linkProposalId === null || !linkRead ? undefined : listed(linkRead);
+  // The read the panel reports on: the one listing the candidate, else one
+  // still loading or failed, and "not found" only once every read is done.
+  const purchase =
+    linkRead ??
+    purchaseReads.find((read) => read.data === undefined && !read.isError) ??
+    purchaseReads.find((read) => read.isError) ??
+    purchaseReads[0];
+  const linkEventId =
+    linkRead === undefined
+      ? (linkEventIds[0] ?? null)
+      : (linkEventIds[purchaseReads.indexOf(linkRead)] ?? null);
   // The action is the server's (the proposal target's next status in the
   // simulation), never inferred here from the candidate's statuses.
   const linkAction =
@@ -437,7 +447,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                     <Notice tone="bad" inline role="alert">
                       カード利用の説明を取得できない接続先のため、承認・確定できません。
                     </Notice>
-                  ) : linkEventId === null || linkProposalId === null ? (
+                  ) : purchase === undefined || linkProposalId === null ? (
                     <Notice tone="bad" inline role="alert">
                       計画した候補と利用の記録を特定できないため、承認・確定できません。カード利用の画面から計画し直してください。
                     </Notice>

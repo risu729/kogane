@@ -15,7 +15,7 @@ import {
 import { clientFeatures } from "../src/capabilities.ts";
 import {
   plannedProposalId,
-  plannedPurchaseEventId,
+  plannedPurchaseEventIds,
   purchaseLinkAction,
   purchaseLinkPinsMatch,
   purchaseLinkPlanRequest,
@@ -305,8 +305,14 @@ describe("pending-to-posted review from the web client", () => {
     const subjects = Object.keys(expected);
     expect(plannedProposalId(subjects)).toBe(merged.proposalId);
     // The absorbed posted event has no live revision (and no page); the survivor is read.
-    expect(plannedPurchaseEventId([...subjects].reverse(), expected)).toBe(PENDING_EVENT);
-    expect(plannedPurchaseEventId(["card-purchase:event_other"], {})).toBeNull();
+    expect(plannedPurchaseEventIds([...subjects].reverse(), expected)).toEqual([PENDING_EVENT]);
+    expect(plannedPurchaseEventIds(["card-purchase:event_other"], {})).toEqual([]);
+    // Both live sides of an open candidate are read, whatever order the plan stored them in.
+    const open = authorizedCandidate();
+    const pins = linkPlanPins(open);
+    expect(new Set(plannedPurchaseEventIds(Object.keys(pins).sort(), pins))).toEqual(
+      new Set([PENDING_EVENT, POSTED_EVENT]),
+    );
     expect(plannedProposalId(["proposal:a", "proposal:b"])).toBeNull();
     expect(plannedProposalId(["relation:x"])).toBeNull();
   });

@@ -13,7 +13,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
-import { purchasePage } from "../../../packages/application/test/card-purchase-view-fixture.ts";
+import {
+  capturedPurchase,
+  purchasePage,
+} from "../../../packages/application/test/card-purchase-view-fixture.ts";
 import type {
   CardPurchaseCandidate,
   CardPurchaseView,
@@ -77,6 +80,8 @@ describe.if(runnable)("change confirmation screen", () => {
     pins?: Record<string, number>;
     proposedStatus?: string | null;
     purchase: CardPurchaseView;
+    /** The other pinned purchases the server serves, as they list their candidates now. */
+    others?: CardPurchaseView[];
   } | null = null;
   let purchaseAdvertised = true;
   const purchaseReads: string[] = [];
@@ -105,15 +110,24 @@ describe.if(runnable)("change confirmation screen", () => {
         if (url.pathname === "/api/v2/card-purchases") {
           const eventId = url.searchParams.get("eventId") ?? "";
           purchaseReads.push(eventId);
-          return link !== null && link.purchase.eventId === eventId
-            ? Response.json({ apiVersion: 2, ...purchasePage([link.purchase]) })
+          const served =
+            link === null
+              ? undefined
+              : [link.purchase, ...(link.others ?? [])].find((view) => view.eventId === eventId);
+          return served
+            ? Response.json({ apiVersion: 2, ...purchasePage([served]) })
             : Response.json({ error: "not_found" }, { status: 404 });
         }
         if (url.pathname.startsWith("/api/command/v1/")) {
           posted.push(url.pathname);
           const operation = url.pathname.slice("/api/command/v1/".length);
           if (operation === "simulate" && link !== null) {
-            const pins = link.pins ?? serverPlanPins(link.planned);
+            // Stored plans keep their expected revisions sorted by subject.
+            const pins = Object.fromEntries(
+              Object.entries(link.pins ?? serverPlanPins(link.planned)).sort(([a], [b]) =>
+                a < b ? -1 : 1,
+              ),
+            );
             return Response.json({
               report: {
                 planId: PLAN_ID,
@@ -279,6 +293,9 @@ describe.if(runnable)("change confirmation screen", () => {
       kind: "relation.accept",
       planned: authorizedCandidate(),
       purchase: authorizedPendingPurchase(),
+      // The posted event's pin sorts first, but its ten newest candidates are
+      // other pairs: the candidate is found on the pending event instead.
+      others: [{ ...capturedPurchase(), candidates: [] }],
     };
     const page = await open();
     const review = linkReview(page);
@@ -292,8 +309,12 @@ describe.if(runnable)("change confirmation screen", () => {
       expect(text).toContain(subject);
     expect(await review.getByText("一致", { exact: true }).count()).toBe(4);
     expect(await review.getByText("不一致", { exact: true }).count()).toBe(0);
-    // The candidate is read back from the pending-origin purchase the plan pinned.
-    expect(new Set(purchaseReads)).toEqual(new Set([PENDING_EVENT]));
+    // The candidate is read back from the pinned purchases, here the pending-origin one.
+    expect(purchaseReads).toContain(PENDING_EVENT);
+    for (const eventId of purchaseReads) expect([PENDING_EVENT, POSTED_EVENT]).toContain(eventId);
+    expect(
+      await page.getByRole("link", { name: "カード利用の説明に戻る" }).getAttribute("href"),
+    ).toBe(`/purchases/${PENDING_EVENT}`);
     expect(await review.getByRole("list", { name: "未確定の明細と確定の明細" }).count()).toBe(1);
     await approveButton(page).click();
     await page.getByRole("button", { name: "承認済み", exact: true }).waitFor();

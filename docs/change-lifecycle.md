@@ -388,15 +388,15 @@ reviewed item back from the server. The panel compares the plan's pins with that
 item, and approval waits until every pin matches. The panel is chosen by the
 plan's kind or invalidation:
 
-| Plan                                     | Panel                                                          |
-| ---------------------------------------- | -------------------------------------------------------------- |
-| `card-settlement.*`                      | the settlement candidate                                       |
-| invalidation `review:card-ownership`     | the account mapping and ownership claims                       |
-| invalidation `review:card-purchase-link` | the pending-to-posted candidate, read from its pinned purchase |
+| Plan                                     | Panel                                                            |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| `card-settlement.*`                      | the settlement candidate                                         |
+| invalidation `review:card-ownership`     | the account mapping and ownership claims                         |
+| invalidation `review:card-purchase-link` | the pending-to-posted candidate, read from the purchases it pins |
 
-The pinned purchase is the one a `card-purchase:<event id>` pin at a live
-revision names; the action is the one the simulation's `proposal:<id>` target
-states (see
+The candidate is taken from whichever purchase lists it among those that
+`card-purchase:<event id>` pins at a live revision name; the action is the one
+the simulation's `proposal:<id>` target states (see
 [card-settlements.md](card-settlements.md#reviewing-a-pending-to-posted-link)).
 A missing item, a changed pin, or an action that is unstated or no longer
 offered disables Approve and Commit.

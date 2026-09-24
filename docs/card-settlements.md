@@ -144,8 +144,10 @@ A pending row and the posted row that replaced it stay two recognised events
 until an operator decides otherwise. Amount and date closeness never merge
 anything by itself. When a stage-B reconciliation proposal names one of a
 purchase's rows, the explanation lists the proposal after the 利用 → 請求 → 引落
-chain, at most ten per purchase and newest first. The list page shows each open
-candidate on the page once, between the coverage note and 利用の一覧.
+chain. At most ten are listed for each row of the purchase, newest first; among
+proposals written together, the pair with most in common comes first. The list
+page shows each open candidate on the page once, between the coverage note and
+利用の一覧.
 
 Each candidate shows:
 
@@ -176,10 +178,14 @@ shown:
 - `card-purchase:<event id>` for each side a live event holds, whatever the
   action (a merged link is one event, so one pin).
 
-A withdrawal of a merged link also pins the posted event the merge absorbed, at 0. The page leaves that pin to the server and never reads the absorbed event.
+A withdrawal of a merged link also pins the posted event the merge absorbed at
+revision 0. The page leaves that pin to the server and never reads the absorbed
+event.
 
-The confirmation screen reads the candidate back from a pinned purchase with a
-live revision and shows each pin beside the candidate's value. The action it
+The confirmation screen reads back every purchase the plan pins at a live
+revision and takes the candidate from the one that lists it: each side lists at
+most ten candidates per row, so a busy month may list it on one side only. It
+shows each pin beside the candidate's value. The action it
 names is the one the server's simulation states, never inferred from the
 candidate. It names the `review:card-purchase-link` invalidation and describes
 the effect in words:
