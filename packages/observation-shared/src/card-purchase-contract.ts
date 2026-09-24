@@ -24,9 +24,49 @@ const CARD_PURCHASE_HISTORY_LIMIT = 20;
 const EVENT_ID = /^(?:purchase|refund)_[0-9a-f]{64}$/u;
 const PERIOD = /^[0-9]{4}-(?:0[1-9]|1[0-2])$/u;
 const UNIT_KEYS = ["unitRef", "captured", "authorized", "capturedRefunds", "authorizedRefunds"];
+const SUMMARY_KEYS = [
+  "units",
+  "unresolved",
+  "events",
+  "statementTotals",
+  "settlementAddsPurchaseExpense",
+];
+const STATEMENT_TOTAL_KEYS = ["sourceId", "accountId", "period", "ref", "total"];
+const COVERAGE_KEYS = [
+  "scope",
+  "completeTransactionHistory",
+  "unsupportedShapes",
+  "unrecognizedCurrentRows",
+  "limit",
+];
+const ITEM_KEYS = [
+  "eventId",
+  "revision",
+  "kind",
+  "state",
+  "unknownReason",
+  "sourceId",
+  "accountId",
+  "usageDate",
+  "statementPeriod",
+  "amount",
+  "lastKnownAmount",
+  "sourceRows",
+  "statement",
+  "settlement",
+  "history",
+  "historyTruncated",
+  "explanationRefs",
+];
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+/**
+ * Exactly these fields: a figure the contract does not name (a combined
+ * total, a statement-versus-purchases difference) is refused, not ignored.
+ */
+const exactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 const text = (value: unknown): value is string => typeof value === "string";
 const nullableText = (value: unknown) => value === null || text(value);
 const count = (value: unknown): value is number =>
@@ -54,9 +94,14 @@ function validSourceRow(value: unknown): boolean {
 
 function validStatement(value: unknown): boolean {
   if (!record(value)) return false;
-  if (value.status === "unlinked") return member(CARD_PURCHASE_STATEMENT_REASONS)(value.reasonCode);
+  if (value.status === "unlinked")
+    return (
+      exactKeys(value, ["status", "reasonCode"]) &&
+      member(CARD_PURCHASE_STATEMENT_REASONS)(value.reasonCode)
+    );
   return (
     value.status === "linked" &&
+    exactKeys(value, ["status", "ref", "period", "paymentDate", "providerTotal"]) &&
     validSourceFactRef(value.ref) &&
     period(value.period) &&
     validTemporalValue(value.paymentDate) &&
@@ -68,15 +113,34 @@ function validSettlement(value: unknown): boolean {
   if (value === null) return true;
   if (
     !record(value) ||
+    !exactKeys(value, [
+      "proposalId",
+      "reviewStatus",
+      "decisionRevisionId",
+      "settlementEventId",
+      "allocationId",
+      "bankDebit",
+    ]) ||
     !text(value.proposalId) ||
     !member(["proposed", "accepted", "rejected", "withdrawn"])(value.reviewStatus) ||
     ![value.decisionRevisionId, value.settlementEventId, value.allocationId].every(nullableText)
+  )
+    return false;
+  // Only an accepted review carries its settlement event, allocation and bank
+  // debit; every decided review names its decision, a proposed one none.
+  const accepted = value.reviewStatus === "accepted";
+  if (
+    (value.reviewStatus === "proposed") !== (value.decisionRevisionId === null) ||
+    accepted !== (value.settlementEventId !== null) ||
+    accepted !== (value.allocationId !== null) ||
+    accepted !== (value.bankDebit !== null)
   )
     return false;
   const debit = value.bankDebit;
   return (
     debit === null ||
     (record(debit) &&
+      exactKeys(debit, ["ref", "sourceId", "amount", "occurred"]) &&
       validSourceFactRef(debit.ref) &&
       text(debit.sourceId) &&
       validQuantity(debit.amount) &&
@@ -98,7 +162,7 @@ function validHistoryEntry(value: unknown): boolean {
 }
 
 function validItem(value: unknown): boolean {
-  if (!record(value)) return false;
+  if (!record(value) || !exactKeys(value, ITEM_KEYS)) return false;
   const unknown = value.state === "unknown";
   return (
     text(value.eventId) &&
@@ -137,7 +201,9 @@ export function validCardPurchasePage(value: unknown): value is CardPurchasePage
     !list(value.items, CARD_PURCHASE_PAGE_LIMIT) ||
     !(value.nextOffset === null || count(value.nextOffset)) ||
     !record(value.summary) ||
-    !record(value.coverage)
+    !exactKeys(value.summary, SUMMARY_KEYS) ||
+    !record(value.coverage) ||
+    !exactKeys(value.coverage, COVERAGE_KEYS)
   )
     return false;
   const { summary, coverage } = value;
@@ -148,8 +214,7 @@ export function validCardPurchasePage(value: unknown): value is CardPurchasePage
     summary.units.every(
       (unit) =>
         record(unit) &&
-        Object.keys(unit).length === UNIT_KEYS.length &&
-        UNIT_KEYS.every((key) => Object.hasOwn(unit, key)) &&
+        exactKeys(unit, UNIT_KEYS) &&
         text(unit.unitRef) &&
         [unit.captured, unit.authorized, unit.capturedRefunds, unit.authorizedRefunds].every(
           validQuantity,
@@ -161,6 +226,7 @@ export function validCardPurchasePage(value: unknown): value is CardPurchasePage
     summary.statementTotals.every(
       (entry) =>
         record(entry) &&
+        exactKeys(entry, STATEMENT_TOTAL_KEYS) &&
         member(CARD_PURCHASE_SOURCES)(entry.sourceId) &&
         text(entry.accountId) &&
         period(entry.period) &&

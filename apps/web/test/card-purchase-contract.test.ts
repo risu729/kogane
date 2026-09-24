@@ -59,6 +59,66 @@ describe("card purchase HTTP contract", () => {
     expect(validCardPurchasePage(unknownShape)).toBe(false);
   });
 
+  test("refuses any figure the contract does not name, at every level", () => {
+    const page = purchasePage();
+    const unit = page.summary.units[0]!;
+    const statement = page.summary.statementTotals[0]!;
+    for (const tamper of [
+      // A combined total beside the state-separated figures.
+      (value: ReturnType<typeof purchasePage>) =>
+        Object.assign(value.summary, { total: unit.captured }),
+      // A statement-versus-purchases difference beside the provider total.
+      (value: ReturnType<typeof purchasePage>) =>
+        Object.assign(value.summary.statementTotals[0]!, { difference: statement.total }),
+      (value: ReturnType<typeof purchasePage>) =>
+        Object.assign(value.items[2]!.statement, { remaining: statement.total }),
+      (value: ReturnType<typeof purchasePage>) =>
+        Object.assign(value.items[2]!, { unexplained: statement.total }),
+      (value: ReturnType<typeof purchasePage>) =>
+        Object.assign(value.coverage, { completeUntil: "2026-09" }),
+      (value: ReturnType<typeof purchasePage>) =>
+        Object.assign(value.items[2]!.settlement!, { purchaseExpense: statement.total }),
+    ]) {
+      const changed = clone(page);
+      tamper(changed);
+      expect(validCardPurchasePage(changed)).toBe(false);
+    }
+    expect(validCardPurchasePage(page)).toBe(true);
+  });
+
+  test("only an accepted review carries its settlement event, allocation and bank debit", () => {
+    const accepted = capturedPurchase().settlement!;
+    const withSettlement = (settlement: Record<string, unknown>) =>
+      validCardPurchasePage(
+        purchasePage([
+          { ...capturedPurchase(), settlement } as unknown as ReturnType<typeof capturedPurchase>,
+        ]),
+      );
+    expect(withSettlement({ ...accepted })).toBe(true);
+    expect(withSettlement({ ...accepted, reviewStatus: "proposed" })).toBe(false);
+    expect(withSettlement({ ...accepted, reviewStatus: "withdrawn" })).toBe(false);
+    expect(withSettlement({ ...accepted, bankDebit: null })).toBe(false);
+    expect(withSettlement({ ...accepted, allocationId: null })).toBe(false);
+    expect(
+      withSettlement({
+        ...accepted,
+        reviewStatus: "withdrawn",
+        settlementEventId: null,
+        allocationId: null,
+        bankDebit: null,
+      }),
+    ).toBe(true);
+    expect(
+      withSettlement({
+        ...accepted,
+        reviewStatus: "proposed",
+        settlementEventId: null,
+        allocationId: null,
+        bankDebit: null,
+      }),
+    ).toBe(false);
+  });
+
   test("an unresolved event carries no live amount, and a settlement needs a linked statement", () => {
     const withAmount = purchasePage([{ ...retiredPurchase(), amount: capturedPurchase().amount }]);
     expect(validCardPurchasePage(withAmount)).toBe(false);
