@@ -113,4 +113,7 @@ test("activity page distinguishes positive withdrawals, card payments, and quant
     await browser.close();
     server.stop(true);
   }
-});
+  // Launching Chromium and loading two viewports inside the test body takes
+  // about 1.5 s alone and exceeded Bun's 5 s default under CI's parallel
+  // workspace load; the sibling single-test browser files allow 30 s.
+}, 30_000);
