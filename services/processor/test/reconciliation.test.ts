@@ -5,8 +5,12 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import { stageAProposals } from "../../../packages/domain/src/reconcile.ts";
+import { vpassStatementPage } from "../../../packages/parsers/src/parsers/vpass.ts";
+import type { ArtifactMeta, TransactionObservation } from "../../../packages/parsers/src/types.ts";
 import { decideProposal, type ProposalCommand } from "../src/reconciliation-commands.ts";
 import {
+  factOf,
   reconciliationEnabled,
   reconciliationSweep,
   RECONCILIATION_SLICES,
@@ -136,6 +140,73 @@ test("slices cover Vpass and guarded MyJCB pending/posted pairs", () => {
   expect(reconciliationEnabled(undefined)).toBe(false);
   expect(reconciliationEnabled("0")).toBe(false);
   expect(reconciliationEnabled("1")).toBe(true);
+});
+
+test("both Vpass id forms stay collector fingerprints, so stage A only proposes them", () => {
+  // vpass-statement-page@1.2.0 names every page after the first in the
+  // external id and records `...+page+occurrence` as its identityOrigin. Both
+  // origins must still read as collector fingerprints, never provider ids.
+  const customized = readFileSync(
+    new URL(
+      "../../../tests/fixtures/observation-pipeline/vpass-parser-boundaries/customized.json",
+      import.meta.url,
+    ),
+  );
+  const parsed = (page: string) =>
+    vpassStatementPage
+      .parse(customized, {
+        id: 1,
+        sourceId: "vpass",
+        runStatus: "success",
+        runFailureCount: 0,
+        dataset: "statement-page",
+        url: null,
+        mime: "application/json",
+        artifactKey: `cards/card-001/months/202608/${page}.json`,
+        fetchUnitKey: "card-001",
+        fetchedAt: "2026-08-30T00:00:00.000Z",
+        sha256: "0".repeat(64),
+      } satisfies ArtifactMeta)
+      .observations.filter((row): row is TransactionObservation => row.kind === "transaction")[0]!;
+  const fact = (row: TransactionObservation, id: number) => {
+    const kogane = row.extra["_kogane"] as Record<string, string>;
+    return factOf(
+      {
+        id,
+        parse_run_id: id,
+        source_account: row.sourceAccount,
+        external_id: row.externalId ?? null,
+        status: row.status ?? null,
+        as_of: row.asOf ?? null,
+        counterparty: row.counterparty ?? null,
+        currency: row.currency ?? null,
+        source_id: "vpass",
+        producer_id: "synthetic-producer",
+        external_id_namespace: null,
+        value_status: "exact",
+        coefficient: String(row.amountMinor),
+        scale: 0,
+        value_basis: "minor_units",
+        statement_period: kogane["statementMonth"]!,
+        provider_link_id: null,
+        identity_origin: kogane["identityOrigin"]!,
+        usage_amount_text: null,
+        payment_amount_text: null,
+      },
+      VPASS,
+    );
+  };
+  const first = fact(parsed("top-000"), 1);
+  const later = fact(parsed("answer-001"), 2);
+  expect(first.identifierOrigin).toBe("collector-fingerprint");
+  expect(later.identifierOrigin).toBe("collector-fingerprint");
+  // The same row on two pages of one capture: two ids, nothing to propose.
+  expect(stageAProposals([first, later])).toEqual([]);
+  // The same later-page row in two captures: proposed for review, never accepted.
+  const [proposal, ...others] = stageAProposals([later, fact(parsed("answer-001"), 3)]);
+  expect(others).toEqual([]);
+  expect(proposal).toMatchObject({ kind: "provider_same", stage: "A", autoAcceptable: false });
+  expect(proposal!.rationaleCodes).toContain("collector_fingerprint_identifier");
 });
 
 test("a pending and a posted row of one card become one candidate, accepted by nobody", async () => {

@@ -58,6 +58,14 @@ Concrete limits in the current code:
   prices or FX. [Reward components](rewards.md) still require activity
   classification and verified offer inputs before they can provide useful
   forecasts and exchanges for actual holdings.
+- The [purchase explanation](card-settlements.md#purchase-explanation-chain)
+  shows recognised Vpass/MyJCB purchases through their statement and bank
+  debit to an operator, with captured, authorized, refund and unresolved
+  figures kept apart. It is not a complete card history: excluded shapes and
+  rows the recognition writer has not reached are only counted, a pending row
+  and its posted row are separate events until a reviewed link merges them,
+  agents cannot read it, and no statement-versus-purchases difference is
+  computed.
 
 ## Delivery order and the next milestone
 

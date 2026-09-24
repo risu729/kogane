@@ -330,6 +330,42 @@ export function Panel({
   );
 }
 
+// ── evidence chains ──────────────────────────────────────────────────
+
+/**
+ * One numbered step of an evidence chain, inside an `<ol className="chain">`:
+ * the rail gives the order, the stage eyebrow names the kind of record the
+ * step holds, and the card holds its facts and links.
+ */
+export function ChainStep({
+  number,
+  stage,
+  title,
+  children,
+}: {
+  number: number;
+  stage: string;
+  title: string;
+  children: ReactNode;
+}): ReactNode {
+  return (
+    <li className="chain-step">
+      <span className="chain-marker" aria-hidden="true">
+        {number}
+      </span>
+      <section className="chain-card">
+        <div className="chain-card-head">
+          <div className="chain-heading">
+            <span className="chain-stage">{stage}</span>
+            <h3 className="chain-title">{title}</h3>
+          </div>
+        </div>
+        <div className="chain-body">{children}</div>
+      </section>
+    </li>
+  );
+}
+
 // ── loading / error / empty ──────────────────────────────────────────
 
 export function Loading({ label }: { label: string }): ReactNode {

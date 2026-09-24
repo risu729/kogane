@@ -122,9 +122,13 @@ snapshot it keeps the newest fetch run per (resolved account, source, slot),
 where the slot is the Vpass statement month or the MyJCB state and period, and
 then the latest observation per key. Ranking runs over the whole current set
 before the `observation_id > afterId` cursor and the `limit` (1 to 1,000)
-apply. Known limit: the Vpass parser numbers identical rows per page, so two
-identical rows on different pages of one capture share a key and only the later
-one is current.
+apply. Two identical Vpass rows on different pages of one capture are two keys
+and two rows: the parser numbers identical rows per page, and since
+`vpass-statement-page@1.2.0` every page after the first names itself in the
+external id ([observations](observations.md#vpass-json-statement-observations)).
+A later page whose published parse is still 1.1.0 keeps its old id, and so can
+still share a key with the first page, until the re-parse that follows the
+release reaches it.
 
 ## Parity proof
 

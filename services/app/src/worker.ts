@@ -15,6 +15,7 @@ import {
   CARD_SETTLEMENT_PATH,
   CARD_OWNERSHIP_PATH,
 } from "./card-settlements-api";
+import { cardPurchasesApi, CARD_PURCHASES_PATH } from "./card-purchases-api";
 import { identityApi } from "./identity-api";
 import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
@@ -29,6 +30,7 @@ function classify(path: string): string {
   if (isCommandPath(path)) return "command";
   if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
     return "card_settlement_review";
+  if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
   if (path === `${PREFIX}/meta`) return "meta";
   if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
@@ -68,6 +70,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (sharedQueryResponse) return sharedQueryResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
+  // Operator-only and read-only; 404 unless the event reader flag is on and
+  // CORE 0047 exists (docs/economic-events.md, HTTP).
+  const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));
+  if (purchaseResponse) return purchaseResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   // Fixed report artifacts (A12). Re-display only; recomputing and sharing a

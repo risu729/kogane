@@ -26,6 +26,9 @@ interface ViewState {
   "identity.tab": "accounts" | "instruments";
   "identity.offset": number;
   "identity.coverageOffset": number;
+  "purchases.period": string;
+  "purchases.draft": string;
+  "purchases.offset": number;
 }
 const Context = createContext<{
   state: ViewState;
@@ -50,6 +53,9 @@ export function ViewStateProvider({ children }: { children: ReactNode }): ReactN
     "identity.tab": "accounts",
     "identity.offset": 0,
     "identity.coverageOffset": 0,
+    "purchases.period": "",
+    "purchases.draft": "",
+    "purchases.offset": 0,
   }));
   return <Context.Provider value={{ state, setState }}>{children}</Context.Provider>;
 }

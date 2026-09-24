@@ -62,7 +62,7 @@ refresh failures retain previously authorized records with an explicit warning.
 | `shell.css`      | App shell: sidebar, brand, navigation, workspace bar, source notice, main, footer                                                        |
 | `components.css` | Panels and note tones, badges, buttons, filters, key/value grids, states, pagination, disclosures, tiles, provenance chain, code preview |
 | `tables.css`     | Scroll region, cell defaults, sortable headers, the transaction/balance/identity column contracts                                        |
-| `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership                         |
+| `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership, card purchases         |
 
 `balance-display.css` stays beside its component. Responsive rules sit next to
 the rule they modify, not in one media block, so page work touches one file.
@@ -104,6 +104,8 @@ Pages compose these instead of writing their own markup or rules:
 | Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |
 | Lists                         | `.plain-list` (stacked; an `<ol>` keeps its numbers), `.warning-list` (parser warnings, reason and blocker codes)                     |
 | Long tokens                   | `.wrap-any`; `.visually-hidden` for captions whose text is already on screen                                                          |
+| Evidence chains               | `ChainStep` items in an `<ol className="chain">`: record → parse → original on a detail page, usage → statement → debit on a purchase |
+| Figures kept apart            | `.tiles` of `.tile` (value, then label) in a `role="list"`; one tile per state and unit, never a combined tile                        |
 
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.

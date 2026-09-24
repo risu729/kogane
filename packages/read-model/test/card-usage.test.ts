@@ -116,15 +116,17 @@ describe("the Transactions page composes the shared snapshot currentness", () =>
     // snapshot CTEs moved into shared definitions, on this fixture: [id,
     // source, account, as_of, amount_minor, amount_text, currency,
     // description, counterparty, external_id, status, parser] per row.
+    // vpass-statement-page@1.2.0 changed only the parser label and the id of
+    // row 7, the one row on a later page (answer-001), which now names it.
     const pinned = [
       '[19,"myjcb","myjcb:conn-a:root","2026-06-02","-300","-300","JPY","1回払い","架空店舗J","myjcb-credit-ledger:unconfirmed:43973f46589c6f9a489c7ed4218dc116:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
-      '[7,"vpass","vpass:card-001","2026-06-02","-3300","-3300","JPY","1回払い","架空店舗E","vpass:card-001:202606:customized:5b6f6dfe410320aa57f741f484c71cae:0","unconfirmed","vpass-statement-page@1.1.0"]',
-      '[6,"vpass","vpass:card-001","2026-06-01","-1234","-1234","JPY","1回払い","架空店舗D","vpass:card-001:202606:customized:ea8cf62a0b9c5d36f0a122146a2e1a1a:0","unconfirmed","vpass-statement-page@1.1.0"]',
+      '[7,"vpass","vpass:card-001","2026-06-02","-3300","-3300","JPY","1回払い","架空店舗E","vpass:card-001:202606:customized:5b6f6dfe410320aa57f741f484c71cae:answer-001:0","unconfirmed","vpass-statement-page@1.2.0"]',
+      '[6,"vpass","vpass:card-001","2026-06-01","-1234","-1234","JPY","1回払い","架空店舗D","vpass:card-001:202606:customized:ea8cf62a0b9c5d36f0a122146a2e1a1a:0","unconfirmed","vpass-statement-page@1.2.0"]',
       '[22,"smbc-bank","smbc-bank:ordinary-yen","2026-05-20","-500","-500","JPY","synthetic",null,"synthetic-bank-1","posted","synthetic-bank-history@1"]',
       '[18,"myjcb","myjcb:conn-a:root","2026-05-10","-800","-800","JPY","1回払い","架空店舗I","myjcb-credit-ledger:unconfirmed:bb6bbdd395fa78f7170f01ed1d734c23:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
-      '[5,"vpass","vpass:card-001","2026-05-06",null,null,"JPY","1回払い","架空店舗C","vpass:card-001:202605:web:0702f13a372bb72634d3126c1fd1908a:0","posted","vpass-statement-page@1.1.0"]',
-      '[4,"vpass","vpass:card-001","2026-05-05","-5000","-5000","JPY","2回払い","架空店舗B","vpass:card-001:202605:web:1176787a086c350ee4e2c060982565ea:0","posted","vpass-statement-page@1.1.0"]',
-      '[3,"vpass","vpass:card-001","2026-05-03","-2000","-2000","JPY","1回払い","架空店舗A","vpass:card-001:202605:web:5ce5da3937a69cfd96ab9fdf5b2ba6a9:0","posted","vpass-statement-page@1.1.0"]',
+      '[5,"vpass","vpass:card-001","2026-05-06",null,null,"JPY","1回払い","架空店舗C","vpass:card-001:202605:web:0702f13a372bb72634d3126c1fd1908a:0","posted","vpass-statement-page@1.2.0"]',
+      '[4,"vpass","vpass:card-001","2026-05-05","-5000","-5000","JPY","2回払い","架空店舗B","vpass:card-001:202605:web:1176787a086c350ee4e2c060982565ea:0","posted","vpass-statement-page@1.2.0"]',
+      '[3,"vpass","vpass:card-001","2026-05-03","-2000","-2000","JPY","1回払い","架空店舗A","vpass:card-001:202605:web:5ce5da3937a69cfd96ab9fdf5b2ba6a9:0","posted","vpass-statement-page@1.2.0"]',
       '[17,"myjcb","myjcb:conn-a:root","2026-04-21","-4000","-4000","JPY","分割","架空店舗H","myjcb-credit-ledger:confirmed:375466d7e2ff11f3949a2a81daafb267:0","confirmed","myjcb-credit-ledger@1.1.1"]',
       '[16,"myjcb","myjcb:conn-a:root","2026-04-20","-1000","-1000","JPY","1回払い","架空店舗G","myjcb-credit-ledger:confirmed:56609643544b87efe207ed214986fa93:0","confirmed","myjcb-credit-ledger@1.1.1"]',
       '[14,"myjcb","myjcb:conn-a:root","2026-03-15","-2500","-2500","JPY","1回払い","架空店舗L","myjcb-credit-ledger:confirmed:2552391aa286539e07de30e0fe9e530a:0","confirmed","myjcb-credit-ledger@1.1.1"]',
@@ -695,11 +697,12 @@ describe("current card usage", () => {
     });
   });
 
-  test("known limit: identical Vpass rows on two pages of one capture share one key, so one is current", () => {
-    // The Vpass parser counts occurrences per page artifact, so an identical
-    // row on two pages of one customized capture carries one external id. The
-    // Transactions page lists both rows; the recognition key can hold only one,
-    // the later observation. Documented in card-usage.ts and docs/read-model.md.
+  test("identical Vpass rows on two pages of one capture are two keys and two current rows", () => {
+    // The Vpass parser counts repeated rows per page artifact, so before
+    // vpass-statement-page@1.2.0 an identical row on two pages of one
+    // customized capture carried one external id and step 4 kept only the
+    // later observation. A page after the first now names itself in the id:
+    // two keys, both current, exactly the rows the Transactions page lists.
     const store = new CardStore();
     const run = store.run("vpass");
     const binding = store.bind(run, "card-001", TOKEN_A);
@@ -734,15 +737,23 @@ describe("current card usage", () => {
         bindingArtifact: binding,
         token: TOKEN_A,
       });
-    const shown = transactions(store.db);
-    expect(shown.map((row) => row.id).sort((left, right) => left - right)).toEqual(
-      pages.flatMap((page) => page.observations),
-    );
-    expect(shown.map((row) => row.external_id)).toEqual([
-      shown[0]!.external_id,
-      shown[0]!.external_id,
+    const observations = pages.flatMap((page) => page.observations);
+    const shown = transactions(store.db).sort((left, right) => left.id - right.id);
+    expect(shown.map((row) => row.id)).toEqual(observations);
+    // Same row content, so the same fingerprint; only the later page's segment differs.
+    const first = shown[0]!.external_id!;
+    const later = shown[1]!.external_id!;
+    expect(later).toBe(first.replace(/:0$/u, ":answer-001:0"));
+    expect(first).toMatch(/^vpass:card-001:202605:customized:[0-9a-f]{32}:0$/u);
+
+    const rows = usage(store.db);
+    expect(ids(rows)).toEqual(observations);
+    expect(rows.map((row) => row.external_id)).toEqual([first, later]);
+    expect(new Set(rows.map((row) => row.recognition_key)).size).toBe(2);
+    expect(rows.map((row) => [row.account_id, row.display_state, row.coefficient])).toEqual([
+      ["acct-card-a", "pending", "-500"],
+      ["acct-card-a", "pending", "-500"],
     ]);
-    expect(ids(usage(store.db))).toEqual(pages[1]!.observations);
   });
 
   test("a month that flips family under a new card ordinal leaves no pending row current", () => {

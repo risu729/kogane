@@ -201,6 +201,7 @@ describe("shared contract pin", () => {
       commands: false,
       cardSettlementReconciliation: false,
       cardOwnershipReview: false,
+      cardPurchaseRecognition: false,
       eventsV2: false,
       opsApi: false,
     });
