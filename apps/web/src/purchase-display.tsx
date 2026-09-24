@@ -7,11 +7,21 @@ import type {
   CardUsageExclusion,
 } from "../../../packages/domain/src/card-purchase.ts";
 import type {
+  CardPurchaseCandidate,
+  CardPurchaseCandidateSide,
   CardPurchasePage,
   CardPurchaseStatementReason,
   CardPurchaseView,
 } from "../../../packages/domain/src/card-purchase-view.ts";
-import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
+import type { EventState, SourceFactRef } from "../../../packages/domain/src/events.ts";
+import type {
+  PendingPostedAction,
+  PendingPostedBlocker,
+} from "../../../packages/domain/src/pending-posted-review.ts";
+import type {
+  RationaleCode,
+  RejectionConditionCode,
+} from "../../../packages/domain/src/reconcile.ts";
 import { useFeatures } from "./api.ts";
 import { DateValue, SETTLEMENT_STATUS, SettlementQuantity } from "./reconciliation-display.tsx";
 import { Link } from "./router.tsx";
@@ -322,4 +332,256 @@ export function PurchaseChain({ view }: { view: CardPurchaseView }): ReactNode {
       </ChainStep>
     </ol>
   );
+}
+
+// ── pending-to-posted candidates ─────────────────────────────────────
+//
+// A candidate names one pending (未確定) row and one posted (確定) row that
+// may be the same purchase. Nothing here decides that: the server says which
+// actions a review may take (`actions`) and why not (`blockers`), and the
+// payload a review plans is the candidate's own `relation`.
+
+/** The three decisions, as the buttons and the confirmation screen name them. */
+export const CANDIDATE_ACTION_LABELS: Record<PendingPostedAction, string> = {
+  accept: "同一の利用として統合",
+  reject: "別の利用として扱う",
+  withdraw: "統合を取り消す",
+};
+
+const RATIONALE_LABELS: Record<RationaleCode, string> = {
+  provider_link_id_equal: "カード会社が同じ利用として対応番号を示している",
+  provider_identifier_equal: "取得元の識別子が一致",
+  collector_fingerprint_identifier: "取得処理が作った識別子で対応",
+  same_identifier_namespace: "同じ取得元・同じ識別子の体系の明細",
+  same_source_account: "同じカードの明細",
+  same_statement_period: "同じ請求月",
+  amount_equal: "金額が一致",
+  amount_opposite_sign: "金額の符号が逆",
+  date_within_window: "利用日が近い",
+  status_pending_to_posted: "未確定の明細と確定の明細の組",
+  counterparty_equal: "利用先の表示が一致",
+  owner_established_self: "保有者を確認済み",
+  multiple_candidates: "同じ未確定の明細に、ほかの候補もある",
+  no_provider_link_id: "カード会社の対応番号はない（金額・日付などからの候補）",
+};
+
+const REJECTION_LABELS: Record<RejectionConditionCode, string> = {
+  identifier_namespace_differs: "識別子の体系が異なる",
+  credential_epoch_differs: "取得したログインの期間が異なる",
+  counterparty_differs: "利用先が異なる",
+  amount_differs: "金額が異なる",
+  unit_differs: "通貨が異なる",
+  owner_not_established: "保有者を確認できていない",
+  date_outside_window: "利用日が離れている",
+  provider_link_absent: "カード会社が対応を示していない",
+  candidate_not_unique: "ほかにも候補がある",
+};
+
+const BLOCKER_LABELS: Record<PendingPostedBlocker, string> = {
+  row_not_recognized: "どちらかの明細が、カード利用としてまだ認識されていません。",
+  already_linked: "どちらかの利用は、すでに別の明細と統合されています。",
+  kind_differs: "購入と返金は同じ利用として統合できません。",
+  account_differs: "2件の明細のカード口座または取得元が異なります。",
+  posted_not_captured: "確定の明細の利用が、確定の状態ではありません。",
+  proposal_closed: "この候補はすでに別の利用と判断されたか、統合が取り消されています。",
+  proposal_shape_unsupported:
+    "この候補は未確定と確定の明細1件ずつの組ではないため、ここでは判断できません。",
+};
+
+/** A candidate still waiting for a decision (the server offers `reject` for exactly these). */
+export function candidateOpen(candidate: CardPurchaseCandidate): boolean {
+  return candidate.proposalStatus === "proposed" && candidate.relationStatus !== "accepted";
+}
+
+/** Both rows are held by one live event: the link was merged. */
+export function candidateMerged(candidate: CardPurchaseCandidate): boolean {
+  return (
+    candidate.pending.eventId !== null && candidate.pending.eventId === candidate.posted.eventId
+  );
+}
+
+function candidateStatus(candidate: CardPurchaseCandidate): {
+  tone: "ok" | "neutral" | "warn";
+  label: string;
+} {
+  if (candidateOpen(candidate)) return { tone: "neutral", label: "確認待ち" };
+  if (candidate.proposalStatus === "accepted" && candidate.relationStatus === "accepted")
+    return candidateMerged(candidate)
+      ? { tone: "ok", label: "統合済み" }
+      : { tone: "ok", label: "同一の利用と判断済み" };
+  if (candidate.proposalStatus === "rejected")
+    return { tone: "neutral", label: "別の利用と判断済み" };
+  if (candidate.proposalStatus === "withdrawn")
+    return { tone: "neutral", label: "統合を取り消し済み" };
+  return { tone: "warn", label: "判断の記録を確認中" };
+}
+
+export function CandidateStatusBadge({
+  candidate,
+}: {
+  candidate: CardPurchaseCandidate;
+}): ReactNode {
+  const status = candidateStatus(candidate);
+  return <Badge tone={status.tone}>{status.label}</Badge>;
+}
+
+/** Whether the provider itself linked the two rows, or the pair is only a heuristic candidate. */
+export function CandidateOrigin({ candidate }: { candidate: CardPurchaseCandidate }): ReactNode {
+  return candidate.providerLinked ? (
+    <Badge tone="ok">カード会社が対応を明示</Badge>
+  ) : (
+    <Badge tone="neutral">金額・日付などからの候補</Badge>
+  );
+}
+
+const SIDE_STATES: Partial<Record<EventState, string>> = {
+  captured: "確定",
+  authorized: "未確定",
+  unknown: "状態不明（合計に含めていません）",
+};
+
+/** The state word alone, for a transition such as 未確定 → 確定. */
+function sideStateWord(side: CardPurchaseCandidateSide): string {
+  if (side.state === null) return "未認識";
+  return side.state === "unknown" ? "状態不明" : (SIDE_STATES[side.state] ?? side.state);
+}
+
+function sideStateLabel(side: CardPurchaseCandidateSide): string {
+  if (side.state === null) return "カード利用として認識されていません";
+  return SIDE_STATES[side.state] ?? side.state;
+}
+
+/** A signed amount as the provider displayed it, or why none is shown. */
+export function DisplayedAmount({ side }: { side: CardPurchaseCandidateSide }): ReactNode {
+  return side.displayedAmount === null ? (
+    <Nullable value={null} placeholder="金額を読み取れません" />
+  ) : (
+    <SettlementQuantity value={side.displayedAmount} />
+  );
+}
+
+/** One row as the provider displayed it: date, its own signed amount, state, record and original. */
+function CandidateSide({
+  number,
+  stage,
+  side,
+  currentEventId,
+}: {
+  number: number;
+  stage: string;
+  side: CardPurchaseCandidateSide;
+  currentEventId: string | null;
+}): ReactNode {
+  return (
+    <ChainStep number={number} stage={stage} title={side.usageDate ?? "利用日未記録"}>
+      <Kv>
+        <KvRow label="取得元の表示金額">
+          <DisplayedAmount side={side} />
+        </KvRow>
+        <KvRow label="利用の記録">
+          {sideStateLabel(side)}
+          {side.eventId === null ? null : (
+            <>
+              {" "}
+              · 版 {side.revision}
+              <br />
+              {side.eventId === currentEventId ? (
+                <span className="dim">この画面の利用</span>
+              ) : (
+                <Link to={`/purchases/${side.eventId}`}>この利用の説明</Link>
+              )}
+            </>
+          )}
+        </KvRow>
+        <KvRow label="原本">
+          <EvidenceLink fact={side.ref} label="明細の記録と原本" />
+        </KvRow>
+      </Kv>
+    </ChainStep>
+  );
+}
+
+/** The pending row, then the posted row: the order the provider showed them in. */
+export function CandidateSides({
+  candidate,
+  currentEventId = null,
+}: {
+  candidate: CardPurchaseCandidate;
+  currentEventId?: string | null;
+}): ReactNode {
+  return (
+    <ol className="chain" aria-label="未確定の明細と確定の明細">
+      <CandidateSide
+        number={1}
+        stage="未確定の明細"
+        side={candidate.pending}
+        currentEventId={currentEventId}
+      />
+      <CandidateSide
+        number={2}
+        stage="確定の明細"
+        side={candidate.posted}
+        currentEventId={currentEventId}
+      />
+    </ol>
+  );
+}
+
+/** Why the pair was proposed, what would make it two purchases, and what blocks a decision. */
+export function CandidateCodes({ candidate }: { candidate: CardPurchaseCandidate }): ReactNode {
+  return (
+    <>
+      <h3>候補の根拠</h3>
+      <ul className="warning-list">
+        {candidate.rationaleCodes.map((code) => (
+          <li key={code}>{RATIONALE_LABELS[code] ?? code}</li>
+        ))}
+      </ul>
+      {candidate.rejectionConditions.length === 0 ? null : (
+        <>
+          <h3>統合する前に確かめること</h3>
+          <p>次に当てはまる場合は、別の利用の可能性があります。</p>
+          <ul className="warning-list">
+            {candidate.rejectionConditions.map((code) => (
+              <li key={code}>{REJECTION_LABELS[code] ?? code}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      {candidate.blockers.length === 0 ? null : (
+        <Notice tone="warn" inline role="note">
+          <p>
+            <strong>
+              {candidateOpen(candidate)
+                ? "現時点では同一の利用として統合できません。"
+                : "この候補の判断は変更できません。"}
+            </strong>
+          </p>
+          <ul className="warning-list">
+            {candidate.blockers.map((code) => (
+              <li key={code}>{BLOCKER_LABELS[code] ?? code}</li>
+            ))}
+          </ul>
+        </Notice>
+      )}
+    </>
+  );
+}
+
+/**
+ * What a decision does to the purchase records, in words. The figures stay
+ * the server's: no decision adds or removes an amount, and the captured
+ * figure stays as it is.
+ */
+export function candidateEffect(
+  candidate: CardPurchaseCandidate,
+  action: PendingPostedAction,
+): string {
+  if (action === "accept")
+    return `2件の利用の記録を1件にまとめます。未確定の明細の記録が残り、状態が ${sideStateWord(candidate.pending)} → 確定 になります。確定の明細の記録はこの1件に統合されます。金額の追加や削除はなく、確定の合計は変わりません。`;
+  if (action === "withdraw")
+    return candidateMerged(candidate)
+      ? "統合した1件の利用を、元の2件の記録に戻します。確定の明細は確定の利用として戻り、未確定の明細の記録は根拠の食い違いで保留として合計に含めません。以前の版と履歴は残ります。金額の追加や削除はなく、確定の合計は変わりません。"
+      : "同一の利用とした判断を取り消します。統合された記録はないため、どの利用の記録も変わりません。";
+  return "この候補を別の利用として閉じます。2件の記録はそのまま残り、金額や合計は変わりません。";
 }

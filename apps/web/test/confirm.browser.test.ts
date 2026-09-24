@@ -4,12 +4,27 @@
 //  * without the advertised `commands` capability the screen is read-only,
 //  * a stale plan cannot be approved or committed from the screen,
 //  * the server-computed diff is what is shown (the client never recomputes),
-//  * `accepted` and `published` are shown as different states.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+//  * `accepted` and `published` are shown as different states,
+//  * a pending-to-posted card usage review compares every pinned revision
+//    with the candidate the server shows now, names its invalidation and its
+//    effect, and cannot be approved while any of them disagrees.
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { purchasePage } from "../../../packages/application/test/card-purchase-view-fixture.ts";
+import type {
+  CardPurchaseCandidate,
+  CardPurchaseView,
+} from "../../../packages/domain/src/card-purchase-view.ts";
+import {
+  authorizedCandidate,
+  authorizedPendingPurchase,
+  linkPlanPins,
+  mergedCandidate,
+  mergedPurchase,
+} from "./card-purchase-link-fixture.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -47,6 +62,20 @@ describe.if(runnable)("change confirmation screen", () => {
   let stale = false;
   let published = false;
   const posted: string[] = [];
+  /** A pending-to-posted review plan: its kind, its pins and the purchase the server shows now. */
+  let link: {
+    kind: "relation.accept" | "relation.reject";
+    planned: CardPurchaseCandidate;
+    pins?: Record<string, number>;
+    purchase: CardPurchaseView;
+  } | null = null;
+  let purchaseAdvertised = true;
+  const purchaseReads: string[] = [];
+  beforeEach(() => {
+    link = null;
+    purchaseAdvertised = true;
+    purchaseReads.length = 0;
+  });
 
   beforeAll(async () => {
     server = Bun.serve({
@@ -58,11 +87,53 @@ describe.if(runnable)("change confirmation screen", () => {
           return Response.json({
             apiVersion: 1,
             source: { kind: "central-store", classification: "financial" },
-            capabilities: { ...CENTRAL_STORE_CAPABILITIES, commands },
+            capabilities: {
+              ...CENTRAL_STORE_CAPABILITIES,
+              commands,
+              cardPurchaseRecognition: purchaseAdvertised,
+            },
           });
+        if (url.pathname === "/api/v2/card-purchases") {
+          const eventId = url.searchParams.get("eventId") ?? "";
+          purchaseReads.push(eventId);
+          return link !== null && link.purchase.eventId === eventId
+            ? Response.json({ apiVersion: 2, ...purchasePage([link.purchase]) })
+            : Response.json({ error: "not_found" }, { status: 404 });
+        }
         if (url.pathname.startsWith("/api/command/v1/")) {
           posted.push(url.pathname);
           const operation = url.pathname.slice("/api/command/v1/".length);
+          if (operation === "simulate" && link !== null) {
+            const pins = link.pins ?? linkPlanPins(link.planned);
+            return Response.json({
+              report: {
+                planId: PLAN_ID,
+                planDigest: PLAN_ID,
+                simulation: {
+                  kind: link.kind,
+                  targets: Object.entries(pins).map(([subjectRef, currentRevision]) => ({
+                    subjectRef,
+                    currentRevision,
+                    currentTargetRef: null,
+                    proposedTargetRef: null,
+                  })),
+                  before: { attributedObservations: 0, relations: link.planned.relationRevision },
+                  after: {
+                    attributedObservations: 0,
+                    relations: link.planned.relationRevision + 1,
+                  },
+                  invalidations: ["review:card-purchase-link"],
+                  affectedScopes: ["vpass"],
+                  affectedParseRuns: 0,
+                  outboxTargets: [],
+                },
+                expectedRevisions: pins,
+                currentRevisions: pins,
+                stale: false,
+                resimulatedPlanId: PLAN_ID,
+              },
+            });
+          }
           if (operation === "simulate")
             return Response.json({
               report: {
@@ -186,4 +257,133 @@ describe.if(runnable)("change confirmation screen", () => {
     ]);
     await page.close();
   });
+
+  const linkReview = (page: Awaited<ReturnType<typeof open>>) =>
+    page.getByRole("region", { name: "未確定と確定の明細の対応", exact: true });
+  const approveButton = (page: Awaited<ReturnType<typeof open>>) =>
+    page.getByRole("button", { name: "承認する", exact: true });
+
+  test("a pending-to-posted merge shows each pin against the candidate, its invalidation and effect, then approves and commits", async () => {
+    commands = true;
+    stale = false;
+    published = false;
+    posted.length = 0;
+    link = {
+      kind: "relation.accept",
+      planned: authorizedCandidate(),
+      purchase: authorizedPendingPurchase(),
+    };
+    const page = await open();
+    const review = linkReview(page);
+    await review.getByText("同一の利用として統合", { exact: true }).waitFor();
+    const text = await review.innerText();
+    // One event, authorized → captured, and no amount added or removed.
+    expect(text).toContain("未確定 → 確定");
+    expect(text).toContain("確定の合計は変わりません");
+    expect(text).toContain("review:card-purchase-link");
+    for (const subject of Object.keys(linkPlanPins(authorizedCandidate())))
+      expect(text).toContain(subject);
+    expect(await review.getByText("一致", { exact: true }).count()).toBe(4);
+    expect(await review.getByText("不一致", { exact: true }).count()).toBe(0);
+    // The candidate is read back from the pending-origin purchase the plan pinned.
+    expect(purchaseReads).toEqual([authorizedPendingPurchase().eventId]);
+    expect(await review.getByRole("list", { name: "未確定の明細と確定の明細" }).count()).toBe(1);
+    await approveButton(page).click();
+    await page.getByRole("button", { name: "承認済み", exact: true }).waitFor();
+    await page.getByRole("button", { name: "確定する", exact: true }).click();
+    await page.getByRole("button", { name: "反映状況を再確認" }).waitFor();
+    expect(posted).toContain("/api/command/v1/commit");
+    await page.close();
+  }, 30_000);
+
+  test("a withdrawal of a merged link names the split and its one merged pin", async () => {
+    commands = true;
+    stale = false;
+    link = { kind: "relation.reject", planned: mergedCandidate(), purchase: mergedPurchase() };
+    const page = await open();
+    const review = linkReview(page);
+    await review.getByText("統合を取り消す", { exact: true }).waitFor();
+    const text = await review.innerText();
+    expect(text).toContain("元の2件の記録に戻します");
+    expect(text).toContain("確定の合計は変わりません");
+    expect(await review.getByText("一致", { exact: true }).count()).toBe(3);
+    expect(await approveButton(page).isDisabled()).toBe(false);
+    await page.close();
+  }, 30_000);
+
+  test("a pin that moved since planning, or an action no longer offered, blocks approval and commit", async () => {
+    commands = true;
+    stale = false;
+    posted.length = 0;
+    // The proposal gained a decision after the plan was made.
+    const moved = authorizedPendingPurchase();
+    moved.candidates = [{ ...authorizedCandidate(), proposalRevision: 1 }];
+    link = { kind: "relation.accept", planned: authorizedCandidate(), purchase: moved };
+    const page = await open();
+    const review = linkReview(page);
+    await review.getByRole("alert").filter({ hasText: "計画作成後に変わっています" }).waitFor();
+    expect(await review.getByText("不一致", { exact: true }).count()).toBe(1);
+    expect(await approveButton(page).isDisabled()).toBe(true);
+    expect(await page.getByRole("button", { name: "確定する", exact: true }).isDisabled()).toBe(
+      true,
+    );
+    await page.close();
+
+    // The same pins, but a blocker took the merge away.
+    const blocked = authorizedPendingPurchase();
+    blocked.candidates = [
+      { ...authorizedCandidate(), actions: ["reject"], blockers: ["posted_not_captured"] },
+    ];
+    link = { kind: "relation.accept", planned: authorizedCandidate(), purchase: blocked };
+    const refused = await open();
+    await linkReview(refused)
+      .getByRole("alert")
+      .filter({ hasText: "この候補では計画した操作を実行できません" })
+      .waitFor();
+    expect(await approveButton(refused).isDisabled()).toBe(true);
+    expect(posted.some((path) => path.endsWith("/approve") || path.endsWith("/commit"))).toBe(
+      false,
+    );
+    await refused.close();
+  }, 30_000);
+
+  test("a review whose candidate cannot be read back cannot be approved", async () => {
+    commands = true;
+    stale = false;
+    // A merge plan without the holder pins names no purchase to read the candidate from.
+    link = {
+      kind: "relation.accept",
+      planned: authorizedCandidate(),
+      pins: Object.fromEntries(
+        Object.entries(linkPlanPins(authorizedCandidate())).filter(
+          ([ref]) => !ref.startsWith("card-purchase:"),
+        ),
+      ),
+      purchase: authorizedPendingPurchase(),
+    };
+    const page = await open();
+    await linkReview(page)
+      .getByRole("alert")
+      .filter({ hasText: "計画した候補と利用の記録を特定できない" })
+      .waitFor();
+    expect(await approveButton(page).isDisabled()).toBe(true);
+    expect(purchaseReads).toHaveLength(0);
+    await page.close();
+
+    // A connection that does not serve card purchases cannot show the candidate either.
+    purchaseAdvertised = false;
+    link = {
+      kind: "relation.accept",
+      planned: authorizedCandidate(),
+      purchase: authorizedPendingPurchase(),
+    };
+    const unserved = await open();
+    await linkReview(unserved)
+      .getByRole("alert")
+      .filter({ hasText: "カード利用の説明を取得できない接続先" })
+      .waitFor();
+    expect(await approveButton(unserved).isDisabled()).toBe(true);
+    expect(purchaseReads).toHaveLength(0);
+    await unserved.close();
+  }, 30_000);
 });

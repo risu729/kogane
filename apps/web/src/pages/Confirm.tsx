@@ -10,6 +10,26 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFeatures } from "../api.ts";
 import { useCardOwnership } from "../card-ownership-api.ts";
 import { CardOwnershipDetails, OWNERSHIP_ROLES, ownerLabel } from "../card-ownership-display.tsx";
+import {
+  PURCHASE_LINK_INVALIDATION,
+  plannedProposalId,
+  plannedPurchaseEventId,
+  purchaseLinkAction,
+  purchaseLinkPins,
+  purchaseLinkPinsMatch,
+  useCardPurchase,
+  type CardPurchaseCandidate,
+  type PendingPostedAction,
+  type PurchaseLinkPin,
+} from "../card-purchases-api.ts";
+import {
+  CANDIDATE_ACTION_LABELS,
+  CandidateCodes,
+  candidateEffect,
+  CandidateOrigin,
+  CandidateSides,
+  CandidateStatusBadge,
+} from "../purchase-display.tsx";
 import { useCardSettlement } from "../reconciliation-api.ts";
 import { CardSettlementDetails } from "../reconciliation-display.tsx";
 import { Link } from "../router.tsx";
@@ -50,6 +70,43 @@ const RECEIPT_STATE: Record<string, { tone: "ok" | "warn" | "bad"; label: string
       note: "この操作は完了していません。記録を確認してください。",
     },
   };
+
+const PIN_LABELS: Record<PurchaseLinkPin["role"], string> = {
+  proposal: "候補の判断の版",
+  relation: "未確定・確定の関係の記録数",
+  pending: "未確定の明細の利用の版",
+  posted: "確定の明細の利用の版",
+};
+
+/** Each subject the plan pinned, against what the candidate on screen says it is at. */
+function PurchaseLinkPins({
+  candidate,
+  action,
+  expected,
+}: {
+  candidate: CardPurchaseCandidate;
+  action: PendingPostedAction;
+  expected: Record<string, number>;
+}): ReactNode {
+  return (
+    <Kv>
+      {purchaseLinkPins(candidate, action).map((pin) => {
+        const planned = Object.hasOwn(expected, pin.subjectRef)
+          ? (expected[pin.subjectRef] ?? null)
+          : null;
+        const matches = planned === null ? !pin.required : planned === pin.shown;
+        return (
+          <KvRow key={pin.subjectRef} label={PIN_LABELS[pin.role]}>
+            計画時 <Nullable value={planned} placeholder="固定なし" /> · 表示中の候補 {pin.shown}{" "}
+            <Badge tone={matches ? "ok" : "bad"}>{matches ? "一致" : "不一致"}</Badge>
+            <br />
+            <code className="wrap-any">{pin.subjectRef}</code>
+          </KvRow>
+        );
+      })}
+    </Kv>
+  );
+}
 
 function targetLabel(value: string | null): ReactNode {
   return value === null ? (
@@ -140,6 +197,45 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
     settlementRevisionMatches &&
     settlementActionAllowed;
 
+  // A pending-to-posted review (relation.accept / relation.reject carrying
+  // the proposal marker): the candidate is read back from the purchase the
+  // plan pinned, and approval waits until every pin is what it shows.
+  const requiresPurchaseLink =
+    report.data?.simulation.invalidations.includes(PURCHASE_LINK_INVALIDATION) === true;
+  const plannedSubjects = report.data
+    ? [
+        ...Object.keys(report.data.expectedRevisions),
+        ...report.data.simulation.targets.map((target) => target.subjectRef),
+      ]
+    : [];
+  const linkProposalId = requiresPurchaseLink ? plannedProposalId(plannedSubjects) : null;
+  const linkEventId = requiresPurchaseLink
+    ? plannedPurchaseEventId(plannedSubjects, report.data?.expectedRevisions ?? {})
+    : null;
+  const purchase = useCardPurchase(linkEventId);
+  const linkCandidate =
+    linkProposalId === null
+      ? undefined
+      : purchase.data?.items[0]?.candidates.find(
+          (candidate) => candidate.proposalId === linkProposalId,
+        );
+  const linkAction =
+    report.data && linkCandidate
+      ? purchaseLinkAction(report.data.simulation.kind, linkCandidate)
+      : null;
+  const linkPinsMatch =
+    report.data !== undefined &&
+    linkCandidate !== undefined &&
+    linkAction !== null &&
+    purchaseLinkPinsMatch(report.data.expectedRevisions, linkCandidate, linkAction);
+  const linkActionAllowed =
+    linkCandidate !== undefined &&
+    linkAction !== null &&
+    linkCandidate.actions.includes(linkAction);
+  const purchaseLinkReady =
+    !requiresPurchaseLink ||
+    (features.cardPurchaseRecognition && linkPinsMatch && linkActionAllowed);
+
   const approveMutation = useMutation({
     mutationFn: async (digest: string) => {
       const value = await postCommand<{ approval: ApprovalView }>(
@@ -193,7 +289,8 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
     features.commands &&
     !stale &&
     settlementReady &&
-    ownershipReady;
+    ownershipReady &&
+    purchaseLinkReady;
 
   return (
     <>
@@ -331,6 +428,76 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
               </Panel>
             ) : null}
 
+            {requiresPurchaseLink ? (
+              <Panel id="purchase-link-review" title="未確定と確定の明細の対応">
+                <div className="panel-body settlement-details">
+                  {!features.cardPurchaseRecognition ? (
+                    <Notice tone="bad" inline role="alert">
+                      カード利用の説明を取得できない接続先のため、承認・確定できません。
+                    </Notice>
+                  ) : linkEventId === null || linkProposalId === null ? (
+                    <Notice tone="bad" inline role="alert">
+                      計画した候補と利用の記録を特定できないため、承認・確定できません。カード利用の画面から計画し直してください。
+                    </Notice>
+                  ) : (
+                    <QueryBoundary
+                      query={purchase}
+                      label="候補と利用の記録"
+                      isEmpty={() => linkCandidate === undefined}
+                      empty="計画した候補が、対象の利用に見つかりません。承認・確定できません。"
+                    >
+                      {() =>
+                        linkCandidate === undefined || linkAction === null ? null : (
+                          <>
+                            <p>
+                              <strong>{CANDIDATE_ACTION_LABELS[linkAction]}</strong>:{" "}
+                              {candidateEffect(linkCandidate, linkAction)}
+                            </p>
+                            <Kv>
+                              <KvRow label="候補の状態">
+                                <CandidateStatusBadge candidate={linkCandidate} />{" "}
+                                <CandidateOrigin candidate={linkCandidate} />
+                              </KvRow>
+                              <KvRow label="再確認が必要になる表示">
+                                <code>{PURCHASE_LINK_INVALIDATION}</code>
+                                （カード利用の対応候補と説明）
+                              </KvRow>
+                            </Kv>
+                            <h3>計画が固定した版</h3>
+                            <PurchaseLinkPins
+                              candidate={linkCandidate}
+                              action={linkAction}
+                              expected={data.expectedRevisions}
+                            />
+                            <CandidateSides candidate={linkCandidate} />
+                            <CandidateCodes candidate={linkCandidate} />
+                          </>
+                        )
+                      }
+                    </QueryBoundary>
+                  )}
+                  {receipt === null && linkCandidate !== undefined && !linkPinsMatch ? (
+                    <Notice tone="bad" inline role="alert">
+                      候補の判断または利用の記録が計画作成後に変わっています。新しい計画で確認し直してください。
+                    </Notice>
+                  ) : null}
+                  {receipt === null && linkCandidate !== undefined && !linkActionAllowed ? (
+                    <Notice tone="bad" inline role="alert">
+                      この候補では計画した操作を実行できません。カード利用の画面で条件と根拠を確認し直してください。
+                    </Notice>
+                  ) : null}
+                  <p className="footnote">
+                    金額や日付が近いだけでは統合しません。2件の明細を1件の利用として扱うのは、承認・確定した判断だけです。
+                  </p>
+                  {linkEventId === null ? null : (
+                    <p className="footnote">
+                      <Link to={`/purchases/${linkEventId}`}>カード利用の説明に戻る</Link>
+                    </p>
+                  )}
+                </div>
+              </Panel>
+            ) : null}
+
             <Panel id="plan-targets" title="対象" count={data.simulation.targets.length}>
               {data.simulation.targets.length === 0 ? (
                 <div className="panel-body">
@@ -378,7 +545,9 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
               note={
                 requiresSettlement
                   ? "変更計画には件数と対象の識別子を記録します。照合の金額は上の原本・決済情報で確認します。"
-                  : "件数と対象の識別子のみです。金額はこの画面では扱いません。"
+                  : requiresPurchaseLink
+                    ? "変更計画には件数と対象の識別子を記録します。明細の金額は上の取得元の表示で確認します。"
+                    : "件数と対象の識別子のみです。金額はこの画面では扱いません。"
               }
             >
               <div className="panel-body">

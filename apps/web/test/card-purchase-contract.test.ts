@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   capturedPurchase,
+  linkCandidate,
   purchasePage,
   retiredPurchase,
 } from "../../../packages/application/test/card-purchase-view-fixture.ts";
@@ -11,7 +12,23 @@ import {
   validApiResponse,
 } from "../../../packages/observation-shared/src/api-validation.ts";
 import { clientFeatures } from "../src/capabilities.ts";
+import {
+  plannedProposalId,
+  plannedPurchaseEventId,
+  purchaseLinkAction,
+  purchaseLinkPinsMatch,
+  purchaseLinkPlanRequest,
+} from "../src/card-purchases-api.ts";
 import { matchRoute } from "../src/router.tsx";
+import {
+  authorizedCandidate,
+  authorizedPendingPurchase,
+  linkPlanPins,
+  mergedCandidate,
+  mergedPurchase,
+  PENDING_EVENT,
+  POSTED_EVENT,
+} from "./card-purchase-link-fixture.ts";
 
 const path = "/api/v2/card-purchases";
 const clone = <T>(value: T): T => structuredClone(value);
@@ -173,5 +190,69 @@ describe("card purchase HTTP contract", () => {
       "/purchases/arbitrary",
     ])
       expect(matchRoute(path).name).toBe("notFound");
+  });
+});
+
+describe("pending-to-posted review from the web client", () => {
+  test("the pages the browser tests serve are pages the client accepts", () => {
+    for (const items of [
+      [{ ...capturedPurchase(), candidates: [linkCandidate()] }],
+      [authorizedPendingPurchase()],
+      [mergedPurchase()],
+    ])
+      expect(validApiResponse(path, purchasePage(items))).toBe(true);
+  });
+
+  test("a plan request carries the candidate's relation unchanged, plus the reason", () => {
+    const candidate = linkCandidate();
+    for (const [action, kind] of [
+      ["accept", "relation.accept"],
+      ["reject", "relation.reject"],
+      ["withdraw", "relation.reject"],
+    ] as const)
+      expect(purchaseLinkPlanRequest(candidate, action, "確認した")).toEqual({
+        kind,
+        payload: { ...candidate.relation, reason: "確認した" },
+        baseContextId: `card-purchase-link:${candidate.proposalId}`,
+      });
+    // A planned reject of an accepted link is its withdrawal.
+    expect(purchaseLinkAction("relation.accept", candidate)).toBe("accept");
+    expect(purchaseLinkAction("relation.reject", candidate)).toBe("reject");
+    expect(purchaseLinkAction("relation.reject", mergedCandidate())).toBe("withdraw");
+    expect(purchaseLinkAction("identity.assign", candidate)).toBeNull();
+  });
+
+  test("a plan matches only when every pin is the candidate's; holders are required to merge or split", () => {
+    const candidate = authorizedCandidate();
+    const pins = linkPlanPins(candidate);
+    expect(purchaseLinkPinsMatch(pins, candidate, "accept")).toBe(true);
+    for (const ref of Object.keys(pins)) {
+      expect(purchaseLinkPinsMatch({ ...pins, [ref]: pins[ref]! + 1 }, candidate, "reject")).toBe(
+        false,
+      );
+      const without = Object.fromEntries(Object.entries(pins).filter(([key]) => key !== ref));
+      expect(purchaseLinkPinsMatch(without, candidate, "accept")).toBe(false);
+      // A reject needs the proposal and relation pins; holder pins are compared when present.
+      expect(purchaseLinkPinsMatch(without, candidate, "reject")).toBe(
+        ref.startsWith("card-purchase:"),
+      );
+    }
+    // A merged link pins its one event once; an absorbed event pinned at 0 is not the candidate's.
+    const merged = mergedCandidate();
+    const mergedPins = { ...linkPlanPins(merged), [`card-purchase:${POSTED_EVENT}`]: 0 };
+    expect(Object.keys(linkPlanPins(merged))).toHaveLength(3);
+    expect(purchaseLinkPinsMatch(mergedPins, merged, "withdraw")).toBe(true);
+  });
+
+  test("the confirmation screen finds the proposal and a live purchase among the planned subjects", () => {
+    const merged = mergedCandidate();
+    const expected = { ...linkPlanPins(merged), [`card-purchase:${POSTED_EVENT}`]: 0 };
+    const subjects = Object.keys(expected);
+    expect(plannedProposalId(subjects)).toBe(merged.proposalId);
+    // The absorbed posted event has no live revision (and no page); the survivor is read.
+    expect(plannedPurchaseEventId([...subjects].reverse(), expected)).toBe(PENDING_EVENT);
+    expect(plannedPurchaseEventId(["card-purchase:event_other"], {})).toBeNull();
+    expect(plannedProposalId(["proposal:a", "proposal:b"])).toBeNull();
+    expect(plannedProposalId(["relation:x"])).toBeNull();
   });
 });
