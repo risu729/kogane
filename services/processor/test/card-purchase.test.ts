@@ -217,6 +217,8 @@ interface CaptureOptions {
   publish?: boolean;
   /** Default `resolveIdentity`, the deployed resolver; null leaves the parse unidentified. */
   identify?: IdentityResolver | null;
+  /** Rewrites each parsed row before it is stored (e.g. an external id with unusual characters). */
+  rewrite?: (row: Observation) => Observation;
 }
 
 /** One Miniflare CORE with typed writers for card captures, publication and identity. */
@@ -315,6 +317,8 @@ class World {
       period: string;
       connection?: string;
       detailMonth?: number;
+      /** The acquisition session's external id namespace; default `MYJCB_NAMESPACE`. */
+      namespace?: string;
     },
   ): Promise<Capture> {
     const connection = input.connection ?? "conn-a";
@@ -342,7 +346,7 @@ class World {
     await this.db.batch([
       this.db
         .prepare("UPDATE acquisition_sessions SET producer_id=?,external_id_namespace=? WHERE id=?")
-        .bind(PRODUCER, MYJCB_NAMESPACE, run),
+        .bind(PRODUCER, input.namespace ?? MYJCB_NAMESPACE, run),
       this.db
         .prepare(
           "INSERT INTO observation_artifact_metadata(fetch_artifact_id,statement_state,period) VALUES(?,?,?)",
@@ -382,7 +386,8 @@ class World {
       .bind(parse, artifact, parser.name, version)
       .run();
     const observations: number[] = [];
-    for (const row of parser.parse(bytes, artifactMeta).observations as Observation[]) {
+    for (const parsed of parser.parse(bytes, artifactMeta).observations as Observation[]) {
+      const row = options.rewrite ? options.rewrite(parsed) : parsed;
       if (row.kind !== "transaction") continue;
       const inserted = await this.db
         .prepare(
@@ -1404,7 +1409,7 @@ test("accepting a card settlement adds no purchase-recognition leg and leaves th
   expect(await w.totals()).toEqual(captured);
 }, 90_000);
 
-test("bounds: the write budget holds the cursor, the last page wraps to 0, and a full retire page defers recognition", async () => {
+test("bounds: the write budget holds the cursor, the last page wraps to 0, and a fully retired full page defers recognition for at most ceil(K / limit) ticks", async () => {
   const w = await world();
   const rows: UsageRow[] = [
     POSTED,
@@ -1434,8 +1439,10 @@ test("bounds: the write budget holds the cursor, the last page wraps to 0, and a
   expect(original.captured).toBe("3534");
 
   // A renumbered card: three stale keys, three new ones. With one retirement
-  // per tick, recognition waits until nothing stale is left, so the captured
-  // total never exceeds what the provider shows.
+  // per tick, every tick retires its whole (full) page, so recognition waits
+  // until nothing stale is left and the captured total never exceeds what the
+  // provider shows. The wait is bounded: three live keys, one per tick, so at
+  // most ceil(3 / 1) = 3 deferred ticks.
   await w.vpass({ family: "web", card: "card-002", fetchedAt: "2026-06-20T00:00:00.000Z", rows });
   const seen: string[] = [];
   for (let tick = 0; tick < 3; tick += 1) {
@@ -1501,3 +1508,197 @@ test("log lines carry counts only: no amount, merchant, account or identifier", 
   // No event id or recognition key either.
   expect(text).not.toMatch(/(?:purchase|refund)_[0-9a-f]{64}/u);
 }, 60_000);
+
+test("keys with slashes, plus signs, full-width, escaped and control characters match SQLite's json_array, so every holder is found again", async () => {
+  const w = await world();
+  // Every character class an external id or a namespace could carry: the
+  // 0047 guard and current usage derive the key with SQLite's json_array, the
+  // writer with JSON.stringify, and the holder lookup decodes it with json_each.
+  const odd = [
+    "a/b+c=",
+    "全角＋／＃ｶﾅ",
+    'q"uote\\back',
+    "lit\\u00e9 é😀",
+    "ctl\u0001\u001f\u007f",
+    "tab\tnl\nlf\r",
+    "ls ps ",
+  ];
+  let next = 0;
+  const rewrite = (row: Observation): Observation =>
+    row.kind === "transaction" && row.externalId
+      ? { ...row, externalId: `${row.externalId}|${odd[next++ % odd.length]}` }
+      : row;
+  const vpassRows = odd.map((_, index): UsageRow => ({
+    date: `26/05/${String(index + 1).padStart(2, "0")}`,
+    merchant: `架空店舗${index}`,
+    amount: `${index + 1},000`,
+    paymentType: "1回払い",
+  }));
+  await w.vpass({
+    family: "web",
+    fetchedAt: "2026-06-10T00:00:00.000Z",
+    rows: vpassRows,
+    rewrite,
+  });
+  await w.myjcb({
+    state: "confirmed",
+    period: "2026年6月お支払い分",
+    fetchedAt: "2026-05-12T00:00:00.000Z",
+    namespace: 'ns/＋"\\\u0001é',
+    rows: [{ date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払い" }],
+    rewrite,
+  });
+  const rows = await w.usage();
+  expect(rows).toHaveLength(odd.length + 1);
+  for (const row of rows)
+    expect(JSON.stringify(recognitionKey(cardUsageFactOf(row)))).toBe(row.recognition_key!);
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: odd.length + 1 });
+  expect(
+    (
+      await w.all<{ recognition_key: string }>(
+        "SELECT recognition_key FROM current_card_purchase_keys",
+      )
+    )
+      .map((row) => row.recognition_key)
+      .sort(),
+  ).toEqual(rows.map((row) => row.recognition_key!).sort());
+  // A key the holder lookup failed to find would be planned as a second
+  // recognition, which the guard refuses: a conflict, not NOTHING.
+  const before = await w.snapshot();
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+  expect(await w.snapshot()).toEqual(before);
+}, 60_000);
+
+test("keys the retire pass cannot retire never hold recognition back", async () => {
+  const w = await world();
+  const pending: UsageRow = {
+    date: "26/05/03",
+    merchant: "架空店舗A",
+    amount: "1,200",
+    paymentType: "1回払い",
+  };
+  const other: UsageRow = {
+    date: "26/05/07",
+    merchant: "架空店舗E",
+    amount: "2,000",
+    paymentType: "1回払い",
+  };
+  await w.vpass({ family: "customized", fetchedAt: "2026-05-10T00:00:00.000Z", rows: [pending] });
+  const [pendingRow] = await w.usage();
+  await w.vpass({ family: "web", fetchedAt: "2026-06-10T00:00:00.000Z", rows: [POSTED, other] });
+  const current = await w.usage();
+  const postedRow = current.find((row) => row.as_of === "2026-05-03")!;
+  // One live event holding a posted and a pending key, the shape a reviewed
+  // pending-to-posted merge leaves, and named so it sorts first on the stale
+  // page. The retire pass never retires it (a merged event is the reviewed
+  // flow's), so each tick it is a conflict.
+  const planned = await draftFor(postedRow, `purchase_${"0".repeat(64)}`);
+  const merged: CardPurchaseDraft = {
+    ...planned,
+    keys: [
+      ...planned.keys,
+      {
+        key: pendingRow!.recognition_key!,
+        role: "pending",
+        observationId: pendingRow!.observation_id,
+        parseRunId: pendingRow!.parse_run_id,
+      },
+    ],
+  };
+  expect((await run(w.db, merged)).every((changes) => changes > 0)).toBe(true);
+  expect(await w.sweep()).toMatchObject({ recognized: 1, conflicts: 1, deferred: false });
+
+  // A newer capture of the month drops both rows: the merged event and the
+  // other event are stale, and two new rows are current.
+  await w.vpass({
+    family: "web",
+    fetchedAt: "2026-06-20T00:00:00.000Z",
+    rows: [
+      { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1回払い" },
+      { date: "26/05/10", merchant: "架空店舗F", amount: "300", paymentType: "1回払い" },
+    ],
+  });
+  // The page is full (the merged event's two keys and the other event's
+  // key), the other event is retired, and the merged one is a conflict: the
+  // page was not retired whole, so recognition runs in the same tick.
+  expect(await w.sweep({ retireLimit: 3 })).toMatchObject({
+    retired: 1,
+    conflicts: 1,
+    recognized: 2,
+    deferred: false,
+  });
+  // Only the merged event is left on the page, tick after tick, and it
+  // never defers recognition.
+  for (let tick = 0; tick < 2; tick += 1)
+    expect(counts(await w.sweep({ retireLimit: 2 }))).toEqual({ ...NOTHING, conflicts: 1 });
+  expect(await w.totals()).toMatchObject({ captured: "4034", unresolved: 1 });
+}, 60_000);
+
+test("cursor: an exactly full last page wraps on the next tick, a row below the cursor is reached after the wrap, and an overlapping tick's move is kept", async () => {
+  const w = await world();
+  // Captured first, published later: its row has the lowest observation id.
+  const late = await w.vpass({
+    family: "web",
+    card: "card-002",
+    token: TOKEN_B,
+    fetchedAt: "2026-06-10T00:00:00.000Z",
+    rows: [{ date: "26/05/02", merchant: "架空店舗L", amount: "400", paymentType: "1回払い" }],
+    publish: false,
+  });
+  const capture = await w.vpass({
+    family: "web",
+    fetchedAt: "2026-06-10T00:00:00.000Z",
+    rows: [
+      POSTED,
+      { date: "26/05/07", merchant: "架空店舗E", amount: "2,000", paymentType: "1回払い" },
+    ],
+  });
+  const [a, b] = capture.observations;
+  expect(late.observations[0]!).toBeLessThan(a!);
+  const limits = { scanLimit: 2 };
+  // Exactly one full page: the cursor stops at its last row...
+  expect(await w.sweep(limits)).toMatchObject({ scanned: 2, recognized: 2 });
+  expect(await w.cursor()).toBe(b!);
+  // ...and the next tick finds an empty page and wraps.
+  expect(await w.sweep(limits)).toMatchObject({ scanned: 0, ...NOTHING });
+  expect(await w.cursor()).toBe(0);
+  expect(await w.sweep(limits)).toMatchObject({ scanned: 2, ...NOTHING });
+  expect(await w.cursor()).toBe(b!);
+
+  // A row below the cursor becomes current: it is not skipped, only reached
+  // after the wrap, and each row is written once.
+  await w.publish(late);
+  expect(await w.sweep(limits)).toMatchObject({ scanned: 0, ...NOTHING });
+  expect(await w.cursor()).toBe(0);
+  expect(await w.sweep(limits)).toMatchObject({ scanned: 2, recognized: 1 });
+  expect(await w.cursor()).toBe(a!);
+  expect(await w.sweep(limits)).toMatchObject({ scanned: 1, ...NOTHING });
+  expect(await w.cursor()).toBe(0);
+  expect(await w.count("SELECT count(*) AS n FROM economic_event_revisions")).toBe(3);
+
+  // An overlapping tick moves the cursor after this tick read it: this tick's
+  // own update is conditional on the value it read, so it leaves that move.
+  const moved = late.observations[0]!;
+  const overlapping = {
+    prepare(sql: string) {
+      if (!sql.startsWith("SELECT last_observation_id FROM card_purchase_scan_cursor"))
+        return w.db.prepare(sql);
+      return {
+        async first() {
+          const read = await w.db.prepare(sql).first();
+          await w.db
+            .prepare("UPDATE card_purchase_scan_cursor SET last_observation_id=? WHERE singleton=1")
+            .bind(moved)
+            .run();
+          return read;
+        },
+      };
+    },
+    batch: (statements: D1PreparedStatement[]) => w.db.batch(statements),
+  } as unknown as D1Database;
+  expect(await cardPurchaseSweep(overlapping, { now: NOW, ...limits })).toMatchObject({
+    scanned: 2,
+    ...NOTHING,
+  });
+  expect(await w.cursor()).toBe(moved);
+}, 90_000);

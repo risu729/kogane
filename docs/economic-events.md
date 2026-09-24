@@ -305,7 +305,7 @@ re-fetch that shows the same row is not a revision. Per key the lane writes:
 | `recognize` | No live event holds the key                                                                                                         |
 | `revise`    | The content changed: the account mapping, the amount or the date, or a retired row reappeared (`unknown → captured`, same event)    |
 | `reanchor`  | Same content, but a parse run the live evidence cites is no longer published (a published replay): the key moves to the current row |
-| `retire`    | A live `authorized` or `captured` event whose key is no longer current (`staleCardPurchaseKeysSql`)                                 |
+| `retire`    | A live `authorized` or `captured` event none of whose keys is current any more (`staleCardPurchaseKeysSql`)                         |
 
 A different kind for a held key is never a revision; it is counted as a
 conflict and left for review. Every revision is one guarded `db.batch`
@@ -320,10 +320,14 @@ retirements: a Vpass month's customized capture replaced by its web capture
 events); a card ordinal change under one resolved account (old events retired,
 new ones captured, the captured total unchanged); a parser change of external
 ids (retire and recreate: churn, never a double count). The retire pass runs
-before recognition in every tick, and while it still finds a full page of stale
-keys and retires some, recognition waits a tick, so a changed key is never
-counted twice. A row that stays current but can no longer be recognised (its
-binding lost, say) keeps its last revision: the provider still shows it.
+before recognition in every tick, and when it fills its page and retires every
+event on it, recognition waits a tick (bounded: see [Bounds](#bounds)), so the old
+events of a changed key are retired before their replacements are recognised
+and the captured total never counts one purchase twice. An event that still
+holds one current key is not stale, and an event holding several keys (a
+reviewed merge) is left to its reviewed flow and counted as a conflict. A row
+that stays current but can no longer be recognised (its binding lost, say)
+keeps its last revision: the provider still shows it.
 
 Accepting a [card settlement](card-settlements.md) adds a cash-movement leg and
 an unresolved obligation-change leg and never a `purchase-recognition` leg, so
@@ -336,9 +340,22 @@ One tick (every five minutes) retires at most 100 events (`RETIRE_LIMIT`),
 reads at most 500 current usage rows after the scan cursor (`SCAN_LIMIT`) and
 writes at most 200 events (`WRITE_LIMIT`), each as its own batch. The
 operational cursor `card_purchase_scan_cursor` stops at the last row handled
-when the write budget runs out, and wraps to 0 after the last page because a
-row below it can become current again. The current-usage query runs twice per
-tick (stale keys, then the page). The log line carries counts only:
+when the write budget runs out, and wraps to 0 after the last page (an exactly
+full last page wraps on the next tick, whose page is empty) because a row below
+it can become current again. The cursor moves only from the value the tick
+read, so a tick that overlapped it never pulls it back. The current-usage query
+runs twice per tick (stale keys, then the page).
+
+Recognition waits for the retire pass only while that pass fills its page and
+retires every event on it. The wait is bounded: each such tick takes 100 keys
+out of the live `authorized` and `captured` set, and nothing refills that set
+while recognition, its only writer, waits. So after a key change touching K
+recognised rows, recognition runs again within ⌈K / 100⌉ ticks: a
+2,000-row parser re-key waits at most 20 ticks (100 minutes), and 10,000 rows
+all changing key at once at most 100 ticks (about 8 hours 20 minutes). A page
+with any conflict or failed batch never defers, so keys the pass cannot
+retire, however many, never hold recognition back. The log line carries
+counts only:
 
 ```json
 {
@@ -358,7 +375,7 @@ tick (stale keys, then the page). The log line carries counts only:
 `conflicts` counts plans the stored state refused (a stale or replayed batch, a
 held key, a refused transition, a multi-key event), `failed` counts batches D1
 rejected with an error (nothing of them is written), and `deferred` marks a tick
-whose recognition waited for the retire pass.
+whose recognition waited because the retire pass retired a whole full page.
 
 ### Flag, deploy and rollback
 
@@ -393,12 +410,18 @@ touch the 0047 tables.
   published replay re-anchors. The trigger refuses a second live holder and a
   duplicate batch writes nothing. A card ordinal change keeps the captured
   total. An accepted card settlement adds no purchase leg, and purchases have
-  no cash leg. The write budget, the cursor wrap and the retire deferral hold,
-  and the log line carries counts only. `test/lanes.test.ts` pins the lane
-  order.
+  no cash leg. The write budget, the cursor wrap and the retire deferral hold;
+  an exactly full last page wraps on the next tick, a row that becomes current
+  below the cursor is reached after the wrap, and an overlapping tick's cursor
+  move is kept. Keys the retire pass cannot retire never defer recognition.
+  External ids and namespaces with slashes, plus signs, full-width, escaped and
+  control characters give the same key in SQLite and in the writer, so every
+  holder is found again. The log line carries counts only.
+  `test/lanes.test.ts` pins the lane order.
 - `packages/read-model`: `test/card-purchase-keys.test.ts` (stale keys and the
-  unrecognised count against current usage) and `test/events.test.ts` (a
-  purchase-recognition leg does not move the derived balance).
+  unrecognised count against current usage; a revision still holding one
+  current key is not stale) and `test/events.test.ts` (a purchase-recognition
+  leg does not move the derived balance).
 
 ## Read side
 
@@ -414,11 +437,14 @@ touch the 0047 tables.
   settlements declared. When either side is not exact, `outstanding` is `null`
   with an `outstandingReasonCode`; it is never zero-filled (INV05).
 - `reconciliationSignals({ subjectRefs })` — the latest published
-  provider-reported balance beside the amount the adopted events imply, and
-  their `difference` with reason codes (`snapshot_boundary_unknown`,
+  provider-reported balance beside the amount the adopted events'
+  `cash-movement` legs imply, and their `difference` with reason codes (`snapshot_boundary_unknown`,
   `events_incomplete`, `timing_difference`, `fees_not_modelled`). It is a
   `difference` observation, never an adjustment entry, and nothing is written to
-  make the two agree (root review 09 §4).
+  make the two agree (root review 09 §4). Only `cash-movement` legs are read:
+  until card purchase recognition, legs of every basis were summed together,
+  which would have added a recognised purchase's `purchase-recognition` leg on
+  `account:<card>` to that account's cash legs (two bases are never summed).
 
 All arithmetic is done in `@kogane/domain` with exact decimals. No sum is
 computed by casting a coefficient to a SQLite INTEGER.

@@ -230,6 +230,59 @@ describe("recognition keys against current card usage", () => {
     ).toEqual({ n: 1 });
   }, 30_000);
 
+  test("a revision that still holds one current key is not stale; once none is current, all its keys are", async () => {
+    const store = new CardStore();
+    // A pending row, captured before its month's web capture replaces it.
+    vpassCapture(store, "customized", "2026-05-10T00:00:00.000Z", [PENDING_ROWS[0]!]);
+    const [pending] = usage(store.db);
+    vpassCapture(store, "web", "2026-06-10T00:00:00.000Z", [
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" },
+    ]);
+    const [posted] = usage(store.db);
+    expect(posted!.observation_id).not.toBe(pending!.observation_id);
+    // One live revision holding the posted key and the pending key, the shape a
+    // reviewed pending-to-posted merge leaves: the pending row is no longer
+    // current, the posted one is.
+    const fact = factOf(posted!);
+    const classified = classifyCardUsage(fact);
+    if (!classified.ok) throw new Error(classified.reasonCode);
+    const draft = await cardPurchaseRevision({
+      action: "recognize",
+      eventId: await cardPurchaseEventId(classified.kind, recognitionKey(fact)!),
+      revision: 1,
+      fact,
+    });
+    const merged: CardPurchaseDraft = {
+      ...draft!,
+      keys: [
+        ...draft!.keys,
+        {
+          key: pending!.recognition_key!,
+          role: "pending",
+          observationId: pending!.observation_id,
+          parseRunId: pending!.parse_run_id,
+        },
+      ],
+    };
+    expect(write(store.db, merged, null)).toBe(true);
+    // Still displayed through its posted row: nothing to retire, and its
+    // vanished pending key never takes a place on the page.
+    expect(stale(store.db)).toEqual([]);
+
+    // A later web capture no longer shows the posted row: now every key of
+    // the revision is stale, and both are reported together.
+    vpassCapture(store, "web", "2026-06-20T00:00:00.000Z", [
+      { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1回払い" },
+    ]);
+    expect(
+      stale(store.db).map((row) => [row.event_id, row.recognition_key, row.key_count]),
+    ).toEqual(
+      [posted!.recognition_key!, pending!.recognition_key!]
+        .sort()
+        .map((key) => [draft!.revision.eventId, key, 2]),
+    );
+  }, 30_000);
+
   test("unrecognised current rows are the rows no live revision holds", async () => {
     const store = new CardStore();
     vpassCapture(store, "customized", "2026-05-10T00:00:00.000Z", PENDING_ROWS);

@@ -2,9 +2,10 @@
 // §1.2). Two reads the purchase-recognition writer and its operator view need
 // beside `currentCardUsageSql`:
 //
-//   * `staleCardPurchaseKeysSql` — keys a live, still-recognised (authorized or
-//     captured) purchase/refund revision holds whose provider row is no longer
-//     current. The writer retires those events (state `unknown`, no legs).
+//   * `staleCardPurchaseKeysSql` — the keys of each live, still-recognised
+//     (authorized or captured) purchase/refund revision none of whose provider
+//     rows is current any more. The writer retires those events (state
+//     `unknown`, no legs).
 //   * `unrecognizedCardUsageCountSql` — current usage rows no live revision
 //     holds: rows the writer skipped (an unsupported shape, an unresolved
 //     account, no external id) or has not reached yet.
@@ -41,7 +42,10 @@ const ALL_PAGES = [0, -1] as const;
  * `?3` is the page size. A retired revision (`unknown`) keeps its keys and is
  * never reported, so the page cannot fill up with events that are already
  * retired; a key whose row is current again is the writer's to revise, not to
- * retire. Ordered by event and key so one event's keys stay together.
+ * retire. A revision that still holds one current key is not reported either:
+ * the event is still displayed (a merged pending key whose posted row is
+ * current), so its other keys can never occupy the page. Ordered by event and
+ * key so one event's keys stay together.
  */
 export const STALE_CARD_PURCHASE_KEYS_SQL = `WITH current_keys AS MATERIALIZED (
          SELECT recognition_key FROM ${ALL_CURRENT_USAGE}
@@ -55,7 +59,9 @@ export const STALE_CARD_PURCHASE_KEYS_SQL = `WITH current_keys AS MATERIALIZED (
        JOIN current_card_purchase_recognitions c
          ON c.event_id = k.event_id AND c.revision = k.revision
        WHERE c.state IN ('authorized', 'captured')
-         AND k.recognition_key NOT IN (SELECT recognition_key FROM current_keys)
+         AND NOT EXISTS (SELECT 1 FROM card_purchase_recognition_keys held
+                          WHERE held.event_id = k.event_id AND held.revision = k.revision
+                            AND held.recognition_key IN (SELECT recognition_key FROM current_keys))
        ORDER BY k.event_id, k.recognition_key
        LIMIT ?3`;
 

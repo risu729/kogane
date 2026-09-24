@@ -16,13 +16,14 @@
 // allocation and "this row is not a purchase" stay reviewed decisions.
 //
 // One tick:
-//   1. the retire pass: every live recognised event whose provider row is no
-//      longer current gets a revision in state `unknown` with no leg
+//   1. the retire pass: every live recognised event none of whose provider
+//      rows is current any more gets a revision in state `unknown` with no leg
 //      (`provider_status_absent`). It runs first so that a key change (a card
 //      ordinal change, a parser fingerprint change, a month's customized
 //      capture replaced by its web capture) retires the old event before the
-//      new row is recognised, never after it. While it still finds a full page
-//      of stale keys and is making progress, recognition waits a tick;
+//      new row is recognised, never after it. While it fills its page and
+//      retires every event on it, recognition waits a tick (bounded: see
+//      `cardPurchaseSweep`);
 //   2. the recognition pass: one page of current usage after the scan cursor.
 //      Each row is classified; its key's live holder is the event it revises,
 //      otherwise it names a new event; the content digest decides between
@@ -32,7 +33,9 @@
 //      stale plan or a key another live event holds writes nothing in any
 //      table and counts as a conflict;
 //   4. the cursor moves to the last row handled, and back to 0 after the last
-//      page: a row below the cursor can become current again later.
+//      page: a row below the cursor can become current again later. It moves
+//      only from the value this tick read, so an overlapping tick never pulls
+//      it back.
 //
 // The log line carries counts only: no amount, merchant, account or key.
 import {
@@ -57,10 +60,12 @@ import {
 } from "../../../packages/domain/src/values.ts";
 import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import {
+  STALE_CARD_PURCHASE_KEY_LIMIT,
   staleCardPurchaseKeysSql,
   type StaleCardPurchaseKeyRow,
 } from "../../../packages/read-model/src/card-purchase-keys.ts";
 import {
+  CARD_USAGE_PAGE_LIMIT,
   currentCardUsageSql,
   type CurrentCardUsageRow,
 } from "../../../packages/read-model/src/card-usage.ts";
@@ -97,7 +102,7 @@ export interface CardPurchaseSweepResult {
   conflicts: number;
   /** Batches D1 rejected with an error; nothing of them was written. */
   failed: number;
-  /** True when recognition waited for a full retire page to drain first. */
+  /** True when recognition waited because the retire pass retired a whole full page. */
   deferred: boolean;
 }
 
@@ -342,21 +347,29 @@ async function page<T>(db: D1Database, query: { sql: string; args: unknown[] }):
   ).results;
 }
 
-function bounded(value: number | undefined, fallback: number): number {
-  return value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : fallback;
+/** A positive integer option, at most `max` (the page its query accepts), else the default. */
+function bounded(value: number | undefined, fallback: number, max: number): number {
+  return value !== undefined && Number.isSafeInteger(value) && value > 0
+    ? Math.min(value, max)
+    : fallback;
 }
 
-/** Retire every live recognised event whose provider row is no longer current. */
+/**
+ * Retire every live recognised event none of whose provider rows is current
+ * any more. True when the page was full and every event on it was retired: more stale
+ * keys may be waiting, and nothing on the page was one this pass cannot act on.
+ */
 async function retirePass(
   db: D1Database,
   result: CardPurchaseSweepResult,
   limit: number,
   now: string,
-): Promise<number> {
+): Promise<boolean> {
   const stale = await page<StaleCardPurchaseKeyRow>(db, staleCardPurchaseKeysSql(limit));
   const byEvent = new Map<string, StaleCardPurchaseKeyRow[]>();
   for (const row of stale) byEvent.set(row.event_id, [...(byEvent.get(row.event_id) ?? []), row]);
   const live = await liveRecognitions(db, [...byEvent.keys()]);
+  let retired = 0;
   for (const [eventId, rows] of byEvent) {
     const current = live.get(eventId);
     // Only an event none of whose keys is current any more is retired; an
@@ -380,11 +393,12 @@ async function retirePass(
       continue;
     }
     const outcome = await commit(db, draft, current.revision.revision, now);
-    if (outcome === "written") result.retired += 1;
+    if (outcome === "written") retired += 1;
     else if (outcome === "conflict") result.conflicts += 1;
     else result.failed += 1;
   }
-  return stale.length;
+  result.retired += retired;
+  return stale.length === limit && byEvent.size > 0 && retired === byEvent.size;
 }
 
 /** One page of current usage after the cursor, each row recognised, revised or left alone. */
@@ -466,12 +480,16 @@ WHERE recognition_key IN (SELECT value FROM json_each(?1))`,
     handled = row.observation_id;
   }
   // The last page wraps to the start: a row below the cursor can become
-  // current again (a reappearing row, a newly resolved identity).
+  // current again (a reappearing row, a newly resolved identity). The update
+  // is conditional on the value this tick read, so a tick that overlapped
+  // this one and already moved the cursor is never pulled back.
   const next = budgetReached ? handled : rows.length < limits.scan ? 0 : handled;
   if (next !== cursor)
     await db
-      .prepare("UPDATE card_purchase_scan_cursor SET last_observation_id=? WHERE singleton=1")
-      .bind(next)
+      .prepare(
+        "UPDATE card_purchase_scan_cursor SET last_observation_id=?1 WHERE singleton=1 AND last_observation_id=?2",
+      )
+      .bind(next, cursor)
       .run();
 }
 
@@ -513,13 +531,24 @@ async function plannedRevision(
  * it over unchanged rows writes nothing: every revision's decision id is a
  * digest of its event, revision, content and action, and the live content
  * digest already matches.
+ *
+ * Recognition waits a tick only when the retire pass filled its page and
+ * retired every event on it, so a key change (a card ordinal, a parser
+ * fingerprint) retires the old events before their replacements are
+ * recognised and the captured total never counts one purchase twice. The wait
+ * is bounded: every deferred tick takes `retireLimit` keys out of the live
+ * authorized and captured set, and nothing refills that set while recognition,
+ * its only writer, waits, so recognition runs again after at most
+ * ceil(K / retireLimit) consecutive ticks, K being the keys that set held when
+ * the wait began. A page with any conflict or failed batch never defers, so
+ * keys this pass cannot retire never hold recognition back.
  */
 export async function cardPurchaseSweep(
   db: D1Database,
   options: CardPurchaseSweepOptions = {},
 ): Promise<CardPurchaseSweepResult> {
   const now = options.now ?? new Date().toISOString();
-  const retireLimit = bounded(options.retireLimit, RETIRE_LIMIT);
+  const retireLimit = bounded(options.retireLimit, RETIRE_LIMIT, STALE_CARD_PURCHASE_KEY_LIMIT);
   const result: CardPurchaseSweepResult = {
     scanned: 0,
     recognized: 0,
@@ -531,11 +560,7 @@ export async function cardPurchaseSweep(
     failed: 0,
     deferred: false,
   };
-  const stale = await retirePass(db, result, retireLimit, now);
-  // More stale keys may remain and this tick retired some: finish retiring
-  // before recognising, so a changed key never counts one purchase twice.
-  // A full page that made no progress does not hold recognition back.
-  if (stale === retireLimit && result.retired > 0) {
+  if (await retirePass(db, result, retireLimit, now)) {
     result.deferred = true;
     return result;
   }
@@ -543,8 +568,8 @@ export async function cardPurchaseSweep(
     db,
     result,
     {
-      scan: bounded(options.scanLimit, SCAN_LIMIT),
-      write: bounded(options.writeLimit, WRITE_LIMIT),
+      scan: bounded(options.scanLimit, SCAN_LIMIT, CARD_USAGE_PAGE_LIMIT),
+      write: bounded(options.writeLimit, WRITE_LIMIT, Number.MAX_SAFE_INTEGER),
     },
     now,
   );
