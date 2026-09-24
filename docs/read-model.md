@@ -159,10 +159,11 @@ current rows) took the shipped first page from 584 to 791 ms and the current
 one from 411 to 462 ms. The shipped plan started `current_rows` from every
 fetch run's terminal report and walked every artifact, parse and observation of
 every source before the snapshot filter; it now starts from `card_artifacts`,
-the members of the current snapshots, and reaches the rest by key through
-`CROSS JOIN`s: `idx_parse_runs_artifact`, `idx_txn_obs_parse_run`, the
-primary keys behind `observation_fetch_artifacts` and `observation_fetch_runs`,
-`sqlite_autoindex_identity_observations_2` and the decimal-v1 primary key. The
+the members of the current snapshots, and reaches the rest by key: through
+`CROSS JOIN`s, the primary keys behind `observation_fetch_artifacts` and
+`observation_fetch_runs`, `idx_parse_runs_artifact` and `idx_txn_obs_parse_run`;
+through the unchanged left joins, the decimal-v1 primary key and, after
+`current_rows`, `sqlite_autoindex_identity_observations_2`. The
 stale-key read probed each live revision's keys once per current key (quadratic
 in the live and current sets); it now names the revisions holding a current key
 once, through `card_purchase_recognition_keys_key`. No index was added: a
@@ -174,7 +175,10 @@ current rows, ranked whole before the cursor by design. `card-usage-scale.test.t
 compares every read with the shipped text (`card-usage-legacy-sql.ts`) on a
 smaller store and fails on a plan that scans observations, parses, runs, reports
 or identity rows whole; `KOGANE_CARD_USAGE_SCALE=full` builds this store and
-prints the timings.
+prints the timings. `card-usage-differential.test.ts` makes the same comparison
+on small random stores that draw every state the shipped reads handle, and
+every scenario of `card-usage.test.ts` and `card-purchase-keys.test.ts` runs
+both texts.
 
 ## Parity proof
 
