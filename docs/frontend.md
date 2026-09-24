@@ -104,8 +104,17 @@ Pages compose these instead of writing their own markup or rules:
 | Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |
 | Lists                         | `.plain-list` (stacked; an `<ol>` keeps its numbers), `.warning-list` (parser warnings, reason and blocker codes)                     |
 | Long tokens                   | `.wrap-any`; `.visually-hidden` for captions whose text is already on screen                                                          |
-| Evidence chains               | `ChainStep` items in an `<ol className="chain">`: record → parse → original on a detail page, usage → statement → debit on a purchase |
+| Evidence chains               | `ChainStep` in an `<ol className="chain">`: record → parse → original; usage → statement → debit; a candidate's pending → posted row  |
+| Review candidates             | A `.panel` with a `.settlement-head`, then a `.settlement-disclosure` open while a decision is due (see below)                        |
 | Figures kept apart            | `.tiles` of `.tile` (value, then label) in a `role="list"`; one tile per state and unit, never a combined tile                        |
+
+A review candidate (a card settlement on カード照合, a pending-to-posted link on
+カード利用) is one panel. Its `.settlement-head` holds the title, a status
+`Badge` and the identifying `.settlement-facts`. The review sits under a
+`.settlement-disclosure` that starts open only while a decision is due. The
+decision is a `.settlement-decision`: a required `.settlement-reason`, a button
+per action the candidate allows, and a footnote that planning decides nothing.
+The pending-to-posted review also states each action's effect in words.
 
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.

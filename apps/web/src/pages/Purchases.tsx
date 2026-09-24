@@ -1,8 +1,27 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { ApiError, useFeatures } from "../api.ts";
-import { useCardPurchase, useCardPurchases, type CardPurchaseView } from "../card-purchases-api.ts";
+import {
+  purchaseLinkAction,
+  purchaseLinkPinsMatch,
+  purchaseLinkPlanRequest,
+  useCardPurchase,
+  useCardPurchases,
+  type CardPurchaseCandidate,
+  type CardPurchaseView,
+  type PendingPostedAction,
+} from "../card-purchases-api.ts";
+import { postCommand, type ChangePlanView } from "../command-api.ts";
 import { Pagination } from "../pagination.tsx";
 import {
+  CANDIDATE_ACTION_LABELS,
+  CandidateCodes,
+  candidateEffect,
+  candidateOpen,
+  CandidateOrigin,
+  CandidateSides,
+  CandidateStatusBadge,
+  DisplayedAmount,
   EXCLUSION_LABELS,
   KIND_LABELS,
   PurchaseAmount,
@@ -14,8 +33,8 @@ import {
   statementCell,
   StatementTotals,
 } from "../purchase-display.tsx";
-import { Link } from "../router.tsx";
-import { EmptyState, Loading, Notice, Nullable, Panel, QueryBoundary } from "../ui.tsx";
+import { Link, navigate } from "../router.tsx";
+import { EmptyState, Kv, KvRow, Loading, Notice, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import { useViewState } from "../view-state.tsx";
 
 const PAGE_SIZE = 50;
@@ -53,6 +72,212 @@ function PurchaseRow({ view }: { view: CardPurchaseView }): ReactNode {
         <Link to={`/purchases/${view.eventId}`}>説明を見る</Link>
       </td>
     </tr>
+  );
+}
+
+/**
+ * Open pending-to-posted candidates touching this page's purchases, each once
+ * (a candidate appears on both of its events), with a link to the purchase
+ * where it is reviewed.
+ */
+function OpenCandidates({ items }: { items: CardPurchaseView[] }): ReactNode {
+  const open = new Map<string, { candidate: CardPurchaseCandidate; eventId: string }>();
+  for (const view of items)
+    for (const candidate of view.candidates)
+      if (candidateOpen(candidate) && !open.has(candidate.proposalId))
+        open.set(candidate.proposalId, { candidate, eventId: view.eventId });
+  if (open.size === 0) return null;
+  return (
+    <Panel
+      id="purchase-candidates"
+      title="確認待ちの未確定・確定の対応候補"
+      count={`${open.size}件`}
+      note="同じ利用が、未確定の明細と確定の明細として別々に記録されているかもしれない組です。金額や日付が近いだけでは統合しません。このページの利用に関わる候補だけを表示します。"
+    >
+      <div className="panel-body">
+        <ul className="plain-list" aria-label="確認待ちの対応候補">
+          {[...open.values()].map(({ candidate, eventId }) => (
+            <li key={candidate.proposalId}>
+              <strong>未確定</strong>{" "}
+              <Nullable value={candidate.pending.usageDate} placeholder="利用日未記録" /> ·{" "}
+              <DisplayedAmount side={candidate.pending} /> → <strong>確定</strong>{" "}
+              <Nullable value={candidate.posted.usageDate} placeholder="利用日未記録" /> ·{" "}
+              <DisplayedAmount side={candidate.posted} /> <CandidateOrigin candidate={candidate} />
+              <br />
+              <Link to={`/purchases/${eventId}`}>候補を確認して判断</Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * The decisions the server offers for one candidate, each behind a written
+ * reason. Planning only opens the confirmation screen; nothing is decided
+ * until a human approves and commits there.
+ */
+function CandidateDecision({ candidate }: { candidate: CardPurchaseCandidate }): ReactNode {
+  const features = useFeatures();
+  const [reason, setReason] = useState("");
+  const plan = useMutation({
+    mutationFn: async (action: PendingPostedAction) => {
+      const response = await postCommand<{ plan: ChangePlanView }>(
+        "plan",
+        purchaseLinkPlanRequest(candidate, action, reason.trim()),
+        new AbortController().signal,
+      );
+      // A plan pinned to anything but what is on screen, or doing anything but
+      // what was chosen, needs another look.
+      if (
+        !purchaseLinkPinsMatch(response.plan.expectedRevisions, candidate) ||
+        purchaseLinkAction(
+          response.plan.kind,
+          response.plan.simulation.targets,
+          candidate.proposalId,
+        ) !== action
+      )
+        throw new Error(
+          "候補または利用の記録が更新されています。表示を更新して、内容を確認し直してください。",
+        );
+      return response.plan;
+    },
+    onSuccess: (value) => navigate(`/confirm/${value.planId}`),
+  });
+  if (candidate.actions.length === 0) return null;
+  // Decisions are an operator's: the route itself is operator-only, and the
+  // actions exist only where the change lifecycle is advertised.
+  if (!features.commands)
+    return (
+      <p className="footnote">
+        この接続先では確認操作が有効ではないため、ここから判断することはできません。
+      </p>
+    );
+  const canPlan = reason.trim().length > 0 && !plan.isPending;
+  const id = `candidate-reason-${candidate.proposalId}`;
+  return (
+    <div className="settlement-decision">
+      <div className="field">
+        <label htmlFor={id}>判断の理由</label>
+        <textarea
+          id={id}
+          className="settlement-reason"
+          rows={2}
+          maxLength={1000}
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          disabled={plan.isPending}
+        />
+      </div>
+      <div className="button-row">
+        {candidate.actions.map((action) => (
+          <button
+            key={action}
+            className="button"
+            type="button"
+            disabled={!canPlan}
+            onClick={() => plan.mutate(action)}
+          >
+            {CANDIDATE_ACTION_LABELS[action]}
+          </button>
+        ))}
+      </div>
+      {plan.isError ? (
+        <Notice tone="bad" inline role="alert">
+          {plan.error.message}
+        </Notice>
+      ) : null}
+      <ul className="plain-list">
+        {candidate.actions.map((action) => (
+          <li key={action}>
+            <strong>{CANDIDATE_ACTION_LABELS[action]}</strong>: {candidateEffect(candidate, action)}
+          </li>
+        ))}
+      </ul>
+      <p className="footnote">
+        次の画面で内容を確認し、承認してから確定します。確認画面を開くだけでは判断は保存されません。
+      </p>
+    </div>
+  );
+}
+
+/**
+ * One candidate on a purchase's explanation, following the reconciliation
+ * candidate: the head names both rows, the review sits under a disclosure
+ * that starts open while a decision is due.
+ */
+function CandidatePanel({
+  candidate,
+  eventId,
+}: {
+  candidate: CardPurchaseCandidate;
+  eventId: string;
+}): ReactNode {
+  const id = `candidate-${candidate.proposalId}`;
+  return (
+    <section className="panel" aria-labelledby={id}>
+      <div className="panel-head settlement-head">
+        <h2 id={id}>未確定と確定の明細の対応</h2>
+        <CandidateStatusBadge candidate={candidate} />
+        <dl className="settlement-facts">
+          <div>
+            <dt>未確定 </dt>
+            <dd>
+              <Nullable value={candidate.pending.usageDate} placeholder="利用日未記録" /> ·{" "}
+              <DisplayedAmount side={candidate.pending} />
+            </dd>
+          </div>
+          <div>
+            <dt>確定 </dt>
+            <dd>
+              <Nullable value={candidate.posted.usageDate} placeholder="利用日未記録" /> ·{" "}
+              <DisplayedAmount side={candidate.posted} />
+            </dd>
+          </div>
+          <div>
+            <dt>根拠 </dt>
+            <dd>
+              <CandidateOrigin candidate={candidate} />
+            </dd>
+          </div>
+        </dl>
+      </div>
+      <details className="settlement-disclosure" open={candidateOpen(candidate)}>
+        <summary>候補の詳細と判断</summary>
+        <div className="panel-body settlement-details">
+          <p>
+            同じ利用が、カード会社の画面で未確定の明細として表示された後、確定の明細として表示されることがあります。同一の利用と判断すると、2件の記録を1件の利用として扱います。金額や日付が近いだけでは統合しません。
+          </p>
+          <CandidateSides candidate={candidate} currentEventId={eventId} />
+          <CandidateCodes candidate={candidate} />
+          <details className="detail-disclosure settlement-history">
+            <summary>判断の記録と根拠の参照</summary>
+            <Kv>
+              <KvRow label="候補">
+                <code className="wrap-any">{candidate.proposalId}</code>
+              </KvRow>
+              <KvRow label="候補の判断の版">{candidate.proposalRevision}</KvRow>
+              <KvRow label="関係の記録数">{candidate.relationRevision}</KvRow>
+              <KvRow label="根拠の参照">
+                <ul className="plain-list">
+                  {candidate.relation.evidenceRefs.map((ref) => (
+                    <li key={ref}>
+                      <code className="wrap-any">{ref}</code>
+                    </li>
+                  ))}
+                </ul>
+              </KvRow>
+            </Kv>
+            <p>判断は新しい記録として追加します。以前の判断、利用の版と原本は消しません。</p>
+          </details>
+          <CandidateDecision
+            key={`${candidate.proposalRevision}:${candidate.relationRevision}`}
+            candidate={candidate}
+          />
+        </div>
+      </details>
+    </section>
   );
 }
 
@@ -172,6 +397,7 @@ export function PurchasesPage(): ReactNode {
                       </ul>
                     </details>
                   </Notice>
+                  <OpenCandidates items={data.items} />
                   <Panel id="purchase-list" title="利用の一覧">
                     {data.items.length === 0 ? (
                       <div className="panel-body">
@@ -280,6 +506,13 @@ export function PurchasePage({ eventId }: { eventId: string }): ReactNode {
                     <PurchaseChain view={view} />
                   </div>
                 </Panel>
+                {view.candidates.map((candidate) => (
+                  <CandidatePanel
+                    key={candidate.proposalId}
+                    candidate={candidate}
+                    eventId={view.eventId}
+                  />
+                ))}
                 <details className="detail-disclosure purchase-history">
                   <summary>記録の履歴と根拠の参照</summary>
                   <ol className="plain-list">

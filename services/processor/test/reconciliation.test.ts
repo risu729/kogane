@@ -311,6 +311,26 @@ test("acceptance flows through the decision log and creates exactly one relation
     .bind(accepted.receipt.relationId)
     .first<{ id: string; kind: string; status: string; decision_revision_id: string }>();
   expect(relation).toMatchObject({ kind: "pending_to_posted", status: "accepted" });
+  // The ends are the targets' own refs, `transaction:<id>`: a SourceFactRef id
+  // already carries its kind and is never prefixed a second time.
+  const targets = await db
+    .prepare("SELECT target_refs_json,evidence_refs_json FROM reconciliation_proposals WHERE id=?")
+    .bind(target.id)
+    .first<{ target_refs_json: string; evidence_refs_json: string }>();
+  const [pending, posted] = JSON.parse(targets!.target_refs_json) as { id: string }[];
+  expect(
+    await db
+      .prepare("SELECT from_ref,to_ref,evidence_refs_json FROM entity_relations WHERE id=?")
+      .bind(accepted.receipt.relationId)
+      .first<Record<string, unknown>>(),
+  ).toEqual({
+    from_ref: pending!.id,
+    to_ref: posted!.id,
+    evidence_refs_json: JSON.stringify([pending!.id, posted!.id]),
+  });
+  expect(pending!.id).toMatch(/^transaction:[0-9]+$/u);
+  expect(posted!.id).toMatch(/^transaction:[0-9]+$/u);
+  expect(JSON.parse(targets!.evidence_refs_json)).toEqual([pending!.id, posted!.id]);
   const stored = (await proposals()).find((row) => row.id === target.id)!;
   expect(stored.status).toBe("accepted");
   // A resend of the same command replays the receipt and writes nothing more.

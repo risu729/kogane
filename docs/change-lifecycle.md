@@ -52,6 +52,8 @@ the run is published.
 | `account_mapping:`              | a `source_accounts.id`         | `max(account_mappings.revision)` for that reference     |
 | `instrument_mapping:`           | an `instrument_identifiers.id` | `max(instrument_mappings.revision)` for that identifier |
 | `relation:<kind>\|<from>\|<to>` | one typed relation triple      | the number of `entity_relations` rows for the triple    |
+| `proposal:`                     | a reconciliation proposal      | the highest revision of its `proposal:<id>` decisions   |
+| `card-purchase:`                | a recognised card purchase     | the event's live revision, 0 when it has none           |
 
 A subject with no history answers `0`. The check is **not** a preceding
 `SELECT`: `expectedRevisionsSql()` is a condition of the receipt-reservation
@@ -60,6 +62,83 @@ between plan and commit therefore writes nothing at all — not the receipt, not
 the decision, not the outbox row. `change-lifecycle.test.ts` asserts the row
 counts of all four new tables plus `decision_revisions`, `decision_operations`
 and `account_mappings` before and after a failing guard.
+
+## Pending-to-posted link review
+
+Reviewing a [pending-to-posted card usage link](economic-events.md#pending-to-posted-links)
+rides on `relation.accept` / `relation.reject`, the way the card ownership
+review does, so the closed kind list and the `change_plans` /
+`operation_receipts` CHECKKs stay as they are. The payload is the candidate's
+`relation` from `GET /api/v2/card-purchases`, plus a reason:
+
+```json
+{
+  "relationKind": "pending_to_posted",
+  "fromRef": "transaction:<pending observation id>",
+  "toRef": "transaction:<posted observation id>",
+  "validFrom": null,
+  "validTo": null,
+  "evidenceRefs": [
+    "reconciliation-proposal:<proposal id>",
+    "transaction:<pending observation id>@parse_run:<n>",
+    "transaction:<posted observation id>@parse_run:<m>"
+  ],
+  "reason": "…"
+}
+```
+
+The **marker** `reconciliation-proposal:<id>` names the proposal; the ends and
+the evidence must be exactly the proposal's own targets, canonical
+`transaction:<id>` refs, in that order (anything else is `invalid_command` or
+`incomplete_evidence`). A `pending_to_posted` relation without the marker is
+refused, because accepting one merges two purchase events and a bare relation
+would claim the link without moving them; the commit re-checks it, so a plan
+stored before the review existed cannot write one either (`invalid_command`). What the command does is decided
+from the stored proposal, never from the caller
+(`packages/application/src/operations/pending-posted-review.ts`):
+
+| Kind              | Proposal / relation           | Effect                                                                      |
+| ----------------- | ----------------------------- | --------------------------------------------------------------------------- |
+| `relation.accept` | `proposed`, not linked        | merge: the pending-origin event survives, captured, holding both rows' keys |
+| `relation.reject` | `proposed`, not linked        | reject: nothing moves in any event                                          |
+| `relation.reject` | `accepted`, relation accepted | withdraw: the merged event is split back into two                           |
+
+The plan pins `proposal:<id>` (its decision count), the relation triple and,
+for every side whose row a live event holds, `card-purchase:<event id>` (its
+live revision; 0 for an event with no live revision, such as the posted event
+a merge absorbed). Every pin is also a `simulation.targets[]` entry, and the
+simulation carries the invalidation `review:card-purchase-link`, which is how a
+screen recognises this review. A rejection pins the holders too: the reviewer
+decided about the events the screen showed. A candidate that cannot be
+accepted answers with the code of its first blocker: `incomplete_evidence`
+(a row no event holds), `needs_scope_resolution` (two card accounts),
+`unsupported_semantics` (a purchase and a refund), `stale_context` (a side
+already linked, a posted event no longer captured, a closed proposal).
+
+The commit batch writes, after the receipt reservation (whose condition also
+re-checks the proposal's status and the merge or split guard): the
+`decision_operations` row, the relation decision and `entity_relations` row
+as for any relation; a `proposal:<id>` decision (`accept`, `reject`, or
+`supersede` for a withdrawal, revision = pinned + 1); the proposal's
+resolution — the 0032 trigger only lets a proposal be resolved by a
+`proposal:` decision — or, for a withdrawal, the accepting decision's
+`superseded_by`, since a proposal row is resolved once; and the merge or split
+batch of `packages/storage-d1/src/atomic/card-purchase-recognition.ts` with
+`manual` event decisions keyed by the operation. All of it is guarded on the
+receipt, so a moved pin writes nothing anywhere, and a resend replays the
+receipt. Every id the batch writes is keyed by the operation (the event
+decisions' digest includes it), so a resend whose batch was built before the
+first commit landed finds its own rows and writes nothing more, and another
+operation of the same plan finds the plan committed and writes nothing. Agents cannot approve or commit it, like every other change. The
+receipt's `result` adds `proposalId`, `proposalDecisionRevisionId`, `review`
+(`accept`, `reject` or `withdraw`) and `eventRevisions`.
+
+A withdrawn link cannot be accepted again, a known limit: the proposal row
+stays `accepted` (0032 resolves a proposal once) and the triple's latest
+relation is `rejected`, so the candidate is closed. The two rows can be linked
+again only through a new proposal, which the purchase lane writes when either
+row's event moves to a new observation
+([economic-events.md](economic-events.md#pending-to-posted-links)).
 
 ## Tables (migration `0031_operations.sql`)
 
@@ -304,6 +383,24 @@ After a commit the receipt panel distinguishes `受理` (accepted) from
 `反映済み` (published) and offers a re-check rather than claiming completion
 (addendum 11 §5).
 
+A plan that reviews something shown elsewhere adds a panel that reads the
+reviewed item back from the server. The panel compares the plan's pins with that
+item, and approval waits until every pin matches. The panel is chosen by the
+plan's kind or invalidation:
+
+| Plan                                     | Panel                                                            |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| `card-settlement.*`                      | the settlement candidate                                         |
+| invalidation `review:card-ownership`     | the account mapping and ownership claims                         |
+| invalidation `review:card-purchase-link` | the pending-to-posted candidate, read from the purchases it pins |
+
+The candidate is taken from whichever purchase lists it among those that
+`card-purchase:<event id>` pins at a live revision name; the action is the one
+the simulation's `proposal:<id>` target states (see
+[card-settlements.md](card-settlements.md#reviewing-a-pending-to-posted-link)).
+A missing item, a changed pin, or an action that is unstated or no longer
+offered disables Approve and Commit.
+
 One operation id is derived per approval, so a resend of the same confirmation
 is the same operation and a lost response never commits twice.
 
@@ -366,12 +463,26 @@ already recorded is never undone by a DELETE — an undo is a new revision
   agent refused approve/commit before forwarding, `503` when the writer binding
   is absent, body and query-string bounds, `no-store` and no credentials in the
   answer, and the capability advertised from the flag.
+- `packages/application/test/pending-posted-plan.test.ts`: the pending-to-posted
+  review on every CORE migration — the candidate and its payload, an accept
+  that merges one purchase `authorized → captured` with the captured total
+  unchanged, a withdrawal that splits it with its history kept, a rejection
+  that pins the holders and moves no event, a stale event revision or a
+  proposal decided elsewhere writing nothing, an agent refused approval and
+  commit, payloads the proposal does not give refused, a resend replaying
+  the receipt, concurrent commit batches of one plan writing the review once,
+  and a bare `pending_to_posted` plan stored before the review existed refused
+  at commit. `services/processor/test/card-purchase-merge.test.ts` runs an
+  accept and a withdrawal through the processor's planners on D1.
 - `packages/application/test/command.test.ts` (11 tests): the closed kind list,
   payloads that reject a caller-supplied impact/approval/revisions, digest
   sensitivity to every input, grants, and the error table.
-- `apps/web/test/confirm.browser.test.ts` (3 tests): read-only
-  without the capability, no action on a stale plan, and accepted vs published
-  shown distinctly.
+- `apps/web/test/confirm.browser.test.ts` (8 tests): read-only
+  without the capability, no action on a stale plan, accepted vs published
+  shown distinctly, and a pending-to-posted review shown against the candidate
+  it pins. That review can be approved and committed only while every pin, the
+  offered action and the candidate itself are unchanged, and while the
+  simulation states an action that matches the plan's kind.
 - `services/processor/test/balance-projection.test.ts` "the
   dispatcher routes the balance-projection target to that processor": a
   `balance-projection` row reaches A07's real processor and rebuilds the

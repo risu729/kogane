@@ -28,6 +28,7 @@ import {
   type CardPurchaseSourceId,
 } from "../../../domain/src/card-purchase.ts";
 import type {
+  CardPurchaseCandidate,
   CardPurchasePage,
   CardPurchaseRevisionEntry,
   CardPurchaseSettlementLink,
@@ -59,10 +60,16 @@ import {
 import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
 import { CURRENT_CARD_USAGE_SQL } from "../../../read-model/src/card-usage.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
+import { loadPendingPostedCandidates } from "./card-purchase-candidates.ts";
 
 export const CARD_PURCHASE_PAGE_SIZE = 50;
 /** Revisions listed per event, newest first; older ones stay stored. */
 const CARD_PURCHASE_HISTORY_LIMIT = 20;
+/**
+ * Pending-to-posted candidates listed per event, newest first and, within one
+ * tick's proposals, the pair with most in common first (card-purchase-candidates.ts).
+ */
+const CARD_PURCHASE_CANDIDATE_LIMIT = 10;
 /**
  * Live events one request may total. The figures cover the whole filter, so a
  * larger filter is refused rather than partially summed; a statement period
@@ -561,6 +568,12 @@ export async function queryCardPurchases(
   const unrecognizedCurrentRows = current.find((row) => row.current_key === null)?.unrecognized;
   if (typeof unrecognizedCurrentRows !== "number") throw new Error("card_usage_count_missing");
 
+  // Pending-to-posted candidates touching the page's rows, resolved by the
+  // one reader the review plan uses (card-purchase-candidates.ts).
+  const candidates = await loadPendingPostedCandidates(sql, {
+    keys: keyRows.map((row) => row.recognition_key),
+  });
+
   const items = page.map((event): CardPurchaseView => {
     const id = event.eventId;
     const detail = details.get(id)!;
@@ -615,6 +628,17 @@ export async function queryCardPurchases(
         decisionRevisionId: row.decision_revision_id,
         createdAt: row.created_at,
       }));
+    const ownKeys = new Set(
+      keyRows.filter((row) => row.event_id === id).map((row) => row.recognition_key),
+    );
+    const eventCandidates: CardPurchaseCandidate[] = candidates
+      .filter(
+        (entry) =>
+          ownKeys.has(entry.pending.recognitionKey ?? "") ||
+          ownKeys.has(entry.posted.recognitionKey ?? ""),
+      )
+      .slice(0, CARD_PURCHASE_CANDIDATE_LIMIT)
+      .map((entry) => entry.view);
     const explanationRefs = [
       ...new Set([
         `event:${id}@${event.revision}`,
@@ -636,6 +660,7 @@ export async function queryCardPurchases(
                 : [`allocation:${settlement.allocationId}`]),
               ...(settlement.bankDebit === null ? [] : [refText(settlement.bankDebit.ref)]),
             ]),
+        ...eventCandidates.map((candidate) => `proposal:${candidate.proposalId}`),
       ]),
     ];
     return {
@@ -655,6 +680,7 @@ export async function queryCardPurchases(
       settlement,
       history,
       historyTruncated: revisions.length > CARD_PURCHASE_HISTORY_LIMIT,
+      candidates: eventCandidates,
       explanationRefs,
     };
   });
