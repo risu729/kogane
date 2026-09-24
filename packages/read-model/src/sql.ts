@@ -153,13 +153,27 @@ const ELIGIBLE_VPOINT_RUNS = `eligible_vpoint_runs AS (
          WHERE snapshot_rank = 1
        )`;
 
+/** The `YYYYMM` statement month of a Vpass statement-page artifact key. */
 const VPASS_STATEMENT_MONTH = (artifact: string): string =>
   `CASE WHEN substr(${artifact}.artifact_key, 1, 7) = 'months/'
                    THEN substr(${artifact}.artifact_key, 8, 6)
                    ELSE substr(${artifact}.artifact_key, 23, 6)
                  END`;
 
-const TRANSACTION_CTES = `ranked_myjcb_snapshots AS (
+// ── Card snapshot currentness ────────────────────────────────────────────
+//
+// Which card-usage capture is current is defined here once. The Transactions
+// page (TRANSACTIONS_SQL below) and the current card usage read
+// (card-usage.ts) compose these same CTEs, so the two can never disagree on
+// which Vpass or MyJCB rows are the latest complete capture.
+
+/**
+ * MyJCB credit ledger: the newest published capture per (source, connection,
+ * statement state, period). Every unconfirmed capture of a connection shares
+ * one partition, so a pending row that left the newest capture is not
+ * current. Defines `current_myjcb_snapshots(fetch_artifact_id)`.
+ */
+export const MYJCB_LEDGER_SNAPSHOT_CTES = `ranked_myjcb_snapshots AS (
          SELECT p.fetch_artifact_id,
                 ROW_NUMBER() OVER (
                   PARTITION BY
@@ -177,7 +191,63 @@ const TRANSACTION_CTES = `ranked_myjcb_snapshots AS (
          SELECT fetch_artifact_id
          FROM ranked_myjcb_snapshots
          WHERE snapshot_rank = 1
-       ), ranked_smbc_direct_snapshots AS (
+       )`;
+
+/**
+ * Vpass statement pages: per (source, card unit, statement month) the newest
+ * fetch run in which every statement-page artifact of that card-month has an
+ * active parse. A month's capture is one snapshot whatever its family, so a
+ * complete web (posted) capture replaces an older customized (unconfirmed)
+ * one. Defines `current_vpass_snapshots(fetch_run_id, source_id,
+ * fetch_unit_key, statement_month, fetched_at)`, where `fetched_at` is the
+ * snapshot's newest artifact time.
+ */
+export const VPASS_STATEMENT_SNAPSHOT_CTES = `eligible_vpass_snapshots AS (
+         SELECT fa.fetch_run_id, fa.source_id, fa.fetch_unit_key,
+                ${VPASS_STATEMENT_MONTH("fa")} AS statement_month,
+                MAX(fa.fetched_at) AS fetched_at
+         FROM ${PARSE_CHAIN}
+         WHERE ${ACTIVE}
+           AND p.parser_name = 'vpass-statement-page'
+           AND fa.dataset = 'statement-page'
+           AND fa.fetch_unit_key IS NOT NULL
+         GROUP BY fa.fetch_run_id, fa.source_id, fa.fetch_unit_key, statement_month
+         HAVING COUNT(DISTINCT fa.id) = (
+           SELECT COUNT(*)
+           FROM ${visibleEvidence.fetchArtifacts} expected_fa
+           WHERE expected_fa.fetch_run_id = fa.fetch_run_id
+             AND expected_fa.source_id = fa.source_id
+             AND expected_fa.dataset = 'statement-page'
+             AND expected_fa.fetch_unit_key = fa.fetch_unit_key
+             AND ${VPASS_STATEMENT_MONTH("expected_fa")} = ${VPASS_STATEMENT_MONTH("fa")}
+         )
+       ), ranked_vpass_snapshots AS (
+         SELECT fetch_run_id, source_id, fetch_unit_key, statement_month, fetched_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY source_id, fetch_unit_key, statement_month
+                  ORDER BY fetched_at DESC, fetch_run_id DESC
+                ) AS snapshot_rank
+         FROM eligible_vpass_snapshots
+       ), current_vpass_snapshots AS (
+         SELECT fetch_run_id, source_id, fetch_unit_key, statement_month, fetched_at
+         FROM ranked_vpass_snapshots
+         WHERE snapshot_rank = 1
+       )`;
+
+/**
+ * The artifact `fa` belongs to `snapshot`, a `current_vpass_snapshots` row:
+ * the current snapshot of the artifact's own card-month.
+ */
+export const VPASS_SNAPSHOT_MEMBER = `snapshot.fetch_run_id = fa.fetch_run_id
+                 AND snapshot.source_id = fa.source_id
+                 AND snapshot.fetch_unit_key = fa.fetch_unit_key
+                 AND snapshot.statement_month = ${VPASS_STATEMENT_MONTH("fa")}`;
+
+/** The artifact `fa` is a current MyJCB credit-ledger capture. */
+export const MYJCB_LEDGER_MEMBER =
+  "fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)";
+
+const TRANSACTION_CTES = `${MYJCB_LEDGER_SNAPSHOT_CTES}, ranked_smbc_direct_snapshots AS (
          SELECT p.fetch_artifact_id,
                 ROW_NUMBER() OVER (
                   PARTITION BY fa.source_id, fa.artifact_key
@@ -220,37 +290,7 @@ const TRANSACTION_CTES = `ranked_myjcb_snapshots AS (
          SELECT fetch_artifact_id
          FROM ranked_moneyforward_snapshots
          WHERE snapshot_rank = 1
-       ), ${ELIGIBLE_VPOINT_RUNS}, eligible_vpass_snapshots AS (
-         SELECT fa.fetch_run_id, fa.source_id, fa.fetch_unit_key,
-                ${VPASS_STATEMENT_MONTH("fa")} AS statement_month,
-                MAX(fa.fetched_at) AS fetched_at
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'vpass-statement-page'
-           AND fa.dataset = 'statement-page'
-           AND fa.fetch_unit_key IS NOT NULL
-         GROUP BY fa.fetch_run_id, fa.source_id, fa.fetch_unit_key, statement_month
-         HAVING COUNT(DISTINCT fa.id) = (
-           SELECT COUNT(*)
-           FROM ${visibleEvidence.fetchArtifacts} expected_fa
-           WHERE expected_fa.fetch_run_id = fa.fetch_run_id
-             AND expected_fa.source_id = fa.source_id
-             AND expected_fa.dataset = 'statement-page'
-             AND expected_fa.fetch_unit_key = fa.fetch_unit_key
-             AND ${VPASS_STATEMENT_MONTH("expected_fa")} = ${VPASS_STATEMENT_MONTH("fa")}
-         )
-       ), ranked_vpass_snapshots AS (
-         SELECT fetch_run_id, source_id, fetch_unit_key, statement_month, fetched_at,
-                ROW_NUMBER() OVER (
-                  PARTITION BY source_id, fetch_unit_key, statement_month
-                  ORDER BY fetched_at DESC, fetch_run_id DESC
-                ) AS snapshot_rank
-         FROM eligible_vpass_snapshots
-       ), current_vpass_snapshots AS (
-         SELECT fetch_run_id, source_id, fetch_unit_key, statement_month
-         FROM ranked_vpass_snapshots
-         WHERE snapshot_rank = 1
-       )`;
+       ), ${ELIGIBLE_VPOINT_RUNS}, ${VPASS_STATEMENT_SNAPSHOT_CTES}`;
 
 /**
  * Current transactions: one row per provider transaction identity. Sources
@@ -305,7 +345,7 @@ const TRANSACTIONS_SQL = `WITH ${TRANSACTION_CTES}
          WHERE ${ACTIVE}
            AND (
              p.parser_name <> 'myjcb-credit-ledger'
-             OR fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)
+             OR ${MYJCB_LEDGER_MEMBER}
            )
            AND (
              p.parser_name <> 'smbc-direct-transactions'
@@ -324,10 +364,7 @@ const TRANSACTIONS_SQL = `WITH ${TRANSACTION_CTES}
              OR EXISTS (
                SELECT 1
                FROM current_vpass_snapshots snapshot
-               WHERE snapshot.fetch_run_id = fa.fetch_run_id
-                 AND snapshot.source_id = fa.source_id
-                 AND snapshot.fetch_unit_key = fa.fetch_unit_key
-                 AND snapshot.statement_month = ${VPASS_STATEMENT_MONTH("fa")}
+               WHERE ${VPASS_SNAPSHOT_MEMBER}
              )
            )
            AND (

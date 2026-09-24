@@ -1,0 +1,326 @@
+// Current card usage: every Vpass and MyJCB usage row a card purchase can be
+// recognised from, pending and posted, with the recognition key, the resolved
+// account, the provider display state and the exact decimal amount. One
+// definition of "current" for the purchase-recognition writer and its readers
+// (card purchase plan §1.2):
+//
+//   1. the parse run is published (`activeStateProjection`, the same predicate
+//      as every current list);
+//   2. the row is in the latest complete container snapshot, by the very CTEs
+//      the Transactions page composes (`sql.ts`: a Vpass card unit + statement
+//      month, a MyJCB connection + statement state + period);
+//   3. the newest representation per (resolved account, source, snapshot
+//      slot) wins, so a card ordinal or MyJCB connection that changed under one
+//      resolved account does not keep an older capture current. The slot is
+//      the part of the step-2 partition that is not the unit: the statement
+//      month for Vpass (a month's capture flips from the customized family to
+//      the web family as one snapshot), the statement state and period for
+//      MyJCB (every unconfirmed capture shares one slot, exactly as in step 2).
+//      A representation is a fetch run: the newest run by (snapshot
+//      fetched_at, fetch run id), the step-2 Vpass order, keeps every one of
+//      its units, so two cards that one account resolves in the same run never
+//      shadow each other. A row without a resolved account keeps its raw unit,
+//      i.e. step 2 alone;
+//   4. the latest observation of each recognition key.
+//
+// Amounts are the decimal-v1 projection of migration 0024, never a cast
+// integer. Provider extras are read at the exact `extra_json` paths the
+// deployed parsers emit; each is cited below. Nothing is classified here:
+// what counts as a purchase is the domain's decision.
+import { activeStateProjection, successfulFetchRuns } from "./concepts";
+import { DECIMAL_POLICY_RELEASE } from "./identity";
+import type { PageSql } from "./scope";
+import {
+  MYJCB_LEDGER_MEMBER,
+  MYJCB_LEDGER_SNAPSHOT_CTES,
+  VPASS_SNAPSHOT_MEMBER,
+  VPASS_STATEMENT_SNAPSHOT_CTES,
+} from "./sql";
+
+/** Largest page one call may request; the caller pages on with `afterId`. */
+export const CARD_USAGE_PAGE_LIMIT = 1000;
+/** Longest provider text an extra column returns; longer text reads as absent. */
+export const CARD_USAGE_TEXT_BOUND = 256;
+
+export type CardUsageSource = "vpass" | "myjcb";
+/** Pending and posted per source, as `RECONCILIATION_SLICES` in services/processor/src/reconciliation-job.ts. */
+export type CardUsageDisplayState = "pending" | "posted";
+
+/** One current card usage row. Column names are the SQL result's. */
+export interface CurrentCardUsageRow {
+  /** `transaction_observations.id`; the paging cursor. */
+  observation_id: number;
+  parse_run_id: number;
+  fetch_artifact_id: number;
+  fetch_run_id: number;
+  raw_locator: string;
+
+  // The recognition key: json_array(source_id, producer_id,
+  // external_id_namespace, source_account, external_id), the shape of
+  // `bank_key` in migration 0044.
+  source_id: CardUsageSource;
+  producer_id: string;
+  external_id_namespace: string | null;
+  source_account: string;
+  external_id: string | null;
+  /** SQLite's `json_array` text of the five components; null without an external id. */
+  recognition_key: string | null;
+
+  // Identity: the `current_identity_observations` row (read by key) and its
+  // `current_account_mappings` revision, as the card settlement ownership
+  // view (0044) and the Transactions page's `latest` organization resolve it.
+  /** `source_accounts.id` the sealed identity run assigned; null before identity ran. */
+  source_account_id: string | null;
+  account_id: string | null;
+  /** `account_mappings.status` of the current mapping. */
+  account_status: "identified" | "provider-local" | "aggregate" | "unresolved" | null;
+  /** `identity_runs.policy_version`: 2 is the Vpass `vpass-card-binding` family. */
+  policy_version: number | null;
+  /** `identity_run_contexts.policy_family`, e.g. `vpass-card-binding` or `identity-default`. */
+  policy_family: string | null;
+
+  // Provider display.
+  /** `transaction_observations.status` verbatim: `unconfirmed`, `posted` or `confirmed`. */
+  provider_status: string | null;
+  /** Vpass `_kogane.statementFamily` (`web`/`customized`); MyJCB `_kogane.statementState`. */
+  provider_family: string | null;
+  display_state: CardUsageDisplayState | null;
+  /** Provider usage date, `YYYY-MM-DD` as both parsers write it. */
+  as_of: string | null;
+  /** Vpass `_kogane.statementMonth` (`YYYYMM`); MyJCB `_kogane.period` (the provider label, verbatim). */
+  statement_period: string | null;
+  /** The snapshot unit: the Vpass card ordinal (`card-NNN`) or the MyJCB connection id. */
+  snapshot_unit: string | null;
+  /** The snapshot's time: the newest artifact of the Vpass card-month, the MyJCB artifact's own. */
+  snapshot_fetched_at: string;
+
+  // decimal-v1 (migration 0024); the unit is the observation's currency.
+  /** Null only when no decimal-v1 row was projected for the observation. */
+  value_status: "exact" | "missing" | "unparsed" | "conflict" | null;
+  coefficient: string | null;
+  scale: number | null;
+  value_basis: "minor_units" | "decimal_text" | "agreement" | "none" | null;
+  unit_ref: string | null;
+
+  // Provider extras; null when absent, not text, empty or over the bound.
+  /** Vpass web `data[6]`, Vpass customized `bunkatsuYaku`, MyJCB `summaryCells[paymentTypeCellIndex]`. */
+  payment_type: string | null;
+  /** Vpass customized `_kogane.providerSaleCode` (`5` sale, `6` refund). */
+  provider_sale_code: string | null;
+  /** MyJCB `_kogane.usageAmountText` (ご利用金額). */
+  usage_amount_text: string | null;
+  /** MyJCB `_kogane.paymentAmountText` (今回のお支払い金額). */
+  payment_amount_text: string | null;
+  /** MyJCB `expanded.今回回数`. */
+  installment_count_text: string | null;
+}
+
+/** A bounded text at a fixed `extra_json` path of `t`, or NULL; malformed JSON is NULL, never an error. */
+const extraText = (path: string): string =>
+  `CASE WHEN json_valid(t.extra_json) AND json_type(t.extra_json, '${path}') = 'text'
+              AND length(json_extract(t.extra_json, '${path}')) BETWEEN 1 AND ${CARD_USAGE_TEXT_BOUND}
+            THEN json_extract(t.extra_json, '${path}') END`;
+
+const VPASS = "fa.source_id = 'vpass' AND p.parser_name = 'vpass-statement-page'";
+const MYJCB = "fa.source_id = 'myjcb' AND p.parser_name = 'myjcb-credit-ledger'";
+
+// Field sources (packages/parsers/src/parsers/*.ts, as deployed):
+// - vpass.ts parseWeb: status 'posted'; `extra` is the provider row (`data`,
+//   positional: data[6] is the payment type, the same text as `description`)
+//   plus `_kogane.statementFamily` = 'web' and `_kogane.statementMonth`.
+// - vpass.ts parseCustomized: status 'unconfirmed'; `extra` is the provider
+//   row (`bunkatsuYaku` is the payment type, the same text as `description`)
+//   plus `_kogane.statementFamily` = 'customized', `_kogane.statementMonth`
+//   and `_kogane.providerSaleCode` (the row's `uriageKbn`: '5' sale, '6' refund).
+// - myjcb.ts myJcbCreditLedger: status 'confirmed'/'unconfirmed'; `extra` is
+//   `summaryCells` (the payment type at `_kogane.paymentTypeCellIndex`, 2 or
+//   3, the same text as `description`), `expanded` (provider cells such as
+//   今回回数) and `_kogane.statementState`, `_kogane.period`,
+//   `_kogane.usageAmountText`, `_kogane.paymentAmountText`. The last two are
+//   the fields services/processor/src/reconciliation-job.ts `comparablePayment`
+//   already reads (usage == payment > 0).
+const PROVIDER_FAMILY = `CASE WHEN ${VPASS} THEN ${extraText("$._kogane.statementFamily")}
+            WHEN ${MYJCB} THEN ${extraText("$._kogane.statementState")} END`;
+const STATEMENT_PERIOD = `CASE WHEN ${VPASS} THEN ${extraText("$._kogane.statementMonth")}
+            WHEN ${MYJCB} THEN ${extraText("$._kogane.period")} END`;
+const PAYMENT_TYPE = `CASE WHEN ${VPASS} THEN
+              CASE ${extraText("$._kogane.statementFamily")}
+                WHEN 'web' THEN ${extraText("$.data[6]")}
+                WHEN 'customized' THEN ${extraText("$.bunkatsuYaku")}
+              END
+            WHEN ${MYJCB} AND json_valid(t.extra_json) THEN
+              CASE json_extract(t.extra_json, '$._kogane.paymentTypeCellIndex')
+                WHEN 2 THEN ${extraText("$.summaryCells[2]")}
+                WHEN 3 THEN ${extraText("$.summaryCells[3]")}
+              END
+            END`;
+const DISPLAY_STATE = `CASE
+              WHEN ${VPASS} AND t.status = 'unconfirmed' THEN 'pending'
+              WHEN ${VPASS} AND t.status = 'posted' THEN 'posted'
+              WHEN ${MYJCB} AND t.status = 'unconfirmed' THEN 'pending'
+              WHEN ${MYJCB} AND t.status = 'confirmed' THEN 'posted'
+            END`;
+
+/**
+ * The identity observation of `t`: `current_identity_observations` (0026)
+ * restated as a keyed lookup, the way `organizationSql` reads it for the
+ * Transactions page. For a published parse on a successful fetch run, the
+ * sealed eligible identity run with the highest policy version. The view
+ * itself would materialize every source's identity catalogue on each call;
+ * card-usage.test.ts proves both give the same row.
+ */
+const IDENTITY_LOOKUP = `LEFT JOIN identity_observations io
+           ON io.kind = 'transaction' AND io.observation_id = t.id
+          AND ${successfulFetchRuns.predicate("f")}
+          AND io.identity_run_id = (
+            SELECT run.id
+            FROM eligible_identity_runs run
+            JOIN identity_run_seals seal ON seal.identity_run_id = run.id
+            WHERE run.parse_run_id = t.parse_run_id
+            ORDER BY run.policy_version DESC
+            LIMIT 1
+          )`;
+
+/** The row's columns, in the order the result returns them. */
+const COLUMNS = [
+  "observation_id",
+  "parse_run_id",
+  "fetch_artifact_id",
+  "fetch_run_id",
+  "raw_locator",
+  "source_id",
+  "producer_id",
+  "external_id_namespace",
+  "source_account",
+  "external_id",
+  "recognition_key",
+  "source_account_id",
+  "account_id",
+  "account_status",
+  "policy_version",
+  "policy_family",
+  "provider_status",
+  "provider_family",
+  "display_state",
+  "as_of",
+  "statement_period",
+  "snapshot_unit",
+  "snapshot_fetched_at",
+  "value_status",
+  "coefficient",
+  "scale",
+  "value_basis",
+  "unit_ref",
+  "payment_type",
+  "provider_sale_code",
+  "usage_amount_text",
+  "payment_amount_text",
+  "installment_count_text",
+] as const satisfies readonly (keyof CurrentCardUsageRow)[];
+
+/**
+ * The whole query; `?1` is the exclusive observation id cursor and `?2` the
+ * page size. Ranking runs over the complete current set before the cursor
+ * applies, so a page boundary never changes which row is current.
+ */
+export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPASS_STATEMENT_SNAPSHOT_CTES}, card_usage AS (
+         SELECT t.id AS observation_id, t.parse_run_id, fa.id AS fetch_artifact_id,
+                fa.fetch_run_id, t.raw_locator,
+                fa.source_id, fr.producer_id, ses.external_id_namespace,
+                t.source_account, t.external_id,
+                CASE WHEN t.external_id IS NOT NULL THEN json_array(
+                  fa.source_id, fr.producer_id, ses.external_id_namespace,
+                  t.source_account, t.external_id
+                ) END AS recognition_key,
+                io.source_account_id, mapping.account_id, mapping.status AS account_status,
+                -- Scalar lookups keep the view keyed; as a LEFT JOIN operand it is materialized whole.
+                (SELECT ctx.policy_version FROM identity_run_contexts ctx
+                  WHERE ctx.identity_run_id = io.identity_run_id) AS policy_version,
+                (SELECT ctx.policy_family FROM identity_run_contexts ctx
+                  WHERE ctx.identity_run_id = io.identity_run_id) AS policy_family,
+                t.status AS provider_status,
+                ${PROVIDER_FAMILY} AS provider_family,
+                ${DISPLAY_STATE} AS display_state,
+                t.as_of,
+                ${STATEMENT_PERIOD} AS statement_period,
+                CASE WHEN snapshot.fetch_run_id IS NOT NULL THEN fa.fetch_unit_key
+                  ELSE substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1)
+                END AS snapshot_unit,
+                coalesce(snapshot.fetched_at, fa.fetched_at) AS snapshot_fetched_at,
+                CASE WHEN snapshot.fetch_run_id IS NOT NULL THEN json_array(snapshot.statement_month)
+                  ELSE json_array(
+                    fa.statement_state,
+                    CASE WHEN fa.statement_state = 'unconfirmed' THEN '' ELSE fa.period END
+                  )
+                END AS snapshot_slot,
+                dv.status AS value_status, dv.coefficient, dv.scale, dv.basis AS value_basis,
+                t.currency AS unit_ref,
+                ${PAYMENT_TYPE} AS payment_type,
+                CASE WHEN ${VPASS} THEN ${extraText("$._kogane.providerSaleCode")} END
+                  AS provider_sale_code,
+                CASE WHEN ${MYJCB} THEN ${extraText("$._kogane.usageAmountText")} END
+                  AS usage_amount_text,
+                CASE WHEN ${MYJCB} THEN ${extraText("$._kogane.paymentAmountText")} END
+                  AS payment_amount_text,
+                CASE WHEN ${MYJCB} THEN ${extraText('$.expanded."今回回数"')} END
+                  AS installment_count_text
+         FROM ${activeStateProjection.observationChain("transaction_observations", "t")}
+         JOIN financial_fetch_runs fr ON fr.id = f.id
+         JOIN acquisition_sessions ses ON ses.id = fr.acquisition_session_id
+         LEFT JOIN current_vpass_snapshots snapshot
+           ON p.parser_name = 'vpass-statement-page'
+          AND ${VPASS_SNAPSHOT_MEMBER}
+         LEFT JOIN observation_decimal_values dv
+           ON dv.kind = 'transaction' AND dv.observation_id = t.id
+          AND dv.policy_version = '${DECIMAL_POLICY_RELEASE}'
+         ${IDENTITY_LOOKUP}
+         LEFT JOIN current_account_mappings mapping
+           ON mapping.source_account_id = io.source_account_id
+         WHERE ${activeStateProjection.predicate}
+           AND (
+             (${VPASS} AND snapshot.fetch_run_id IS NOT NULL)
+             OR (${MYJCB} AND ${MYJCB_LEDGER_MEMBER})
+           )
+       ), representations AS (
+         SELECT card_usage.*,
+                FIRST_VALUE(fetch_run_id) OVER (
+                  PARTITION BY source_id, snapshot_slot,
+                    CASE WHEN account_id IS NULL THEN json_array('unit', snapshot_unit)
+                      ELSE json_array('account', account_id)
+                    END
+                  ORDER BY snapshot_fetched_at DESC, fetch_run_id DESC
+                ) AS newest_run
+         FROM card_usage
+       ), keyed AS (
+         SELECT representations.*,
+                ROW_NUMBER() OVER (
+                  PARTITION BY coalesce(recognition_key, json_array('observation-row', observation_id))
+                  ORDER BY snapshot_fetched_at DESC, observation_id DESC
+                ) AS key_rank
+         FROM representations
+         WHERE fetch_run_id = newest_run
+       )
+       SELECT ${COLUMNS.join(", ")}
+       FROM keyed
+       WHERE key_rank = 1 AND observation_id > ?1
+       ORDER BY observation_id
+       LIMIT ?2`;
+
+/**
+ * One page of current card usage after the observation id `afterId`, in
+ * ascending id order. Start at 0; pass the last row's `observation_id` for
+ * the next page; a page shorter than `limit` is the end.
+ */
+export function currentCardUsageSql({
+  afterId,
+  limit,
+}: {
+  afterId: number;
+  limit: number;
+}): PageSql {
+  if (!Number.isSafeInteger(afterId) || afterId < 0)
+    throw new Error("read-model: afterId must be a non-negative safe integer");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > CARD_USAGE_PAGE_LIMIT)
+    throw new Error(`read-model: limit must be an integer from 1 to ${CARD_USAGE_PAGE_LIMIT}`);
+  return { sql: CURRENT_CARD_USAGE_SQL, args: [afterId, limit] };
+}

@@ -182,6 +182,15 @@ export {
   type SavedSimulationSqlRow,
 } from "./reward-projection";
 export {
+  CARD_USAGE_PAGE_LIMIT,
+  CARD_USAGE_TEXT_BOUND,
+  type CardUsageDisplayState,
+  type CardUsageSource,
+  CURRENT_CARD_USAGE_SQL,
+  type CurrentCardUsageRow,
+  currentCardUsageSql,
+} from "./card-usage";
+export {
   ACTIVITY_BASES,
   type ActivityBasis,
   activityEventsSql,
