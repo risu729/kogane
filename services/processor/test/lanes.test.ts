@@ -451,6 +451,46 @@ test("U08 lanes report skipped by default and sit in their stated order", async 
   expect(lines[4]).toEqual({ event: "operation_dispatch", flag: "true" });
 }, 60000);
 
+test("with its flag on, purchase_recognition sits right after reconciliation_sweep", async () => {
+  const lines: Record<string, unknown>[] = [];
+  const log = (line: string) => lines.push(JSON.parse(line));
+  const stages = {
+    parse: () => Promise.resolve({ ok: true }),
+    identity: () => Promise.resolve({ ok: true }),
+    balanceProjection: () => Promise.resolve({ ok: true }),
+    reconcile: () => Promise.resolve({ ok: true }),
+    purchases: () => Promise.resolve({ ok: true }),
+    rewards: () => Promise.resolve({ ok: true }),
+    decisions: () => Promise.resolve({ ok: true }),
+  };
+  const flags = { RECONCILIATION_ENABLED: "true", REWARD_CLAIMS_ENABLED: "true" };
+  // Off (absent, as in a configuration that predates the flag, or "0" as shipped).
+  for (const value of [undefined, "0"]) {
+    lines.length = 0;
+    await runScheduled(
+      { ...env, ...flags, PURCHASE_RECOGNITION_ENABLED: value } as unknown as Env,
+      stages,
+      log,
+    );
+    expect(lines.map((line) => line.event)).not.toContain("purchase_recognition");
+  }
+  lines.length = 0;
+  await runScheduled(
+    { ...env, ...flags, PURCHASE_RECOGNITION_ENABLED: "1" } as unknown as Env,
+    stages,
+    log,
+  );
+  expect(lines.map((line) => line.event)).toEqual([
+    "observation_sweep",
+    "identity_sweep",
+    "balance_projection",
+    "reconciliation_sweep",
+    "purchase_recognition",
+    "reward_claims_sweep",
+    "decision_outbox",
+  ]);
+}, 60000);
+
 test("replay and sweep commands validate their input and stay off unknown routes", async () => {
   expect(
     (

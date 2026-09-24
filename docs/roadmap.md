@@ -37,6 +37,13 @@ Concrete limits in the current code:
 - [The pending/posted job](../services/processor/src/reconciliation-job.ts)
   includes Vpass and the supported MyJCB usage/payment-equivalent subset.
   An installment payment amount is not silently compared with a purchase amount.
+- [Card purchase recognition](economic-events.md#card-purchase-recognition)
+  turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
+  trusted card identity into `purchase` and `refund` events, behind
+  `PURCHASE_RECOGNITION_ENABLED` (off until enabled). Installment, revolving
+  and bonus rows, amountless rows and rows without a stable card identity are
+  excluded. Excluding a row by decision and linking a pending row to its posted
+  row as one purchase are not available yet.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
@@ -72,8 +79,10 @@ finishing a representative bank, card, broker or rewards flow.
 
 **The current milestone is to complete card usage → statement → bank debit
 coverage without counting an expense twice.** The first statement/debit review
-slice is implemented; source ownership, supported bank coverage, purchase-event
-recognition, partial payments and refund handling still need completion.
+slice is implemented, and so is the first purchase-event writer for supported
+single-payment card usage (off until enabled); source ownership, supported bank
+coverage, pending-to-posted purchase linking, partial payments and refund
+handling still need completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The numbered phases below retain the original layer identifiers. They describe

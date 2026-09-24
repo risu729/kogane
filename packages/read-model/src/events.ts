@@ -200,12 +200,17 @@ ORDER BY t.id`;
  * provider-reported balance of the same subject. Both are returned as rows; the
  * comparison and the arithmetic happen in TypeScript, and this query writes
  * nothing. `?1` is a JSON array of subject refs.
+ *
+ * Only `cash-movement` legs move a provider balance. A recognised card purchase
+ * decreases `account:<card>` on the `purchase-recognition` basis, and adding
+ * that to the same account's cash legs would count one card charge twice (two
+ * bases are never summed; see `legTotal`).
  */
 export const eventDerivedLegsSql = `SELECT l.subject_ref,l.unit_ref,l.role,
  l.value_status,l.coefficient,l.scale,l.value_reason_code
 FROM economic_legs l
 JOIN economic_event_revisions e ON e.event_id=l.event_id AND e.revision=l.revision
-WHERE ${LIVE_EVENT} AND l.role IN ('increase','decrease')
+WHERE ${LIVE_EVENT} AND l.basis='cash-movement' AND l.role IN ('increase','decrease')
  AND l.subject_ref IN (SELECT value FROM json_each(?1))
 ORDER BY l.subject_ref,l.unit_ref`;
 

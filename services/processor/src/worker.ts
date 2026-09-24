@@ -22,6 +22,7 @@ import { runBatch } from "../../../packages/storage-d1/src/d1.ts";
 import { dispatchDecisionOutbox } from "./decision-outbox.ts";
 import { cardSettlementSweep } from "./card-settlement-job.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
+import { cardPurchaseSweep, purchaseRecognitionEnabled } from "./card-purchase-job.ts";
 import {
   publicationConsistency,
   publishBatch,
@@ -1651,6 +1652,12 @@ export interface ScheduledStages {
   collection?: (env: Env) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
+  /**
+   * Card purchase recognition (docs/economic-events.md). Absent stage, or
+   * PURCHASE_RECOGNITION_ENABLED off, means the lane never runs and writes
+   * nothing.
+   */
+  purchases?: (env: Env) => Promise<object>;
   /** A11 reward promotion. Absent stage, or the flag off, means the lane never runs. */
   rewards?: (env: Env) => Promise<object>;
   /**
@@ -1687,6 +1694,7 @@ const defaultStages: ScheduledStages = {
     ...(await reconciliationSweep(env.DB)),
     cardSettlements: await cardSettlementSweep(env.DB),
   }),
+  purchases: (env) => cardPurchaseSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
   rewardReadProjection: (env) => rewardReadProjectionStage(env),
   reports: (env) => {
@@ -1746,6 +1754,14 @@ export async function runScheduled(
     [
       "reconciliation_sweep",
       reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
+    ],
+    // Off unless PURCHASE_RECOGNITION_ENABLED is set: then adopted Vpass and
+    // MyJCB usage rows become purchase/refund events, each with a rule
+    // decision. Right after reconciliation, which reads the same rows as
+    // candidates and writes none of these events (docs/economic-events.md).
+    [
+      "purchase_recognition",
+      purchaseRecognitionEnabled(env.PURCHASE_RECOGNITION_ENABLED) ? stages.purchases : undefined,
     ],
     // Off unless REWARD_CLAIMS_ENABLED is set, so a normal deploy promotes
     // nothing and logs nothing new (docs/rewards.md).
