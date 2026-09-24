@@ -64,6 +64,14 @@ import {
   handleTerminalNotification,
   type CollectionEnv,
 } from "./collection/index.ts";
+import {
+  invocationContext,
+  invocationProbe,
+  meteredEnv,
+  platformLimitError,
+  type InvocationContext,
+} from "./invocation-probe.ts";
+import { OperationMeter } from "../../../packages/application/src/collection/index.ts";
 import { dispatchOperations } from "./operations/dispatch.ts";
 import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
 import {
@@ -1647,9 +1655,10 @@ export interface ScheduledStages {
    * U08 shared-R2 terminal scan. Always wired like the projection: the scan
    * itself reports `skipped` while SHARED_R2_INGEST_ENABLED is off, so the
    * log shows the lane exists and is off rather than nothing at all
-   * (docs/processor.md).
+   * (docs/processor.md). It spends the invocation's registration budget,
+   * which it shares with `operations`.
    */
-  collection?: (env: Env) => Promise<object>;
+  collection?: (env: Env, context: InvocationContext) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
   /**
@@ -1677,16 +1686,18 @@ export interface ScheduledStages {
   /**
    * U06/U08 operations dispatch. Reports `skipped` unless OPS_DISPATCH_ENABLED
    * is set; it runs before the decision outbox and never completes an
-   * operation merely by handing its work over (contracts/stages.json).
+   * operation merely by handing its work over (contracts/stages.json). An
+   * `import` spends the same registration budget as the scan.
    */
-  operations?: (env: Env) => Promise<object>;
+  operations?: (env: Env, context: InvocationContext) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
-  collection: (env) => collectionScan(collectionEnv(env)),
+  collection: (env, context) =>
+    collectionScan(collectionEnv(env), { budget: context.registration }),
   // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
@@ -1717,7 +1728,8 @@ const defaultStages: ScheduledStages = {
     dispatchDecisionOutbox(env.DB, {
       processors: { "balance-projection": balanceProjectionOutboxProcessor(env) },
     }),
-  operations: (env) => dispatchOperations(collectionEnv(env)),
+  operations: (env, context) =>
+    dispatchOperations(collectionEnv(env), { budget: context.registration }),
 };
 
 /**
@@ -1731,68 +1743,72 @@ function collectionEnv(env: Env): CollectionEnv & { OPS_DISPATCH_ENABLED?: strin
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
  * and never stops the identity projection. Log lines carry counts and safe
- * codes only, never provider values or exception text. */
+ * codes only, never provider values or exception text. The stages of one
+ * invocation share `context`: one registration budget, one count of failures
+ * that named a platform limit. */
 export async function runScheduled(
   env: Env,
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
+  context: InvocationContext = invocationContext(),
 ): Promise<void> {
-  const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
-    ["observation_sweep", stages.parse],
-    // U08: terminals persisted in the shared DATA bucket are registered
-    // before the identity sweep, so a run found this tick can reach identity
-    // and parsing on the same tick rather than waiting for the next one.
-    // The stage reports itself `skipped` while SHARED_R2_INGEST_ENABLED is
-    // off, like the projection lane, so an operator can see it is off.
-    ["collection_scan", stages.collection],
-    ["identity_sweep", stages.identity],
-    // The projection lane always runs and reports itself skipped while its
-    // own flag is off (docs/balance-read-model.md).
-    ["balance_projection", stages.balanceProjection],
-    // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
-    // writes nothing new (docs/economic-events.md).
+  const lanes: [string, ((env: Env, context: InvocationContext) => Promise<object>) | undefined][] =
     [
-      "reconciliation_sweep",
-      reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
-    ],
-    // Off unless PURCHASE_RECOGNITION_ENABLED is set: then adopted Vpass and
-    // MyJCB usage rows become purchase/refund events, each with a rule
-    // decision. Right after reconciliation, which reads the same rows as
-    // candidates and writes none of these events (docs/economic-events.md).
-    [
-      "purchase_recognition",
-      purchaseRecognitionEnabled(env.PURCHASE_RECOGNITION_ENABLED) ? stages.purchases : undefined,
-    ],
-    // Off unless REWARD_CLAIMS_ENABLED is set, so a normal deploy promotes
-    // nothing and logs nothing new (docs/rewards.md).
-    [
-      "reward_claims_sweep",
-      rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED) ? stages.rewards : undefined,
-    ],
-    // U16: the reward second stage reads the claims the sweep above promoted,
-    // so it runs after it and before the report job. Off unless
-    // REWARD_READ_PROJECTION_ENABLED is set (docs/rewards.md).
-    [
-      "reward_read_projection",
-      rewardReadProjectionEnabled(env.REWARD_READ_PROJECTION_ENABLED)
-        ? stages.rewardReadProjection
-        : undefined,
-    ],
-    // Off unless REPORTS_ENABLED is set, for the same reason
-    // (docs/calculation-and-reports.md).
-    ["report_job", reportsEnabled(env.REPORTS_ENABLED) ? stages.reports : undefined],
-    // U06/U08: accepted operations are handed to their executor before the
-    // outbox, so work this tick accepted can still reach it. Reports
-    // `skipped` unless OPS_DISPATCH_ENABLED is set.
-    ["operation_dispatch", stages.operations],
-    // A09: the decision outbox runs last, after the projections a decision may
-    // have invalidated (docs/change-lifecycle.md).
-    ["decision_outbox", stages.decisions],
-  ];
+      ["observation_sweep", stages.parse],
+      // U08: terminals persisted in the shared DATA bucket are registered
+      // before the identity sweep, so a run found this tick can reach identity
+      // and parsing on the same tick rather than waiting for the next one.
+      // The stage reports itself `skipped` while SHARED_R2_INGEST_ENABLED is
+      // off, like the projection lane, so an operator can see it is off.
+      ["collection_scan", stages.collection],
+      ["identity_sweep", stages.identity],
+      // The projection lane always runs and reports itself skipped while its
+      // own flag is off (docs/balance-read-model.md).
+      ["balance_projection", stages.balanceProjection],
+      // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
+      // writes nothing new (docs/economic-events.md).
+      [
+        "reconciliation_sweep",
+        reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
+      ],
+      // Off unless PURCHASE_RECOGNITION_ENABLED is set: then adopted Vpass and
+      // MyJCB usage rows become purchase/refund events, each with a rule
+      // decision. Right after reconciliation, which reads the same rows as
+      // candidates and writes none of these events (docs/economic-events.md).
+      [
+        "purchase_recognition",
+        purchaseRecognitionEnabled(env.PURCHASE_RECOGNITION_ENABLED) ? stages.purchases : undefined,
+      ],
+      // Off unless REWARD_CLAIMS_ENABLED is set, so a normal deploy promotes
+      // nothing and logs nothing new (docs/rewards.md).
+      [
+        "reward_claims_sweep",
+        rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED) ? stages.rewards : undefined,
+      ],
+      // U16: the reward second stage reads the claims the sweep above promoted,
+      // so it runs after it and before the report job. Off unless
+      // REWARD_READ_PROJECTION_ENABLED is set (docs/rewards.md).
+      [
+        "reward_read_projection",
+        rewardReadProjectionEnabled(env.REWARD_READ_PROJECTION_ENABLED)
+          ? stages.rewardReadProjection
+          : undefined,
+      ],
+      // Off unless REPORTS_ENABLED is set, for the same reason
+      // (docs/calculation-and-reports.md).
+      ["report_job", reportsEnabled(env.REPORTS_ENABLED) ? stages.reports : undefined],
+      // U06/U08: accepted operations are handed to their executor before the
+      // outbox, so work this tick accepted can still reach it. Reports
+      // `skipped` unless OPS_DISPATCH_ENABLED is set.
+      ["operation_dispatch", stages.operations],
+      // A09: the decision outbox runs last, after the projections a decision may
+      // have invalidated (docs/change-lifecycle.md).
+      ["decision_outbox", stages.decisions],
+    ];
   for (const [event, stage] of lanes) {
     if (!stage) continue;
     try {
-      log(JSON.stringify({ event, ...(await stage(env)) }));
+      log(JSON.stringify({ event, ...(await stage(env, context)) }));
     } catch (error) {
       const code =
         error instanceof PipelineError
@@ -1800,14 +1816,80 @@ export async function runScheduled(
           : error instanceof Error
             ? error.constructor.name
             : "unknown";
-      log(JSON.stringify({ event: `${event}_failed`, code }));
+      // Whether the platform refused the invocation at a documented limit is
+      // the one thing the probe keeps from the error; the text is dropped.
+      const limit = platformLimitError(error);
+      if (limit) context.limitErrors += 1;
+      log(JSON.stringify({ event: `${event}_failed`, code, ...(limit ? { limit: true } : {}) }));
     }
+  }
+}
+
+/**
+ * One cron or queue invocation, metered: every binding the lanes use counts
+ * what they do, and one `invocation_budget` line reports it when the
+ * invocation ends, however it ends (issue #87, docs/operations.md).
+ */
+export async function meteredInvocation(
+  trigger: "scheduled" | "queue",
+  env: Env,
+  work: (env: Env, context: InvocationContext) => Promise<void>,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<void> {
+  const meter = new OperationMeter();
+  const context = invocationContext();
+  try {
+    await work(meteredEnv(env, meter), context);
+  } finally {
+    log(JSON.stringify(invocationProbe(trigger, meter, context)));
+  }
+}
+
+/**
+ * The queue consumer's work for one batch. Every message of the batch shares
+ * the invocation's registration budget; a message whose registration did not
+ * start because the budget was spent is retried, exactly like a retryable
+ * one, and is idempotent when it runs again.
+ */
+export async function consumeTerminalNotifications(
+  messages: readonly Pick<Message<unknown>, "body" | "ack" | "retry">[],
+  env: Env,
+  context: InvocationContext,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<void> {
+  for (const message of messages) {
+    let event: Record<string, unknown>;
+    try {
+      const result = await handleTerminalNotification(
+        collectionEnv(env),
+        { body: message.body },
+        { budget: context.registration },
+      );
+      event = { event: "collection_notification", ...result };
+      if (result.outcome === "retryable" || result.outcome === "deferred") message.retry();
+      else message.ack();
+    } catch (error) {
+      // Safe codes only: never the exception text, never a key or a value.
+      const code =
+        error instanceof PipelineError
+          ? error.message
+          : error instanceof Error
+            ? error.constructor.name
+            : "unknown";
+      const limit = platformLimitError(error);
+      if (limit) context.limitErrors += 1;
+      event = { event: "collection_notification_failed", code, ...(limit ? { limit: true } : {}) };
+      message.retry();
+    }
+    log(JSON.stringify(event));
   }
 }
 
 export default {
   async scheduled(_event: ScheduledController, env: Env): Promise<void> {
-    await runScheduled(env);
+    await meteredInvocation("scheduled", env, (metered, context) =>
+      runScheduled(metered, defaultStages, undefined, context),
+    );
   },
   /**
    * R2 event notifications for the shared DATA bucket (U08). The queue only
@@ -1815,31 +1897,14 @@ export default {
    * message that cannot be trusted is acknowledged and dropped rather than
    * retried forever — the `collection_scan` lane finds the run anyway
    * (G1-04). A registration that could not finish is retried through the
-   * queue's own retry, and is idempotent when it runs again (G1-05).
+   * queue's own retry, and is idempotent when it runs again (G1-05). One that
+   * stopped at the batch's registration budget is `pending` and acknowledged:
+   * the scan continues it on the next tick (issue #87).
    */
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
-    for (const message of batch.messages) {
-      let event: Record<string, unknown>;
-      try {
-        const result = await handleTerminalNotification(collectionEnv(env), {
-          body: message.body,
-        });
-        event = { event: "collection_notification", ...result };
-        if (result.outcome === "retryable") message.retry();
-        else message.ack();
-      } catch (error) {
-        // Safe codes only: never the exception text, never a key or a value.
-        const code =
-          error instanceof PipelineError
-            ? error.message
-            : error instanceof Error
-              ? error.constructor.name
-              : "unknown";
-        event = { event: "collection_notification_failed", code };
-        message.retry();
-      }
-      console.log(JSON.stringify(event));
-    }
+    await meteredInvocation("queue", env, (metered, context) =>
+      consumeTerminalNotifications(batch.messages, metered, context),
+    );
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);

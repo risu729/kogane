@@ -441,15 +441,22 @@ export interface AddInventoryItemsRequest {
   items: InventoryItem[];
 }
 
+/**
+ * The most items one inventory chunk may carry. A caller that stages an
+ * inventory sizes its chunks from this rather than restating the number, so
+ * a chunk can never be refused as `invalid_items` for its length alone.
+ */
+export const MAX_INVENTORY_CHUNK_ITEMS = 30;
+
 export interface ValidatedAddInventoryItemsRequest {
-  /** Sorted by artifactKey; at least one and at most thirty items. */
+  /** Sorted by artifactKey; at least one and at most {@link MAX_INVENTORY_CHUNK_ITEMS} items. */
   items: InventoryItem[];
 }
 
 export function parseAddInventoryItemsRequest(input: unknown): ValidatedAddInventoryItemsRequest {
   const body = object(input);
   exactKeys(body, ["items"]);
-  const items = parseInventoryItems(body.items, "items", 30);
+  const items = parseInventoryItems(body.items, "items", MAX_INVENTORY_CHUNK_ITEMS);
   if (items.length === 0) throw new ContractError("empty_inventory_chunk");
   return { items };
 }

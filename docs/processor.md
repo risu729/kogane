@@ -25,10 +25,10 @@ is still unregistered.
 
 ## 2. Two ways in, one use case
 
-| Path                        | Trigger                                                              | Boundedness                                         |
-| --------------------------- | -------------------------------------------------------------------- | --------------------------------------------------- |
-| Queue consumer              | R2 event notification on the DATA bucket, `runs/` + `/terminal.json` | one batch of at most 10 messages                    |
-| `collection_scan` cron lane | every 5 minutes                                                      | one R2 list page (25 keys), at most 5 registrations |
+| Path                        | Trigger                                                              | Boundedness                                                                                                      |
+| --------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Queue consumer              | R2 event notification on the DATA bucket, `runs/` + `/terminal.json` | one batch of at most 10 messages, all sharing one registration budget of 500 operations (§3.3)                   |
+| `collection_scan` cron lane | every 5 minutes                                                      | up to 5 staged registrations continued first, then one R2 list page (25 keys) and at most 5 registrations (§3.3) |
 
 Both call `registerTerminal(source, runId)`
 (`packages/application/src/collection/register-terminal.ts`). The queue only
@@ -44,14 +44,15 @@ wakes the Processor sooner; the terminal in R2 is the record, so:
 
 What the consumer does with each outcome, exactly:
 
-| Outcome of `handleTerminalNotification`                        | Message   | Why                                                                                      |
-| -------------------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------- |
-| `flag_off`                                                     | **acked** | the flag is off; the message is logged and dropped, never retried into the DLQ           |
-| `invalid` (account, bucket, shape), `ignored` (not a terminal) | acked     | not a fact about a terminal in the DATA bucket                                           |
-| `registered`, `already_registered`, `blocked`, `missing`       | acked     | done, or nothing further a retry could change                                            |
-| `pending` (artifact budget spent)                              | acked     | the run is unsealed and the scan continues it; retrying would push large runs to the DLQ |
-| `retryable` (ingest client or route absent)                    | retried   | a configuration fix will make it succeed; after `max_retries` it lands in the DLQ        |
-| the handler threw                                              | retried   | a CORE or R2 failure; the log carries a safe code only                                   |
+| Outcome of `handleTerminalNotification`                        | Message   | Why                                                                                        |
+| -------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------ |
+| `flag_off`                                                     | **acked** | the flag is off; the message is logged and dropped, never retried into the DLQ             |
+| `invalid` (account, bucket, shape), `ignored` (not a terminal) | acked     | not a fact about a terminal in the DATA bucket                                             |
+| `registered`, `already_registered`, `blocked`, `missing`       | acked     | done, or nothing further a retry could change                                              |
+| `pending` (operation budget spent, progress recorded)          | acked     | the run is unsealed and the next scan tick continues it; retrying would push it to the DLQ |
+| `deferred` (the batch's budget was spent before it started)    | retried   | nothing was registered; the next delivery starts it with a fresh budget                    |
+| `retryable` (ingest client or route absent)                    | retried   | a configuration fix will make it succeed; after `max_retries` it lands in the DLQ          |
+| the handler threw                                              | retried   | a CORE or R2 failure; the log carries a safe code only                                     |
 
 With the flag off the queue therefore drains harmlessly: every message is
 acknowledged with a `flag_off` log line, and the terminals stay in R2 for the
@@ -101,13 +102,14 @@ revision and the old registration is kept.
 | Referenced object missing or resized                                                                                     | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                    |
 | Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13) |
 | Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state                                             |
-| Artifact budget spent                                                                                                    | pending, **unsealed**                              | `registered` pending; the next call catalogues only what is missing (G1-10)                     |
+| Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)      |
 
-A resumed registration reads what the run already has in `fetch_artifacts`
-and skips it, so the budget (500 artifacts per call) is spent on new work and
-a run of any size converges over as many ticks as it needs. Every port
-operation is idempotent on its own key, so a call that re-runs one anyway is
-a no-op rather than a conflict.
+A resumed registration reads what the run already has — its units, ranges,
+catalogued artifacts, staged inventory items and unit reports, one statement
+each — and skips it, so the budget is spent on new work and a run of any size
+the manifest schema allows converges over as many invocations as it needs.
+Every port operation is idempotent on its own key, so a call that re-runs one
+anyway is a no-op rather than a conflict.
 
 ### 3.1 Collector ids, CORE source ids and producers
 
@@ -166,6 +168,111 @@ A block is write-once, which is why a missing ingest route is retryable
 instead: the block would outlive the operator's fix. A retryable stage row is
 appended only when the state or the code changes, so an append-only table does
 not fill with one row per tick.
+
+### 3.3 Operation budget and staged registration (issue #87)
+
+Issue #87 was filed against the retired Vpass importer, whose initial path
+catalogued every page group and five artifacts through Service Binding calls
+in one invocation, against Cloudflare's limit of 32 Worker invocations per
+request. That importer, its signed continuations and its queue are gone
+(§8, [legacy-retirement.md](legacy-retirement.md)). Registration now runs in
+process here, and the Processor declares no Service Binding, so it makes no
+such call at all; `scripts/service-binding-chain.test.ts` fails if a
+collector or the Processor ever gains one, and pins the longest chain in the
+account at two Workers (App → Processor).
+
+The question the issue asked still applied to the successor: registration was
+bounded by artifact count (500 per call) and nothing else. Every call added
+every unit and every range of the manifest, re-verified every referenced
+object and re-staged every inventory item before cataloguing anything, and the
+manifest schema allows 1,000 units, 1,000 ranges and 10,000 artifacts. Each of
+those is several CORE statements or an R2 call, against a documented
+[D1 limit](https://developers.cloudflare.com/d1/platform/limits/) of 1,000
+queries per Worker invocation and a
+[Workers limit](https://developers.cloudflare.com/workers/platform/limits/#subrequests)
+of 10,000 subrequests per invocation (Workers Paid). Measured before this
+change, one 34-artifact Vpass card cost 669 D1 statements and 69 R2 calls in a
+single call, and a queue batch holds up to ten such terminals. Staging an
+inventory was also broken: its chunk of 50 items was above the contract's 30,
+so a run of more than 50 artifacts failed `invalid_items` on every attempt and
+never sealed.
+
+**The budget.** Every registration of one Worker invocation — the queue
+consumer's whole batch, or the cron's `collection_scan` and
+`operation_dispatch` lanes together — spends from one `RegistrationBudget`
+of **500 operations**, where an operation is one D1 statement (each statement
+of a batch counts) or one R2 call
+(`packages/application/src/collection/budget.ts`). The count is measured,
+not estimated: registration wraps the bindings it is handed in a meter and
+builds its port over them. 500 is half the documented D1 limit — the queue
+consumer spends nothing else, and a cron invocation shares the rest with its
+other lanes — and a twentieth of the subrequest limit. No lower provider
+limit is assumed.
+
+**The steps.** Registration is a sequence of steps, each idempotent on its own
+key, and a step only starts while its reserve and the audit reserve still fit.
+Each reserve is what the step measured against the real CORE schema plus a
+margin, and `services/processor/test/registration-budget.test.ts` fails when a
+step outgrows its reserve:
+
+| Step                                                               | Measured                              | Reserve              |
+| ------------------------------------------------------------------ | ------------------------------------- | -------------------- |
+| Preamble: terminal read, run row, conflict and refusal checks      | 8                                     | 16                   |
+| The run, a unit, a range, the inventory declaration, a unit report | 5-6                                   | 16                   |
+| An artifact: its R2 head, adoption and catalogue row               | 19, +1 per transform, +2 per relation | 32, +1 each, +2 each |
+| An inventory chunk (at most 30 items, the contract's maximum)      | 7 + 3 per item (97 full)              | 16 + 4 per item      |
+| Final: run report, seal (direct of ≤ 50, or staged), link          | 32 direct, 16 staged                  | 64                   |
+| Audit: a `pending` row for a yield, or a stage row and the block   | 1-2                                   | 4, always kept back  |
+
+So no invocation spends more than 500 operations on registration, and a
+failure at the edge of the budget still records its audit. A Vpass card of
+about twenty statement pages registers in one invocation; a 34-artifact card
+takes two (467 and 292 operations); the schema's largest structure converges
+over as many as it needs. No step can be too large for every invocation: the
+descriptor contract accepts at most 100 transformation steps and 100 relations
+per artifact, and that artifact's reserve (332) still fits what a fresh
+invocation has left after its preamble and the run. A manifest whose derived
+descriptor the contract refuses — a transformation with more inputs than 100
+relations, which the manifest schema allows — is blocked with the contract's
+code (`invalid_relations`, say) instead of failing on every tick.
+
+**The continuation.** A registration that reaches the budget yields `pending`:
+the `registered` stage says `pending` and names the fetch run, and everything
+written so far stays in CORE, unsealed and invisible to normal readers. The
+next call reads what exists and does only what is missing. The
+`collection_scan` lane continues up to five pending runs, oldest first, before
+it lists anything, so a large run finishes over consecutive ticks instead of
+waiting for the walk to come round to it. A registration that could not start
+because the invocation's budget was already spent is `deferred`: nothing was
+registered, the queue retries the message, the scan leaves its cursor, and an
+`import` operation waits with `registration_deferred`.
+
+Objects are verified before anything is recorded for them. On the first call
+that happens before the fetch run exists, for as many artifacts as the
+invocation can go on to catalogue — every artifact of a run that fits one
+invocation — so a missing or resized object still blocks with no fetch run at
+all (G1-14). Beyond that window each object is verified in its own step just
+before it is catalogued; a problem there blocks the run before its seal.
+
+**Versioning.** The registration contract stays `terminal-registration-v1`.
+Staging changes how many calls a registration takes, not what a terminal means
+in CORE: the descriptors, the inventory digest and the seal's attempt id are
+byte-identical, so a bump would only register every run a second time as a new
+revision. No signed continuation exists any more to be versioned: the
+importer's `vpass-transfer-v2.` state travelled on the deleted Vpass import
+Queue, whose backlog was verified empty before deletion, and its ingest
+clients are deactivated. A body of that shape arriving on the terminal queue
+is not an R2 notification; it is refused as `invalid` and acknowledged.
+
+**Deploy consequence.** In-flight state of the previous release completes
+under this one without an operator: a run it left `pending` is continued on
+the next tick, reusing its fetch run, units, ranges, inventory declaration and
+catalogued artifacts; a run above 50 artifacts it could never seal has no
+`pending` row, so it is picked up when the scan walk next reaches it (or at
+once by an `import` operation) and completes on its existing inventory. Both
+cases are tested. Queue messages are R2 notifications before and after, so
+none in flight changes meaning. The health route's `registration` counts
+(§13) show how many terminals are still short of registration.
 
 ## 4. No byte is copied
 
@@ -329,12 +436,17 @@ and retained resources for rollback. See [rollout.md](rollout.md) and
 
 Verified with synthetic data only
 (`services/processor/test/collection.test.ts`,
+`registration-budget.test.ts`, `invocation-probe.test.ts`,
 `operation-dispatch.test.ts`, `lanes.test.ts`;
 `packages/storage-d1/test/migrations.test.ts`;
-`scripts/config-bootstrap.test.ts`): the acceptance rows of §3 and §4, the
-budget-bounded resume, failed and mapped-source terminals, per-unit runs
-sharing one acquisition session, the lane order with flags off and on, the
-append-only triggers, the
+`scripts/config-bootstrap.test.ts`, `scripts/service-binding-chain.test.ts`):
+the acceptance rows of §3 and §4, the budget-bounded resume and every
+invocation's operation count at, below and above the one-invocation edge,
+the failure audits at the budget edge, the previous release's unfinished
+runs, failed and mapped-source terminals, per-unit runs sharing one
+acquisition session, the lane order with flags off and on, the metered
+bindings against Miniflare and (in `services/collector-st-george`'s
+worker test) real workerd D1 and R2, the append-only triggers, the
 bootstrap SQL applied twice to a fresh CORE, and `wrangler deploy --dry-run`.
 
 Production deployment, resource identity and migration verification are recorded
@@ -361,17 +473,18 @@ attaches to every request that entered from the internet.
 What the answer carries — counts, identifiers, file names, flags and ages, and
 never a value:
 
-| Field              | What it is                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------- |
-| `ok`               | true with HTTP 200; false with HTTP 503                                               |
-| `releaseSha`       | the commit the deploy stamped into `RELEASE_SHA`, or `""` outside a release           |
-| `core`, `read`     | `SELECT 1` and the applied migration file names of each database                      |
-| `data`, `evidence` | one R2 `head` of the fixed key `health/release-marker` through each binding           |
-| `bindings`         | which of `DB`, `READ`, `EVIDENCE`, `DATA` this deployment actually has                |
-| `flags`            | the declared value of every lane flag of §9                                           |
-| `lanes`            | `observation_lane_state`: how long ago each lane last swept                           |
-| `collectionScan`   | the bounded scan's cursor: how stale it is, whether it is mid-cycle, pages and cycles |
-| `readPointer`      | the READ active pointer: present or not, and how long ago it was switched             |
+| Field              | What it is                                                                                                                                               |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ok`               | true with HTTP 200; false with HTTP 503                                                                                                                  |
+| `releaseSha`       | the commit the deploy stamped into `RELEASE_SHA`, or `""` outside a release                                                                              |
+| `core`, `read`     | `SELECT 1` and the applied migration file names of each database                                                                                         |
+| `data`, `evidence` | one R2 `head` of the fixed key `health/release-marker` through each binding                                                                              |
+| `bindings`         | which of `DB`, `READ`, `EVIDENCE`, `DATA` this deployment actually has                                                                                   |
+| `flags`            | the declared value of every lane flag of §9                                                                                                              |
+| `lanes`            | `observation_lane_state`: how long ago each lane last swept                                                                                              |
+| `collectionScan`   | the bounded scan's cursor: how stale it is, whether it is mid-cycle, pages and cycles                                                                    |
+| `registration`     | the operation budget and the documented limits (§3.3); terminals still unregistered, how many of them are staged (`pending`), and the oldest pending age |
+| `readPointer`      | the READ active pointer: present or not, and how long ago it was switched                                                                                |
 
 The queue _consumer_ cannot be introspected from inside the isolate — it is a
 property of the configuration, not of the runtime — so what is asserted is the

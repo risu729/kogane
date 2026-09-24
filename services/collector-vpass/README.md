@@ -41,40 +41,24 @@ is whether its public API exposes auto-imported rows.
      matching `CardUseDetailRequest` in the Android app.
 7. Writes the original JSON bytes page by page plus a small `manifest.json`.
 
-The hosted Worker writes a card-scoped immutable snapshot followed by its
-success manifest. A provider failure is represented by an error-only prefix.
-After the terminal record is written, the collector durably enqueues its key.
-A single-message Queue consumer calls the private importer Service Binding for
-one bounded chunk. A `deferred` response is acknowledged only after its signed
-continuation has been put back on the Queue; the next delivery repeats this
-until the importer returns `sealed`. Importer errors and invalid responses fail
-the delivery and are retried, then retained in a dead-letter queue rather than
-being reported as a completed import. The importer sanitizes authentication,
-session, and card-reference fields before central storage; it never writes to
-or deletes from the source R2 bucket.
+The hosted Worker sanitizes each response with `vpass-json-sanitizer` v1
+(`src/sanitize.ts`) and writes one run per card to the shared DATA bucket
+through `packages/collection`: content-addressed objects first, the
+`terminal-v1` manifest last (`src/shared-collection.ts`,
+[`../../docs/collection.md`](../../docs/collection.md)). A card or session
+that collected nothing writes a `failed` terminal with no artifact. The Worker
+has no Service Binding and no Queue of its own: the R2 notification of the
+terminal wakes the Processor, which registers the run in process
+([`../../docs/processor.md`](../../docs/processor.md)).
 
-Before deploying this collector binding for the first time, create the two
-private queues named by `wrangler.jsonc`:
-
-```sh
-bunx wrangler queues create kogane-vpass-raw-evidence-import
-bunx wrangler queues create kogane-vpass-raw-evidence-import-dlq
-```
-
-Queue creation and collector deployment happen only after the central route and
-importer are healthy. This repository change does not create queues or deploy.
-
-Historical records are resumed one object at a time with:
-
-```sh
-bash scripts/backfill-raw-evidence.sh
-```
-
-The script reads the collector admin token from a user-owned mode-0600 file,
-stores only an opaque signed cursor locally, treats staged chunks as progress,
-and stops without advancing past a record that fails validation. It emits only
-aggregate counts and safe error codes. No GitHub Actions schedule is used; the
-existing Worker cron remains the sole scheduled trigger.
+Registration is bounded per invocation by an operation budget, not by the
+number of statement pages (issue #87, `docs/processor.md` §3.3). A card of
+about twenty pages registers in one invocation; a longer one yields with its
+progress in CORE and is continued on the next Processor cron tick, so it is
+sealed within minutes rather than in one call that could pass a documented
+per-invocation limit. The earlier importer, its signed continuations, its
+Queue and the per-source bucket are retired
+([`../../docs/legacy-retirement.md`](../../docs/legacy-retirement.md)).
 
 The PoC deliberately does not turn the provider JSON into final ledger rows.
 That parsing belongs to Kogane's deterministic observation layer; keeping the

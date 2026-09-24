@@ -11,14 +11,21 @@
 // What it reports: the build identity the deploy stamped, whether CORE, READ
 // and the DATA bucket answer, which bindings exist, the declared value of every
 // lane flag, the lane bookkeeping, how old the bounded collection scan's cursor
-// is, and whether the READ active pointer has ever been switched.
+// is, the registration budget with the terminals still short of registration,
+// and whether the READ active pointer has ever been switched.
 //
 // What it does not do: write anything, contact a provider, run a lane, move a
 // cursor, or report a value. Counts, identifiers, file names, flags and ages
 // only — the same rule the `/status` route already follows.
 import {
+  DOCUMENTED_LIMITS,
+  REGISTRATION_CONTRACT_VERSION,
+  REGISTRATION_OPERATION_BUDGET,
+} from "../../../packages/application/src/collection/index.ts";
+import {
   COLLECTION_SCAN_LANE,
   readCollectionScanState,
+  readRegistrationBacklog,
 } from "../../../packages/storage-d1/src/core/collection-runs.ts";
 
 /** The route this module owns. */
@@ -167,6 +174,31 @@ export async function internalHealthBody(env: Env): Promise<{ status: number; bo
   } catch {
     /* Before migration 0039 there is no such table; `recorded` stays false. */
   }
+  // The registration budget this deployment enforces, the documented limits
+  // it is a fraction of, and how many terminals are still short of
+  // registration — staged continuations among them. Counts and ages only; the
+  // measured counts per invocation are the `invocation_budget` log line.
+  let registration: Record<string, unknown> = {
+    operationBudget: REGISTRATION_OPERATION_BUDGET,
+    documented: DOCUMENTED_LIMITS,
+    recorded: false,
+  };
+  try {
+    const backlog = await readRegistrationBacklog(env.DB, REGISTRATION_CONTRACT_VERSION);
+    const oldest =
+      backlog.oldest_pending_first_seen_at === null
+        ? Number.NaN
+        : Date.parse(backlog.oldest_pending_first_seen_at);
+    registration = {
+      ...registration,
+      recorded: true,
+      unregistered: backlog.unregistered,
+      pending: backlog.pending,
+      oldestPendingAgeMs: Number.isNaN(oldest) ? null : now - oldest,
+    };
+  } catch {
+    /* Before migration 0039 there is no such table; `recorded` stays false. */
+  }
   let readPointer: Record<string, unknown> = { present: false };
   try {
     const row = await env.READ.prepare(
@@ -212,6 +244,7 @@ export async function internalHealthBody(env: Env): Promise<{ status: number; bo
       flags,
       lanes,
       collectionScan,
+      registration,
       readPointer,
     },
   };
