@@ -106,15 +106,22 @@ is needed. On the next sweeps, maintenance registers the
 `vpass-statement-page@1.2.0` release, and because `(artifact, parser, version)`
 is new, job creation adds 1.2.0 jobs by itself: the incremental lane for runs
 sealed after the deploy, and the repair lane's cyclic scan for every eligible
-historical artifact the parser accepts. The repair lane is deliberately slow
-(100 artifact ids scanned and at most 4 jobs executed per sweep, shared by every
-source). A 1.2.0 job is a normal run, not a candidate: its successful parse
+historical artifact the parser accepts. The repair lane scans 100 artifact ids
+and executes at most 28 jobs per five-minute tick, shared by every source: 336
+artifacts an hour, so the 3,133 artifacts still at 1.1.0 on 2026-09-24 drain in
+roughly 9 to 10 hours with no operator action, where the 4 jobs a tick this
+release shipped with would have needed about 65 hours
+([observation lanes](observation-lanes.md#repair-budget-and-drain-rate)). The
+identity sweep takes every re-parse on the tick that publishes it. A 1.2.0 job
+is a normal run, not a candidate: its successful parse
 supersedes the artifact's 1.1.0 run and moves the publication pointer in the
 same transaction ([publication gate](publication-gate.md)). An
 `active_releases` pointer, if the dataset has one, only narrows job creation to
 a deployed version, and 1.1.0 no longer is one. To drain sooner, run a bounded
 replay through the internal helper, without `targetRelease`
-([observation lanes](observation-lanes.md#bounded-operator-replay)):
+([observation lanes](observation-lanes.md#bounded-operator-replay)); its
+re-parses are identified from the identity slots the incremental lane leaves
+unused, so they can reach the account views a few ticks after they publish:
 
 ```sh
 mise run //services/processor:ops replay plan '{"source":"vpass","dataset":"statement-page","parser":"vpass-statement-page","version":"1.2.0","reason":"Vpass page-qualified external ids"}'

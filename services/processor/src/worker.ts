@@ -71,6 +71,13 @@ import {
   rewardReadProjectionStage,
 } from "./reward-read-projection.ts";
 import { reportsEnabled, runReportJob } from "./report-job.ts";
+import {
+  IDENTITY_RUNS_PER_TICK,
+  LANE_BUDGETS,
+  LANES,
+  MAX_LANE_JOBS,
+  type Lane,
+} from "./lane-budgets.ts";
 import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identity";
 import type {
   ArtifactMeta,
@@ -86,7 +93,6 @@ import type {
 const REPORT_BASE_UNIT = "JPY";
 const REPORT_PERIMETER = "perimeter:all-visible-evidence";
 const SCAN_PAGE = 200;
-const JOBS_PER_SWEEP = 12;
 const MAX_BYTES = 16 * 1024 * 1024;
 const MAX_ATTEMPTS = 5;
 const LEASE_MS = 10 * 60 * 1000;
@@ -659,13 +665,6 @@ async function executeParseJob(
   }
 }
 
-const LANES = ["incremental", "repair", "replay"] as const;
-export type Lane = (typeof LANES)[number];
-/** Jobs executed per sweep and lane. Incremental keeps the historical
- * per-sweep budget; repair and replay are smaller so a large replay backlog
- * or a slow history scan never delays freshly sealed evidence. */
-const LANE_BUDGETS: Record<Lane, number> = { incremental: JOBS_PER_SWEEP, repair: 4, replay: 8 };
-const MAX_LANE_JOBS = 40;
 const WORK_ITEMS_PER_SWEEP = 50;
 const WORK_ITEM_PAGE = 100;
 const WORK_ITEM_PAGES_PER_SWEEP = 5;
@@ -703,6 +702,12 @@ export interface LaneSummary {
   scanned: number;
   workItems: number;
   plans: number;
+  /** The lane's job budget for this sweep. */
+  budget: number;
+  /** Jobs that ran to a parse run this sweep (`parsed + error`). */
+  executed: number;
+  /** Jobs of the lane still pending after this sweep, ready or backing off. */
+  pending: number;
 }
 export interface SweepOptions {
   maxJobs?: number;
@@ -1000,6 +1005,9 @@ async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummar
     scanned: 0,
     workItems: 0,
     plans: 0,
+    budget,
+    executed: 0,
+    pending: 0,
   };
   let cursor = 0;
   if (lane === "incremental") {
@@ -1047,10 +1055,19 @@ async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummar
     summary[await parseJob(env, job, parser)]++;
   }
   if (lane === "replay") summary.plans += await completeReplayPlans(env);
+  summary.executed = summary.parsed + summary.error;
+  // Counts only: what is left for the next ticks, so the scheduled log line
+  // shows a drain's progress (observation_jobs_lane_ready covers the count).
+  summary.pending =
+    (await env.DB.prepare(
+      "SELECT count(*) AS n FROM observation_parse_jobs WHERE lane=? AND status='pending'",
+    )
+      .bind(lane)
+      .first<number>("n")) ?? 0;
   await env.DB.prepare(
     "UPDATE observation_lane_state SET cursor=?,last_sweep_at_ms=?,last_created=?,last_executed=? WHERE lane=?",
   )
-    .bind(cursor, Date.now(), summary.created, summary.parsed + summary.error, lane)
+    .bind(cursor, Date.now(), summary.created, summary.executed, lane)
     .run();
   return summary;
 }
@@ -1683,7 +1700,9 @@ export interface ScheduledStages {
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
-  identity: (env) => identitySweep(env.DB, resolveIdentity),
+  // Sized to what the parse lanes publish per tick, so a re-parse is
+  // identified on the tick that published it (IDENTITY_RUNS_PER_TICK).
+  identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
   collection: (env) => collectionScan(collectionEnv(env)),

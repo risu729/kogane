@@ -17,7 +17,7 @@ budget executes it.
 | Lane          | Job source                                                                          | Cursor / state                                                          | Default budget per sweep                                 |
 | ------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------- |
 | `incremental` | Unprocessed `observation_work_items` (one per sealed run, appended by a D1 trigger) | `observation_work_items.processed_at_ms`, per-item `cursor_artifact_id` | 12 jobs, 50 items, 5 artifact pages of 100               |
-| `repair`      | The historical cyclic scan over `fetch_artifacts`                                   | `observation_scan_state` row 1 (unchanged meaning)                      | 4 jobs, 100 artifact ids per sweep                       |
+| `repair`      | The historical cyclic scan over `fetch_artifacts`                                   | `observation_scan_state` row 1 (unchanged meaning)                      | 28 jobs, 100 artifact ids per sweep                      |
 | `replay`      | Running `observation_replay_plans`                                                  | `observation_replay_plans.creation_cursor`                              | 8 jobs, 2 plans stepped, 200 artifacts examined per step |
 
 `sweep` runs maintenance (lease exhaustion, interrupted attempts, version
@@ -172,6 +172,80 @@ jobs back off exponentially and are ordered behind ready work, but a large
 single-source incremental burst still consumes that lane's budget in artifact
 order. Recorded as an open item.
 
+The budgets are constants in `services/processor/src/lane-budgets.ts`, with
+`MAX_LANE_JOBS` (40) as the hard bound: every `maxJobs` override is clamped to
+it, and `test/repair-budget.test.ts` holds every default to it.
+
+### Repair budget and drain rate
+
+The repair lane is how history is re-parsed after a parser version bump, so
+its budget is the drain rate. It executes `REPAIR_JOBS_PER_SWEEP` = 28 jobs a
+tick:
+
+```text
+28 jobs x 12 ticks/hour = 336 artifacts/hour
+vpass-statement-page 1.2.0, 3,133 artifacts at 1.1.0 on 2026-09-24:
+  3,133 / 336            = 9.3 hours   (28 jobs a tick)
+  3,133 / (4 x 12)       = 65 hours    (the former 4 jobs a tick)
+```
+
+The scan that creates the jobs is not the bottleneck. It walks 100 artifact
+ids a tick; on 2026-09-24 the 1.2.0 work not yet scanned was 1,617 artifacts
+in the 4,169 ids beyond its cursor, about 39 per 100 ids, more than the 28 a
+tick executes, so the lane has ready work for the whole drain.
+
+What sets 28 is the identity sweep later in the same tick. A published
+re-parse needs its identity run before the read models resolve its rows to an
+account (current card usage, the account a Transactions row is organized
+under), and
+`identitySweep` takes at most 40 parse runs and 200 observations per call. The
+scheduled stage passes `IDENTITY_RUNS_PER_TICK` = incremental 12 + repair 28 =
+40, so everything the two unattended lanes publish in a tick is identified on
+it. At the function's own default of 8, which the stage used before, a 28-job
+tick would leave 20 published re-parses without identity on every tick of a
+drain. The observation cap holds: Vpass statement pages carry 1.47
+observations on average (2,599 of the 3,101 published 1.1.0 runs are empty,
+the largest has 69), about 41 a tick. Replay jobs (8 a tick, operator-started)
+and the operator's own `/sweep` calls (`catchup`, `sweep repair`) publish runs
+the identity budget does not reserve; they are identified from the slots the
+incremental lane leaves unused.
+
+One repair job, measured on synthetic Vpass statement pages under Miniflare
+with counting D1 and R2 proxies, and on production counts read on 2026-09-24:
+
+| Measurement                             | Value                                                                      |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| D1 per job                              | 14 statements and 1 batch (the 5-statement publish); 13 for an empty page  |
+| R2 per job                              | 1 `get` of the raw object                                                  |
+| Per repair sweep, besides the jobs      | 9-12 D1 statements and 1 insert batch (scan, ready query, counts, state)   |
+| Parser CPU, parse + serialize + SHA-256 | 0.6 ms (20 rows, 6 KB), 2.4 ms (100 rows, 29 KB), 7.3 ms (300 rows, 85 KB) |
+| Job CPU counted on the test process     | 46-63 ms, Miniflare's proxy work included (an upper bound)                 |
+| Identity sweep, production-shaped tick  | 29 re-parses (25 empty, 40 observations): 66 D1 calls, all identified      |
+| Production page size                    | 3,314 pages, 2.6-2.8 KB on average, 23 KB at most                          |
+| Production wall time per job            | 0.32-1.1 s (gaps between consecutive 1.2.0 parse runs, 6 ticks)            |
+
+Against the limits of one scheduled invocation, per Cloudflare's
+[Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
+(last updated 2026-09-05, the page `docs/vpass-card-identity.md` cites):
+
+| Limit                                                       | 28 repair jobs                             |
+| ----------------------------------------------------------- | ------------------------------------------ |
+| CPU, Cron Trigger with an interval under one hour: 30 s     | under 2 s at the upper bound above         |
+| Subrequests, Workers Paid (D1 and R2 included): 10,000      | about 450 (16 a job)                       |
+| Wall time, Cron Trigger: 15 minutes; the cadence: 5 minutes | at most 31 s at the slowest production job |
+
+`limits.cpu_ms` (300,000) in `wrangler.jsonc` raises the HTTP ceiling; the
+page lists the cron trigger ceiling separately, so the budget is sized against
+30 s. [D1's limits page](https://developers.cloudflare.com/d1/platform/limits/)
+(last updated 2026-04-21) still lists 1,000 queries per invocation for Workers
+Paid by reference to the subrequest limit the Workers page has since raised to
+10,000; if it applied, the whole tick's D1 calls would need measuring before
+raising any budget further.
+
+The repair lane runs inside `observation_sweep`, the first stage, so the
+stages after it start later by the extra jobs' wall time and do no less work:
+each keeps its own bound.
+
 ## Health signals
 
 `GET /status` returns, in addition to the existing parser list and job counts:
@@ -192,7 +266,10 @@ evidence-browser metadata API and identity audit; they are not duplicated here.
 No field carries an amount, a raw body, a token or a provider URL.
 
 The scheduled handler logs each stage as its own JSON event with counts only,
-in this order (`runScheduled` in `services/processor/src/worker.ts`):
+in this order (`runScheduled` in `services/processor/src/worker.ts`). In the
+`observation_sweep` line every lane reports its `budget`, the jobs it
+`executed` (parsed or failed) and the jobs still `pending` in it, so a drain's
+progress is readable tick by tick:
 
 | #   | Event                    | Gate                                                                                                                                                                                                                                                                                                                             |
 | --- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -244,6 +321,7 @@ Synthetic fixtures only, under Miniflare D1/R2 (`services/processor/test`):
 | Pause/resume idempotent; live lease fenced; one `ok` per artifact/version                                            | `lanes.test.ts` "pause/resume is idempotent…"                                                          |
 | High-water fixed; cancel never touches published results                                                             | `lanes.test.ts` "the replay high-water is fixed…"                                                      |
 | Identity sweep runs and is logged separately when parse sweep fails                                                  | `lanes.test.ts` "identity sweep still runs…"                                                           |
+| More repair work than one budget: exactly the budget per tick, the rest next tick; identity takes them on the tick   | `repair-budget.test.ts` "a tick with more repair work than the budget…"                                |
 | Migration 0035 applies after 0017–0024 through D1; full chain 0001–0035 compiles; old Worker's insert still works    | `harness.ts`, `pipeline.test.ts` "all production migrations compile…"                                  |
 | Existing lease, retry, supersession, retirement, metadata and parser behaviour                                       | all pre-existing tests in `pipeline.test.ts`, `job-retirement.test.ts`, `identity-*.test.ts` unchanged |
 
@@ -279,11 +357,14 @@ creates one through the internal route; the cron never starts a plan.
 ## Verified locally / not verified
 
 Verified with synthetic data: everything in the table above, `mise run //services/processor:typecheck`,
-`wrangler deploy --dry-run`, the raw-evidence suite with 0035 present. Not
-verified: production throughput of the per-lane budgets, D1 query cost of
-`/status` on the real catalogue, and the CPU cost of a 24-job worst-case sweep
-(incremental 12 + repair 4 + replay 8) on real artifact sizes. Budgets are
-constants in `worker.ts` and should be tuned from observed sweep durations.
+`wrangler deploy --dry-run`, the raw-evidence suite with 0035 present. The
+repair budget was sized from the measurements in
+[Repair budget and drain rate](#repair-budget-and-drain-rate). Not verified:
+D1 query cost of `/status` on the real catalogue, and the CPU and wall time of
+a 48-job worst-case sweep (incremental 12 + repair 28 + replay 8) inside a
+whole production tick, which the Workers dashboard's cron invocation metrics
+show. Budgets are constants in `lane-budgets.ts` and should be tuned from
+observed sweep durations.
 
 ## Open items for later PRs
 
