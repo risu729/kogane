@@ -83,7 +83,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/v-point.ts":
       "1ff35488c84fa1ca373983cbdac3cbcae5c66ebfbf569da4ee5f8d7acc9977fb",
     "poc/observation-pipeline/src/parsers/vpass.ts":
-      "d640081b86215606c2d130de913aa5c0ad9b0664df850136d87151d0f51c7938",
+      "5dda05c4d685e8f8ea045805623462a84b93c6e681eacad716be62321149f059",
     "poc/observation-pipeline/src/st-george-contract.ts":
       "768d352de3b50e4b4eebecf7c3eedba95d480fc3f877767cf54219dcede5091f",
     "poc/observation-pipeline/src/types.ts":
@@ -593,8 +593,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "vpass-statement-page": {
-      version: "1.1.0",
-      codeDigest: "da475f3819cc8e7a7e5305676ba7c86ea65381dc9e7d89856648d012d555854b",
+      version: "1.2.0",
+      codeDigest: "7fef43c41fb2c1d99fc971ab02a4ade4156ecb4efb540bce04ad1b88661d8196",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
