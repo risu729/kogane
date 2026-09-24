@@ -72,7 +72,7 @@ its amount twice into the same live set does not (INV06).
 ### Card purchase recognition (migration `0047_card_purchase_recognition.sql`)
 
 The writer is the `purchase_recognition` lane
-([below](#card-purchase-recognition)), which ships off.
+([below](#card-purchase-recognition)), on in production since 2026-09-24.
 A recognised card purchase is an ordinary `purchase` or `refund` event
 revision on the `purchase-recognition` basis with a `rule` decision; 0047 adds
 the sidecar that says which policy wrote each revision and from which provider
@@ -229,8 +229,9 @@ lane. It turns adopted Vpass and MyJCB usage rows into `purchase` and `refund`
 events on the `purchase-recognition` basis, through the contract, the guarded
 batch and the schema of
 [migration 0047](#card-purchase-recognition-migration-0047_card_purchase_recognitionsql).
-It ships off: `PURCHASE_RECOGNITION_ENABLED` is `"0"` in the committed
-configuration.
+It is on in production since 2026-09-24: `PURCHASE_RECOGNITION_ENABLED` is
+`"true"` in the committed configuration
+([rollout record](rollout.md#production-enablement--2026-09-24-card-purchase-recognition)).
 
 ### What is automatic, and why
 
