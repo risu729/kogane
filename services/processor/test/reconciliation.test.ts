@@ -638,6 +638,7 @@ async function seedLedger(
   connection: string,
   state: "unconfirmed" | "confirmed",
   rows: readonly LedgerRow[],
+  period = MYJCB_PERIOD,
 ): Promise<number[]> {
   const artifactId = (nextArtifact += 1);
   const parseId = (nextParse += 1);
@@ -646,7 +647,7 @@ async function seedLedger(
   const ledger = {
     schemaVersion: 1,
     detailMonth,
-    period: MYJCB_PERIOD,
+    period,
     state,
     headers: [
       "ご利用日",
@@ -684,7 +685,7 @@ async function seedLedger(
       mime: "application/json",
       artifactKey: key,
       statementState: state,
-      period: MYJCB_PERIOD,
+      period,
       fetchedAt: "2026-10-01T00:00:00.000Z",
       sha256: "0".repeat(64),
     })
@@ -882,4 +883,81 @@ test("re-running the sweep over the same MyJCB rows writes no duplicate proposal
   expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
   expect(await proposals()).toEqual(before);
   expect(await citing(ledgerObservations)).toHaveLength(3);
+});
+
+test("a proposal already decided is never proposed again", async () => {
+  const [pair] = await citing(ledgerObservations);
+  const rejected = await decideProposal(db, {
+    operationId: "op-reject-myjcb",
+    actorId: "reviewer",
+    actorVerification: "server",
+    action: "reject",
+    proposalId: pair!.id,
+    expectedStatus: "proposed",
+    method: "manual",
+    reason: "reviewed against the ledger",
+  });
+  expect(rejected).toMatchObject({ ok: true });
+  const before = await proposals();
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-04T00:00:00Z" });
+  expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
+  expect(await proposals()).toEqual(before);
+  expect((await citing(ledgerObservations)).find((row) => row.id === pair!.id)?.status).toBe(
+    "rejected",
+  );
+});
+
+test("a relative MyJCB label (detailMonth-N) names no payment month, so nothing pairs under it", async () => {
+  // The collector writes `detailMonth-N` for a month the past-months API does
+  // not label; the same label names a different payment month next month.
+  const purchase = { date: "2026/09/20", merchant: "架空薬局", paymentType: "一回払い" };
+  const [pending] = await seedLedger(
+    "conn-relative",
+    "unconfirmed",
+    [{ ...purchase, amount: "1,200円" }],
+    "detailMonth-1",
+  );
+  const [posted] = await seedLedger(
+    "conn-relative",
+    "confirmed",
+    [{ ...purchase, amount: "1,200円" }],
+    "detailMonth-1",
+  );
+  // Grouped by the label alone the matcher would claim one statement period.
+  const [unguarded, ...others] = stageBProposals(await unguardedFacts("conn-relative"));
+  expect(others).toEqual([]);
+  expect(unguarded!.rationaleCodes).toContain("same_statement_period");
+  const before = await proposals();
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-05T00:00:00Z" });
+  expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
+  expect(await citing([pending!, posted!])).toEqual([]);
+  expect(await proposals()).toEqual(before);
+});
+
+test("a MyJCB confirmed row re-captured by a later run is not proposed as the same row", async () => {
+  // Stage A over MyJCB confirmed rows is left out: every daily run re-captures
+  // each listed month, and the lane only needs these rows for stage B.
+  const row = {
+    date: "2026/09/22",
+    merchant: "架空文具",
+    paymentType: "一回払い",
+    amount: "700円",
+  };
+  const first = await seedLedger("conn-recapture", "confirmed", [row]);
+  const second = await seedLedger("conn-recapture", "confirmed", [row]);
+  const [unguarded, ...others] = stageAProposals(await unguardedFacts("conn-recapture"));
+  expect(others).toEqual([]);
+  expect(unguarded).toMatchObject({ kind: "provider_same", stage: "A", autoAcceptable: false });
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-06T00:00:00Z" });
+  expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
+  expect(await citing([...first, ...second])).toEqual([]);
+  // A pending row of the same month still pairs with each capture, as a candidate.
+  const [pending] = await seedLedger("conn-recapture", "unconfirmed", [row]);
+  const paired = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-07T00:00:00Z" });
+  expect(paired).toMatchObject({ written: 2, autoAccepted: 0 });
+  const stored = await citing([pending!]);
+  expect(stored.map((proposal) => [proposal.stage, proposal.targets[0]])).toEqual([
+    ["B", `transaction:${pending}`],
+    ["B", `transaction:${pending}`],
+  ]);
 });

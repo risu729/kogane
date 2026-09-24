@@ -193,6 +193,87 @@ test("the reconciliation rule reads MyJCB's display amounts as recognition does"
   expect(comparable(pending!)).toBe(true);
 });
 
+test("recognition and the matching guard never disagree on a parsed MyJCB row", () => {
+  // Every usage/payment text pair below is parsed by the deployed ledger
+  // parser, confirmed and unconfirmed, next to the fixture's own rows. With the
+  // payment type held single, a confirmed row takes part in pending-to-posted
+  // matching exactly when recognition recognises it as a purchase, so no row
+  // recognition excludes for its amounts (installment_amount_differs,
+  // payment_split_unknown, refund_shape_unverified) is ever compared.
+  const exact = ["1,200円", "1200円", "１，２００円", "￥1,200", " 1,200 円", "400円"];
+  const signed = ["12,000円", "-500円", "-1,200円", "0円"];
+  const unreadable = ["", "円", "1,20円", "1.5円", "01,200円", "1,200ドル"];
+  const texts = [...exact, ...signed, ...unreadable];
+  const period = "2026年10月お支払い分";
+  const parsed = (state: "confirmed" | "unconfirmed", pairs: [string, string | undefined][]) => {
+    const detailMonth = state === "confirmed" ? 1 : 0;
+    const displayed = state === "confirmed" ? "今回のお支払い金額" : "ご利用金額";
+    const other = state === "confirmed" ? "ご利用金額" : "今回のお支払い金額";
+    const ledger = {
+      schemaVersion: 1,
+      detailMonth,
+      period,
+      state,
+      headers: ["ご利用日", "ご利用先など", "支払区分", displayed],
+      rows: pairs.map(([cell, text], index) => ({
+        summaryCells: ["2026/09/10", `架空店${index}`, cell, "一回払い"],
+        expanded: { ...(text === undefined ? {} : { [other]: text }), 摘要: "", 備考: "" },
+      })),
+    };
+    return rows(
+      myJcbCreditLedger,
+      "myjcb",
+      new TextEncoder().encode(JSON.stringify(ledger)),
+      meta({
+        artifactKey: `connection-a/credit-ledger-0${detailMonth}.json`,
+        statementState: state,
+        period,
+      }),
+    );
+  };
+  // The summary cell is the one amount the parser reads as a number, so it is
+  // always exact; the expanded text is whatever the provider displayed.
+  const cells = [...exact, ...signed];
+  const pairs = cells.flatMap((cell) =>
+    [...texts, undefined].map((text): [string, string | undefined] => [cell, text]),
+  );
+  const facts = [
+    ...parsed("confirmed", pairs),
+    ...parsed("unconfirmed", pairs),
+    ...myjcb("credit-ledger-02.json", "confirmed", "2026年7月お支払い分"),
+    ...myjcb("credit-ledger-00.json", "unconfirmed", "2026年9月お支払い分"),
+  ];
+  expect(facts).toHaveLength(pairs.length * 2 + 3);
+  const seen = new Set<string>();
+  for (const fact of facts) {
+    const guard = comparableCardPayment({
+      sourceId: fact.sourceId,
+      status: fact.providerStatus,
+      usageAmountText: fact.usageAmountText,
+      paymentAmountText: fact.paymentAmountText,
+    });
+    const classified = classifyCardUsage({ ...fact, paymentType: "一回払い" });
+    const outcome = classified.ok ? classified.kind : classified.reasonCode;
+    seen.add(`${fact.providerStatus}:${outcome}`);
+    if (fact.providerStatus === "unconfirmed") {
+      // A pending row is never constrained by the guard.
+      expect(guard).toBe(true);
+      continue;
+    }
+    expect({ outcome, guard }).toEqual({ outcome, guard: outcome === "purchase" });
+  }
+  // The matrix reaches every amount outcome on the confirmed side.
+  for (const outcome of [
+    "purchase",
+    "refund",
+    "amount_zero",
+    "installment_amount_differs",
+    "payment_split_unknown",
+    "refund_shape_unverified",
+  ])
+    expect(seen).toContain(`confirmed:${outcome}`);
+});
+
 test("Vpass statement pages as parsed: web and customized rows, sale codes and refunds", () => {
   const vpass = (file: string) =>
     rows(
