@@ -694,6 +694,12 @@
         }
       ],
       "sha256": "4ae010e7a881b839cd376fec814c1bc518b62b04b7c0c7e75b72a38077f4875b"
+    },
+    {
+      "file": "0048_statement_fact_indexes.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "49ffaf6193a075f2f7052dfb7a1bd67accabad51158e6528456520e1434cafef"
     }
   ],
   "tables": [
@@ -3146,6 +3152,16 @@
           "partial": false,
           "columns": [
             "statement_key"
+          ]
+        },
+        {
+          "name": "card_settlement_candidates_statement_period",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "(expression)",
+            "(expression)",
+            "(expression)"
           ]
         }
       ],
@@ -16058,6 +16074,11 @@
       "sqlSha256": "f77a383fb344ed34"
     },
     {
+      "name": "card_settlement_candidates_statement_period",
+      "table": "card_settlement_candidates",
+      "sqlSha256": "4d73d1fcde6fdade"
+    },
+    {
       "name": "change_plans_status",
       "table": "change_plans",
       "sqlSha256": "6d550e9d16f24464"
@@ -16547,7 +16568,7 @@
     "tableCount": 109,
     "viewCount": 39,
     "triggerCount": 398,
-    "explicitIndexCount": 109,
+    "explicitIndexCount": 110,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -16749,6 +16770,6 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "d279b999f15a9b1b0c1b64a089f058c18fd2ddf70a45d58d7adc6b06dd5608c0"
+    "schemaSha256": "f2f0da7dfdb64f8ff0ca040a6063465057df0559b9e9b68a3625d9d2ec842974"
   }
 }

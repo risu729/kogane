@@ -105,10 +105,28 @@ function bean(payload: Record<string, unknown>, name: string): Record<string, un
   return content[name] as Record<string, unknown>;
 }
 
-/** A Vpass `WebMeisaiTopDisplayServiceBean` page (posted rows, `4K/005`). */
-export function webPayload(rows: readonly UsageRow[]): Uint8Array {
+/** The finalized bill header of a Vpass Web statement's first page (`webMeisaiTopK3Vo`). */
+export interface VpassStatementHeader {
+  /** A provider display amount, `12,345`. */
+  payTotal: string;
+  /** `YYYYMM`, the statement month of the artifact key. */
+  seikyuYm: string;
+  /** `YYYY年M月D日`. */
+  shiharaiDate: string;
+}
+
+/**
+ * A Vpass `WebMeisaiTopDisplayServiceBean` page (posted rows, `4K/005`); with
+ * a `header`, a finalized statement whose first page carries its bill total.
+ */
+export function webPayload(rows: readonly UsageRow[], header?: VpassStatementHeader): Uint8Array {
   const payload = template("web");
-  bean(payload, "WebMeisaiTopDisplayServiceBean")["meisaiList"] = rows.map((row) => ({
+  const target = bean(payload, "WebMeisaiTopDisplayServiceBean");
+  if (header !== undefined) {
+    target["saiseiStatus"] = "0";
+    target["webMeisaiTopK3Vo"] = { ...header };
+  }
+  target["meisaiList"] = rows.map((row) => ({
     columnsSize: 11,
     columnsSizeS: "11",
     data: ["4K", "005", "", row.date, row.merchant, row.amount, row.paymentType, "", "", "", ""],

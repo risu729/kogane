@@ -56,6 +56,7 @@ import {
   normalizeDecimal,
   type Quantity,
 } from "../../../domain/src/values.ts";
+import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
 import { CURRENT_CARD_USAGE_SQL } from "../../../read-model/src/card-usage.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
@@ -253,26 +254,47 @@ const LAST_AMOUNT_SQL = `SELECT event_id,revision,unit_ref,value_status,coeffici
 
 /**
  * The newest published provider statement of each (resolved account, source,
- * period). The account is the statement observation's own resolved account,
- * so a card ordinal that changed under one account still joins, and a
- * statement whose mapping is ambiguous (NULL) joins nothing.
+ * period). The account is the statement observation's own resolved account
+ * (`card_settlement_fact_ownership`), so a card ordinal that changed under one
+ * account still joins, and a statement whose mapping is ambiguous (NULL) joins
+ * nothing.
+ *
+ * The owner is resolved for the requested statements only, through the keyed
+ * form of the ownership view (card-settlement-ownership.ts): the view itself
+ * starts from every published parse run and groups every balance identity, which
+ * on D1's unanalyzed planner cost more than the rest of the page together
+ * (docs/card-settlements.md, Cost). `card_statement_facts` is still read whole
+ * once: its newest capture per statement is ranked over the statement totals of
+ * the whole history.
  */
-const STATEMENT_SQL = `SELECT account_id,source_id,period,id,parse_run_id,unit_ref,value_status,coefficient,scale,payment_date FROM (
-  SELECT w.account_id,w.source_id,w.period,s.id,s.parse_run_id,s.unit_ref,s.value_status,s.coefficient,s.scale,s.payment_date,
-   ROW_NUMBER() OVER (PARTITION BY w.account_id,w.source_id,w.period ORDER BY s.fetched_at DESC,s.id DESC) AS position
-  FROM (SELECT DISTINCT json_extract(value,'$[0]') AS account_id,json_extract(value,'$[1]') AS source_id,
-    json_extract(value,'$[2]') AS period FROM json_each(?1)) w
-  JOIN card_statement_facts s ON s.source_id=w.source_id AND s.period=w.period
-  WHERE (SELECT o.account_id FROM card_settlement_fact_ownership o
-    WHERE o.kind='balance' AND o.observation_id=s.id)=w.account_id
+export const STATEMENT_SQL = `WITH wanted AS MATERIALIZED (
+  SELECT DISTINCT json_extract(value,'$[0]') AS account_id,json_extract(value,'$[1]') AS source_id,
+   json_extract(value,'$[2]') AS period FROM json_each(?1)
+ ), statements AS MATERIALIZED (
+  SELECT s.id,s.parse_run_id,s.source_id,s.period,s.fetched_at,s.unit_ref,s.value_status,s.coefficient,s.scale,s.payment_date
+  FROM card_statement_facts s
+  WHERE EXISTS(SELECT 1 FROM wanted WHERE wanted.source_id=s.source_id AND wanted.period=s.period)
+ ), observed AS (SELECT id AS observation_id FROM statements),
+ ${cardSettlementOwnershipCtes("balance")}
+ SELECT account_id,source_id,period,id,parse_run_id,unit_ref,value_status,coefficient,scale,payment_date FROM (
+  SELECT wanted.account_id,wanted.source_id,wanted.period,statements.id,statements.parse_run_id,statements.unit_ref,
+   statements.value_status,statements.coefficient,statements.scale,statements.payment_date,
+   ROW_NUMBER() OVER (PARTITION BY wanted.account_id,wanted.source_id,wanted.period
+    ORDER BY statements.fetched_at DESC,statements.id DESC) AS position
+  FROM wanted
+  JOIN statements ON statements.source_id=wanted.source_id AND statements.period=wanted.period
+  JOIN ownership ON ownership.observation_id=statements.id AND ownership.account_id=wanted.account_id
  ) WHERE position=1`;
 
 /**
  * One settlement review per statement (source, account, period), the key 0044
  * reserves an acceptance under: accepted first, then a review still due, then
- * a withdrawn and finally a rejected one, newest first within each.
+ * a withdrawn and finally a rejected one, newest first within each. The three
+ * `json_extract` terms are the expressions of
+ * `card_settlement_candidates_statement_period` (migration 0048), which reaches
+ * each key's reviews directly; they must stay written exactly so.
  */
-const SETTLEMENT_SQL = `SELECT account_id,source_id,period,id,facts_json,status,decision_revision_id,event_id,settlement_id FROM (
+export const SETTLEMENT_SQL = `SELECT account_id,source_id,period,id,facts_json,status,decision_revision_id,event_id,settlement_id FROM (
   SELECT w.account_id,w.source_id,w.period,c.id,c.facts_json,c.status,c.decision_revision_id,c.event_id,c.settlement_id,
    ROW_NUMBER() OVER (PARTITION BY w.account_id,w.source_id,w.period
     ORDER BY CASE c.status WHEN 'accepted' THEN 0 WHEN 'proposed' THEN 1 WHEN 'withdrawn' THEN 2 ELSE 3 END,
