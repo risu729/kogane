@@ -273,6 +273,43 @@ describe("SC04 installments", () => {
     });
   });
 
+  test("MyJCB display text (1,234円, 一回払い) is read with the ledger parser's grammar", () => {
+    // The shapes the MyJCB ledger parser emits for tests/fixtures/observation-pipeline/myjcb.
+    const display = myjcbRow({
+      paymentType: "一回払い",
+      usageAmountText: "1,234円",
+      paymentAmountText: "1,234円",
+    });
+    expect(classifyCardUsage(display)).toMatchObject({ ok: true, kind: "purchase" });
+    expect(reason({ ...display, providerStatus: "unconfirmed" })).toBe("recognised");
+    // Width, spaces and a leading yen sign are normalised as the parser does.
+    for (const text of ["１，２３４円", " 1,234 円", "¥1,234", "￥1,234", "1234"])
+      expect(reason({ ...display, usageAmountText: text })).toBe("recognised");
+    // A refund keeps the provider's minus sign on both texts.
+    expect(
+      classifyCardUsage({
+        ...display,
+        amount: observed("-500"),
+        usageAmountText: "-500円",
+        paymentAmountText: "-500円",
+      }),
+    ).toMatchObject({ ok: true, kind: "refund", state: "captured" });
+    // The installment slice from the confirmed fixture (400円 of 1,200円, 分割払い).
+    const slice = {
+      ...display,
+      amount: observed("400"),
+      paymentType: "分割払い",
+      usageAmountText: "1,200円",
+      paymentAmountText: "400円",
+    };
+    expect(reason(slice)).toBe("payment_type_unsupported");
+    expect(reason({ ...slice, paymentType: "一回払い" })).toBe("installment_amount_differs");
+    // Anything that is not an exact display integer is not read as a number.
+    for (const text of ["1,23円", "1.5円", "1,234ドル", "円", "", "01,234円", "1,234円円"])
+      expect(reason({ ...display, usageAmountText: text })).toBe("payment_split_unknown");
+    expect(myjcbAgreedAmount("1,200円", "1,200")).toEqual({ ok: true, amount: 1200n });
+  });
+
   test("the shared MyJCB rule keeps the reconciliation job's grammar and scope", () => {
     const confirmed = (usageAmountText: string | null, paymentAmountText: string | null) =>
       comparableCardPayment({
@@ -286,7 +323,11 @@ describe("SC04 installments", () => {
     expect(confirmed("1,200", "300")).toBe(false);
     expect(confirmed("0", "0")).toBe(false);
     expect(confirmed("-500", "-500")).toBe(false);
+    // Known gap, pinned on purpose: the moved rule keeps the job's grammar, so
+    // real MyJCB display text never takes part in pending-to-posted matching.
+    // Widening it changes live proposals and is a separate reviewed change.
     expect(confirmed("1,200円", "1,200円")).toBe(false);
+    expect(myjcbAgreedAmount("1,200円", "1,200円")).toEqual({ ok: true, amount: 1200n });
     expect(confirmed(null, "1,200")).toBe(false);
     // Only MyJCB confirmed rows are constrained.
     for (const other of [
@@ -305,6 +346,10 @@ describe("exclusions", () => {
       expect(reason(vpassRow({ paymentType }))).toBe("payment_type_unsupported");
     // Width and surrounding spaces are normalised; the wording itself is not guessed.
     expect(reason(vpassRow({ paymentType: " １回払い " }))).toBe("recognised");
+    expect(reason(vpassRow({ paymentType: "１回払い" }))).toBe("recognised");
+    expect(reason(vpassRow({ paymentType: "一回払い" }))).toBe("recognised");
+    for (const paymentType of ["1回払", "一括払い", "1回払い（リボ変更）", "ボーナス一回払い"])
+      expect(reason(vpassRow({ paymentType }))).toBe("payment_type_unsupported");
   });
 
   test("amountless/unparsed/zero/non-JPY rows excluded with a reason, never zero (INV05)", () => {
@@ -673,15 +718,25 @@ describe("totals", () => {
   });
 });
 
-test("statementPeriod accepts only YYYY-MM/YYYYMM", () => {
+test("statementPeriod yields card_statement_facts.period (YYYY-MM), from YYYY-MM/YYYYMM or the MyJCB label", () => {
   expect(statementPeriod("2026-09")).toBe("2026-09");
   expect(statementPeriod("202609")).toBe("2026-09");
+  // MyJCB `_kogane.period` / settlementYM labels (collector fixtures) name the
+  // month the statement is paid in, which is the statement parser's period.
+  expect(statementPeriod("2026年7月お支払い分")).toBe("2026-07");
+  expect(statementPeriod("2025年10月お支払い分")).toBe("2025-10");
+  expect(statementPeriod("2026年9月")).toBe("2026-09");
+  expect(statementPeriod("２０２６年 ７月 お支払い分")).toBe("2026-07");
   for (const value of [
     "2026-9",
     "20269",
     "2026-13",
     "202600",
-    "2026年7月お支払い分",
+    "2026年13月お支払い分",
+    "2026年0月お支払い分",
+    "2026年7月10日お支払い分",
+    "26年7月お支払い分",
+    "detailMonth-2",
     " 2026-09",
     "2026-09-01",
     "",

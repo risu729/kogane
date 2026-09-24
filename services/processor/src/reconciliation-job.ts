@@ -309,8 +309,9 @@ export async function reconciliationSweep(
 }
 
 /** MyJCB's posted amount can be an installment slice. Only a provider row with
- * equal full usage/payment amounts participates in pending-to-posted matching;
- * the rule is shared with card purchase recognition (`comparableCardPayment`). */
+ * equal full usage/payment amounts participates in pending-to-posted matching.
+ * The rule moved unchanged to the domain (`comparableCardPayment`), which also
+ * records its known gap: it does not read MyJCB's `1,200円` display text. */
 function comparablePayment(row: FactRow): boolean {
   return comparableCardPayment({
     sourceId: row.source_id,

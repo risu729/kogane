@@ -48,11 +48,13 @@ export const CARD_PURCHASE_ZONE = "Asia/Tokyo";
 /** The one basis these events carry; a card purchase moves no cash by itself. */
 export const CARD_PURCHASE_BASIS: RecognitionBasis = "purchase-recognition";
 /**
- * Payment types that are a single payment, compared after NFKC and trimming.
- * Anything else (2回払い, 分割, リボ, ボーナス一括, blank, a wording this list
- * does not know yet) is `payment_type_unsupported`: drift fails safe.
+ * Payment types that are a single payment, compared after NFKC and trimming:
+ * Vpass writes `1回払い`, MyJCB's ledger writes `一回払い`
+ * (tests/fixtures/observation-pipeline/myjcb). Anything else (2回払い, 分割,
+ * リボ, ボーナス一括, blank, a wording this list does not know yet) is
+ * `payment_type_unsupported`: drift fails safe.
  */
-export const SINGLE_PAYMENT_TYPES = ["1回払い"] as const;
+export const SINGLE_PAYMENT_TYPES = ["1回払い", "一回払い"] as const;
 /** Vpass rows need the trusted card binding; a card ordinal is not an identity. */
 export const VPASS_STABLE_IDENTITY_FAMILY = "vpass-card-binding";
 
@@ -201,15 +203,32 @@ export type CardUsageClassification =
 // ---------------------------------------------------------------------------
 
 /**
- * A provider display integer: ASCII digits with optional thousands
- * separators, trimmed, with an optional leading minus. This is the grammar the
- * reconciliation job has always accepted (plus the sign, which it never
- * compared); anything else is not read as a number.
+ * The reconciliation job's historical grammar, kept exactly for
+ * `comparableCardPayment`: trimmed ASCII digits with optional thousands
+ * separators and no sign. It does not read MyJCB's real display text
+ * (`1,200円`); see `comparableCardPayment`.
  */
-function providerInteger(value: string | null): bigint | null {
+function plainInteger(value: string | null): bigint | null {
+  if (value === null || !/^[0-9]+(?:,[0-9]{3})*$/u.test(value.trim())) return null;
+  return BigInt(value.trim().replaceAll(",", ""));
+}
+
+/**
+ * A MyJCB display amount, read with the grammar the MyJCB ledger parser reads
+ * its own amount cell with (`packages/parsers/src/parsers/myjcb.ts`
+ * `jpyAmount`): NFKC, whitespace removed, an optional leading yen sign and
+ * trailing `円`, then an exact integer with optional thousands separators and
+ * an optional leading minus (`1,200円`, `-500円`). Anything else is not read as
+ * a number.
+ */
+function myjcbDisplayInteger(value: string | null): bigint | null {
   if (value === null) return null;
-  const text = value.trim();
-  if (!/^-?[0-9]+(?:,[0-9]{3})*$/u.test(text)) return null;
+  const text = value
+    .normalize("NFKC")
+    .replace(/\s+/gu, "")
+    .replace(/^[¥\\]/u, "")
+    .replace(/円$/u, "");
+  if (!/^-?(?:0|[1-9]\d*|[1-9]\d{0,2}(?:,\d{3})+)$/u.test(text)) return null;
   return BigInt(text.replaceAll(",", ""));
 }
 
@@ -227,8 +246,8 @@ export function myjcbAgreedAmount(
   usageAmountText: string | null,
   paymentAmountText: string | null,
 ): MyjcbAmountCheck {
-  const usage = providerInteger(usageAmountText);
-  const payment = providerInteger(paymentAmountText);
+  const usage = myjcbDisplayInteger(usageAmountText);
+  const payment = myjcbDisplayInteger(paymentAmountText);
   if (usage === null || payment === null) return { ok: false, reasonCode: "payment_split_unknown" };
   if (usage !== payment) return { ok: false, reasonCode: "installment_amount_differs" };
   return { ok: true, amount: usage };
@@ -237,8 +256,16 @@ export function myjcbAgreedAmount(
 /**
  * Whether a row may take part in pending-to-posted matching: a MyJCB confirmed
  * row only when usage equals payment and is positive; every other row is
- * unaffected. Recognition applies the same `myjcbAgreedAmount` rule to every
- * MyJCB row, pending or posted (`classifyCardUsage`).
+ * unaffected. This is the reconciliation job's rule moved here unchanged,
+ * grammar included (`plainInteger`).
+ *
+ * Known gap, deliberately not fixed here: real MyJCB rows display `1,200円`,
+ * which that grammar does not read, so no real MyJCB confirmed row passes and
+ * the live reconciliation lane proposes no MyJCB pending-to-posted pair.
+ * Widening it would start new production proposals, which is a reviewed
+ * change of its own. Recognition does not depend on it: `classifyCardUsage`
+ * applies `myjcbAgreedAmount`, which reads the display grammar, to every MyJCB
+ * row, pending or posted.
  */
 export function comparableCardPayment(row: {
   sourceId: string;
@@ -247,22 +274,40 @@ export function comparableCardPayment(row: {
   paymentAmountText: string | null;
 }): boolean {
   if (row.sourceId !== "myjcb" || row.status !== "confirmed") return true;
-  const agreed = myjcbAgreedAmount(row.usageAmountText, row.paymentAmountText);
-  return agreed.ok && agreed.amount > 0n;
+  const usage = plainInteger(row.usageAmountText),
+    payment = plainInteger(row.paymentAmountText);
+  return usage !== null && usage > 0n && usage === payment;
 }
 
 // ---------------------------------------------------------------------------
 // Classification
 // ---------------------------------------------------------------------------
 
-/** `YYYY-MM` from `YYYY-MM` or `YYYYMM`; every other shape (including provider text) is null. */
+/**
+ * The statement period as `card_statement_facts.period` stores it (`YYYY-MM`),
+ * so a purchase joins its statement on (account, source, period):
+ *
+ * - `YYYY-MM` and `YYYYMM` (Vpass `_kogane.statementMonth`, MyJCB's numeric
+ *   `settlementYM`);
+ * - MyJCB's `_kogane.period` label, `YYYY年M月お支払い分` or `YYYY年M月` after
+ *   NFKC and whitespace removal. The label names the month the statement is
+ *   paid in, which is the period the MyJCB statement parser derives from its
+ *   payment date and cross-checks against this same label.
+ *
+ * Every other shape (the collector's `detailMonth-N` fallback, a date, free
+ * text) is null, never a guess.
+ */
 export function statementPeriod(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const match = /^(\d{4})(?:-(\d{2})|(\d{2}))$/u.exec(value);
-  if (!match) return null;
-  const month = match[2] ?? match[3]!;
+  const numeric = /^(\d{4})(?:-(\d{2})|(\d{2}))$/u.exec(value);
+  const label = numeric
+    ? null
+    : /^(\d{4})年(\d{1,2})月(?:お支払い分)?$/u.exec(value.normalize("NFKC").replace(/\s+/gu, ""));
+  const year = numeric?.[1] ?? label?.[1];
+  const month = numeric ? (numeric[2] ?? numeric[3]!) : label?.[2]?.padStart(2, "0");
+  if (year === undefined || month === undefined) return null;
   const number = Number(month);
-  return number >= 1 && number <= 12 ? `${match[1]}-${month}` : null;
+  return number >= 1 && number <= 12 ? `${year}-${month}` : null;
 }
 
 function isCardSource(value: string): value is CardPurchaseSourceId {
