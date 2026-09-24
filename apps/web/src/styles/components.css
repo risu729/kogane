@@ -1,0 +1,925 @@
+/* Shared components: panels, notes, badges, buttons, filters and check
+ * fields, key/value grids, states, pagination, disclosures, tiles,
+ * provenance chain, notices and code previews. Responsive rules sit next to
+ * the rule they modify. */
+
+/* ── panels ────────────────────────────────────────────────────────── */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-6);
+  box-shadow: var(--shadow-sm);
+  overflow: clip;
+  min-width: 0;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.count {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-body {
+  padding: var(--space-6);
+}
+
+.panel-note {
+  padding: var(--space-3) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: var(--text-md);
+  background: var(--panel);
+}
+
+/* Tones for a note: warn for a derived or stale figure, bad for a blocker. */
+.panel-note-warn {
+  background: var(--warn-bg);
+  border-bottom: 1px solid var(--warn-border);
+  color: var(--warn-fg);
+}
+
+.panel-note-bad {
+  background: var(--bad-bg);
+  border-bottom: 1px solid var(--bad-border);
+  color: var(--bad-fg);
+}
+
+/* A note that closes a panel has the panel's own border beneath it. */
+.panel > .panel-note:last-child {
+  border-bottom: 0;
+}
+
+@media (max-width: 760px) {
+  .panel-head {
+    padding: var(--space-4);
+  }
+  .panel-body {
+    padding: var(--space-4);
+  }
+  .panel-note {
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-sm);
+  }
+}
+
+/* ── badges ────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  color: var(--text-2);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+.badge-ok {
+  color: var(--ok-fg);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.badge-warn {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.badge-bad {
+  color: var(--bad-fg);
+  background: var(--bad-bg);
+  border-color: var(--bad-border);
+}
+
+.badge-superseded {
+  color: var(--sup-fg);
+  background: var(--sup-bg);
+  border-color: var(--sup-border);
+}
+
+.badge-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── buttons ───────────────────────────────────────────────────────── */
+
+.button {
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+  justify-content: center;
+  align-items: center;
+  line-height: 1.5;
+  gap: var(--space-2);
+  display: inline-flex;
+  min-height: var(--control-height);
+}
+
+/* An <a class="button"> keeps its box border; the link underline never leaks in. */
+.button:hover {
+  color: var(--text);
+  background: var(--panel-3);
+  border-color: var(--border-strong);
+}
+
+.button[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--gold-soft);
+  border-color: var(--gold);
+  font-weight: 600;
+}
+
+.button:disabled,
+.button[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.panel-body > .button-row:first-child {
+  margin-top: 0;
+}
+
+.button-row .button {
+  min-width: 0;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .button-row .button {
+    flex: 1 1 100%;
+  }
+}
+
+/* ── filters ───────────────────────────────────────────────────────── */
+
+/* One bar per panel: fields, search and the clear action share a row that
+ * spans the panel edge to edge. It is a panel-level sibling, never a child
+ * of .panel-body. */
+.filter-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.panel > .filter-grid:last-child {
+  border-bottom: 0;
+}
+
+.filter-grid .button {
+  flex: 0 0 auto;
+}
+
+.filter-grid p[role="alert"] {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--bad-fg);
+  font-size: var(--text-sm);
+}
+
+.filter-field {
+  display: flex;
+  flex: 1 1 145px;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+.filter-field input,
+.filter-field select {
+  text-overflow: ellipsis;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.filter-field input::placeholder {
+  color: var(--text-3);
+}
+
+/* A field the page has marked invalid shows it beside the alert text. */
+:is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--bad-fg);
+  box-shadow: 0 0 0 2px var(--bad-border);
+}
+
+/* A row of aria-pressed tabs that switches what a panel lists; it shares the
+ * filter bar's inset and surface. */
+.tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+@media (max-width: 760px) {
+  .filter-grid,
+  .tab-row {
+    padding: var(--space-4);
+    gap: var(--space-3);
+  }
+}
+
+/* ── form fields ───────────────────────────────────────────────────── */
+
+/* A labelled block field: the label above the control, the control sharing
+ * the look of a filter input. Help text goes in a .footnote after the control. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+.field input,
+.field textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+.field .footnote {
+  margin: 0;
+}
+
+/* A native checkbox beside its label, with the whole row as the hit area. */
+.check-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--space-7);
+  padding: var(--space-1) 0;
+  color: var(--text);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.check-field input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: var(--check-size);
+  height: var(--check-size);
+  margin: 1px 0 0;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+/* ── notices ───────────────────────────────────────────────────────── */
+
+/* A toned block inside a panel body: warn for a blocker the reader can
+ * resolve, bad for a failed action or a record that no longer matches. */
+.notice {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: var(--text-md);
+}
+
+.notice-warn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.notice-bad {
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.notice > :first-child {
+  margin-top: 0;
+}
+
+.notice > :last-child {
+  margin-bottom: 0;
+}
+
+.notice strong {
+  display: block;
+}
+
+.notice a {
+  color: inherit;
+}
+
+/* ── key/value grids ───────────────────────────────────────────────── */
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr);
+  gap: 0;
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+/* The label column sizes to the longest label but never past 14rem, so a
+ * long Japanese label wraps instead of squeezing the value column. Child
+ * combinators keep a <dl> nested in a value (a disclosure's full text, the
+ * record dates) out of the grid's rules. */
+.kv > dt {
+  font-family: var(--sans);
+  color: var(--text-3);
+  padding: var(--space-2) var(--space-5) var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  max-width: 14rem;
+}
+
+.kv > dd {
+  font-family: var(--mono);
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kv > dt:last-of-type,
+.kv > dd:last-of-type {
+  border-bottom: none;
+}
+
+@media (max-width: 760px) {
+  .kv {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kv > dt {
+    border-bottom: 0;
+    padding: var(--space-3) 0 0;
+    font-size: var(--text-xs);
+  }
+  .kv > dd {
+    padding-top: var(--space-1);
+  }
+}
+
+/* ── states: loading, error, empty ─────────────────────────────────── */
+
+.state {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: var(--space-7);
+  color: var(--text-2);
+  font-family: var(--sans);
+  font-size: var(--text-md);
+}
+
+.state-error {
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.state-title {
+  font-weight: 600;
+  display: block;
+  margin-bottom: var(--space-3);
+}
+
+.state p {
+  margin: 0 0 var(--space-4);
+}
+
+.state-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-8) var(--space-7);
+}
+
+.state-empty p:last-child {
+  margin-bottom: 0;
+}
+
+.empty-symbol {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  color: var(--gold);
+  width: 42px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
+}
+
+.skeleton-bar {
+  height: var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--panel-3);
+  margin: var(--space-2) 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar,
+  .is-refreshing {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .state {
+    padding: var(--space-5);
+  }
+}
+
+/* ── notices in page flow ──────────────────────────────────────────── */
+
+/* A Notice outside a panel head gets the frame a panel would have given it. */
+.panel-note:not(.panel > *) {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0 0 var(--space-6);
+  overflow-wrap: anywhere;
+}
+
+.panel-note-warn:not(.panel > *) {
+  border-color: var(--warn-border);
+}
+
+.panel-note-bad:not(.panel > *) {
+  border-color: var(--bad-border);
+}
+
+.panel-note strong {
+  display: block;
+}
+
+.panel-note p {
+  margin: 0;
+}
+
+.panel-note strong + p {
+  margin-top: var(--space-1);
+}
+
+/* ── pagination ────────────────────────────────────────────────────── */
+
+.pagination {
+  padding: var(--space-4) var(--space-6);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  border-top: 1px solid var(--border);
+}
+
+.pagination .button {
+  min-width: 60px;
+}
+
+/* A pager that closes a list of cards or panels in page flow: no panel inset
+ * and no rule, so it reads as the list's last line. */
+.pagination-bare {
+  padding: 0;
+  border-top: 0;
+}
+
+@media (max-width: 760px) {
+  .pagination {
+    padding: var(--space-3) var(--space-4);
+    justify-content: center;
+  }
+  .pagination-bare {
+    padding: 0;
+  }
+}
+
+/* ── disclosures ───────────────────────────────────────────────────── */
+
+.detail-disclosure {
+  margin: var(--space-5) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-5);
+  background: var(--panel);
+  min-width: 0;
+}
+
+/* In page flow it keeps the panels' rhythm. */
+main > .detail-disclosure {
+  margin: var(--space-6) 0;
+}
+
+/* Directly under a panel it is the panel's last section: a rule above, the
+ * panel's inset, no frame of its own. */
+.panel > .detail-disclosure {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding: var(--space-4) var(--space-6);
+}
+
+/* Holding panels, it is a section toggle: the panels carry the frames. */
+.detail-disclosure:has(> .panel) {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+/* A light disclosure for a line or two of secondary text; it looks the same
+ * inside a table cell and inside a panel or card body. */
+.inline-disclosure {
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.inline-disclosure p {
+  margin: var(--space-1) 0 0;
+}
+
+/* The full text of a shortened identifier pair. */
+.inline-disclosure dl {
+  margin: var(--space-2) 0 0;
+}
+
+.inline-disclosure dt {
+  font-weight: 600;
+  margin-top: var(--space-2);
+}
+
+.inline-disclosure dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-disclosure summary,
+.inline-disclosure summary,
+td summary {
+  font-size: var(--text-sm);
+}
+
+.detail-disclosure[open] summary {
+  margin-bottom: var(--space-4);
+}
+
+.detail-disclosure pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Hand-off references and identifiers are long tokens; they wrap rather
+ * than push the page sideways. */
+.detail-disclosure code {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .detail-disclosure {
+    margin: var(--space-4) 0;
+    padding: var(--space-3) var(--space-4);
+  }
+  .panel > .detail-disclosure {
+    padding: var(--space-4);
+  }
+  .detail-disclosure:has(> .panel) {
+    padding: 0;
+  }
+}
+
+/* ── stat tiles ────────────────────────────────────────────────────── */
+
+/* Two tiles fit a phone: the minimum never exceeds the available width. Each
+ * tile draws its own top and left hairline, so an empty trailing cell stays
+ * the panel's colour. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr));
+  border-top: 1px solid var(--border);
+}
+
+.tile {
+  background: var(--panel);
+  padding: var(--space-6);
+  box-shadow: -1px -1px 0 var(--border);
+}
+
+.tile-value {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xl);
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.tile-label {
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  word-break: break-word;
+  margin-top: var(--space-2);
+}
+
+.tile code {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .tile {
+    padding: var(--space-4);
+  }
+  .tile-value {
+    font-size: var(--text-xl);
+  }
+}
+
+/* ── provenance chain ──────────────────────────────────────────────── */
+
+.chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chain-step {
+  position: relative;
+  padding-left: 36px;
+}
+
+.chain-step::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 36px;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-strong);
+}
+
+.chain-step:last-child::before {
+  display: none;
+}
+
+.chain-marker {
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chain-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  margin-bottom: var(--space-3);
+  min-width: 0;
+}
+
+/* A superseded parse run is tinted whole, head included, so it can never be
+ * mistaken for a current one at a glance. */
+.chain-card.is-superseded {
+  border-color: var(--sup-border);
+  background: var(--sup-bg);
+}
+
+.chain-card.is-superseded > .chain-card-head {
+  background: color-mix(in srgb, var(--sup-bg) 70%, var(--border));
+  border-bottom-color: var(--sup-border);
+}
+
+.chain-card > .chain-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+/* Stage eyebrow over the step title: the numbered rail gives the order, the
+ * eyebrow names the kind of record each step holds. */
+.chain-heading {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.chain-stage {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
+.chain-title {
+  font-weight: 600;
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.chain-body {
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.chain-body > p:first-child {
+  margin-top: var(--space-1);
+}
+
+.chain-body .detail-disclosure {
+  margin: var(--space-3) 0;
+}
+
+.chain-body .panel-note {
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+@media (max-width: 760px) {
+  .chain-step {
+    padding-left: 28px;
+  }
+}
+
+/* ── query notices ─────────────────────────────────────────────────── */
+
+.query-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+.query-warning {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+}
+
+/* ── raw evidence preview ──────────────────────────────────────────── */
+
+.evidence-preview {
+  margin-top: var(--space-5);
+}
+
+.preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-4);
+}
+
+.evidence-preview .muted {
+  color: var(--text-2);
+  font-size: var(--text-md);
+}
+
+.preview-code {
+  max-height: 36rem;
+  max-width: 100%;
+  overflow: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font: var(--text-md) / 1.65 var(--mono);
+  white-space: pre;
+  tab-size: 2;
+}
+
+.preview-code.is-wrapped {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preview-code code {
+  font: inherit;
+}
+
+.preview-code .code-constant {
+  color: var(--code-constant);
+}
+.preview-code .code-string {
+  color: var(--code-string);
+}
+.preview-code .code-variable {
+  color: var(--code-variable);
+}
+.preview-code .code-tag {
+  color: var(--code-tag);
+}
+.preview-code .code-comment {
+  color: var(--code-comment);
+}
+.preview-code .code-keyword {
+  color: var(--code-keyword);
+}
+.preview-code .code-entity {
+  color: var(--code-entity);
+}
+.preview-code .code-text {
+  color: var(--code-fg);
+}
+.preview-code .code-invalid {
+  color: var(--code-invalid);
+}
+
+@media (max-width: 760px) {
+  .preview-code {
+    padding: var(--space-3);
+    max-height: 24rem;
+  }
+}

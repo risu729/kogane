@@ -5,6 +5,7 @@ import type {
   EvidenceTimeBasis,
 } from "../../../packages/observation-shared/src/evidence-contract.ts";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
+import { Pagination } from "./pagination.tsx";
 
 /** An expired authorization must not leave cached evidence on screen. */
 export function EvidenceBoundary<T>({
@@ -67,7 +68,9 @@ export function RecordedTime({
 }): ReactNode {
   return (
     <>
-      <Nullable value={value} />
+      <span className="cell-time">
+        <Nullable value={value} />
+      </span>
       <div className="dim">日時の根拠：{basis === null ? "未記録" : BASES[basis]}</div>
     </>
   );
@@ -94,22 +97,25 @@ export function EvidencePager({
   fetching: boolean;
 }): ReactNode {
   return (
-    <div className="pagination" aria-label="記録のページ">
-      <span role="status">
-        {paging.page}ページ目 · このページ{count}件
-      </span>
-      <button className="button" disabled={fetching || paging.page === 1} onClick={paging.previous}>
-        前のページ
-      </button>
-      <button
-        className="button"
-        disabled={fetching || nextCursor === null}
-        onClick={() => {
+    <Pagination
+      label="記録のページ"
+      status={
+        <>
+          {paging.page}ページ目 · このページ{count}件
+        </>
+      }
+      previous={{
+        label: "前のページ",
+        disabled: fetching || paging.page === 1,
+        onClick: paging.previous,
+      }}
+      next={{
+        label: "次のページ",
+        disabled: fetching || nextCursor === null,
+        onClick: () => {
           if (nextCursor !== null) paging.next(nextCursor);
-        }}
-      >
-        次のページ
-      </button>
-    </div>
+        },
+      }}
+    />
   );
 }

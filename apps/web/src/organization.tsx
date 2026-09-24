@@ -1,11 +1,20 @@
-import { Fragment, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { IdentityStatus } from "../../../packages/observation-shared/src/identity-contract.ts";
 import type {
   ObservationOrganization,
   OrganizedAccount,
   OrganizedInstrument,
 } from "../../../packages/observation-shared/src/organization-contract.ts";
-import { Badge, Nullable, ObservationLink, Panel, SourceAccount } from "./ui.tsx";
+import {
+  Badge,
+  Kv,
+  KvRow,
+  Nullable,
+  ObservationLink,
+  Panel,
+  SourceAccount,
+  type Tone,
+} from "./ui.tsx";
 import { AccountConnectionDetails } from "./account-connection.tsx";
 import { FinancialProductDetails, FinancialProductSummary } from "./financial-product.tsx";
 import { isCurrentFinancialProductClaim } from "../../../packages/observation-shared/src/financial-products.ts";
@@ -16,6 +25,14 @@ const STATUS: Record<IdentityStatus, string> = {
   "provider-local": "取得元内で識別",
   aggregate: "集計表示",
   unresolved: "要確認",
+};
+// Only a full identification is a positive claim; a provider-local or
+// aggregate mapping is a fact about scope, not a warning.
+const STATUS_TONE: Record<IdentityStatus, Tone> = {
+  identified: "ok",
+  "provider-local": "neutral",
+  aggregate: "neutral",
+  unresolved: "warn",
 };
 const ROLE: Record<OrganizedInstrument["role"], string> = {
   security: "銘柄",
@@ -28,6 +45,9 @@ const NAME_REASON = {
   "provider-current": "現在の対応付けの名称",
   "observed-japanese-script": "保存記録にある日本語表記",
 };
+export function IdentityStatusBadge({ status }: { status: IdentityStatus }): ReactNode {
+  return <Badge tone={STATUS_TONE[status]}>{STATUS[status]}</Badge>;
+}
 export function organizedInstrument(
   organization: Organization,
   role: OrganizedInstrument["role"],
@@ -58,10 +78,10 @@ export function OrganizedSourceAccount({
     organized?.method !== "manual";
   return (
     <div className="organized-account">
-      {productPrimary ? <FinancialProductSummary claim={product} /> : null}
+      {productPrimary ? <FinancialProductSummary claim={product} primary /> : null}
       {organized ? (
-        <div className={productPrimary ? "table-secondary" : undefined}>
-          {organized.label} <Badge>{STATUS[organized.status]}</Badge>
+        <div className={`organized-label${productPrimary ? " table-secondary" : ""}`}>
+          {organized.label} <IdentityStatusBadge status={organized.status} />
         </div>
       ) : null}
       {product && !productPrimary ? <FinancialProductSummary claim={product} /> : null}
@@ -95,22 +115,19 @@ export function OrganizedInstrumentContext({
 function Interpretation({ item }: { item: OrganizedAccount }): ReactNode {
   return (
     <>
-      <div>
-        {item.label} <Badge>{STATUS[item.status]}</Badge>
+      <div className="organized-label">
+        {item.label} <IdentityStatusBadge status={item.status} />
       </div>
       <div className="table-secondary">
         {item.method === "manual" ? "手動で整理" : "規則で整理"} · 改訂 {item.revision}
       </div>
-      <details>
+      <details className="detail-disclosure">
         <summary>対応の根拠</summary>
-        <dl className="kv">
-          <dt>理由</dt>
-          <dd>{item.reason}</dd>
-          <dt>参照先</dt>
-          <dd className="wrap">{item.referenceId}</dd>
-          <dt>整理先</dt>
-          <dd className="wrap">{item.targetId}</dd>
-        </dl>
+        <Kv>
+          <KvRow label="理由">{item.reason}</KvRow>
+          <KvRow label="参照先">{item.referenceId}</KvRow>
+          <KvRow label="整理先">{item.targetId}</KvRow>
+        </Kv>
       </details>
     </>
   );
@@ -127,9 +144,8 @@ export function OrganizationPanel({ organization }: { organization: Organization
             <p className="footnote">
               保存された値に対応する整理情報です。「取得元内で識別」は外部台帳との照合完了を意味しません。
             </p>
-            <dl className="kv">
-              <dt>口座</dt>
-              <dd>
+            <Kv>
+              <KvRow label="口座">
                 {organization.account ? (
                   <>
                     <Interpretation item={organization.account} />
@@ -140,39 +156,36 @@ export function OrganizationPanel({ organization }: { organization: Organization
                 ) : (
                   <Nullable value={null} placeholder="口座の整理情報なし" />
                 )}
-              </dd>
+              </KvRow>
               {organization.instruments.map((item) => (
-                <Fragment key={item.role}>
-                  <dt>{ROLE[item.role]}</dt>
-                  <dd>
-                    <Interpretation item={item} />
+                <KvRow key={item.role} label={ROLE[item.role]}>
+                  <Interpretation item={item} />
+                  <div className="table-secondary">
+                    {item.namespace} / {item.scope} / {item.value}
+                  </div>
+                  {item.nameEvidence ? (
                     <div className="table-secondary">
-                      {item.namespace} / {item.scope} / {item.value}
+                      名称の根拠: {NAME_REASON[item.nameEvidence.reason]}
+                      {item.nameEvidence.origin ? (
+                        <>
+                          {" "}
+                          ·{" "}
+                          <ObservationLink
+                            kind={item.nameEvidence.origin.kind}
+                            id={item.nameEvidence.origin.id}
+                          >
+                            根拠の記録
+                          </ObservationLink>
+                        </>
+                      ) : null}
                     </div>
-                    {item.nameEvidence ? (
-                      <div className="table-secondary">
-                        名称の根拠: {NAME_REASON[item.nameEvidence.reason]}
-                        {item.nameEvidence.origin ? (
-                          <>
-                            {" "}
-                            ·{" "}
-                            <ObservationLink
-                              kind={item.nameEvidence.origin.kind}
-                              id={item.nameEvidence.origin.id}
-                            >
-                              根拠の記録
-                            </ObservationLink>
-                          </>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </dd>
-                </Fragment>
+                  ) : null}
+                </KvRow>
               ))}
-            </dl>
+            </Kv>
             {organization.product ? (
               <>
-                <h3>金融商品</h3>
+                <h3 className="section-gap">金融商品</h3>
                 <FinancialProductDetails claim={organization.product} />
               </>
             ) : null}

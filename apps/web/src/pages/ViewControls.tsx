@@ -5,6 +5,7 @@ import {
   type SourceAccount,
   type RecordFilters,
 } from "../filters.ts";
+import { Pagination } from "../pagination.tsx";
 
 function savedAccountLabel(value: string): string {
   try {
@@ -28,11 +29,14 @@ export function RecordControls({
   filters,
   onChange,
   dates = false,
+  children,
 }: {
   rows: SourceAccount[];
   filters: RecordFilters;
   onChange: (value: RecordFilters) => void;
   dates?: boolean;
+  /** Further fields and actions that share the row, such as a search box. */
+  children?: ReactNode;
 }): ReactNode {
   const dateErrorId = useId();
   const invalidDates = Boolean(dates && filters.from && filters.to && filters.from > filters.to);
@@ -110,6 +114,7 @@ export function RecordControls({
           ) : null}
         </>
       ) : null}
+      {children}
     </div>
   );
 }
@@ -120,6 +125,7 @@ export function Pager({
   start,
   end,
   onChange,
+  bare = false,
 }: {
   page: number;
   pages: number;
@@ -127,32 +133,21 @@ export function Pager({
   start: number;
   end: number;
   onChange: (page: number) => void;
+  bare?: boolean;
 }): ReactNode {
   return (
-    <div className="pagination" aria-label="表示ページ">
-      <span role="status" aria-live="polite">
-        {total}件中 {start}–{end}件
-      </span>
-      <button
-        className="button"
-        type="button"
-        disabled={page === 0}
-        onClick={() => onChange(page - 1)}
-      >
-        前へ
-      </button>
-      <span>
-        {page + 1} / {pages}
-      </span>
-      <button
-        className="button"
-        type="button"
-        disabled={page + 1 >= pages}
-        onClick={() => onChange(page + 1)}
-      >
-        次へ
-      </button>
-    </div>
+    <Pagination
+      bare={bare}
+      label="表示ページ"
+      status={
+        <>
+          {total}件中 {start}–{end}件
+        </>
+      }
+      previous={{ label: "前へ", disabled: page === 0, onClick: () => onChange(page - 1) }}
+      position={`${String(page + 1)} / ${String(pages)}`}
+      next={{ label: "次へ", disabled: page + 1 >= pages, onClick: () => onChange(page + 1) }}
+    />
   );
 }
 export const KIND_LABELS = {

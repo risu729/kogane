@@ -3,9 +3,15 @@
   color: var(--text);
 }
 
-/* Evidence lists need a readable width inside the horizontally scrollable table. */
+/* Evidence lists need a readable width; the column grows with the row rather
+ * than claiming a fixed share of a table that must still fit the page. */
 .balance-table:has(.balance-evidence) .col-detail,
 .balance-table:has(.balance-conflict) .col-detail {
-  min-width: 16rem;
-  width: 16rem;
+  min-width: 9rem;
+}
+
+.balance-evidence ul {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
 }

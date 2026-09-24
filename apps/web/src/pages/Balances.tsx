@@ -23,6 +23,7 @@ import {
 } from "../balance-display.tsx";
 import { Link } from "../router.tsx";
 import { BalancesLatestPage } from "./BalancesLatest.tsx";
+import { CollectionControls } from "../collection-controls.tsx";
 export function BalancesPage({
   view = "balances",
 }: {
@@ -31,7 +32,7 @@ export function BalancesPage({
   // The read model is used when the server advertises it, and the previous
   // list stays in place otherwise; the page never branches on the name of the
   // connection.
-  const { balanceReadModel } = useFeatures();
+  const { balanceReadModel, serverFilters } = useFeatures();
   const query = useBalances(view);
   const summaries = view === "summaries";
   return (
@@ -47,6 +48,7 @@ export function BalancesPage({
           {summaries ? "保有残高を見る" : "期間実績・請求を見る"}
         </Link>
       </div>
+      {serverFilters ? <CollectionControls kind={view} /> : null}
       {balanceReadModel ? <BalancesLatestPage view={view} /> : null}
       <QueryBoundary query={query} label={summaries ? "実績・請求" : "残高"}>
         {(data) => (
@@ -92,43 +94,40 @@ function BalancesBody({
   ]);
   return (
     <>
-      {!serverFilters ? (
-        <section className="panel">
-          <div className="panel-body">
-            <RecordControls rows={rows} filters={filters} onChange={setFilters} />
-            <div className="filter-grid">
-              {[
-                {
-                  label: "通貨・単位",
-                  value: instrument,
-                  options: instruments,
-                  setValue: setInstrument,
-                },
-                {
-                  label: summaries ? "実績・請求の種類" : "残高の種類",
-                  value: metric,
-                  options: metrics,
-                  setValue: setMetric,
-                },
-              ].map(({ label, value, options, setValue }) => (
-                <label className="filter-field" key={label}>
-                  {label}
-                  <select
-                    aria-label={label}
-                    value={value}
-                    onChange={(event) => setValue(event.target.value)}
-                  >
-                    <option value="">すべて</option>
-                    {value && !options.includes(value) ? (
-                      <option value={value}>{value}（今回の記録に含まれません）</option>
-                    ) : null}
-                    {options.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-              ))}
-            </div>
+      <section className="panel" aria-label={summaries ? "実績・請求の表示条件" : "残高の表示条件"}>
+        {!serverFilters ? (
+          <RecordControls rows={rows} filters={filters} onChange={setFilters}>
+            {[
+              {
+                label: "通貨・単位",
+                value: instrument,
+                options: instruments,
+                setValue: setInstrument,
+              },
+              {
+                label: summaries ? "実績・請求の種類" : "残高の種類",
+                value: metric,
+                options: metrics,
+                setValue: setMetric,
+              },
+            ].map(({ label, value, options, setValue }) => (
+              <label className="filter-field" key={label}>
+                {label}
+                <select
+                  aria-label={label}
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                >
+                  <option value="">すべて</option>
+                  {value && !options.includes(value) ? (
+                    <option value={value}>{value}（今回の記録に含まれません）</option>
+                  ) : null}
+                  {options.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
             <button
               className="button"
               type="button"
@@ -141,18 +140,16 @@ function BalancesBody({
             >
               条件をクリア
             </button>
-          </div>
-        </section>
-      ) : null}
-      <section className="panel" aria-label={summaries ? "実績・請求の表示条件" : "残高の表示条件"}>
+          </RecordControls>
+        ) : null}
         <div className="panel-body">
-          <label>
+          <label className="check-field">
             <input
               type="checkbox"
               checked={hideZero}
               onChange={(event) => setHideZero(event.target.checked)}
-            />{" "}
-            {summaries ? "0の実績・請求を除外" : "残高0を除外"}
+            />
+            <span>{summaries ? "0の実績・請求を除外" : "残高0を除外"}</span>
           </label>
           <p className="footnote">
             DBで正規化された金額が0の行を除外します。未記録・解析不能・値の不一致・正規化情報がない行は残します。
@@ -210,13 +207,15 @@ function LatestBalances({
   const view = pageWindow(rows, page);
   return (
     <section aria-label={summaries ? "最新取得の期間実績・請求" : "項目ごとの最新の記録"}>
-      <h2 id="latest-balances">
-        {summaries ? "最新取得の期間実績・請求" : "項目ごとの最新の記録"}
-      </h2>
-      <p className="footnote">
-        受信した最新の記録 {available}件中、条件に一致する{rows.length}
-        件。各区分の件数はこの表示ページ内です。
-      </p>
+      <div className="section-head">
+        <h2 id="latest-balances">
+          {summaries ? "最新取得の期間実績・請求" : "項目ごとの最新の記録"}
+        </h2>
+        <p className="footnote">
+          受信した最新の記録 {available}件中、条件に一致する{rows.length}
+          件。各区分の件数はこの表示ページ内です。
+        </p>
+      </div>
       {BALANCE_GROUPS.map((group) => {
         const grouped = view.rows.filter((row) =>
           (group.kinds as readonly string[]).includes(balanceMeaning(row).kind),
@@ -238,7 +237,7 @@ function LatestBalances({
             : "表示対象の記録がまだありません。金額がゼロであることを意味しません。"}
         </p>
       ) : null}
-      <Pager {...view} total={rows.length} onChange={setPage} />
+      <Pager {...view} total={rows.length} onChange={setPage} bare />
     </section>
   );
 }

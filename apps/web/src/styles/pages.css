@@ -1,0 +1,638 @@
+/* Page-specific layouts: overview statistics and source cards, positions,
+ * observation lists, identities, rewards, settlement and card ownership. */
+
+/* ── overview ──────────────────────────────────────────────────────── */
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.overview-stat {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: var(--space-6);
+  min-width: 0;
+}
+
+.overview-stat-label {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.overview-stat-value {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--text-3xl);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  margin: var(--space-4) 0 var(--space-3);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.overview-stat > span:last-child {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.overview-stat > a:last-child {
+  font-size: var(--text-xs);
+  color: var(--link);
+}
+
+.overview-stat p {
+  margin: 0;
+}
+
+@media (max-width: 1150px) {
+  .overview-stat {
+    padding: var(--space-5);
+  }
+}
+
+@media (max-width: 760px) {
+  .overview-grid {
+    gap: var(--space-2);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .overview-stat {
+    padding: var(--space-4);
+  }
+  .overview-stat:last-child {
+    grid-column: 1 / -1;
+  }
+  .overview-stat-value {
+    font-size: var(--text-2xl);
+  }
+  .overview-stat-label {
+    font-size: var(--text-xs);
+  }
+}
+
+/* ── source cards ──────────────────────────────────────────────────── */
+
+.source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.source-card {
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  overflow-wrap: anywhere;
+}
+
+.source-card h3 {
+  font-family: var(--sans);
+  font-size: var(--text-lg);
+  margin-bottom: var(--space-2);
+}
+
+.source-card p {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  margin: var(--space-1) 0;
+}
+
+.source-card strong {
+  display: block;
+  font-size: var(--text-md);
+  margin-top: var(--space-4);
+}
+
+.source-card .detail-disclosure {
+  margin-bottom: 0;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+}
+
+@media (max-width: 760px) {
+  .source-grid {
+    padding: var(--space-4);
+  }
+  .source-card {
+    padding: var(--space-4);
+  }
+}
+
+/* ── positions ─────────────────────────────────────────────────────── */
+
+.position-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  margin-bottom: var(--space-6);
+  display: grid;
+  grid-template-columns: minmax(280px, 22rem) minmax(0, 1fr);
+}
+
+.position-facts {
+  padding: var(--space-5);
+  border-right: 1px solid var(--border);
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.position-valuations {
+  padding: var(--space-5);
+  min-width: 0;
+}
+
+.position-valuations h3 {
+  margin-bottom: var(--space-3);
+}
+
+@media (max-width: 860px) {
+  .position-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .position-facts {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 760px) {
+  .position-facts,
+  .position-valuations {
+    padding: var(--space-4);
+  }
+}
+
+/* The security code is the heading; the name is its secondary line. */
+.position-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-1);
+}
+
+.security-code {
+  font-family: var(--mono);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.security-name {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.position-quantity {
+  margin: var(--space-4) 0 var(--space-5);
+}
+
+.quantity {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.position-facts .detail-disclosure {
+  margin-bottom: 0;
+}
+
+/* Never narrower than the column: a 190px minimum inside a narrower grid
+ * would overflow it instead of shrinking. */
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  gap: var(--space-2);
+}
+
+/* One block per currency, so the page cannot be read as a set of figures
+ * waiting to be added up. The rule is structural, not just stated. */
+.currency-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-3);
+}
+
+.currency-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-3);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+.currency-group-body {
+  padding: var(--space-3);
+}
+
+.currency-label {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: var(--text-md);
+  color: var(--text);
+}
+
+.figure {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+/* A long exact amount gets the whole row rather than a scrollbar. */
+.figure-wide {
+  grid-column: 1 / -1;
+}
+
+.figure-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.figure-metric {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+/* The amount is never clipped or wrapped: a figure too long for its cell
+ * scrolls, and the value stays exact and selectable. */
+.figure-amount {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow-x: auto;
+  margin-top: var(--space-2);
+}
+
+.figure-currency {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+  flex: 0 0 auto;
+}
+
+.figure-asof {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.figure-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 760px) {
+  .quantity {
+    font-size: var(--text-lg);
+  }
+  .currency-group-body {
+    padding: var(--space-2);
+  }
+  .figure {
+    padding: var(--space-2);
+  }
+}
+
+/* ── observation detail ────────────────────────────────────────────── */
+
+/* Two columns (label, stored value): a phone width holds it without a
+ * scroller, so it keeps a smaller minimum than the shared table default. */
+.stored-row-table {
+  min-width: 20rem;
+}
+
+/* It fits a phone width, so the shared "scroll sideways" hint would be false. */
+@media (max-width: 760px) {
+  .table-scroll:has(.stored-row-table)::before {
+    content: none;
+  }
+}
+
+/* ── observation lists ─────────────────────────────────────────────── */
+
+.obs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+
+.obs-list li {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.obs-list li:last-child {
+  border-bottom: none;
+}
+
+.obs-summary {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* ── identities and account connections ────────────────────────────── */
+
+/* One free-text field: cap it so it does not stretch across the panel. */
+.identity-source-field {
+  max-width: 48ch;
+}
+
+/* The two buttons stay together when the row wraps. */
+.identity-filter-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+}
+
+.identity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+/* The grid sits between panel bodies without a doubled rule after a toolbar. */
+.panel-body + .identity-grid,
+.identity-grid + .panel-body {
+  border-top: 1px solid var(--border);
+}
+
+.identity-card {
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  overflow-wrap: anywhere;
+}
+
+/* Labels are recorded identifiers: no page-heading letter-spacing or casing. */
+.identity-card-title {
+  font-family: var(--sans);
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.identity-card-meta {
+  margin: var(--space-1) 0 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.identity-card-link {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-md);
+}
+
+.identity-card .detail-disclosure {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel);
+}
+
+.identity-card .detail-disclosure p {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+}
+
+.identity-card .detail-disclosure p:last-child {
+  margin-bottom: 0;
+}
+
+.connection-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-md);
+}
+
+.connection-count .count {
+  color: var(--text);
+  font-size: var(--text-md);
+}
+
+@media (max-width: 760px) {
+  .identity-grid {
+    padding: var(--space-4);
+    gap: var(--space-3);
+  }
+  .identity-card {
+    padding: var(--space-4);
+  }
+}
+
+/* ── reward programmes (A11) ───────────────────────────────────────── */
+
+/* A quantity always carries its unit, attached and muted: this number is
+ * not yen unless it says so. Zones on dates share the treatment. */
+.reward-unit {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.reward-holding-table {
+  min-width: 40rem;
+}
+
+.reward-expiry-table {
+  min-width: 52rem;
+}
+
+.reward-block + .reward-block {
+  margin-top: var(--space-5);
+}
+
+.reward-block h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.reward-block-text {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text-2);
+}
+
+.reward-block + .footnote {
+  margin-top: var(--space-5);
+}
+
+.panel-body > .kv + .warning-list {
+  margin-top: var(--space-4);
+}
+
+/* ── settlement and card ownership ─────────────────────────────────── */
+
+/* One reconciliation candidate: a panel whose head carries the facts that
+ * identify it (source, amount, status), with the full review under a
+ * disclosure that is open only while the candidate still needs a decision. */
+.settlement-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+}
+
+.settlement-head h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settlement-head .badge {
+  justify-self: start;
+}
+
+.settlement-facts {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.settlement-facts dt {
+  display: inline;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.settlement-facts dd {
+  display: inline;
+  margin: 0;
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.settlement-facts .null {
+  font-family: var(--sans);
+}
+
+/* The disclosure is a panel section: its summary is a toned bar spanning the
+ * panel, and the review opens beneath it as a panel body. */
+.settlement-disclosure {
+  min-width: 0;
+}
+
+.settlement-disclosure > summary {
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-sm);
+  background: var(--panel-2);
+}
+
+.settlement-disclosure[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.settlement-details h3 {
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+.settlement-details .kv + h3 {
+  margin-top: var(--space-6);
+}
+
+/* A written reason precedes every reviewed settlement decision. */
+.settlement-reason {
+  min-height: calc(var(--control-height) * 2);
+}
+
+.settlement-decision {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.settlement-decision .button-row,
+.ownership-form .button-row {
+  margin-top: 0;
+}
+
+.settlement-history {
+  overflow-wrap: anywhere;
+}
+
+.settlement-targets {
+  min-width: 40rem;
+}
+
+/* The ownership decision form is its own surface beneath the evidence. */
+.ownership-form {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+
+.ownership-form .field input,
+.ownership-form .field textarea {
+  background: var(--panel);
+}
+
+@media (max-width: 760px) {
+  .settlement-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settlement-disclosure > summary {
+    padding: var(--space-3) var(--space-4);
+  }
+  .settlement-decision {
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+  }
+  .ownership-form {
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+    padding: var(--space-4);
+  }
+}

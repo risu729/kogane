@@ -214,6 +214,18 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "bounded card settlement scan progress",
   },
+  card_purchase_recognitions: {
+    classification: "core-keep",
+    planRow: "card purchase recognition evidence",
+  },
+  card_purchase_recognition_keys: {
+    classification: "core-keep",
+    planRow: "card purchase recognition evidence",
+  },
+  card_purchase_scan_cursor: {
+    classification: "operational-mutable",
+    planRow: "bounded card purchase scan progress",
+  },
   // reconciliation_proposals → CORE
   reconciliation_proposals: { classification: "core-keep", planRow: "reconciliation proposals" },
   // economic_event_revisions, legs, allocations, obligations, settlements → CORE

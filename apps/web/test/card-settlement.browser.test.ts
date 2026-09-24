@@ -155,6 +155,9 @@ describe.if(runnable)("card settlement review", () => {
         exact: true,
       })
       .waitFor();
+    // The page head renders before the list or plan resolves; wait for every
+    // loading skeleton (outer and nested boundaries) to be gone.
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
     return page;
   }
 
@@ -241,6 +244,8 @@ describe.if(runnable)("card settlement review", () => {
     detailRevision = 1;
     planRevision = 1;
     const page = await open();
+    // A decided candidate starts collapsed; the withdrawal form is behind its disclosure.
+    await page.getByText("候補の詳細と判断", { exact: true }).click();
     expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(0);
     await page.getByLabel("判断の理由", { exact: true }).fill("別の銀行明細が支払に対応していた");
     await page.getByRole("button", { name: "採用を解除する内容を確認" }).click();

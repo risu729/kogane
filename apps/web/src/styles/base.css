@@ -1,0 +1,271 @@
+/* Reset, document defaults, headings, links, focus, code and text helpers. */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--text-base);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--link) 30%, transparent);
+}
+
+a:hover {
+  border-bottom-color: var(--link);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+code,
+pre {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+pre {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+/* ── headings and page lead ────────────────────────────────────────── */
+
+h1 {
+  font-size: clamp(1.5rem, 2.1vw, var(--text-3xl));
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* No text-transform: account labels and security names are identifiers
+ * whose case is part of the recorded value. */
+h2 {
+  font-size: var(--text-base);
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+h3 {
+  font-size: var(--text-md);
+  margin: 0;
+  font-weight: 600;
+}
+
+h4 {
+  font-size: var(--text-md);
+  margin: var(--space-4) 0 var(--space-2);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.page-head {
+  margin-bottom: var(--space-7);
+}
+
+.page-eyebrow {
+  color: var(--gold-deep);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  margin: 0 0 var(--space-2);
+}
+
+.breadcrumb {
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  margin-bottom: var(--space-1);
+}
+
+.title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.lede {
+  color: var(--text-2);
+  margin: 0;
+  max-width: 78ch;
+}
+
+.footnote {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
+  max-width: 92ch;
+}
+
+.footnote code {
+  font-size: var(--text-xs);
+}
+
+.section-gap {
+  margin-top: var(--space-6);
+}
+
+/* A sub-heading in page flow between panels: set off from the panel above it,
+ * close to the group it introduces. */
+.section-head {
+  margin: var(--space-6) 0 var(--space-4);
+}
+
+.section-head h2 {
+  font-size: var(--text-lg);
+}
+
+.section-head .footnote {
+  margin-top: var(--space-1);
+}
+
+@media (max-width: 760px) {
+  .page-head {
+    margin-bottom: var(--space-6);
+  }
+  .lede {
+    font-size: var(--text-sm);
+  }
+}
+
+/* ── disclosures ───────────────────────────────────────────────────── */
+
+/* Every <details> opens the same way; components only adjust size and
+ * spacing. The line is centred in a hit area a finger can find, whatever the
+ * type size. */
+summary {
+  min-height: var(--tap-min);
+  align-content: center;
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+summary:hover {
+  color: var(--text);
+}
+
+/* ── values and text helpers ───────────────────────────────────────── */
+
+.amount {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.amount-negative {
+  color: var(--neg);
+}
+
+.amount-positive {
+  color: var(--pos);
+}
+
+.amount-zero,
+.amount-unknown {
+  color: var(--zero);
+}
+
+.null {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.dim,
+.muted {
+  color: var(--text-3);
+}
+
+.hash {
+  font-family: var(--mono);
+  letter-spacing: -0.01em;
+  word-break: break-all;
+}
+
+.wrap {
+  white-space: normal;
+  min-width: 14ch;
+}
+
+/* Present for assistive technology and search, drawn nowhere: table captions
+ * whose text already appears as the panel title, and the like. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Unbroken provider strings (URLs, run ids, hashes) wrap inside their box. */
+.wrap-any {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* ── list helpers ──────────────────────────────────────────────────── */
+
+/* A list that is a stack of items, not a bulleted aside. */
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* An ordered stack keeps its numbers: the order is the point of the element. */
+ol.plain-list {
+  list-style: decimal;
+  padding-left: var(--space-5);
+}
+
+.warning-list {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--warn-fg);
+}
+
+.warn-unreadable {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-md);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.warn-unreadable code {
+  font-size: var(--text-xs);
+}

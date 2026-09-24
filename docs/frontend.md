@@ -50,6 +50,64 @@ query cache and hide its records. A failed retry cannot restore them; a successf
 response is required. Connection metadata gates observation pages as well. Other
 refresh failures retain previously authorized records with an explicit warning.
 
+## Design tokens and stylesheet layout
+
+`apps/web/src/styles.css` is an index of `@import` lines; the rules live in
+`apps/web/src/styles/`, imported in cascade order:
+
+| File             | Holds                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `tokens.css`     | Every colour, type size, spacing step, radius and shadow, as `:root` custom properties                                                   |
+| `base.css`       | Reset, body, links, focus ring, headings, `summary`, code, value and list helpers                                                        |
+| `shell.css`      | App shell: sidebar, brand, navigation, workspace bar, source notice, main, footer                                                        |
+| `components.css` | Panels and note tones, badges, buttons, filters, key/value grids, states, pagination, disclosures, tiles, provenance chain, code preview |
+| `tables.css`     | Scroll region, cell defaults, sortable headers, the transaction/balance/identity column contracts                                        |
+| `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership                         |
+
+`balance-display.css` stays beside its component. Responsive rules sit next to
+the rule they modify, not in one media block, so page work touches one file.
+
+The scales in `tokens.css`:
+
+- Type: `--text-xs` (11px) through `--text-3xl` (32px) in eight steps. Nothing
+  renders below `--text-xs`; the smallest-text colour `--text-3` clears WCAG AA
+  on every surface it is printed on (the ratios are in the file).
+- Spacing: `--space-1` (4px) to `--space-8` (40px) on a 4px grid.
+- Radii: `--radius-sm` (controls, badges), `--radius-md` (nested cards,
+  disclosures), `--radius-lg` (panels; `--radius` is its alias).
+- Tones: `--ok-*`, `--warn-*`, `--bad-*`, `--sup-*` triples (foreground,
+  background, border) shared by badges, notes and states; `--code-*` for the
+  evidence preview palette.
+
+Rule: new CSS uses tokens. Raw colours, pixel sizes and radii belong only in
+`tokens.css`; a value that has no token gets one there first. The documented
+exceptions are drawn geometry: the brand mark, the empty-state symbol, the
+provenance chain rail, and the main column's `max-width`.
+
+### Shared primitives
+
+Pages compose these instead of writing their own markup or rules:
+
+| Need                          | Use                                                                                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Page header                   | `.page-head` with the `<h1>` and a `.lede`; `.footnote` for caveats                                                                   |
+| Grouped content               | `Panel` (`.panel` with `.panel-head`, `.panel-note`, `.panel-body`); content inside a panel always sits in `.panel-body`              |
+| Key/value facts               | `Kv` / `KvRow`                                                                                                                        |
+| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, never blank                                                    |
+| Loading, error, empty, stale  | `QueryBoundary` (with `isEmpty`/`empty`), `ErrorState`, `EmptyState`                                                                  |
+| Notices                       | `Notice` (`.panel-note` tones `-warn`/`-bad`) at panel level; `Notice` with `inline` (`.notice`) inside a body                        |
+| Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |
+| Free-text and checkbox inputs | `.field` (label + input/textarea) and `.check-field`; never a bare native control                                                     |
+| Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`                                                                            |
+| Paging                        | `Pagination` (offset or cursor) rendering `.pagination`                                                                               |
+| Tables                        | `.table-scroll` region with `role="region"`, `tabIndex`, a `<caption>` and a class that sets `min-width`; `.cell-time` for timestamps |
+| Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |
+| Lists                         | `.plain-list` (stacked; an `<ol>` keeps its numbers), `.warning-list` (parser warnings, reason and blocker codes)                     |
+| Long tokens                   | `.wrap-any`; `.visually-hidden` for captions whose text is already on screen                                                          |
+
+The application frame is `AppShell`, used by both the observation client and
+the evidence-only client; navigation entries come from one list with icons.
+
 ## API metadata and capabilities
 
 `/api/meta` describes the connection. Its `source.kind` (`local-store`,

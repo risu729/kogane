@@ -82,7 +82,7 @@ export function SourceAccount({ source, account }: { source: string; account: st
         </div>
       </div>
       {longSource || longAccount ? (
-        <details className="identity-details">
+        <details className="inline-disclosure">
           <summary>取得元・口座の全文</summary>
           <dl>
             <dt>取得元</dt>
@@ -176,13 +176,16 @@ export function StatusBadge({ status }: { status: string }): ReactNode {
     error: "エラー",
     pending: "待機中",
     running: "実行中",
+    cancelled: "収集中止",
+    human_required: "操作が必要",
+    unknown: "結果不明",
   };
   const tone: Tone =
     status === "ok" || status === "success"
       ? "ok"
       : status === "failed" || status === "error"
         ? "bad"
-        : status === "partial"
+        : status === "partial" || status === "human_required"
           ? "warn"
           : "neutral";
   return (
@@ -393,12 +396,15 @@ export function QueryBoundary<T>({
   label,
   isEmpty,
   empty,
+  coverageNotice = true,
   children,
 }: {
   query: UseQueryResult<T, Error>;
   label: string;
   isEmpty?: (data: T) => boolean;
   empty?: ReactNode;
+  /** Pages that page in memory render their own pager instead of the URL-based notice. */
+  coverageNotice?: boolean;
   children: (data: T) => ReactNode;
 }): ReactNode {
   const retry = (): void => {
@@ -448,7 +454,7 @@ export function QueryBoundary<T>({
           通信が一時停止しています。接続が戻るまで、前回読み込んだ{label}を表示しています。
         </div>
       ) : null}
-      {coverage?.truncated ? (
+      {coverageNotice && coverage?.truncated ? (
         <div className="query-notice query-warning" role="status">
           このページは各一覧の最大500件を表示しています。続きの記録があります。表示件数は全記録の総数ではありません。
           {coverage.nextCursor || coverage.nextOffset != null ? (
@@ -500,5 +506,30 @@ export function QueryBoundary<T>({
         children(data)
       )}
     </>
+  );
+}
+
+// ── notices ──────────────────────────────────────────────────────────
+
+/** A toned message: warn for a stale or derived value, bad for a blocker; no
+ * tone for a plain remark. At panel level it is the panel note (in page flow
+ * it gets its own frame); `inline` renders the boxed `.notice` for a message
+ * inside a panel body. */
+export function Notice({
+  tone,
+  role,
+  inline = false,
+  children,
+}: {
+  tone?: "warn" | "bad" | undefined;
+  role?: "alert" | "status" | "note";
+  inline?: boolean;
+  children: ReactNode;
+}): ReactNode {
+  const base = inline ? "notice" : "panel-note";
+  return (
+    <div className={tone === undefined ? base : `${base} ${base}-${tone}`} role={role}>
+      {children}
+    </div>
   );
 }

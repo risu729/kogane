@@ -193,7 +193,7 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
     expect(rows.length).toBe(SNAPSHOT_DATASETS.length * 2 - 1);
     expect(differing(rows)).toEqual([]);
     expect(rows.every((row) => row.legacy_artifact_id !== null)).toBe(true);
-  });
+  }, 30_000);
 
   // Same shape and the same reason: several stores, each with the full schema
   // applied and both snapshot policies evaluated over it.

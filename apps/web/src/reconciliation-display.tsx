@@ -5,7 +5,7 @@ import type { TemporalValue } from "../../../packages/domain/src/time.ts";
 import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
 import type { CardSettlementReview } from "./reconciliation-api.ts";
 import { Link } from "./router.tsx";
-import { Badge, Kv, KvRow } from "./ui.tsx";
+import { Badge, Kv, KvRow, Notice, Nullable } from "./ui.tsx";
 
 export const SETTLEMENT_STATUS = {
   proposed: "確認待ち",
@@ -39,14 +39,13 @@ export function SettlementQuantity({ value }: { value: Quantity }): ReactNode {
       {decimalToString(value.value.value)} {value.unitRef}
     </span>
   ) : (
-    <span className="muted">
-      不明（{value.value.reasonCode}） · {value.unitRef}
-    </span>
+    <Nullable value={null} placeholder={`不明（${value.value.reasonCode}） · ${value.unitRef}`} />
   );
 }
 
-function DateValue({ value }: { value: TemporalValue }): ReactNode {
-  if (value.kind === "unknown") return <span className="muted">不明（{value.reasonCode}）</span>;
+export function DateValue({ value }: { value: TemporalValue }): ReactNode {
+  if (value.kind === "unknown")
+    return <Nullable value={null} placeholder={`不明（${value.reasonCode}）`} />;
   if (value.kind === "period")
     return (
       <span>
@@ -67,7 +66,7 @@ function FactLink({ fact, label }: { fact: SourceFactRef; label: string }): Reac
           {label}: <code>{fact.id}</code>
         </span>
       )}
-      <span className="muted"> · 解析版: {fact.revision}</span>
+      <span className="dim"> · 解析版: {fact.revision}</span>
     </span>
   );
 }
@@ -75,7 +74,7 @@ function FactLink({ fact, label }: { fact: SourceFactRef; label: string }): Reac
 export function CardSettlementDetails({ review }: { review: CardSettlementReview }): ReactNode {
   const { facts, impact } = review;
   return (
-    <>
+    <div className="settlement-details">
       <Kv>
         <KvRow label="状態">
           <Badge tone={review.status === "accepted" ? "ok" : "neutral"}>
@@ -88,7 +87,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
           {facts.statement.sourceAccount}
         </KvRow>
         <KvRow label="請求対象期間">
-          {facts.statement.period ?? <span className="muted">不明</span>}
+          <Nullable value={facts.statement.period} placeholder="不明" />
         </KvRow>
         <KvRow label="カード会社の請求総額">
           <SettlementQuantity value={facts.statement.amount} />
@@ -119,13 +118,13 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
         </KvRow>
       </Kv>
       <h3>照合の根拠</h3>
-      <ul>
+      <ul className="warning-list">
         {facts.rationaleCodes.map((code) => (
           <li key={code}>{settlementReason(code)}</li>
         ))}
       </ul>
       {review.acceptanceBlockers.length > 0 ? (
-        <div role="note">
+        <Notice tone="warn" inline role="note">
           <p>
             <strong>
               {review.status === "proposed"
@@ -133,13 +132,13 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
                 : "保存された根拠の再確認が必要です。"}
             </strong>
           </p>
-          <ul>
+          <ul className="warning-list">
             {review.acceptanceBlockers.map((code) => (
               <li key={code}>{settlementReason(code)}</li>
             ))}
           </ul>
           <p>金額や日付の一致だけで、口座の保有者を推測して確定することはありません。</p>
-        </div>
+        </Notice>
       ) : null}
       <h3>残高・支出への影響</h3>
       <Kv>
@@ -170,12 +169,12 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
         <KvRow label="手数料の内訳">不明</KvRow>
         <KvRow label="純資産への影響">算定していません（資産・負債全体の情報が不足）</KvRow>
       </Kv>
-      <p className="panel-note">
+      <p className="footnote">
         出金は銀行の記録にすでに存在します。この照合は請求の支払先を説明するもので、同じ出金や購入をもう一度計上しません。個々のカード利用と請求内訳の照合は、この候補だけでは完了しません。
       </p>
-      <details className="settlement-history">
+      <details className="detail-disclosure settlement-history">
         <summary>再確認する条件と判断の履歴</summary>
-        <ul>
+        <ul className="warning-list">
           {facts.rejectionConditions.map((code) => (
             <li key={code}>{settlementReason(code)}</li>
           ))}
@@ -187,7 +186,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
         {review.history.length === 0 ? (
           <p>まだ判断は保存されていません。</p>
         ) : (
-          <ol>
+          <ol className="plain-list">
             {review.history.map((entry) => (
               <li key={entry.revision}>
                 版 {entry.revision}: {SETTLEMENT_STATUS[entry.status]} · {entry.createdAt}
@@ -202,6 +201,6 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
         ) : null}
         <p>訂正は新しい判断を追加します。原本や以前の判断は消しません。</p>
       </details>
-    </>
+    </div>
   );
 }

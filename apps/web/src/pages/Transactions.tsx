@@ -24,6 +24,7 @@ import {
   organizedInstrument,
 } from "../organization.tsx";
 import { activityMeaning, ActivityFacts } from "../activity-display.tsx";
+import { CollectionControls } from "../collection-controls.tsx";
 const features = tableFeatures({
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
@@ -38,7 +39,9 @@ const columns = helper.columns([
     cell: (info) => (
       <>
         <div className="dim">{activityMeaning(info.row.original).dateLabel}</div>
-        <Nullable value={info.row.original.as_of} />
+        <span className="cell-time">
+          <Nullable value={info.row.original.as_of} />
+        </span>
       </>
     ),
   }),
@@ -106,6 +109,7 @@ const columns = helper.columns([
 ]);
 export function TransactionsPage(): ReactNode {
   const query = useTransactions();
+  const { serverFilters } = useFeatures();
   return (
     <>
       <div className="page-head">
@@ -114,6 +118,7 @@ export function TransactionsPage(): ReactNode {
           カード利用、口座の入出金、売買、利用通知の記録です。残高や期間合計とは分け、金額の正負だけで収入・支出とは判断しません。
         </p>
       </div>
+      {serverFilters ? <CollectionControls kind="transactions" /> : null}
       <QueryBoundary
         query={query}
         label="取引"
@@ -178,7 +183,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
   return (
     <Panel id="transactions" title="取引の記録" count={`受信した${rows.length}件から絞り込み`}>
       {!serverFilters ? (
-        <div className="panel-body">
+        <>
           <RecordControls
             rows={rows}
             filters={filters}
@@ -187,12 +192,10 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
               setFilters(value);
               setPage(0);
             }}
-          />
-          <div className="toolbar">
+          >
             <label className="filter-field">
               内容を検索
               <input
-                className="filter-input"
                 type="search"
                 value={search}
                 placeholder="内容・相手先・識別番号"
@@ -214,16 +217,16 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
             >
               条件をクリア
             </button>
-          </div>
-          <p className="dim" role="status" aria-live="polite" aria-atomic="true">
+          </RecordControls>
+          <div className="panel-note" role="status" aria-live="polite" aria-atomic="true">
             {invalidDates
               ? "日付の条件を修正すると、該当する取引を表示します。"
               : `受信した${rows.length}件のうち、条件に合う取引は${filtered.length}件です。`}
             {!invalidDates && excludedUnknownDates > 0
               ? ` 日付が不明な${excludedUnknownDates}件は期間指定により除外しています。`
               : null}
-          </p>
-        </div>
+          </div>
+        </>
       ) : null}
       <div className="table-scroll" role="region" aria-label="取引の記録" tabIndex={0}>
         <table className="transaction-table">
@@ -258,7 +261,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
                           onClick={header.column.getToggleSortingHandler()}
                         >
                           <table.FlexRender header={header} />
-                          <span aria-hidden="true">
+                          <span className="sort-arrow" aria-hidden="true">
                             {sorted === "asc" ? " ↑" : sorted === "desc" ? " ↓" : " ↕"}
                           </span>
                         </button>

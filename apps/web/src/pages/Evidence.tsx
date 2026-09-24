@@ -84,8 +84,8 @@ export function EvidenceHistory({ sources }: { sources: EvidenceSource[] }): Rea
   if (!sourceId) return <EmptyState>閲覧できる取得元はまだありません。</EmptyState>;
   return (
     <>
-      <section className="panel">
-        <div className="panel-body">
+      <section className="panel" aria-label="取得履歴の表示条件">
+        <div className="filter-grid">
           <label className="filter-field">
             取得元
             <select
@@ -126,8 +126,16 @@ function HistoryPage({ sourceId }: { sourceId: string }): ReactNode {
               このページに保存済みの記録はありません。未保存の収集や未取得の履歴の有無は、この一覧からは判断できません。
             </EmptyState>
           ) : (
-            <div className="table-scroll">
-              <table>
+            <div
+              className="table-scroll"
+              role="region"
+              aria-label="保存済みの取得履歴"
+              tabIndex={0}
+            >
+              <table className="evidence-run-table">
+                <caption>
+                  日時は記録された表記のままです。受付順の一覧で、取得元のデータが最新かどうかは示しません。
+                </caption>
                 <thead>
                   <tr>
                     <th scope="col">中央受付日時</th>
@@ -141,7 +149,7 @@ function HistoryPage({ sourceId }: { sourceId: string }): ReactNode {
                 <tbody>
                   {data.items.map((run) => (
                     <tr key={run.id}>
-                      <td>{run.recordedAt}</td>
+                      <td className="cell-time">{run.recordedAt}</td>
                       <td>
                         <RecordedTime value={run.startedAt} basis={run.startedAtBasis} />
                       </td>
@@ -197,8 +205,11 @@ export function EvidenceRunPage({
             {data.items.length === 0 ? (
               <EmptyState>このページに保存ファイルはありません。</EmptyState>
             ) : (
-              <div className="table-scroll">
-                <table>
+              <div className="table-scroll" role="region" aria-label="保存ファイル" tabIndex={0}>
+                <table className="evidence-file-table">
+                  <caption>
+                    取得元の応答と収集側が生成した記録を、種類の列で区別しています。
+                  </caption>
                   <thead>
                     <tr>
                       <th scope="col">記録の内容</th>

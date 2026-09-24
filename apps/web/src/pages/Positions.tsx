@@ -1,7 +1,17 @@
 import type { ReactNode } from "react";
 import { useFeatures, usePositions, type PositionWithValuations } from "../api.ts";
-import { Amount, Badge, EmptyState, Nullable, ObservationLink, QueryBoundary } from "../ui.tsx";
+import {
+  Amount,
+  Badge,
+  EmptyState,
+  Kv,
+  KvRow,
+  Nullable,
+  ObservationLink,
+  QueryBoundary,
+} from "../ui.tsx";
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
+import { formatAmount } from "../money.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
 import {
@@ -9,14 +19,17 @@ import {
   OrganizedSourceAccount,
   organizedInstrument,
 } from "../organization.tsx";
+import { CollectionControls } from "../collection-controls.tsx";
 export function PositionsPage(): ReactNode {
   const query = usePositions();
+  const { serverFilters } = useFeatures();
   return (
     <>
       <div className="page-head">
         <h1>保有資産</h1>
         <p className="lede">取得元が報告した保有数量と評価額を、通貨ごとに確認できます。</p>
       </div>
+      {serverFilters ? <CollectionControls kind="positions" /> : null}
       <details className="detail-disclosure">
         <summary>評価額の対応関係について</summary>
         <p>
@@ -39,16 +52,15 @@ function PositionList({ entries }: { entries: PositionWithValuations[] }): React
   return (
     <>
       {!serverFilters ? (
-        <section className="panel">
-          <div className="panel-body">
-            <RecordControls
-              rows={entries.map((entry) => entry.position)}
-              filters={filters}
-              onChange={(next) => {
-                setFilters(next);
-                setPage(0);
-              }}
-            />
+        <section className="panel" aria-label="保有資産の表示条件">
+          <RecordControls
+            rows={entries.map((entry) => entry.position)}
+            filters={filters}
+            onChange={(next) => {
+              setFilters(next);
+              setPage(0);
+            }}
+          >
             <button
               className="button"
               type="button"
@@ -59,10 +71,10 @@ function PositionList({ entries }: { entries: PositionWithValuations[] }): React
             >
               条件をクリア
             </button>
-            <p className="footnote">
-              保存された保有資産 {entries.length}件中 {filtered.length}
-              件が条件に一致しています。取得元の全保有資産が揃っていることを示す件数ではありません。
-            </p>
+          </RecordControls>
+          <div className="panel-note" role="status" aria-live="polite" aria-atomic="true">
+            保存された保有資産 {entries.length}件中 {filtered.length}
+            件が条件に一致しています。取得元の全保有資産が揃っていることを示す件数ではありません。
           </div>
         </section>
       ) : null}
@@ -76,10 +88,16 @@ function PositionList({ entries }: { entries: PositionWithValuations[] }): React
       {view.rows.map((entry) => (
         <PositionCard key={entry.position.id} entry={entry} />
       ))}
-      <Pager {...view} total={filtered.length} onChange={setPage} />
+      <Pager {...view} total={filtered.length} onChange={setPage} bare />
     </>
   );
 }
+/**
+ * A figure whose formatted amount is longer than this takes the whole row of
+ * the grid, so a large exact amount is read in one line rather than scrolled.
+ * This is a length of text, never a comparison of amounts.
+ */
+const WIDE_FIGURE_CHARS = 16;
 function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
   const { position, valuations } = entry;
   const security = organizedInstrument(position.organization, "security");
@@ -87,48 +105,47 @@ function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
   return (
     <article className="position-card">
       <div className="position-facts">
+        {/* The security code is the heading: it is the identifier the source
+            reported, and the name underneath is a label for it. */}
         <div className="position-title">
-          <span className="security-code">{position.security_code}</span>
+          <h2 className="security-code">{position.security_code}</h2>
           <Badge>{position.source_id}</Badge>
         </div>
-        <h2 className="security-name">
+        <div className="security-name">
           <Nullable value={security?.label || position.security_name} placeholder="銘柄名未記録" />
-        </h2>
+        </div>
         {security && security.label !== position.security_name ? (
           <div className="table-secondary">
             取得元の銘柄名: <Nullable value={position.security_name} />
           </div>
         ) : null}
-        <div className="quantity">{position.quantity_text}</div>
-        <div className="figure-metric">保有数量（取得元の表記）</div>
-        <dl className="kv">
-          <dt>口座</dt>
-          <dd>
+        <div className="position-quantity">
+          <div className="quantity">{position.quantity_text}</div>
+          <div className="figure-metric">保有数量（取得元の表記）</div>
+        </div>
+        <Kv>
+          <KvRow label="口座">
             <OrganizedSourceAccount
               source={position.source_id}
               account={position.source_account}
               organization={position.organization}
             />
-          </dd>
-          <dt>市場</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="市場">
             <Nullable value={position.market} />
-          </dd>
-          <dt>通貨</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="通貨">
             <Nullable value={position.currency} />
-          </dd>
-          <dt>基準日</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="基準日">
             <Nullable value={position.as_of} />
-          </dd>
-          <dt>記録</dt>
-          <dd>
+          </KvRow>
+          <KvRow label="記録">
             <ObservationLink kind="position" id={position.id}>
               詳細・原本を確認
             </ObservationLink>
-          </dd>
-        </dl>
+          </KvRow>
+        </Kv>
         <details className="detail-disclosure">
           <summary>数量・解析の情報</summary>
           <p>
@@ -142,46 +159,57 @@ function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
           currencies.map((currency) => (
             <section className="currency-group" key={currency}>
               <div className="currency-group-head">
-                <span>{currency}</span>
+                <span className="currency-label">{currency}</span>
                 <span>通貨別の報告値</span>
               </div>
-              <div className="figures">
-                {valuations
-                  .filter((value) => value.currency === currency)
-                  .map((value) => (
-                    <div className="figure" key={value.id}>
-                      <div className="figure-metric">{value.metric}</div>
-                      <OrganizedSourceAccount
-                        source={value.source_id}
-                        account={value.source_account}
-                        organization={value.organization}
-                      />
-                      <OrganizedInstrumentContext
-                        organization={value.organization}
-                        role="security"
-                      />
-                      <OrganizedInstrumentContext
-                        organization={value.organization}
-                        role="unit"
-                        original={value.currency}
-                      />
-                      <div className="figure-amount">
-                        <Amount
-                          minor={value.amount_minor}
-                          unit={value.currency}
-                          text={value.amount_text}
-                        />
-                      </div>
-                      <div className="figure-foot">
-                        <span>
-                          基準日: <Nullable value={value.as_of} />
-                        </span>
-                        <ObservationLink kind="valuation" id={value.id}>
-                          詳細
-                        </ObservationLink>
-                      </div>
-                    </div>
-                  ))}
+              <div className="currency-group-body">
+                <div className="figures">
+                  {valuations
+                    .filter((value) => value.currency === currency)
+                    .map((value) => {
+                      const wide =
+                        formatAmount(value.amount_minor, value.currency, value.amount_text).length >
+                        WIDE_FIGURE_CHARS;
+                      return (
+                        <div className={wide ? "figure figure-wide" : "figure"} key={value.id}>
+                          <div className="figure-head">
+                            <span className="figure-metric">{value.metric}</span>
+                            {/* The currency stays visible even when the amount is missing. */}
+                            <span className="figure-currency">{value.currency}</span>
+                          </div>
+                          <OrganizedSourceAccount
+                            source={value.source_id}
+                            account={value.source_account}
+                            organization={value.organization}
+                          />
+                          <OrganizedInstrumentContext
+                            organization={value.organization}
+                            role="security"
+                          />
+                          <OrganizedInstrumentContext
+                            organization={value.organization}
+                            role="unit"
+                            original={value.currency}
+                          />
+                          <div className="figure-amount">
+                            <Amount
+                              minor={value.amount_minor}
+                              unit={value.currency}
+                              text={value.amount_text}
+                            />
+                          </div>
+                          <div className="figure-foot">
+                            <span className="figure-asof">
+                              基準日: <Nullable value={value.as_of} />
+                            </span>
+                            <ObservationLink kind="valuation" id={value.id}>
+                              詳細
+                            </ObservationLink>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
               </div>
             </section>
           ))

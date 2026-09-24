@@ -5,7 +5,9 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useFeatures, useMetadata } from "./api.ts";
 import { QueryBoundary } from "./ui.tsx";
-import { Link, useRoute, usePath, type Route } from "./router.tsx";
+import { useRoute, usePath, type Route } from "./router.tsx";
+import { AppShell, NAV_ICONS, type NavItem } from "./app-shell.tsx";
+import type { ClientFeatures } from "./capabilities.ts";
 import { OverviewPage } from "./pages/Overview.tsx";
 import { TransactionsPage } from "./pages/Transactions.tsx";
 import { BalancesPage } from "./pages/Balances.tsx";
@@ -16,40 +18,30 @@ import { ObservationDetailPage } from "./pages/ObservationDetail.tsx";
 import { NotFoundPage } from "./pages/NotFound.tsx";
 import { EvidenceContent } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
-import { CollectionControls } from "./collection-controls.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
 import { CardOwnershipPage } from "./pages/CardOwnership.tsx";
 import { ReconciliationPage } from "./pages/Reconciliation.tsx";
 
-const NAV: { to: string; label: string; icon: string }[] = [
+// Every destination in one list. A `feature` entry is shown only while the
+// API advertises that capability; the others are always present.
+const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeatures }[] = [
+  { to: "/", label: "ホーム", icon: NAV_ICONS.home },
+  { to: "/transactions", label: "取引", icon: NAV_ICONS.transactions },
+  { to: "/balances", label: "残高", icon: NAV_ICONS.balances },
+  { to: "/positions", label: "保有資産", icon: NAV_ICONS.positions },
+  { to: "/summaries", label: "期間実績・請求", icon: NAV_ICONS.summaries },
+  { to: "/artifacts", label: "原本・証跡", icon: NAV_ICONS.artifacts },
   {
-    to: "/",
-    label: "ホーム",
-    icon: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
+    to: "/reconciliation",
+    label: "カード照合",
+    icon: NAV_ICONS.reconciliation,
+    feature: "cardSettlementReconciliation",
   },
-  {
-    to: "/transactions",
-    label: "取引",
-    icon: "M4 7h16m-4-4 4 4-4 4 M20 17H4m4-4-4 4 4 4",
-  },
-  {
-    to: "/balances",
-    label: "残高",
-    icon: "M3 7h18v13H3z M3 7V4h15v3 M16 12h5v4h-5z",
-  },
-  {
-    to: "/positions",
-    label: "保有資産",
-    icon: "M4 21V11h4v10 M10 21V3h4v18 M16 21V7h4v14",
-  },
-  { to: "/summaries", label: "期間実績・請求", icon: "M5 3h14v18H5z M8 8h8 M8 12h8 M8 16h5" },
-  {
-    to: "/artifacts",
-    label: "原本・証跡",
-    icon: "M5 3h9l5 5v13H5z M14 3v6h5 M9 13h6 M9 17h6",
-  },
+  { to: "/identities", label: "口座・銘柄", icon: NAV_ICONS.identities, feature: "identities" },
+  { to: "/rewards", label: "ポイント・前払式残高", icon: NAV_ICONS.rewards, feature: "rewards" },
+  { to: "/evidence", label: "取得履歴", icon: NAV_ICONS.evidence, feature: "evidenceHistory" },
 ];
 
 // Labels for known connection names. Text only: no feature reads these maps,
@@ -138,102 +130,28 @@ export function App(): ReactNode {
 
   const evidenceRoute =
     features.evidenceHistory && (path === "/evidence" || path.startsWith("/runs/"));
+  const navItems: NavItem[] = NAV.filter((item) => !item.feature || features[item.feature]).map(
+    (item) => ({
+      to: item.to,
+      label: item.label,
+      icon: item.icon,
+      current: item.to === "/evidence" ? evidenceRoute : isActive(item.to, path),
+    }),
+  );
   return (
-    <div className="app-shell">
-      <a className="skip-link" href="#main">
-        本文へ移動
-      </a>
-      <aside className="sidebar">
-        <Link to="/" className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            k
-          </span>
-          <span>
-            <span className="brand-name">
-              kogane<span className="brand-dot">.</span>
-            </span>
-            <span className="brand-sub">資産の記録を、たどる。</span>
-          </span>
-        </Link>
-        <p className="nav-label">ライブラリ</p>
-        <nav className="nav" aria-label="メインナビゲーション">
-          {NAV.map((item) => (
-            <Link key={item.to} to={item.to} current={isActive(item.to, path)}>
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d={item.icon} />
-              </svg>
-              <span>{item.label}</span>
-            </Link>
-          ))}
-          {features.cardSettlementReconciliation ? (
-            <Link to="/reconciliation" current={path === "/reconciliation"}>
-              カード照合
-            </Link>
-          ) : null}
-          {features.identities ? (
-            <Link to="/identities" current={path === "/identities"}>
-              口座・銘柄
-            </Link>
-          ) : null}
-          {features.rewards ? (
-            <Link to="/rewards" current={path === "/rewards"}>
-              ポイント・前払式残高
-            </Link>
-          ) : null}
-          {features.evidenceHistory ? (
-            <Link to="/evidence" current={evidenceRoute}>
-              取得履歴
-            </Link>
-          ) : null}
-        </nav>
-        <div className="sidebar-note">
-          <span className="sidebar-note-symbol" aria-hidden="true">
-            ↳
-          </span>
-          <strong>数字の先に、原本を。</strong>
-          <p>取引や残高から、取得時の記録と保存された原本を確認できます。</p>
-          <span className="read-only-label">閲覧専用</span>
-        </div>
-        <div className="sidebar-footer">
-          KOGANE <span>EVIDENCE BROWSER</span>
-        </div>
-      </aside>
-      <div className="workspace">
-        <header className="workspace-bar">
-          <div className="workspace-caption">
-            マイライブラリ <span>/</span> 保存された記録
-          </div>
-          <button
-            className="button refresh-button"
-            aria-disabled={fetching}
-            onClick={() => {
-              if (client.isFetching() > 0) return;
-              void client.invalidateQueries({ refetchType: "active" });
-            }}
-          >
-            <span
-              className={fetching ? "refresh-symbol is-refreshing" : "refresh-symbol"}
-              aria-hidden="true"
-            >
-              ↻
-            </span>
-            {fetching ? "更新中…" : "表示を更新"}
-          </button>
-        </header>
-        <div className="source-notice">
-          <div className="source-identity">
-            <span className={`connection-dot${connected ? " connected" : ""}`} aria-hidden="true" />
-            <span role="status">{connectionLabel}</span>
-          </div>
-          <p>
+    <AppShell
+      tagline="資産の記録を、たどる。"
+      navItems={navItems}
+      note={{
+        title: "数字の先に、原本を。",
+        body: "取引や残高から、取得時の記録と保存された原本を確認できます。",
+      }}
+      caption="保存された記録"
+      connection={{
+        connected,
+        label: connectionLabel,
+        detail: (
+          <>
             {metadata.data ? (
               synthetic ? (
                 "この接続先のデータは表示できません"
@@ -256,40 +174,37 @@ export function App(): ReactNode {
               "データの種類は未確認です"
             )}
             {metadata.isError && metadata.data ? "（前回の接続情報）" : ""}
-          </p>
-        </div>
-        <main id="main" ref={main} tabIndex={-1}>
-          {!synthetic ? <ParsingHealthNotice health={metadata.data?.parsingHealth} /> : null}
-          <QueryBoundary query={metadata} label="接続情報">
-            {() =>
-              synthetic ? (
-                <section>
-                  <h1>表示対象の記録がありません</h1>
-                  <p>接続先を確認してください。</p>
-                </section>
-              ) : (
-                <>
-                  {features.serverFilters &&
-                  ["transactions", "balances", "summaries", "positions", "artifacts"].includes(
-                    route.name,
-                  ) ? (
-                    <CollectionControls kind={route.name} />
-                  ) : null}
-                  {evidenceRoute ? (
-                    <EvidenceContent observationsAvailable />
-                  ) : (
-                    <View key={path + window.location.search} route={route} />
-                  )}
-                </>
-              )
-            }
-          </QueryBoundary>
-        </main>
-        <footer className="workspace-footer">
-          <span>原本を保持し、確認・訂正の履歴を記録します。</span>
-          <span>金融機関への接続・収集はこの画面から実行しません。</span>
-        </footer>
-      </div>
-    </div>
+          </>
+        ),
+      }}
+      refresh={{
+        refreshing: fetching,
+        onRefresh: () => {
+          if (client.isFetching() > 0) return;
+          void client.invalidateQueries({ refetchType: "active" });
+        },
+      }}
+      footer={[
+        "原本を保持し、確認・訂正の履歴を記録します。",
+        "金融機関への接続・収集はこの画面から実行しません。",
+      ]}
+      mainRef={main}
+    >
+      {!synthetic ? <ParsingHealthNotice health={metadata.data?.parsingHealth} /> : null}
+      <QueryBoundary query={metadata} label="接続情報">
+        {() =>
+          synthetic ? (
+            <section>
+              <h1>表示対象の記録がありません</h1>
+              <p>接続先を確認してください。</p>
+            </section>
+          ) : evidenceRoute ? (
+            <EvidenceContent observationsAvailable />
+          ) : (
+            <View key={path + window.location.search} route={route} />
+          )
+        }
+      </QueryBoundary>
+    </AppShell>
   );
 }
