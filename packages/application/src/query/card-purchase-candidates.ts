@@ -40,7 +40,7 @@ import {
 import { exactQuantity, normalizeDecimal, type Quantity } from "../../../domain/src/values.ts";
 
 /** Proposals one call resolves; a page asks for the candidates of at most 50 events. */
-export const CANDIDATE_LIMIT = 200;
+const CANDIDATE_LIMIT = 200;
 
 /** Structural: both `SqlExecutor` (queries) and `CommandStore` (commands) satisfy it. */
 export interface CandidateReader {
@@ -87,7 +87,7 @@ interface RelationRow {
  * a target that is not a canonical `transaction:<id>` pinned to its own parse
  * run finds no row and so no key.
  */
-export const CANDIDATE_TARGETS_SQL = `WITH proposals AS MATERIALIZED (
+const CANDIDATE_TARGETS_SQL = `WITH proposals AS MATERIALIZED (
   SELECT p.id,p.status,p.target_refs_json,p.rationale_codes_json,p.rejection_conditions_json,p.created_at
   FROM reconciliation_proposals p
   WHERE p.kind='pending_to_posted' AND p.stage='B' AND (?2 IS NULL OR p.id=?2)
@@ -142,7 +142,7 @@ ORDER BY s.created_at DESC,p.id,target.position`;
  * as `relation:pending_to_posted|<from>|<to>`) and the latest one's status,
  * latest by creation time and then by insertion order.
  */
-export const CANDIDATE_RELATIONS_SQL = `SELECT json_extract(w.value,'$[0]') AS from_ref,json_extract(w.value,'$[1]') AS to_ref,
+const CANDIDATE_RELATIONS_SQL = `SELECT json_extract(w.value,'$[0]') AS from_ref,json_extract(w.value,'$[1]') AS to_ref,
  (SELECT count(*) FROM entity_relations r WHERE r.kind='${PENDING_POSTED_RELATION_KIND}'
    AND r.from_ref=json_extract(w.value,'$[0]') AND r.to_ref=json_extract(w.value,'$[1]')) AS revision,
  (SELECT r.status FROM entity_relations r WHERE r.kind='${PENDING_POSTED_RELATION_KIND}'
@@ -226,9 +226,7 @@ interface ResolvedTarget {
   side: CardPurchaseCandidateSide;
 }
 
-function targetOf(
-  row: TargetRow,
-): ResolvedTarget | null {
+function targetOf(row: TargetRow): ResolvedTarget | null {
   const ref = { kind: row.ref_kind, id: row.ref_id, revision: row.ref_revision };
   if (!validSourceFactRef(ref)) return null;
   const holder = holderOf(row);

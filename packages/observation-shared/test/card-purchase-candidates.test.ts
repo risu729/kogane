@@ -52,9 +52,9 @@ describe("card purchase candidates contract", () => {
       { ...base.relation, validFrom: "2026-08-01" },
       { ...base.relation, relationKind: "supersedes" },
     ])
-      expect(
-        validCardPurchasePage(withCandidates({ ...base, relation } as typeof base)),
-      ).toBe(false);
+      expect(validCardPurchasePage(withCandidates({ ...base, relation } as typeof base))).toBe(
+        false,
+      );
   });
 
   test("refuses unknown fields, codes and inconsistent sides", () => {

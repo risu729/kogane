@@ -29,6 +29,9 @@ produce the complete economic event or its balance effect.
 | Accepting a candidate                                     | A decision in the decision log, through a guarded command |
 | Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision       |
 | Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision     |
+| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only        |
+| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)           |
+| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions |
 | Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)  |
 
 [Card purchase recognition](#card-purchase-recognition) runs only while
@@ -88,6 +91,10 @@ batch that writes one revision is
 | `current_card_purchase_keys`         | Keys of live revisions.                                                                                                                                                                                                                                                     |
 | `card_purchase_scan_cursor`          | Operational singleton `(1, last_observation_id)`; outside the source-revision ledger.                                                                                                                                                                                       |
 
+A reviewed or provider-linked [pending-to-posted link](#pending-to-posted-links)
+writes the `merge` and `split` actions through the same guards; 0047 needed no
+change for them.
+
 Both sidecar tables are append-only. Their insert guards require the event's
 only live revision, a `purchase`/`refund` on the `purchase-recognition` basis
 (so a batch writes revision → legs → supersede → sidecar → keys); a `retire`
@@ -123,6 +130,10 @@ Judgements are recorded in `decision_revisions` (migration 0029). Its
 `subject_kind='relation'` with a prefixed `subject_ref`: `proposal:`, `event:`,
 `obligation:`, `allocation:` or `settlement:`. The prefixes keep those subject
 namespaces disjoint from the `entity_relations` ids, which use the bare form.
+A proposal is resolved only together with a `proposal:<id>` decision: the
+0032 update trigger refuses a `(status, decision_revision_id)` whose decision
+is about another subject. The [pending-to-posted review](#pending-to-posted-links)
+therefore appends that decision and resolves the proposal in the same batch.
 
 `RELATION_STATUSES` in `packages/domain` diverged from the stored
 `entity_relations.status` CHECK (`proposed|accepted|rejected|released`). The
@@ -216,8 +227,12 @@ principal the server verified, and `expectedStatus` is the state the caller saw.
 All writes of one command are one D1 batch guarded on the ledger row, so a
 failed guard writes nothing. An acceptance appends two decision revisions (one
 for the proposal, one for the relation it creates), inserts the
-`entity_relations` row, and resolves the proposal. A09 will expose this as an
-authenticated command route; there is no public write route today.
+`entity_relations` row, and resolves the proposal. The relation's ends are the
+targets' own `SourceFactRef` ids, `transaction:<id>`, which already carry
+their kind, never prefixed a second time; a proposal cites its rows the same
+way in `evidence_refs_json`. There is no public write route to this command: the reviewed path is the
+change lifecycle's `relation.accept` with a proposal marker
+([pending-to-posted links](#pending-to-posted-links)).
 
 Undoing an acceptance is never a DELETE: a later decision appends a new revision
 and the old one stays readable.
@@ -263,11 +278,12 @@ ordinal is not an identity. A mapping whose status is `unresolved` names a
 placeholder, not a card, and counts as no account.
 
 These stay reviewed decisions and are never automatic: linking a pending row to
-its posted row as one purchase (until then they are separate events),
-allocating a refund to a purchase, declaring an old row and a renamed row the
-same purchase after an external id change, a card statement against a bank
-debit ([card settlements](card-settlements.md)), and "this row is not a
-purchase".
+its posted row as one purchase (until then they are separate events; see
+[pending-to-posted links](#pending-to-posted-links), where only a pair the
+provider itself linked is merged by the rule), allocating a refund to a
+purchase, declaring an old row and a renamed row the same purchase after an
+external id change, a card statement against a bank debit
+([card settlements](card-settlements.md)), and "this row is not a purchase".
 
 ### Mapping
 
@@ -307,6 +323,8 @@ re-fetch that shows the same row is not a revision. Per key the lane writes:
 | `revise`    | The content changed: the account mapping, the amount or the date, or a retired row reappeared (`unknown → captured`, same event)    |
 | `reanchor`  | Same content, but a parse run the live evidence cites is no longer published (a published replay): the key moves to the current row |
 | `retire`    | A live `authorized` or `captured` event none of whose keys is current any more (`staleCardPurchaseKeysSql`)                         |
+| `merge`     | A pending-to-posted link accepted by review, or linked by the provider ([below](#pending-to-posted-links))                          |
+| `split`     | An accepted link withdrawn: the posted event's restored revision ([below](#pending-to-posted-links))                                |
 
 A different kind for a held key is never a revision; it is counted as a
 conflict and left for review. Every revision is one guarded `db.batch`
@@ -325,15 +343,91 @@ before recognition in every tick, and when it fills its page and retires every
 event on it, recognition waits a tick (bounded: see [Bounds](#bounds)), so the old
 events of a changed key are retired before their replacements are recognised
 and the captured total never counts one purchase twice. An event that still
-holds one current key is not stale, and an event holding several keys (a
-reviewed merge) is left to its reviewed flow and counted as a conflict. A row
-that stays current but can no longer be recognised (its binding lost, say)
-keeps its last revision: the provider still shows it.
+holds one current key is not stale. A merged event (one posted key and its
+pending key) is treated like any other: it is revised from its posted row when
+that row's content changes, keeping its pending key; its pending row adds
+nothing to it; and it is retired, keeping both keys, once none of its rows is
+current. A row that stays current but can no longer be recognised (its binding
+lost, say) keeps its last revision: the provider still shows it.
 
 Accepting a [card settlement](card-settlements.md) adds a cash-movement leg and
 an unresolved obligation-change leg and never a `purchase-recognition` leg, so
 a card charge is counted once as a purchase and its payment once as cash. No
 purchase is allocated to a statement.
+
+### Pending-to-posted links
+
+A pending authorisation and the posted charge it became are recognised as two
+events, each holding its own key: an `authorized` event (retired to `unknown`
+once a Vpass month's posted capture replaces its pending one) and a `captured`
+event. Only a recorded decision makes them one purchase: amount and date
+closeness never does (INV07), and two posted rows of one amount on one day are
+two candidates, never a merge (SC03).
+
+**Candidates.** After the recognition pass, the lane pairs the recognised
+events of every group its page touched with `stageBProposals`. A group is the
+resolved account, the source and the statement period, or, when the sidecar
+has no recognised period, the usage month: MyJCB labels many months only
+relatively (`detailMonth-N`), so its pending and confirmed rows often carry no
+period at all, and grouping them by usage month lets a pending row meet its
+posted row, stage B's own amount and date closeness then deciding. Within a
+group it pairs each single-key pending-origin event (`authorized`, or
+`unknown` after it left the display) against each single-key `captured`
+posted event of the same card account namespace and kind, never a purchase
+against a refund. Each candidate is a `reconciliation_proposals` row keyed by
+the matcher's own `proposalIdentity` digest, so a pair is proposed once
+whichever lane saw it first: kind `pending_to_posted`, stage `B`, method
+`rule`, policy release `reconciliation-rules-v1`, targets `[pending, posted]`
+as `transaction:<id>` pinned to `parse_run:<id>`, inserted only
+`WHERE NOT EXISTS` a row with that digest (the 0032 no-replace trigger would
+abort a second insert of an id). A pair already stored, proposed or decided, is
+never written again and never takes the write budget, and the ambiguity codes
+(`multiple_candidates`, `candidate_not_unique`) are kept. The recognition cursor cycles through every
+current row, so a pair is reached however many rows a source has; the
+reconciliation lane's first-1,000-rows read can no longer hide it. The amount
+and counterparty are read from the rows to compare and never stored.
+
+**Merge.** A reviewed `relation.accept` of the candidate
+([change lifecycle](change-lifecycle.md#pending-to-posted-link-review)), or,
+for a pair whose rows carry the same provider link id (`autoAcceptable`), the
+lane itself as `rule` decisions under `rule:card-purchase-recognition-v1`,
+writes one guarded batch:
+
+- the survivor is the **pending-origin event**: its revision n+1 (action
+  `merge`) is `captured`, with the posted row's content, facts, usage date and
+  single `purchase-recognition` leg, and holds the posted key and the pending
+  key. Its evidence cites the posted row first, then the pending one. Its
+  history reads `authorized → captured` (or `authorized → unknown → captured`),
+  each step checked with `eventTransition`;
+- the posted event's live revision m gets `superseded_by = '<survivor>@n+1'`,
+  a cross-id supersession 0032 allows, so the posted key is free when the
+  survivor claims it; the survivor's revision n is superseded as usual;
+- the batch order is survivor n+1 → leg → supersede n and m → sidecar → keys.
+  Statement 1 (the survivor's decision) carries every guard: both events still
+  at the planned live revisions, holding exactly the keys being merged, which
+  no other live event holds. Every later statement is `WHERE EXISTS(decision)
+AND NOT EXISTS(own row)`, so a replay or a stale batch writes nothing.
+
+The captured total is unchanged: the posted leg moves, it is not added, and
+the authorisation is no longer held apart. The merged event's statement is the
+posted row's (its sidecar is the posted row's), so it links to its statement
+and settlement unchanged.
+
+**Split.** Withdrawing an accepted link (`relation.reject` of an accepted
+triple) retires the merged event first, holding its pending key alone, in
+state `unknown` with `conflicting_evidence` and the pending row's own facts
+and date: the reviewer said the authorisation is not this charge, and nothing
+says what it became. Then the posted event gets revision m+1 (action `split`)
+holding its posted key again, with the merged revision's posted content and
+leg. It is restored rather than recognised anew: its id already has
+revisions, so a first recognition could never be written for it, and the lane
+would find its key held by nobody forever. A merged event already retired
+splits into two retired events. The captured total is unchanged again, and
+every earlier revision stays readable.
+
+What stays proposal-only: every candidate without a provider link id, which
+is every one the deployed parsers produce today (no source supplies a
+pending-to-posted link id; see [above](#which-sources-supply-a-provider-link-id)).
 
 ### Bounds
 
@@ -346,6 +440,16 @@ full last page wraps on the next tick, whose page is empty) because a row below
 it can become current again. The cursor moves only from the value the tick
 read, so a tick that overlapped it never pulls it back. The current-usage query
 runs twice per tick (stale keys, then the page).
+
+The candidate pass then reads the recognised events of the groups the page
+touched, at most 2,000 in all (`CANDIDATE_READ_LIMIT`; a
+larger read skips every group that tick) and at most 200 per group
+(`CANDIDATE_GROUP_LIMIT`; a larger group is skipped and counted), writes at
+most 100 new proposals in one batch (`CANDIDATE_WRITE_LIMIT`; a pair already
+stored never takes that budget), and merges at most 20 provider-linked pairs
+(`LINK_MERGE_LIMIT`), each its own batch. A tick therefore issues at most
+about 320 guarded batches, and a deferred tick pairs nothing: the candidate
+pass follows the page.
 
 Recognition waits for the retire pass only while that pass fills its page and
 retires every event on it. The wait is bounded: each such tick takes 100 keys
@@ -369,14 +473,20 @@ counts only:
   "skipped": { "payment_type_unsupported": 12 },
   "conflicts": 0,
   "failed": 0,
-  "deferred": false
+  "deferred": false,
+  "proposed": 3,
+  "merged": 0,
+  "groupsSkipped": 0
 }
 ```
 
 `conflicts` counts plans the stored state refused (a stale or replayed batch, a
-held key, a refused transition, a multi-key event), `failed` counts batches D1
-rejected with an error (nothing of them is written), and `deferred` marks a tick
-whose recognition waited because the retire pass retired a whole full page.
+held key, a refused transition such as a different kind for a held key),
+`failed` counts batches D1 rejected with an error (nothing of them is written),
+`deferred` marks a tick whose recognition waited because the retire pass
+retired a whole full page, `proposed` counts new pending-to-posted candidates,
+`merged` provider-linked pairs merged as rule decisions, and `groupsSkipped`
+the candidate groups too large to pair that tick.
 
 ### Flag, deploy and rollback
 
@@ -421,6 +531,37 @@ touch the 0047 tables.
   control characters give the same key in SQLite and in the writer, so every
   holder is found again. The log line carries counts only.
   `test/lanes.test.ts` pins the lane order.
+- `services/processor`: `test/card-purchase-merge.test.ts`, on the same world
+  (`test/card-purchase-world.ts`). The candidate pass writes each stage-B pair
+  of recognised events once, cites rows canonically and stays within its
+  budget, with stored pairs never taking it; two posted rows of one amount are
+  two candidates and never merge; MyJCB pending and confirmed rows labelled
+  only `detailMonth-N` meet by usage month, giving exactly one proposal for the
+  matching pair and two `multiple_candidates` proposals for twins; a pair with
+  a provider link id is accepted
+  and merged as rule decisions (`authorized → unknown → captured`, the posted
+  event superseded across ids, the captured total unchanged); a merged event
+  is revised on an account correction, retired holding both keys when its
+  posted row is gone and captured again when it reappears; a reviewed accept
+  through the lifecycle on D1 merges, the lane then leaves the merged event
+  alone, and a withdrawal splits it without a new proposal.
+  `test/reconciliation.test.ts` checks the canonical relation ends and
+  proposal evidence.
+- `packages/storage-d1`: `test/card-purchase-links.test.ts` (merge and split
+  batches on the full CORE: order, cross-id supersession, replay and stale
+  batches writing nothing, a key held elsewhere, the one-live-holder trigger
+  refusing a merge without its pointer, a split restoring both holders and a
+  merge again after it, and the `proposal:` and `card-purchase:` revision
+  subjects).
+- `packages/domain`: `test/pending-posted-review.test.ts` (merge and split
+  drafts, transitions, `conflicting_evidence`, the linked revision, what a
+  review may do, the marker and canonical ends).
+- `packages/application`: `test/pending-posted-plan.test.ts` (plan, simulate,
+  approve and commit of an accept, a reject and a withdrawal; pins; stale
+  event revisions and proposals decided elsewhere writing nothing; agents
+  refused; resends replaying the receipt) and
+  `packages/observation-shared/test/card-purchase-candidates.test.ts` (the
+  `candidates` wire shape).
 - `packages/read-model`: `test/card-purchase-keys.test.ts` (stale keys and the
   unrecognised count against current usage; a revision still holding one
   current key is not stale) and `test/events.test.ts` (a purchase-recognition
@@ -489,6 +630,18 @@ statement is derived at read time from (resolved account, source, statement
 period); no allocation is read or written for it
 ([card settlement review](card-settlements.md#purchase-explanation-chain)).
 
+Each event also lists its `candidates` (at most 10, newest first): the
+[pending-to-posted](#pending-to-posted-links) proposals that name one of its
+provider rows, matched through the rows' recognition keys, with `proposal:<id>`
+added to its `explanationRefs`. A candidate carries the proposal's status and
+decision count, the relation triple's latest status and row count, the rows'
+own amounts and dates with the live event each is held by (and its revision),
+the rationale and rejection codes, the review `actions` it allows now
+(`accept`, `reject`, `withdraw`) with the `blockers` that prevent the others,
+and the exact `relation` payload a review plans
+(`packages/domain/src/pending-posted-review.ts` `pendingPostedReview` is the one
+definition the page and the plan share).
+
 `summary` covers every live event the filter selects, not only the page:
 captured, authorized, captured refunds and authorized refunds per unit, with
 no combined field, and a count of unresolved events. A filter of more than
@@ -512,7 +665,11 @@ and the unrecognised count. That pass reads every current Vpass/MyJCB capture
 and dominates the cost: on a synthetic store of about 34,000 usage
 observations (180 days of daily captures) and 8,200 live events, the
 unfiltered first page took about 0.4 s in `bun:sqlite`, of which the usage
-pass was about 0.3 s and the selection about 0.04 s.
+pass was about 0.3 s and the selection about 0.04 s. The candidates add two
+queries: one pass over the stage-B `pending_to_posted` proposals, re-deriving
+each target's recognition key by primary-key lookups
+(`packages/application/src/query/card-purchase-candidates.ts`), and one lookup
+of the page's relation triples.
 
 The route needs a human principal with `interpretation.accept` (the card
 settlement review's guard), is GET-only, and answers 404 unless

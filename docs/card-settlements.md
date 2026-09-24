@@ -114,6 +114,10 @@ recognised card purchase: 利用 → 請求 → 引落.
   `card_settlement_fact_ownership(kind='balance')` account is the purchase's
   account, the newest capture first. A card ordinal that changed under one
   account still joins; a statement whose account is not resolved joins nothing.
+  A pending authorisation [linked to its posted row](economic-events.md#pending-to-posted-links)
+  is one event carrying the posted row's facts, so it joins the posted row's
+  statement exactly as the posted event did; a withdrawn link restores the
+  posted event, which joins it again.
 - The statement's settlement review is found by the (source, account, period)
   key an acceptance reserves: an accepted review first, then one still
   proposed, then a withdrawn and a rejected one, newest first within each, so
