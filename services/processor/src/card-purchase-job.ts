@@ -43,12 +43,13 @@
 //      it back;
 //   5. the candidate pass: `stageBProposals` over the recognised pending and
 //      captured events of every group the page touched — (resolved account,
-//      source, statement period), or the usage month where the provider gave
-//      no recognised period (MyJCB's relative `detailMonth-N` labels) —
-//      written as `reconciliation_proposals` under the matcher's own digest
-//      (idempotent). The recognition cursor cycles through every
-//      current row, so no pair is starved the way a first-1,000-rows read
-//      starves it. A pair the provider itself linked (`autoAcceptable`) is
+//      source, statement period) for Vpass, or the usage month where Vpass
+//      gave no recognised period; (resolved account, source, usage month) for
+//      MyJCB, whose confirmed rows often sit at a relative position no rule
+//      places (`groupOf`) — written as `reconciliation_proposals` under the
+//      matcher's own digest (idempotent). The recognition cursor cycles
+//      through every current row, so no pair is starved the way a
+//      first-1,000-rows read starves it. A pair the provider itself linked (`autoAcceptable`) is
 //      accepted and merged in one batch as a rule decision; every other pair
 //      stays a proposal for review.
 //
@@ -58,12 +59,12 @@ import {
   cardPurchaseLinkedRevision,
   cardPurchaseRetirement,
   cardPurchaseRevision,
+  cardStatementPeriod,
   classifyCardUsage,
   CARD_PURCHASE_ACTOR,
   CARD_PURCHASE_POLICY,
   nextCardPurchaseAction,
   recognitionKey,
-  statementPeriod,
   validCardPurchaseFacts,
   type CardPurchaseDraft,
   type CardPurchaseKey,
@@ -227,6 +228,9 @@ export function cardUsageFactOf(row: CurrentCardUsageRow): CardUsageFact {
     usageDate: row.as_of,
     paymentType: row.payment_type,
     statementPeriod: row.statement_period,
+    // The row's own capture: a MyJCB snapshot is one ledger artifact, so this
+    // is the `fetched_at` its relative `detailMonth-N` label is resolved from.
+    capturedAt: row.snapshot_fetched_at,
     providerSaleCode: row.provider_sale_code,
     usageAmountText: row.usage_amount_text,
     paymentAmountText: row.payment_amount_text,
@@ -472,8 +476,14 @@ async function plannedRevision(
       state: revision.state,
       contentDigest: current.contentDigest,
       evidenceAdopted: decisive.every((entry) => current.published.get(entry.key) === true),
+      statementPeriod: current.sidecar.statementPeriod,
     },
-    next: { kind, state: next.revision.state, contentDigest: next.contentDigest },
+    next: {
+      kind,
+      state: next.revision.state,
+      contentDigest: next.contentDigest,
+      statementPeriod: next.sidecar.statementPeriod,
+    },
   });
   if (action === "none") return "none";
   if (action === "revise") return { draft: next, expected: revision.revision };
@@ -510,13 +520,11 @@ interface GroupFactRow {
  * side of a link: a pending row's event while it is authorized or retired
  * (`unknown`: a Vpass pending row leaves the display when the month's posted
  * capture arrives), a posted row's event while it is captured. A group is
- * `[account, source, statement period, usage month]`: the statement period
- * when the sidecar has one, otherwise (the period is NULL) the usage month.
- * MyJCB labels many months only relatively (`detailMonth-N`), so its pending
- * and confirmed rows often have no statement period at all; grouping them by
- * usage month lets a pending row and its posted row meet, and stage B's own
- * amount and date closeness decides. The counterparty and a provider link id
- * are read from the cited row to compare, never stored.
+ * `[account, source, statement period, usage month]` (`groupOf`): the
+ * statement period when it names one, otherwise the usage month, which for
+ * MyJCB matches every event of that month whatever its sidecar period. The
+ * counterparty and a provider link id are read from the cited row to compare,
+ * never stored.
  */
 const GROUP_FACTS_SQL = `SELECT c.event_id,c.revision,c.account_id,c.source_id,c.statement_period,c.facts_json,
  r.kind,r.state,
@@ -528,7 +536,7 @@ FROM json_each(?1) g
 JOIN card_purchase_recognitions c ON c.account_id=json_extract(g.value,'$[0]')
  AND c.source_id=json_extract(g.value,'$[1]')
  AND CASE WHEN json_extract(g.value,'$[2]') IS NOT NULL THEN c.statement_period=json_extract(g.value,'$[2]')
-  ELSE c.statement_period IS NULL
+  ELSE (c.statement_period IS NULL OR c.source_id='myjcb')
    AND substr(json_extract(c.facts_json,'$.usageDate'),1,7)=json_extract(g.value,'$[3]') END
 JOIN economic_event_revisions r ON r.event_id=c.event_id AND r.revision=c.revision AND r.superseded_by IS NULL
 JOIN card_purchase_recognition_keys k ON k.event_id=c.event_id AND k.revision=c.revision
@@ -592,13 +600,27 @@ function matchFactOf(row: GroupFactRow): MatchFact | null {
 /** `[account, source, statement period, usage month]`: the month only when there is no period. */
 type Group = [string, string, string | null, string | null];
 
+/**
+ * The group a recognised event is paired in. Vpass: its statement period, or
+ * its usage month when it has none. MyJCB: always its usage month. A MyJCB
+ * pending row's label resolves to a payment month from its capture time
+ * (`cardStatementPeriod`: `detailMonth-0` and `detailMonth-1`), but the
+ * confirmed row of the same purchase usually sits at a later position the
+ * rule does not place (`detailMonth-2` and beyond, docs/observations.md), so
+ * grouping by period would keep the two apart. The usage date is the one
+ * key both displays of a purchase share; the resolved periods still reach the
+ * matcher, which claims `same_statement_period` only when both sides have the
+ * same one.
+ */
 function groupOf(
   accountId: string,
   sourceId: string,
   period: string | null,
   usageDate: string,
 ): Group {
-  return [accountId, sourceId, period, period === null ? usageDate.slice(0, 7) : null];
+  const month = usageDate.slice(0, 7);
+  if (sourceId === "myjcb") return [accountId, sourceId, null, month];
+  return [accountId, sourceId, period, period === null ? month : null];
 }
 
 /** The idempotent proposal insert of the reconciliation job, as a statement. */
@@ -649,12 +671,7 @@ async function candidatePass(
   for (const row of rows) {
     const fact = cardUsageFactOf(row);
     if (fact.accountId === null || fact.usageDate === null || !classifyCardUsage(fact).ok) continue;
-    const entry = groupOf(
-      fact.accountId,
-      fact.sourceId,
-      statementPeriod(fact.statementPeriod),
-      fact.usageDate,
-    );
+    const entry = groupOf(fact.accountId, fact.sourceId, cardStatementPeriod(fact), fact.usageDate);
     groups.set(JSON.stringify(entry), entry);
   }
   if (groups.size === 0) return [];

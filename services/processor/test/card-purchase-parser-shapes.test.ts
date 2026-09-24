@@ -37,7 +37,12 @@ function meta(overrides: Partial<ArtifactMeta>): ArtifactMeta {
 }
 
 /** The read model's view of one parsed row, with identity resolved. */
-function factOf(sourceId: string, row: TransactionObservation, index: number): CardUsageFact {
+function factOf(
+  sourceId: string,
+  row: TransactionObservation,
+  index: number,
+  fetchedAt: string,
+): CardUsageFact {
   const kogane = (row.extra["_kogane"] ?? {}) as Record<string, unknown>;
   const text = (key: string) => (typeof kogane[key] === "string" ? (kogane[key] as string) : null);
   return {
@@ -55,6 +60,7 @@ function factOf(sourceId: string, row: TransactionObservation, index: number): C
     usageDate: row.asOf ?? null,
     paymentType: row.description ?? null,
     statementPeriod: text("statementMonth") ?? text("period"),
+    capturedAt: fetchedAt,
     providerSaleCode: text("providerSaleCode"),
     usageAmountText: text("usageAmountText"),
     paymentAmountText: text("paymentAmountText"),
@@ -71,7 +77,7 @@ function rows(
   return parser
     .parse(data, artifact)
     .observations.filter((row): row is TransactionObservation => row.kind === "transaction")
-    .map((row, index) => factOf(sourceId, row, index));
+    .map((row, index) => factOf(sourceId, row, index, artifact.fetchedAt));
 }
 
 /** Kind, state, magnitude and statement period, or the exclusion reason. */
