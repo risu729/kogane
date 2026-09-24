@@ -35,8 +35,12 @@ Concrete limits in the current code:
   acceptance. Other bank adapters, partial payments, refunds and complete
   purchase recognition remain extensions; this is not complete event coverage.
 - [The pending/posted job](../services/processor/src/reconciliation-job.ts)
-  includes Vpass and the supported MyJCB usage/payment-equivalent subset.
-  An installment payment amount is not silently compared with a purchase amount.
+  proposes Vpass pairs and MyJCB pairs whose confirmed row's usage and payment
+  amounts (`1,200円`) agree and whose ledgers share an absolute payment month;
+  every pair stays a candidate for review. An installment payment amount is
+  not silently compared with a purchase amount. MyJCB ledgers labelled with the
+  collector's relative `detailMonth-N` fallback are not paired, which on the
+  surveyed connection covers its unconfirmed and recent confirmed months.
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind
@@ -128,7 +132,7 @@ Contracts: [collection](collection.md), [observations](observations.md),
 
 ## Phases 6–7 — Reconciliation and economic event generation
 
-Build on Vpass pending/posted matching, then add MyJCB, card statement/payment
+Build on Vpass and MyJCB pending/posted matching, then add card statement/payment
 matching, bank transfers and securities transactions. Continuously generate
 corrigible events from adopted source observations; event tables and matching
 functions alone do not complete this stage.

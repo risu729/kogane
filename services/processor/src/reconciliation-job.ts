@@ -5,7 +5,9 @@
 // Pending/posted pairs stay inside one source account and billing period.
 // Vpass uses unconfirmed/posted; MyJCB uses unconfirmed/confirmed. MyJCB's
 // posted payment can be an installment slice, so only rows whose explicit
-// usage and payment totals agree participate in the pending purchase match.
+// usage and payment totals agree participate in the pending purchase match,
+// and only under an absolute payment month (`comparablePayment`). A MyJCB
+// confirmed row takes part in stage B only (`inStageA`).
 //
 // // Nothing is accepted automatically. Auto-acceptance needs a link id the
 // provider itself issued for the pair, exposed by the parser as
@@ -26,7 +28,10 @@ import {
   type Quantity,
 } from "../../../packages/domain/src/values.ts";
 import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
-import { comparableCardPayment } from "../../../packages/domain/src/card-purchase.ts";
+import {
+  comparableCardPayment,
+  statementPeriod,
+} from "../../../packages/domain/src/card-purchase.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import {
   DEFAULT_MATCH_OPTIONS,
@@ -283,7 +288,7 @@ export async function reconciliationSweep(
       // Stage C (cross-source correspondence) needs an established owner on
       // both sides and a second source in the slice; it is not run yet.
       const proposals = [
-        ...stageAProposals(facts, DEFAULT_MATCH_OPTIONS),
+        ...stageAProposals(facts.filter(inStageA), DEFAULT_MATCH_OPTIONS),
         ...stageBProposals(facts, DEFAULT_MATCH_OPTIONS),
       ];
       result.proposed += proposals.length;
@@ -309,14 +314,43 @@ export async function reconciliationSweep(
 }
 
 /** MyJCB's posted amount can be an installment slice. Only a provider row with
- * equal full usage/payment amounts participates in pending-to-posted matching.
- * The rule moved unchanged to the domain (`comparableCardPayment`), which also
- * records its known gap: it does not read MyJCB's `1,200円` display text. */
+ * equal, positive usage/payment amounts participates in pending-to-posted
+ * matching. The rule is the domain's `comparableCardPayment`, which reads the
+ * ledger parser's display text (`1,200円`) through the same grammar card
+ * purchase recognition uses.
+ *
+ * A MyJCB confirmed row must also carry an absolute payment month, read as
+ * recognition reads it (`statementPeriod`). The collector writes the relative
+ * fallback `detailMonth-N` for every month the past-months API does not label
+ * (docs/sources/myjcb.md: the first connection's menu lists months 0..8 and
+ * the API only 9..17). That label is a position in the provider's month list
+ * on the capture day, so rows of different payment months share it over time,
+ * and a pair grouped by it would claim `same_statement_period` falsely. */
 function comparablePayment(row: FactRow): boolean {
+  if (
+    row.source_id === "myjcb" &&
+    row.status === "confirmed" &&
+    statementPeriod(row.statement_period) === null
+  )
+    return false;
   return comparableCardPayment({
     sourceId: row.source_id,
     status: row.status,
     usageAmountText: row.usage_amount_text,
     paymentAmountText: row.payment_amount_text,
   });
+}
+
+/**
+ * MyJCB confirmed rows are admitted for pending-to-posted matching (stage B)
+ * only. Their stage A pairs would be one confirmed row re-captured by every
+ * daily run under a collector fingerprint (never auto-acceptable): each ledger
+ * month is re-captured daily while the provider lists it, so a sparse month
+ * yields a candidate per pair of captures, and every written candidate is
+ * re-checked by each sweep. No confirmed MyJCB row took part in the lane before
+ * `comparableCardPayment` read the ledger's display text, and stage B does not
+ * need them in stage A.
+ */
+function inStageA(fact: MatchFact): boolean {
+  return !(fact.scope.sourceId === "myjcb" && fact.settlementState === "posted");
 }

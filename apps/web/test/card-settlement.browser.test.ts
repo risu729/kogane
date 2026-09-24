@@ -250,6 +250,8 @@ describe.if(runnable)("card settlement review", () => {
     await page.getByLabel("判断の理由", { exact: true }).fill("別の銀行明細が支払に対応していた");
     await page.getByRole("button", { name: "採用を解除する内容を確認" }).click();
     await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    // As in open(): the page head renders before the plan resolves.
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
     expect(await page.locator("main").innerText()).toContain("現金が返却されたことにはなりません");
     expect(posted.find((row) => row.operation === "plan")?.body.kind).toBe(
       "card-settlement.withdraw",
