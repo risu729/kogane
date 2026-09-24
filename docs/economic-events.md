@@ -64,6 +64,34 @@ NULL`). A superseded revision is retained, so a report that cited
 Citing an observation twice as supporting evidence stays possible; allocating
 its amount twice into the same live set does not (INV06).
 
+### Card purchase recognition (migration `0047_card_purchase_recognition.sql`)
+
+Schema only: no writer runs yet, and no deployed build reads these objects.
+A recognised card purchase will be an ordinary `purchase` or `refund` event
+revision on the `purchase-recognition` basis with a `rule` decision; 0047 adds
+the sidecar that says which policy wrote each revision and from which provider
+rows. The contract is `packages/domain/src/card-purchase.ts`, and the guarded
+batch that writes one revision is
+`packages/storage-d1/src/atomic/card-purchase-recognition.ts`.
+
+| Object                               | Role                                                                                                                                                                                                                                                                        |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `card_purchase_recognitions`         | One row per event revision: `policy_release`, `action` (`recognize`/`revise`/`reanchor`/`retire`/`merge`/`split`), `content_digest`, `account_id`, `source_id`, `statement_period`, and `facts_json` restricted to codes, amounts and dates (no merchant or provider text). |
+| `card_purchase_recognition_keys`     | The revision's recognition keys, `json_array(source_id, producer_id, external_id_namespace, source_account, external_id)`, with `role` (`posted`/`pending`) and the pinned `observation_id`/`parse_run_id`.                                                                 |
+| `current_card_purchase_recognitions` | Sidecar rows of live revisions, with their `kind`, `state` and `unknown_reason`.                                                                                                                                                                                            |
+| `current_card_purchase_keys`         | Keys of live revisions.                                                                                                                                                                                                                                                     |
+| `card_purchase_scan_cursor`          | Operational singleton `(1, last_observation_id)`; outside the source-revision ledger.                                                                                                                                                                                       |
+
+Both sidecar tables are append-only. Their insert guards require a live
+`purchase`/`refund` revision on the `purchase-recognition` basis; a `retire`
+row is exactly the `unknown` state with no leg, and every other row has exactly
+one exact, positive `purchase-recognition` leg on `account:<account_id>` and
+no cash-movement leg (legs are sealed once the sidecar exists). A key must be
+the cited row's own key and match its parse run and provider status, and
+**at most one live event may hold a key**: the one-live-holder trigger is the
+no-double-count invariant. A superseded revision holds nothing, so a
+supersession releases its keys to the revision that replaced it.
+
 ### Where the decisions live
 
 Judgements are recorded in `decision_revisions` (migration 0029). Its

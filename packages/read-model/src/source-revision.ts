@@ -103,6 +103,9 @@ export const REVISION_EXCLUDED_TABLES = [
   "ops_requests",
   "ops_request_stages",
   "card_settlement_scan_cursor",
+  // Card purchase recognition scan progress (migration 0047); the recognitions
+  // themselves move the revision through their decision_revisions rows.
+  "card_purchase_scan_cursor",
 ] as const;
 
 export type LedgerTable =

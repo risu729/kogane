@@ -1,0 +1,692 @@
+// The card purchase recognition contract, checked against the SC02, SC03 and
+// SC04 fixtures (reused, not extended: fixtures.test.ts pins the inventory).
+// Fixture amounts are in the provider's liability sign (a purchase positive, a
+// refund negative); Layer B observations invert it (outflow negative), exactly
+// as the Vpass and MyJCB parsers do, so every row below negates the fixture.
+import { describe, expect, test } from "bun:test";
+import {
+  CARD_PURCHASE_POLICY,
+  CARD_USAGE_EXCLUSIONS,
+  cardPurchaseContent,
+  cardPurchaseEventId,
+  cardPurchaseRetirement,
+  cardPurchaseRevision,
+  cardPurchaseSummary,
+  classifyCardUsage,
+  comparableCardPayment,
+  myjcbAgreedAmount,
+  nextCardPurchaseAction,
+  recognitionKey,
+  statementPeriod,
+  validCardPurchaseFacts,
+  type CardPurchaseDraft,
+  type CardUsageFact,
+} from "../src/card-purchase.ts";
+import { canonicalDigest } from "../src/context.ts";
+import {
+  eventTransition,
+  legTotal,
+  refundAllocation,
+  validEconomicEventRevision,
+  validSourceFactRef,
+  type EconomicEventRevision,
+  type EconomicLeg,
+} from "../src/events.ts";
+import { absentQuantity, exactQuantity, negateDecimal, type Quantity } from "../src/values.ts";
+import { exact, loadFixture, ok, q, quantityText } from "./helpers.ts";
+
+/** Observation amount (outflow negative) from a fixture's provider-signed text. */
+const observed = (providerAmount: string): Quantity =>
+  exactQuantity("JPY", negateDecimal(exact(q("JPY", providerAmount))), "decimal-v1");
+
+function vpassRow(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
+  return {
+    observationId: 101,
+    parseRunId: 11,
+    sourceId: "vpass",
+    producerId: "card-producer",
+    externalIdNamespace: "vpass-worker-card-v1",
+    sourceAccount: "vpass:card-001",
+    externalId: "vpass:card-001:202608:web:fingerprint:0",
+    accountId: "acct-card",
+    identityPolicyFamily: "vpass-card-binding",
+    providerStatus: "posted",
+    amount: observed("1234"),
+    usageDate: "2026-08-15",
+    paymentType: "1回払い",
+    statementPeriod: "202609",
+    providerSaleCode: null,
+    usageAmountText: null,
+    paymentAmountText: null,
+    newestRepresentation: true,
+    ...overrides,
+  };
+}
+
+function myjcbRow(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
+  return vpassRow({
+    sourceId: "myjcb",
+    externalIdNamespace: "myjcb-connection-v1",
+    sourceAccount: "myjcb:connection-a:root",
+    externalId: "myjcb-credit-ledger:confirmed:fingerprint:0",
+    identityPolicyFamily: "identity-default",
+    providerStatus: "confirmed",
+    statementPeriod: null,
+    usageAmountText: "1,234",
+    paymentAmountText: "1,234",
+    ...overrides,
+  });
+}
+
+async function recognise(fact: CardUsageFact, revision = 1): Promise<CardPurchaseDraft> {
+  const classified = classifyCardUsage(fact);
+  if (!classified.ok) throw new Error(`unexpected exclusion: ${classified.reasonCode}`);
+  const key = recognitionKey(fact);
+  if (!key) throw new Error("no key");
+  const draft = await cardPurchaseRevision({
+    action: revision === 1 ? "recognize" : "revise",
+    eventId: await cardPurchaseEventId(classified.kind, key),
+    revision,
+    fact,
+  });
+  if (!draft) throw new Error("draft rejected");
+  return draft;
+}
+
+function reason(fact: CardUsageFact): string {
+  const classified = classifyCardUsage(fact);
+  return classified.ok ? "recognised" : classified.reasonCode;
+}
+
+describe("SC03 pending, posted and a partial refund", () => {
+  interface Sc03 {
+    observations: { ref: string; providerStatus: string; amount: string }[];
+    variants: { "pending-vanished": { expected: { inferredRefund: null } } };
+  }
+  const fixture = loadFixture<Sc03>("v2/sc03-pending-posted-refund.json");
+  const byRef = new Map(fixture.observations.map((row) => [row.ref, row]));
+  const vpassStatus = { pending: "unconfirmed", posted: "posted" } as const;
+  const rowOf = (ref: string, overrides: Partial<CardUsageFact> = {}) => {
+    const row = byRef.get(ref)!;
+    return vpassRow({
+      providerStatus: vpassStatus[row.providerStatus as keyof typeof vpassStatus],
+      amount: observed(row.amount),
+      externalId: `vpass:card-001:202608:${row.providerStatus === "pending" ? "customized" : "web"}:${ref}:0`,
+      ...overrides,
+    });
+  };
+
+  test("SC03: pending 1,200 is authorized, posted 1,234 captured; authorized→captured allowed", () => {
+    const pending = classifyCardUsage(rowOf("obs:card:pending-1", { providerSaleCode: "5" }));
+    const posted = classifyCardUsage(rowOf("obs:card:posted-1"));
+    expect(pending).toMatchObject({ ok: true, kind: "purchase", state: "authorized" });
+    expect(posted).toMatchObject({ ok: true, kind: "purchase", state: "captured" });
+    if (!pending.ok || !posted.ok) throw new Error("unreachable");
+    expect(quantityText(pending.magnitude)).toBe("1200");
+    expect(quantityText(posted.magnitude)).toBe("1234");
+    expect(eventTransition("purchase", pending.state, posted.state)).toEqual({ ok: true });
+    // The reverse is never a revision of one event.
+    expect(eventTransition("purchase", "captured", "authorized").ok).toBe(false);
+    // The same states hold for MyJCB's own status words.
+    expect(
+      classifyCardUsage(myjcbRow({ providerStatus: "unconfirmed" })) as { state?: string },
+    ).toMatchObject({ state: "authorized" });
+    expect(classifyCardUsage(myjcbRow()) as { state?: string }).toMatchObject({
+      state: "captured",
+    });
+  });
+
+  test("retirement has no live legs and infers neither refund nor cancellation (SC03 pending-vanished)", async () => {
+    const pending = await recognise(rowOf("obs:card:pending-1"));
+    const retired = await cardPurchaseRetirement({
+      live: pending.revision,
+      keys: pending.keys,
+      sidecar: pending.sidecar,
+    });
+    expect(retired).not.toBeNull();
+    expect(retired!.action).toBe("retire");
+    expect(retired!.revision).toMatchObject({
+      eventId: pending.revision.eventId,
+      revision: 2,
+      kind: "purchase",
+      state: "unknown",
+      unknownReason: "provider_status_absent",
+      legs: [],
+    });
+    // Evidence is the last displayed row; nothing else is claimed.
+    expect(retired!.revision.evidenceSupport).toEqual(pending.revision.evidenceSupport);
+    expect(validEconomicEventRevision(retired!.revision)).toBe(true);
+    expect(fixture.variants["pending-vanished"].expected.inferredRefund).toBeNull();
+    // Neither a refund nor a canceled purchase appears; the figure moves to unresolved.
+    const summary = ok(
+      cardPurchaseSummary([{ ...pending.revision, supersededBy: "x@2" }, retired!.revision]),
+    ).summary;
+    expect(summary).toEqual({ units: [], unresolved: 1 });
+    // An unknown event is not retired again, and a captured one may be.
+    expect(
+      await cardPurchaseRetirement({
+        live: retired!.revision,
+        keys: retired!.keys,
+        sidecar: retired!.sidecar,
+      }),
+    ).toBeNull();
+    expect(eventTransition("purchase", "captured", "unknown")).toEqual({ ok: true });
+  });
+
+  test("a refund is its own event with an increase leg and no allocation; refundAllocation reports refund_target_unknown", async () => {
+    const refundRow = rowOf("obs:card:refund-1");
+    const draft = await recognise(refundRow);
+    expect(draft.revision.kind).toBe("refund");
+    expect(draft.revision.eventId).toMatch(/^refund_[0-9a-f]{64}$/u);
+    expect(draft.revision.legs).toHaveLength(1);
+    expect(draft.revision.legs[0]).toMatchObject({
+      role: "increase",
+      basis: "purchase-recognition",
+      subjectRef: "account:acct-card",
+    });
+    expect(quantityText(draft.revision.legs[0]!.quantity)).toBe("400");
+    // The draft carries no allocation: a refund is never netted by recognition.
+    expect(Object.keys(draft).sort()).toEqual([
+      "action",
+      "content",
+      "contentDigest",
+      "decisionRevisionId",
+      "keys",
+      "revision",
+      "sidecar",
+    ]);
+    const outcome = ok(
+      refundAllocation({
+        purchase: q("JPY", "1234"),
+        refunds: [],
+        unallocatedRefunds: [draft.revision.legs[0]!.quantity],
+      }),
+    );
+    expect(quantityText(outcome.net)).toBe("1234");
+    expect(outcome.exceptions.map((exception) => exception.code)).toEqual([
+      "refund_target_unknown",
+    ]);
+    // A Vpass customized return (sale code 6) is a pending refund.
+    expect(
+      classifyCardUsage(
+        rowOf("obs:card:refund-1", { providerStatus: "unconfirmed", providerSaleCode: "6" }),
+      ),
+    ).toMatchObject({ ok: true, kind: "refund", state: "authorized" });
+    expect(reason(rowOf("obs:card:refund-1", { providerSaleCode: "5" }))).toBe(
+      "refund_shape_unverified",
+    );
+    // MyJCB refunds need usage and payment to agree; otherwise the shape is unverified.
+    const myjcbRefund = myjcbRow({
+      amount: observed("-500"),
+      usageAmountText: "-500",
+      paymentAmountText: "-500",
+    });
+    expect(classifyCardUsage(myjcbRefund)).toMatchObject({ ok: true, kind: "refund" });
+    expect(reason({ ...myjcbRefund, paymentAmountText: null })).toBe("refund_shape_unverified");
+    expect(reason({ ...myjcbRefund, usageAmountText: "-1,000" })).toBe("refund_shape_unverified");
+  });
+});
+
+describe("SC04 installments", () => {
+  interface Sc04 {
+    purchase: { amount: string };
+    schedule: { principal: string }[];
+  }
+  const fixture = loadFixture<Sc04>("v2/sc04-installments.json");
+  const usage = Number(fixture.purchase.amount).toLocaleString("en-US");
+  const payment = Number(fixture.schedule[0]!.principal).toLocaleString("en-US");
+
+  test("SC04: an installment slice (usage 12,000 / payment 4,000) is never recognised or compared", () => {
+    expect([usage, payment]).toEqual(["12,000", "4,000"]);
+    const slice = myjcbRow({
+      amount: observed(fixture.schedule[0]!.principal),
+      paymentType: "分割",
+      usageAmountText: usage,
+      paymentAmountText: payment,
+    });
+    expect(reason(slice)).toBe("payment_type_unsupported");
+    // Even a payment type that drifted to look single cannot hide the slice.
+    expect(reason({ ...slice, paymentType: "1回払い" })).toBe("installment_amount_differs");
+    expect(reason({ ...slice, paymentType: "1回払い", paymentAmountText: null })).toBe(
+      "payment_split_unknown",
+    );
+    // A pending usage row of the same purchase is not recognised either.
+    expect(
+      reason({
+        ...slice,
+        paymentType: "1回払い",
+        providerStatus: "unconfirmed",
+        amount: observed(fixture.purchase.amount),
+      }),
+    ).toBe("installment_amount_differs");
+    // The shared rule keeps the slice out of pending-to-posted matching too.
+    const row = { sourceId: "myjcb", status: "confirmed" };
+    expect(
+      comparableCardPayment({ ...row, usageAmountText: usage, paymentAmountText: payment }),
+    ).toBe(false);
+    expect(
+      comparableCardPayment({ ...row, usageAmountText: usage, paymentAmountText: usage }),
+    ).toBe(true);
+    expect(myjcbAgreedAmount(usage, payment)).toEqual({
+      ok: false,
+      reasonCode: "installment_amount_differs",
+    });
+  });
+
+  test("the shared MyJCB rule keeps the reconciliation job's grammar and scope", () => {
+    const confirmed = (usageAmountText: string | null, paymentAmountText: string | null) =>
+      comparableCardPayment({
+        sourceId: "myjcb",
+        status: "confirmed",
+        usageAmountText,
+        paymentAmountText,
+      });
+    expect(confirmed("1,200", "1,200")).toBe(true);
+    expect(confirmed(" 1,200 ", "1200")).toBe(true);
+    expect(confirmed("1,200", "300")).toBe(false);
+    expect(confirmed("0", "0")).toBe(false);
+    expect(confirmed("-500", "-500")).toBe(false);
+    expect(confirmed("1,200円", "1,200円")).toBe(false);
+    expect(confirmed(null, "1,200")).toBe(false);
+    // Only MyJCB confirmed rows are constrained.
+    for (const other of [
+      { sourceId: "myjcb", status: "unconfirmed" },
+      { sourceId: "vpass", status: "posted" },
+    ])
+      expect(
+        comparableCardPayment({ ...other, usageAmountText: null, paymentAmountText: null }),
+      ).toBe(true);
+  });
+});
+
+describe("exclusions", () => {
+  test("Vpass: 2回払い/分割/リボ/ボーナス一括/blank → payment_type_unsupported", () => {
+    for (const paymentType of ["2回払い", "分割", "リボ", "ボーナス一括", "", "  ", null])
+      expect(reason(vpassRow({ paymentType }))).toBe("payment_type_unsupported");
+    // Width and surrounding spaces are normalised; the wording itself is not guessed.
+    expect(reason(vpassRow({ paymentType: " １回払い " }))).toBe("recognised");
+  });
+
+  test("amountless/unparsed/zero/non-JPY rows excluded with a reason, never zero (INV05)", () => {
+    expect(
+      reason(vpassRow({ amount: absentQuantity("JPY", "missing", "decimal-v1:missing") })),
+    ).toBe("amount_not_exact");
+    expect(
+      reason(vpassRow({ amount: absentQuantity("JPY", "unparsed", "decimal-v1:unparsed") })),
+    ).toBe("amount_not_exact");
+    expect(reason(vpassRow({ amount: observed("0") }))).toBe("amount_zero");
+    expect(reason(vpassRow({ amount: exactQuantity("USD", exact(observed("12"))) }))).toBe(
+      "unit_unsupported",
+    );
+    expect(reason(vpassRow({ usageDate: null }))).toBe("date_absent");
+    expect(reason(vpassRow({ usageDate: "2026-02-30" }))).toBe("date_absent");
+    expect(reason(vpassRow({ accountId: null }))).toBe("account_not_resolved");
+    expect(reason(vpassRow({ providerStatus: "canceled" }))).toBe("status_unsupported");
+    expect(reason(vpassRow({ providerStatus: "confirmed" }))).toBe("status_unsupported");
+    expect(reason(vpassRow({ sourceId: "smbc-bank" }))).toBe("status_unsupported");
+    expect(reason(vpassRow({ newestRepresentation: false }))).toBe("superseded_representation");
+    // Every reason used above is in the closed set.
+    expect(CARD_USAGE_EXCLUSIONS).toContain("amount_not_exact");
+  });
+
+  test("Vpass without vpass-card-binding identity → card_identity_unstable", () => {
+    expect(reason(vpassRow({ identityPolicyFamily: "identity-default" }))).toBe(
+      "card_identity_unstable",
+    );
+    expect(reason(vpassRow({ identityPolicyFamily: null }))).toBe("card_identity_unstable");
+    expect(reason(vpassRow({ externalId: null }))).toBe("card_identity_unstable");
+    // MyJCB's connection-scoped identity is resolved by the default policy.
+    expect(reason(myjcbRow())).toBe("recognised");
+  });
+});
+
+describe("drafts and content identity", () => {
+  test("drafts validate, have exactly one purchase-recognition leg on account:<id>, and object SourceFactRef evidence", async () => {
+    const draft = await recognise(vpassRow());
+    expect(validEconomicEventRevision(draft.revision)).toBe(true);
+    expect(draft.revision).toMatchObject({
+      kind: "purchase",
+      state: "captured",
+      basis: "purchase-recognition",
+      effectiveTime: {
+        kind: "local-date",
+        value: "2026-08-15",
+        zone: "Asia/Tokyo",
+        basis: "provider",
+      },
+      decisionRevisionRef: draft.decisionRevisionId,
+      supersededBy: null,
+    });
+    expect(draft.revision.legs).toEqual([
+      {
+        eventId: draft.revision.eventId,
+        revision: 1,
+        legIndex: 0,
+        subjectRef: "account:acct-card",
+        quantity: exactQuantity("JPY", exact(q("JPY", "1234")), "decimal-v1"),
+        role: "decrease",
+        basis: "purchase-recognition",
+      },
+    ]);
+    expect(draft.revision.legs.some((leg) => leg.basis === "cash-movement")).toBe(false);
+    expect(draft.revision.evidenceSupport).toEqual([
+      { kind: "transaction", id: "transaction:101", revision: "parse_run:11" },
+    ]);
+    expect(draft.revision.evidenceSupport.every(validSourceFactRef)).toBe(true);
+    expect(draft.keys).toEqual([
+      {
+        key: JSON.stringify([
+          "vpass",
+          "card-producer",
+          "vpass-worker-card-v1",
+          "vpass:card-001",
+          "vpass:card-001:202608:web:fingerprint:0",
+        ]),
+        role: "posted",
+        observationId: 101,
+        parseRunId: 11,
+      },
+    ]);
+    expect(draft.sidecar).toEqual({
+      accountId: "acct-card",
+      sourceId: "vpass",
+      statementPeriod: "2026-09",
+      facts: {
+        providerStatus: "posted",
+        amount: observed("1234"),
+        usageDate: "2026-08-15",
+        paymentType: "single-payment",
+        amountCheck: "provider-amount",
+        providerSaleCode: null,
+      },
+    });
+    // The stored facts carry codes, amounts and dates only.
+    expect(JSON.stringify(draft.sidecar.facts)).not.toContain("1回払い");
+    expect(validCardPurchaseFacts(draft.sidecar.facts)).toBe(true);
+    expect(validCardPurchaseFacts({ ...draft.sidecar.facts, merchant: "synthetic shop" })).toBe(
+      false,
+    );
+    expect(validCardPurchaseFacts({ ...draft.sidecar.facts, amount: observed("0") })).toBe(false);
+    expect(draft.decisionRevisionId).toMatch(/^dr_cp_[0-9a-f]{64}$/u);
+    expect(draft.contentDigest).toBe(await canonicalDigest(draft.content));
+    // Event ids come from the policy and the key.
+    expect(draft.revision.eventId).toBe(
+      `purchase_${await canonicalDigest({ policy: CARD_PURCHASE_POLICY, key: JSON.parse(draft.keys[0]!.key) })}`,
+    );
+    // Inconsistent inputs are refused rather than repaired.
+    const fact = vpassRow();
+    const eventId = draft.revision.eventId;
+    expect(
+      await cardPurchaseRevision({ action: "recognize", eventId, revision: 2, fact }),
+    ).toBeNull();
+    expect(await cardPurchaseRevision({ action: "revise", eventId, revision: 1, fact })).toBeNull();
+    expect(
+      await cardPurchaseRevision({
+        action: "recognize",
+        eventId: eventId.replace("purchase_", "refund_"),
+        revision: 1,
+        fact,
+      }),
+    ).toBeNull();
+    expect(
+      await cardPurchaseRevision({
+        action: "recognize",
+        eventId,
+        revision: 1,
+        fact: vpassRow({ paymentType: "リボ" }),
+      }),
+    ).toBeNull();
+  });
+
+  test("content identity ignores observation/parse ids; account/amount/state/date changes are revisions", async () => {
+    const first = await recognise(vpassRow());
+    const refetched = await recognise(vpassRow({ observationId: 999, parseRunId: 77 }));
+    expect(refetched.contentDigest).toBe(first.contentDigest);
+    expect(refetched.decisionRevisionId).toBe(first.decisionRevisionId);
+    expect(refetched.revision.evidenceSupport).not.toEqual(first.revision.evidenceSupport);
+    const live = {
+      kind: first.revision.kind,
+      state: first.revision.state,
+      contentDigest: first.contentDigest,
+    };
+    const next = { kind: "purchase" as const, state: "captured" as const };
+    expect(
+      nextCardPurchaseAction({
+        live: { ...live, evidenceAdopted: true },
+        next: { ...next, contentDigest: refetched.contentDigest },
+      }),
+    ).toBe("none");
+    // The cited parse is no longer published: same content, new anchor.
+    expect(
+      nextCardPurchaseAction({
+        live: { ...live, evidenceAdopted: false },
+        next: { ...next, contentDigest: refetched.contentDigest },
+      }),
+    ).toBe("reanchor");
+    for (const changed of [
+      vpassRow({ accountId: "acct-other" }),
+      vpassRow({ amount: observed("1300") }),
+      vpassRow({ usageDate: "2026-08-16" }),
+      vpassRow({ providerStatus: "unconfirmed" }),
+    ]) {
+      const draft = await recognise(changed);
+      expect(draft.contentDigest).not.toBe(first.contentDigest);
+      expect(
+        nextCardPurchaseAction({
+          live: { ...live, evidenceAdopted: true },
+          next: { ...next, state: draft.revision.state, contentDigest: draft.contentDigest },
+        }),
+      ).toBe(draft.revision.state === "captured" ? "revise" : "blocked");
+    }
+    // A state change is a revision exactly when eventTransition allows it:
+    // authorized → captured is, captured → authorized (above) is not.
+    const authorized = await recognise(vpassRow({ providerStatus: "unconfirmed" }));
+    expect(
+      nextCardPurchaseAction({
+        live: {
+          kind: "purchase",
+          state: authorized.revision.state,
+          contentDigest: authorized.contentDigest,
+          evidenceAdopted: true,
+        },
+        next: { ...next, contentDigest: first.contentDigest },
+      }),
+    ).toBe("revise");
+    // A statement period or policy release is not content.
+    expect((await recognise(vpassRow({ statementPeriod: "2026-10" }))).contentDigest).toBe(
+      first.contentDigest,
+    );
+    // A later revision of the same content is its own decision.
+    const second = await recognise(vpassRow(), 2);
+    expect(second.contentDigest).toBe(first.contentDigest);
+    expect(second.decisionRevisionId).not.toBe(first.decisionRevisionId);
+    // First sight recognises; a kind change is never a revision; unknown may return.
+    expect(
+      nextCardPurchaseAction({ live: null, next: { ...next, contentDigest: first.contentDigest } }),
+    ).toBe("recognize");
+    expect(
+      nextCardPurchaseAction({
+        live: { ...live, evidenceAdopted: true },
+        next: { kind: "refund", state: "captured", contentDigest: "other" },
+      }),
+    ).toBe("blocked");
+    expect(
+      nextCardPurchaseAction({
+        live: { ...live, state: "unknown", evidenceAdopted: true },
+        next: { ...next, contentDigest: first.contentDigest.replace(/.$/u, "x") },
+      }),
+    ).toBe("revise");
+    // A leg without an exact amount has no content identity.
+    expect(
+      cardPurchaseContent(
+        {
+          ...first.revision,
+          legs: [{ ...first.revision.legs[0]!, quantity: absentQuantity("JPY", "missing", "x") }],
+        },
+        first.keys,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("totals", () => {
+  const revision = (
+    eventId: string,
+    kind: EconomicEventRevision["kind"],
+    state: EconomicEventRevision["state"],
+    legs: [unitRef: string, amount: string, basis?: EconomicLeg["basis"]][],
+  ): EconomicEventRevision => ({
+    eventId,
+    revision: 1,
+    kind,
+    state,
+    unknownReason: state === "unknown" ? "provider_status_absent" : null,
+    effectiveTime: {
+      kind: "local-date",
+      value: "2026-08-15",
+      zone: "Asia/Tokyo",
+      basis: "provider",
+    },
+    basis: "purchase-recognition",
+    evidenceSupport: [
+      { kind: "transaction", id: `transaction:${eventId}`, revision: "parse_run:1" },
+    ],
+    decisionRevisionRef: `dr_${eventId}`,
+    supersededBy: null,
+    legs: legs.map(([unitRef, amount, basis], legIndex) => ({
+      eventId,
+      revision: 1,
+      legIndex,
+      subjectRef: "account:acct-card",
+      quantity: q(unitRef, amount),
+      role: kind === "refund" ? "increase" : "decrease",
+      basis: basis ?? "purchase-recognition",
+    })),
+  });
+
+  test("summary never adds captured and authorized, nor different units", () => {
+    const summary = ok(
+      cardPurchaseSummary([
+        revision("p1", "purchase", "captured", [["JPY", "1234"]]),
+        revision("p2", "purchase", "captured", [["JPY", "0.5"]]),
+        revision("p3", "purchase", "authorized", [["JPY", "1200"]]),
+        revision("p4", "purchase", "captured", [["USD", "12.34"]]),
+        revision("r1", "refund", "captured", [["JPY", "400"]]),
+        revision("r2", "refund", "authorized", [["JPY", "50"]]),
+        revision("u1", "purchase", "unknown", []),
+        { ...revision("old", "purchase", "captured", [["JPY", "999"]]), supersededBy: "old@2" },
+      ]),
+    ).summary;
+    expect(summary.unresolved).toBe(1);
+    expect(
+      summary.units.map((unit) => ({
+        unitRef: unit.unitRef,
+        captured: quantityText(unit.captured),
+        authorized: quantityText(unit.authorized),
+        capturedRefunds: quantityText(unit.capturedRefunds),
+        authorizedRefunds: quantityText(unit.authorizedRefunds),
+      })),
+    ).toEqual([
+      {
+        unitRef: "JPY",
+        captured: "1234.5",
+        authorized: "1200",
+        capturedRefunds: "400",
+        authorizedRefunds: "50",
+      },
+      {
+        unitRef: "USD",
+        captured: "12.34",
+        authorized: "0",
+        capturedRefunds: "0",
+        authorizedRefunds: "0",
+      },
+    ]);
+    // There is no field that combines states or units.
+    expect(Object.keys(summary.units[0]!).sort()).toEqual([
+      "authorized",
+      "authorizedRefunds",
+      "captured",
+      "capturedRefunds",
+      "unitRef",
+    ]);
+    // A leg without an exact amount fails the summary instead of counting as zero.
+    const broken = revision("b", "purchase", "captured", [["JPY", "1"]]);
+    broken.legs[0]!.quantity = absentQuantity("JPY", "missing", "x");
+    expect(cardPurchaseSummary([broken]).ok).toBe(false);
+  });
+
+  test("SC02: a settlement-shaped event (legs copied from card-settlement-commands.ts:113-129) adds 0 to purchase-recognition; a purchase adds 0 to cash-movement", async () => {
+    interface Sc02 {
+      events: { eventId: string; kind: string; purchaseCost?: string }[];
+    }
+    const fixture = loadFixture<Sc02>("v2/sc02-charge-purchase-settle.json");
+    const cost = fixture.events.find((event) => event.kind === "purchase")!.purchaseCost!;
+    const purchase = (await recognise(vpassRow({ amount: observed(cost) }))).revision;
+    // What accepting a card settlement writes: a card_settlement/debited event
+    // with a cash-movement leg and an unresolved obligation-change leg.
+    const settlement: EconomicEventRevision = {
+      ...revision("ev:settlement-1", "card_settlement", "debited", [
+        ["JPY", "10000", "cash-movement"],
+      ]),
+      basis: "cash-movement",
+      legs: [
+        {
+          eventId: "ev:settlement-1",
+          revision: 1,
+          legIndex: 0,
+          subjectRef: "acct-bank",
+          quantity: q("JPY", "10000"),
+          role: "decrease",
+          basis: "cash-movement",
+        },
+        {
+          eventId: "ev:settlement-1",
+          revision: 1,
+          legIndex: 1,
+          subjectRef: "acct-card",
+          quantity: absentQuantity("JPY", "missing", "statement_principal_and_fees_unknown"),
+          role: "unresolved",
+          basis: "obligation-change",
+        },
+      ],
+    };
+    const settlementCash = settlement.legs.filter((leg) => leg.basis === "cash-movement");
+    expect(
+      quantityText(
+        ok(legTotal(settlementCash, { unitRef: "JPY", basis: "purchase-recognition" })).quantity,
+      ),
+    ).toBe("0");
+    expect(
+      quantityText(
+        ok(legTotal(purchase.legs, { unitRef: "JPY", basis: "cash-movement" })).quantity,
+      ),
+    ).toBe("0");
+    expect(
+      quantityText(
+        ok(legTotal(purchase.legs, { unitRef: "JPY", basis: "purchase-recognition" })).quantity,
+      ),
+    ).toBe(cost);
+    // The purchase summary ignores the settlement entirely.
+    const summary = ok(cardPurchaseSummary([purchase, settlement])).summary;
+    expect(summary.units.map((unit) => quantityText(unit.captured))).toEqual([cost]);
+  });
+});
+
+test("statementPeriod accepts only YYYY-MM/YYYYMM", () => {
+  expect(statementPeriod("2026-09")).toBe("2026-09");
+  expect(statementPeriod("202609")).toBe("2026-09");
+  for (const value of [
+    "2026-9",
+    "20269",
+    "2026-13",
+    "202600",
+    "2026年7月お支払い分",
+    " 2026-09",
+    "2026-09-01",
+    "",
+    null,
+    202609,
+  ])
+    expect(statementPeriod(value)).toBeNull();
+});
