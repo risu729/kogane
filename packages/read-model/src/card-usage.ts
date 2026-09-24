@@ -23,14 +23,17 @@
 //      i.e. step 2 alone;
 //   4. the latest observation of each recognition key.
 //
-// Known limit of step 4: the Vpass parser numbers repeated identical rows per
-// page artifact (`occurrence` in packages/parsers/src/parsers/vpass.ts), so two
-// identical rows on different pages of one capture share an external id and
-// so one key; only the later one is current, although the Transactions page
-// lists both. Telling them apart needs a parser identity change. The MyJCB
-// ledger is one artifact per snapshot, so its occurrence count is complete.
-// Both deployed parsers always emit an external id; a row without one has no
-// recognition key, is never merged with another row, and cannot be recognised.
+// Step 4 keeps one row per key, and each provider row of one capture has a key
+// of its own. The Vpass parser numbers repeated identical rows per page
+// artifact (`rowIdentity` in packages/parsers/src/parsers/vpass.ts), and since
+// vpass-statement-page@1.2.0 every page after the first names itself in the
+// external id, so two identical rows on different pages of one capture are two
+// keys and two rows, as on the Transactions page. A later page whose published
+// parse is still 1.1.0 (its re-parse has not run yet) keeps the old id and can
+// still share a key with the first page. The MyJCB ledger is one artifact per
+// snapshot, so its occurrence count is complete. Both deployed parsers always
+// emit an external id; a row without one has no recognition key, is never
+// merged with another row, and cannot be recognised.
 //
 // Amounts are the decimal-v1 projection of migration 0024, never a cast
 // integer. Provider extras are read at the exact `extra_json` paths the
