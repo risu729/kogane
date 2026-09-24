@@ -656,9 +656,10 @@ test("flag off: the lane is not run and nothing is written; only 1 or true turns
   }
   expect(await w.snapshot()).toEqual(before);
   expect(await w.cursor()).toBe(0);
-  // The committed configuration ships the flag off.
+  // The committed configuration turns the lane on (production since
+  // 2026-09-24); the rollback is setting it back to "0".
   expect(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8")).toContain(
-    '"PURCHASE_RECOGNITION_ENABLED": "0"',
+    '"PURCHASE_RECOGNITION_ENABLED": "true"',
   );
   await runScheduled(
     { ...w.env, PURCHASE_RECOGNITION_ENABLED: "1" } as unknown as Env,
