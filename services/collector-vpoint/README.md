@@ -159,7 +159,7 @@ repositoryへ保存し、Koganeにはprovenance、hash、再現手順、sanitize
 ## VポイントPay通知メールの取り込みと照合
 
 同じWorkerのVポイントPay専用Email Routing ruleを通知archiveにも使う。Gmailから対象通知を
-`vpoint@takuk.me`へ転送すると、Gmailは原本を`message/rfc822`のinline attachmentとして
+`vpointpay@takuk.me`へ転送すると、Gmailは原本を`message/rfc822`のinline attachmentとして
 送る。handlerは`forceRfc822Attachments`で内側の原本を分離し、内側のFromが
 `info@prepaid.smbc-card.com`で、subjectが次のいずれかである場合だけ取り込む。
 
@@ -185,13 +185,15 @@ Gmailからのbackfillは転送loopを起こさない。
    from:info@prepaid.smbc-card.com (subject:"ご利用のお知らせ" OR subject:"チャージ受付のお知らせ" OR subject:"プリペイド残高加算のお知らせ" OR subject:"ご利用不可のお知らせ" OR subject:"カードがご利用頂けませんでした") -in:spam -in:trash
    ```
 
-2. 検索結果を原本添付のまま`vpoint@takuk.me`へ転送する。Gmail APIを使う場合は
+2. 検索結果を原本添付のまま`vpointpay@takuk.me`へ転送する。Gmail APIを使う場合は
    `message/rfc822`を保持し、1 request最大10通で分割する。
 3. 転送した通知はそれぞれ`v-point-pay-email` runとしてDATAへ保存される。再転送は安全
-   （`already_persisted`）だが、欠落分だけ再転送してよい。
+   （`already_persisted`）だが、欠落分だけ再転送してよい。handlerが通知を保存するのは
+   envelope宛先が`VPOINT_PAY_EMAIL_RECIPIENT`（`vpointpay@takuk.me`）の場合だけで、
+   `vpoint@takuk.me`へ転送した通知は保存されない。
 
-`vpoint@takuk.me`はVポイントWeb認証メールと過去メールbackfill専用、
-`vpointpay@takuk.me`はVポイントPayアプリの登録先および今後の公式通知専用とする。両routeは
+`vpoint@takuk.me`はVポイントWeb認証メール専用、
+`vpointpay@takuk.me`はVポイントPayアプリの登録先、公式通知、過去通知のbackfill先とする。両routeは
 同じWorkerへ届くが、後者はコード抽出には使われない。通常のcatch-all転送ruleは残す。
 
 collectorのメール照合reportは旧source bucketの`raw/v-point-pay-email/`一覧に依存していたため、

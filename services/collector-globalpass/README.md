@@ -2,7 +2,7 @@
 
 GLOBAL PASS（Vpassデビット専用サイト）のサーバーレンダリングHTMLを、Cloudflare ContainerのPlaywright Google Chromeで取得し、private R2へ保存する独立PoCである。SMBCカード用VpassアプリAPIや`mnie`をruntime依存・設定源・submoduleとして使用しない。
 
-2026-08-30に、Cloudflare Containerのtimezoneを`Asia/Tokyo`へ合わせるだけでTurnstile token生成を再現し、実アカウントのlogin、daily、15か月backfillをend-to-endで完了した。HTMLとmanifestはprivate R2へ保存済みで、Workers Cronを1日1回だけ有効化している。GitHub Actionsのscheduleは使わない。手動`/trigger`と認証付きの`/browser-probe`・`/container-probe`・`/latest-manifest`は運用診断用に残す。
+2026-08-30に、Cloudflare Containerのtimezoneを`Asia/Tokyo`へ合わせるだけでTurnstile token生成を再現し、実アカウントのlogin、daily、15か月backfillをend-to-endで完了した。HTMLとmanifestはprivate R2へ保存済みで、Workers Cronを1日1回だけ有効化している。GitHub Actionsのscheduleは使わない。手動`/trigger`と認証付きの`/browser-probe`・`/container-probe`・`/container-stop`は運用診断用に残す。旧staging bucketを読む`/latest-manifest`は2026-09-13に廃止した。
 
 ## Runtime profile
 
@@ -66,7 +66,7 @@ runは`packages/collection`で共有DATA bucketへ直接書き、ProcessorがDAT
 
 - `GLOBALPASS_ID`
 - `GLOBALPASS_PASSWORD`
-- `ADMIN_TRIGGER_TOKEN`: `/trigger`、`/browser-probe`、`/container-probe`、`/container-stop`、`/latest-manifest`専用
+- `ADMIN_TRIGGER_TOKEN`: `/trigger`、`/browser-probe`、`/container-probe`、`/container-stop`専用
 - `RELAY_TOKEN`: WebSocket relay専用
 
 session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記4 secret名だけをaugmentationする。

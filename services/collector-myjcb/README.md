@@ -164,8 +164,8 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 ## R2 layout
 
 runは`packages/collection`で共有DATA bucketへ書く。各artifactは`objects/<2 hex>/<sha256>`へ
-content-addressedで保存し、最後にterminal `runs/myjcb/<run-id>/terminal.json`を書く。terminalは
-次のartifact keyと保存objectを対応付ける。
+content-addressedで保存し、最後にterminal `runs/myjcb/<run-id>/terminal.json`を書く。collectorが
+取得しうるartifact keyは次のlayoutに従い、terminalは保存したartifactごとにkeyとobjectを対応付ける。
 
 ```text
 <run>/
@@ -187,7 +187,7 @@ content-addressedで保存し、最後にterminal `runs/myjcb/<run-id>/terminal.
     discovery.json
 ```
 
-`debit-*`とCSV/PDF/OFXのdatasetは中央契約で未観測のため`artifact_dataset_unobserved`として拒否し、`DATA`へ保存しない。
+`debit-*`とCSV/PDF/OFXのdatasetは中央契約で未観測である。これらを含むrunは`artifact_dataset_unobserved`で拒否され、objectもterminalも`DATA`へ書かない。
 
 HTMLは取得時sourceをUTF-8へdecodeし、script/style/metaと埋込み要素、event/data属性、navigation URL、form action、全value/textarea、token/session類似属性、16桁card番号を決定的に除去・置換してから保存する。login/mypage HTMLは保存しない。各objectのR2 metadataは`packages/collection`が書く`sha256`と`byteSize`だけである。manifestにはrun/connection/artifact/failureのmetadataだけを入れ、cookie値や実明細値をlogへ出さない。bucketはpublicにしない。
 

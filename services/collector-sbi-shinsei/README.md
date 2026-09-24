@@ -157,11 +157,12 @@ PoCを廃止するときは、次をまとめて削除します。現在はlive�
 
 Collection failures emit a structured `*-collection-failure` event before teardown
 or the DATA write. Join on `runId`; use `phase` to distinguish collection from
-teardown, relay and shared-persist events. The collector manifest stored in DATA
-retains the same three failure fields (`operation`, `errorType`, `message`). Its
-bounded message includes the safe stage and available HTTP status; structured logs
-expose these as `diagnostics` fields. Use that manifest or the Worker logs for
-diagnosis.
+teardown, relay and shared-persist events. The event carries the safe stage and
+available HTTP status as `diagnostics` fields. The collector manifest stored in
+DATA keeps the three failure fields (`operation`, `errorType`, `message`), but its
+`message` is an allowlisted code (`safeFailureMessage` in
+`src/shared-collection.ts`) without the stage or HTTP status, so use the Worker
+logs for diagnosis.
 
 No exception message, stack, cause, request URL, credential, response body, or
 unrecognized provider text is logged. Sony logs only fixed operation IDs/currencies
