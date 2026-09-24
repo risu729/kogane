@@ -71,16 +71,17 @@ The historical research below predates this follow-up.
   to Kogane during this validation. Shared ingestion/projection is tested with
   synthetic data, including real local Workers/R2 semantics.
 
-Implement only observed read transitions. Automated expiry/re-login,
-pagination and cloud execution each require their own
-validation. `services/collector-mizuho` now integrates the session-based direct
-client, sanitized evidence persistence, shared parsers, and existing projections.
-It is an operator-triggered service with no automated login renewal or cron;
-the normal production release now includes its Worker and health postcheck.
-Deployment does not start collection. The trigger token is provisioned out of
-band; a successful health check does not establish authenticated bank access
-from Cloudflare. Cloud collection and session handoff remain unverified until
-a separate operational read succeeds.
+`services/collector-mizuho` integrates password login, the direct read client,
+sanitized evidence persistence, shared parsers, and existing projections.
+It runs daily at 06:25 JST (`25 21 * * *` UTC); an authenticated `POST /trigger`
+with `{}` follows the same login and collection path. An explicit browser-session
+request remains supported. Customer number and login password are provisioned
+as Worker secrets out of band; neither enters CI/CD, evidence or response logs.
+Each invocation attempts login once and stops on additional authentication;
+scheduled retries are disabled. The normal production release includes the
+Worker and health postcheck. A successful health check does not establish
+authenticated bank access: password login and cloud collection require separate
+live validation. Pagination still requires its own observed-transition validation.
 
 The bank app was renamed to みずほ銀行アプリ on 2026-09-03; historical app names
 below describe the original research. The
