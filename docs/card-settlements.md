@@ -90,10 +90,10 @@ The screen keeps fee breakdown and net-asset impact unknown.
 
 Card purchases now exist separately, recognised from the usage rows themselves
 by the [card purchase recognition](economic-events.md#card-purchase-recognition)
-lane (behind `PURCHASE_RECOGNITION_ENABLED`, off until enabled): each is a
-`purchase` or `refund` event with one `purchase-recognition` leg and no cash
-leg. Settlement still adds none. Its event carries the cash movement and an
-unresolved obligation change, never a `purchase-recognition` leg, so a card
+lane (`PURCHASE_RECOGNITION_ENABLED`, on in production since 2026-09-24): each
+is a `purchase` or `refund` event with one `purchase-recognition` leg and no
+cash leg. Settlement still adds none. Its event carries the cash movement and
+an unresolved obligation change, never a `purchase-recognition` leg, so a card
 charge is counted once as a purchase and its payment once as cash. No purchase
 is allocated to a statement: statement totals are not decomposed into
 purchases.
