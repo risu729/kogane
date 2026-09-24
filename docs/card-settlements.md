@@ -93,6 +93,34 @@ card history. Missing ownership, unavailable exact dates, unsupported bank
 adapters and stale evidence remain visible limitations. This milestone does not
 complete the broader [economic-event roadmap](roadmap.md).
 
+## Purchase explanation chain
+
+The operator-only `カード利用` page (`/purchases`, capability
+`cardPurchaseRecognition`, `GET /api/v2/card-purchases`) reads the chain from a
+recognised card purchase: 利用 → 請求 → 引落.
+
+- A posted purchase joins the provider statement of the same resolved account,
+  source and statement period (`YYYY-MM`): `card_statement_facts` whose
+  `card_settlement_fact_ownership(kind='balance')` account is the purchase's
+  account, the newest capture first. A card ordinal that changed under one
+  account still joins; a statement whose account is not resolved joins nothing.
+- The statement's settlement review is found by the (source, account, period)
+  key an acceptance reserves. While it is accepted, the page shows its
+  `card_settlement` event, its `settlement` allocation and the bank debit its
+  facts cite; a proposed, rejected or withdrawn review is named without a debit.
+- A statement that cannot be shown is a reason, never a zero: `not_posted` for a
+  pending row, `statement_not_collected`, or `period_unrecognized` when the
+  provider period is in no recognised shape.
+
+No allocation links a purchase to a statement, and none is written: a statement
+total is not decomposable into purchases. The provider total is shown beside the
+purchase figures, which keep captured, authorized, refunds and unresolved events
+apart, and no difference between them is computed. Accepting a settlement
+changes none of the purchase figures (引落は購入費用に加算しません). An empty
+list does not prove there were no purchases: installment, revolving and bonus
+rows and rows the recognition writer has not reached are counted as
+unrecognised instead.
+
 ## Verification
 
 Synthetic tests cover authoritative totals, missing/ambiguous dates and totals,

@@ -5,6 +5,7 @@ import { formatAmount } from "../money.ts";
 import {
   Amount,
   CellValue,
+  ChainStep,
   KindBadge,
   Kv,
   KvRow,
@@ -260,34 +261,6 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
     </>
   );
 }
-function Step({
-  number,
-  stage,
-  title,
-  children,
-}: {
-  number: number;
-  stage: string;
-  title: string;
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <li className="chain-step">
-      <span className="chain-marker" aria-hidden="true">
-        {number}
-      </span>
-      <section className="chain-card">
-        <div className="chain-card-head">
-          <div className="chain-heading">
-            <span className="chain-stage">{stage}</span>
-            <h3 className="chain-title">{title}</h3>
-          </div>
-        </div>
-        <div className="chain-body">{children}</div>
-      </section>
-    </li>
-  );
-}
 function ProvenanceChain({
   detail,
   provenance: p,
@@ -297,7 +270,7 @@ function ProvenanceChain({
 }): ReactNode {
   return (
     <ol className="chain">
-      <Step number={1} stage="記録" title="口座と原本内の位置">
+      <ChainStep number={1} stage="記録" title="口座と原本内の位置">
         <Kv>
           <KvRow label="口座">
             <Nullable value={stringAt(detail.row, "source_account")} />
@@ -309,8 +282,8 @@ function ProvenanceChain({
         <p className="footnote">
           この位置を原本と照らし合わせることで、読み取った値を確認できます。
         </p>
-      </Step>
-      <Step number={2} stage="解析" title={`解析 #${p.parse_run_id}`}>
+      </ChainStep>
+      <ChainStep number={2} stage="解析" title={`解析 #${p.parse_run_id}`}>
         <StatusBadge status={p.parse_status} />
         <LineageBadge supersededBy={p.superseded_by_parse_run_id} />
         <Kv>
@@ -326,8 +299,8 @@ function ProvenanceChain({
         {p.warnings.parsed && p.warnings.list.length === 0 ? (
           <p className="dim">解析の注意事項は記録されていません。</p>
         ) : null}
-      </Step>
-      <Step number={3} stage="原本" title={`原本 #${p.artifact_id}`}>
+      </ChainStep>
+      <ChainStep number={3} stage="原本" title={`原本 #${p.artifact_id}`}>
         <Kv>
           <KvRow label="取得元">{p.source_id}</KvRow>
           <KvRow label="資料の種類">
@@ -349,8 +322,8 @@ function ProvenanceChain({
             <KvRow label="資料形式">{p.mime}</KvRow>
           </Kv>
         </details>
-      </Step>
-      <Step number={4} stage="保存データ" title="保存された原本データ">
+      </ChainStep>
+      <ChainStep number={4} stage="保存データ" title="保存された原本データ">
         <RawLink sha256={p.sha256}>この記録の原本を開く ↗</RawLink>
         <details className="detail-disclosure">
           <summary>原本の識別情報</summary>
@@ -362,8 +335,8 @@ function ProvenanceChain({
             <KvRow label="保存形式">{p.content_type}</KvRow>
           </Kv>
         </details>
-      </Step>
-      <Step number={5} stage="収集" title={`収集 #${p.fetch_run_id}`}>
+      </ChainStep>
+      <ChainStep number={5} stage="収集" title={`収集 #${p.fetch_run_id}`}>
         <StatusBadge status={p.fetch_status} />
         <Kv>
           <KvRow label="開始日時">{p.started_at}</KvRow>
@@ -384,7 +357,7 @@ function ProvenanceChain({
             </KvRow>
           </Kv>
         </details>
-      </Step>
+      </ChainStep>
     </ol>
   );
 }

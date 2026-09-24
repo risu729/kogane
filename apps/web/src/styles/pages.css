@@ -1,5 +1,6 @@
 /* Page-specific layouts: overview statistics and source cards, positions,
- * observation lists, identities, rewards, settlement and card ownership. */
+ * observation lists, identities, rewards, settlement, card ownership and card
+ * purchases. */
 
 /* ── overview ──────────────────────────────────────────────────────── */
 
@@ -635,4 +636,27 @@
     margin-top: var(--space-5);
     padding: var(--space-4);
   }
+}
+
+/* ── card purchases ────────────────────────────────────────────────── */
+
+/* One month field: cap it so it does not stretch across the filter bar. */
+.purchase-period-field {
+  max-width: 24ch;
+}
+
+/* Seven columns: date, merchant, kind and state, amount, statement, debit, link. */
+.purchase-table {
+  min-width: 52rem;
+}
+
+/* An exact amount wraps inside a narrow tile rather than being clipped. */
+.purchase-figures .tile-value {
+  overflow-wrap: anywhere;
+}
+
+/* The provider rows sit under the step's facts. */
+.purchase-rows {
+  font-size: var(--text-md);
+  margin-top: var(--space-4);
 }

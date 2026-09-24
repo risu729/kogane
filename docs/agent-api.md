@@ -217,6 +217,15 @@ refused with `unsupported_semantics`. An unknown request key or an unknown
 filter key is refused the same way rather than ignored: silently dropping a
 filter answers a different question from the one that was asked.
 
+Recognised card purchases are not an intent. They are explained to an operator
+on the `カード利用` page through `GET /api/v2/card-purchases`
+([economic events](economic-events.md#http)), which, like the card settlement
+review, refuses an agent principal: the query service cannot yet scope those
+events and their statements per source grant. The `activity` intent is
+unchanged and still reads provider transaction observations, not recognised
+purchase events, so an agent's rows and the page's figures answer different
+questions, and neither is a complete card history.
+
 ## Contexts, cursors and hand-off
 
 `context.open` pins the identity release, the metric registry release, the

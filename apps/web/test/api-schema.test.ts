@@ -118,6 +118,7 @@ describe("shared API schema", () => {
       commands: false,
       cardSettlementReconciliation: false,
       cardOwnershipReview: false,
+      cardPurchaseRecognition: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -145,6 +146,7 @@ describe("shared API schema", () => {
       commands: false,
       cardSettlementReconciliation: false,
       cardOwnershipReview: false,
+      cardPurchaseRecognition: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -311,6 +313,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       commands: false,
       cardSettlementReconciliation: false,
       cardOwnershipReview: false,
+      cardPurchaseRecognition: false,
     });
     expect(clientFeatures(withBalancesV2(CENTRAL_STORE_CAPABILITIES, true)).balanceReadModel).toBe(
       true,
@@ -335,6 +338,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       commands: false,
       cardSettlementReconciliation: false,
       cardOwnershipReview: false,
+      cardPurchaseRecognition: false,
     });
   });
 });

@@ -74,6 +74,14 @@ data coverage → reconciliation/events → dated holdings and liabilities →
 price/FX valuation → lots/P&L → tax. Rewards progress in parallel, while UI and
 AI/MCP flows are delivered with each feature.
 
+The operator-only **カード利用** page
+([purchase explanation](docs/card-settlements.md#purchase-explanation-chain))
+traces each recognised card purchase to its provider statement and, where a
+settlement was accepted, to the bank debit. Captured, pending, refund and
+unresolved figures stay apart, a statement total is shown beside them but never
+compared with them, and a settlement adds no purchase expense. An empty list is
+not proof that there were no purchases.
+
 ## Getting started
 
 One Bun workspace, one lockfile, and mise as the only task runner. There are no

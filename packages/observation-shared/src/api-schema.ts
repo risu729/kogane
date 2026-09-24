@@ -163,6 +163,13 @@ export interface ApiCapabilities {
   readonly cardSettlementReconciliation?: boolean;
   readonly cardOwnershipReview?: boolean;
   /**
+   * `GET /api/v2/card-purchases` is served: recognised card purchases
+   * explained through their statement and bank debit, to an operator. False
+   * unless the event reader flag is on and the CORE 0047 tables exist in the
+   * store the server reads.
+   */
+  readonly cardPurchaseRecognition?: boolean;
+  /**
    * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
    * collection, re-registration, replay, rebuild, session refresh and the
    * progress of one accepted operation. False everywhere the
@@ -196,6 +203,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   eventsV2: false,
   cardSettlementReconciliation: false,
   cardOwnershipReview: false,
+  cardPurchaseRecognition: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -227,6 +235,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   eventsV2: false,
   cardSettlementReconciliation: false,
   cardOwnershipReview: false,
+  cardPurchaseRecognition: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 

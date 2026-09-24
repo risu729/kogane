@@ -23,6 +23,7 @@ import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
 import { CardOwnershipPage } from "./pages/CardOwnership.tsx";
 import { ReconciliationPage } from "./pages/Reconciliation.tsx";
+import { PurchasePage, PurchasesPage } from "./pages/Purchases.tsx";
 
 // Every destination in one list. A `feature` entry is shown only while the
 // API advertises that capability; the others are always present.
@@ -33,6 +34,12 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
   { to: "/positions", label: "保有資産", icon: NAV_ICONS.positions },
   { to: "/summaries", label: "期間実績・請求", icon: NAV_ICONS.summaries },
   { to: "/artifacts", label: "原本・証跡", icon: NAV_ICONS.artifacts },
+  {
+    to: "/purchases",
+    label: "カード利用",
+    icon: NAV_ICONS.purchases,
+    feature: "cardPurchaseRecognition",
+  },
   {
     to: "/reconciliation",
     label: "カード照合",
@@ -80,6 +87,10 @@ function View({ route }: { route: Route }): ReactNode {
       return <CardOwnershipPage key={route.proposalId} proposalId={route.proposalId} />;
     case "reconciliation":
       return <ReconciliationPage />;
+    case "purchases":
+      return <PurchasesPage />;
+    case "purchase":
+      return <PurchasePage key={route.eventId} eventId={route.eventId} />;
     case "artifacts":
       return <ArtifactsPage />;
     case "artifact":
