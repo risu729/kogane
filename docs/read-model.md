@@ -102,6 +102,30 @@ authentication gate, that the raw object is reachable through a visible
 artifact. It is independent of any list limit; the R2 read and the integrity
 checks in `src/read.ts` are unchanged.
 
+### Card snapshot currentness and current card usage
+
+Which Vpass and MyJCB capture is current is defined once in `src/sql.ts`:
+`MYJCB_LEDGER_SNAPSHOT_CTES` (`current_myjcb_snapshots`: the newest published
+credit-ledger capture per connection, statement state and period, where every
+unconfirmed capture of a connection shares one slot) and
+`VPASS_STATEMENT_SNAPSHOT_CTES` (`current_vpass_snapshots`: per card unit and
+statement month, the newest fetch run whose statement pages all have an active
+parse, whatever the family), with the membership predicates
+`MYJCB_LEDGER_MEMBER` and `VPASS_SNAPSHOT_MEMBER`. `listTransactions` composes
+them unchanged.
+
+`currentCardUsageSql({ afterId, limit })` (`src/card-usage.ts`) composes the
+same CTEs for purchase recognition: every current Vpass and MyJCB usage row with
+its recognition key (the `bank_key` shape of migration 0044), resolved account,
+identity policy family, provider state and decimal-v1 amount. On top of the
+snapshot it keeps the newest fetch run per (resolved account, source, slot),
+where the slot is the Vpass statement month or the MyJCB state and period, and
+then the latest observation per key. Ranking runs over the whole current set
+before the `observation_id > afterId` cursor and the `limit` (1 to 1,000)
+apply. Known limit: the Vpass parser numbers identical rows per page, so two
+identical rows on different pages of one capture share a key and only the later
+one is current.
+
 ## Parity proof
 
 `services/app/test/read-model-parity.test.ts` seeds one
