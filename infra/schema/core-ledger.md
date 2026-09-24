@@ -10,7 +10,7 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `6a022ab8258385c3ca02701b3868ac274819b93091b398f3eb807eedba8642f5`
+Schema digest: `744dcd9b61a167d7031b4cf7f9c0fe39c2dfd9a97859a8a8744178f49569c335`
 
 ## Summary
 
@@ -18,7 +18,7 @@ Schema digest: `6a022ab8258385c3ca02701b3868ac274819b93091b398f3eb807eedba8642f5
 - Tables: 110 (all `STRICT`: yes)
 - Views: 39
 - Triggers: 398
-- Explicit indexes: 109
+- Explicit indexes: 110
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
 | classification | count | tables |
@@ -130,7 +130,7 @@ active_releases, allocations, approvals, calculation_runs, card_purchase_scan_cu
 | `published_parse_runs` | core-keep | publication pointer and history | yes | no | no | — | published_parse_runs_no_delete | 7 | 2 | 1 | 6 |
 | `raw_object_verification_events` | core-keep | inventories, seals and verification | yes | no | yes | raw_object_verification_events_no_update | raw_object_verification_events_no_delete | 9 | 2 | 1 | 5 |
 | `raw_objects` | core-keep | raw objects and origin | yes | no | yes | raw_objects_no_update | raw_objects_no_delete | 4 | 0 | 0 | 3 |
-| `reconciliation_proposals` | core-keep | reconciliation proposals | yes | no | no | — | reconciliation_proposals_no_delete | 13 | 1 | 2 | 4 |
+| `reconciliation_proposals` | core-keep | reconciliation proposals | yes | no | no | — | reconciliation_proposals_no_delete | 13 | 1 | 3 | 4 |
 | `reconciliation_scan_cursor` | operational-mutable | bounded reconciliation scan progress | yes | no | no | — | — | 2 | 0 | 0 | 0 |
 | `release_activation_events` | core-keep | parser releases and activations | yes | no | yes | release_activation_events_no_update | release_activation_events_no_delete | 12 | 0 | 1 | 2 |
 | `release_comparisons` | core-keep | parser releases and activations | yes | no | yes | release_comparisons_no_update | release_comparisons_no_delete | 8 | 1 | 1 | 2 |

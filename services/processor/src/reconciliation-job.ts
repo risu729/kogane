@@ -165,22 +165,24 @@ const jsonText = (path: string) =>
      AND length(json_extract(t.extra_json,'${path}')) BETWEEN 1 AND 256
    THEN json_extract(t.extra_json,'${path}') END`;
 
+const statementPeriodSql = `coalesce(${jsonText("$._kogane.statementMonth")},replace(${jsonText("$._kogane.period")},'-',''))`;
+
+const factColumns = `SELECT t.id,t.parse_run_id,t.source_account,t.external_id,t.status,t.as_of,
+ t.counterparty,t.currency,a.source_id,fr.producer_id,ses.external_id_namespace,
+ d.status AS value_status,d.coefficient,d.scale,d.basis AS value_basis,
+ ${statementPeriodSql} AS statement_period,
+ ${jsonText("$._kogane.providerLinkId")} AS provider_link_id,
+ ${jsonText("$._kogane.identityOrigin")} AS identity_origin,
+ ${jsonText("$._kogane.usageAmountText")} AS usage_amount_text,
+ ${jsonText("$._kogane.paymentAmountText")} AS payment_amount_text`;
+
 /**
  * Published transaction observations of one source (?1) with a pending or
  * posted status (?2, a JSON array). Only the publication projection is read
  * (docs/publication-gate.md), so an unadopted successful parse never produces
  * a candidate.
  */
-const sliceFacts = `SELECT t.id,t.parse_run_id,t.source_account,t.external_id,t.status,t.as_of,
- t.counterparty,t.currency,a.source_id,fr.producer_id,ses.external_id_namespace,
- d.status AS value_status,d.coefficient,d.scale,d.basis AS value_basis,
- coalesce(${jsonText("$._kogane.statementMonth")},replace(${jsonText("$._kogane.period")},'-','')) AS statement_period,
- ${jsonText("$._kogane.providerLinkId")} AS provider_link_id,
- ${jsonText("$._kogane.identityOrigin")} AS identity_origin,
- ${jsonText("$._kogane.usageAmountText")} AS usage_amount_text,
- ${jsonText("$._kogane.paymentAmountText")} AS payment_amount_text
-FROM transaction_observations t
-JOIN parse_runs p ON p.id=t.parse_run_id
+const sliceJoins = `JOIN parse_runs p ON p.id=t.parse_run_id
 JOIN published_parse_runs pub ON pub.parse_run_id=p.id
 JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
 JOIN fetch_runs fr ON fr.id=a.fetch_run_id
@@ -189,32 +191,43 @@ LEFT JOIN observation_decimal_values d
  ON d.kind='transaction' AND d.observation_id=t.id AND d.policy_version='decimal-v1'
 WHERE a.source_id=?1 AND t.status IN (SELECT value FROM json_each(?2))`;
 
+/**
+ * The slice's rows whose ids the CTE `ids(id)` names, read by primary key.
+ * Only these rows pay for the JSON columns: on the scaled store of
+ * docs/read-model.md#cost, computing them for every published Vpass row
+ * before choosing a page took 2 s, choosing the ids first 0.3 s.
+ */
+const factsOfIds = `${factColumns}
+FROM ids CROSS JOIN transaction_observations t ON t.id=ids.id
+${sliceJoins}
+ORDER BY t.id`;
+
 /** One page of a slice's rows after the cursor (?3), in observation id order, at most ?4 rows. */
-export const factPageQuery = `${sliceFacts}
+export const factPageQuery = `WITH ids(id) AS (SELECT t.id FROM transaction_observations t
+${sliceJoins}
  AND t.id>?3
 ORDER BY t.id
-LIMIT ?4`;
+LIMIT ?4)
+${factsOfIds}`;
 
 /**
- * The rows of the groups in ?3, a JSON array of `[source account, statement
- * period or ""]`. The two IN lists narrow the rows before the exact pair test.
+ * The size of each group in ?3 (a JSON array of `[source account, statement
+ * period or ""]`) among the slice's published rows, and, for a group of at
+ * most ?4 rows, its row ids. One pass over the slice computes each row's key
+ * once; the rows themselves are then read by id (`groupFactQuery`).
  */
-const inGroups = `f.source_account IN (SELECT json_extract(value,'$[0]') FROM json_each(?3))
- AND coalesce(f.statement_period,'') IN (SELECT json_extract(value,'$[1]') FROM json_each(?3))
- AND EXISTS(SELECT 1 FROM json_each(?3) g WHERE json_extract(g.value,'$[0]')=f.source_account
-  AND json_extract(g.value,'$[1]')=coalesce(f.statement_period,''))`;
+const groupMembersQuery = `WITH wanted(k) AS (
+ SELECT json_array(json_extract(value,'$[0]'),json_extract(value,'$[1]')) FROM json_each(?3)),
+ keyed AS (SELECT t.id AS id,json_array(t.source_account,coalesce(${statementPeriodSql},'')) AS k
+  FROM transaction_observations t
+  ${sliceJoins})
+SELECT k,count(*) AS n,CASE WHEN count(*)<=?4 THEN json_group_array(id) END AS ids
+FROM keyed WHERE k IN (SELECT k FROM wanted)
+GROUP BY k`;
 
-/** How many published rows each group in ?3 holds. */
-const groupSizeQuery = `WITH f AS (${sliceFacts})
-SELECT f.source_account,coalesce(f.statement_period,'') AS period,count(*) AS n
-FROM f WHERE ${inGroups}
-GROUP BY f.source_account,coalesce(f.statement_period,'')`;
-
-/** Every published row of the groups in ?3, at most ?4, so each group is paired whole. */
-const groupFactQuery = `WITH f AS (${sliceFacts})
-SELECT f.* FROM f WHERE ${inGroups}
-ORDER BY f.source_account,coalesce(f.statement_period,''),f.id
-LIMIT ?4`;
+/** The slice's rows with the ids in ?3 (a JSON array), in observation id order. */
+const groupFactQuery = `WITH ids(id) AS (SELECT value FROM json_each(?3))
+${factsOfIds}`;
 
 const STORED_PROPOSALS_SQL = `SELECT proposal_digest,status FROM reconciliation_proposals
 WHERE proposal_digest IN (SELECT value FROM json_each(?1))`;
@@ -472,25 +485,35 @@ async function sweepSlice(
         firstId: row.id,
       });
   }
-  const groupsParam = (groups: readonly TouchedGroup[]) =>
-    JSON.stringify(groups.map((group) => [group.sourceAccount, group.period]));
-  const sizes = new Map<string, number>();
+  const members = new Map<string, { size: number; ids: number[] }>();
   if (touched.size > 0)
     for (const row of (
       await db
-        .prepare(groupSizeQuery)
-        .bind(slice.sourceId, statuses, groupsParam([...touched.values()]))
-        .all<{ source_account: string; period: string; n: number }>()
-    ).results)
-      sizes.set(groupKey(row.source_account, row.period), row.n);
+        .prepare(groupMembersQuery)
+        .bind(
+          slice.sourceId,
+          statuses,
+          JSON.stringify([...touched.values()].map((group) => [group.sourceAccount, group.period])),
+          GROUP_LIMIT,
+        )
+        .all<{ k: string; n: number; ids: string | null }>()
+    ).results) {
+      const [sourceAccount, period] = JSON.parse(row.k) as [string, string];
+      members.set(groupKey(sourceAccount, period), {
+        size: row.n,
+        ids: row.ids === null ? [] : (JSON.parse(row.ids) as number[]),
+      });
+    }
 
   // Take the page's groups in order while they fit the group read; the first
-  // one that does not fit and every later one wait for the next tick.
+  // one that does not fit and every later one wait for the next tick. Rows
+  // published into a taken group after this read are paired when a later
+  // page reaches them.
   const taken: TouchedGroup[] = [];
-  let takenRows = 0;
+  const takenIds: number[] = [];
   let deferredFrom: number | null = null;
   for (const [key, group] of touched) {
-    const size = sizes.get(key) ?? 0;
+    const { size, ids } = members.get(key) ?? { size: 0, ids: [] };
     if (deferredFrom !== null) {
       result.groupsDeferred += 1;
       continue;
@@ -499,13 +522,13 @@ async function sweepSlice(
       result.groupsSkipped += 1;
       continue;
     }
-    if (taken.length > 0 && takenRows + size > limits.groupRead) {
+    if (taken.length > 0 && takenIds.length + ids.length > limits.groupRead) {
       result.groupsDeferred += 1;
       deferredFrom = group.firstId;
       continue;
     }
     taken.push(group);
-    takenRows += size;
+    takenIds.push(...ids);
   }
 
   const proposals: ReconciliationProposal[] = [];
@@ -513,26 +536,19 @@ async function sweepSlice(
     const rows = (
       await db
         .prepare(groupFactQuery)
-        .bind(slice.sourceId, statuses, groupsParam(taken), takenRows + 1)
+        .bind(slice.sourceId, statuses, JSON.stringify(takenIds))
         .all<FactRow>()
     ).results;
-    if (rows.length > takenRows) {
-      // A group grew between the count and the read (an overlapping tick
-      // published into it): pair nothing on a partial read, and wait.
-      result.groupsDeferred += taken.length;
-      deferredFrom = taken[0]!.firstId;
-    } else {
-      const groups = groupFacts(rows.filter(comparablePayment).map((row) => factOf(row, slice)));
-      for (const group of taken) {
-        const facts = groups.get(groupKey(group.sourceAccount, group.period)) ?? [];
-        result.groups += 1;
-        // Stage C (cross-source correspondence) needs an established owner on
-        // both sides and a second source in the slice; it is not run yet.
-        proposals.push(
-          ...stageAProposals(facts, DEFAULT_MATCH_OPTIONS),
-          ...stageBProposals(facts, DEFAULT_MATCH_OPTIONS),
-        );
-      }
+    const groups = groupFacts(rows.filter(comparablePayment).map((row) => factOf(row, slice)));
+    for (const group of taken) {
+      const facts = groups.get(groupKey(group.sourceAccount, group.period)) ?? [];
+      result.groups += 1;
+      // Stage C (cross-source correspondence) needs an established owner on
+      // both sides and a second source in the slice; it is not run yet.
+      proposals.push(
+        ...stageAProposals(facts, DEFAULT_MATCH_OPTIONS),
+        ...stageBProposals(facts, DEFAULT_MATCH_OPTIONS),
+      );
     }
   }
   result.proposed += proposals.length;

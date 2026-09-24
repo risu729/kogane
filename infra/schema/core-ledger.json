@@ -697,9 +697,9 @@
     },
     {
       "file": "0048_reconciliation_scan_cursor.sql",
-      "statementCount": 1,
+      "statementCount": 2,
       "insertStatements": [],
-      "sha256": "0f9070502acdd474307855e88dee3447aba44a2909a7fd33b6e7f9c88fc60b13"
+      "sha256": "216682487e6b4283f35aae0b3b2fc59570045b6506ccede4f57c44dfdb6af327"
     }
   ],
   "tables": [
@@ -11017,6 +11017,15 @@
           ]
         },
         {
+          "name": "reconciliation_proposals_kind_stage",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "kind",
+            "stage"
+          ]
+        },
+        {
           "name": "reconciliation_proposals_status",
           "unique": false,
           "partial": false,
@@ -16522,6 +16531,11 @@
       "sqlSha256": "bcacbcedda493c47"
     },
     {
+      "name": "reconciliation_proposals_kind_stage",
+      "table": "reconciliation_proposals",
+      "sqlSha256": "e3028f9ba5d251cf"
+    },
+    {
       "name": "reconciliation_proposals_status",
       "table": "reconciliation_proposals",
       "sqlSha256": "648ffa4c25ecec4c"
@@ -16586,7 +16600,7 @@
     "tableCount": 110,
     "viewCount": 39,
     "triggerCount": 398,
-    "explicitIndexCount": 109,
+    "explicitIndexCount": 110,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -16790,6 +16804,6 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "6a022ab8258385c3ca02701b3868ac274819b93091b398f3eb807eedba8642f5"
+    "schemaSha256": "744dcd9b61a167d7031b4cf7f9c0fe39c2dfd9a97859a8a8744178f49569c335"
   }
 }

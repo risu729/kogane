@@ -179,11 +179,14 @@ returned side by side with `cross_unit_requires_fx_model`; signed amounts in
   content and occurrence, so each daily capture of a displayed row carries the
   same fingerprint: stage A over them was one more `provider_same` candidate
   per pair of captures, never auto-acceptable, and nothing for a reviewer to
-  decide, because which capture a reader sees is already decided by snapshot
-  currentness ([publication gate](publication-gate.md)), not by a relation.
-  The `provider_same` rows written before this rule (all `proposed`, carrying
-  `collector_fingerprint_identifier`) stay as they are: proposals are
-  append-only and nothing resolves or deletes them.
+  decide (no surface lists or reviews one), because which capture a reader
+  sees is already decided by snapshot currentness
+  ([publication gate](publication-gate.md)), not by a relation. The
+  `provider_same` rows written before this rule (about 26,000 in production,
+  all `proposed`, carrying `collector_fingerprint_identifier`) stay as they
+  are: proposals are append-only and nothing resolves or deletes them. The
+  candidate reads select stage B proposals by the `(kind, stage)` index of
+  CORE `0048`, so those rows are never read by them.
 - **Stage B — a revision or a second display inside one provider.** Pending
   against posted. Amount and date closeness alone yields a candidate, never an
   acceptance: two purchases of the same amount on the same day must not be
@@ -791,8 +794,8 @@ browser serves no new route.
 ## Deploy order and rollback
 
 1. Apply migration `0032_economic_events.sql` (schema; additive, writes no rows)
-   and `0048_reconciliation_scan_cursor.sql` (the sweep's scan cursor;
-   additive, writes no rows).
+   and `0048_reconciliation_scan_cursor.sql` (the sweep's scan cursor and the
+   `(kind, stage)` proposal index; additive, writes no rows).
 2. Deploy `services/processor` with `RECONCILIATION_ENABLED="0"`;
    turn it on when the candidates should start being produced.
 3. Deploy `services/app` with `EVENTS_V2_ENABLED="0"`; turn it on
@@ -815,12 +818,13 @@ Per slice, one tick:
 1. reads at most 1,000 published rows after the cursor, by observation id
    (`SCAN_LIMIT`);
 2. counts the published rows of every group (source account, statement
-   period) those rows belong to, skips a group of more than 200 rows
-   (`GROUP_LIMIT`, counted in `groupsSkipped`), and reads the others whole, at
-   most 2,000 rows in all (`GROUP_READ_LIMIT`; the page's first group to pair
-   is always read, so the cursor always moves), so a pair is found
-   whichever pages its two rows fall on. A group that does not fit waits for
-   the next tick (`groupsDeferred`) and the cursor stops before its first row;
+   period) those rows belong to, in one pass that also names the rows of each
+   group of at most 200 rows; skips a larger group (`GROUP_LIMIT`, counted in
+   `groupsSkipped`), and reads the others whole by row id, at most 2,000 rows
+   in all (`GROUP_READ_LIMIT`; the page's first group to pair is always read,
+   so the cursor always moves), so a pair is found whichever pages its two
+   rows fall on. A group that does not fit waits for the next tick
+   (`groupsDeferred`) and the cursor stops before its first row;
 3. runs stage A and stage B over each group read, looks the candidates'
    digests up 1,000 at a time (`LOOKUP_CHUNK`, about 67 KB of bound JSON) and
    writes only the proposals not stored yet, in batches of 100
@@ -856,6 +860,22 @@ account label, provider text or row id:
 
 `proposed` counts the candidates the matcher produced for the groups read,
 `known` those already stored. One API page is 200 rows.
+
+Cost, on the scaled store of [the read model's measurement](read-model.md#cost)
+(268,575 observations, 220,309 published Vpass pending and posted rows after
+180 daily captures; `bun:sqlite`, no table statistics): one tick of both
+slices took 1.5–3.2 s, about 0.5 s choosing the pages (the ids first, then
+only the page's rows with their JSON columns: 0.3 s against 2 s for Vpass)
+and 1–1.8 s finding the members of the groups the pages touched, which reads
+each published row's statement period once. The first-1,000-rows read it
+replaces took about 1 s and paired only those rows. What still grows with
+history is that pass: the lane reads every published capture, not only the
+current ones, so a Vpass statement month captured daily holds thousands of
+rows there and is counted in `groupsSkipped` rather than paired, as it was
+skipped or read in part before. On the smaller store the CI scale test builds
+(2,070 published Vpass rows after 21 daily captures, near production's
+3,300) a tick's reads take tens of milliseconds, and several of its Vpass
+months already hold more than 200 rows.
 
 ## Verified locally (synthetic data only)
 

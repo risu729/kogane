@@ -42,9 +42,9 @@ import { exactQuantity, normalizeDecimal, type Quantity } from "../../../domain/
 /**
  * Proposals selected per recognition key, newest first. A page lists at most
  * 10 candidates per event, and an event holds a key per row it shows, so each
- * key keeps its own 10: stage B pairs every pending row with every posted row
- * of a statement period, and one busy month must not crowd the other events
- * of the page out of a shared limit.
+ * key keeps its own 10: stage B pairs a pending row with every posted row
+ * inside its matching window, and one busy week must not crowd the other
+ * events of the page out of a shared limit.
  */
 const CANDIDATES_PER_KEY = 10;
 
