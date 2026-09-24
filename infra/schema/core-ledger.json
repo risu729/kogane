@@ -683,6 +683,17 @@
         }
       ],
       "sha256": "f19cf5d0e932ce4c09de7f4614c983faa6507b604c35924e74704f69babc3175"
+    },
+    {
+      "file": "0047_card_purchase_recognition.sql",
+      "statementCount": 20,
+      "insertStatements": [
+        {
+          "table": "card_purchase_scan_cursor",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "4ae010e7a881b839cd376fec814c1bc518b62b04b7c0c7e75b72a38077f4875b"
     }
   ],
   "tables": [
@@ -2668,6 +2679,284 @@
       "sqlSha256": "7e2fb2705ac4c799"
     },
     {
+      "name": "card_purchase_recognition_keys",
+      "classification": "core-keep",
+      "planRow": "card purchase recognition evidence",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "recognition_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "event_id",
+        "revision",
+        "recognition_key"
+      ],
+      "foreignKeys": [
+        {
+          "column": "event_id",
+          "references": "card_purchase_recognitions(event_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "observation_id",
+          "references": "transaction_observations(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "parse_run_id",
+          "references": "parse_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "revision",
+          "references": "card_purchase_recognitions(revision)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "card_purchase_recognition_keys_key",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "recognition_key"
+          ]
+        },
+        {
+          "name": "card_purchase_recognition_keys_observation",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "observation_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "card_purchase_recognition_keys_guard",
+        "card_purchase_recognition_keys_no_delete",
+        "card_purchase_recognition_keys_no_replace",
+        "card_purchase_recognition_keys_no_update",
+        "card_purchase_recognition_keys_one_live_holder"
+      ],
+      "noUpdateTriggers": [
+        "card_purchase_recognition_keys_no_update"
+      ],
+      "noDeleteTriggers": [
+        "card_purchase_recognition_keys_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "3e60e56fe3a27da7"
+    },
+    {
+      "name": "card_purchase_recognitions",
+      "classification": "core-keep",
+      "planRow": "card purchase recognition evidence",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "policy_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "action",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "content_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "account_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "statement_period",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "facts_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "event_id",
+        "revision"
+      ],
+      "foreignKeys": [
+        {
+          "column": "account_id",
+          "references": "accounts(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "event_id",
+          "references": "economic_event_revisions(event_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "revision",
+          "references": "economic_event_revisions(revision)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "card_purchase_recognitions_account",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "account_id",
+            "source_id",
+            "statement_period"
+          ]
+        }
+      ],
+      "triggers": [
+        "card_purchase_recognitions_facts",
+        "card_purchase_recognitions_guard",
+        "card_purchase_recognitions_no_delete",
+        "card_purchase_recognitions_no_replace",
+        "card_purchase_recognitions_no_update"
+      ],
+      "noUpdateTriggers": [
+        "card_purchase_recognitions_no_update"
+      ],
+      "noDeleteTriggers": [
+        "card_purchase_recognitions_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "5aefb9bc04e2a310"
+    },
+    {
+      "name": "card_purchase_scan_cursor",
+      "classification": "operational-mutable",
+      "planRow": "bounded card purchase scan progress",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "singleton",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "last_observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "singleton"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "97b3a82741dc691f"
+    },
+    {
       "name": "card_settlement_allocation_withdrawals",
       "classification": "core-keep",
       "planRow": "card settlement evidence and decisions",
@@ -4564,6 +4853,7 @@
         }
       ],
       "triggers": [
+        "card_purchase_recognition_legs_sealed",
         "economic_legs_no_delete",
         "economic_legs_no_replace",
         "economic_legs_no_update"
@@ -12521,6 +12811,37 @@
       "sqlSha256": "0499c33f62accc89"
     },
     {
+      "name": "current_card_purchase_keys",
+      "columns": [
+        "event_id",
+        "revision",
+        "recognition_key",
+        "role",
+        "observation_id",
+        "parse_run_id"
+      ],
+      "sqlSha256": "df0ea835f2a28b57"
+    },
+    {
+      "name": "current_card_purchase_recognitions",
+      "columns": [
+        "event_id",
+        "revision",
+        "policy_release",
+        "action",
+        "content_digest",
+        "account_id",
+        "source_id",
+        "statement_period",
+        "facts_json",
+        "created_at",
+        "kind",
+        "state",
+        "unknown_reason"
+      ],
+      "sqlSha256": "22c1514477541130"
+    },
+    {
       "name": "current_card_settlement_allocations",
       "columns": [
         "id",
@@ -13454,6 +13775,83 @@
       "timing": "BEFORE",
       "event": "UPDATE OF STATUS",
       "sqlSha256": "c01baa60705e79d6"
+    },
+    {
+      "name": "card_purchase_recognition_keys_guard",
+      "table": "card_purchase_recognition_keys",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "cbc2669dfcb1a597"
+    },
+    {
+      "name": "card_purchase_recognition_keys_no_delete",
+      "table": "card_purchase_recognition_keys",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "b309697d8cc65d3a"
+    },
+    {
+      "name": "card_purchase_recognition_keys_no_replace",
+      "table": "card_purchase_recognition_keys",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "8b04d11199f47d7b"
+    },
+    {
+      "name": "card_purchase_recognition_keys_no_update",
+      "table": "card_purchase_recognition_keys",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "243877455b6ecc09"
+    },
+    {
+      "name": "card_purchase_recognition_keys_one_live_holder",
+      "table": "card_purchase_recognition_keys",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "07f2feb1f003fc3c"
+    },
+    {
+      "name": "card_purchase_recognition_legs_sealed",
+      "table": "economic_legs",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "37f4fa4f042a8ae4"
+    },
+    {
+      "name": "card_purchase_recognitions_facts",
+      "table": "card_purchase_recognitions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "1b2bd7cbcef15dbb"
+    },
+    {
+      "name": "card_purchase_recognitions_guard",
+      "table": "card_purchase_recognitions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "296df3dfc839c041"
+    },
+    {
+      "name": "card_purchase_recognitions_no_delete",
+      "table": "card_purchase_recognitions",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "a222c10c248b064e"
+    },
+    {
+      "name": "card_purchase_recognitions_no_replace",
+      "table": "card_purchase_recognitions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "e5d06bdadf250904"
+    },
+    {
+      "name": "card_purchase_recognitions_no_update",
+      "table": "card_purchase_recognitions",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "172b261776273a7e"
     },
     {
       "name": "card_settlement_allocation_withdrawals_guard",
@@ -15635,6 +16033,21 @@
       "sqlSha256": "d1ea79e43a286823"
     },
     {
+      "name": "card_purchase_recognition_keys_key",
+      "table": "card_purchase_recognition_keys",
+      "sqlSha256": "07530959930ba7cc"
+    },
+    {
+      "name": "card_purchase_recognition_keys_observation",
+      "table": "card_purchase_recognition_keys",
+      "sqlSha256": "d738ce1b3202d4ad"
+    },
+    {
+      "name": "card_purchase_recognitions_account",
+      "table": "card_purchase_recognitions",
+      "sqlSha256": "dfc2e06f2ad808f8"
+    },
+    {
       "name": "card_settlement_candidates_bank",
       "table": "card_settlement_candidates",
       "sqlSha256": "b481b789f02d61ad"
@@ -16131,10 +16544,10 @@
     }
   ],
   "summary": {
-    "tableCount": 106,
-    "viewCount": 37,
-    "triggerCount": 387,
-    "explicitIndexCount": 106,
+    "tableCount": 109,
+    "viewCount": 39,
+    "triggerCount": 398,
+    "explicitIndexCount": 109,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -16155,6 +16568,8 @@
         "calculation_policies",
         "calculation_results",
         "calculation_runs",
+        "card_purchase_recognition_keys",
+        "card_purchase_recognitions",
         "card_settlement_allocation_withdrawals",
         "card_settlement_candidates",
         "card_settlement_decisions",
@@ -16235,6 +16650,7 @@
       ],
       "read-candidate": [],
       "operational-mutable": [
+        "card_purchase_scan_cursor",
         "card_settlement_scan_cursor",
         "collection_scan_state",
         "observation_lane_state",
@@ -16255,6 +16671,7 @@
       "allocations",
       "approvals",
       "calculation_runs",
+      "card_purchase_scan_cursor",
       "card_settlement_scan_cursor",
       "change_plans",
       "collection_runs",
@@ -16329,8 +16746,9 @@
       "0043_remove_synthetic_bootstrap.sql",
       "0044_card_statement_settlements.sql",
       "0045_expand_card_settlement_commands.sql",
-      "0046_st_george_balance_snapshot.sql"
+      "0046_st_george_balance_snapshot.sql",
+      "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "b0bab16f796dabc97e55e31602856a6520612254881d75ea94bf5920e360647c"
+    "schemaSha256": "d279b999f15a9b1b0c1b64a089f058c18fd2ddf70a45d58d7adc6b06dd5608c0"
   }
 }

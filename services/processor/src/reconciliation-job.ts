@@ -26,6 +26,7 @@ import {
   type Quantity,
 } from "../../../packages/domain/src/values.ts";
 import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
+import { comparableCardPayment } from "../../../packages/domain/src/card-purchase.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import {
   DEFAULT_MATCH_OPTIONS,
@@ -308,14 +309,14 @@ export async function reconciliationSweep(
 }
 
 /** MyJCB's posted amount can be an installment slice. Only a provider row with
- * equal full usage/payment amounts participates in pending-to-posted matching. */
+ * equal full usage/payment amounts participates in pending-to-posted matching.
+ * The rule moved unchanged to the domain (`comparableCardPayment`), which also
+ * records its known gap: it does not read MyJCB's `1,200円` display text. */
 function comparablePayment(row: FactRow): boolean {
-  if (row.source_id !== "myjcb" || row.status !== "confirmed") return true;
-  const parse = (value: string | null): bigint | null => {
-    if (value === null || !/^[0-9]+(?:,[0-9]{3})*$/.test(value.trim())) return null;
-    return BigInt(value.trim().replaceAll(",", ""));
-  };
-  const usage = parse(row.usage_amount_text),
-    payment = parse(row.payment_amount_text);
-  return usage !== null && usage > 0n && usage === payment;
+  return comparableCardPayment({
+    sourceId: row.source_id,
+    status: row.status,
+    usageAmountText: row.usage_amount_text,
+    paymentAmountText: row.payment_amount_text,
+  });
 }
