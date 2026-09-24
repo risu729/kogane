@@ -650,6 +650,12 @@
   min-width: 52rem;
 }
 
+/* The statement, debit and link cells hold a few fixed words each; they stay
+ * on one line instead of breaking 請求分 or 説明を見る between characters. */
+.purchase-table td:nth-child(n + 5) {
+  white-space: nowrap;
+}
+
 /* An exact amount wraps inside a narrow tile rather than being clipped. */
 .purchase-figures .tile-value {
   overflow-wrap: anywhere;

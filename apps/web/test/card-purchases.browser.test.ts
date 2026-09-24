@@ -20,10 +20,12 @@ describe.if(runnable)("card purchase explanation", () => {
   let origin: string;
   let advertised = true;
   let empty = false;
+  let tooMany = false;
   const requests: URL[] = [];
   beforeEach(() => {
     advertised = true;
     empty = false;
+    tooMany = false;
     requests.length = 0;
   });
   beforeAll(async () => {
@@ -44,6 +46,9 @@ describe.if(runnable)("card purchase explanation", () => {
           });
         if (url.pathname === "/api/v2/card-purchases") {
           requests.push(url);
+          // The server refuses a filter it cannot total completely.
+          if (tooMany && !url.searchParams.has("period"))
+            return Response.json({ error: "result_limit_exceeded" }, { status: 413 });
           const page = purchasePage(empty ? [] : undefined);
           const eventId = url.searchParams.get("eventId");
           if (eventId !== null) {
@@ -104,7 +109,8 @@ describe.if(runnable)("card purchase explanation", () => {
     // No figure adds captured and authorized, or subtracts a refund.
     for (const combined of ["2434", "2734", "934", "2134"]) expect(main).not.toContain(combined);
     expect(main).toContain("引落は購入費用に加算しません");
-    expect(main).toContain("3 件は、この一覧に含まれていません");
+    // The unrecognised count is across every statement month, and says so.
+    expect(main).toContain("3 件は、カード利用として認識されていないため、どの請求月の一覧にも");
     // The statement total is reference only, behind its own disclosure.
     await page.getByText("カード会社の請求総額（参考）", { exact: true }).click();
     expect(await page.locator("main").innerText()).toContain("1734 JPY");
@@ -164,6 +170,21 @@ describe.if(runnable)("card purchase explanation", () => {
     await page.getByRole("button", { name: "すべて表示", exact: true }).click();
     await page.getByRole("heading", { name: "状態ごとの利用額", exact: true }).waitFor();
     expect(requests.at(-1)?.searchParams.has("period")).toBe(false);
+    await page.close();
+  }, 30_000);
+
+  test("a filter too large to total asks for a statement month instead of a partial sum", async () => {
+    tooMany = true;
+    const page = await open();
+    await page.getByText("一部だけの合計は表示しないため、請求月で絞り込んでください。").waitFor();
+    const main = await page.locator("main").innerText();
+    // Neither a figure nor a generic failure with a retry that would be refused again.
+    expect(main).not.toContain("読み込めませんでした");
+    expect(await page.getByRole("list", { name: "状態ごとの利用額" }).count()).toBe(0);
+    await page.getByLabel("請求月", { exact: true }).fill("2026-09");
+    await page.getByRole("button", { name: "絞り込む", exact: true }).click();
+    await page.getByRole("heading", { name: "2026-09 請求分の状態ごとの利用額" }).waitFor();
+    expect(requests.at(-1)?.searchParams.get("period")).toBe("2026-09");
     await page.close();
   }, 30_000);
 

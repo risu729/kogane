@@ -63,6 +63,10 @@ export function PurchasesPage(): ReactNode {
   const [offset, setOffset] = useViewState("purchases.offset");
   const query = useCardPurchases(offset, period === "" ? null : period);
   const invalidDraft = draft !== "" && !PERIOD.test(draft);
+  // The server refuses a filter it cannot total completely (413); the page
+  // says how to narrow it instead of a generic error with a retry that would
+  // be refused again.
+  const tooLarge = query.error instanceof ApiError && query.error.status === 413;
   if (!features.known) return <Loading label="カード利用" />;
   return (
     <>
@@ -120,122 +124,125 @@ export function PurchasesPage(): ReactNode {
               ) : null}
             </form>
           </Panel>
-          {query.error instanceof ApiError && query.error.status === 413 ? (
+          {tooLarge ? (
             <Notice tone="warn" role="note">
-              利用が多いため、すべての利用の合計を一度に表示できません。請求月で絞り込んでください。
+              この条件の利用は多すぎて、すべてを合計できません。一部だけの合計は表示しないため、請求月で絞り込んでください。
             </Notice>
-          ) : null}
-          <QueryBoundary query={query} label="カード利用">
-            {(data) => (
-              <>
-                <Panel
-                  id="purchase-figures"
-                  title={period === "" ? "状態ごとの利用額" : `${period} 請求分の状態ごとの利用額`}
-                  count={`${data.summary.events}件`}
-                  note={<>確定・未確定・返金は別々に表示し、合算しません。{SETTLEMENT_NOTE}。</>}
-                >
-                  {data.summary.units.length === 0 && data.summary.unresolved === 0 ? (
-                    <div className="panel-body">
-                      <p>この条件で合計する利用はありません。</p>
-                    </div>
-                  ) : (
-                    <PurchaseFigures summary={data.summary} />
-                  )}
-                  <details className="detail-disclosure">
-                    <summary>カード会社の請求総額（参考）</summary>
-                    <p className="footnote">
-                      請求総額はカード会社が報告した金額です。上の利用額と比較したり差し引いたりしません。
+          ) : (
+            <QueryBoundary query={query} label="カード利用">
+              {(data) => (
+                <>
+                  <Panel
+                    id="purchase-figures"
+                    title={
+                      period === "" ? "状態ごとの利用額" : `${period} 請求分の状態ごとの利用額`
+                    }
+                    count={`${data.summary.events}件`}
+                    note={<>確定・未確定・返金は別々に表示し、合算しません。{SETTLEMENT_NOTE}。</>}
+                  >
+                    {data.summary.units.length === 0 && data.summary.unresolved === 0 ? (
+                      <div className="panel-body">
+                        <p>この条件で合計する利用はありません。</p>
+                      </div>
+                    ) : (
+                      <PurchaseFigures summary={data.summary} />
+                    )}
+                    <details className="detail-disclosure">
+                      <summary>カード会社の請求総額（参考）</summary>
+                      <p className="footnote">
+                        請求総額はカード会社が報告した金額です。上の利用額と比較したり差し引いたりしません。
+                      </p>
+                      <StatementTotals totals={data.summary.statementTotals} />
+                    </details>
+                  </Panel>
+                  <Notice tone="warn" role="note">
+                    <p>
+                      <strong>一覧に含まれない利用があります。</strong>
                     </p>
-                    <StatementTotals totals={data.summary.statementTotals} />
-                  </details>
-                </Panel>
-                <Notice tone="warn" role="note">
-                  <p>
-                    <strong>一覧に含まれない利用があります。</strong>
-                  </p>
-                  <p>
-                    現在取得している明細のうち {data.coverage.unrecognizedCurrentRows}{" "}
-                    件は、この一覧に含まれていません。分割・リボ・ボーナス払い、金額を読み取れない利用などは対象外です。
-                  </p>
-                  <details className="inline-disclosure">
-                    <summary>対象外の条件</summary>
-                    <ul className="warning-list">
-                      {data.coverage.unsupportedShapes.map((code) => (
-                        <li key={code}>{EXCLUSION_LABELS[code] ?? code}</li>
-                      ))}
-                    </ul>
-                  </details>
-                </Notice>
-                <Panel id="purchase-list" title="利用の一覧">
-                  {data.items.length === 0 ? (
-                    <div className="panel-body">
-                      <EmptyState>
-                        <p>表示できるカード利用はありません。</p>
-                        <p>
-                          一覧が空でも、カードの利用がなかったことにはなりません。取得していない明細や、この一覧の対象外の利用があります。
-                        </p>
-                      </EmptyState>
-                    </div>
-                  ) : (
-                    <div
-                      className="table-scroll"
-                      role="region"
-                      aria-label="カード利用の一覧"
-                      tabIndex={0}
-                    >
-                      <table className="purchase-table">
-                        <caption>
-                          新しい利用日から順に表示します。金額は状態ごとに扱い、合算していません。
-                        </caption>
-                        <thead>
-                          <tr>
-                            <th scope="col">利用日</th>
-                            <th scope="col">利用先</th>
-                            <th scope="col">種類・状態</th>
-                            <th scope="col" className="num">
-                              金額
-                            </th>
-                            <th scope="col">請求</th>
-                            <th scope="col">引落</th>
-                            <th scope="col">
-                              <span className="visually-hidden">説明</span>
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {data.items.map((view) => (
-                            <PurchaseRow key={view.eventId} view={view} />
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  {data.items.length === 0 && offset === 0 ? null : (
-                    <Pagination
-                      label="カード利用のページ"
-                      status={`${data.summary.events}件中 ${
-                        data.items.length === 0
-                          ? "表示なし"
-                          : `${offset + 1}–${offset + data.items.length}件`
-                      }`}
-                      previous={{
-                        label: `前の${PAGE_SIZE}件`,
-                        disabled: offset === 0,
-                        onClick: () => setOffset(Math.max(0, offset - PAGE_SIZE)),
-                      }}
-                      next={{
-                        label: `次の${PAGE_SIZE}件`,
-                        disabled: data.nextOffset === null,
-                        onClick: () => {
-                          if (data.nextOffset !== null) setOffset(data.nextOffset);
-                        },
-                      }}
-                    />
-                  )}
-                </Panel>
-              </>
-            )}
-          </QueryBoundary>
+                    <p>
+                      取得元が現在表示している明細のうち {data.coverage.unrecognizedCurrentRows}{" "}
+                      件は、カード利用として認識されていないため、どの請求月の一覧にも含まれていません。分割・リボ・ボーナス払い、金額を読み取れない利用、まだ処理していない明細などです。
+                    </p>
+                    <details className="inline-disclosure">
+                      <summary>対象外の条件</summary>
+                      <ul className="warning-list">
+                        {data.coverage.unsupportedShapes.map((code) => (
+                          <li key={code}>{EXCLUSION_LABELS[code] ?? code}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  </Notice>
+                  <Panel id="purchase-list" title="利用の一覧">
+                    {data.items.length === 0 ? (
+                      <div className="panel-body">
+                        <EmptyState>
+                          <p>表示できるカード利用はありません。</p>
+                          <p>
+                            一覧が空でも、カードの利用がなかったことにはなりません。取得していない明細や、この一覧の対象外の利用があります。
+                          </p>
+                        </EmptyState>
+                      </div>
+                    ) : (
+                      <div
+                        className="table-scroll"
+                        role="region"
+                        aria-label="カード利用の一覧"
+                        tabIndex={0}
+                      >
+                        <table className="purchase-table">
+                          <caption>
+                            新しい利用日から順に表示します。金額は状態ごとに扱い、合算していません。
+                          </caption>
+                          <thead>
+                            <tr>
+                              <th scope="col">利用日</th>
+                              <th scope="col">利用先</th>
+                              <th scope="col">種類・状態</th>
+                              <th scope="col" className="num">
+                                金額
+                              </th>
+                              <th scope="col">請求</th>
+                              <th scope="col">引落</th>
+                              <th scope="col">
+                                <span className="visually-hidden">説明</span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.items.map((view) => (
+                              <PurchaseRow key={view.eventId} view={view} />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {data.items.length === 0 && offset === 0 ? null : (
+                      <Pagination
+                        label="カード利用のページ"
+                        status={`${data.summary.events}件中 ${
+                          data.items.length === 0
+                            ? "表示なし"
+                            : `${offset + 1}–${offset + data.items.length}件`
+                        }`}
+                        previous={{
+                          label: `前の${PAGE_SIZE}件`,
+                          disabled: offset === 0,
+                          onClick: () => setOffset(Math.max(0, offset - PAGE_SIZE)),
+                        }}
+                        next={{
+                          label: `次の${PAGE_SIZE}件`,
+                          disabled: data.nextOffset === null,
+                          onClick: () => {
+                            if (data.nextOffset !== null) setOffset(data.nextOffset);
+                          },
+                        }}
+                      />
+                    )}
+                  </Panel>
+                </>
+              )}
+            </QueryBoundary>
+          )}
         </>
       )}
     </>
