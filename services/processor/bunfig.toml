@@ -1,0 +1,7 @@
+# ref: https://bun.com/docs/runtime/bunfig
+
+[test]
+# Every test file here reads Miniflare's synchronous proxy through this guard,
+# including the ones that build their own Miniflare instead of using
+# test/harness.ts (see the file for the CI failure it removes).
+preload = ["./test/miniflare-sync-proxy.ts"]
