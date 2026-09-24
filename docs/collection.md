@@ -775,7 +775,6 @@ format change is needed for that step.
   `worker-test/shared-data-bucket.test.ts`, which stages a run into a real
   Miniflare R2 `DATA` bucket, re-reads it and writes the objects and the
   terminal into the same bucket.
-- Known, pre-existing and untouched: three of this package's bun tests fail
-  under bun 1.4.0 because `mock.module("cloudflare:workers")` does not resolve
-  in bare `bun test` discovery. The test task still runs `bun test ./test`, so
-  those failures stay exactly as visible as they were.
+- A bare `bun test` also discovers `worker-test/shared-data-bucket.test.ts`,
+  whose `cloudflare:test` import resolves only under Vitest. The test task runs
+  `vitest run` and `bun test ./test` separately, and both pass under bun 1.4.0.
