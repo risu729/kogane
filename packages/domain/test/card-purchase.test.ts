@@ -259,14 +259,25 @@ describe("SC04 installments", () => {
         amount: observed(fixture.purchase.amount),
       }),
     ).toBe("installment_amount_differs");
-    // The shared rule keeps the slice out of pending-to-posted matching too.
+    // The shared rule keeps the slice out of pending-to-posted matching too,
+    // in plain digits and in the ledger's display text alike.
     const row = { sourceId: "myjcb", status: "confirmed" };
-    expect(
-      comparableCardPayment({ ...row, usageAmountText: usage, paymentAmountText: payment }),
-    ).toBe(false);
-    expect(
-      comparableCardPayment({ ...row, usageAmountText: usage, paymentAmountText: usage }),
-    ).toBe(true);
+    for (const unit of ["", "円"]) {
+      expect(
+        comparableCardPayment({
+          ...row,
+          usageAmountText: `${usage}${unit}`,
+          paymentAmountText: `${payment}${unit}`,
+        }),
+      ).toBe(false);
+      expect(
+        comparableCardPayment({
+          ...row,
+          usageAmountText: `${usage}${unit}`,
+          paymentAmountText: `${usage}${unit}`,
+        }),
+      ).toBe(true);
+    }
     expect(myjcbAgreedAmount(usage, payment)).toEqual({
       ok: false,
       reasonCode: "installment_amount_differs",
@@ -310,7 +321,7 @@ describe("SC04 installments", () => {
     expect(myjcbAgreedAmount("1,200円", "1,200")).toEqual({ ok: true, amount: 1200n });
   });
 
-  test("the shared MyJCB rule keeps the reconciliation job's grammar and scope", () => {
+  test("pending-to-posted matching reads MyJCB amounts with the same grammar as recognition", () => {
     const confirmed = (usageAmountText: string | null, paymentAmountText: string | null) =>
       comparableCardPayment({
         sourceId: "myjcb",
@@ -318,17 +329,30 @@ describe("SC04 installments", () => {
         usageAmountText,
         paymentAmountText,
       });
-    expect(confirmed("1,200", "1,200")).toBe(true);
-    expect(confirmed(" 1,200 ", "1200")).toBe(true);
-    expect(confirmed("1,200", "300")).toBe(false);
-    expect(confirmed("0", "0")).toBe(false);
-    expect(confirmed("-500", "-500")).toBe(false);
-    // Known gap, pinned on purpose: the moved rule keeps the job's grammar, so
-    // real MyJCB display text never takes part in pending-to-posted matching.
-    // Widening it changes live proposals and is a separate reviewed change.
-    expect(confirmed("1,200円", "1,200円")).toBe(false);
-    expect(myjcbAgreedAmount("1,200円", "1,200円")).toEqual({ ok: true, amount: 1200n });
-    expect(confirmed(null, "1,200")).toBe(false);
+    // The ledger parser's real display text is compared, as recognition reads it.
+    expect(confirmed("1,200円", "1,200円")).toBe(true);
+    for (const text of ["1,200", " 1,200 円", "１，２００円", "¥1,200", "￥1,200", "1200"])
+      expect(confirmed(text, "1,200円")).toBe(true);
+    // Usage must equal payment and be positive: an installment slice, a zero
+    // and a refund are never compared.
+    expect(confirmed("1,200円", "300円")).toBe(false);
+    expect(confirmed("0円", "0円")).toBe(false);
+    expect(confirmed("-500円", "-500円")).toBe(false);
+    // A missing or unreadable text is never read as a number.
+    for (const text of [null, "", "円", "1,20円", "1.5円", "01,200円", "1,200ドル"])
+      expect(confirmed(text, "1,200円")).toBe(false);
+    expect(confirmed("1,200円", null)).toBe(false);
+    // One grammar: wherever recognition agrees on a positive amount, so does matching.
+    for (const [usage, payment] of [
+      ["1,200円", "1,200円"],
+      ["1,200円", "400円"],
+      ["-500円", "-500円"],
+      ["1,200円", null],
+      ["1,2000円", "12,000円"],
+    ] as const) {
+      const agreed = myjcbAgreedAmount(usage, payment);
+      expect(confirmed(usage, payment)).toBe(agreed.ok && agreed.amount > 0n);
+    }
     // Only MyJCB confirmed rows are constrained.
     for (const other of [
       { sourceId: "myjcb", status: "unconfirmed" },

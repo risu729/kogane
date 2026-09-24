@@ -140,7 +140,7 @@ test("MyJCB ledger rows as parsed: 一回払い and 円 amounts are recognised, 
   }
 });
 
-test("known gap: the reconciliation rule does not read MyJCB's display amounts", () => {
+test("the reconciliation rule reads MyJCB's display amounts as recognition does", () => {
   // A confirmed, positive, single-payment row (synthetic, same shape as the fixture).
   const ledger = {
     schemaVersion: 1,
@@ -171,18 +171,26 @@ test("known gap: the reconciliation rule does not read MyJCB's display amounts",
     amount: "1000",
     period: "2026-07",
   });
-  // The rule moved unchanged from the reconciliation job, whose grammar
-  // predates the MyJCB ledger parser: it reads `1,000円` as no number, so the
-  // live lane keeps this row out of pending-to-posted matching. Widening it
-  // starts new production proposals and is left to its own reviewed change.
-  expect(
+  const comparable = (fact: CardUsageFact) =>
     comparableCardPayment({
-      sourceId: row!.sourceId,
-      status: row!.providerStatus,
-      usageAmountText: row!.usageAmountText,
-      paymentAmountText: row!.paymentAmountText,
-    }),
-  ).toBe(false);
+      sourceId: fact.sourceId,
+      status: fact.providerStatus,
+      usageAmountText: fact.usageAmountText,
+      paymentAmountText: fact.paymentAmountText,
+    });
+  // What the parser hands over is display text, and the pending-to-posted
+  // guard reads it with the same grammar recognition uses.
+  expect([row!.usageAmountText, row!.paymentAmountText]).toEqual(["1,000円", "1,000円"]);
+  expect(comparable(row!)).toBe(true);
+  // The fixture's confirmed ledger: the installment slice (400円 of 1,200円)
+  // and the refund (-500円) never take part in matching; the pending row is
+  // not constrained by the guard.
+  const [slice, refund] = myjcb("credit-ledger-02.json", "confirmed", "2026年7月お支払い分");
+  expect([slice!.usageAmountText, slice!.paymentAmountText]).toEqual(["1,200円", "400円"]);
+  expect(comparable(slice!)).toBe(false);
+  expect(comparable(refund!)).toBe(false);
+  const [pending] = myjcb("credit-ledger-00.json", "unconfirmed", "2026年9月お支払い分");
+  expect(comparable(pending!)).toBe(true);
 });
 
 test("Vpass statement pages as parsed: web and customized rows, sale codes and refunds", () => {
