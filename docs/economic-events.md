@@ -346,11 +346,11 @@ full last page wraps on the next tick, whose page is empty) because a row below
 it can become current again. The cursor moves only from the value the tick
 read, so a tick that overlapped it never pulls it back. The current-usage query
 runs twice per tick (stale keys, then the page): about 0.5 s and 0.4 s on the
-scaled store of [the read model's cost measurement](read-model.md#cost), which
-starts from the current captures rather than the whole store. Nothing in the
-tick is skipped when no evidence changed: every tick that writes moves the CORE
-source revision itself, and the cursor still has to page through the current
-rows.
+scaled store of [the read model's cost measurement](read-model.md#cost), since
+both start from the current captures rather than the whole store. Nothing in
+the tick is skipped when no evidence changed: every tick that writes moves the
+CORE source revision itself, and the cursor still has to page through the
+current rows.
 
 Recognition waits for the retire pass only while that pass fills its page and
 retires every event on it. The wait is bounded: each such tick takes 100 keys
