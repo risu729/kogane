@@ -101,17 +101,44 @@ gives every Vpass row a new observation under a new parse run, and the next
 sweeps write new proposals for those; that follows from the version bump and
 would happen with unchanged ids too.
 
-Deploying the parser changes nothing stored. Because `(artifact, parser,
-version)` is new, the repair lane creates `vpass-statement-page@1.2.0` jobs for
-every eligible historical artifact the parser accepts; a bounded replay plan for source `vpass`,
-dataset `statement-page`, version `1.2.0` ([observation lanes](observation-lanes.md#bounded-operator-replay))
-drains them sooner. Each successful re-parse supersedes that artifact's 1.1.0
-run through the normal publication path. During the drain a snapshot may mix
-versions, because currentness needs an active parse of every page of any
-version: a later page still at 1.1.0 keeps its old id, and can still share a
-key with the first page, until its own re-parse publishes. After catch-up,
-verify with counts only (no provider values) that no `statement-page` artifact
-still publishes a 1.1.0 run and that the 1.2.0 jobs finished without errors.
+Deploying the parser rewrites nothing already stored, and no adoption decision
+is needed. On the next sweeps, maintenance registers the
+`vpass-statement-page@1.2.0` release, and because `(artifact, parser, version)`
+is new, job creation adds 1.2.0 jobs by itself: the incremental lane for runs
+sealed after the deploy, and the repair lane's cyclic scan for every eligible
+historical artifact the parser accepts. The repair lane is deliberately slow
+(100 artifact ids scanned and at most 4 jobs executed per sweep, shared by every
+source). A 1.2.0 job is a normal run, not a candidate: its successful parse
+supersedes the artifact's 1.1.0 run and moves the publication pointer in the
+same transaction ([publication gate](publication-gate.md)). An
+`active_releases` pointer, if the dataset has one, only narrows job creation to
+a deployed version, and 1.1.0 no longer is one. To drain sooner, run a bounded
+replay through the internal helper, without `targetRelease`
+([observation lanes](observation-lanes.md#bounded-operator-replay)):
+
+```sh
+mise run //services/processor:ops replay plan '{"source":"vpass","dataset":"statement-page","parser":"vpass-statement-page","version":"1.2.0","reason":"Vpass page-qualified external ids"}'
+mise run //services/processor:ops replay start '{"planId":<id>}'
+mise run //services/processor:ops sweep replay 20
+```
+
+Do not use the public `POST /api/ops/v1/replays` for it: that route always pins
+a `target_release`, and with `RELEASE_CANDIDATES_ENABLED` on (as
+`services/processor/wrangler.jsonc` sets it) the results of a release that is
+not the dataset's active one stay unpublished candidates until an explicit
+comparison and activation ([release adoption](release-adoption.md)).
+
+During the drain a snapshot may mix versions, because currentness needs an
+active parse of every page of any version: a later page still at 1.1.0 keeps its
+old id, and can still share a key with the first page, until its own re-parse
+publishes. A mix adds no collision 1.1.0 did not already have, because a 1.1.0 id
+never carries a page segment and a 1.2.0 later-page id always does. After
+catch-up, verify with counts only (no provider values): `replay inspect` on the
+plan shows no pending or running 1.2.0 job of the scope in any lane
+(`scopeJobs`), and a new plan for the same scope (cancelled without starting)
+reports in `already_parsed` how many of its `estimated_artifacts` publish 1.2.0.
+A failed 1.2.0 job supersedes nothing: its artifact keeps publishing the run it
+had, with 1.1.0 ids, so every `failed` count there needs a look.
 `packages/parsers/test/vpass-page-identity.test.ts` pins the unchanged
 first-page ids and the new later-page ids for both families.
 
@@ -1189,7 +1216,7 @@ truncation would both discard valid captured evidence.
 
 ### Vpass JSON statement observations
 
-`vpass-statement-page@1.0.0` is the sole financial Layer B route for the
+`vpass-statement-page` is the sole financial Layer B route for the
 collector's sanitized `statement-page` JSON. CSV is not an intermediate:
 the Android member API response models expose the named unsettled fields, and
 the app's item mapping identifies the positional settled rows directly.
