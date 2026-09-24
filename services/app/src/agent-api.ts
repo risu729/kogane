@@ -2,11 +2,12 @@
 //
 // One of the browser's two non-GET surfaces (the other is A09's change
 // lifecycle). It is an explicit allow-list: exactly five POST paths plus
-// `/mcp`, each with a bounded JSON body, each behind the same Access gate as
-// every read route, and each behind a grant looked up by the verified
-// principal. `AGENT_API_GRANTS` absent means no principal has a grant, so every
-// agent route answers 403 — that is the deployed default, and the test snapshot adapter
-// never serves these paths at all.
+// `/mcp`, and a sixth path (`purchases.explain`) only while the deployment
+// serves card purchase recognition, each with a bounded JSON body, each behind
+// the same Access gate as every read route, and each behind a grant looked up
+// by the verified principal. `AGENT_API_GRANTS` absent means no principal has
+// a grant, so every agent route answers 403 — that is the deployed default,
+// and the test snapshot adapter never serves these paths at all.
 //
 // `GET /api/v2/query` is the same query service under the reader authority
 // the browser already has over every other GET route: a signed-in human sees
@@ -29,11 +30,13 @@ import {
   callTool,
   isAgentToolName,
   MAX_REQUEST_BYTES,
+  PURCHASES_TOOL_NAME,
   queryResponse,
   toolContext,
 } from "./agent-service";
+import { cardPurchasesAvailable } from "./card-purchases-api";
 import { grantsUsable } from "./grants";
-import { handleMcp, MCP_TOOLS } from "./mcp";
+import { handleMcp, MCP_TOOLS, PURCHASES_MCP_TOOLS } from "./mcp";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
 import { HttpError, json } from "./http";
@@ -163,20 +166,27 @@ export async function agentApi(
     // so a client that asks anyway is told `grants_misconfigured` rather than
     // "no such tool".
     const listOps = ops && grantsUsable(env);
+    // The purchase explanation exists exactly while the operator route does
+    // (`cardPurchaseRecognition`): otherwise it is neither listed nor callable.
+    const purchases = await cardPurchasesAvailable(env);
     const message = await handleMcp(
       await boundedJson(request),
       async (name, body) => {
+        if (name === PURCHASES_TOOL_NAME && !purchases) return null;
         if (isAgentToolName(name)) return callTool(name, body, context);
         if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, subject);
         return null;
       },
-      listOps ? [...MCP_TOOLS, ...OPS_MCP_TOOLS] : MCP_TOOLS,
+      [...MCP_TOOLS, ...(purchases ? PURCHASES_MCP_TOOLS : []), ...(listOps ? OPS_MCP_TOOLS : [])],
     );
     if (message === null) return new Response(null, { status: 202 });
     return json(message);
   }
   const tool = toolForPath(path);
   if (tool === null) throw new HttpError(404, "not_found");
+  // Absent, not refused, while the deployment cannot serve it, like its route.
+  if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
+    throw new HttpError(404, "not_found");
   const outcome = await callTool(tool, await boundedJson(request), context);
   return json(outcome.body, outcome.status);
 }

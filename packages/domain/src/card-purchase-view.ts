@@ -181,3 +181,26 @@ export interface CardPurchasePage {
     limit: number;
   };
 }
+
+/**
+ * The candidate fields that are review affordances rather than facts: what an
+ * operator may do now, and the exact payload a review plans. The agent API
+ * (`kogane.purchases.explain`, docs/agent-api.md) never hands either to a
+ * caller: an agent does not decide a link, so it is not offered one.
+ */
+export const CARD_PURCHASE_REVIEW_AFFORDANCES = ["actions", "relation"] as const;
+
+/** A candidate as an agent reads it: every fact of the operator's, no action and no plan payload. */
+export type AgentCardPurchaseCandidate = Omit<
+  CardPurchaseCandidate,
+  (typeof CARD_PURCHASE_REVIEW_AFFORDANCES)[number]
+>;
+
+export interface AgentCardPurchaseView extends Omit<CardPurchaseView, "candidates"> {
+  candidates: AgentCardPurchaseCandidate[];
+}
+
+/** The operator's page with each candidate's review affordances removed; nothing else differs. */
+export interface AgentCardPurchasePage extends Omit<CardPurchasePage, "items"> {
+  items: AgentCardPurchaseView[];
+}

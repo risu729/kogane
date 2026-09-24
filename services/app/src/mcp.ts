@@ -13,7 +13,14 @@
 // Every schema below is closed (`additionalProperties: false`) and every free
 // string is either a bounded identifier pattern or an enum. No tool takes a
 // URL, a host, a table name, an ordering or SQL text.
-import { SUPPORTED_QUERY_INTENTS } from "../../../packages/application/src/index";
+import {
+  PURCHASES_EXPLAIN_MAX_OFFSET,
+  SUPPORTED_QUERY_INTENTS,
+} from "../../../packages/application/src/index";
+import {
+  CARD_PURCHASE_EVENT_ID,
+  CARD_PURCHASE_PERIOD,
+} from "../../../packages/application/src/query/card-purchases.ts";
 import { RELATION_KINDS } from "../../../packages/domain/src/decisions.ts";
 import type { ToolResult } from "./agent-service";
 
@@ -117,6 +124,33 @@ export const MCP_TOOLS = [
   },
 ] as const;
 
+/**
+ * `kogane.purchases.explain`, published only while this deployment serves
+ * card purchase recognition (`cardPurchaseRecognition`): with it off, the tool
+ * is neither listed nor callable, exactly as the operator route is absent.
+ * The patterns are the service's own, so the advertised and the enforced
+ * contract cannot drift; that an event id stands alone is checked by the
+ * service, which refuses it beside a period or an offset.
+ */
+export const PURCHASES_MCP_TOOLS = [
+  {
+    name: "kogane.purchases.explain",
+    title: "Explain recognised card purchases",
+    description:
+      "Recognised card purchases and refunds: each one's provider rows, statement, reviewed settlement and bank debit, its pending-to-posted candidates, and figures that keep captured, authorized, refunds and unresolved apart. Read-only; a candidate carries no action or plan payload, because every decision about it is the operator's.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        period: { type: "string", pattern: CARD_PURCHASE_PERIOD.source },
+        eventId: { type: "string", pattern: CARD_PURCHASE_EVENT_ID.source },
+        offset: { type: "integer", minimum: 0, maximum: PURCHASES_EXPLAIN_MAX_OFFSET },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+] as const;
+
 function querySpecSchema(): Record<string, unknown> {
   return {
     type: "object",
@@ -194,7 +228,8 @@ function rpcError(
  * transport answers with 202 and no body.
  *
  * `tools` is what this deployment publishes — the five read/propose tools,
- * plus the operations tools while their flag is on — and `run` is the one
+ * plus the purchase explanation while card purchase recognition is served and
+ * the operations tools while their flag is on — and `run` is the one
  * dispatcher for all of them. The adapter never decides which tools exist: a
  * name `run` does not know is `unknown_tool`, not a route of its own.
  */

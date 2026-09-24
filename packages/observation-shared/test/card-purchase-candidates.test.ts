@@ -7,7 +7,11 @@ import {
   linkCandidate,
   purchasePage,
 } from "../../application/test/card-purchase-view-fixture.ts";
-import { validCardPurchasePage } from "../src/card-purchase-contract.ts";
+import { withoutReviewAffordances } from "../../application/src/query/purchases-explain.ts";
+import {
+  validAgentCardPurchasePage,
+  validCardPurchasePage,
+} from "../src/card-purchase-contract.ts";
 
 const withCandidates = (...candidates: ReturnType<typeof linkCandidate>[]) =>
   purchasePage([{ ...capturedPurchase(), candidates }]);
@@ -76,5 +80,53 @@ describe("card purchase candidates contract", () => {
       ).toBe(false);
     const many = Array.from({ length: 11 }, () => linkCandidate());
     expect(validCardPurchasePage(withCandidates(...many))).toBe(false);
+  });
+});
+
+// The same page as `kogane.purchases.explain` hands it to an agent: every
+// fact of a candidate, and neither the actions an operator may take nor the
+// payload a review plans.
+describe("card purchase candidates as an agent reads them", () => {
+  test("accepts the page without review affordances, and only that", () => {
+    const open = withCandidates(linkCandidate());
+    const agent = withoutReviewAffordances(open);
+    expect(validAgentCardPurchasePage(agent)).toBe(true);
+    expect(validAgentCardPurchasePage(withoutReviewAffordances(withCandidates()))).toBe(true);
+    expect(validAgentCardPurchasePage(withoutReviewAffordances(purchasePage()))).toBe(true);
+    // Each contract refuses the other's candidate.
+    expect(validAgentCardPurchasePage(open)).toBe(false);
+    expect(validCardPurchasePage(agent)).toBe(false);
+    const [candidate] = agent.items[0]!.candidates;
+    expect(Object.keys(candidate!).sort()).toEqual([
+      "blockers",
+      "pending",
+      "posted",
+      "proposalId",
+      "proposalRevision",
+      "proposalStatus",
+      "providerLinked",
+      "rationaleCodes",
+      "rejectionConditions",
+      "relationRevision",
+      "relationStatus",
+    ]);
+  });
+
+  test("refuses an action or a plan payload handed back, and a tampered fact", () => {
+    const agent = withoutReviewAffordances(withCandidates(linkCandidate()));
+    const base = agent.items[0]!.candidates[0]!;
+    const page = (candidate: unknown) => ({
+      ...agent,
+      items: [{ ...agent.items[0]!, candidates: [candidate] }],
+    });
+    for (const candidate of [
+      { ...base, actions: ["accept", "reject"] },
+      { ...base, actions: [] },
+      { ...base, relation: linkCandidate().relation },
+      { ...base, blockers: ["looks_different"] },
+      { ...base, proposalStatus: "maybe" },
+      { ...base, pending: { ...base.pending, revision: null } },
+    ])
+      expect(validAgentCardPurchasePage(page(candidate))).toBe(false);
   });
 });

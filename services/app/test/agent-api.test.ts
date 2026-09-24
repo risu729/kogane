@@ -13,8 +13,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { MCP_TOOLS } from "../src/mcp";
-import { AGENT_TOOL_NAMES } from "../src/agent-service";
+import { MCP_TOOLS, PURCHASES_MCP_TOOLS } from "../src/mcp";
+import { AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME } from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
 import { parseGrants } from "../../../packages/application/src/index";
@@ -118,7 +118,11 @@ async function call(
   } as Env);
 }
 
-const AGENT_PATHS = AGENT_TOOL_NAMES.map((name) => `/api/agent/v1/${name.slice("kogane.".length)}`);
+// Every agent path, the purchase explanation's included: whether the
+// deployment serves it is decided only after Access and the grant.
+const AGENT_PATHS = [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME].map(
+  (name) => `/api/agent/v1/${name.slice("kogane.".length)}`,
+);
 
 describe("the agent API is off until a grant is configured", () => {
   it("answers 403 on every agent route with no AGENT_API_GRANTS", async () => {
@@ -503,6 +507,68 @@ describe("untrusted provider content (AT71)", () => {
       "to",
       "view",
     ]);
+  });
+
+  it("adds exactly the purchase explanation while card purchase recognition is served", async () => {
+    // This store has CORE 0047; the reader flag decides (docs/economic-events.md, HTTP).
+    const served = { ...grants({ "agent-principal": FULL_GRANT }), EVENTS_V2_ENABLED: "true" };
+    const listed = (await (
+      await call("/mcp", {
+        body: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+        environment: served,
+      })
+    ).json()) as {
+      result: { tools: { name: string; inputSchema: Record<string, any>; annotations: unknown }[] };
+    };
+    expect(listed.result.tools.map((tool) => tool.name)).toEqual([
+      ...AGENT_TOOL_NAMES,
+      PURCHASES_TOOL_NAME,
+    ]);
+    expect(PURCHASES_MCP_TOOLS.map((tool) => tool.name)).toEqual([PURCHASES_TOOL_NAME]);
+    const purchases = listed.result.tools.at(-1)!;
+    expect({
+      name: purchases.name,
+      required: purchases.inputSchema["required"] ?? [],
+      closed: purchases.inputSchema["additionalProperties"],
+      properties: purchases.inputSchema["properties"],
+      annotations: purchases.annotations,
+    }).toEqual({
+      name: "kogane.purchases.explain",
+      required: [],
+      closed: false,
+      properties: {
+        period: { type: "string", pattern: "^[0-9]{4}-(?:0[1-9]|1[0-2])$" },
+        eventId: { type: "string", pattern: "^(?:purchase|refund)_[0-9a-f]{64}$" },
+        offset: { type: "integer", minimum: 0, maximum: 1_000_000 },
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    });
+    expect(purchases.inputSchema["properties"].actions).toBeUndefined();
+    // With the reader flag off it is not a tool and not a route.
+    const offCall = (await (
+      await call("/mcp", {
+        body: {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: PURCHASES_TOOL_NAME, arguments: {} },
+        },
+        environment: grants({ "agent-principal": FULL_GRANT }),
+      })
+    ).json()) as { error: { code: number; message: string } };
+    expect(offCall.error).toEqual({ code: -32602, message: "unknown_tool" });
+    const offRoute = await call("/api/agent/v1/purchases.explain", {
+      body: {},
+      environment: grants({ "agent-principal": FULL_GRANT }),
+    });
+    expect(offRoute.status).toBe(404);
+    // Like every agent path: Access first, then the grant, and POST only.
+    const path = "/api/agent/v1/purchases.explain";
+    expect((await call(path, { body: {}, jwt: null, environment: served })).status).toBe(401);
+    expect(
+      (await call(path, { body: {}, environment: { EVENTS_V2_ENABLED: "true" } })).status,
+    ).toBe(403);
+    expect((await call(path, { environment: served })).status).toBe(405);
   });
 
   it("lists exactly the five tools, with the same names the HTTP routes serve", async () => {
