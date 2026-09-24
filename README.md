@@ -74,8 +74,9 @@ is the first purchase-event writer: on in production since 2026-09-24
 usage rows into purchase and refund events, each with a recorded rule decision.
 When a later re-parse re-keys a row, its event is retired and the new key is
 recognised as a new event, so the purchase is not counted twice. Installment,
-revolving and bonus rows are never recognised, and a pending row is not yet
-linked to its posted row as one purchase.
+revolving and bonus rows are never recognised, and a pending row becomes one
+purchase with its posted row only through a reviewed link (or a provider link
+id, which no deployed source supplies yet).
 
 The [roadmap](docs/roadmap.md) records the current implementation limits,
 development order and acceptance criteria. Its main sequence is identity and

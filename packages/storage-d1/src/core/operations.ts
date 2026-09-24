@@ -25,7 +25,13 @@ export interface SqlWrite {
 /**
  * "Every subject in this JSON object is still at the revision the plan
  * recorded." A mapping subject answers with its highest mapping revision; a
- * relation subject with the number of relation rows the triple already has.
+ * relation subject with the number of relation rows the triple already has;
+ * `proposal:<id>` (a reconciliation proposal, 0032) with the highest revision
+ * of the decisions recorded about it; `card-purchase:<event id>` (a
+ * recognised card purchase, 0047) with the event's live revision, or 0 when
+ * it has none (it was merged into another event). A live revision only ever
+ * grows, and a merge takes it to 0, so equality means the event is exactly
+ * the revision the plan read, holding exactly the keys it held.
  * A subject with no history answers 0, so a first-ever assignment plans
  * against revision 0 and conflicts if someone else got there first.
  */
@@ -38,6 +44,11 @@ const REVISION_OF = `coalesce(
    WHERE 'ownership:'||r.kind||'|'||a.id=e.key) END,
  CASE WHEN e.key LIKE 'relation:%' THEN
   (SELECT count(*) FROM entity_relations r WHERE 'relation:'||r.kind||'|'||r.from_ref||'|'||r.to_ref=e.key) END,
+ CASE WHEN e.key LIKE 'proposal:%' THEN
+  (SELECT max(d.revision) FROM decision_revisions d WHERE d.subject_kind='relation' AND d.subject_ref=e.key) END,
+ CASE WHEN e.key LIKE 'card-purchase:%' THEN
+  (SELECT r.revision FROM economic_event_revisions r
+   WHERE r.event_id=substr(e.key,15) AND r.superseded_by IS NULL) END,
  0)`;
 
 /**

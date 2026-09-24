@@ -18,6 +18,10 @@
 // Expected revisions are therefore a condition of the write, never a preceding
 // SELECT that a concurrent commit could invalidate.
 import { ownershipReviewRequested } from "../../../domain/src/ownership-review.ts";
+import {
+  PENDING_POSTED_RELATION_KIND,
+  pendingPostedReviewRequested,
+} from "../../../domain/src/pending-posted-review.ts";
 import type { RelationPayload } from "./contract.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import {
@@ -287,7 +291,9 @@ async function failureReason(
   if (
     plan.kind === "card-settlement.accept" ||
     ((plan.kind === "relation.accept" || plan.kind === "relation.reject") &&
-      ownershipReviewRequested((plan.payload as RelationPayload).evidenceRefs))
+      (ownershipReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||
+        pendingPostedReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||
+        (plan.payload as RelationPayload).relationKind === PENDING_POSTED_RELATION_KIND))
   ) {
     const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
     if (!eligibility.ok) return eligibility;

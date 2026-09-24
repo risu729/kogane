@@ -25,7 +25,12 @@ import {
 import { cardSettlementPlan } from "./card-settlement-target.ts";
 
 import { ownershipReviewRequested } from "../../../domain/src/ownership-review.ts";
+import {
+  PENDING_POSTED_RELATION_KIND,
+  pendingPostedReviewRequested,
+} from "../../../domain/src/pending-posted-review.ts";
 import { ownershipReviewPlan } from "./ownership-review.ts";
+import { pendingPostedReviewPlan } from "./pending-posted-review.ts";
 
 const SCOPE_LIMIT = 50;
 
@@ -102,10 +107,18 @@ export async function resolveAndSimulate(
 ): Promise<CommandResult<{ resolved: ResolvedPlan }>> {
   if (kind.startsWith("card-settlement.")) return cardSettlementPlan(store, kind, payload);
   if (kind === "relation.accept" || kind === "relation.reject") {
+    const relation = relationPayload(payload);
+    const linkReview = pendingPostedReviewRequested(relation.evidenceRefs);
+    // A pending-to-posted link is only ever reviewed through its proposal:
+    // accepting one merges two purchase events, so a bare relation that
+    // would claim the link without moving them is refused.
+    if (linkReview !== (relation.relationKind === PENDING_POSTED_RELATION_KIND))
+      return commandError("invalid_command");
     const resolved = await relationPlan(store, kind, payload);
-    if (!resolved.ok || !ownershipReviewRequested(relationPayload(payload).evidenceRefs))
-      return resolved;
-    return ownershipReviewPlan(store, relationPayload(payload), resolved.resolved);
+    if (!resolved.ok) return resolved;
+    if (linkReview) return pendingPostedReviewPlan(store, kind, relation, resolved.resolved);
+    if (!ownershipReviewRequested(relation.evidenceRefs)) return resolved;
+    return ownershipReviewPlan(store, relation, resolved.resolved);
   }
   return identityPlan(store, kind, payload);
 }
