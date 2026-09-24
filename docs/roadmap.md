@@ -44,7 +44,10 @@ Concrete limits in the current code:
   but only positions 0 and 1 are placed: a confirmed MyJCB row at a later
   relative position has no payment month, so this job leaves it unpaired and
   the operator view shows it as `period_unrecognized`. The recognition lane's
-  candidate pass still pairs it by usage month.
+  candidate pass still pairs it by usage month. On the surveyed connection the
+  collector records `detailMonth=1` as `unconfirmed` (its page has no export
+  link), so that month's rows stay pending, its statement page is rejected,
+  and only one of its two unconfirmed ledgers is current.
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind

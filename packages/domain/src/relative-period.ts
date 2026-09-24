@@ -38,7 +38,9 @@ export function civilDateInZone(instant: string, zone: string): CivilDate | null
 /**
  * JCB closes a billing cycle on the 15th and collects it in the following
  * month (docs/sources/myjcb.md), so usage on day d of month m is paid in m + 1
- * when d is at most 15 and in m + 2 after it.
+ * when d is at most 15 and in m + 2 after it. That position 0 moves to the new
+ * cycle on the 16th follows this published schedule and is not verified: no
+ * production capture falls on days 12–30 yet (docs/observations.md).
  */
 export const MYJCB_CLOSING_DAY = 15;
 /** The collector's relative fallback: `detailMonth-0` … `detailMonth-17`. */

@@ -223,7 +223,11 @@ inside one provider's own displays**:
   grouped under it would claim `same_statement_period` falsely. A pending
   `detailMonth-0` row therefore pairs with the `detailMonth-1` confirmed row
   the next cycle moves it to when both resolve to one month, and the same
-  label captured in another cycle groups apart. A confirmed row whose month
+  label captured in another cycle groups apart. That needs the collector to
+  record `detailMonth=1` as confirmed; on the surveyed connection it records
+  it as `unconfirmed` (no export link,
+  [observations](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
+  so its rows are pending rows there. A confirmed row whose month
   neither the label nor the rule places (`detailMonth-2` and beyond) stays out
   of this job; the recognition lane's candidate pass, which groups MyJCB by
   usage month, still pairs it. A confirmed row takes part in stage B only: its
@@ -405,12 +409,12 @@ is the resolved account, the source and the statement period, or, when the
 sidecar has no recognised period, the usage month. A MyJCB group is always
 the resolved account, the source and the usage month: a pending row's
 relative label resolves to a payment month from its capture time, but the
-confirmed row of the same purchase usually sits at a later position the rule
-does not place (`detailMonth-2` and beyond), so grouping by period would keep
-the two apart. The usage date is the one key both displays of a purchase
-share; stage B's own amount and date closeness then decides, and it claims
-`same_statement_period` only when both sides resolved to the same month.
-Within a
+confirmed row of the same purchase can sit at a later position the rule does
+not place (`detailMonth-2` and beyond), so grouping by period would keep the
+two apart. The usage date is the one key both displays of a purchase share.
+Stage B then admits a pair when the usage dates are within its day window or
+both sides carry the same statement period (`same_statement_period`, never
+claimed otherwise); the amount is a rationale code, never a filter. Within a
 group it pairs each single-key pending-origin event (`authorized`, or
 `unknown` after it left the display) against each single-key `captured`
 posted event of the same card account namespace and kind, never a purchase

@@ -45,7 +45,7 @@
 //      captured events of every group the page touched — (resolved account,
 //      source, statement period) for Vpass, or the usage month where Vpass
 //      gave no recognised period; (resolved account, source, usage month) for
-//      MyJCB, whose confirmed rows often sit at a relative position no rule
+//      MyJCB, whose confirmed rows can sit at a relative position no rule
 //      places (`groupOf`) — written as `reconciliation_proposals` under the
 //      matcher's own digest (idempotent). The recognition cursor cycles
 //      through every current row, so no pair is starved the way a
@@ -605,12 +605,12 @@ type Group = [string, string, string | null, string | null];
  * its usage month when it has none. MyJCB: always its usage month. A MyJCB
  * pending row's label resolves to a payment month from its capture time
  * (`cardStatementPeriod`: `detailMonth-0` and `detailMonth-1`), but the
- * confirmed row of the same purchase usually sits at a later position the
- * rule does not place (`detailMonth-2` and beyond, docs/observations.md), so
+ * confirmed row of the same purchase can sit at a later position the rule
+ * does not place (`detailMonth-2` and beyond, docs/observations.md), so
  * grouping by period would keep the two apart. The usage date is the one
  * key both displays of a purchase share; the resolved periods still reach the
- * matcher, which claims `same_statement_period` only when both sides have the
- * same one.
+ * matcher, which admits a pair on the same period or on close usage dates and
+ * claims `same_statement_period` only when both sides have the same one.
  */
 function groupOf(
   accountId: string,
