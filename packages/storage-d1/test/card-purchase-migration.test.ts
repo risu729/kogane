@@ -374,7 +374,7 @@ test("sidecar needs a purchase/refund revision and a matching observation", () =
     expect(() => keyRow(db, "purchase_a", 1, 5)).toThrow("card_purchase_key_invalid");
     expect(() => keyRow(db, "purchase_missing", 1, 1)).toThrow();
     keyRow(db, "purchase_a", 1, 1);
-    keyRow(db, "purchase_e", 1, 2, { role: "pending" });
+    keyRow(db, "purchase_e", 1, 7, { role: "pending" });
     expect(
       db.query("SELECT event_id,role FROM current_card_purchase_keys ORDER BY event_id").all(),
     ).toEqual([
@@ -459,7 +459,7 @@ test("a key has at most one live holder; superseding frees it", () => {
       { event_id: "purchase_b", revision: 1 },
     ]);
     // A key cannot be attached to a superseded revision either.
-    expect(() => keyRow(db, "purchase_a", 2, 2, { role: "pending" })).toThrow(
+    expect(() => keyRow(db, "purchase_a", 2, 7, { role: "pending" })).toThrow(
       "card_purchase_key_invalid",
     );
     expect(

@@ -4,11 +4,15 @@
 // writers store them (card-purchase-world.ts). Synthetic values only.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
-import { classifyCardUsage, type CardUsageFact } from "../../domain/src/card-purchase.ts";
+import {
+  classifyCardUsage,
+  recognitionKey,
+  type CardUsageFact,
+} from "../../domain/src/card-purchase.ts";
 import { exactQuantity } from "../../domain/src/values.ts";
 import { currentCardUsageSql, type CurrentCardUsageRow } from "../../read-model/src/card-usage.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
-import { baseWorld, PRODUCER, VPASS_NAMESPACE } from "../../read-model/test/card-usage-fixture.ts";
+import { baseWorld, myjcbRoot } from "../../read-model/test/card-usage-fixture.ts";
 import { factOf } from "../../storage-d1/test/card-purchase-fixture.ts";
 import { myJcbCreditStatement } from "../../parsers/src/parsers/myjcb.ts";
 import {
@@ -825,7 +829,7 @@ describe("current provider rows", () => {
   test("rows the provider still shows are current, and unrecognised current rows are counted", async () => {
     // The read model's snapshot world: published captures, a Vpass month that
     // flipped from pending to posted, installment and amountless rows.
-    const { store, replacedCustomized } = baseWorld();
+    const { store, replacedCustomized, unconfirmed } = baseWorld();
     const db = store.db;
     try {
       const sql: SqlExecutor = {
@@ -835,68 +839,51 @@ describe("current provider rows", () => {
           (db.query(query).get(...(args as never[])) as T | null) ?? null,
       };
       const page = currentCardUsageSql({ afterId: 0, limit: 1000 });
-      const rows = db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
+      const read = () => db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
+      const rows = read();
       const recognisable = rows.map(factFrom).filter((fact) => classifyCardUsage(fact).ok);
       expect(recognisable.length).toBeGreaterThan(0);
       expect(recognisable.length).toBeLessThan(rows.length);
-      for (const fact of recognisable) await recognise(db, fact);
-      // A pending sale of the month the web capture replaced: no longer displayed.
-      const vanished = db
-        .query(
-          `SELECT t.id,t.parse_run_id,t.source_account,t.external_id,t.as_of,
-            json_extract(t.extra_json,'$.bunkatsuYaku') AS payment_type,
-            json_extract(t.extra_json,'$._kogane.statementMonth') AS statement_period,
-            d.coefficient,d.scale
-           FROM transaction_observations t JOIN observation_decimal_values d
-            ON d.kind='transaction' AND d.observation_id=t.id
-           WHERE t.parse_run_id=? AND t.status='unconfirmed' AND t.amount_minor<0`,
-        )
-        .get(replacedCustomized.parse) as {
-        id: number;
-        parse_run_id: number;
-        source_account: string;
-        external_id: string;
-        as_of: string;
-        payment_type: string;
-        statement_period: string;
-        coefficient: string;
-        scale: number;
-      };
-      const replaced = await recognise(db, {
-        observationId: vanished.id,
-        parseRunId: vanished.parse_run_id,
-        sourceId: "vpass",
-        producerId: PRODUCER,
-        externalIdNamespace: VPASS_NAMESPACE,
-        sourceAccount: vanished.source_account,
-        externalId: vanished.external_id,
-        accountId: "acct-card-a",
-        identityPolicyFamily: "vpass-card-binding",
-        providerStatus: "unconfirmed",
-        amount: exactQuantity(
-          "JPY",
-          { coefficient: vanished.coefficient, scale: vanished.scale },
-          "decimal-v1",
-        ),
-        usageDate: vanished.as_of,
-        paymentType: vanished.payment_type,
-        statementPeriod: vanished.statement_period,
-        capturedAt: null,
-        providerSaleCode: "5",
-        usageAmountText: null,
-        paymentAmountText: null,
-        newestRepresentation: true,
+      // Current Vpass pending rows (bunkatsuYaku `0`) are recognised as
+      // authorized; the replaced customized capture is not current.
+      const customized = rows.filter((row) => row.provider_family === "customized");
+      expect(customized.length).toBeGreaterThan(0);
+      for (const row of customized)
+        expect(classifyCardUsage(factFrom(row))).toMatchObject({ ok: true, state: "authorized" });
+      expect(recognisable.map((fact) => fact.parseRunId)).not.toContain(replacedCustomized.parse);
+      const events = new Map<number, string>();
+      for (const fact of recognisable) events.set(fact.observationId, await recognise(db, fact));
+      // A newer MyJCB unconfirmed capture no longer shows the pending rows of
+      // the last one: their authorized events stay, their rows are no longer current.
+      const later = store.myjcbLedger({
+        run: store.run("myjcb"),
+        connection: "conn-a",
+        detailMonth: 0,
+        state: "unconfirmed",
+        period: "202608",
+        fetchedAt: "2026-06-30T00:00:00.000Z",
+        rows: [{ date: "2026/06/25", merchant: "架空店舗M", amount: "700", paymentType: "1回払" }],
       });
+      store.identify(later, myjcbRoot("conn-a", "acct-jcb"), { version: 1 });
+      const replaced = new Set(
+        unconfirmed.observations.flatMap((id) => (events.has(id) ? [events.get(id)!] : [])),
+      );
+      expect(replaced.size).toBeGreaterThan(0);
+      const current = read();
+      const held = new Set(recognisable.map((fact) => JSON.stringify(recognitionKey(fact))));
       const result = await queryCardPurchases(sql);
-      expect(result.coverage.unrecognizedCurrentRows).toBe(rows.length - recognisable.length);
-      expect(result.items).toHaveLength(recognisable.length + 1);
+      expect(result.coverage.unrecognizedCurrentRows).toBe(
+        current.filter((row) => !held.has(row.recognition_key!)).length,
+      );
+      expect(result.items).toHaveLength(recognisable.length);
       for (const item of result.items)
-        expect(item.sourceRows.every((row) => row.current)).toBe(item.eventId !== replaced);
-      expect(result.items.find((item) => item.eventId === replaced)).toMatchObject({
-        state: "authorized",
-        statement: { status: "unlinked", reasonCode: "not_posted" },
-        sourceRows: [{ role: "pending", current: false }],
-      });
+        expect(item.sourceRows.every((row) => row.current)).toBe(!replaced.has(item.eventId));
+      for (const eventId of replaced)
+        expect(result.items.find((item) => item.eventId === eventId)).toMatchObject({
+          state: "authorized",
+          statement: { status: "unlinked", reasonCode: "not_posted" },
+          sourceRows: [{ role: "pending", current: false }],
+        });
     } finally {
       db.close();
     }

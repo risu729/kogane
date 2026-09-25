@@ -48,7 +48,7 @@ beforeAll(async () => {
   const observation = await env.DB.prepare(
     `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,
       currency,description,counterparty,as_of,raw_locator,extra_json)
-     VALUES(?,'vpass:card-001','vpass:card-001:202609:web:row-a:0','posted',-1234,'-1234',0,'JPY','1回払い',
+     VALUES(?,'vpass:card-001','vpass:card-001:202609:web:row-a:0','posted',-1234,'-1234',0,'JPY','１',
       'synthetic merchant','2026-08-15','json:$.rows[0]','{}') RETURNING id`,
   )
     .bind(parse!.id)
@@ -66,7 +66,7 @@ beforeAll(async () => {
     providerStatus: "posted",
     amount: exactQuantity("JPY", integerDecimal(-1234), "decimal-v1"),
     usageDate: "2026-08-15",
-    paymentType: "1回払い",
+    paymentType: "１",
     statementPeriod: "202609",
     capturedAt: "2026-09-07T00:00:00.000Z",
     providerSaleCode: null,

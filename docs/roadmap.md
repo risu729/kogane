@@ -62,8 +62,13 @@ Concrete limits in the current code:
   retired and at most 200 guarded recognition writes, so at most 300 event
   mutations per tick, plus the candidate pass's one proposal batch and at most
   20 provider-linked merges). Installment, revolving and bonus rows, amountless
-  rows and rows without a stable card identity are excluded. A pending row and
-  its posted row can now be
+  rows and rows without a stable card identity are excluded, and so is every
+  Vpass web payment-type code but `1` until an installment row shows what the
+  others mean, and every Vpass customized `bunkatsuYaku` but `0` (the only
+  value observed, a single payment on the owner's confirmation) until another
+  value is observed and confirmed
+  ([single payment, per source](economic-events.md#single-payment-per-source)).
+  A pending row and its posted row can now be
   [linked as one purchase](economic-events.md#pending-to-posted-links) by a
   reviewed decision (or by the rule for a pair the provider itself links, which
   no deployed source does yet); candidates are proposed, never merged by

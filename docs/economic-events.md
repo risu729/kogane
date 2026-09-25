@@ -110,8 +110,9 @@ one live revision may hold a key**: the one-live-holder trigger is the
 no-double-count invariant. A superseded revision holds nothing, so a
 supersession releases its keys to the revision that replaced it.
 
-What the contract reads from the parsers: Vpass `1回払い` and MyJCB `一回払い`
-are single payments; MyJCB's usage and payment texts (`1,200円`, `-500円`) are
+What the contract reads from the parsers: the payment type where production
+rows carry it ([single payment, per source](#single-payment-per-source));
+MyJCB's usage and payment texts (`1,200円`, `-500円`) are
 read with the MyJCB ledger parser's own amount grammar and must agree; the
 statement period is stored as `YYYY-MM`, the key `card_statement_facts.period`
 uses, from Vpass `statementMonth` and from MyJCB's `YYYY年M月お支払い分` label,
@@ -342,10 +343,11 @@ first revision and `supersede` for every later one, and the reason
 `card-purchase-recognition-v1:<action>`. No provider text is stored in the
 decision, the event or the sidecar.
 
-The scope is deliberately narrow. Only a single-payment row (`1回払い`,
-`一回払い`) with an exact, non-zero JPY amount, a usage date and a stable card
-identity is recognised. Every other row is skipped with a code from a closed
-set and never guessed (INV05): `account_not_resolved`,
+The scope is deliberately narrow. Only a single-payment row
+([per source](#single-payment-per-source)) with an exact, non-zero JPY amount,
+a usage date and a stable card identity is recognised. Every other row is
+skipped with a code from a closed set and never guessed (INV05):
+`account_not_resolved`,
 `card_identity_unstable`, `amount_not_exact`, `amount_zero`,
 `unit_unsupported`, `payment_type_unsupported`, `installment_amount_differs`,
 `payment_split_unknown`, `refund_shape_unverified`, `status_unsupported` and
@@ -362,6 +364,83 @@ provider itself linked is merged by the rule), allocating a refund to a
 purchase, declaring an old row and a renamed row the same purchase after an
 external id change, a card statement against a bank debit
 ([card settlements](card-settlements.md)), and "this row is not a purchase".
+
+### Single payment, per source
+
+The rule (`classifyCardUsage`, `myjcbSinglePayment` in
+`packages/domain/src/card-purchase.ts`) reads the payment type (支払区分)
+where production rows carry it, the read model's `payment_type`
+(`packages/read-model/src/card-usage.ts`), and a shape it does not know is
+`payment_type_unsupported`, never guessed:
+
+| Source and family                 | Where the payment type is                                                           | Single payment                                                                                                                                                                               |
+| --------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vpass web (`posted`)              | `data[6]`: a one-digit code, full width (`１`); an empty text on some rows          | exactly `1` after NFKC                                                                                                                                                                       |
+| Vpass customized (`unconfirmed`)  | `bunkatsuYaku`: `0` on every row observed; the provider does not document the field | exactly `0` after NFKC, on the owner's confirmation                                                                                                                                          |
+| MyJCB (`confirmed`/`unconfirmed`) | `summaryCells[1]`, the combined `ご利用先など／支払区分` cell: merchant and `1回払` | after NFKC, at least one count `N回払` (`1回払`, `1回払い`, `一回払い`) and every count 1; after whitespace removal, none of `分割`, `リボ`, `ボーナス`, `キャッシング` anywhere in the cell |
+
+The shapes are from read-only aggregate counts over every
+`transaction_observations` row the deployed parsers have written to CORE
+(all parse runs, 2026-09-24; counts only, no row values):
+
+| Parser and family                 | Payment-type field | Value         | Rows  |
+| --------------------------------- | ------------------ | ------------- | ----- |
+| `vpass-statement-page` web        | `data[6]`          | `１`          | 6,053 |
+| `vpass-statement-page` web        | `data[6]`          | empty text    | 230   |
+| `vpass-statement-page` customized | `bunkatsuYaku`     | `0`           | 2,395 |
+| `myjcb-credit-ledger` confirmed   | `summaryCells[1]`  | holds `1回払` | 48    |
+| `myjcb-credit-ledger` unconfirmed | `summaryCells[1]`  | holds `1回払` | 514   |
+
+No MyJCB row holds another `N回払` or any of `分割`, `リボ`, `ボーナス`,
+`キャッシング`.
+
+Vpass: neither the provider nor this repository documents what the codes
+mean. `docs/vpass-android-api.md` records the routes and models, not the code
+values; the parser keeps each field verbatim (`description`) and names the
+web row only by the app's item mapping (`InstallmentWithComment`,
+`InstallmentWithCurrency`). On the web family every row with a code carries
+`１`, so exactly the code `1` is a single payment. **Every other web code
+(`2`, `5`, ...) is unverified** and stays `payment_type_unsupported` until a
+real installment, revolving or bonus row is observed and its code recorded
+here; so do a blank, a padded code and any wording, including the `1回払い` the
+synthetic fixtures used to invent. The customized family's `bunkatsuYaku` is a
+different field from the web code, and the provider does not document it
+either: it is `0` on every row ever collected (2,395), never `1`. The owner
+confirmed on 2026-09-25 that `0` is a single payment (1回払い), so exactly `0`
+after NFKC is accepted and a pending Vpass row becomes an `authorized` event.
+**Every other `bunkatsuYaku` value (`1`, `2`, ...) is unconfirmed** and stays
+`payment_type_unsupported` until it is observed and confirmed; so do a blank,
+a padded value and any wording. Skipping a real purchase is safe; guessing one
+is not.
+
+MyJCB: the cell the ledger parser takes for the payment type
+(`_kogane.paymentTypeCellIndex`, copied to `description`) holds a
+two-character on-screen label in production, not the payment type; the wording
+(`1回払`) is inside the combined cell on every row (the counts above).
+The evidence already holds it, so the read model reads the combined cell and
+no parser release is needed. That cell also holds the merchant: the rule only
+reads it, and nothing stores or logs it (the sidecar stores the code
+`single-payment`). A merchant name that contains one of the excluded words is
+excluded too, and a merchant name ending in a digit written with no space
+before `1回払` reads as a larger count (`21回払`) and is excluded: a skipped
+purchase is safe, a guessed one is not. A row whose payment type sits in a cell
+of its own (the older synthetic fixture shape) states nothing in the combined
+cell and is not recognised. The amount rules still follow the payment type: a
+MyJCB row also needs its usage and payment texts to agree
+(`installment_amount_differs`, `payment_split_unknown`).
+
+Rows skipped before this rule are not stored anywhere, so no backfill is
+needed: once it is deployed the lane recognises the rows it accepts on its
+next pass, which are the current Vpass web (posted) rows with the code `１` and
+an exact amount (`captured`), the current Vpass customized (pending) rows with
+`bunkatsuYaku` `0` and an exact amount (`authorized`), and the current MyJCB
+rows whose combined cell reads single and whose usage and payment texts agree
+(`captured` or `authorized`). The purchase lane's pending-to-posted candidates
+then apply to Vpass as well as MyJCB. The
+current set is below `SCAN_LIMIT`, so every tick that skipped them reached the
+last page and wrapped the cursor to 0; the next tick starts from the first row
+and holds the cursor wherever the write budget (`WRITE_LIMIT`, 200) stops it,
+and the tick after continues from there.
 
 ### Mapping
 
@@ -412,9 +491,10 @@ duplicate writes nothing in any table, and the 0047 trigger lets at most one
 live revision hold a key.
 
 A retired event keeps its keys, so no other event can take the row. Typical
-retirements: a Vpass month's customized capture replaced by its web capture
-(the pending events are retired, the posted rows become separate captured
-events); a card ordinal change under one resolved account (old events retired,
+retirements: a pending row the next capture no longer shows (a Vpass month's
+customized capture replaced by its web capture, whose posted rows become
+separate captured events; a MyJCB unconfirmed row that moved to a confirmed
+ledger); a card ordinal change under one resolved account (old events retired,
 new ones captured, the captured total unchanged); a parser change of external
 ids (retire and recreate: churn, never a double count). The retire pass runs
 before recognition in every tick, and when it fills its page and retires every
@@ -437,8 +517,7 @@ purchase is allocated to a statement.
 
 A pending authorisation and the posted charge it became are recognised as two
 events, each holding its own key: an `authorized` event (retired to `unknown`
-once a Vpass month's posted capture replaces its pending one) and a `captured`
-event. Only a recorded decision makes them one purchase: amount and date
+once the provider no longer shows its pending row) and a `captured` event. Only a recorded decision makes them one purchase: amount and date
 closeness never does (INV07), and two posted rows of one amount on one day are
 two candidates, never a merge (SC03).
 
@@ -642,9 +721,17 @@ event already retired keeps the period it had.
   and MyJCB parsers, the publication gate and the identity store on Miniflare
   D1. The flag off runs nothing. A posted Vpass single payment is one captured
   purchase with its rule decision, and a second sweep writes nothing. A
-  re-fetch is no revision. A customized month becomes authorized events; its
-  web capture retires them (no legs) and captures the posted rows only. MyJCB
-  usage equal to payment is captured and the installment slice is skipped. An
+  re-fetch is no revision. A customized month (`bunkatsuYaku` `0`) becomes
+  authorized events; its web capture retires them (no legs) and captures the
+  posted rows only. MyJCB pending rows become authorized events, retired with
+  no legs once the next unconfirmed ledger no longer shows them. MyJCB usage
+  equal to payment is captured and the installment slice is skipped. Rows in
+  the payment-type shapes production carries (the Vpass web code `１`, the
+  customized `0`, MyJCB's `1回払` in the combined cell) are recognised, while
+  another Vpass web code, a customized `1`, a blank, the old `1回払い`
+  wording and a MyJCB installment are skipped with their reasons (`test/card-purchase-parser-shapes.test.ts`
+  runs the same shapes through the deployed parsers, and
+  `packages/domain/test/card-purchase.test.ts` the whole code table). An
   unpublished parse, an unidentified parse and a Vpass identity without the
   binding recognise nothing. A refund is its own event with no allocation. An
   account mapping change supersedes revision 1, which stays readable. A

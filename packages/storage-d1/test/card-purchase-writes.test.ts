@@ -198,7 +198,7 @@ describe("card purchase recognition batch", () => {
       const facts = sidecar["facts_json"] as string;
       expect(validCardPurchaseFacts(JSON.parse(facts))).toBe(true);
       expect(facts).not.toContain("merchant");
-      expect(facts).not.toContain("回払い");
+      expect(facts).not.toMatch(/回払|１/u);
       expect(
         db
           .query(
@@ -208,9 +208,9 @@ describe("card purchase recognition batch", () => {
       ).toEqual([
         { event_id: eventId, revision: 1, role: "posted", observation_id: 1, parse_run_id: 1 },
       ]);
-      // MyJCB goes through the same batch, from its own display text
-      // (一回払い, 500円) and its period label (2026年9月お支払い分), which is
-      // stored as the statement's YYYY-MM.
+      // MyJCB goes through the same batch, from its own display text (1回払
+      // in the combined cell, 500円) and its period label (2026年9月お支払い分),
+      // which is stored as the statement's YYYY-MM.
       await run(db, write(await draftOf(factOf(5)), null));
       expect(
         db
@@ -223,7 +223,7 @@ describe("card purchase recognition batch", () => {
           source_id: "myjcb",
           account_id: "acct-jcb",
           statement_period: "2026-09",
-          facts_json: expect.not.stringMatching(/円|回払い/u),
+          facts_json: expect.not.stringMatching(/円|回払|merchant/u),
         },
       ]);
       expect(counts(db)["allocations"]).toBe(0);

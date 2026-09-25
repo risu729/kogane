@@ -16,8 +16,8 @@
 // identified through the card binding policy, every other parse through the
 // default policy. `scaledStore` then recognises every recognisable current row
 // through the guarded 0047 builder, as the purchase-recognition lane would, and
-// adds one more capture in which a few recognised pending rows have gone, so
-// stale keys exist too. Names, tokens and amounts are invented; no provider
+// adds one more capture in which a few pending rows (Vpass and MyJCB) have
+// gone, so stale keys exist too. Names, tokens and amounts are invented; no provider
 // row, card or account is real.
 //
 // With `statements`, the store also holds the statement history the statement
@@ -58,7 +58,13 @@ import {
   type CurrentCardUsageRow,
   currentCardUsageSql,
 } from "../src/card-usage";
-import { customizedPayload, ledgerPayload, type UsageRow, webPayload } from "./card-usage-fixture";
+import {
+  asCustomized,
+  customizedPayload,
+  ledgerPayload,
+  type UsageRow,
+  webPayload,
+} from "./card-usage-fixture";
 import {
   type BankRow,
   myjcbPastMonthsPayload,
@@ -194,19 +200,15 @@ function captureDays(options: ScaleOptions): string[] {
   return [...monthly, ...daily];
 }
 
-/** Mostly single payments; the rest are shapes recognition leaves alone. */
-const PAYMENT_TYPES = [
-  "1回払い",
-  "1回払い",
-  "1回払い",
-  "1回払い",
-  "1回払い",
-  "1回払い",
-  "2回払い",
-  "2回払い",
-  "リボ",
-  "分割",
-];
+/**
+ * Mostly single payments, in each source's production shape (the Vpass web
+ * code `1`, MyJCB's `1回払`); the rest are shapes recognition leaves alone. A
+ * customized (pending) page shows every row with `CUSTOMIZED_PAYMENT_TYPE`.
+ */
+const PAYMENT_TYPES = {
+  vpass: ["1", "1", "1", "1", "1", "1", "2", "2", "5", "3"],
+  myjcb: ["1回払", "1回払", "1回払", "1回払", "1回払", "1回払", "2回払", "2回払", "リボ", "分割"],
+};
 
 type MonthRow = UsageRow & { day: number };
 
@@ -235,7 +237,8 @@ function monthPages(
   const days = daysIn(usage);
   const rows = Array.from({ length: count }, (_, index): MonthRow => {
     const day = 1 + Math.floor((index * days) / count);
-    const paymentType = PAYMENT_TYPES[Math.floor(next() * PAYMENT_TYPES.length)]!;
+    const types = PAYMENT_TYPES[vpassDate ? "vpass" : "myjcb"];
+    const paymentType = types[Math.floor(next() * types.length)]!;
     const yen = 100 + Math.floor(next() * 30_000);
     const refund = next() < 0.03;
     const dd = String(day).padStart(2, "0");
@@ -847,7 +850,8 @@ class ScaleStore {
       // With a statement history, a posted month's first page carries its bill.
       const header =
         this.ledger !== null && family === "web" && first ? vpassHeader(source, month) : undefined;
-      const bytes = family === "web" ? webPayload(page, header) : customizedPayload(month, page);
+      const bytes =
+        family === "web" ? webPayload(page, header) : customizedPayload(month, asCustomized(page));
       const result = vpassStatementPage.parse(
         bytes,
         this.meta(artifact, "vpass", "statement-page", key, at, { fetchUnitKey: ordinal(card) }),
@@ -898,11 +902,12 @@ class ScaleStore {
   }
 
   /**
-   * One MyJCB capture: the unconfirmed ledger and the confirmed ledgers of the
-   * last periods; with a statement history also the confirmed statement page
-   * of each of those periods and the past-month summary.
+   * One MyJCB capture: the unconfirmed ledger (without its `cancelled` oldest
+   * rows) and the confirmed ledgers of the last periods; with a statement
+   * history also the confirmed statement page of each of those periods and the
+   * past-month summary.
    */
-  private myjcbCapture(day: string, at: number): void {
+  private myjcbCapture(day: string, at: number, cancelled: number): void {
     const session = this.session(MYJCB_NAMESPACE, at);
     const pending = monthOf(day, 1);
     const ledgers = [
@@ -914,7 +919,7 @@ class ScaleStore {
         rows: visibleOn(
           monthPages(this.options, "myjcb", pending, false),
           Number(day.slice(8)),
-          0,
+          cancelled,
         ).flat(),
       },
       ...Array.from({ length: this.options.postedMonths }, (_, back) => {
@@ -1174,8 +1179,8 @@ class ScaleStore {
 
   /**
    * Every capture of `days`, each day in one transaction. `cancelled` pending
-   * Vpass rows per card disappear from these captures. With a statement
-   * history, the sweep's proposals follow each day's captures.
+   * Vpass rows per card and MyJCB pending rows disappear from these captures.
+   * With a statement history, the sweep's proposals follow each day's captures.
    */
   async capture(days: readonly string[], options: { cancelled?: number } = {}): Promise<void> {
     for (const day of days) {
@@ -1184,7 +1189,7 @@ class ScaleStore {
         const session = this.session(VPASS_NAMESPACE, at);
         for (let card = 0; card < this.options.cards; card += 1)
           this.vpassCapture(session, day, card, at + card * 60_000, options.cancelled ?? 0);
-        this.myjcbCapture(day, at + 30 * 60_000);
+        this.myjcbCapture(day, at + 30 * 60_000, options.cancelled ?? 0);
         this.bankCapture(day, at + 40 * 60_000);
       })();
       this.days += 1;
@@ -1318,8 +1323,8 @@ export interface ScaledStore {
 /**
  * Every capture but the last, every recognisable current row recognised, then
  * the last capture, in which the two oldest pending Vpass rows of each card
- * have disappeared, so their live events are stale; with a statement history,
- * the settlement reviews are decided last.
+ * and of the MyJCB ledger have disappeared, so their live events are stale;
+ * with a statement history, the settlement reviews are decided last.
  */
 export async function scaledStore(options: ScaleOptions): Promise<ScaledStore> {
   const store = new ScaleStore(options);

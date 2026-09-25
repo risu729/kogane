@@ -49,6 +49,15 @@ export interface UsageRow {
   merchant: string;
   /** Provider display amount; empty for an amountless Vpass web row. */
   amount: string;
+  /**
+   * The payment type where production rows carry it, written verbatim except
+   * for the width of Vpass web digits. Vpass web: the one-digit `data[6]`
+   * code, which the web builder writes full width (`1` → `１`), as production
+   * web rows show it. Vpass customized: `bunkatsuYaku`, a different field
+   * that is `0` on every production row (`CUSTOMIZED_PAYMENT_TYPE`). MyJCB:
+   * the wording the combined `ご利用先など／支払区分` cell shows after the
+   * merchant (`1回払`).
+   */
   paymentType: string;
   /** MyJCB only: the other amount of the row (usage when confirmed, payment when not). */
   other?: string;
@@ -105,6 +114,35 @@ function bean(payload: Record<string, unknown>, name: string): Record<string, un
   return content[name] as Record<string, unknown>;
 }
 
+/**
+ * The Vpass customized family's `bunkatsuYaku` as every production row
+ * carries it (read-only CORE D1 diagnosis of 2026-09-24): `0`, a single
+ * payment as the owner confirmed.
+ */
+export const CUSTOMIZED_PAYMENT_TYPE = "0";
+
+/**
+ * The rows of a pool that one card-month re-states on both families, as its
+ * customized page shows them: the same purchase carries the web family's code
+ * once posted and `CUSTOMIZED_PAYMENT_TYPE` while pending.
+ */
+export const asCustomized = (rows: readonly UsageRow[]): UsageRow[] =>
+  rows.map((row) => ({ ...row, paymentType: CUSTOMIZED_PAYMENT_TYPE }));
+
+/** ASCII digits as the Vpass web family writes its payment-type code: full width (`1` → `１`). */
+const fullWidthDigits = (text: string): string =>
+  text.replace(/[0-9]/gu, (digit) => String.fromCharCode(digit.charCodeAt(0) + 0xfee0));
+
+/**
+ * The two-character on-screen label production MyJCB rows show in the summary
+ * cell the ledger parser takes for the payment type (synthetic text).
+ */
+const MYJCB_LABEL = "架空";
+
+/** A MyJCB combined `ご利用先など／支払区分` cell: the merchant, then the payment type. */
+const myjcbCombinedCell = (row: Pick<UsageRow, "merchant" | "paymentType">): string =>
+  row.paymentType === "" ? row.merchant : `${row.merchant} ${row.paymentType}`;
+
 /** The finalized bill header of a Vpass Web statement's first page (`webMeisaiTopK3Vo`). */
 export interface VpassStatementHeader {
   /** A provider display amount, `12,345`. */
@@ -129,7 +167,19 @@ export function webPayload(rows: readonly UsageRow[], header?: VpassStatementHea
   target["meisaiList"] = rows.map((row) => ({
     columnsSize: 11,
     columnsSizeS: "11",
-    data: ["4K", "005", "", row.date, row.merchant, row.amount, row.paymentType, "", "", "", ""],
+    data: [
+      "4K",
+      "005",
+      "",
+      row.date,
+      row.merchant,
+      row.amount,
+      fullWidthDigits(row.paymentType),
+      "",
+      "",
+      "",
+      "",
+    ],
     maxIndex: "10",
     rowType: "4K",
     shiharaiPatternFlag: 0,
@@ -167,7 +217,12 @@ export function customizedPayload(month: string, rows: readonly UsageRow[]): Uin
 const CONFIRMED_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
 const UNCONFIRMED_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"];
 
-/** A MyJCB canonical `credit-ledger` JSON as the collector writes it. */
+/**
+ * A MyJCB canonical `credit-ledger` JSON as the collector writes it, in the
+ * production row shape: the merchant and the payment type share the combined
+ * `summaryCells[1]`, and the cell the parser takes for the payment type holds
+ * a two-character label (`MYJCB_LABEL`).
+ */
 export function ledgerPayload(
   detailMonth: number,
   period: string,
@@ -182,7 +237,7 @@ export function ledgerPayload(
       state,
       headers: state === "confirmed" ? CONFIRMED_HEADERS : UNCONFIRMED_HEADERS,
       rows: rows.map((row) => ({
-        summaryCells: [row.date, row.merchant, row.paymentType, row.amount],
+        summaryCells: [row.date, myjcbCombinedCell(row), MYJCB_LABEL, row.amount],
         expanded:
           state === "confirmed"
             ? {
@@ -636,7 +691,7 @@ const CONFIRMED_ROWS: readonly UsageRow[] = [
     date: "2026/04/20",
     merchant: "架空店舗G",
     amount: "1,000",
-    paymentType: "1回払い",
+    paymentType: "1回払",
     other: "1,000",
   },
   {
@@ -678,8 +733,8 @@ export function baseWorld(): BaseWorld {
       family: "customized",
       fetchedAt: may.fetchedAt,
       rows: [
-        { date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1回払い" },
-        { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1回払い" },
+        { date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "0" },
+        { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "0" },
       ],
     }),
     may.binding,
@@ -694,9 +749,10 @@ export function baseWorld(): BaseWorld {
       family: "web",
       fetchedAt: june.fetchedAt,
       rows: [
-        { date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1回払い" },
-        { date: "26/05/05", merchant: "架空店舗B", amount: "5,000", paymentType: "2回払い" },
-        { date: "26/05/06", merchant: "架空店舗C", amount: "", paymentType: "1回払い" },
+        { date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1" },
+        { date: "26/05/05", merchant: "架空店舗B", amount: "5,000", paymentType: "2" },
+        // Production amountless web rows show no payment type either.
+        { date: "26/05/06", merchant: "架空店舗C", amount: "", paymentType: "" },
       ],
     }),
     june.binding,
@@ -709,9 +765,7 @@ export function baseWorld(): BaseWorld {
         month: "202606",
         family: "customized",
         fetchedAt: june.fetchedAt,
-        rows: [
-          { date: "26/06/01", merchant: "架空店舗D", amount: "1,234", paymentType: "1回払い" },
-        ],
+        rows: [{ date: "26/06/01", merchant: "架空店舗D", amount: "1,234", paymentType: "0" }],
       }),
       june.binding,
     ),
@@ -723,9 +777,7 @@ export function baseWorld(): BaseWorld {
         page: "answer-001",
         family: "customized",
         fetchedAt: june.fetchedAt,
-        rows: [
-          { date: "26/06/02", merchant: "架空店舗E", amount: "3,300", paymentType: "1回払い" },
-        ],
+        rows: [{ date: "26/06/02", merchant: "架空店舗E", amount: "3,300", paymentType: "0" }],
       }),
       june.binding,
     ),
@@ -741,8 +793,8 @@ export function baseWorld(): BaseWorld {
         family: "customized",
         fetchedAt: late.fetchedAt,
         rows: [
-          { date: "26/06/01", merchant: "架空店舗D", amount: "1,234", paymentType: "1回払い" },
-          { date: "26/06/03", merchant: "架空店舗F", amount: "700", paymentType: "1回払い" },
+          { date: "26/06/01", merchant: "架空店舗D", amount: "1,234", paymentType: "0" },
+          { date: "26/06/03", merchant: "架空店舗F", amount: "700", paymentType: "0" },
         ],
       }),
       late.binding,
@@ -755,7 +807,7 @@ export function baseWorld(): BaseWorld {
       family: "customized",
       fetchedAt: late.fetchedAt,
       publication: "unpublished",
-      rows: [{ date: "26/06/02", merchant: "架空店舗E", amount: "3,300", paymentType: "1回払い" }],
+      rows: [{ date: "26/06/02", merchant: "架空店舗E", amount: "3,300", paymentType: "0" }],
     }),
   ];
 
@@ -767,7 +819,7 @@ export function baseWorld(): BaseWorld {
     family: "web",
     fetchedAt: july.fetchedAt,
     publication: "unpublished",
-    rows: [{ date: "26/07/01", merchant: "架空店舗K", amount: "900", paymentType: "1回払い" }],
+    rows: [{ date: "26/07/01", merchant: "架空店舗K", amount: "900", paymentType: "1" }],
   });
 
   const root = myjcbRoot("conn-a", "acct-jcb");
@@ -795,9 +847,7 @@ export function baseWorld(): BaseWorld {
       state: "confirmed",
       period: "2026年4月お支払い分",
       fetchedAt: "2026-05-12T00:00:00.000Z",
-      rows: [
-        { date: "2026/03/15", merchant: "架空店舗L", amount: "2,500", paymentType: "1回払い" },
-      ],
+      rows: [{ date: "2026/03/15", merchant: "架空店舗L", amount: "2,500", paymentType: "1回払" }],
     }),
   );
   const olderUnconfirmed = jcb(
@@ -808,7 +858,7 @@ export function baseWorld(): BaseWorld {
       state: "unconfirmed",
       period: "202606",
       fetchedAt: "2026-05-12T00:00:00.000Z",
-      rows: [{ date: "2026/05/10", merchant: "架空店舗I", amount: "800", paymentType: "1回払い" }],
+      rows: [{ date: "2026/05/10", merchant: "架空店舗I", amount: "800", paymentType: "1回払" }],
     }),
   );
   const second = store.run("myjcb");
@@ -832,12 +882,12 @@ export function baseWorld(): BaseWorld {
       period: "202607",
       fetchedAt: "2026-06-12T00:00:00.000Z",
       rows: [
-        { date: "2026/05/10", merchant: "架空店舗I", amount: "800", paymentType: "1回払い" },
+        { date: "2026/05/10", merchant: "架空店舗I", amount: "800", paymentType: "1回払" },
         {
           date: "2026/06/02",
           merchant: "架空店舗J",
           amount: "300",
-          paymentType: "1回払い",
+          paymentType: "1回払",
           other: "300",
         },
       ],
