@@ -417,16 +417,15 @@ stream as expected.
 
 ## Where a finished run is written (U09)
 
-An authenticated collector's _storage_ target is now a deployment variable,
-separate from how it authenticates. `COLLECTION_TARGET=legacy` (the default)
-keeps the per-source staging bucket plus the central importer upload;
-`COLLECTION_TARGET=shared` makes the Worker write the run and its terminal into
-the shared `DATA` bucket (`kogane-raw-evidence`) through `packages/collection`
-and skip the central upload; except for smbc-direct (a bounded, documented
-exception) the per-source staging bucket is then not written at all, so the
-run is stored once. Nothing about authentication changes with it: the
-same secrets, the same runtime, the same Container image, the same tunnel, the
-same cron.
+Where a run is stored is separate from how the collector authenticates. Every
+authenticated collector writes the run and its terminal into the shared `DATA`
+bucket (`kogane-raw-evidence`) through `packages/collection`, and the run is
+stored once; smbc-direct alone stages its chunks under its run prefix in `DATA`
+first (a bounded, documented exception). There is no storage target variable,
+per-source bucket or importer upload any more: they were retired on
+2026-09-13 ([legacy-retirement.md](legacy-retirement.md)). Retiring them
+changed nothing about authentication: the same secrets, the same runtime, the
+same Container image, the same tunnel, the same cron.
 
 Two rules this adds to the checklist above:
 
@@ -442,4 +441,4 @@ Two rules this adds to the checklist above:
   signal for the operations API. No collector gained an unattended
   re-authentication and none retries a login (12 §3, G3-10/G3-11).
 
-Per-source detail, deploy order and rollback: [`docs/collection.md`](collection.md#shared-data-bucket-per-source-u09).
+Per-source detail and deploy order: [`docs/collection.md`](collection.md#shared-data-bucket-per-source-u09).
