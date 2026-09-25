@@ -65,6 +65,14 @@ import {
   handleTerminalNotification,
   type CollectionEnv,
 } from "./collection/index.ts";
+import {
+  invocationContext,
+  invocationProbe,
+  meteredEnv,
+  platformLimitError,
+  type InvocationContext,
+} from "./invocation-probe.ts";
+import { OperationMeter } from "../../../packages/application/src/collection/index.ts";
 import { dispatchOperations } from "./operations/dispatch.ts";
 import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
 import {
@@ -1677,9 +1685,10 @@ export interface ScheduledStages {
    * U08 shared-R2 terminal scan. Always wired like the projection: the scan
    * itself reports `skipped` while SHARED_R2_INGEST_ENABLED is off, so the
    * log shows the lane exists and is off rather than nothing at all
-   * (docs/processor.md).
+   * (docs/processor.md). It spends the invocation's registration budget,
+   * which it shares with `operations`.
    */
-  collection?: (env: Env) => Promise<object>;
+  collection?: (env: Env, context: InvocationContext) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
   /**
@@ -1713,9 +1722,10 @@ export interface ScheduledStages {
   /**
    * U06/U08 operations dispatch. Reports `skipped` unless OPS_DISPATCH_ENABLED
    * is set; it runs before the decision outbox and never completes an
-   * operation merely by handing its work over (contracts/stages.json).
+   * operation merely by handing its work over (contracts/stages.json). An
+   * `import` spends the same registration budget as the scan.
    */
-  operations?: (env: Env) => Promise<object>;
+  operations?: (env: Env, context: InvocationContext) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
@@ -1725,7 +1735,8 @@ const defaultStages: ScheduledStages = {
   identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
-  collection: (env) => collectionScan(collectionEnv(env)),
+  collection: (env, context) =>
+    collectionScan(collectionEnv(env), { budget: context.registration }),
   // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
@@ -1754,7 +1765,8 @@ const defaultStages: ScheduledStages = {
     dispatchDecisionOutbox(env.DB, {
       processors: { "balance-projection": balanceProjectionOutboxProcessor(env) },
     }),
-  operations: (env) => dispatchOperations(collectionEnv(env)),
+  operations: (env, context) =>
+    dispatchOperations(collectionEnv(env), { budget: context.registration }),
 };
 
 /**
@@ -1768,7 +1780,9 @@ function collectionEnv(env: Env): CollectionEnv & { OPS_DISPATCH_ENABLED?: strin
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
  * and never stops the identity projection. Log lines carry counts and safe
- * codes only, never provider values or exception text.
+ * codes only, never provider values or exception text. The stages of one
+ * invocation share `context`: one registration budget, one count of failures
+ * that named a platform limit.
  *
  * The lanes that otherwise leave only that log line also record each tick in
  * `processor_lane_ticks` (migration 0049, `src/lane-ticks.ts`): ran, skipped
@@ -1779,10 +1793,15 @@ export async function runScheduled(
   env: Env,
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
+  context: InvocationContext = invocationContext(),
 ): Promise<void> {
   const reconciliation = reconciliationEnabled(env.RECONCILIATION_ENABLED);
   // [event, stage, whether its flag lets it run this tick]
-  const lanes: [string, ((env: Env) => Promise<object>) | undefined, boolean][] = [
+  const lanes: [
+    string,
+    ((env: Env, context: InvocationContext) => Promise<object>) | undefined,
+    boolean,
+  ][] = [
     ["observation_sweep", stages.parse, true],
     // U08: terminals persisted in the shared DATA bucket are registered
     // before the identity sweep, so a run found this tick can reach identity
@@ -1841,7 +1860,7 @@ export async function runScheduled(
     }
     let tick: LaneTickResult;
     try {
-      const result = await stage(env);
+      const result = await stage(env, context);
       log(JSON.stringify({ event, ...result }));
       tick = { outcome: "ran", result };
     } catch (error) {
@@ -1851,16 +1870,82 @@ export async function runScheduled(
           : error instanceof Error
             ? error.constructor.name
             : "unknown";
-      log(JSON.stringify({ event: `${event}_failed`, code }));
+      // Whether the platform refused the invocation at a documented limit is
+      // the one thing the probe keeps from the error; the text is dropped.
+      const limit = platformLimitError(error);
+      if (limit) context.limitErrors += 1;
+      log(JSON.stringify({ event: `${event}_failed`, code, ...(limit ? { limit: true } : {}) }));
       tick = { outcome: "failed", code };
     }
     await recordTick(env.DB, event, startedAtMs, tick, log);
   }
 }
 
+/**
+ * One cron or queue invocation, metered: every binding the lanes use counts
+ * what they do, and one `invocation_budget` line reports it when the
+ * invocation ends, however it ends (issue #87, docs/operations.md).
+ */
+export async function meteredInvocation(
+  trigger: "scheduled" | "queue",
+  env: Env,
+  work: (env: Env, context: InvocationContext) => Promise<void>,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<void> {
+  const meter = new OperationMeter();
+  const context = invocationContext();
+  try {
+    await work(meteredEnv(env, meter), context);
+  } finally {
+    log(JSON.stringify(invocationProbe(trigger, meter, context)));
+  }
+}
+
+/**
+ * The queue consumer's work for one batch. Every message of the batch shares
+ * the invocation's registration budget; a message whose registration did not
+ * start because the budget was spent is retried, exactly like a retryable
+ * one, and is idempotent when it runs again.
+ */
+export async function consumeTerminalNotifications(
+  messages: readonly Pick<Message<unknown>, "body" | "ack" | "retry">[],
+  env: Env,
+  context: InvocationContext,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<void> {
+  for (const message of messages) {
+    let event: Record<string, unknown>;
+    try {
+      const result = await handleTerminalNotification(
+        collectionEnv(env),
+        { body: message.body },
+        { budget: context.registration },
+      );
+      event = { event: "collection_notification", ...result };
+      if (result.outcome === "retryable" || result.outcome === "deferred") message.retry();
+      else message.ack();
+    } catch (error) {
+      // Safe codes only: never the exception text, never a key or a value.
+      const code =
+        error instanceof PipelineError
+          ? error.message
+          : error instanceof Error
+            ? error.constructor.name
+            : "unknown";
+      const limit = platformLimitError(error);
+      if (limit) context.limitErrors += 1;
+      event = { event: "collection_notification_failed", code, ...(limit ? { limit: true } : {}) };
+      message.retry();
+    }
+    log(JSON.stringify(event));
+  }
+}
+
 export default {
   async scheduled(_event: ScheduledController, env: Env): Promise<void> {
-    await runScheduled(env);
+    await meteredInvocation("scheduled", env, (metered, context) =>
+      runScheduled(metered, defaultStages, undefined, context),
+    );
   },
   /**
    * R2 event notifications for the shared DATA bucket (U08). The queue only
@@ -1868,31 +1953,14 @@ export default {
    * message that cannot be trusted is acknowledged and dropped rather than
    * retried forever — the `collection_scan` lane finds the run anyway
    * (G1-04). A registration that could not finish is retried through the
-   * queue's own retry, and is idempotent when it runs again (G1-05).
+   * queue's own retry, and is idempotent when it runs again (G1-05). One that
+   * stopped at the batch's registration budget is `pending` and acknowledged:
+   * the scan continues it on the next tick (issue #87).
    */
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
-    for (const message of batch.messages) {
-      let event: Record<string, unknown>;
-      try {
-        const result = await handleTerminalNotification(collectionEnv(env), {
-          body: message.body,
-        });
-        event = { event: "collection_notification", ...result };
-        if (result.outcome === "retryable") message.retry();
-        else message.ack();
-      } catch (error) {
-        // Safe codes only: never the exception text, never a key or a value.
-        const code =
-          error instanceof PipelineError
-            ? error.message
-            : error instanceof Error
-              ? error.constructor.name
-              : "unknown";
-        event = { event: "collection_notification_failed", code };
-        message.retry();
-      }
-      console.log(JSON.stringify(event));
-    }
+    await meteredInvocation("queue", env, (metered, context) =>
+      consumeTerminalNotifications(batch.messages, metered, context),
+    );
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);

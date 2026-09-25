@@ -1,9 +1,10 @@
 // Shared-R2 collection runs and their stage evidence (migration 0039).
 //
-// The Processor's questions are exactly three: "have I seen this terminal
-// before, and under what identity?", "what happened at each stage?", and
-// "where did the bounded scan get to?". Each is one statement here, so the
-// Processor holds no SQL of its own (unified plan 02 §3).
+// The Processor's questions are four: "have I seen this terminal before, and
+// under what identity?", "what happened at each stage?", "which staged
+// registrations wait for their next invocation?" and "where did the bounded
+// scan get to?". Each is one statement here, so the Processor holds no SQL of
+// its own (unified plan 02 §3).
 //
 // Every write is conditional on its own absence or on the row still being
 // open, and is read back by the caller through `readCollectionRun`. The 0039
@@ -247,6 +248,63 @@ export async function collectionRunRegistered(
     [collectionRunId],
   );
   return (row?.n ?? 0) > 0;
+}
+
+// ── staged registrations waiting for their next invocation (issue #87) ─
+
+/**
+ * An open run whose newest `registered` attempt is `pending`: a registration
+ * that stopped at its operation budget with its progress in CORE. `?1` is the
+ * current registration contract, so a revision the Processor no longer
+ * registers is never picked up again.
+ */
+const PENDING_REGISTRATION = `r.blocked_code IS NULL AND r.registered_at IS NULL
+    AND r.registration_contract_version = ?1
+    AND (SELECT s.state FROM collection_run_stages s
+          WHERE s.collection_run_id = r.id AND s.stage = 'registered'
+          ORDER BY s.id DESC LIMIT 1) = 'pending'`;
+
+/** The oldest staged registrations, to be continued before new terminals are listed. */
+export function readPendingRegistrations(
+  db: D1Like,
+  registrationContractVersion: string,
+  limit: number,
+): Promise<{ source: string; run_id: string }[]> {
+  return all<{ source: string; run_id: string }>(
+    db,
+    `SELECT r.source, r.run_id FROM collection_runs r
+      WHERE ${PENDING_REGISTRATION}
+      ORDER BY r.id LIMIT ?2`,
+    [registrationContractVersion, limit],
+  );
+}
+
+export interface RegistrationBacklog {
+  /** Runs seen and neither registered nor blocked, for any reason. */
+  unregistered: number;
+  /** Of those, the staged registrations waiting for their next invocation. */
+  pending: number;
+  /** When the oldest pending run was first seen, or null when none is pending. */
+  oldest_pending_first_seen_at: string | null;
+}
+
+/** Counts only: how many terminals are still short of registration. */
+export async function readRegistrationBacklog(
+  db: D1Like,
+  registrationContractVersion: string,
+): Promise<RegistrationBacklog> {
+  const row = await first<RegistrationBacklog>(
+    db,
+    `SELECT
+       (SELECT count(*) FROM collection_runs
+         WHERE blocked_code IS NULL AND registered_at IS NULL) AS unregistered,
+       count(*) AS pending,
+       min(r.first_seen_at) AS oldest_pending_first_seen_at
+       FROM collection_runs r
+      WHERE ${PENDING_REGISTRATION}`,
+    [registrationContractVersion],
+  );
+  return row ?? { unregistered: 0, pending: 0, oldest_pending_first_seen_at: null };
 }
 
 // ── the bounded scan's cursor ───────────────────────────────────────────

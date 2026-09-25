@@ -18,6 +18,7 @@ import {
   requestImport,
   requestProjectionRebuild,
 } from "../../../packages/application/src/operations/requests.ts";
+import { RegistrationBudget } from "../../../packages/application/src/collection/index.ts";
 import { sqliteD1 } from "../../../packages/storage-d1/test/sqlite.ts";
 import { dispatchOperations, opsDispatchEnabled } from "../src/operations/dispatch.ts";
 import {
@@ -145,6 +146,32 @@ test("an import whose terminal is not there stays pending and is never failed aw
     true,
   );
   expect(record.receipt.status).toBe("accepted");
+});
+
+test("an import the tick's registration budget cannot start waits for a later tick", async () => {
+  // The scan spent the cron invocation's shared registration budget first
+  // (issue #87). Nothing is registered and nothing is failed: the request
+  // keeps its place and says why it waits.
+  const harness = withDispatch();
+  await persistSyntheticRun(harness);
+  const accepted = await requestImport({
+    store: harness.store,
+    principal: PRINCIPAL,
+    now: NOW,
+    request: { source: SOURCE, runId: "run-001" },
+  });
+  if (!accepted.ok) throw new Error("acceptance failed");
+  expect(
+    await dispatchOperations(harness.env, { budget: new RegistrationBudget(0) }),
+  ).toMatchObject({ claimed: 1, retried: 1, dispatched: 0 });
+  const record = await receipt(harness, accepted.receipt.operationId);
+  if (!record.ok) throw new Error("receipt missing");
+  expect(record.receipt.dispatch.state).toBe("dispatch_pending");
+  expect(record.receipt.failureCode).toBe("registration_deferred");
+  expect(stageStates(record.receipt.stages).every((entry) => entry.endsWith(":pending"))).toBe(
+    true,
+  );
+  expect(harness.db.query("SELECT count(*) AS n FROM collection_runs").get()).toEqual({ n: 0 });
 });
 
 test("an import of a blocked terminal records the block and does not complete", async () => {
