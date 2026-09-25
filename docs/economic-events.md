@@ -172,10 +172,12 @@ returned side by side with `cross_unit_requires_fx_model`; signed amounts in
 
 - **Stage A — the same provider row observed twice.** Provider-identifier
   equality inside one identifier namespace, and **only for identifiers the
-  provider issued** (`identifierOrigin: "provider"` on both sides, such as SBI
-  Shinsei's `txnReferenceNo` or PayPay's `transactionNumber`); such a pair is
+  provider issued** (`identifierOrigin: "provider"` on both sides, which the
+  job reads from the parser's `_kogane.identityOrigin`); such a pair is
   auto-acceptable. A collector fingerprint, or an origin nobody recorded,
-  pairs nothing. Vpass and MyJCB derive every external id from the row's
+  pairs nothing: SBI Shinsei's `txnReferenceNo` and PayPay's
+  `transactionNumber` are provider row ids, but their parsers record no
+  origin and neither source is in a slice, so they pair nothing yet either. Vpass and MyJCB derive every external id from the row's
   content and occurrence, so each daily capture of a displayed row carries the
   same fingerprint: stage A over them was one more `provider_same` candidate
   per pair of captures, never auto-acceptable, and nothing for a reviewer to
@@ -206,8 +208,9 @@ returned side by side with `cross_unit_requires_fx_model`; signed amounts in
   its authorisation (a foreign-currency charge converted at posting, a fuel or
   hotel hold): `amount_equal` stays a rationale and `amount_differs` a
   rejection condition for the reviewer, and equal-amount pairs come first. More
-  than one heuristic candidate for one pending row marks all of them
-  `multiple_candidates` / `candidate_not_unique`. A pair the provider itself
+  than one heuristic candidate for one pending row, or for one posted row (two
+  same-amount purchases on one day, one of them posted so far), marks all of
+  them `multiple_candidates` / `candidate_not_unique`. A pair the provider itself
   linked is proposed whatever its days. The window only removes pairs:
   `proposalIdentity` (kind, stage, method, policy release, targets) is
   unchanged, so every pair still proposed keeps its stored digest and a
@@ -822,8 +825,8 @@ Per slice, one tick:
    group of at most 200 rows; skips a larger group (`GROUP_LIMIT`, counted in
    `groupsSkipped`), and reads the others whole by row id, at most 2,000 rows
    in all (`GROUP_READ_LIMIT`; the page's first group to pair is always read,
-   so the cursor always moves), so a pair is found whichever pages its two
-   rows fall on. A group that does not fit waits for the next tick
+   so a deferred group never keeps the cursor where it is), so a pair is found
+   whichever pages its two rows fall on. A group that does not fit waits for the next tick
    (`groupsDeferred`) and the cursor stops before its first row;
 3. runs stage A and stage B over each group read, looks the candidates'
    digests up 1,000 at a time (`LOOKUP_CHUNK`, about 67 KB of bound JSON) and
@@ -838,8 +841,11 @@ Per slice, one tick:
    the page, and the next tick writes the rest. The update is conditional on
    the value this tick read, so an overlapping tick never pulls it back.
 
-A batch D1 rejects writes nothing and is counted in `failed`; its pairs are
-retried on the next cycle. The log line carries counts only, no amount,
+A batch D1 rejects writes nothing and is counted in `failed`. While the page
+is held, the next tick sends its pairs again; a tick in which D1 rejected every
+batch it sent does not hold the page, so a rejection that repeats cannot keep
+the slice on one page, and those pairs are retried on the next cycle, as are
+the rejected pairs of a page the cursor has left. The log line carries counts only, no amount,
 account label, provider text or row id:
 
 ```json
@@ -909,13 +915,15 @@ migration 0026.
   triggers; MyJCB ledgers seeded through the deployed parser: a `1,200円` pair,
   an installment slice never compared, same-amount twins, re-runs and a decided
   proposal writing nothing, a relative `detailMonth-N` label pairing nothing,
-  and a re-captured confirmed row kept out of stage A; two captures of real
-  Vpass 1.2.0 rows writing no stage A proposal and a synthetic provider row id
-  still paired; a slice of several pages visited in full and wrapped, an
-  overlapping tick never pulling the cursor back, a deferred group, the write
-  budget holding the cursor on its page, a stored proposal sending no
-  statement and a decided one never proposed again, and only the in-window
-  posted row proposed) and
+  and a re-captured confirmed row kept out of stage A; two captures of the
+  synthetic Vpass fixture parsed by the deployed 1.2.0 parser writing no stage
+  A proposal and a synthetic provider row id still paired; a slice of several
+  pages visited in full and wrapped, an overlapping tick never pulling the
+  cursor back, a deferred group, the write budget holding the cursor on its
+  page and a tick whose every batch D1 rejected not holding it, the digest
+  lookup's chunk boundary, a stored proposal sending no statement and a
+  decided one never proposed again, and only the in-window posted row
+  proposed) and
   `test/card-purchase-parser-shapes.test.ts` (recognition and the matching
   guard never disagree on a parsed MyJCB row).
 - `services/app`: `test/events-api.test.ts` (capability gate, Access

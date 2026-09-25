@@ -242,6 +242,28 @@ describe("stage B: the matching window", () => {
     }
   });
 
+  test("SC03: two pending rows one posted row could have become are both marked ambiguous", () => {
+    // Two same-amount purchases on one day, one posted so far; another posted
+    // row of the month lies outside both windows. Each pending row has one
+    // candidate, but the posted row has two: neither pair is unique.
+    const facts = [
+      fact({ id: "1", settlementState: "pending", occurred: day("2026-03-10") }),
+      fact({ id: "2", settlementState: "pending", occurred: day("2026-03-10") }),
+      postedOn("11", "2026-03-10"),
+      postedOn("12", "2026-03-25"),
+    ];
+    const proposals = stageBProposals(facts);
+    expect(proposals.map((proposal) => proposal.targetRefs.map((ref) => ref.id))).toEqual([
+      ["transaction:1", "transaction:11"],
+      ["transaction:2", "transaction:11"],
+    ]);
+    for (const proposal of proposals) {
+      expect(proposal.autoAcceptable).toBe(false);
+      expect(proposal.rationaleCodes).toContain("multiple_candidates");
+      expect(proposal.rejectionConditions).toContain("candidate_not_unique");
+    }
+  });
+
   test("a posted amount that differs stays a candidate inside the window, after the equal one", () => {
     // A foreign-currency charge converted at posting, or a hold settled lower:
     // the amounts disagree and the reviewer is told so; the rule decides nothing.

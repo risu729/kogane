@@ -341,6 +341,7 @@ export function stageBProposals(
   const posted = facts.filter((fact) => fact.settlementState === "posted");
   const out: ReconciliationProposal[] = [];
   const candidatesPerPending = new Map<string, number>();
+  const candidatesPerPosted = new Map<string, number>();
   const drafts: {
     left: MatchFact;
     right: MatchFact;
@@ -382,10 +383,15 @@ export function stageBProposals(
             "candidate_not_unique",
           ];
       drafts.push({ left, right, rationale, rejections, linked });
-      // Ambiguity is counted among heuristic candidates only: a pair the
+      // Ambiguity is counted among heuristic candidates only, from both
+      // ends: a pending row with more than one posted candidate, and a posted
+      // row more than one pending row could have become (two same-amount
+      // purchases on one day, one of them posted so far: SC03). A pair the
       // provider itself linked is not weakened by a look-alike row.
-      if (!linked)
+      if (!linked) {
         candidatesPerPending.set(left.ref.id, (candidatesPerPending.get(left.ref.id) ?? 0) + 1);
+        candidatesPerPosted.set(right.ref.id, (candidatesPerPosted.get(right.ref.id) ?? 0) + 1);
+      }
     }
   }
   // Equal amounts first, each part in pending-then-posted order, so a bounded
@@ -395,7 +401,10 @@ export function stageBProposals(
     ...drafts.filter((draft) => !draft.rationale.includes("amount_equal")),
   ];
   for (const draft of equalFirst) {
-    const ambiguous = !draft.linked && (candidatesPerPending.get(draft.left.ref.id) ?? 0) > 1;
+    const ambiguous =
+      !draft.linked &&
+      ((candidatesPerPending.get(draft.left.ref.id) ?? 0) > 1 ||
+        (candidatesPerPosted.get(draft.right.ref.id) ?? 0) > 1);
     out.push(
       proposal({
         kind: "pending_to_posted",
