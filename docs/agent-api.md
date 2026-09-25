@@ -44,12 +44,12 @@ A grant is looked up **after** the Cloudflare Access check, by the subject
 nothing reads an actor from a request body or header, which is the same rule
 the change lifecycle follows. A valid token with no grant is still refused.
 
-| Capability               | Allows                                                      | Notes                                                   |
-| ------------------------ | ----------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`          | The first capability an agent should get                |
-| `records.read`           | `reported-state`, `activity`                                | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`) | A separate grant; raw bytes are still a different route |
-| `interpretation.propose` | `reconcile.propose`                                         | Proposals only; never adoption                          |
+| Capability               | Allows                                                                       | Notes                                                   |
+| ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                           | The first capability an agent should get                |
+| `records.read`           | `reported-state`, `activity`, and `purchases.explain` on a whole-store scope | Never implies `evidence.read`                           |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                  | A separate grant; raw bytes are still a different route |
+| `interpretation.propose` | `reconcile.propose`                                                          | Proposals only; never adoption                          |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -146,16 +146,18 @@ and it belongs in its own change.
 
 ## Tools
 
-Five tools, one implementation each (`src/agent-service.ts`), reachable two
+Five tools, plus a sixth while the deployment serves card purchase
+recognition, one implementation each (`src/agent-service.ts`), reachable two
 ways.
 
-| Tool                       | HTTP                                   | MCP `tools/call`           | Requires                 |
-| -------------------------- | -------------------------------------- | -------------------------- | ------------------------ |
-| `kogane.capabilities`      | `POST /api/agent/v1/capabilities`      | `kogane.capabilities`      | any grant                |
-| `kogane.context.open`      | `POST /api/agent/v1/context.open`      | `kogane.context.open`      | any grant                |
-| `kogane.financial.query`   | `POST /api/agent/v1/financial.query`   | `kogane.financial.query`   | per intent (table below) |
-| `kogane.explain`           | `POST /api/agent/v1/explain`           | `kogane.explain`           | `summary.read`           |
-| `kogane.reconcile.propose` | `POST /api/agent/v1/reconcile.propose` | `kogane.reconcile.propose` | `interpretation.propose` |
+| Tool                       | HTTP                                   | MCP `tools/call`           | Requires                                                                                                                      |
+| -------------------------- | -------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`      | `POST /api/agent/v1/capabilities`      | `kogane.capabilities`      | any grant                                                                                                                     |
+| `kogane.context.open`      | `POST /api/agent/v1/context.open`      | `kogane.context.open`      | any grant                                                                                                                     |
+| `kogane.financial.query`   | `POST /api/agent/v1/financial.query`   | `kogane.financial.query`   | per intent (table below)                                                                                                      |
+| `kogane.explain`           | `POST /api/agent/v1/explain`           | `kogane.explain`           | `summary.read`                                                                                                                |
+| `kogane.reconcile.propose` | `POST /api/agent/v1/reconcile.propose` | `kogane.reconcile.propose` | `interpretation.propose`                                                                                                      |
+| `kogane.purchases.explain` | `POST /api/agent/v1/purchases.explain` | `kogane.purchases.explain` | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
 
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
@@ -170,10 +172,15 @@ one description of the deployment.
 dependency, so nothing Node-only reaches workerd. It holds no logic, no
 session state and no authorization of its own — including which tools exist:
 the adapter publishes the list it is handed and dispatches by name, so a tool
-set that is off is neither listed nor callable. With `OPS_API_ENABLED` on **and
+set that is off is neither listed nor callable. `kogane.purchases.explain`
+follows the operator route it shares a query with: while `/api/meta` reports
+`cardPurchaseRecognition: true` (the event reader flag on and CORE 0047
+applied) it is appended to the five above, and otherwise its name is
+`unknown_tool` and its HTTP path answers `404 not_found`, after the Access and
+grant checks every agent path makes. With `OPS_API_ENABLED` on **and
 this deployment's command grant lists readable**, the six `kogane.ops.*` tools
-of [ops-api.md](ops-api.md) are appended to the five above; with the flag off,
-`tools/list` is exactly the five and an operations tool name is
+of [ops-api.md](ops-api.md) are appended after them; with the flag off,
+`tools/list` holds no operations tool and an operations tool name is
 `unknown_tool`. While the grant lists cannot be read, they are not published
 either — a deployment that grades nobody can authorize none of them — but they
 stay callable, so a client that asks anyway is told
@@ -217,14 +224,103 @@ refused with `unsupported_semantics`. An unknown request key or an unknown
 filter key is refused the same way rather than ignored: silently dropping a
 filter answers a different question from the one that was asked.
 
-Recognised card purchases are not an intent. They are explained to an operator
-on the `カード利用` page through `GET /api/v2/card-purchases`
-([economic events](economic-events.md#http)), which, like the card settlement
-review, refuses an agent principal: the query service cannot yet scope those
-events and their statements per source grant. The `activity` intent is
-unchanged and still reads provider transaction observations, not recognised
-purchase events, so an agent's rows and the page's figures answer different
+The `activity` intent reads provider transaction observations, not recognised
+purchase events, so its rows and the purchase figures below answer different
 questions, and neither is a complete card history.
+
+### Card purchase explanation
+
+`kogane.purchases.explain` explains recognised card purchases the way the
+operator's `カード利用` page does, because it is the same read: the service
+(`packages/application/src/query/purchases-explain.ts`) calls the page's own
+`queryCardPurchases` ([economic events](economic-events.md#http)) and changes
+nothing in its answer except what an agent may not be handed. It answers "what
+did this card charge become, which statement and bank debit settled it, and
+which pending-to-posted candidates are open".
+
+Input, a closed object (every key optional):
+
+| Key       | Shape                                    | Means                                                             |
+| --------- | ---------------------------------------- | ----------------------------------------------------------------- |
+| `period`  | `YYYY-MM`                                | Only the events of that statement period, and figures over them   |
+| `eventId` | `purchase_<sha256>` or `refund_<sha256>` | One event, exactly; never beside `period` or `offset`             |
+| `offset`  | integer, 0 to 1,000,000                  | Page start; a page is 50 events, `data.nextOffset` names the next |
+
+Output:
+
+```jsonc
+{
+  "schemaVersion": "kogane-card-purchases-v1",
+  "query": { "period": "2026-09", "eventId": null, "offset": 0 },
+  "decisions": "operator-only",
+  "data": {/* the page: items, nextOffset, summary, coverage */},
+}
+```
+
+`data` is the operator page's `CardPurchasePage` (`packages/domain/src/card-purchase-view.ts`),
+field for field: the figures of the whole filter per unit with captured,
+authorized, captured refunds and authorized refunds apart and no combined
+total, the unresolved count, the provider statement totals beside them and
+`settlementAddsPurchaseExpense: false`; `coverage`, which says the list is not
+a complete transaction history and counts the current provider rows no event
+holds; and per event its state and amount (or last known amount), its provider
+rows and whether the provider still shows them, the statement it was posted to
+or the reason there is none, the settlement review of that statement with the
+bank debit an accepted one cites, its newest revisions, its candidates and its
+`explanationRefs`. `validAgentCardPurchasePage`
+(`packages/observation-shared/src/card-purchase-contract.ts`) is its contract.
+
+**Proposals are shown, decisions stay with the operator.** Each candidate
+keeps every fact the page shows — the proposal and relation status and
+revision, whether the provider linked the rows, the rationale and rejection
+codes, both rows with the event and revision holding each, and the `blockers`
+that keep it from being merged — and loses exactly two fields: `actions` (what
+an operator may do now) and `relation` (the payload a review plans). Merging,
+rejecting or withdrawing a link, like accepting a card settlement, is a
+human-approved change the operator makes on the purchases page
+([card settlements](card-settlements.md#reviewing-a-pending-to-posted-link));
+no grant here can hold `interpretation.accept`, so no caller of this tool is
+ever offered one, and `decisions: "operator-only"` says so in every answer.
+An agent that finds a link worth reviewing names its `proposalId` to the
+operator. This tool hands it no payload to plan with, and the change lifecycle
+refuses an agent's approval and commit of a link review in any case.
+
+Authorization, in order, after the Access check and the grant lookup every
+agent path makes:
+
+1. `records.read`, else `403 unauthorized` (`capability:records.read`).
+2. A whole-store perimeter: `sources` and `accounts` both `"*"`. A grant listed
+   on either axis is refused with `403 evidence_restricted`
+   (`scope:source`, `scope:account`) before anything is read. The page cannot
+   yet be recomputed inside a narrower perimeter — its events and statements
+   are keyed by resolved account rather than by the source accounts a scope
+   lists, the settlement it shows cites a bank debit of another source, and its
+   unrecognised-row count spans every card source — so a listed grant gets no
+   page rather than a page computed outside it (SC18). The refusal is the same
+   whatever the store holds.
+3. The grant's `maxRows` bounds how deep the caller pages: `offset + 50` rows
+   (one for an `eventId` read) above it is `413 budget_exceeded`
+   (`budget:maxRows=<n>`), before anything is read.
+
+"Before anything is read" is exact: the only statement the Worker runs before
+one of these refusals is the `sqlite_master` check that decides whether the
+tool exists at all — the same one the operator route and `kogane.capabilities`
+run — and no store row is read.
+
+The page's own bound is kept: a filter of more than 10,000 live events is
+`413 budget_exceeded` (`budget:cardPurchaseEvents=10000`) — the agent API's
+code for the route's `413 result_limit_exceeded` — rather than partly summed,
+and a statement period narrows it. An `eventId` that names no live event is
+`403 evidence_restricted` (`eventId`), the answer `explain` gives for a ref it
+will not show. A malformed value is `400 invalid_query` naming the key, and an
+unknown key is `400 unsupported_semantics`.
+
+It reads and never writes: no path, answer or refusal changes a table or the
+CORE source revision. Provider text (a counterparty) appears only under `data`,
+and `rawLocator` is the parser's position inside an artifact, not a
+`fetch_artifact:` or `raw:` locator; reaching those still takes `explain` and
+`evidence.read`. The operator route itself is unchanged and still refuses an
+agent principal (`403 operator_required`).
 
 ## Contexts, cursors and hand-off
 
@@ -364,6 +460,27 @@ default-off, the grant denial matrix, scope isolation and non-leakage, the
 cursor and budget rules, proposal validation and non-adoption, the MCP tool
 list and schemas, the untrusted-content rule, and UI/agent agreement.
 
+The purchase explanation is checked the same way.
+`packages/application/test/purchases-explain.test.ts`, on every CORE migration
+with purchases written by the guarded recognition builder, a settled statement
+and an open candidate, asserts that the answer is `queryCardPurchases`' page
+with exactly `actions` and `relation` removed (for the list, a period, an exact
+id and a later page), the grant matrix (`records.read`, both scope axes, a
+refusal reading nothing), the `maxRows` and 10,000-event bounds, an unknown id,
+the closed request, and that no path moves a table, the change counter or the
+source revision. `services/app/test/purchases-explain.test.ts` repeats it over
+the real Worker: the same page as the query and as the operator route, one
+object over HTTP and MCP with provider text only under `data`, 401 before any
+grant and 403 for the operator without an agent grant (neither preparing a
+statement), each grant and `maxRows` refusal preparing only the schema check,
+404 and `unknown_tool` with the reader flag off or CORE 0047 absent while
+`kogane.capabilities` reports `cardPurchaseRecognition: false`, the refusal
+codes, and every table and the source revision unchanged.
+`test/agent-api.test.ts` pins the tool list and its schema with the capability
+on and off, and
+`packages/observation-shared/test/card-purchase-candidates.test.ts` pins the
+contract (`validAgentCardPurchasePage` refuses an action or a plan payload).
+
 Not verified: no deployed instance, no live Access policy, no real provider
 data, and no MCP client has connected to `/mcp`. Passing a client's connection
 check is not a completion criterion (addendum 10 §10).
@@ -380,6 +497,11 @@ writes; this change adds no migration.
 2. Set `AGENT_API_GRANTS` for one principal with `summary.read` only, and confirm
    `kogane.capabilities` reports the expected scope and limits.
 3. Widen one capability at a time. `interpretation.propose` last.
+   `kogane.purchases.explain` needs no flag of its own: it is served wherever
+   the operator's purchases page is (`cardPurchaseRecognition`), and reaches
+   only a principal whose grant has `records.read` with `"*"` sources and
+   accounts. Granting that is a deliberate decision to show the agent every
+   recognised card purchase, its statement and its bank debit.
 
 Rollback: set `AGENT_API_GRANTS` to `""` (immediate, no redeploy of code needed if
 it is a secret), or redeploy the previous Worker build. Proposals already

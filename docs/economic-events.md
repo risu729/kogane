@@ -694,7 +694,14 @@ event already retired keeps the period it had.
   before the review existed refused at commit; every event of a page listing
   its own candidates next to a busy one) and
   `packages/observation-shared/test/card-purchase-candidates.test.ts` (the
-  `candidates` wire shape).
+  `candidates` wire shape, and the agent's shape without `actions` and
+  `relation`).
+- The agent read of the same page: `packages/application`
+  `test/purchases-explain.test.ts` (the query's page with exactly the review
+  affordances removed, the grant, scope and bound refusals reading nothing, no
+  path writing) and `services/app` `test/purchases-explain.test.ts` (the same
+  page over HTTP and MCP, the authorization order, absent while the capability
+  is, every table and the source revision unchanged).
 - `packages/read-model`: `test/card-purchase-keys.test.ts` (stale keys and the
   unrecognised count against current usage; a revision still holding one
   current key is not stale) and `test/events.test.ts` (a purchase-recognition
@@ -814,6 +821,20 @@ settlement review's guard), is GET-only, and answers 404 unless
 `EVENTS_V2_ENABLED` is on **and** the 0047 table and views exist. `/api/meta`
 advertises the same fact as `cardPurchaseRecognition`, which both stored
 capability constants default to `false`. It writes nothing.
+
+An agent reads the same page through the agent API instead:
+`POST /api/agent/v1/purchases.explain`, or the MCP tool
+`kogane.purchases.explain`, with `{period?, eventId?, offset?}`
+([agent API](agent-api.md#card-purchase-explanation)). It is served exactly
+while `cardPurchaseRecognition` is, calls the same `queryCardPurchases`, and
+returns its page as `data`, figures, coverage, chain and `explanationRefs`
+unchanged, with each candidate's `actions` and `relation` removed: an agent
+sees which links are proposed and why, and every review stays with the
+operator. It needs an `AGENT_API_GRANTS` grant with `records.read` over
+`"*"` sources and accounts (the page cannot yet be recomputed inside a
+narrower scope, so a listed grant is refused rather than answered), the
+10,000-event bound is `413 budget_exceeded` there, and it writes nothing
+either.
 
 ## Flags
 
