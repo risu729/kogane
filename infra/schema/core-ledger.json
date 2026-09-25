@@ -696,6 +696,18 @@
       "sha256": "4ae010e7a881b839cd376fec814c1bc518b62b04b7c0c7e75b72a38077f4875b"
     },
     {
+      "file": "0048_reconciliation_scan_cursor.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "216682487e6b4283f35aae0b3b2fc59570045b6506ccede4f57c44dfdb6af327"
+    },
+    {
+      "file": "0049_processor_lane_ticks.sql",
+      "statementCount": 4,
+      "insertStatements": [],
+      "sha256": "817c9cc5bfa93da3066561963003b73d91153071f34c0d8d51cf2e9f077e7146"
+    },
+    {
       "file": "0050_statement_fact_indexes.sql",
       "statementCount": 1,
       "insertStatements": [],
@@ -10297,6 +10309,89 @@
       "sqlSha256": "1f1333e0c8661ba0"
     },
     {
+      "name": "processor_lane_ticks",
+      "classification": "operational-mutable",
+      "planRow": "bounded processor lane tick records",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "lane",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "started_at_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "finished_at_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "error_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "counts_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "name": "processor_lane_ticks_lane",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "lane",
+            "id"
+          ]
+        }
+      ],
+      "triggers": [
+        "processor_lane_ticks_counts",
+        "processor_lane_ticks_no_update"
+      ],
+      "noUpdateTriggers": [
+        "processor_lane_ticks_no_update"
+      ],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "32e6f9b91c6e62a1"
+    },
+    {
       "name": "producer_sources",
       "classification": "core-keep",
       "planRow": "sources, producers and routes",
@@ -11027,6 +11122,15 @@
           ]
         },
         {
+          "name": "reconciliation_proposals_kind_stage",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "kind",
+            "stage"
+          ]
+        },
+        {
           "name": "reconciliation_proposals_status",
           "unique": false,
           "partial": false,
@@ -11049,6 +11153,39 @@
       ],
       "appendOnly": false,
       "sqlSha256": "388ad3293150043e"
+    },
+    {
+      "name": "reconciliation_scan_cursor",
+      "classification": "operational-mutable",
+      "planRow": "bounded reconciliation scan progress",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "last_observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "source_id"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "55cd20581437a930"
     },
     {
       "name": "release_activation_events",
@@ -15501,6 +15638,20 @@
       "sqlSha256": "77aecea2f90ffa97"
     },
     {
+      "name": "processor_lane_ticks_counts",
+      "table": "processor_lane_ticks",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "5fffe0baf15d1617"
+    },
+    {
+      "name": "processor_lane_ticks_no_update",
+      "table": "processor_lane_ticks",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "8a548612eb2f9f6b"
+    },
+    {
       "name": "projection_input_records_no_delete",
       "table": "projection_input_records",
       "timing": "BEFORE",
@@ -16474,6 +16625,11 @@
       "sqlSha256": "7a316700ff52f118"
     },
     {
+      "name": "processor_lane_ticks_lane",
+      "table": "processor_lane_ticks",
+      "sqlSha256": "10df119948e2cf31"
+    },
+    {
       "name": "projection_input_records_job",
       "table": "projection_input_records",
       "sqlSha256": "bdd312bec3b263b4"
@@ -16502,6 +16658,11 @@
       "name": "reconciliation_proposals_decision",
       "table": "reconciliation_proposals",
       "sqlSha256": "bcacbcedda493c47"
+    },
+    {
+      "name": "reconciliation_proposals_kind_stage",
+      "table": "reconciliation_proposals",
+      "sqlSha256": "e3028f9ba5d251cf"
     },
     {
       "name": "reconciliation_proposals_status",
@@ -16565,10 +16726,10 @@
     }
   ],
   "summary": {
-    "tableCount": 109,
+    "tableCount": 111,
     "viewCount": 39,
-    "triggerCount": 398,
-    "explicitIndexCount": 110,
+    "triggerCount": 400,
+    "explicitIndexCount": 112,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -16677,7 +16838,9 @@
         "observation_lane_state",
         "observation_parse_jobs",
         "observation_replay_plans",
-        "observation_work_items"
+        "observation_work_items",
+        "processor_lane_ticks",
+        "reconciliation_scan_cursor"
       ],
       "unclassified-keep": [
         "dataset_snapshot_policies",
@@ -16717,10 +16880,12 @@
       "origin_template_policies",
       "parse_run_candidates",
       "parse_runs",
+      "processor_lane_ticks",
       "producer_sources",
       "producers",
       "published_parse_runs",
       "reconciliation_proposals",
+      "reconciliation_scan_cursor",
       "retention_classes",
       "settlement_relations",
       "source_external_ids",
@@ -16770,6 +16935,6 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "f2f0da7dfdb64f8ff0ca040a6063465057df0559b9e9b68a3625d9d2ec842974"
+    "schemaSha256": "a8e14834690f62150ccd66ff5dfab6a81e70b3bc811dc0d7e62c841369b5d24e"
   }
 }

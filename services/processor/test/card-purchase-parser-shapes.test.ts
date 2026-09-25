@@ -199,6 +199,55 @@ test("the reconciliation rule reads MyJCB's display amounts as recognition does"
   expect(comparable(pending!)).toBe(true);
 });
 
+test("a closed position-1 statement, as the collector now records it, is a captured purchase", () => {
+  // services/collector-myjcb decides the state from the page: a `(確定分)`
+  // page without export links is `confirmed`, its ledger carries the confirmed
+  // header set and the expanded `ご利用金額`, and its period is the relative
+  // fallback label (the collector test pins this exact JSON). Synthetic row.
+  const ledger = {
+    schemaVersion: 1,
+    detailMonth: 1,
+    period: "detailMonth-1",
+    state: "confirmed",
+    headers: ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"],
+    rows: [
+      {
+        summaryCells: ["2026/01/05", "架空商店", "一回払い", "1,000円"],
+        expanded: { ご利用金額: "1,000円", 摘要: "架空摘要", 今回回数: "1" },
+      },
+    ],
+  };
+  const [row] = rows(
+    myJcbCreditLedger,
+    "myjcb",
+    new TextEncoder().encode(JSON.stringify(ledger)),
+    meta({
+      artifactKey: "connection-a/credit-ledger-01.json",
+      statementState: "confirmed",
+      period: ledger.period,
+    }),
+  );
+  expect(row!.providerStatus).toBe("confirmed");
+  expect(row!.externalId).toMatch(/^myjcb-credit-ledger:confirmed:/u);
+  expect([row!.usageAmountText, row!.paymentAmountText]).toEqual(["1,000円", "1,000円"]);
+  // Captured, not authorized. The relative label names no statement month, so
+  // the purchase carries none rather than a guessed one.
+  expect(outcome(row!)).toEqual({
+    kind: "purchase",
+    state: "captured",
+    amount: "1000",
+    period: null,
+  });
+  expect(
+    comparableCardPayment({
+      sourceId: row!.sourceId,
+      status: row!.providerStatus,
+      usageAmountText: row!.usageAmountText,
+      paymentAmountText: row!.paymentAmountText,
+    }),
+  ).toBe(true);
+});
+
 test("recognition and the matching guard never disagree on a parsed MyJCB row", () => {
   // Every usage/payment text pair below is parsed by the deployed ledger
   // parser, confirmed and unconfirmed, next to the fixture's own rows. With the

@@ -226,8 +226,18 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "bounded card purchase scan progress",
   },
+  // The Processor's last ticks per lane (0049): diagnosis bookkeeping pruned
+  // to one day per lane, never evidence.
+  processor_lane_ticks: {
+    classification: "operational-mutable",
+    planRow: "bounded processor lane tick records",
+  },
   // reconciliation_proposals → CORE
   reconciliation_proposals: { classification: "core-keep", planRow: "reconciliation proposals" },
+  reconciliation_scan_cursor: {
+    classification: "operational-mutable",
+    planRow: "bounded reconciliation scan progress",
+  },
   // economic_event_revisions, legs, allocations, obligations, settlements → CORE
   allocations: { classification: "core-keep", planRow: "economic events" },
   economic_event_revisions: { classification: "core-keep", planRow: "economic events" },

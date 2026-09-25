@@ -15,8 +15,9 @@ Every five minutes, the Worker runs three independently budgeted lanes (see
 `docs/observation-lanes.md`, migration `0035_observation_job_lanes.sql`):
 `incremental` consumes the durable work items a D1 trigger appends whenever a
 run is sealed and executes up to 12 jobs; `repair` advances the historical
-cyclic cursor over at most 100 artifact IDs and executes up to 4 jobs, so lost
-notifications and new parser versions are still discovered; `replay` steps
+cyclic cursor over at most 100 artifact IDs and executes up to 28 jobs, so lost
+notifications and new parser versions are still discovered and a version bump
+re-parses history at 336 artifacts an hour; `replay` steps
 operator-created plans and executes up to 8 jobs. A large replay never delays
 newly sealed evidence. Jobs are
 unique per artifact/parser/version. Failed attempts remain in `parse_runs`.
@@ -71,8 +72,9 @@ budgets. `sweep <lane> [maxJobs]` runs a single lane. `replay <plan|start|pause|
 calls the internal replay commands; `start` performs one bounded creation step
 per call and the cron continues the rest. None of this deploys an ops Worker or
 exposes a local server. `status` reports per-lane backlog, oldest pending age,
-unprocessed work items, latest sealed versus latest parsed time and replay plan
-states, with no financial values. Failed jobs require inspecting their
+unprocessed work items, latest sealed versus latest parsed time, replay plan
+states and `laneTicks` — the latest recorded tick of each scheduled lane that
+keeps no state of its own (`docs/operations.md`) — with no financial values. Failed jobs require inspecting their
 safe error code and artifact/parser/version, repairing the cause, then explicitly
 resetting that exact job or deploying a corrected parser version.
 

@@ -23,6 +23,7 @@ import { dispatchDecisionOutbox } from "./decision-outbox.ts";
 import { cardSettlementSweep } from "./card-settlement-job.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import { cardPurchaseSweep, purchaseRecognitionEnabled } from "./card-purchase-job.ts";
+import { laneTickSummary, recordTick, type LaneTickResult } from "./lane-ticks.ts";
 import {
   publicationConsistency,
   publishBatch,
@@ -64,6 +65,14 @@ import {
   handleTerminalNotification,
   type CollectionEnv,
 } from "./collection/index.ts";
+import {
+  invocationContext,
+  invocationProbe,
+  meteredEnv,
+  platformLimitError,
+  type InvocationContext,
+} from "./invocation-probe.ts";
+import { OperationMeter } from "../../../packages/application/src/collection/index.ts";
 import { dispatchOperations } from "./operations/dispatch.ts";
 import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
 import {
@@ -71,6 +80,13 @@ import {
   rewardReadProjectionStage,
 } from "./reward-read-projection.ts";
 import { reportsEnabled, runReportJob } from "./report-job.ts";
+import {
+  IDENTITY_RUNS_PER_TICK,
+  LANE_BUDGETS,
+  LANES,
+  MAX_LANE_JOBS,
+  type Lane,
+} from "./lane-budgets.ts";
 import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identity";
 import type {
   ArtifactMeta,
@@ -86,7 +102,6 @@ import type {
 const REPORT_BASE_UNIT = "JPY";
 const REPORT_PERIMETER = "perimeter:all-visible-evidence";
 const SCAN_PAGE = 200;
-const JOBS_PER_SWEEP = 12;
 const MAX_BYTES = 16 * 1024 * 1024;
 const MAX_ATTEMPTS = 5;
 const LEASE_MS = 10 * 60 * 1000;
@@ -659,13 +674,6 @@ async function executeParseJob(
   }
 }
 
-const LANES = ["incremental", "repair", "replay"] as const;
-export type Lane = (typeof LANES)[number];
-/** Jobs executed per sweep and lane. Incremental keeps the historical
- * per-sweep budget; repair and replay are smaller so a large replay backlog
- * or a slow history scan never delays freshly sealed evidence. */
-const LANE_BUDGETS: Record<Lane, number> = { incremental: JOBS_PER_SWEEP, repair: 4, replay: 8 };
-const MAX_LANE_JOBS = 40;
 const WORK_ITEMS_PER_SWEEP = 50;
 const WORK_ITEM_PAGE = 100;
 const WORK_ITEM_PAGES_PER_SWEEP = 5;
@@ -703,6 +711,14 @@ export interface LaneSummary {
   scanned: number;
   workItems: number;
   plans: number;
+  /** The lane's job budget for this sweep. */
+  budget: number;
+  /** Jobs that ran to a parse run this sweep (`parsed + error`). */
+  executed: number;
+  /** Pending jobs of the lane that can still run after this sweep, ready or
+   * backing off; jobs out of attempts, of an undeployed parser or of a
+   * stopped replay plan are not counted. */
+  pending: number;
 }
 export interface SweepOptions {
   maxJobs?: number;
@@ -991,6 +1007,18 @@ async function maintenance(env: Env): Promise<void> {
   await registerDeployedReleases(env.DB);
 }
 
+/**
+ * Whether a job of lane ?1 can still run: attempts left (?2), a deployed
+ * parser (?4, a JSON list of name/version) and, for replay work, a running
+ * plan. Shared by the ready query, which adds the clock (?3), and the pending
+ * count, so the two cannot drift. Paused or cancelled plans stop unclaimed
+ * replay jobs only; a claimed lease finishes through the same fenced publish
+ * path as every other job.
+ */
+const RUNNABLE_JOB_SQL = `j.lane=?1 AND j.attempts<?2
+      AND EXISTS(SELECT 1 FROM json_each(?4) r WHERE json_extract(r.value,'$.name')=j.parser_name AND json_extract(r.value,'$.version')=j.parser_version)
+      AND (j.replay_plan_id IS NULL OR EXISTS(SELECT 1 FROM observation_replay_plans p WHERE p.id=j.replay_plan_id AND p.status='running'))`;
+
 async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummary> {
   const summary: LaneSummary = {
     created: 0,
@@ -1000,6 +1028,9 @@ async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummar
     scanned: 0,
     workItems: 0,
     plans: 0,
+    budget,
+    executed: 0,
+    pending: 0,
   };
   let cursor = 0;
   if (lane === "incremental") {
@@ -1020,21 +1051,13 @@ async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummar
     summary.plans = creation.plans;
     cursor = creation.cursor;
   }
-  // Paused or cancelled plans stop unclaimed replay jobs only; a claimed lease
-  // finishes through the same fenced publish path as every other job.
+  const deployed = JSON.stringify(PARSERS.map(({ name, version }) => ({ name, version })));
   const ready = await env.DB.prepare(
-    `SELECT * FROM observation_parse_jobs j WHERE j.lane=?1 AND attempts<?2 AND ((status='pending' AND available_at_ms<=?3) OR (status='running' AND lease_until_ms<=?3))
-      AND EXISTS(SELECT 1 FROM json_each(?4) r WHERE json_extract(r.value,'$.name')=j.parser_name AND json_extract(r.value,'$.version')=j.parser_version)
-      AND (j.replay_plan_id IS NULL OR EXISTS(SELECT 1 FROM observation_replay_plans p WHERE p.id=j.replay_plan_id AND p.status='running'))
+    `SELECT * FROM observation_parse_jobs j WHERE ${RUNNABLE_JOB_SQL}
+      AND ((status='pending' AND available_at_ms<=?3) OR (status='running' AND lease_until_ms<=?3))
       ORDER BY priority DESC,available_at_ms,fetch_artifact_id LIMIT ?5`,
   )
-    .bind(
-      lane,
-      MAX_ATTEMPTS,
-      Date.now(),
-      JSON.stringify(PARSERS.map(({ name, version }) => ({ name, version }))),
-      budget,
-    )
+    .bind(lane, MAX_ATTEMPTS, Date.now(), deployed, budget)
     .all<Job>();
   for (const job of ready.results) {
     const parser = PARSERS.find(
@@ -1047,10 +1070,23 @@ async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummar
     summary[await parseJob(env, job, parser)]++;
   }
   if (lane === "replay") summary.plans += await completeReplayPlans(env);
+  summary.executed = summary.parsed + summary.error;
+  // Counts only: what is left for the next ticks, so the scheduled log line
+  // shows a drain's progress. The ready query's own eligibility predicate
+  // without its clock condition: a job backing off still drains, but one out
+  // of attempts, of an undeployed parser or of a stopped plan never does and
+  // is not counted. observation_jobs_lane_ready bounds it to the lane's
+  // pending rows.
+  summary.pending =
+    (await env.DB.prepare(
+      `SELECT count(*) AS n FROM observation_parse_jobs j WHERE ${RUNNABLE_JOB_SQL} AND j.status='pending'`,
+    )
+      .bind(lane, MAX_ATTEMPTS, null, deployed)
+      .first<number>("n")) ?? 0;
   await env.DB.prepare(
     "UPDATE observation_lane_state SET cursor=?,last_sweep_at_ms=?,last_created=?,last_executed=? WHERE lane=?",
   )
-    .bind(cursor, Date.now(), summary.created, summary.parsed + summary.error, lane)
+    .bind(cursor, Date.now(), summary.created, summary.executed, lane)
     .run();
   return summary;
 }
@@ -1373,6 +1409,8 @@ async function status(env: Env): Promise<Response> {
     },
     laneState: laneState.results,
     replayPlans: plans.results,
+    // The latest tick of every lane that keeps no state of its own (0049).
+    laneTicks: await laneTickSummary(env.DB, now),
   });
 }
 
@@ -1647,11 +1685,18 @@ export interface ScheduledStages {
    * U08 shared-R2 terminal scan. Always wired like the projection: the scan
    * itself reports `skipped` while SHARED_R2_INGEST_ENABLED is off, so the
    * log shows the lane exists and is off rather than nothing at all
-   * (docs/processor.md).
+   * (docs/processor.md). It spends the invocation's registration budget,
+   * which it shares with `operations`.
    */
-  collection?: (env: Env) => Promise<object>;
+  collection?: (env: Env, context: InvocationContext) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
+  /**
+   * The card settlement candidate sweep (docs/card-settlements.md). Gated by
+   * RECONCILIATION_ENABLED like `reconcile`, but its own lane: it fails, logs
+   * and records its tick on its own (docs/processor.md §6).
+   */
+  settlements?: (env: Env) => Promise<object>;
   /**
    * Card purchase recognition (docs/economic-events.md). Absent stage, or
    * PURCHASE_RECOGNITION_ENABLED off, means the lane never runs and writes
@@ -1677,23 +1722,26 @@ export interface ScheduledStages {
   /**
    * U06/U08 operations dispatch. Reports `skipped` unless OPS_DISPATCH_ENABLED
    * is set; it runs before the decision outbox and never completes an
-   * operation merely by handing its work over (contracts/stages.json).
+   * operation merely by handing its work over (contracts/stages.json). An
+   * `import` spends the same registration budget as the scan.
    */
-  operations?: (env: Env) => Promise<object>;
+  operations?: (env: Env, context: InvocationContext) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
-  identity: (env) => identitySweep(env.DB, resolveIdentity),
+  // Sized to what the incremental and repair lanes publish per tick, so a
+  // re-parse is identified on the tick that published it unless the sweep's
+  // 200-observation cap or an older backlog defers it (IDENTITY_RUNS_PER_TICK).
+  identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
-  collection: (env) => collectionScan(collectionEnv(env)),
+  collection: (env, context) =>
+    collectionScan(collectionEnv(env), { budget: context.registration }),
   // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
-  reconcile: async (env) => ({
-    ...(await reconciliationSweep(env.DB)),
-    cardSettlements: await cardSettlementSweep(env.DB),
-  }),
+  reconcile: (env) => reconciliationSweep(env.DB),
+  settlements: (env) => cardSettlementSweep(env.DB),
   purchases: (env) => cardPurchaseSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
   rewardReadProjection: (env) => rewardReadProjectionStage(env),
@@ -1717,7 +1765,8 @@ const defaultStages: ScheduledStages = {
     dispatchDecisionOutbox(env.DB, {
       processors: { "balance-projection": balanceProjectionOutboxProcessor(env) },
     }),
-  operations: (env) => dispatchOperations(collectionEnv(env)),
+  operations: (env, context) =>
+    dispatchOperations(collectionEnv(env), { budget: context.registration }),
 };
 
 /**
@@ -1731,68 +1780,89 @@ function collectionEnv(env: Env): CollectionEnv & { OPS_DISPATCH_ENABLED?: strin
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
  * and never stops the identity projection. Log lines carry counts and safe
- * codes only, never provider values or exception text. */
+ * codes only, never provider values or exception text. The stages of one
+ * invocation share `context`: one registration budget, one count of failures
+ * that named a platform limit.
+ *
+ * The lanes that otherwise leave only that log line also record each tick in
+ * `processor_lane_ticks` (migration 0049, `src/lane-ticks.ts`): ran, skipped
+ * because the flag is off, or failed with the same safe code. A lane whose
+ * stage is not wired records nothing, and a flag that is off still logs
+ * nothing. */
 export async function runScheduled(
   env: Env,
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
+  context: InvocationContext = invocationContext(),
 ): Promise<void> {
-  const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
-    ["observation_sweep", stages.parse],
+  const reconciliation = reconciliationEnabled(env.RECONCILIATION_ENABLED);
+  // [event, stage, whether its flag lets it run this tick]
+  const lanes: [
+    string,
+    ((env: Env, context: InvocationContext) => Promise<object>) | undefined,
+    boolean,
+  ][] = [
+    ["observation_sweep", stages.parse, true],
     // U08: terminals persisted in the shared DATA bucket are registered
     // before the identity sweep, so a run found this tick can reach identity
     // and parsing on the same tick rather than waiting for the next one.
     // The stage reports itself `skipped` while SHARED_R2_INGEST_ENABLED is
     // off, like the projection lane, so an operator can see it is off.
-    ["collection_scan", stages.collection],
-    ["identity_sweep", stages.identity],
+    ["collection_scan", stages.collection, true],
+    ["identity_sweep", stages.identity, true],
     // The projection lane always runs and reports itself skipped while its
     // own flag is off (docs/balance-read-model.md).
-    ["balance_projection", stages.balanceProjection],
-    // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
-    // writes nothing new (docs/economic-events.md).
-    [
-      "reconciliation_sweep",
-      reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
-    ],
+    ["balance_projection", stages.balanceProjection, true],
+    // Off unless RECONCILIATION_ENABLED is set: a deploy with the flag off
+    // logs nothing new and records only a skipped tick
+    // (docs/economic-events.md).
+    ["reconciliation_sweep", stages.reconcile, reconciliation],
+    // Same flag, its own lane, so a failure of either sweep no longer hides
+    // the other's counts (docs/card-settlements.md).
+    ["card_settlement_sweep", stages.settlements, reconciliation],
     // Off unless PURCHASE_RECOGNITION_ENABLED is set: then adopted Vpass and
     // MyJCB usage rows become purchase/refund events, each with a rule
     // decision. Right after reconciliation, which reads the same rows as
     // candidates and writes none of these events (docs/economic-events.md).
     [
       "purchase_recognition",
-      purchaseRecognitionEnabled(env.PURCHASE_RECOGNITION_ENABLED) ? stages.purchases : undefined,
+      stages.purchases,
+      purchaseRecognitionEnabled(env.PURCHASE_RECOGNITION_ENABLED),
     ],
     // Off unless REWARD_CLAIMS_ENABLED is set, so a normal deploy promotes
     // nothing and logs nothing new (docs/rewards.md).
-    [
-      "reward_claims_sweep",
-      rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED) ? stages.rewards : undefined,
-    ],
+    ["reward_claims_sweep", stages.rewards, rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED)],
     // U16: the reward second stage reads the claims the sweep above promoted,
     // so it runs after it and before the report job. Off unless
     // REWARD_READ_PROJECTION_ENABLED is set (docs/rewards.md).
     [
       "reward_read_projection",
-      rewardReadProjectionEnabled(env.REWARD_READ_PROJECTION_ENABLED)
-        ? stages.rewardReadProjection
-        : undefined,
+      stages.rewardReadProjection,
+      rewardReadProjectionEnabled(env.REWARD_READ_PROJECTION_ENABLED),
     ],
     // Off unless REPORTS_ENABLED is set, for the same reason
     // (docs/calculation-and-reports.md).
-    ["report_job", reportsEnabled(env.REPORTS_ENABLED) ? stages.reports : undefined],
+    ["report_job", stages.reports, reportsEnabled(env.REPORTS_ENABLED)],
     // U06/U08: accepted operations are handed to their executor before the
     // outbox, so work this tick accepted can still reach it. Reports
     // `skipped` unless OPS_DISPATCH_ENABLED is set.
-    ["operation_dispatch", stages.operations],
+    ["operation_dispatch", stages.operations, true],
     // A09: the decision outbox runs last, after the projections a decision may
     // have invalidated (docs/change-lifecycle.md).
-    ["decision_outbox", stages.decisions],
+    ["decision_outbox", stages.decisions, true],
   ];
-  for (const [event, stage] of lanes) {
+  for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
+    const startedAtMs = Date.now();
+    if (!enabled) {
+      await recordTick(env.DB, event, startedAtMs, { outcome: "skipped-by-flag" }, log);
+      continue;
+    }
+    let tick: LaneTickResult;
     try {
-      log(JSON.stringify({ event, ...(await stage(env)) }));
+      const result = await stage(env, context);
+      log(JSON.stringify({ event, ...result }));
+      tick = { outcome: "ran", result };
     } catch (error) {
       const code =
         error instanceof PipelineError
@@ -1800,14 +1870,82 @@ export async function runScheduled(
           : error instanceof Error
             ? error.constructor.name
             : "unknown";
-      log(JSON.stringify({ event: `${event}_failed`, code }));
+      // Whether the platform refused the invocation at a documented limit is
+      // the one thing the probe keeps from the error; the text is dropped.
+      const limit = platformLimitError(error);
+      if (limit) context.limitErrors += 1;
+      log(JSON.stringify({ event: `${event}_failed`, code, ...(limit ? { limit: true } : {}) }));
+      tick = { outcome: "failed", code };
     }
+    await recordTick(env.DB, event, startedAtMs, tick, log);
+  }
+}
+
+/**
+ * One cron or queue invocation, metered: every binding the lanes use counts
+ * what they do, and one `invocation_budget` line reports it when the
+ * invocation ends, however it ends (issue #87, docs/operations.md).
+ */
+export async function meteredInvocation(
+  trigger: "scheduled" | "queue",
+  env: Env,
+  work: (env: Env, context: InvocationContext) => Promise<void>,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<void> {
+  const meter = new OperationMeter();
+  const context = invocationContext();
+  try {
+    await work(meteredEnv(env, meter), context);
+  } finally {
+    log(JSON.stringify(invocationProbe(trigger, meter, context)));
+  }
+}
+
+/**
+ * The queue consumer's work for one batch. Every message of the batch shares
+ * the invocation's registration budget; a message whose registration did not
+ * start because the budget was spent is retried, exactly like a retryable
+ * one, and is idempotent when it runs again.
+ */
+export async function consumeTerminalNotifications(
+  messages: readonly Pick<Message<unknown>, "body" | "ack" | "retry">[],
+  env: Env,
+  context: InvocationContext,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<void> {
+  for (const message of messages) {
+    let event: Record<string, unknown>;
+    try {
+      const result = await handleTerminalNotification(
+        collectionEnv(env),
+        { body: message.body },
+        { budget: context.registration },
+      );
+      event = { event: "collection_notification", ...result };
+      if (result.outcome === "retryable" || result.outcome === "deferred") message.retry();
+      else message.ack();
+    } catch (error) {
+      // Safe codes only: never the exception text, never a key or a value.
+      const code =
+        error instanceof PipelineError
+          ? error.message
+          : error instanceof Error
+            ? error.constructor.name
+            : "unknown";
+      const limit = platformLimitError(error);
+      if (limit) context.limitErrors += 1;
+      event = { event: "collection_notification_failed", code, ...(limit ? { limit: true } : {}) };
+      message.retry();
+    }
+    log(JSON.stringify(event));
   }
 }
 
 export default {
   async scheduled(_event: ScheduledController, env: Env): Promise<void> {
-    await runScheduled(env);
+    await meteredInvocation("scheduled", env, (metered, context) =>
+      runScheduled(metered, defaultStages, undefined, context),
+    );
   },
   /**
    * R2 event notifications for the shared DATA bucket (U08). The queue only
@@ -1815,31 +1953,14 @@ export default {
    * message that cannot be trusted is acknowledged and dropped rather than
    * retried forever — the `collection_scan` lane finds the run anyway
    * (G1-04). A registration that could not finish is retried through the
-   * queue's own retry, and is idempotent when it runs again (G1-05).
+   * queue's own retry, and is idempotent when it runs again (G1-05). One that
+   * stopped at the batch's registration budget is `pending` and acknowledged:
+   * the scan continues it on the next tick (issue #87).
    */
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
-    for (const message of batch.messages) {
-      let event: Record<string, unknown>;
-      try {
-        const result = await handleTerminalNotification(collectionEnv(env), {
-          body: message.body,
-        });
-        event = { event: "collection_notification", ...result };
-        if (result.outcome === "retryable") message.retry();
-        else message.ack();
-      } catch (error) {
-        // Safe codes only: never the exception text, never a key or a value.
-        const code =
-          error instanceof PipelineError
-            ? error.message
-            : error instanceof Error
-              ? error.constructor.name
-              : "unknown";
-        event = { event: "collection_notification_failed", code };
-        message.retry();
-      }
-      console.log(JSON.stringify(event));
-    }
+    await meteredInvocation("queue", env, (metered, context) =>
+      consumeTerminalNotifications(batch.messages, metered, context),
+    );
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);

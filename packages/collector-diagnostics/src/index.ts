@@ -110,6 +110,7 @@ const SAFE_CODES = new Set([
   "credit-ledger-headers",
   "credit-ledger-item-cell",
   "credit-ledger-cell-count",
+  "credit-statement-state",
   "collect-debit",
 ]);
 
