@@ -164,11 +164,14 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 
 月の明細状態はexport linkの有無ではなく、page自身から決める（`src/parsers.ts`の`creditStatementState`）。調査したconnectionにはどの月にもexport linkがないため、以前の「`detailMonth<=1`でexportなしなら`unconfirmed`」という規則は、position 1の締め済み明細を`unconfirmed`と記録していた。
 
+- `detailMonth=0`: 常に`unconfirmed`。h1があれば停止する
 - `<h1>カードご利用代金明細(確定分)</h1>`がちょうど一つあり、ledger headerの金額labelが`今回のお支払い金額`またはなし: `confirmed`
-- h1がなく、金額labelが`ご利用金額`: `unconfirmed`
-- h1もledgerもない: `unknown`（ledger artifactは作らない）
-- `detailMonth=0`: 常に`unconfirmed`
-- それ以外は`credit-statement-state`で停止する: h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と`ご利用金額`、h1なしの`今回のお支払い金額`、状態を示さないpage上のledger、確定を示すposition 0、確定明細でないpageのexport link。停止時のlogにはh1の個数とlabel codeだけを出す。
+- h1がなく、ledgerがない、またはledgerに行がない: `unknown`（ledger artifactは作らない）
+- h1がなく、`ご利用金額`の行がある: position 1は`unconfirmed`、position 2以降は`unknown`
+- h1がなく、`今回のお支払い金額`または金額labelなしの行がある: position 1は停止、position 2以降は`unknown`
+- page自身の矛盾は全positionで`credit-statement-state`停止: h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と`ご利用金額`。確定明細でないpageのexport linkも停止する。
+
+position 2以降を停止にしないのは、productionのposition 7と8がh1のない行0件のledgerを持つためである（`docs/sources/myjcb.md`の「明細状態の判定」）。停止時と`unknown`時のlog（`myjcb-credit-statement-state`／`myjcb-credit-statement-unstated`）にはh1の個数、ledger数、行数、label codeだけを出す。
 
 行を持つledgerは、状態に対応するheader一式（`ご利用日`、`ご利用先など`、`支払区分`、`今回のお支払い金額`または`ご利用金額`）をheadに表示していなければならない（`credit-ledger-headers`）。これにより、ledger JSONの`headers`はpageで確認した事実になる。確定ledgerはexpandedの`ご利用金額`を、未確定ledgerは`今回のお支払い金額`を読む。
 
@@ -227,7 +230,7 @@ Processorの登録の冪等性はこのoverlap問題を解決しない。同じr
 
 ## synthetic test
 
-`test/fixtures`は架空merchant・架空額・架空token/card番号だけを持つ手書きHTMLであり、MyJCB/Okura/mnieのHTMLをcopyしていない。testはroute allowlist、cross-origin/unknown method拒否、cookie domain/path、card/month parser、token/card番号redactionを検証する。`test/credit-statement-state.test.ts`は、export linkのない`(確定分)` pageを`confirmed`、position 0と未確定header pageを`unconfirmed`とすること、h1とheaderの矛盾で`credit-statement-state`停止になることを、架空pageと`collectCredit`の架空clientで検証する。
+`test/fixtures`は架空merchant・架空額・架空token/card番号だけを持つ手書きHTMLであり、MyJCB/Okura/mnieのHTMLをcopyしていない。testはroute allowlist、cross-origin/unknown method拒否、cookie domain/path、card/month parser、token/card番号redactionを検証する。`test/credit-statement-state.test.ts`は、export linkのない`(確定分)` pageを`confirmed`、position 0と未確定header pageを`unconfirmed`とすること、h1とheaderの矛盾で`credit-statement-state`停止になること、h1のない古いpageが停止せず`unknown`になりledgerを作らないことを、架空pageと`collectCredit`の架空clientで検証する。
 
 ## public prior art boundary
 

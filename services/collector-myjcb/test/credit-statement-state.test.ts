@@ -84,6 +84,8 @@ describe("creditStatementState", () => {
   test("month 0 and an unconfirmed-header page without the heading are unconfirmed", () => {
     expect(creditStatementState(mutable, 0)).toBe("unconfirmed");
     expect(creditStatementState(mutable, 1)).toBe("unconfirmed");
+    // An older position cannot be the mutable month: its page is kept as evidence only.
+    expect(creditStatementState(mutable, 2)).toBe("unknown");
     // Month 0 stays unconfirmed even when its empty ledger shows no amount label.
     expect(creditStatementState(page({ head: "ご利用日 ご利用先など" }), 0)).toBe("unconfirmed");
     // A page with neither the heading nor a ledger states nothing, as before.
@@ -102,8 +104,8 @@ describe("creditStatementState", () => {
       [page({ headings: [CONFIRMED_STATEMENT_HEADING], head: `${CONFIRMED_HEAD} ご利用金額` }), 1],
       // Month 0 stating a closed statement.
       [page({ headings: [CONFIRMED_STATEMENT_HEADING] }), 0],
-      // A ledger whose page states no state at all.
-      [page({ head: "ご利用日 ご利用先など" }), 2],
+      // Position-1 rows whose page states no state at all.
+      [page({ head: "ご利用日 ご利用先など", rows: [confirmedRow] }), 1],
     ] as const)
       expect(stopCode(() => creditStatementState(html, detailMonth))).toBe(
         "credit-statement-state",
@@ -111,9 +113,31 @@ describe("creditStatementState", () => {
     // A heading that only mentions the state is not the heading.
     expect(
       stopCode(() =>
-        creditStatementState(page({ headings: ["カードご利用代金明細(確定分)のご案内"] }), 1),
+        creditStatementState(
+          page({ headings: ["カードご利用代金明細(確定分)のご案内"], rows: [confirmedRow] }),
+          1,
+        ),
       ),
     ).toBe("credit-statement-state");
+  });
+
+  test("an older page without the heading is unknown, never a stop", () => {
+    const emptyRow =
+      '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はありません</div></div></div>';
+    // An empty ledger without the heading, as older closed months show it, at
+    // any position but 0, whatever its header label.
+    for (const head of [UNCONFIRMED_HEAD, CONFIRMED_HEAD, "ご利用日 ご利用先など"])
+      for (const detailMonth of [1, 7])
+        expect(creditStatementState(page({ head, rows: [emptyRow] }), detailMonth)).toBe("unknown");
+    // Rows without the heading at an older position: unknown, not a stop.
+    expect(creditStatementState(page({ rows: [confirmedRow] }), 7)).toBe("unknown");
+    expect(
+      creditStatementState(page({ head: "ご利用日 ご利用先など", rows: [confirmedRow] }), 7),
+    ).toBe("unknown");
+    // Month 0 keeps its empty ledger as the unconfirmed snapshot.
+    expect(creditStatementState(page({ head: UNCONFIRMED_HEAD, rows: [emptyRow] }), 0)).toBe(
+      "unconfirmed",
+    );
   });
 
   test("a ledger with rows must display its state's whole header set", () => {
@@ -208,6 +232,30 @@ describe("collectCredit", () => {
         .filter((artifact) => artifact.filename.endsWith("-01.html"))
         .map((artifact) => artifact.statementState),
     ).toEqual(["unconfirmed"]);
+  });
+
+  test("an older empty page without the heading is kept as unknown evidence without a ledger", async () => {
+    const olderEmpty = page({
+      head: UNCONFIRMED_HEAD,
+      rows: [
+        '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はありません</div></div></div>',
+      ],
+    });
+    const { artifacts } = await collectCredit(
+      client({ 0: mutable, 1: closedWithoutExports, 7: olderEmpty }),
+      "x",
+    );
+    const states = Object.fromEntries(
+      artifacts.map((artifact) => [artifact.filename, artifact.statementState ?? null]),
+    );
+    expect(states["credit-detail-07.html"]).toBe("unknown");
+    expect(states["credit-ledger-07.json"]).toBeUndefined();
+    // The only unconfirmed capture of the run stays position 0.
+    expect(
+      artifacts
+        .filter((artifact) => artifact.statementState === "unconfirmed")
+        .map((artifact) => artifact.filename),
+    ).toEqual(["credit-detail-00.html", "credit-ledger-00.json"]);
   });
 
   test("a page whose heading and headers disagree stops the collection", async () => {

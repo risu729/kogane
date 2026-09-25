@@ -162,6 +162,11 @@ describe("the statement state is the page's own (1.1.0)", () => {
     expect(parse(statementPage([], [UNCONFIRMED_HEAD]), misStated).warnings).toEqual([
       "statement_total_not_confirmed",
     ]);
+    // The collector's `unknown` for a page without the heading agrees.
+    expect(
+      parse(statementPage([], [UNCONFIRMED_HEAD]), { ...misStated, statementState: "unknown" })
+        .warnings,
+    ).toEqual(["statement_total_not_confirmed"]);
     // A confirmed header without the heading proves nothing more than before.
     expect(parse(statementPage([], [CONFIRMED_HEAD])).observations).toHaveLength(0);
     expect(parse(statementPage(["カードご利用代金明細(未確定分)"], [])).observations).toHaveLength(

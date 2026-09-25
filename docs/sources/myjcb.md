@@ -356,23 +356,28 @@ checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査し�
 
 collectorは状態をpage自身から決める（`services/collector-myjcb/src/parsers.ts`の`creditStatementState`）。pageは状態を二か所で示す。一つは`カードご利用代金明細(確定分)`のh1で、もう一つはledger headerの金額label（確定は`今回のお支払い金額`、未確定は`ご利用金額`。parserの`CONFIRMED_HEADERS`／`UNCONFIRMED_HEADERS`の4番目）である。
 
-| `(確定分)` h1 | ledger headerの金額label     | 記録する状態                          |
-| ------------- | ---------------------------- | ------------------------------------- |
-| 1個           | `今回のお支払い金額`／なし   | `confirmed`                           |
-| 1個           | `ご利用金額`                 | 停止（`credit-statement-state`）      |
-| なし          | `ご利用金額`                 | `unconfirmed`                         |
-| なし          | `今回のお支払い金額`         | 停止                                  |
-| なし          | なし                         | ledgerがなければ`unknown`、あれば停止 |
-| 2個以上       | 任意                         | 停止                                  |
-| 任意          | 両方、またはledger間で不一致 | 停止                                  |
+`(確定分)` h1だけが「締め済み明細である」というpage自身の表明である。
 
-`detailMonth=0`は常に`unconfirmed`である。position 0のpageが確定を示した場合も停止する。export linkは状態の根拠にしない。ただし、確定明細でないpageにexport linkがあれば停止する。exportは`confirmed`として記録されるためである。行を持つledgerのheaderは、その状態のheader一式（4 label）を全部表示していなければならない。これにより、ledger artifactの`headers`はpageで確認済みの事実になる。停止時のlogにはh1の個数とlabel codeだけを出し、page本文は出さない。修正後の最初のrunから、position 1は`confirmed`として保存される。そのledgerは、未確定labelでは読めなかった`ご利用金額`も保持する。
+| `(確定分)` h1 | ledger                                          | 記録する状態                                         |
+| ------------- | ----------------------------------------------- | ---------------------------------------------------- |
+| 1個           | 金額labelが`今回のお支払い金額`／なし           | `confirmed`                                          |
+| 1個           | 金額labelが`ご利用金額`                         | 停止（`credit-statement-state`）                     |
+| なし          | ledgerなし                                      | `unknown`                                            |
+| なし          | 行のないledger（labelは問わない）               | `unknown`（ledger artifactは作らない）               |
+| なし          | 行があり、金額labelが`ご利用金額`               | position 1は`unconfirmed`、position 2以降は`unknown` |
+| なし          | 行があり、金額labelが`今回のお支払い金額`／なし | position 1は停止、position 2以降は`unknown`          |
+| 2個以上       | 任意                                            | 停止                                                 |
+| 任意          | 一つのheaderに両label、またはledger間で不一致   | 停止                                                 |
+
+`detailMonth=0`は常に`unconfirmed`である。position 0のpageが確定を示した場合は停止する。`unknown`のpageはHTMLだけをevidenceとして保存し、ledger artifactを作らない。position 2以降でh1のないpageを停止にしない理由は、production evidenceにある（read-only、件数だけの集計で、値は記録していない）。各runで取得したposition 7と8は、h1のない行0件のledgerを持っていた（manifestは`confirmed`、`myjcb-credit-statement-total@1.0.1`は12 runすべてで`statement_total_not_confirmed`）。これらを停止にすれば日次runが毎回止まる。`unconfirmed`として保存すれば、同じrunでposition 0より後に記録されるため、connectionで一つの未確定snapshot slotを空のcaptureが占め、position 0の保留行がcurrentでなくなる。締め済み明細はすべてposition 1を通り、そこでh1を持つ（production evidenceでは12 run中12 run）。そのためposition 1では、h1なしで確定labelの行があるpageを停止にする。一方、古いpage一つで日次runを止めることはしない。停止または`unknown`のlogにはh1の個数、ledger数、行数、label codeだけを出し、page本文は出さない。
+
+export linkは状態の根拠にしない。ただし、確定明細でないpageにexport linkがあれば停止する。exportは`confirmed`として記録されるためである。行を持つledgerのheaderは、その状態のheader一式（4 label）を全部表示していなければならない。これにより、ledger artifactの`headers`はpageで確認済みの事実になる。修正後の最初のrunから、position 1は`confirmed`として保存される。そのledgerは、未確定labelでは読めなかった`ご利用金額`も保持する。
 
 既存captureのraw evidenceとmanifestは書き換えない。解釈はversion付きparserで直す。
 
-- 明細total（`myjcb-credit-statement-total@1.1.0`）: 状態をpageから読み、manifestの状態は照合用として`_kogane.manifestStatementState`に記録する（不一致時はwarning `statement_state_differs_from_manifest`）。失敗させるのはpage自身が矛盾する場合（h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と未確定header）だけで、manifestだけが違う場合は失敗させない。h1のないpageは1.0.1と同じくtotalを出さない。1.0.1で`parser_rejected`だったposition-1 pageは、repair laneの再parseまたはbounded replayで、正確な支払日を持つtotalを公開する。1.0.1のerror runは履歴として残る。
+- 明細total（`myjcb-credit-statement-total@1.1.0`）: 状態をpageから読み、manifestの状態は照合用として`_kogane.manifestStatementState`に記録する。manifestとpageで「確定かどうか」が異なる場合はwarning `statement_state_differs_from_manifest`を出す（`unconfirmed`と`unknown`の違いはwarningにしない）。失敗させるのはpage自身が矛盾する場合（h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と未確定header）だけで、manifestだけが違う場合は失敗させない。h1のないpageは1.0.1と同じくtotalを出さない。1.0.1で`parser_rejected`だったposition-1 pageは、repair laneの再parseまたはbounded replayで、正確な支払日を持つtotalを公開する。1.0.1のerror runは履歴として残る。
 - ledger（`myjcb-credit-ledger@1.1.2`）: 同じmoduleのdigest変更によるversion bumpだけで、挙動は変えない。parserは一artifactしか見ない。`credit-ledger-NN.json`の`state`はcollectorの判断であり、`headers`もその判断から書かれていて、pageの証拠を含まない。確定pageを未確定labelで読んだため、`ご利用金額`も保存されていない。さらにread modelのsnapshot区分は、manifestが書いたappend-onlyの`observation_artifact_metadata.statement_state`を使う。したがってparserで行の状態を直すことはできない。既存のposition-1行は、当時collectorが述べた記録として`unconfirmed`のまま残る。
-- 既存行は、修正後collectorの最初の成功runでcurrentでなくなる。connectionの未確定captureは一つのsnapshot slotを共有し、その最新は以後常にposition 0になる。同じ明細はposition 1で`confirmed`として別slot（`detailMonth-1`）に再取得される。以前はposition 0と1が同じslotを奪い合い、片方しかcurrentにならなかった。purchase laneはcurrentでなくなった`authorized` eventを`unknown`へretireし、確定行を`captured`として新しいeventで認識する。状態はfingerprintとexternal idに含まれるため、同じeventのreviseにはならない。
+- 既存行は、修正後collectorの最初の成功runでcurrentでなくなる。connectionの未確定captureは一つのsnapshot slotを共有し、その最新は以後position 0になる（例外は、position 1がh1なしで`ご利用金額`の行を示す場合だけで、production evidenceでは観測していない）。同じ明細はposition 1で`confirmed`として別slot（`detailMonth-1`）に再取得される。以前はposition 0と1が同じslotを奪い合い、片方しかcurrentにならなかった。purchase laneはcurrentでなくなった`authorized` eventを`unknown`へretireし、確定行を`captured`として新しいeventで認識する。状態はfingerprintとexternal idに含まれるため、同じeventのreviseにはならない。retireされた`unknown` eventはlegを持たないので、同じ購入が二重に数えられることはない。
 
 release noteと再parse手順は`docs/observations.md`の「MyJCB statement state from the page (statement parser 1.1.0)」にある。
 

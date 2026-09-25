@@ -164,14 +164,33 @@ The collector now reads the state from the page (`creditStatementState` in
 statement has exactly one `(確定分)` heading, and each ledger header shows the
 amount label of one state, `今回のお支払い金額` for confirmed and `ご利用金額`
 for unconfirmed (the fourth labels of `CONFIRMED_HEADERS` and
-`UNCONFIRMED_HEADERS`). The heading with a confirmed or absent amount label is
-`confirmed`. No heading with an unconfirmed label is `unconfirmed`. A page with
-neither and no ledger is `unknown`, as before. `detailMonth` 0 is always
-`unconfirmed`. Every other combination stops the collection with
-`credit-statement-state`: two headings, both labels in one header, ledgers that
-disagree, the heading over an unconfirmed header, a confirmed header without the
-heading, a ledger on a page that states no state, a position-0 page that states
-it is closed, or export links on a page that is not a confirmed statement. A
+`UNCONFIRMED_HEADERS`). Only the heading states that a page is closed.
+`detailMonth` 0 is always `unconfirmed`, and stops the collection if it shows
+the heading. Elsewhere, the heading with a confirmed or absent amount label is
+`confirmed`. Without the heading, a page with no ledger, or with a ledger that
+has no rows, is `unknown` and gets no ledger artifact. Rows under the
+unconfirmed label are `unconfirmed` at position 1 and `unknown` at an older
+position, which cannot be the mutable month. Rows under a confirmed or absent
+label stop the collection at position 1 and are `unknown` at an older
+position. A page that contradicts itself stops the collection with
+`credit-statement-state` at any position: two headings, both labels in one
+header, ledgers that disagree, or the heading over an unconfirmed header. So do
+export links on a page that is not a confirmed statement.
+
+Older positions do not stop the run because of production evidence (counts
+only, read only). Every run captured positions 7 and 8 with a ledger of zero
+rows and no heading; their manifests say `confirmed`, and
+`myjcb-credit-statement-total@1.0.1` answered `statement_total_not_confirmed`
+for all 12 captures of each. Stopping on them would stop every daily run.
+Recording them as `unconfirmed` would be worse: they are recorded after
+position 0 in the same run, so an empty capture would become the newest in the
+connection's one unconfirmed snapshot slot and position 0's pending rows would
+stop being current. Every closed statement passes through position 1, where
+all 12 production captures show the heading, so position 1 keeps the stop for
+rows that claim a statement the page does not state. The stop log
+(`myjcb-credit-statement-state`) and the `unknown` log
+(`myjcb-credit-statement-unstated`) carry the detail month, the heading,
+ledger and row counts and label codes only. A
 ledger with rows must also display every label of its state's header set, so
 the `headers` a ledger artifact stores are now checked against the page. From
 the first run after the deploy, position 1 is stored as `confirmed`, and its
@@ -181,8 +200,10 @@ Version 1.1.0 of the statement parser applies the same reading to stored pages.
 The collector manifest's state, which reaches the parser as artifact metadata,
 is no longer an input. It is a cross-check: the total records it as
 `_kogane.manifestStatementState` next to `_kogane.statementState` and
-`_kogane.statementStateBasis: "page-heading"`, and a disagreement adds the
-warning `statement_state_differs_from_manifest`. The parse fails only when the
+`_kogane.statementStateBasis: "page-heading"`, and a disagreement on whether
+the page is confirmed adds the warning `statement_state_differs_from_manifest`
+(`unconfirmed` against `unknown` is not one: the collector records an older
+page without the heading as `unknown` whatever its ledger label). The parse fails only when the
 page contradicts itself: more than one heading, a header with both amount
 labels, ledgers that disagree, or the heading over an unconfirmed header. A
 position-0 page still never yields a total. A confirmed header without the
@@ -217,15 +238,20 @@ The stored rows therefore remain `unconfirmed` observations, the record of what
 the collector said at the time. They stop being current on the first successful
 run of the fixed collector. Every unconfirmed ledger capture of a connection
 shares one snapshot slot, `(connection, unconfirmed)`, and from then on its
-newest capture is always position 0. The same statement is captured again at
+newest capture is position 0, unless position 1 shows unconfirmed rows without
+the heading, which no production capture has. The same statement is captured again at
 position 1 in its own slot, `(confirmed, detailMonth-1)`. Until then,
 position 0 and position 1 of one run competed for the unconfirmed slot, so only
 one of them was current. After the fix, position 0's pending rows are current
 beside the posted ones. On the next ticks the purchase lane's retire pass moves
 each `authorized` event whose row left the current view to `unknown`
-(`provider_status_absent`). The recognition pass then recognises the confirmed
-rows, under their `confirmed` external ids, as `captured` purchases. These are
-new events, for the reason in point 3. A collector run that stops on
+(`provider_status_absent`), a revision with no leg. The recognition pass then
+recognises the confirmed rows, under their `confirmed` external ids, as
+`captured` purchases. These are new events, for the reason in point 3, and the
+captured total counts each purchase once: the retired event has no leg, and
+`authorized` and `captured` are never added together. The candidate pass may
+propose linking a retired pending event to its captured event for review, as
+for any pending row that left the view. A collector run that stops on
 `credit-statement-state` stores nothing for the connection, so the old captures
 stay current until a run succeeds.
 
@@ -237,10 +263,15 @@ scan, as for [Vpass 1.2.0](#vpass-page-qualified-external-ids-statement-parser-1
 Where 1.0.1 left a position-1 page with only an `error` run (job error code
 `parser_rejected`), a successful 1.1.0 parse publishes its total at the exact
 payment date. `card_statement_facts` and card settlement matching read that
-total by the page's own period. The 1.0.1 error runs stay as history. The 1.1.2 re-parses publish identical observations, and the purchase
-lane only re-anchors its events to the new parse runs because their content
-digests do not change. To drain the statement pages sooner, run a bounded replay
-without `targetRelease`:
+total by the page's own period. The 1.0.1 error runs stay as history. The 1.1.2 re-parses publish identical
+observations, and the purchase lane only re-anchors its events to the new parse
+runs because their content digests do not change. The backlog is small: at the
+time of writing production held 132 credit-detail pages, 72 ledgers, 12
+past-month responses and 24 menu and discovery artifacts for MyJCB, about 240
+jobs, which the repair lane (at most 4 jobs per sweep, shared by every source)
+drains over some 60 sweeps. To drain the statement pages sooner, run a bounded
+replay without `targetRelease`, through the internal helper and not the public
+`POST /api/ops/v1/replays`, for the reason given under Vpass 1.2.0:
 
 ```sh
 mise run //services/processor:ops replay plan '{"source":"myjcb","dataset":"credit-detail","parser":"myjcb-credit-statement-total","version":"1.1.0","reason":"MyJCB statement state from the page"}'

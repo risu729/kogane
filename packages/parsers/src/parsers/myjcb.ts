@@ -385,9 +385,12 @@ export const myJcbCreditStatement: Parser = {
     const manifestState = artifact.statementState ?? null;
     // The manifest alone disagreeing never fails the parse: it is the
     // collector's earlier reading of these same bytes. People see it here,
-    // and a total records it in `_kogane.manifestStatementState`.
+    // and a total records it in `_kogane.manifestStatementState`. Only the
+    // decision this parser makes is compared, confirmed or not: the collector
+    // records an older page without the heading as `unknown` even when its
+    // ledger header reads unconfirmed, and that is agreement.
     const stateWarnings =
-      manifestState !== null && manifestState !== pageState
+      manifestState !== null && (manifestState === "confirmed") !== (pageState === "confirmed")
         ? ["statement_state_differs_from_manifest"]
         : [];
     if (pageState !== "confirmed")

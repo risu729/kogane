@@ -284,18 +284,29 @@ export function parseCreditLedger(
  * The page states its state twice: a closed statement carries exactly one
  * `CONFIRMED_STATEMENT_HEADING` h1, and every ledger header displays the
  * amount label of one state (`今回のお支払い金額` confirmed, `ご利用金額`
- * unconfirmed). The two must agree:
+ * unconfirmed). The heading is the only statement that a page is closed:
  *
- * - the heading and a confirmed (or no) amount header: `confirmed`;
- * - no heading and an unconfirmed amount header: `unconfirmed`;
- * - neither, on a page without a ledger: `unknown`, as before;
- * - anything else stops the collection (`credit-statement-state`): more than
- *   one heading, a header with both labels, ledgers that disagree, the heading
- *   over an unconfirmed header, a confirmed header without the heading, or a
- *   ledger whose page states no state at all.
+ * - `detailMonth=0` is the mutable current month and is always `unconfirmed`;
+ *   a position-0 page that shows the heading stops the collection;
+ * - the heading, with a confirmed (or no) amount header: `confirmed`;
+ * - no heading and no ledger: `unknown`, as before;
+ * - no heading and a ledger without rows: `unknown`. Production captures of
+ *   older closed months (positions 7 and 8 of the surveyed connection) are
+ *   exactly this; recording them as `unconfirmed` would put an empty capture
+ *   in the connection's one unconfirmed snapshot slot after position 0;
+ * - no heading and rows under the unconfirmed header: `unconfirmed` at
+ *   position 1 (a closed month not yet confirmed), `unknown` at an older
+ *   position, which cannot be the mutable month;
+ * - no heading and rows under a confirmed or no amount header: the rows claim
+ *   a statement the page does not state. Position 1, which every closed
+ *   statement passes through and where production always showed the heading,
+ *   stops the collection; an older position is `unknown`, so one old page
+ *   never halts the daily run.
  *
- * `detailMonth=0` is the mutable current month and is always `unconfirmed`;
- * a position-0 page that states it is confirmed stops the collection too.
+ * `unknown` stores the page as evidence and no ledger artifact. A page that
+ * contradicts itself stops the collection at every position
+ * (`credit-statement-state`): more than one heading, a header with both
+ * labels, ledgers that disagree, or the heading over an unconfirmed header.
  */
 export function creditStatementState(html: string, detailMonth: number): CreditStatementState {
   const document = parse(html);
@@ -305,6 +316,7 @@ export function creditStatementState(html: string, detailMonth: number): CreditS
       element.tagName === "h1" && compactText(nodeText(element)) === CONFIRMED_STATEMENT_HEADING,
   ).length;
   const ledgers = findElements(document, (element) => hasClass(element, "detail-list-01"));
+  const rowCount = ledgers.reduce((count, ledger) => count + ledgerRows(ledger).length, 0);
   const amountHeaders = new Set(
     ledgers.flatMap((ledger): ("confirmed" | "unconfirmed" | "both")[] => {
       const header = findElements(ledger, (element) => hasClass(element, "head"))[0];
@@ -315,42 +327,68 @@ export function creditStatementState(html: string, detailMonth: number): CreditS
       return confirmed ? ["confirmed"] : unconfirmed ? ["unconfirmed"] : [];
     }),
   );
-  const pageState: CreditStatementState | "conflict" =
-    headings > 1 || amountHeaders.has("both") || amountHeaders.size > 1
-      ? "conflict"
-      : headings === 1
-        ? amountHeaders.has("unconfirmed")
-          ? "conflict"
-          : "confirmed"
-        : amountHeaders.has("confirmed")
-          ? "conflict"
-          : amountHeaders.has("unconfirmed")
-            ? "unconfirmed"
-            : "unknown";
+  // Counts and label codes only: the page's text never reaches the log.
+  const shape = (event: string) =>
+    JSON.stringify({
+      event,
+      detailMonth,
+      confirmedHeadings: headings,
+      ledgerCount: ledgers.length,
+      rowCount,
+      amountHeaders: [...amountHeaders].sort(),
+    });
   const stop = (message: string): never => {
-    // Counts and label codes only: the page's text never reaches the log.
-    console.warn(
-      JSON.stringify({
-        event: "myjcb-credit-statement-state",
-        detailMonth,
-        confirmedHeadings: headings,
-        ledgerCount: ledgers.length,
-        amountHeaders: [...amountHeaders].sort(),
-      }),
-    );
+    console.warn(shape("myjcb-credit-statement-state"));
     throw new StopConditionError(message, "credit-statement-state");
   };
-  if (pageState === "conflict") {
+  const unstated = (): "unknown" => {
+    console.warn(shape("myjcb-credit-statement-unstated"));
+    return "unknown";
+  };
+  if (
+    headings > 1 ||
+    amountHeaders.has("both") ||
+    amountHeaders.size > 1 ||
+    (headings === 1 && amountHeaders.has("unconfirmed"))
+  ) {
     return stop("MyJCB credit detail heading and ledger headers disagree on the statement state");
   }
   if (detailMonth === 0) {
-    if (pageState === "confirmed") return stop("MyJCB detailMonth 0 stated a confirmed statement");
+    if (headings === 1) return stop("MyJCB detailMonth 0 stated a confirmed statement");
     return "unconfirmed";
   }
-  if (pageState === "unknown" && ledgers.length > 0) {
-    return stop("MyJCB credit detail ledger has no stated statement state");
+  if (headings === 1) return "confirmed";
+  if (ledgers.length === 0) return "unknown";
+  if (rowCount === 0) return unstated();
+  if (amountHeaders.has("unconfirmed")) return detailMonth === 1 ? "unconfirmed" : unstated();
+  if (detailMonth === 1) {
+    return stop("MyJCB credit detail ledger rows have no stated statement state");
   }
-  return pageState;
+  return unstated();
+}
+
+const EMPTY_LEDGER_MARKER = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u;
+
+/**
+ * The `.content` rows of a ledger, without the structurally known empty-ledger
+ * row (one `w-100per` cell under the empty marker). A row of any other shape
+ * counts, so `parseCreditLedger` still stops on it.
+ */
+function ledgerRows(ledger: HtmlElement): HtmlElement[] {
+  const hasEmptyMarker = EMPTY_LEDGER_MARKER.test(nodeText(ledger));
+  return directElementChildren(ledger)
+    .filter((element) => hasClass(element, "content"))
+    .filter((row) => !(hasEmptyMarker && isEmptyLedgerRow(row)));
+}
+
+function isEmptyLedgerRow(row: HtmlElement): boolean {
+  const itemCell = findElements(row, (element) => hasClass(element, "item-cell"))[0];
+  if (!itemCell) return false;
+  const children = directElementChildren(itemCell);
+  return (
+    children.filter((element) => hasClass(element, "cell")).length === 1 &&
+    children.some((element) => hasClass(element, "w-100per"))
+  );
 }
 
 function safeClassNames(element: HtmlElement): string[] {
