@@ -150,6 +150,160 @@ had, with 1.1.0 ids, so every `failed` count there needs a look.
 `packages/parsers/test/vpass-page-identity.test.ts` pins the unchanged
 first-page ids and the new later-page ids for both families.
 
+## MyJCB statement state from the page (statement parser 1.1.0)
+
+`services/collector-myjcb` decided a credit month's statement state from its
+export links: `detailMonth` 0, and 1 without export links, was `unconfirmed`,
+and every other month with a ledger or export links was `confirmed`. The
+connection surveyed in
+[`docs/sources/myjcb.md`](sources/myjcb.md) offers no export links in any
+month, so position 1, the newest closed statement, was always recorded as
+`unconfirmed`. Its page says otherwise: in aggregate production evidence (read
+only, no values recorded) every `credit-detail-01.html` capture carries exactly
+one `<h1>カードご利用代金明細(確定分)</h1>`. Two things followed from the
+manifest's `unconfirmed`. `myjcb-credit-statement-total@1.0.1` threw
+`myjcb statement confirmation conflicts` on every position-1 page, so each one
+is recorded as `parser_rejected`. And `myjcb-credit-ledger` read its rows with
+status `unconfirmed`, which card purchase recognition treats as `authorized`,
+although they are posted charges of a closed statement.
+
+The collector now reads the state from the page (`creditStatementState` in
+`services/collector-myjcb/src/parsers.ts`). The page states it twice: a closed
+statement has exactly one `(確定分)` heading, and each ledger header shows the
+amount label of one state, `今回のお支払い金額` for confirmed and `ご利用金額`
+for unconfirmed (the fourth labels of `CONFIRMED_HEADERS` and
+`UNCONFIRMED_HEADERS`). Only the heading states that a page is closed.
+`detailMonth` 0 is always `unconfirmed`, and stops the collection if it shows
+the heading. Elsewhere, the heading with a confirmed or absent amount label is
+`confirmed`. Without the heading, a page with no ledger, or with a ledger that
+has no rows, is `unknown` and gets no ledger artifact. Rows under the
+unconfirmed label are `unconfirmed` at position 1 and `unknown` at an older
+position, which cannot be the mutable month. Rows under a confirmed or absent
+label stop the collection at position 1 and are `unknown` at an older
+position. A page that contradicts itself stops the collection with
+`credit-statement-state` at any position: two headings, both labels in one
+header, ledgers that disagree, or the heading over an unconfirmed header. So do
+export links on a page that is not a confirmed statement.
+
+Older positions do not stop the run because of production evidence (counts
+only, read only). Every run captured positions 7 and 8 with a ledger of zero
+rows and no heading; their manifests say `confirmed`, and
+`myjcb-credit-statement-total@1.0.1` answered `statement_total_not_confirmed`
+for all 12 captures of each. Stopping on them would stop every daily run.
+Recording them as `unconfirmed` would be worse: they are recorded after
+position 0 in the same run, so an empty capture would become the newest in the
+connection's one unconfirmed snapshot slot and position 0's pending rows would
+stop being current. Every closed statement passes through position 1, where
+all 12 production captures show the heading, so position 1 keeps the stop for
+rows that claim a statement the page does not state. The stop log
+(`myjcb-credit-statement-state`) and the `unknown` log
+(`myjcb-credit-statement-unstated`) carry the detail month, the heading,
+ledger and row counts and label codes only. A
+ledger with rows must also display every label of its state's header set, so
+the `headers` a ledger artifact stores are now checked against the page. From
+the first run after the deploy, position 1 is stored as `confirmed`, and its
+ledger keeps the `ご利用金額` that the unconfirmed labels never read.
+
+Version 1.1.0 of the statement parser applies the same reading to stored pages.
+Both read the page through one function, `readMyJcbStatementPage` in
+`packages/domain/src/myjcb-statement-page.ts`, so they count headings, ledger
+rows and amount labels the same way; only the collector adds position rules. A
+page without the heading whose ledger has no rows is `unknown` to both,
+whatever its header label.
+The collector manifest's state, which reaches the parser as artifact metadata,
+is no longer an input. It is a cross-check: the total records it as
+`_kogane.manifestStatementState` next to `_kogane.statementState` and
+`_kogane.statementStateBasis: "page-heading"`, and a disagreement on whether
+the page is confirmed adds the warning `statement_state_differs_from_manifest`
+(`unconfirmed` against `unknown` is not one: the collector records an older
+page without the heading as `unknown` whatever its ledger label). The parse fails only when the
+page contradicts itself: more than one heading, a header with both amount
+labels, ledgers that disagree, or the heading over an unconfirmed header. A
+position-0 page still never yields a total. A confirmed header without the
+heading yields no total, as in 1.0.1, so no page gains a total without the
+heading. A page that 1.0.1 read a total from is read the same way, unless its
+own ledger header contradicts its heading. The values are unchanged, and
+`_kogane` gains the two new keys. `myjcb.ts` holds all four MyJCB
+parsers, so the module digest changed for each of them. The ledger, past-month
+and evidence-boundary parsers are bumped to 1.1.2 without any change in
+behaviour.
+
+The ledger parser does not re-state the stored position-1 rows, and it cannot.
+There are three reasons:
+
+1. A parser sees one artifact (see [the parser contract](#the-parser-contract)),
+   and `credit-ledger-NN.json` holds no page evidence. Its `state` is the
+   collector's decision. Its `headers` were written from that decision, not read
+   from the page. On a closed page read as unconfirmed, the collector looked up
+   the unconfirmed expanded labels, so the page's `ご利用金額` was never copied.
+   Nothing in those bytes tells a closed statement from a mutable one.
+   Inferring `confirmed` from a label that is missing would be a guess.
+2. A row the parser re-stated would still sit in the wrong snapshot. The read
+   model partitions MyJCB ledger snapshots by
+   `observation_fetch_artifacts.statement_state`, which comes from the
+   append-only `observation_artifact_metadata` that the manifest filled. No
+   parser release or metadata release rewrites it.
+3. The statement state is part of a row's fingerprint and external id
+   (`myjcb-credit-ledger:<state>:...`). A re-stated row would therefore have a
+   new recognition key, not a new revision of the same event.
+
+The stored rows therefore remain `unconfirmed` observations, the record of what
+the collector said at the time. They stop being current on the first successful
+run of the fixed collector. Every unconfirmed ledger capture of a connection
+shares one snapshot slot, `(connection, unconfirmed)`, and from then on its
+newest capture is position 0, unless position 1 shows unconfirmed rows without
+the heading, which no production capture has. The same statement is captured again at
+position 1 in its own slot, `(confirmed, detailMonth-1)`. Until then,
+position 0 and position 1 of one run competed for the unconfirmed slot, so only
+one of them was current. After the fix, position 0's pending rows are current
+beside the posted ones. On the next ticks the purchase lane's retire pass moves
+each `authorized` event whose row left the current view to `unknown`
+(`provider_status_absent`), a revision with no leg. The recognition pass then
+recognises the confirmed rows, under their `confirmed` external ids, as
+`captured` purchases. These are new events, for the reason in point 3, and the
+captured total counts each purchase once: the retired event has no leg, and
+`authorized` and `captured` are never added together. The candidate pass may
+propose linking a retired pending event to its captured event for review, as
+for any pending row that left the view. A collector run that stops on
+`credit-statement-state` stores nothing for the connection, so the old captures
+stay current until a run succeeds.
+
+Deploying the parsers rewrites nothing already stored, and no adoption decision
+is needed. On the next sweeps, maintenance registers
+`myjcb-credit-statement-total@1.1.0` and the three 1.1.2 releases. Job creation
+then adds their jobs through the incremental lane and the repair lane's cyclic
+scan, as for [Vpass 1.2.0](#vpass-page-qualified-external-ids-statement-parser-120).
+Where 1.0.1 left a position-1 page with only an `error` run (job error code
+`parser_rejected`), a successful 1.1.0 parse publishes its total at the exact
+payment date. `card_statement_facts` and card settlement matching read that
+total by the page's own period. The 1.0.1 error runs stay as history. The 1.1.2 re-parses publish identical
+observations, and the purchase lane only re-anchors its events to the new parse
+runs because their content digests do not change. The backlog is small: at the
+time of writing production held 132 credit-detail pages, 72 ledgers, 12
+past-month responses and 24 menu and discovery artifacts for MyJCB, about 240
+jobs, which the repair lane (at most 4 jobs per sweep, shared by every source)
+drains over some 60 sweeps. To drain the statement pages sooner, run a bounded
+replay without `targetRelease`, through the internal helper and not the public
+`POST /api/ops/v1/replays`, for the reason given under Vpass 1.2.0:
+
+```sh
+mise run //services/processor:ops replay plan '{"source":"myjcb","dataset":"credit-detail","parser":"myjcb-credit-statement-total","version":"1.1.0","reason":"MyJCB statement state from the page"}'
+mise run //services/processor:ops replay start '{"planId":<id>}'
+mise run //services/processor:ops sweep replay 20
+```
+
+After catch-up, verify with counts only, as for Vpass 1.2.0: `replay inspect`
+shows no pending or running 1.1.0 job of the scope, and a new plan for the same
+scope reports in `already_parsed` how many pages publish 1.1.0. A failed 1.1.0
+job now means that a page contradicts itself, or that it is a position-0 page
+stating that it is closed. Each one needs a look, because it is a new shape and
+not the old manifest conflict. `packages/parsers/test/myjcb-statement.test.ts`
+pins the reading and the cross-check.
+`services/processor/test/myjcb-statement-replay.test.ts` replays a
+misrecorded position-1 page end to end, and
+`services/collector-myjcb/test/credit-statement-state.test.ts` pins the
+collector's decision.
+
 ## What an observation is
 
 An observation is one statement of the form _source X said Y_. It is
@@ -427,7 +581,11 @@ displayed monthly statement-payment amount as a balance-like metric, not as an
 account cash balance. `myjcb-canonical-evidence-boundary` strictly validates
 sanitized credit menu/detail HTML and discovery JSON but emits nothing. This
 makes normalized ledger the canonical transaction source and prevents a
-second interpretation of the same provider HTML.
+second interpretation of the same provider HTML. A fourth route,
+`myjcb-credit-statement-total`, reads only the statement total and its exact
+payment date from credit detail HTML. Since 1.1.0 it takes the statement state
+from the page itself, not from the manifest
+([release note](#myjcb-statement-state-from-the-page-statement-parser-110)).
 
 Every artifact is bound to its manifest-relative
 `<connection-id>/<filename>`, statement state, and period before bytes are

@@ -133,18 +133,20 @@ describe("the Transactions page composes the shared snapshot currentness", () =>
     // cell and its two-character label) changed only the description,
     // counterparty and fingerprint columns; every id, amount, date and status
     // is as pinned.
+    // myjcb-credit-ledger@1.1.2 changed only the parser label: its module's
+    // digest moved with the statement parser's 1.1.0, not its behaviour.
     const pinned = [
-      '[19,"myjcb","myjcb:conn-a:root","2026-06-02","-300","-300","JPY","架空","架空店舗J 1回払","myjcb-credit-ledger:unconfirmed:933c80ea937d61fe5f7ee1881f0119ba:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
+      '[19,"myjcb","myjcb:conn-a:root","2026-06-02","-300","-300","JPY","架空","架空店舗J 1回払","myjcb-credit-ledger:unconfirmed:933c80ea937d61fe5f7ee1881f0119ba:0","unconfirmed","myjcb-credit-ledger@1.1.2"]',
       '[7,"vpass","vpass:card-001","2026-06-02","-3300","-3300","JPY","0","架空店舗E","vpass:card-001:202606:customized:53574894370073d0ed47dada2a974f24:answer-001:0","unconfirmed","vpass-statement-page@1.2.0"]',
       '[6,"vpass","vpass:card-001","2026-06-01","-1234","-1234","JPY","0","架空店舗D","vpass:card-001:202606:customized:0c9cf0b445aa57409e1debe6999b3fc4:0","unconfirmed","vpass-statement-page@1.2.0"]',
       '[22,"smbc-bank","smbc-bank:ordinary-yen","2026-05-20","-500","-500","JPY","synthetic",null,"synthetic-bank-1","posted","synthetic-bank-history@1"]',
-      '[18,"myjcb","myjcb:conn-a:root","2026-05-10","-800","-800","JPY","架空","架空店舗I 1回払","myjcb-credit-ledger:unconfirmed:f32e4a3b0b17730ff548bed596f7bc8b:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
+      '[18,"myjcb","myjcb:conn-a:root","2026-05-10","-800","-800","JPY","架空","架空店舗I 1回払","myjcb-credit-ledger:unconfirmed:f32e4a3b0b17730ff548bed596f7bc8b:0","unconfirmed","myjcb-credit-ledger@1.1.2"]',
       '[5,"vpass","vpass:card-001","2026-05-06",null,null,"JPY","","架空店舗C","vpass:card-001:202605:web:b73cad7c67672c50c243b322a569b12c:0","posted","vpass-statement-page@1.2.0"]',
       '[4,"vpass","vpass:card-001","2026-05-05","-5000","-5000","JPY","２","架空店舗B","vpass:card-001:202605:web:f84a958500574c19cfd5a2a3f1fb0715:0","posted","vpass-statement-page@1.2.0"]',
       '[3,"vpass","vpass:card-001","2026-05-03","-2000","-2000","JPY","１","架空店舗A","vpass:card-001:202605:web:33214f40941f9024c65b166e9eac70d0:0","posted","vpass-statement-page@1.2.0"]',
-      '[17,"myjcb","myjcb:conn-a:root","2026-04-21","-4000","-4000","JPY","架空","架空店舗H 分割","myjcb-credit-ledger:confirmed:28b0598147b4713decd51977dab8e871:0","confirmed","myjcb-credit-ledger@1.1.1"]',
-      '[16,"myjcb","myjcb:conn-a:root","2026-04-20","-1000","-1000","JPY","架空","架空店舗G 1回払","myjcb-credit-ledger:confirmed:c1f3af2b2cad5e47f8b804c9fd1db53b:0","confirmed","myjcb-credit-ledger@1.1.1"]',
-      '[14,"myjcb","myjcb:conn-a:root","2026-03-15","-2500","-2500","JPY","架空","架空店舗L 1回払","myjcb-credit-ledger:confirmed:4a56d41235b7a7a6c1d4c53855be6402:0","confirmed","myjcb-credit-ledger@1.1.1"]',
+      '[17,"myjcb","myjcb:conn-a:root","2026-04-21","-4000","-4000","JPY","架空","架空店舗H 分割","myjcb-credit-ledger:confirmed:28b0598147b4713decd51977dab8e871:0","confirmed","myjcb-credit-ledger@1.1.2"]',
+      '[16,"myjcb","myjcb:conn-a:root","2026-04-20","-1000","-1000","JPY","架空","架空店舗G 1回払","myjcb-credit-ledger:confirmed:c1f3af2b2cad5e47f8b804c9fd1db53b:0","confirmed","myjcb-credit-ledger@1.1.2"]',
+      '[14,"myjcb","myjcb:conn-a:root","2026-03-15","-2500","-2500","JPY","架空","架空店舗L 1回払","myjcb-credit-ledger:confirmed:4a56d41235b7a7a6c1d4c53855be6402:0","confirmed","myjcb-credit-ledger@1.1.2"]',
     ];
     const { store } = baseWorld();
     expect(
