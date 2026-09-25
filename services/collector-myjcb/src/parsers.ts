@@ -1,6 +1,10 @@
 import type { DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
 import { StopConditionError } from "./types";
 import { parse, serialize, type DefaultTreeAdapterMap } from "parse5";
+import {
+  CONFIRMED_STATEMENT_HEADING,
+  readMyJcbStatementPage,
+} from "../../../packages/domain/src/myjcb-statement-page";
 
 type HtmlNode = DefaultTreeAdapterMap["node"];
 type HtmlElement = DefaultTreeAdapterMap["element"];
@@ -13,6 +17,27 @@ export interface CreditLedgerSnapshot {
     readonly expanded: Readonly<Record<string, string>>;
   }[];
 }
+
+/** The statement state the collector records for one credit detail page. */
+export type CreditStatementState = "confirmed" | "unconfirmed" | "unknown";
+
+/**
+ * The heading a closed MyJCB credit statement page carries. The page reading
+ * (heading, ledger rows, amount labels) lives in
+ * packages/domain/src/myjcb-statement-page.ts, shared with the
+ * statement parser so the two cannot drift.
+ */
+export { CONFIRMED_STATEMENT_HEADING };
+
+/**
+ * The ledger header sets of a confirmed and of an unconfirmed page. The fourth
+ * label is the one amount the summary row displays: this statement's payment
+ * on a confirmed page, the usage amount on an unconfirmed one
+ * (docs/sources/myjcb.md; the Layer B contract is `CONFIRMED_HEADERS` and
+ * `UNCONFIRMED_HEADERS` in packages/parsers/src/parsers/myjcb.ts).
+ */
+const CONFIRMED_LEDGER_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
+const UNCONFIRMED_LEDGER_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"];
 
 export interface PastMonthAvailability {
   readonly detailMonth: number;
@@ -183,15 +208,14 @@ export function parseCreditLedger(
   const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u.test(
     nodeText(ledger),
   );
-  const headers =
-    state === "unconfirmed"
-      ? ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"]
-      : ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
+  const headers = state === "unconfirmed" ? UNCONFIRMED_LEDGER_HEADERS : CONFIRMED_LEDGER_HEADERS;
   const headerText = header ? normalizeText(nodeText(header)) : "";
-  const requiredCoreHeaders = hasEmptyMarker
-    ? ["ご利用日", "ご利用先など"]
-    : ["ご利用日", "ご利用先など", "支払区分"];
-  if (requiredCoreHeaders.some((label) => !headerText.includes(label))) {
+  // A ledger with rows must display the whole header set of its state: the
+  // fourth label says which amount the summary cell holds, so `headers` in the
+  // stored ledger is a checked fact about the page, not an assumption. An
+  // empty ledger only has to be recognisably the same component.
+  const requiredHeaders = hasEmptyMarker ? ["ご利用日", "ご利用先など"] : headers;
+  if (requiredHeaders.some((label) => !headerText.includes(label))) {
     throw new StopConditionError(`MyJCB ${state} ledger headers changed`, "credit-ledger-headers");
   }
   const expandedLabels =
@@ -253,7 +277,83 @@ export function parseCreditLedger(
       }
       return [{ summaryCells, expanded }];
     });
-  return { state, headers, rows };
+  return { state, headers: [...headers], rows };
+}
+
+/**
+ * The statement state of the credit detail page fetched as `detailMonth=N`,
+ * decided from the page itself and never from whether it offers export links.
+ *
+ * The page states its state twice: a closed statement carries exactly one
+ * `CONFIRMED_STATEMENT_HEADING` h1, and every ledger header displays the
+ * amount label of one state (`今回のお支払い金額` confirmed, `ご利用金額`
+ * unconfirmed). The heading is the only statement that a page is closed:
+ *
+ * - `detailMonth=0` is the mutable current month and is always `unconfirmed`;
+ *   a position-0 page that shows the heading stops the collection;
+ * - the heading, with a confirmed (or no) amount header: `confirmed`;
+ * - no heading and no ledger: `unknown`, as before;
+ * - no heading and a ledger without rows: `unknown`. Production captures of
+ *   older closed months (positions 7 and 8 of the surveyed connection) are
+ *   exactly this; recording them as `unconfirmed` would put an empty capture
+ *   in the connection's one unconfirmed snapshot slot after position 0;
+ * - no heading and rows under the unconfirmed header: `unconfirmed` at
+ *   position 1 (a closed month not yet confirmed), `unknown` at an older
+ *   position, which cannot be the mutable month;
+ * - no heading and rows under a confirmed or no amount header: the rows claim
+ *   a statement the page does not state. Position 1, which every closed
+ *   statement passes through and where production always showed the heading,
+ *   stops the collection; an older position is `unknown`, so one old page
+ *   never halts the daily run.
+ *
+ * The page reading is `readMyJcbStatementPage`, the one the statement parser
+ * uses; the position rules are the collector's own.
+ * `unknown` stores the page as evidence and no ledger artifact. A page that
+ * contradicts itself stops the collection at every position
+ * (`credit-statement-state`): more than one heading, a header with both
+ * labels, ledgers that disagree, or the heading over an unconfirmed header.
+ */
+export function creditStatementState(html: string, detailMonth: number): CreditStatementState {
+  const page = readMyJcbStatementPage(parse(html));
+  // Counts and label codes only: the page's text never reaches the log.
+  const shape = (event: string) =>
+    JSON.stringify({
+      event,
+      detailMonth,
+      confirmedHeadings: page.headings,
+      ledgerCount: page.ledgerCount,
+      rowCount: page.rowCount,
+      amountHeaders: page.amountHeaders,
+    });
+  const stop = (message: string): never => {
+    console.warn(shape("myjcb-credit-statement-state"));
+    throw new StopConditionError(message, "credit-statement-state");
+  };
+  const unstated = (): "unknown" => {
+    console.warn(shape("myjcb-credit-statement-unstated"));
+    return "unknown";
+  };
+  if (page.reading === "conflict") {
+    return stop("MyJCB credit detail heading and ledger headers disagree on the statement state");
+  }
+  if (detailMonth === 0) {
+    if (page.reading === "confirmed")
+      return stop("MyJCB detailMonth 0 stated a confirmed statement");
+    return "unconfirmed";
+  }
+  switch (page.reading) {
+    case "confirmed":
+      return "confirmed";
+    case "unknown":
+      return page.ledgerCount === 0 ? "unknown" : unstated();
+    case "unconfirmed":
+      return detailMonth === 1 ? "unconfirmed" : unstated();
+    case "unstated-rows":
+      if (detailMonth === 1) {
+        return stop("MyJCB credit detail ledger rows have no stated statement state");
+      }
+      return unstated();
+  }
 }
 
 function safeClassNames(element: HtmlElement): string[] {

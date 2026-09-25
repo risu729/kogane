@@ -3,6 +3,7 @@ import { decodeMyJcbHtml, MyJcbReadClient, type ReadResponse } from "./client";
 import { CookieJar } from "./cookie-jar";
 import { loginWithBitwardenPasskey, loginWithOfficialProtection } from "./login-protection";
 import {
+  creditStatementState,
   discoverCreditExports,
   extractCreditMenuLinkId,
   extractGeneralJsonDiscriminator,
@@ -149,8 +150,11 @@ async function collectDebit(client: MyJcbReadClient): Promise<{
   return { periodCount: sequences.length, artifacts };
 }
 
-async function collectCredit(
-  client: MyJcbReadClient,
+/** The reads the credit collection makes; the Worker passes a `MyJcbReadClient`. */
+export type CreditReadClient = Pick<MyJcbReadClient, "get" | "postCreditPastJson">;
+
+export async function collectCredit(
+  client: CreditReadClient,
   linkId: string,
 ): Promise<{ readonly periodCount: number; readonly artifacts: RawArtifact[] }> {
   const { menuHtml, initialMonths } = await collectionStage("collect-credit-menu", async () => {
@@ -214,7 +218,7 @@ async function collectCredit(
         "collect-credit-month-fetch",
         async () => detailCache.get(detailMonth) ?? (await fetchCreditDetail(client, detailMonth)),
       );
-      const { html, exports, ledger } = await collectionStage(
+      const { html, exports, ledger, state } = await collectionStage(
         "collect-credit-month-parse",
         async () => {
           const html = decodeMyJcbHtml(detail.body, detail.contentType);
@@ -226,23 +230,24 @@ async function collectCredit(
           if (!hasLedgerContainer && hasEmptyMarker) {
             throw new Error("MyJCB credit detail exposed an inconsistent empty state");
           }
-          const ledgerState =
-            detailMonth <= 1 && exports.length === 0 ? "unconfirmed" : "confirmed";
-          const ledger = parseCreditLedger(html, ledgerState);
+          // The page states whether it is a closed statement; export links are
+          // not that statement (the surveyed connection offers none at all).
+          const state = creditStatementState(html, detailMonth);
+          if (exports.length > 0 && state !== "confirmed") {
+            // Exports are recorded as confirmed statements, so a page that
+            // offers them must itself state that it is one.
+            throw new StopConditionError(
+              "MyJCB offered statement exports on a page that is not a confirmed statement",
+              "credit-statement-state",
+            );
+          }
+          const ledger = state === "unknown" ? undefined : parseCreditLedger(html, state);
           if (detailMonth === 0 && !ledger) {
             throw new Error("MyJCB unconfirmed detail page omitted .detail-list-01");
           }
-          return { html, exports, ledger };
+          return { html, exports, ledger, state };
         },
       );
-      const state =
-        detailMonth === 0
-          ? "unconfirmed"
-          : ledger?.state === "unconfirmed"
-            ? "unconfirmed"
-            : ledger || exports.length > 0
-              ? "confirmed"
-              : "unknown";
       const period =
         pastMonths.find((month) => month.detailMonth === detailMonth)?.settlementYM ??
         `detailMonth-${detailMonth}`;
@@ -287,7 +292,7 @@ async function collectCredit(
 }
 
 async function fetchCreditDetail(
-  client: MyJcbReadClient,
+  client: CreditReadClient,
   detailMonth: number,
 ): Promise<ReadResponse> {
   return await client.get(
@@ -297,7 +302,7 @@ async function fetchCreditDetail(
 }
 
 async function fetchCreditExport(
-  client: MyJcbReadClient,
+  client: CreditReadClient,
   detailMonth: number,
   period: string,
   kind: "csv" | "pdf" | "ofx",
