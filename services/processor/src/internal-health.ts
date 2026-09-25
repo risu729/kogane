@@ -10,8 +10,9 @@
 //
 // What it reports: the build identity the deploy stamped, whether CORE, READ
 // and the DATA bucket answer, which bindings exist, the declared value of every
-// lane flag, the lane bookkeeping, how old the bounded collection scan's cursor
-// is, and whether the READ active pointer has ever been switched.
+// lane flag, the lane bookkeeping, the latest recorded tick of every lane that
+// keeps no state of its own, how old the bounded collection scan's cursor is,
+// and whether the READ active pointer has ever been switched.
 //
 // What it does not do: write anything, contact a provider, run a lane, move a
 // cursor, or report a value. Counts, identifiers, file names, flags and ages
@@ -20,6 +21,7 @@ import {
   COLLECTION_SCAN_LANE,
   readCollectionScanState,
 } from "../../../packages/storage-d1/src/core/collection-runs.ts";
+import { laneTickSummary } from "./lane-ticks.ts";
 
 /** The route this module owns. */
 export const INTERNAL_HEALTH_PATH = "/internal/health";
@@ -148,6 +150,10 @@ export async function internalHealthBody(env: Env): Promise<{ status: number; bo
   } catch {
     /* Reported as an empty list; `core` already says whether CORE answers. */
   }
+  // The latest tick of each lane that otherwise leaves only a log line
+  // (migration 0049): outcome, safe error code, when, and its counts. Before
+  // 0049 there is no table, which is an empty list.
+  const laneTicks = await laneTickSummary(env.DB, now);
   let collectionScan: Record<string, unknown> = { lane: COLLECTION_SCAN_LANE, recorded: false };
   try {
     const state = await readCollectionScanState(env.DB);
@@ -211,6 +217,7 @@ export async function internalHealthBody(env: Env): Promise<{ status: number; bo
       bindings,
       flags,
       lanes,
+      laneTicks,
       collectionScan,
       readPointer,
     },
