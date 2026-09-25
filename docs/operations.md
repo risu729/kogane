@@ -20,20 +20,21 @@ budgets, the retention classes and the drills.
 Root review 08 section 2 asks for coverage of the same subject range from
 Layer A through to the read model, not just "no failed jobs".
 
-| Signal (review 08 section 2)                    | Where it is served today                                                                                | Gap                                                     |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Latest sealed artifact arrival                  | pipeline `GET /status`: `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`       | -                                                       |
-| Eligible / unsupported / oversized reasons      | evidence-browser metadata API (parse health); pipeline safe failure codes on jobs                       | Not aggregated into one "why is there no job" counter   |
-| Oldest pending age, per-lane backlog            | pipeline `GET /status`: `lanes.<lane>.{pending,running,done,failed}`, `lanes.<lane>.oldestPendingAgeMs` | -                                                       |
-| Parsed Layer B versus sealed identity           | identity audit (`docs/identity-audit.md`)                                                               | Not exposed as a single coverage percentage per source  |
-| Candidate versus active                         | `published_parse_runs` versus successful `parse_runs`; `GET /publication/consistency`                   | Candidate releases themselves are the next step (A04)   |
-| Latest complete snapshot                        | complete-snapshot projection used by every reader                                                       | Not surfaced as a freshness signal on `/status`         |
-| Raw integrity verification result               | raw-evidence verification tables                                                                        | Not summarised on `/status`                             |
-| Notification backlog                            | pipeline `GET /status`: `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                     | -                                                       |
-| Unregistered shared-R2 terminals                | Processor `GET /internal/health`: `registration.unregistered`, `.pending`, `.oldestPendingAgeMs`        | Not summarised on `/status`                             |
-| Operations per invocation vs. documented limits | Processor `invocation_budget` log line per cron and queue invocation (§1.1)                             | Workers Logs only; not persisted                        |
-| Lane liveness and replay progress               | pipeline `GET /status`: `laneState[]`, `replayPlans[]`                                                  | -                                                       |
-| Report generation                               | `report_job` scheduled stage log line (only while `REPORTS_ENABLED` is on)                              | Not on `/status`; add when the flag becomes the default |
+| Signal (review 08 section 2)                    | Where it is served today                                                                                | Gap                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Latest sealed artifact arrival                  | pipeline `GET /status`: `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`       | -                                                           |
+| Eligible / unsupported / oversized reasons      | evidence-browser metadata API (parse health); pipeline safe failure codes on jobs                       | Not aggregated into one "why is there no job" counter       |
+| Oldest pending age, per-lane backlog            | pipeline `GET /status`: `lanes.<lane>.{pending,running,done,failed}`, `lanes.<lane>.oldestPendingAgeMs` | -                                                           |
+| Parsed Layer B versus sealed identity           | identity audit (`docs/identity-audit.md`)                                                               | Not exposed as a single coverage percentage per source      |
+| Candidate versus active                         | `published_parse_runs` versus successful `parse_runs`; `GET /publication/consistency`                   | Candidate releases themselves are the next step (A04)       |
+| Latest complete snapshot                        | complete-snapshot projection used by every reader                                                       | Not surfaced as a freshness signal on `/status`             |
+| Raw integrity verification result               | raw-evidence verification tables                                                                        | Not summarised on `/status`                                 |
+| Notification backlog                            | pipeline `GET /status`: `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                     | -                                                           |
+| Unregistered shared-R2 terminals                | Processor `GET /internal/health`: `registration.unregistered`, `.pending`, `.oldestPendingAgeMs`        | Not summarised on `/status`                                 |
+| Operations per invocation vs. documented limits | Processor `invocation_budget` log line per cron and queue invocation (§1.1)                             | Workers Logs only; not persisted                            |
+| Lane liveness and replay progress               | pipeline `GET /status`: `laneState[]`, `replayPlans[]`                                                  | -                                                           |
+| Event-lane ticks and their counts               | pipeline `GET /status` and `GET /internal/health`: `laneTicks[]`; `processor_lane_ticks` (last day)     | The latest tick per lane only; older ticks are read from D1 |
+| Report generation                               | `report_job` scheduled stage log line (only while `REPORTS_ENABLED` is on)                              | Not on `/status`; add when the flag becomes the default     |
 
 Addendum 12 section 5 also asks the operational metrics to separate freshness,
 coverage, resolution, publication and safety. Today `/status` covers freshness,
@@ -123,6 +124,72 @@ limits, and the backlog read from CORE — `unregistered` terminals,
 `pending` staged registrations waiting for their next invocation, and
 `oldestPendingAgeMs`. A pending count that stays up, or an age that keeps
 growing, is a staged registration that is not converging.
+
+### Lane tick records
+
+**The diagnosis this replaces.** The Processor's event lanes —
+`purchase_recognition`, `reconciliation_sweep`, `card_settlement_sweep` — and
+the other lanes that keep no state of their own left only a Workers Logs line
+per tick. Working out whether `purchase_recognition` had run at all, whether it
+failed, or whether its flag was simply off meant searching Workers Logs for
+`"event":"purchase_recognition"` and its `_failed` twin, and "no line" could
+mean off, not deployed, or killed. Since migration 0049 every tick of those
+lanes is a row in `processor_lane_ticks`, kept for one day per lane
+([processor.md §6.1](processor.md#61-tick-records) lists the lanes and the
+counts each keeps).
+
+**The latest tick per lane** is `laneTicks` in the pipeline's `GET /status`
+and in its `GET /internal/health`, which the App relays as `processor` in
+`GET /api/ops/v1/health` ([ops-api.md](ops-api.md)):
+
+```sh
+mise run //services/processor:ops status
+```
+
+```jsonc
+{
+  "laneTicks": [
+    {
+      "lane": "purchase_recognition",
+      "outcome": "ran", // or "skipped-by-flag", or "failed"
+      "errorCode": null, // a safe code when failed: a pipeline code or an error class name
+      "startedAt": "2026-09-24T03:05:00.412Z",
+      "durationMs": 8412,
+      "ageMs": 131000, // since the tick finished
+      // abridged here: the lane's whole log line, field for field
+      "counts": { "scanned": 500, "recognized": 0, "skipped": { "payment_type_unsupported": 12 } },
+    },
+  ],
+}
+```
+
+How to read it:
+
+- `ageMs` well over five minutes means the lane has not ticked since: the cron
+  is not firing, or the Worker is dying before this lane (an earlier lane
+  running into a limit leaves no row for the lanes after it).
+- `skipped-by-flag` means the Worker holds the flag off; compare `flags` in the
+  internal health answer.
+- `failed` gives the same code as the `<lane>_failed` log line. The row never
+  holds the exception text; the log line does not either.
+- `counts` are the lane's own counts, field for field; for
+  `purchase_recognition` it is the whole log line. They are counts, flags and
+  closed reason codes only — never an amount, key, account label or provider
+  text.
+
+**The last day of one lane**, newest first, straight from CORE (read-only):
+
+```sh
+cd services/processor
+./node_modules/.bin/wrangler d1 execute kogane-raw-evidence --remote --command \
+  "SELECT datetime(started_at_ms/1000,'unixepoch') AS started, finished_at_ms-started_at_ms AS ms,
+          outcome, error_code, counts_json
+     FROM processor_lane_ticks WHERE lane='purchase_recognition' ORDER BY id DESC LIMIT 24"
+```
+
+`SELECT lane, outcome, count(*) FROM processor_lane_ticks GROUP BY lane, outcome`
+summarises the day. A row that could not be written is itself logged as
+`lane_tick_record_failed` with a code, and never changes what the lane did.
 
 ## 2. Load budgets and the D1 harness
 

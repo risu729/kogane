@@ -974,7 +974,19 @@ test("log lines carry counts only: no amount, merchant, account or identifier", 
     merged: 0,
     groupsSkipped: 0,
   });
-  const text = lines.join("\n");
+  // The tick is recorded (migration 0049) with exactly the counts of that
+  // line, so "did the lane run, and what did it do?" no longer needs the logs.
+  const ticks = await w.env.DB.prepare(
+    "SELECT outcome,error_code,counts_json FROM processor_lane_ticks WHERE lane='purchase_recognition'",
+  ).all<{ outcome: string; error_code: string | null; counts_json: string }>();
+  expect(ticks.results).toHaveLength(1);
+  const { event: _event, ...counts } = line;
+  expect(ticks.results[0]).toMatchObject({ outcome: "ran", error_code: null });
+  expect(JSON.parse(ticks.results[0]!.counts_json)).toEqual(counts);
+  const stored = await w.env.DB.prepare(
+    "SELECT group_concat(counts_json,char(10)) AS text FROM processor_lane_ticks",
+  ).first<string>("text");
+  const text = `${lines.join("\n")}\n${stored}`;
   const [row] = await w.usage();
   for (const secret of [
     "98765",
