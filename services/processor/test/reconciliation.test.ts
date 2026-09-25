@@ -996,7 +996,7 @@ test("a MyJCB confirmed row re-captured by a later run is not proposed as the sa
 });
 
 // ---------------------------------------------------------------------------
-// Stage A over real Vpass captures, the scan cursor, and the matching window
+// Stage A over parsed Vpass captures, the scan cursor, and the matching window
 // ---------------------------------------------------------------------------
 
 const NOW = "2026-10-10T00:00:00Z";
@@ -1049,8 +1049,9 @@ function counting(target: D1Database): {
 }
 
 /**
- * One published capture of the Vpass statement page, parsed by the deployed
- * parser (vpass-statement-page@1.2.0) and stored exactly as it emits each row.
+ * One published capture of the synthetic Vpass statement page fixture, parsed
+ * by the deployed parser (vpass-statement-page@1.2.0) and stored exactly as it
+ * emits each row.
  */
 async function seedVpassCapture(family: "customized" | "web", page: string): Promise<number[]> {
   const artifactId = (nextArtifact += 1);
@@ -1115,7 +1116,7 @@ async function seedVpassCapture(family: "customized" | "web", page: string): Pro
   return ids;
 }
 
-test("two captures of real Vpass 1.2.0 rows write no stage A proposal", async () => {
+test("two captures parsed by the deployed Vpass 1.2.0 parser write no stage A proposal", async () => {
   // Every daily capture re-lists the month: the same rows under the same
   // collector fingerprints, on the first page and on a later one.
   const captures = [
@@ -1438,4 +1439,68 @@ test("the write budget holds the cursor on its page until the page's new pairs a
   expect(await cursorOf(slice.sourceId)).toBeNull();
   expect(await citing(rows)).toHaveLength(2);
   expect(await reconciliationSweep(db, tick)).toMatchObject({ known: 2, written: 0 });
+});
+
+test("a tick whose every write D1 rejects leaves its page instead of holding it for ever", async () => {
+  const slice = syntheticSlice("synthetic-rejected");
+  const rows = await observationsOf(
+    await seedRows("synthetic-rejected", "card-x", [
+      { status: "unconfirmed", amount: -100, asOf: "2026-09-01", month: "2026-09", family: "c" },
+      { status: "posted", amount: -100, asOf: "2026-09-01", month: "2026-09", family: "web" },
+      { status: "unconfirmed", amount: -200, asOf: "2026-09-15", month: "2026-09", family: "c" },
+      { status: "posted", amount: -200, asOf: "2026-09-16", month: "2026-09", family: "web" },
+    ]),
+  );
+  const rejecting = {
+    prepare: (sql: string) => db.prepare(sql),
+    batch: () => Promise.reject(new Error("synthetic rejection")),
+  } as unknown as D1Database;
+  // Two new pairs and room for one: the page would be held, but nothing
+  // was written, so holding it would only send the same batch again.
+  const tick = { slices: [slice], now: NOW, scanLimit: 2, writeLimit: 1 };
+  expect(await reconciliationSweep(rejecting, tick)).toMatchObject({
+    proposed: 2,
+    written: 0,
+    failed: 1,
+  });
+  expect(await cursorOf(slice.sourceId)).toBe(rows[1]!);
+  expect(await citing(rows)).toEqual([]);
+  // A tick that writes something still holds its page for the pair left over.
+  expect(await reconciliationSweep(db, tick)).toMatchObject({ proposed: 2, written: 1 });
+  expect(await cursorOf(slice.sourceId)).toBe(rows[1]!);
+  expect(await reconciliationSweep(db, tick)).toMatchObject({ known: 1, written: 1 });
+  expect(await cursorOf(slice.sourceId)).toBe(rows[3]!);
+  expect(await citing(rows)).toHaveLength(2);
+});
+
+test("the stored digests are looked up a chunk at a time, the last chunk short", async () => {
+  const slice = syntheticSlice("synthetic-chunks");
+  // One pending row and three posted rows in its window: three candidates.
+  const rows = await observationsOf(
+    await seedRows("synthetic-chunks", "card-k", [
+      { status: "unconfirmed", amount: -300, asOf: "2026-09-10", month: "2026-09", family: "c" },
+      { status: "posted", amount: -300, asOf: "2026-09-10", month: "2026-09", family: "web" },
+      { status: "posted", amount: -300, asOf: "2026-09-11", month: "2026-09", family: "web" },
+      { status: "posted", amount: -300, asOf: "2026-09-12", month: "2026-09", family: "web" },
+    ]),
+  );
+  // One digest past a full chunk (as 1,001 against 1,000): a second lookup.
+  const over = counting(db);
+  expect(
+    await reconciliationSweep(over.db, { slices: [slice], now: NOW, lookupChunk: 2 }),
+  ).toMatchObject({ proposed: 3, known: 0, written: 3 });
+  expect(over.sent).toEqual({ inserts: 3, lookups: 2, batches: 1 });
+  // Exactly one full chunk (as 1,000): one lookup, and every digest found.
+  const exact = counting(db);
+  expect(
+    await reconciliationSweep(exact.db, { slices: [slice], now: NOW, lookupChunk: 3 }),
+  ).toMatchObject({ proposed: 3, known: 3, written: 0 });
+  expect(exact.sent).toEqual({ inserts: 0, lookups: 1, batches: 0 });
+  // The short last chunk finds its stored digest too.
+  const again = counting(db);
+  expect(
+    await reconciliationSweep(again.db, { slices: [slice], now: NOW, lookupChunk: 2 }),
+  ).toMatchObject({ proposed: 3, known: 3, written: 0 });
+  expect(again.sent).toEqual({ inserts: 0, lookups: 2, batches: 0 });
+  expect(await citing(rows)).toHaveLength(3);
 });

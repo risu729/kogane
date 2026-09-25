@@ -18,9 +18,9 @@
 //      are written: a decided proposal is never proposed again, and a stored
 //      one costs no write;
 //   4. the cursor moves past the page, and back to 0 after the last page. It
-//      waits on the page while new proposals are left for the write budget,
-//      and moves only from the value this tick read, so an overlapping tick
-//      never pulls it back.
+//      waits on the page while new proposals are left for the write budget
+//      (unless D1 rejected every batch the tick sent), and moves only from the
+//      value this tick read, so an overlapping tick never pulls it back.
 //
 // Nothing is accepted automatically. Auto-acceptance needs a link id the
 // provider itself issued for the pair, exposed by the parser as
@@ -560,7 +560,13 @@ async function sweepSlice(
     limits.lookup,
     result,
   );
+  const failedBefore = result.failed;
   const inserted = await writeCandidates(db, writes, now, result);
+  // Every write this tick sent was rejected: holding the cursor would send the
+  // same writes again next tick, for ever if D1 keeps rejecting them, and the
+  // slice would never move on. The page is then left like any other, and its
+  // pairs are retried on the next cycle.
+  const stalled = result.failed > failedBefore && inserted.length === 0;
   for (const { proposal, digest } of [
     ...inserted.filter((candidate) => candidate.proposal.autoAcceptable),
     ...openLinked,
@@ -577,10 +583,12 @@ async function sweepSlice(
     if (accepted.ok && !accepted.replayed) result.autoAccepted += 1;
   }
 
-  // New pairs left for the budget: stay on this page. A deferred group: stop
-  // before its first row. Otherwise past the page, and back to 0 after the
-  // last one, since a row below the cursor can pair with a later row.
-  const next = !complete
+  // New pairs left for the budget: stay on this page, unless the tick wrote
+  // nothing because D1 rejected every batch. A deferred group: stop before
+  // its first row. Otherwise past the page, and back to 0 after the last one,
+  // since a row below the cursor can pair with a later row.
+  const holdPage = !complete && !stalled;
+  const next = holdPage
     ? cursor
     : deferredFrom !== null
       ? deferredFrom - 1
