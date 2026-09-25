@@ -37,9 +37,12 @@ Concrete limits in the current code:
 - [The pending/posted job](../services/processor/src/reconciliation-job.ts)
   proposes Vpass pairs and MyJCB pairs whose confirmed row's usage and payment
   amounts (`1,200円`) agree and whose ledgers name the same payment month;
-  every pair stays a candidate for review. An installment payment amount is
-  not silently compared with a purchase amount. The collector's relative
-  `detailMonth-N` labels are resolved from their capture time
+  every pair stays a candidate for review. Only a posted row dated on its
+  pending row's usage day or up to five days after it is proposed
+  ([matching window](economic-events.md#matching-stages)). An installment
+  payment amount is not silently compared with a purchase amount. The
+  collector's relative `detailMonth-N` labels are resolved from their capture
+  time
   ([`relative-statement-period-v1`](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
   but only positions 0 and 1 are placed: a confirmed MyJCB row at a later
   relative position has no payment month, so this job leaves it unpaired and
@@ -47,7 +50,10 @@ Concrete limits in the current code:
   candidate pass still pairs it by usage month. On the surveyed connection the
   collector records `detailMonth=1` as `unconfirmed` (its page has no export
   link), so that month's rows stay pending, its statement page is rejected,
-  and only one of its two unconfirmed ledgers is current.
+  and only one of its two unconfirmed ledgers is current. The job pages
+  through every published row with a scan cursor, but a card's statement
+  month with more than 200 published rows (every capture of the month counts)
+  is counted and skipped, not paired.
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind

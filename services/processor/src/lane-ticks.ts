@@ -82,8 +82,11 @@ export const LANE_TICK_COUNTS = {
     "scanned",
     "groups",
     "groupsSkipped",
+    "groupsDeferred",
     "proposed",
+    "known",
     "written",
+    "failed",
     "autoAccepted",
   ]),
   card_settlement_sweep: countsOf<Awaited<ReturnType<typeof cardSettlementSweep>>>([

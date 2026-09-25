@@ -361,7 +361,7 @@ const RATIONALE_LABELS: Record<RationaleCode, string> = {
   status_pending_to_posted: "未確定の明細と確定の明細の組",
   counterparty_equal: "利用先の表示が一致",
   owner_established_self: "保有者を確認済み",
-  multiple_candidates: "同じ未確定の明細に、ほかの候補もある",
+  multiple_candidates: "未確定・確定のどちらかの明細に、ほかの候補もある",
   no_provider_link_id: "カード会社の対応番号はない（金額・日付などからの候補）",
 };
 

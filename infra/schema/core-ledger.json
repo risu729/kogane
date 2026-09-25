@@ -696,6 +696,12 @@
       "sha256": "4ae010e7a881b839cd376fec814c1bc518b62b04b7c0c7e75b72a38077f4875b"
     },
     {
+      "file": "0048_reconciliation_scan_cursor.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "216682487e6b4283f35aae0b3b2fc59570045b6506ccede4f57c44dfdb6af327"
+    },
+    {
       "file": "0049_processor_lane_ticks.sql",
       "statementCount": 4,
       "insertStatements": [],
@@ -11100,6 +11106,15 @@
           ]
         },
         {
+          "name": "reconciliation_proposals_kind_stage",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "kind",
+            "stage"
+          ]
+        },
+        {
           "name": "reconciliation_proposals_status",
           "unique": false,
           "partial": false,
@@ -11122,6 +11137,39 @@
       ],
       "appendOnly": false,
       "sqlSha256": "388ad3293150043e"
+    },
+    {
+      "name": "reconciliation_scan_cursor",
+      "classification": "operational-mutable",
+      "planRow": "bounded reconciliation scan progress",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "last_observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "source_id"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "55cd20581437a930"
     },
     {
       "name": "release_activation_events",
@@ -16591,6 +16639,11 @@
       "sqlSha256": "bcacbcedda493c47"
     },
     {
+      "name": "reconciliation_proposals_kind_stage",
+      "table": "reconciliation_proposals",
+      "sqlSha256": "e3028f9ba5d251cf"
+    },
+    {
       "name": "reconciliation_proposals_status",
       "table": "reconciliation_proposals",
       "sqlSha256": "648ffa4c25ecec4c"
@@ -16652,10 +16705,10 @@
     }
   ],
   "summary": {
-    "tableCount": 110,
+    "tableCount": 111,
     "viewCount": 39,
     "triggerCount": 400,
-    "explicitIndexCount": 110,
+    "explicitIndexCount": 111,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -16765,7 +16818,8 @@
         "observation_parse_jobs",
         "observation_replay_plans",
         "observation_work_items",
-        "processor_lane_ticks"
+        "processor_lane_ticks",
+        "reconciliation_scan_cursor"
       ],
       "unclassified-keep": [
         "dataset_snapshot_policies",
@@ -16810,6 +16864,7 @@
       "producers",
       "published_parse_runs",
       "reconciliation_proposals",
+      "reconciliation_scan_cursor",
       "retention_classes",
       "settlement_relations",
       "source_external_ids",
@@ -16859,6 +16914,6 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "623a9471725b0b3be1f49027b500ef6725c541787e7b24c6522180b52c4fb647"
+    "schemaSha256": "6dc1077d1606c1a6c201918d79e4c5b9061e941995df1a2e60ed45854f20370a"
   }
 }
