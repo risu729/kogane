@@ -48,6 +48,7 @@ function row(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
     usageDate: "2026-08-21",
     paymentType: "1回払い",
     statementPeriod: "202609",
+    capturedAt: "2026-09-07T00:00:00.000Z",
     providerSaleCode: null,
     usageAmountText: null,
     paymentAmountText: null,
