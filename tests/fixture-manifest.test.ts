@@ -12,7 +12,7 @@
 //
 // A deliberate fixture change re-pins its line in the same commit, as the two
 // `vpass-parser-boundaries` pages were when they took the payment-type codes
-// production rows carry (`１` on the web page, `1` on the customized one) in
+// production rows carry (`１` on the web page, `0` on the customized one) in
 // place of the invented `1回払い`.
 //
 // It also pins the formatter exclusions: the manifest is only a guarantee if

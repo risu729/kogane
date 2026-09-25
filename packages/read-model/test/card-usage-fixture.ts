@@ -50,11 +50,13 @@ export interface UsageRow {
   /** Provider display amount; empty for an amountless Vpass web row. */
   amount: string;
   /**
-   * The payment type where production rows carry it. Vpass: the one-digit
-   * code as the customized family writes it (`bunkatsuYaku`, `1` for a single
-   * payment); the web builder writes its digits full width into `data[6]`
-   * (`１`), as production web rows show it. MyJCB: the wording the combined
-   * `ご利用先など／支払区分` cell shows after the merchant (`1回払`).
+   * The payment type where production rows carry it, written verbatim except
+   * for the width of Vpass web digits. Vpass web: the one-digit `data[6]`
+   * code, which the web builder writes full width (`1` → `１`), as production
+   * web rows show it. Vpass customized: `bunkatsuYaku`, a different field
+   * that is `0` on every production row (`CUSTOMIZED_PAYMENT_TYPE`). MyJCB:
+   * the wording the combined `ご利用先など／支払区分` cell shows after the
+   * merchant (`1回払`).
    */
   paymentType: string;
   /** MyJCB only: the other amount of the row (usage when confirmed, payment when not). */
@@ -111,6 +113,21 @@ function bean(payload: Record<string, unknown>, name: string): Record<string, un
   >;
   return content[name] as Record<string, unknown>;
 }
+
+/**
+ * The Vpass customized family's `bunkatsuYaku` as every production row
+ * carries it (read-only CORE D1 diagnosis of 2026-09-24): `0`. What the field
+ * means is unverified, so recognition accepts no value of it.
+ */
+export const CUSTOMIZED_PAYMENT_TYPE = "0";
+
+/**
+ * The rows of a pool that one card-month re-states on both families, as its
+ * customized page shows them: the same purchase carries the web family's code
+ * once posted and `CUSTOMIZED_PAYMENT_TYPE` while pending.
+ */
+export const asCustomized = (rows: readonly UsageRow[]): UsageRow[] =>
+  rows.map((row) => ({ ...row, paymentType: CUSTOMIZED_PAYMENT_TYPE }));
 
 /** ASCII digits as the Vpass web family writes its payment-type code: full width (`1` → `１`). */
 const fullWidthDigits = (text: string): string =>
@@ -698,8 +715,8 @@ export function baseWorld(): BaseWorld {
       family: "customized",
       fetchedAt: may.fetchedAt,
       rows: [
-        { date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1" },
-        { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1" },
+        { date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "0" },
+        { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "0" },
       ],
     }),
     may.binding,
@@ -730,7 +747,7 @@ export function baseWorld(): BaseWorld {
         month: "202606",
         family: "customized",
         fetchedAt: june.fetchedAt,
-        rows: [{ date: "26/06/01", merchant: "架空店舗D", amount: "1,234", paymentType: "1" }],
+        rows: [{ date: "26/06/01", merchant: "架空店舗D", amount: "1,234", paymentType: "0" }],
       }),
       june.binding,
     ),
@@ -742,7 +759,7 @@ export function baseWorld(): BaseWorld {
         page: "answer-001",
         family: "customized",
         fetchedAt: june.fetchedAt,
-        rows: [{ date: "26/06/02", merchant: "架空店舗E", amount: "3,300", paymentType: "1" }],
+        rows: [{ date: "26/06/02", merchant: "架空店舗E", amount: "3,300", paymentType: "0" }],
       }),
       june.binding,
     ),
@@ -758,8 +775,8 @@ export function baseWorld(): BaseWorld {
         family: "customized",
         fetchedAt: late.fetchedAt,
         rows: [
-          { date: "26/06/01", merchant: "架空店舗D", amount: "1,234", paymentType: "1" },
-          { date: "26/06/03", merchant: "架空店舗F", amount: "700", paymentType: "1" },
+          { date: "26/06/01", merchant: "架空店舗D", amount: "1,234", paymentType: "0" },
+          { date: "26/06/03", merchant: "架空店舗F", amount: "700", paymentType: "0" },
         ],
       }),
       late.binding,
@@ -772,7 +789,7 @@ export function baseWorld(): BaseWorld {
       family: "customized",
       fetchedAt: late.fetchedAt,
       publication: "unpublished",
-      rows: [{ date: "26/06/02", merchant: "架空店舗E", amount: "3,300", paymentType: "1" }],
+      rows: [{ date: "26/06/02", merchant: "架空店舗E", amount: "3,300", paymentType: "0" }],
     }),
   ];
 

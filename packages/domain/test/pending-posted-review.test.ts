@@ -32,26 +32,34 @@ import {
 import { stageBProposals, type MatchFact } from "../src/reconcile.ts";
 import { exactQuantity, integerDecimal } from "../src/values.ts";
 
+/**
+ * A MyJCB ledger row in the production shape. The pending and posted pair
+ * here is MyJCB's unconfirmed and confirmed ledger: a Vpass pending
+ * (customized) row is not recognised until the meaning of its payment-type
+ * field (`bunkatsuYaku`, `0` on every production row) is verified, so the
+ * Vpass pending side is not exercised here yet. A single payment's usage and
+ * payment texts agree, in the provider's sign.
+ */
 function row(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
   return {
     observationId: 101,
     parseRunId: 11,
-    sourceId: "vpass",
+    sourceId: "myjcb",
     producerId: "card-producer",
-    externalIdNamespace: "vpass-worker-card-v1",
-    sourceAccount: "vpass:card-001",
-    externalId: "vpass:card-001:202609:web:row-q:0",
+    externalIdNamespace: "myjcb-connection-v1",
+    sourceAccount: "myjcb:connection-a:root",
+    externalId: "myjcb-credit-ledger:confirmed:row-q:0",
     accountId: "acct-card",
-    identityPolicyFamily: "vpass-card-binding",
-    providerStatus: "posted",
+    identityPolicyFamily: "identity-default",
+    providerStatus: "confirmed",
     amount: exactQuantity("JPY", integerDecimal(-1234), "decimal-v1"),
     usageDate: "2026-08-21",
-    // The web family's payment-type code as production shows it (full width).
-    paymentType: "１",
-    statementPeriod: "202609",
+    // The combined ご利用先など／支払区分 cell production MyJCB rows carry.
+    paymentType: "架空店舗 1回払",
+    statementPeriod: "2026年9月お支払い分",
     providerSaleCode: null,
-    usageAmountText: null,
-    paymentAmountText: null,
+    usageAmountText: "1,234円",
+    paymentAmountText: "1,234円",
     newestRepresentation: true,
     ...overrides,
   };
@@ -60,13 +68,19 @@ const POSTED = row();
 const PENDING = row({
   observationId: 100,
   parseRunId: 10,
-  externalId: "vpass:card-001:202609:customized:row-p:0",
+  externalId: "myjcb-credit-ledger:unconfirmed:row-p:0",
   providerStatus: "unconfirmed",
   amount: exactQuantity("JPY", integerDecimal(-1200), "decimal-v1"),
   usageDate: "2026-08-20",
-  // The customized family writes the same code in ASCII.
-  paymentType: "1",
-  providerSaleCode: "5",
+  usageAmountText: "1,200円",
+  paymentAmountText: "1,200円",
+});
+/** A refund row: the provider's minus sign on both texts. */
+const REFUND = row({
+  externalId: "refund-row",
+  amount: exactQuantity("JPY", integerDecimal(1234)),
+  usageAmountText: "-1,234円",
+  paymentAmountText: "-1,234円",
 });
 
 async function recognised(fact: CardUsageFact): Promise<CardPurchaseDraft> {
@@ -172,15 +186,11 @@ describe("merge", () => {
     const posted = await recognised(POSTED);
     const refund = await cardPurchaseRevision({
       action: "recognize",
-      eventId: await cardPurchaseEventId(
-        "refund",
-        recognitionKey(
-          row({ externalId: "refund-row", amount: exactQuantity("JPY", integerDecimal(1234)) }),
-        )!,
-      ),
+      eventId: await cardPurchaseEventId("refund", recognitionKey(REFUND)!),
       revision: 1,
-      fact: row({ externalId: "refund-row", amount: exactQuantity("JPY", integerDecimal(1234)) }),
+      fact: REFUND,
     });
+    expect(refund).not.toBeNull();
     const otherAccount = await recognised(
       row({ externalId: "other-row", accountId: "acct-other" }),
     );

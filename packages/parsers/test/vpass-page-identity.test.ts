@@ -126,8 +126,9 @@ describe("Vpass external ids across the pages of one card-month", () => {
   test("a first page keeps its 1.1.0 external ids, so a single-page month is unchanged", () => {
     // Pinned from vpass-statement-page@1.1.0 (the parser of 1b8cb84~1) on the
     // unmodified fixtures, re-pinned the same way when the fixtures took the
-    // production payment-type codes (`１`, `1`). The first page emits exactly
-    // what 1.1.0 emitted; a later page is the only place 1.2.0 changes an id.
+    // production payment-type codes (`１` in the web page's data[6], `0` in
+    // the customized page's bunkatsuYaku). The first page emits exactly what
+    // 1.1.0 emitted; a later page is the only place 1.2.0 changes an id.
     const ids = (family: Family) =>
       transactions(
         readFileSync(join(FIXTURES_ROOT, `vpass-parser-boundaries/${family}.json`)),
@@ -138,8 +139,8 @@ describe("Vpass external ids across the pages of one card-month", () => {
       ["vpass:card-001:202608:web:d914f30977e2c3b5b822a8b35331fd19:0", origin],
     ]);
     expect(ids("customized")).toEqual([
-      ["vpass:card-001:202608:customized:46df2517b9abc04bd87378490846ce87:0", origin],
-      ["vpass:card-001:202608:customized:e907b572a910edf6a1d4305873f1cbc2:0", origin],
+      ["vpass:card-001:202608:customized:9ca2b8bed94f4612dfed45d047febe2e:0", origin],
+      ["vpass:card-001:202608:customized:0fd5ed556505e519d64a2cf3ead145e5:0", origin],
     ]);
   });
 });

@@ -128,13 +128,14 @@ describe("the Transactions page composes the shared snapshot currentness", () =>
     // vpass-statement-page@1.2.0 changed only the parser label and the id of
     // row 7, the one row on a later page (answer-001), which now names it.
     // The fixture's move to the production payment-type shapes (the Vpass
-    // codes `１`/`1`, MyJCB's combined `<merchant> 1回払` cell and its
-    // two-character label) changed only the description, counterparty and
-    // fingerprint columns; every id, amount, date and status is as pinned.
+    // web code `１`, the customized `0`, MyJCB's combined `<merchant> 1回払`
+    // cell and its two-character label) changed only the description,
+    // counterparty and fingerprint columns; every id, amount, date and status
+    // is as pinned.
     const pinned = [
       '[19,"myjcb","myjcb:conn-a:root","2026-06-02","-300","-300","JPY","架空","架空店舗J 1回払","myjcb-credit-ledger:unconfirmed:933c80ea937d61fe5f7ee1881f0119ba:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
-      '[7,"vpass","vpass:card-001","2026-06-02","-3300","-3300","JPY","1","架空店舗E","vpass:card-001:202606:customized:b865a357c66258e3595a021db53dfb27:answer-001:0","unconfirmed","vpass-statement-page@1.2.0"]',
-      '[6,"vpass","vpass:card-001","2026-06-01","-1234","-1234","JPY","1","架空店舗D","vpass:card-001:202606:customized:e625f5b7f35b3d23a6df2ed9341ed247:0","unconfirmed","vpass-statement-page@1.2.0"]',
+      '[7,"vpass","vpass:card-001","2026-06-02","-3300","-3300","JPY","0","架空店舗E","vpass:card-001:202606:customized:53574894370073d0ed47dada2a974f24:answer-001:0","unconfirmed","vpass-statement-page@1.2.0"]',
+      '[6,"vpass","vpass:card-001","2026-06-01","-1234","-1234","JPY","0","架空店舗D","vpass:card-001:202606:customized:0c9cf0b445aa57409e1debe6999b3fc4:0","unconfirmed","vpass-statement-page@1.2.0"]',
       '[22,"smbc-bank","smbc-bank:ordinary-yen","2026-05-20","-500","-500","JPY","synthetic",null,"synthetic-bank-1","posted","synthetic-bank-history@1"]',
       '[18,"myjcb","myjcb:conn-a:root","2026-05-10","-800","-800","JPY","架空","架空店舗I 1回払","myjcb-credit-ledger:unconfirmed:f32e4a3b0b17730ff548bed596f7bc8b:0","unconfirmed","myjcb-credit-ledger@1.1.1"]',
       '[5,"vpass","vpass:card-001","2026-05-06",null,null,"JPY","","架空店舗C","vpass:card-001:202605:web:b73cad7c67672c50c243b322a569b12c:0","posted","vpass-statement-page@1.2.0"]',
@@ -267,8 +268,8 @@ describe("current card usage", () => {
       return parsed;
     };
     const pending = capture("customized", "2026-05-10T00:00:00.000Z", [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1" },
-      { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1" },
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "0" },
+      { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "0" },
     ]);
     expect(
       usage(store.db).map((row) => [
@@ -682,7 +683,8 @@ describe("current card usage", () => {
       provider_family: "customized",
       display_state: "pending",
       statement_period: "202606",
-      payment_type: "1",
+      // Production customized rows carry bunkatsuYaku `0`.
+      payment_type: "0",
       provider_sale_code: "5",
     });
     // SC04: an installment slice keeps its usage, payment and 今回回数 apart.
@@ -729,7 +731,7 @@ describe("current card usage", () => {
       date: "26/05/03",
       merchant: "架空店舗A",
       amount: "500",
-      paymentType: "1",
+      paymentType: "0",
     };
     const pages = [
       store.vpassPage({
@@ -790,7 +792,7 @@ describe("current card usage", () => {
       month: "202605",
       family: "customized",
       fetchedAt: "2026-05-10T00:00:00.000Z",
-      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1" }],
+      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "0" }],
     });
     store.identify(pending, card, {
       version: 2,
@@ -977,7 +979,7 @@ describe("current card usage", () => {
       month: "202605",
       family: "customized",
       fetchedAt: "2026-05-10T00:00:00.000Z",
-      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "1" }],
+      rows: [{ date: "26/05/03", merchant: "架空店舗A", amount: "2,000", paymentType: "0" }],
     });
     store.identify(page, vpassCard(TOKEN_A, "acct-card-a"), {
       version: 2,
@@ -1016,7 +1018,7 @@ describe("current card usage", () => {
       row.payment_type,
       row.provider_sale_code,
     ];
-    expect(extras(view(page.observations[0]!))).toEqual(["customized", "202605", "1", "5"]);
+    expect(extras(view(page.observations[0]!))).toEqual(["customized", "202605", "0", "5"]);
     expect(extras(view(malformed))).toEqual([null, null, null, null]);
     expect(extras(view(oversized))).toEqual(["customized", null, null, null]);
     expect(view(atBound).payment_type).toBe("y".repeat(CARD_USAGE_TEXT_BOUND));

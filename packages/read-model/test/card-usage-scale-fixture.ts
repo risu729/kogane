@@ -39,7 +39,13 @@ import {
   type CurrentCardUsageRow,
   currentCardUsageSql,
 } from "../src/card-usage";
-import { customizedPayload, ledgerPayload, type UsageRow, webPayload } from "./card-usage-fixture";
+import {
+  asCustomized,
+  customizedPayload,
+  ledgerPayload,
+  type UsageRow,
+  webPayload,
+} from "./card-usage-fixture";
 
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
 const PRODUCER = "collector-r2-importer";
@@ -132,8 +138,9 @@ function captureDays(options: ScaleOptions): string[] {
 }
 
 /**
- * Mostly single payments, in each source's production shape (the Vpass code
- * `1`, MyJCB's `1回払`); the rest are shapes recognition leaves alone.
+ * Mostly single payments, in each source's production shape (the Vpass web
+ * code `1`, MyJCB's `1回払`); the rest are shapes recognition leaves alone. A
+ * customized (pending) page shows every row with `CUSTOMIZED_PAYMENT_TYPE`.
  */
 const PAYMENT_TYPES = {
   vpass: ["1", "1", "1", "1", "1", "1", "2", "2", "5", "3"],
@@ -705,7 +712,8 @@ class ScaleStore {
     });
     pages.forEach(({ month, family, page, key }, index) => {
       const artifact = run.artifacts[4 + index]!;
-      const bytes = family === "web" ? webPayload(page) : customizedPayload(month, page);
+      const bytes =
+        family === "web" ? webPayload(page) : customizedPayload(month, asCustomized(page));
       const result = vpassStatementPage.parse(
         bytes,
         this.meta(artifact, "vpass", "statement-page", key, at, { fetchUnitKey: ordinal(card) }),
