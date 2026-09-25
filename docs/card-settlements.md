@@ -107,7 +107,9 @@ complete the broader [economic-event roadmap](roadmap.md).
 
 The operator-only `カード利用` page (`/purchases`, capability
 `cardPurchaseRecognition`, `GET /api/v2/card-purchases`) reads the chain from a
-recognised card purchase: 利用 → 請求 → 引落.
+recognised card purchase: 利用 → 請求 → 引落. An agent with a whole-store
+`records.read` grant reads the same chain through `kogane.purchases.explain`
+([agent API](agent-api.md#card-purchase-explanation)).
 
 - A posted purchase joins the provider statement of the same resolved account,
   source and statement period (`YYYY-MM`): `card_statement_facts` whose
@@ -213,8 +215,11 @@ the effect in words:
 
 None of these adds or removes an amount, and the captured figure stays the same.
 Approval is refused while any of these is missing or changed: a pin, the offered
-action, or the candidate itself. The route is operator-only, so an agent sees
-neither the candidates nor the actions.
+action, or the candidate itself. The route is operator-only. An agent reads the
+same candidates through the agent API's `kogane.purchases.explain`
+([agent API](agent-api.md#card-purchase-explanation)) with every fact and
+blocker but without `actions` or `relation`, so it can report a candidate and
+never review one: the decision stays on this page.
 
 ## Cost
 
