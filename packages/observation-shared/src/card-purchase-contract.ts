@@ -1,14 +1,17 @@
-// The wire shape of `GET /api/v2/card-purchases`. Shape only: the client never
-// recalculates a figure, and a response that adds a combined total, calls a
-// settlement a purchase expense or claims complete history is refused rather
-// than displayed.
+// The wire shape of `GET /api/v2/card-purchases`, and of the same page as the
+// agent API's `kogane.purchases.explain` returns it (its `data`, without the
+// review affordances). Shape only: the client never recalculates a figure, and
+// a response that adds a combined total, calls a settlement a purchase expense
+// or claims complete history is refused rather than displayed.
 import {
   CARD_PURCHASE_ACTIONS,
   CARD_PURCHASE_SOURCES,
   CARD_USAGE_EXCLUSIONS,
 } from "../../domain/src/card-purchase.ts";
 import {
+  CARD_PURCHASE_REVIEW_AFFORDANCES,
   CARD_PURCHASE_STATEMENT_REASONS,
+  type AgentCardPurchasePage,
   type CardPurchasePage,
 } from "../../domain/src/card-purchase-view.ts";
 import {
@@ -86,6 +89,10 @@ const CANDIDATE_KEYS = [
   "blockers",
   "relation",
 ];
+/** An agent's candidate: the same facts, no action and no plan payload. */
+const AGENT_CANDIDATE_KEYS = CANDIDATE_KEYS.filter(
+  (key) => !(CARD_PURCHASE_REVIEW_AFFORDANCES as readonly string[]).includes(key),
+);
 const CANDIDATE_SIDE_KEYS = ["ref", "eventId", "revision", "state", "displayedAmount", "usageDate"];
 const RELATION_KEYS = ["relationKind", "fromRef", "toRef", "validFrom", "validTo", "evidenceRefs"];
 
@@ -207,31 +214,45 @@ function validCandidateSide(value: unknown): boolean {
 
 const distinct = (value: readonly unknown[]): boolean => new Set(value).size === value.length;
 
+/** Every fact of a candidate: what the operator's page and an agent both read. */
+function validCandidateFacts(value: Record<string, unknown>): boolean {
+  return (
+    text(value.proposalId) &&
+    member(PROPOSAL_STATUSES)(value.proposalStatus) &&
+    count(value.proposalRevision) &&
+    (value.relationStatus === null ||
+      member(["proposed", "accepted", "rejected", "released"])(value.relationStatus)) &&
+    count(value.relationRevision) &&
+    typeof value.providerLinked === "boolean" &&
+    list(value.rationaleCodes, RATIONALE_CODES.length) &&
+    value.rationaleCodes.every(member(RATIONALE_CODES)) &&
+    list(value.rejectionConditions, REJECTION_CONDITION_CODES.length) &&
+    value.rejectionConditions.every(member(REJECTION_CONDITION_CODES)) &&
+    validCandidateSide(value.pending) &&
+    validCandidateSide(value.posted) &&
+    list(value.blockers, PENDING_POSTED_BLOCKERS.length) &&
+    value.blockers.every(member(PENDING_POSTED_BLOCKERS)) &&
+    distinct(value.blockers)
+  );
+}
+
+/**
+ * An agent's candidate: exactly the facts, so a response that hands an agent
+ * an action or a plan payload is refused.
+ */
+function validAgentCandidate(value: unknown): boolean {
+  return record(value) && exactKeys(value, AGENT_CANDIDATE_KEYS) && validCandidateFacts(value);
+}
+
 function validCandidate(value: unknown): boolean {
   if (!record(value) || !exactKeys(value, CANDIDATE_KEYS)) return false;
   const relation = value.relation;
   if (
+    !validCandidateFacts(value) ||
     !text(value.proposalId) ||
-    !member(PROPOSAL_STATUSES)(value.proposalStatus) ||
-    !count(value.proposalRevision) ||
-    !(
-      value.relationStatus === null ||
-      member(["proposed", "accepted", "rejected", "released"])(value.relationStatus)
-    ) ||
-    !count(value.relationRevision) ||
-    typeof value.providerLinked !== "boolean" ||
-    !list(value.rationaleCodes, RATIONALE_CODES.length) ||
-    !value.rationaleCodes.every(member(RATIONALE_CODES)) ||
-    !list(value.rejectionConditions, REJECTION_CONDITION_CODES.length) ||
-    !value.rejectionConditions.every(member(REJECTION_CONDITION_CODES)) ||
-    !validCandidateSide(value.pending) ||
-    !validCandidateSide(value.posted) ||
     !list(value.actions, PENDING_POSTED_ACTIONS.length) ||
     !value.actions.every(member(PENDING_POSTED_ACTIONS)) ||
     !distinct(value.actions) ||
-    !list(value.blockers, PENDING_POSTED_BLOCKERS.length) ||
-    !value.blockers.every(member(PENDING_POSTED_BLOCKERS)) ||
-    !distinct(value.blockers) ||
     !record(relation) ||
     !exactKeys(relation, RELATION_KEYS) ||
     relation.relationKind !== PENDING_POSTED_RELATION_KIND ||
@@ -256,7 +277,7 @@ function validCandidate(value: unknown): boolean {
   );
 }
 
-function validItem(value: unknown): boolean {
+function validItem(value: unknown, candidate: (value: unknown) => boolean): boolean {
   if (!record(value) || !exactKeys(value, ITEM_KEYS)) return false;
   const unknown = value.state === "unknown";
   return (
@@ -285,7 +306,7 @@ function validItem(value: unknown): boolean {
     value.history.every(validHistoryEntry) &&
     typeof value.historyTruncated === "boolean" &&
     list(value.candidates, CARD_PURCHASE_CANDIDATE_LIMIT) &&
-    value.candidates.every(validCandidate) &&
+    value.candidates.every(candidate) &&
     list(value.explanationRefs, 100) &&
     value.explanationRefs.every(text)
   );
@@ -293,6 +314,18 @@ function validItem(value: unknown): boolean {
 
 /** Validate the wire shape only. Financial figures are never recalculated by a client. */
 export function validCardPurchasePage(value: unknown): value is CardPurchasePage {
+  return validPage(value, validCandidate);
+}
+
+/**
+ * The `data` of `kogane.purchases.explain`: the same page, whose candidates
+ * carry every fact and neither `actions` nor `relation`.
+ */
+export function validAgentCardPurchasePage(value: unknown): value is AgentCardPurchasePage {
+  return validPage(value, validAgentCandidate);
+}
+
+function validPage(value: unknown, candidate: (value: unknown) => boolean): boolean {
   if (
     !record(value) ||
     !list(value.items, CARD_PURCHASE_PAGE_LIMIT) ||
@@ -337,6 +370,6 @@ export function validCardPurchasePage(value: unknown): value is CardPurchasePage
     coverage.unsupportedShapes.every(member(CARD_USAGE_EXCLUSIONS)) &&
     count(coverage.unrecognizedCurrentRows) &&
     coverage.limit === CARD_PURCHASE_PAGE_LIMIT &&
-    value.items.every(validItem)
+    value.items.every((item) => validItem(item, candidate))
   );
 }
