@@ -114,15 +114,26 @@ What the contract reads from the parsers: Vpass `1回払い` and MyJCB `一回�
 are single payments; MyJCB's usage and payment texts (`1,200円`, `-500円`) are
 read with the MyJCB ledger parser's own amount grammar and must agree; the
 statement period is stored as `YYYY-MM`, the key `card_statement_facts.period`
-uses, from Vpass `statementMonth` and from MyJCB's `YYYY年M月お支払い分` label
-(any other label is stored as `NULL`, never guessed). The reconciliation job's
-MyJCB installment guard, `comparableCardPayment`, reads the same texts through
-the same rule (`myjcbAgreedAmount`): a confirmed row takes part in
-pending-to-posted matching only when its usage and payment agree and are
-positive, so an installment slice is never compared with a purchase. The job
-also admits a confirmed row only under a label `statementPeriod` reads as a
-payment month, so a label recognition stores as `NULL` (the collector's
-relative `detailMonth-N` fallback) never pairs rows either.
+uses, from Vpass `statementMonth` and from MyJCB's `YYYY年M月お支払い分` label,
+or, for the collector's relative `detailMonth-N` fallback, from the label and
+the capture time of the ledger artifact that carries it
+(`cardStatementPeriod`, rule `relative-statement-period-v1`,
+[docs/observations.md](observations.md#relative-period-labels-are-resolved-from-the-capture-time)):
+`detailMonth-0` is the payment month of the cycle the capture day's usage is
+billed to, `detailMonth-1` the month before it, both payment months as the
+statement parser derives them from the payment date. Any other label
+(`detailMonth-2` and beyond, which the evidence does not place) is stored as
+`NULL`, never guessed, and the stored label is never rewritten. The period is
+not content: a sidecar period derived differently from the same row (a
+recognition stored with `NULL` before the rule existed) is recorded as a
+`revise` of its own, and the earlier revision keeps its period
+(`nextCardPurchaseAction`). The reconciliation job's MyJCB installment guard,
+`comparableCardPayment`, reads the same texts through the same rule
+(`myjcbAgreedAmount`): a confirmed row takes part in pending-to-posted
+matching only when its usage and payment agree and are positive, so an
+installment slice is never compared with a purchase. The job also admits a
+confirmed row only under a payment month read or resolved the same way, so a
+row recognition stores as `NULL` never pairs rows there either.
 
 ### Where the decisions live
 
@@ -240,17 +251,24 @@ inside one provider's own displays**:
   account. A confirmed row's amount can be one installment slice, so it takes
   part only when its usage and payment texts (`1,200円`) agree and are positive
   (`comparableCardPayment`, read with the rule card purchase recognition uses);
-  an installment slice is never compared with a purchase. It also needs an
-  absolute payment month label (`2026年10月お支払い分`, read by
-  `statementPeriod`): the collector writes the relative fallback
-  `detailMonth-N` for every month the past-months API does not label, and that
-  position names a different payment month as months pass, so rows grouped
-  under it would claim `same_statement_period` falsely. A pair is therefore
-  proposed only when both ledgers carry the same absolute month. On the
-  connection surveyed in [the MyJCB source notes](sources/myjcb.md) the menu
-  lists months 0–8 and the API labels only months 9–17, so its unconfirmed
-  ledger and recent confirmed months carry `detailMonth-N` and this job
-  proposes no MyJCB pending-to-posted pair for them.
+  an installment slice is never compared with a purchase. Rows are grouped
+  by payment month: an absolute label (`2026年10月お支払い分`), or the
+  collector's relative fallback `detailMonth-N` resolved from the capture time
+  of the row's own artifact (`statementPeriodOf`, the rule recognition uses).
+  The raw label is never a group: it is a position in the provider's list on
+  the capture day and names a different payment month as months pass, so rows
+  grouped under it would claim `same_statement_period` falsely. A pending
+  `detailMonth-0` row therefore pairs with the `detailMonth-1` confirmed row
+  the next cycle moves it to when both resolve to one month (and the posted
+  day is inside the [matching window](#matching-stages)), and the same label
+  captured in another cycle groups apart. That needs the collector to
+  record `detailMonth=1` as confirmed; on the surveyed connection it records
+  it as `unconfirmed` (no export link,
+  [observations](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
+  so its rows are pending rows there. A confirmed row whose month
+  neither the label nor the rule places (`detailMonth-2` and beyond) stays out
+  of this job; the recognition lane's candidate pass, which groups MyJCB by
+  usage month, still pairs it.
 
 Both sources' external ids are collector fingerprints, so stage A proposes
 nothing for either; it runs for the day a slice carries provider row ids.
@@ -425,31 +443,36 @@ closeness never does (INV07), and two posted rows of one amount on one day are
 two candidates, never a merge (SC03).
 
 **Candidates.** After the recognition pass, the lane pairs the recognised
-events of every group its page touched with `stageBProposals`. A group is the
-resolved account, the source and the statement period, or, when the sidecar
-has no recognised period, the usage month: MyJCB labels many months only
-relatively (`detailMonth-N`), so its pending and confirmed rows often carry no
-period at all, and grouping them by usage month lets a pending row meet its
-posted row, stage B's own matching window then deciding. Within a group it
-pairs each single-key pending-origin event (`authorized`, or `unknown` after
-it left the display) against each single-key `captured` posted event of the
-same card account namespace and kind, never a purchase against a refund, and
-only when the posted usage day falls inside the
-[matching window](#matching-stages) after the pending one; the reconciliation
-lane calls the same `stageBProposals`, so both lanes propose the same pairs.
-Each candidate is a `reconciliation_proposals` row keyed by the matcher's own
-`proposalIdentity` digest, so a pair is proposed once whichever lane saw it
-first: kind `pending_to_posted`, stage `B`, method `rule`, policy release
-`reconciliation-rules-v1`, targets `[pending, posted]` as `transaction:<id>`
-pinned to `parse_run:<id>`, inserted only `WHERE NOT EXISTS` a row with that
-digest (the 0032 no-replace trigger would abort a second insert of an id). A
-pair already stored, proposed or decided, is never written again and never
-takes the write budget, and the ambiguity codes (`multiple_candidates`,
-`candidate_not_unique`) are kept. The recognition cursor cycles through every
+events of every group its page touched with `stageBProposals`. A Vpass group
+is the resolved account, the source and the statement period, or, when the
+sidecar has no recognised period, the usage month. A MyJCB group is always
+the resolved account, the source and the usage month: a pending row's
+relative label resolves to a payment month from its capture time, but the
+confirmed row of the same purchase can sit at a later position the rule does
+not place (`detailMonth-2` and beyond), so grouping by period would keep the
+two apart. The usage date is the one key both displays of a purchase share.
+Stage B then admits a pair only when the posted usage day falls inside the
+[matching window](#matching-stages) after the pending one, whatever the
+periods (`same_statement_period` is a rationale, claimed only when both sides
+have the same one); the amount is a rationale code, never a filter. A pending
+and posted row whose usage days straddle a month end are in two MyJCB groups
+and are not paired by this pass. Within a
+group it pairs each single-key pending-origin event (`authorized`, or
+`unknown` after it left the display) against each single-key `captured`
+posted event of the same card account namespace and kind, never a purchase
+against a refund. Each candidate is a `reconciliation_proposals` row keyed by
+the matcher's own `proposalIdentity` digest, so a pair is proposed once
+whichever lane saw it first: kind `pending_to_posted`, stage `B`, method
+`rule`, policy release `reconciliation-rules-v1`, targets `[pending, posted]`
+as `transaction:<id>` pinned to `parse_run:<id>`, inserted only
+`WHERE NOT EXISTS` a row with that digest (the 0032 no-replace trigger would
+abort a second insert of an id). A pair already stored, proposed or decided, is
+never written again and never takes the write budget, and the ambiguity codes
+(`multiple_candidates`, `candidate_not_unique`) are kept. The recognition cursor cycles through every
 current row, so a pair is reached however many rows a source has, as the
 reconciliation lane's own [scan cursor](#bounds-1) reaches it over every
-published row. The amount and counterparty are read from the rows to compare
-and never stored.
+published row. The amount
+and counterparty are read from the rows to compare and never stored.
 
 **Merge.** A reviewed `relation.accept` of the candidate
 ([change lifecycle](change-lifecycle.md#pending-to-posted-link-review)), or,
@@ -596,6 +619,14 @@ Rollback: set the flag back to `"0"`. The lane stops and every row it wrote
 stays. A wrong recognition is corrected by shipping a fixed policy whose sweep
 appends revisions, never by a DELETE. Builds from before this change never
 touch the 0047 tables.
+
+Resolving relative labels (`relative-statement-period-v1`) needs no migration
+and no re-parse. A live MyJCB recognition stored with a `NULL` period while its
+current row carries `detailMonth-0` or `detailMonth-1` gets one `revise`
+revision with the resolved period the next time the recognition pass reaches
+its row (the cursor cycles through every current row, within the write
+bound); its content digest is unchanged, and revision 1 keeps its `NULL`. An
+event already retired keeps the period it had.
 
 ### Verified locally (synthetic data only)
 
@@ -821,7 +852,8 @@ Per slice, one tick:
 1. reads at most 1,000 published rows after the cursor, by observation id
    (`SCAN_LIMIT`);
 2. counts the published rows of every group (source account, statement
-   period) those rows belong to, in one pass that also names the rows of each
+   period; for MyJCB the payment month its label resolves to) those rows
+   belong to, in one pass that also names the rows of each
    group of at most 200 rows; skips a larger group (`GROUP_LIMIT`, counted in
    `groupsSkipped`), and reads the others whole by row id, at most 2,000 rows
    in all (`GROUP_READ_LIMIT`; the page's first group to pair is always read,
@@ -914,16 +946,23 @@ migration 0026.
   on 0017–0035 with seeded rows including its closed enums and append-only
   triggers; MyJCB ledgers seeded through the deployed parser: a `1,200円` pair,
   an installment slice never compared, same-amount twins, re-runs and a decided
-  proposal writing nothing, a relative `detailMonth-N` label pairing nothing,
-  and a re-captured confirmed row kept out of stage A; two captures of the
-  synthetic Vpass fixture parsed by the deployed 1.2.0 parser writing no stage
-  A proposal and a synthetic provider row id still paired; a slice of several
-  pages visited in full and wrapped, an overlapping tick never pulling the
-  cursor back, a deferred group, the write budget holding the cursor on its
-  page and a tick whose every batch D1 rejected not holding it, the digest
-  lookup's chunk boundary, a stored proposal sending no statement and a
-  decided one never proposed again, and only the in-window posted row
-  proposed) and
+  proposal writing nothing, a `detailMonth-0` row pairing with the
+  `detailMonth-1` row its months resolve to, the same label in another cycle
+  and an unplaced `detailMonth-2` row pairing nothing, and a re-captured
+  confirmed row kept out of stage A; two captures of the synthetic Vpass
+  fixture parsed by the deployed 1.2.0 parser writing no stage A proposal and
+  a synthetic provider row id still paired; a slice of several pages visited
+  in full and wrapped, an overlapping tick never pulling the cursor back, a
+  deferred group, the write budget holding the cursor on its page and a tick
+  whose every batch D1 rejected not holding it, the digest lookup's chunk
+  boundary, a stored proposal sending no statement and a decided one never
+  proposed again, and only the in-window posted row proposed),
+  `test/card-purchase-relative-period.test.ts` (a `detailMonth-1` row's stored
+  period is its statement's from the same capture and the explanation links
+  them; `detailMonth-0` stores its resolved month and `detailMonth-2` stays
+  `period_unrecognized`; a recognition stored without a period is revised with
+  the resolved one, append-only; a pending row pairs with its posted row by
+  usage month and claims one statement only when both resolve to it) and
   `test/card-purchase-parser-shapes.test.ts` (recognition and the matching
   guard never disagree on a parsed MyJCB row).
 - `services/app`: `test/events-api.test.ts` (capability gate, Access

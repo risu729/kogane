@@ -26,7 +26,6 @@ import {
   type ContainerRecord,
   type StoredArtifact,
 } from "./model";
-import type { RawEvidenceImportResult } from "./raw-evidence-types";
 import { sanitizeGlobalPassActivityHtml } from "./sanitize";
 import {
   dataBucket,
@@ -208,9 +207,7 @@ async function runContainerProbe(env: Env, variant: ContainerProbeVariant): Prom
 }
 type CollectionResult = CollectionManifest & {
   manifestKey: string;
-  /** Legacy mode only: the central importer's answer. */
-  central?: RawEvidenceImportResult;
-  /** Shared mode only: what `persistRun` did in the DATA bucket. */
+  /** What `persistRun` did in the DATA bucket. */
   shared?: SharedRunSummary;
 };
 async function runCollection(
@@ -756,20 +753,6 @@ function publicCollectionResult(result: CollectionResult): object {
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
     manifestKey: result.manifestKey,
-    ...(result.central
-      ? {
-          central: {
-            status: result.central.status,
-            ...(result.central.status === "sealed"
-              ? { centralRunId: result.central.centralRunId, sealed: result.central.sealed }
-              : {
-                  reason: result.central.reason,
-                  artifactCount: result.central.artifactCount,
-                  nextOffset: result.central.nextOffset,
-                }),
-          },
-        }
-      : {}),
     ...(result.shared
       ? {
           shared: {

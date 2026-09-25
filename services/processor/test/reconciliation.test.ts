@@ -203,6 +203,8 @@ test("both Vpass id forms stay collector fingerprints, so stage A pairs neither"
         scale: 0,
         value_basis: "minor_units",
         statement_period: kogane["statementMonth"]!,
+        period_label: null,
+        fetched_at: "2026-08-30T00:00:00.000Z",
         provider_link_id: null,
         identity_origin: kogane["identityOrigin"]!,
         usage_amount_text: null,
@@ -666,11 +668,13 @@ async function seedLedger(
   state: "unconfirmed" | "confirmed",
   rows: readonly LedgerRow[],
   period = MYJCB_PERIOD,
+  /** The capture time (default now) and the menu position (default 0 unconfirmed, 1 confirmed). */
+  capture: { fetchedAt?: string; detailMonth?: number } = {},
 ): Promise<number[]> {
   const artifactId = (nextArtifact += 1);
   const parseId = (nextParse += 1);
-  const detailMonth = state === "unconfirmed" ? 0 : 1;
-  const key = `${connection}/credit-ledger-0${detailMonth}.json`;
+  const detailMonth = capture.detailMonth ?? (state === "unconfirmed" ? 0 : 1);
+  const key = `${connection}/credit-ledger-${String(detailMonth).padStart(2, "0")}.json`;
   const ledger = {
     schemaVersion: 1,
     detailMonth,
@@ -694,7 +698,16 @@ async function seedLedger(
     })),
   };
   const bytes = new TextEncoder().encode(JSON.stringify(ledger));
-  await seedArtifact(env, artifactId, "myjcb", "credit-ledger", key, bytes);
+  await seedArtifact(
+    env,
+    artifactId,
+    "myjcb",
+    "credit-ledger",
+    key,
+    bytes,
+    true,
+    capture.fetchedAt === undefined ? undefined : Date.parse(capture.fetchedAt),
+  );
   await db
     .prepare(
       "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,?,'2026-10-01','pending','[]')",
@@ -713,7 +726,7 @@ async function seedLedger(
       artifactKey: key,
       statementState: state,
       period,
-      fetchedAt: "2026-10-01T00:00:00.000Z",
+      fetchedAt: capture.fetchedAt ?? "2026-10-01T00:00:00.000Z",
       sha256: "0".repeat(64),
     })
     .observations.filter((row): row is TransactionObservation => row.kind === "transaction");
@@ -935,31 +948,108 @@ test("a proposal already decided is never proposed again", async () => {
   );
 });
 
-test("a relative MyJCB label (detailMonth-N) names no payment month, so nothing pairs under it", async () => {
-  // The collector writes `detailMonth-N` for a month the past-months API does
-  // not label; the same label names a different payment month next month.
-  const purchase = { date: "2026/09/20", merchant: "架空薬局", paymentType: "一回払い" };
+test("a relative MyJCB label is resolved from its capture time: detailMonth-0 pairs with the detailMonth-1 row the next cycle moved it to", async () => {
+  // docs/observations.md: the collector keeps `detailMonth-N` verbatim and
+  // the job reads it with the capture time of its own artifact. Captured on
+  // 2026-09-12 (JST), position 0 is the cycle paid in 2026-10; captured on
+  // 2026-09-26, after the 15th closing, position 1 is that same cycle.
+  const purchase = { date: "2026/09/10", merchant: "架空花店", paymentType: "一回払い" };
+  const [pending] = await seedLedger(
+    "conn-resolved",
+    "unconfirmed",
+    [{ ...purchase, amount: "1,200円" }],
+    "detailMonth-0",
+    { fetchedAt: "2026-09-12T00:00:00.000Z" },
+  );
+  const [posted] = await seedLedger(
+    "conn-resolved",
+    "confirmed",
+    [{ ...purchase, amount: "1,200円" }],
+    "detailMonth-1",
+    { fetchedAt: "2026-09-26T00:00:00.000Z" },
+  );
+  expect(
+    (await unguardedFacts("conn-resolved")).map((fact) => [fact.ref.id, fact.statementPeriod]),
+  ).toEqual([
+    [`transaction:${pending}`, "2026-10"],
+    [`transaction:${posted}`, "2026-10"],
+  ]);
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-05T00:00:00Z" });
+  expect(result).toMatchObject({ written: 1, autoAccepted: 0 });
+  const [stored, ...others] = await citing([pending!, posted!]);
+  expect(others).toEqual([]);
+  expect(stored).toMatchObject({
+    kind: "pending_to_posted",
+    stage: "B",
+    status: "proposed",
+    targets: [`transaction:${pending}`, `transaction:${posted}`],
+  });
+  expect(stored!.rationale).toEqual(
+    expect.arrayContaining(["same_statement_period", "date_within_window", "amount_equal"]),
+  );
+});
+
+test("the same relative label captured in another cycle names another month, so nothing pairs under it", async () => {
+  // Two purchases of one amount three days apart, either side of the 15th
+  // closing: the first is on the statement paid in 2026-09, the second on the
+  // one paid in 2026-10, and each is `detailMonth-1` on its own capture day.
   const [pending] = await seedLedger(
     "conn-relative",
     "unconfirmed",
-    [{ ...purchase, amount: "1,200円" }],
+    [{ date: "2026/08/14", merchant: "架空薬局", paymentType: "一回払い", amount: "1,200円" }],
     "detailMonth-1",
+    { fetchedAt: "2026-09-05T00:00:00.000Z", detailMonth: 1 },
   );
   const [posted] = await seedLedger(
     "conn-relative",
     "confirmed",
-    [{ ...purchase, amount: "1,200円" }],
+    [{ date: "2026/08/17", merchant: "架空薬局", paymentType: "一回払い", amount: "1,200円" }],
     "detailMonth-1",
+    { fetchedAt: "2026-10-05T00:00:00.000Z" },
   );
-  // Grouped by the label alone the matcher would claim one statement period.
-  const [unguarded, ...others] = stageBProposals(await unguardedFacts("conn-relative"));
-  expect(others).toEqual([]);
+  const facts = await unguardedFacts("conn-relative");
+  expect(facts.map((fact) => fact.statementPeriod)).toEqual(["2026-09", "2026-10"]);
+  // Grouped by the raw label, the matcher would claim one statement period.
+  const [unguarded, ...rest] = stageBProposals(
+    facts.map((fact) => ({ ...fact, statementPeriod: "detailMonth-1" })),
+  );
+  expect(rest).toEqual([]);
   expect(unguarded!.rationaleCodes).toContain("same_statement_period");
   const before = await proposals();
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-05T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-06T00:00:00Z" });
   expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
   expect(await citing([pending!, posted!])).toEqual([]);
   expect(await proposals()).toEqual(before);
+});
+
+test("a confirmed row at a position the rule does not place (detailMonth-2) pairs with nothing", async () => {
+  // relative-statement-period-v1 resolves positions 0 and 1 only: the
+  // production captures place nothing beyond, and the months the provider
+  // labels absolutely sit two months off `P0 − N`. A uniform offset would put
+  // this row in 2026-10 beside the pending row; the rule leaves it unplaced,
+  // and an unplaced confirmed row stays out of pending-to-posted matching.
+  const purchase = { date: "2026/09/01", merchant: "架空書房", paymentType: "一回払い" };
+  const [pending] = await seedLedger(
+    "conn-unplaced",
+    "unconfirmed",
+    [{ ...purchase, amount: "1,500円" }],
+    "detailMonth-0",
+    { fetchedAt: "2026-09-05T00:00:00.000Z" },
+  );
+  const [posted] = await seedLedger(
+    "conn-unplaced",
+    "confirmed",
+    [{ ...purchase, amount: "1,500円" }],
+    "detailMonth-2",
+    { fetchedAt: "2026-10-20T00:00:00.000Z", detailMonth: 2 },
+  );
+  expect((await unguardedFacts("conn-unplaced")).map((fact) => fact.statementPeriod)).toEqual([
+    "2026-10",
+    null,
+  ]);
+  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-21T00:00:00Z" });
+  expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
+  expect(await citing([pending!, posted!])).toEqual([]);
 });
 
 test("a MyJCB confirmed row re-captured by a later run is not proposed as the same row", async () => {

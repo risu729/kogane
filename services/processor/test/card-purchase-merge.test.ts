@@ -311,10 +311,18 @@ test("MyJCB rows with only relative period labels (detailMonth-N) meet by usage 
     rows: [matching, { ...matching, date: "2026/05/01", amount: "300" }],
   });
   expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 4, proposed: 1 });
-  // No statement period is recognised on either side.
+  // The pending side's position 0 resolves from its capture time (2026-06-12
+  // JST: the cycle paid in 2026-07); the confirmed side's position 2 is one
+  // relative-statement-period-v1 does not place, so it has no period. MyJCB
+  // events are paired by usage month, so the two still meet.
   expect(
-    await w.all("SELECT DISTINCT source_id,statement_period FROM card_purchase_recognitions"),
-  ).toEqual([{ source_id: "myjcb", statement_period: null }]);
+    await w.all(
+      "SELECT DISTINCT source_id,json_extract(facts_json,'$.providerStatus') AS status,statement_period FROM card_purchase_recognitions ORDER BY status",
+    ),
+  ).toEqual([
+    { source_id: "myjcb", status: "confirmed", statement_period: null },
+    { source_id: "myjcb", status: "unconfirmed", statement_period: "2026-07" },
+  ]);
   // Exactly the matching pair is proposed: same usage day, same amount.
   const [only, ...rest] = await proposals(w);
   expect(rest).toEqual([]);
