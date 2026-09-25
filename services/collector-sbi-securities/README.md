@@ -1,6 +1,6 @@
 # SBI証券 read-only Worker PoC
 
-SBI証券の保存済みパスキーから毎回新しいsessionを作り、国内・米国株の残高と履歴を公式のWeb／アプリ通信から取得してprivate R2へ保存する独立Workerである。`mnie`をruntime依存、submodule、設定源として使用しない。必要だった認証・復号・read-only通信だけをこのディレクトリへ移植した。
+SBI証券の保存済みパスキーから毎回新しいsessionを作り、国内・米国株の残高と履歴を公式のWeb／アプリ通信から取得して共有DATA bucket（`kogane-raw-evidence`）へ保存する独立Workerである。`mnie`をruntime依存、submodule、設定源として使用しない。必要だった認証・復号・read-only通信だけをこのディレクトリへ移植した。
 
 ## Runtime profile
 
@@ -14,7 +14,7 @@ SBI証券の保存済みパスキーから毎回新しいsessionを作り、国�
 - メインサイト: My資産の現在評価、円貨入出金明細、国内株の90日以下の履歴。円貨明細はproviderの全page metadataと全fieldをpage bundleに保持し、全件性を検証してからartifact化する
 - 外国株式アプリ: 米国株現物、USD外貨預り金、90日以下の取引履歴
 - 実行: Cloudflare Cron Triggerから毎日21:00 UTC（日本時間06:00）に国内・外国を1 invocationで直列収集、または認証付き手動trigger
-- 保存: private R2をdurable outboxとして維持し、manifest確定後に内部Service Binding経由で中央raw-evidenceへ転送する。collector自身はD1を使用しない
+- 保存: `packages/collection`で共有DATA bucketへ直接書き、ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。collector自身はD1を使用しない
 
 注文、訂正、取消、取引パスワード、端末登録は実装にも設定にも含めない。通信が`POST`でも、許可するhost、path、MTS TR code、GraphQL operationを読み取り用途へ固定している。
 
@@ -33,7 +33,7 @@ Worker secretは次の3つだけである。
 - `SBI_HANDSHAKE_KEY_JSON`: SBIが返す一時tokenを復号するRSA-4096 transport key。口座認証鍵ではなく、ローカルで一度生成する
 - `ADMIN_TRIGGER_TOKEN`: 手動triggerのBearer token
 
-中央raw-evidenceのBearerやstorage fingerprint鍵はcollectorには置かず、外部非公開の`kogane-collector-r2-importer`だけが保持する。Service Bindingの転送に失敗しても、確定済みmanifestとartifactは元R2に残り、`scripts/backfill-raw-evidence.sh`で再送できる。
+中央raw-evidenceのBearerやstorage fingerprint鍵はcollectorに置かない。旧source専用bucket、`kogane-collector-r2-importer`へのService Binding、`scripts/backfill-raw-evidence.sh`は2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 Bitwarden item全体、ログインID、ログインパスワード、取引パスワード、master password、vault exportはWorkerへ置かない。SBIのpasskey秘密鍵はこのPoCではCloudflare secretへ複製されるため、通常のpasswordより強いsecretとして扱う。transport鍵は口座認証鍵でもsession鍵でもないため一度だけ生成し、各runで再利用する。sessionとpasskey assertionは毎回作り直す。
 
@@ -64,7 +64,7 @@ mise run //services/collector-sbi-securities:dry-run
 
 ローカルの管理用tokenを表示せずに起動する場合は、`scripts/trigger.sh foreign`のようにscopeを渡す。`scripts/trigger.sh all`はCloudflare Cronと同じく、1 invocation内で国内、外国の順に収集する。
 
-`from`と`to`は同時指定し、1回の範囲はinclusiveで90日以下とする。現在値だけなら省略できる。raw responseは次の形でprivate R2に保存する。
+`from`と`to`は同時指定し、1回の範囲はinclusiveで90日以下とする。現在値だけなら省略できる。raw responseは次の形で共有DATA bucketに保存する。
 
 初期取込は、指定期間を重複のない90日以下のwindowへ分けて国内・外国を順番に取得する。
 
@@ -73,21 +73,15 @@ scripts/backfill.sh 2024-08-28 2026-05-29
 ```
 
 ```text
-raw/sbi-securities/YYYY/MM/DD/<run-id>/<dataset>.json
-raw/sbi-securities/YYYY/MM/DD/<run-id>/manifest.json
+objects/<2 hex>/<sha256>                       <dataset>.jsonごとのcontent-addressed object
+runs/sbi-securities/<run-id>/terminal.json     最後に書くrunの完了記録（artifact keyとobjectの対応を持つ）
 ```
 
-manifestには期間、成功・部分成功・失敗、artifactのhashとbyte数、秘密を除いた短い失敗分類を記録する。access token、SID、Cookie、MTSのsession header、口座番号は保存しない。
+terminalには期間、成功・部分成功・失敗、artifactのhashとbyte数、秘密を除いた機械可読な失敗codeを記録する。access token、SID、Cookie、MTSのsession header、口座番号は保存しない。
 
 `yen-detail-history.json`は`sbi-yen-detail-history-bundle-v1`で、bundle側の件数・完了・上限flagと、`pages[]`内のprovider responseを保持する。連続した`pageNumber`、一定の`pageCount`／`pageSize`／`totalCount`、全row件数、`did`重複、provider／collector上限flagを検証する。現時点で観測済みなのはread-only `GET /banking/api/yen/detail/init`だけで、次page requestのendpoint／parameter契約は未確認である。従ってinitが複数pageまたは未収集rowを示すrunは、推測したrequestを送らず`main-site` failureとして閉じ、欠落した履歴を成功artifactとして保存しない。
 
-保存済みrunを中央へ移行する場合は、CloudflareのWorker呼び出し上限を避けるため1 top-level requestにつき1 R2 objectを走査し、cursorで反復する。
-
-```sh
-scripts/backfill-raw-evidence.sh
-```
-
-再実行は同じ中央runへ冪等に収束する。中央への移行後もsource R2を自動削除しない。
+旧source専用bucketの保存済みrunは2026-09-13に中央DATAへコピー・検証済みであり、再送するoutboxはない（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 ## Workers Paidでの定期実行
 

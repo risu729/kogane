@@ -130,6 +130,17 @@ A later page whose published parse is still 1.1.0 keeps its old id, and so can
 still share a key with the first page, until the re-parse that follows the
 release reaches it.
 
+A row's `statement_period` is the provider label verbatim (Vpass
+`statementMonth`; MyJCB `_kogane.period`, which may be the collector's
+relative `detailMonth-N`), and `snapshot_fetched_at` is the capture time: for
+MyJCB the ledger artifact's own `fetched_at`, since a MyJCB snapshot is one
+artifact. The read model never resolves a relative label. The domain does,
+from exactly these two columns (`cardStatementPeriod`, rule
+`relative-statement-period-v1`,
+[observations](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
+so every reader interprets a label the same way and the stored evidence stays
+as the provider showed it.
+
 #### Cost
 
 D1 never runs `ANALYZE`, so its planner has no table statistics. Measured on

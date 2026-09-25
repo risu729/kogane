@@ -178,6 +178,8 @@ export async function seedArtifact(
   key: string,
   payload: unknown,
   seal = true,
+  /** The capture time (`fetched_at`); default now. */
+  fetchedAtMs?: number,
 ): Promise<string> {
   const bytes =
     payload instanceof Uint8Array
@@ -187,7 +189,7 @@ export async function seedArtifact(
     b.toString(16).padStart(2, "0"),
   ).join("");
   await env.EVIDENCE.put(sha, bytes);
-  const now = Date.now();
+  const now = fetchedAtMs ?? Date.now();
   await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO sources VALUES(?,?)").bind(source, source),
     env.DB.prepare("INSERT OR IGNORE INTO producers VALUES('collector-r2-importer')"),

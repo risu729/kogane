@@ -97,6 +97,12 @@ reportへ追加する。matchできないeventはunknownのまま残す。
 
 ## Layer A: 通知メール evidence の中央取り込み
 
+この節は2026-09-13に廃止したImporter経路の記録である。Importer（`services/collector-r2-importer`）、
+その監査script、collectorからのService Binding、historical scan routeとbackfill scriptはすでに
+存在しない。旧bucketのpairは中央DATAへコピー・検証済みであり（[legacy-retirement.md](../legacy-retirement.md)）、
+新着通知は`services/collector-vpoint`が`v-point-pay-email` runとして共有DATA bucketへ直接書く
+（[collection.md](../collection.md#v-point-pay-email-email-route-of-servicescollector-vpoint)）。
+
 `services/collector-vpoint-pay`のapp pollingはPR #60で停止済みであり、この取り込みでは再有効化しない。
 現存するsourceは`services/collector-vpoint`が保存した公式通知の二つ組だけである。
 
@@ -134,15 +140,8 @@ pairを取り込む。`.eml`は対応JSON側で一緒に検証されるためsca
 import failure時はcontinuationを返さずcursorを進めないため、同じ入力cursorで同じpairをretryする。
 source R2へのwrite/deleteは行わない。
 
-```sh
-cd services/collector-r2-importer
-bash scripts/audit-v-point-pay-email-r2.sh
-
-services/collector-vpoint/scripts/backfill-vpoint-pay-email-raw-evidence.sh
-```
-
-新着メール保存後の中央取り込みはService Bindingの失敗をメール受信・Gmail転送の失敗へ
-昇格させず、`waitUntil`で試行する。失敗pairはimmutable source R2に残り、上記backfillで再送する。
+当時は新着メール保存後の中央取り込みを`waitUntil`で試行し、失敗pairはsource R2から上記scanで
+再送していた。監査script、backfill script、Service Bindingは2026-09-13にImporterとともに廃止した。
 GitHub Actions cronは使わず、既存collectorのscheduleと廃止済みapp polling設定は変更しない。
 
 ## Layer B: 通知eventからの金融観測
@@ -169,7 +168,7 @@ current取引は同じevent identityのreplayをcollapseし、current残高はDB
 funding split非推測、declined amount、残高account分離、schema/provenance drift、失敗runを固定する。
 
 `services/collector-r2-importer/scripts/audit-v-point-pay-layer-b-r2.sh`は既存のLayer A pair
-validatorを通した後にLayer Bを実行する本番canaryである。localhost限定Workerとremote read-only
+validatorを通した後にLayer Bを実行する本番canaryだった（2026-09-13にImporterとともに廃止）。localhost限定Workerとremote read-only
 R2 bindingだけを使い、object key、hash、本文、金額、残高、ポイント、認証情報を返さず、
 object種別とobservation種別のaggregate件数だけを出す。deploy、R2 write、R2 delete経路は持たない。
 

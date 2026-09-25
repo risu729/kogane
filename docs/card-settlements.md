@@ -114,8 +114,18 @@ recognised card purchase: 利用 → 請求 → 引落. An agent with a whole-st
 - A posted purchase joins the provider statement of the same resolved account,
   source and statement period (`YYYY-MM`): `card_statement_facts` whose
   `card_settlement_fact_ownership(kind='balance')` account is the purchase's
-  account, the newest capture first. A card ordinal that changed under one
-  account still joins; a statement whose account is not resolved joins nothing.
+  account, the newest capture first. Both sides mean the payment month: the
+  statement's period comes from its payment date, and a MyJCB purchase's from
+  its ledger label, where the collector's relative `detailMonth-0` and
+  `detailMonth-1` are resolved from the capture time of the ledger artifact
+  (rule `relative-statement-period-v1`,
+  [observations](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
+  so a recent MyJCB purchase joins the statement the same capture's page
+  names, once the collector records that month as confirmed. On the surveyed
+  connection it records `detailMonth=1` as `unconfirmed` (the page has no
+  export link), so those rows are pending and that page has no statement fact
+  yet. A card ordinal that changed under one account still joins; a statement
+  whose account is not resolved joins nothing.
   A pending authorisation [linked to its posted row](economic-events.md#pending-to-posted-links)
   is one event carrying the posted row's facts, so it joins the posted row's
   statement exactly as the posted event did; a withdrawn link restores the
@@ -129,7 +139,8 @@ recognised card purchase: 利用 → 請求 → 引落. An agent with a whole-st
   facts cite; a proposed, rejected or withdrawn review is named without a debit.
 - A statement that cannot be shown is a reason, never a zero: `not_posted` for a
   pending row, `statement_not_collected`, or `period_unrecognized` when the
-  provider period is in no recognised shape.
+  provider period is in no recognised shape (a MyJCB `detailMonth-2` or later,
+  which the rule does not place).
 
 No allocation links a purchase to a statement, and none is written: a statement
 total is not decomposable into purchases. The provider total is shown beside the

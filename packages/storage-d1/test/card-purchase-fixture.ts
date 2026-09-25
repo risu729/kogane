@@ -226,6 +226,7 @@ export function factOf(
     usageDate: row.usageDate,
     paymentType: row.paymentType,
     statementPeriod: row.statementPeriod,
+    capturedAt: "2026-09-07T00:00:00.000Z",
     providerSaleCode: null,
     usageAmountText: row.usageAmountText,
     paymentAmountText: row.paymentAmountText,

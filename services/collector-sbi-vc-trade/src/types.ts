@@ -85,9 +85,7 @@ export interface CollectionSummary {
   artifactCount: number;
   failureCount: number;
   manifestKey: string;
-  /** Legacy mode only: the central importer's answer, or why it was deferred. */
-  central?: RawEvidenceImportResult | RawEvidenceDeferredResult;
-  /** Shared mode only (U09): what `persistRun` did in the DATA bucket. */
+  /** U09: what `persistRun` did in the DATA bucket. */
   shared?: SharedRunSummary;
 }
 
@@ -111,33 +109,4 @@ export interface SharedRunSummary {
   /** True when only a person can clear what stopped the run (12 §3). */
   readonly waitingForHuman: boolean;
   readonly reasonCode?: string;
-}
-
-export interface RawEvidenceDeferredResult {
-  deferred: true;
-  reason: "worker-invocation-chain-limit";
-  artifactCount: number;
-}
-
-export interface RawEvidenceImportResult {
-  source: "sbi-vc-trade";
-  manifestKey: string;
-  centralRunId: number;
-  artifactCount: number;
-  sealed: boolean;
-  allObjectsReused: boolean;
-}
-
-export interface RawEvidenceBackfillPageResult {
-  source: "sbi-vc-trade";
-  scannedObjectCount: number;
-  importedManifestCount: number;
-  skippedManifestCount: number;
-  deferredManifestCount: number;
-  failedManifestCount: number;
-  nextCursor: string | null;
-  truncated: boolean;
-  failureCode?: string;
-  deferredReason?: "sync_import_worker_chain_limit";
-  result?: RawEvidenceImportResult;
 }
