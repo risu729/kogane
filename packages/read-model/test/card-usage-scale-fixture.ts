@@ -16,8 +16,10 @@
 // identified through the card binding policy, every other parse through the
 // default policy. `scaledStore` then recognises every recognisable current row
 // through the guarded 0047 builder, as the purchase-recognition lane would, and
-// adds one more capture in which a few recognised pending rows have gone, so
-// stale keys exist too. Names, tokens and amounts are invented; no provider
+// adds one more capture in which a few pending rows have gone, so stale keys
+// exist too. Only MyJCB pending rows are recognised (a Vpass customized row's
+// payment-type field is unverified), so the MyJCB unconfirmed ledger loses
+// rows too. Names, tokens and amounts are invented; no provider
 // row, card or account is real.
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
@@ -726,8 +728,11 @@ class ScaleStore {
     });
   }
 
-  /** One MyJCB capture: the unconfirmed ledger and the confirmed ledgers of the last periods. */
-  private myjcbCapture(day: string, at: number): void {
+  /**
+   * One MyJCB capture: the unconfirmed ledger (without its `cancelled` oldest
+   * rows) and the confirmed ledgers of the last periods.
+   */
+  private myjcbCapture(day: string, at: number, cancelled: number): void {
     const session = this.session(MYJCB_NAMESPACE, at);
     const pending = monthOf(day, 1);
     const ledgers = [
@@ -738,7 +743,7 @@ class ScaleStore {
         rows: visibleOn(
           monthPages(this.options, "myjcb", pending, false),
           Number(day.slice(8)),
-          0,
+          cancelled,
         ).flat(),
       },
       ...Array.from({ length: this.options.postedMonths }, (_, back) => {
@@ -815,7 +820,7 @@ class ScaleStore {
 
   /**
    * Every capture of `days`, each day in one transaction. `cancelled` pending
-   * Vpass rows per card disappear from these captures.
+   * Vpass rows per card and MyJCB pending rows disappear from these captures.
    */
   capture(days: readonly string[], options: { cancelled?: number } = {}): void {
     for (const day of days) {
@@ -824,7 +829,7 @@ class ScaleStore {
         const session = this.session(VPASS_NAMESPACE, at);
         for (let card = 0; card < this.options.cards; card += 1)
           this.vpassCapture(session, day, card, at + card * 60_000, options.cancelled ?? 0);
-        this.myjcbCapture(day, at + 30 * 60_000);
+        this.myjcbCapture(day, at + 30 * 60_000, options.cancelled ?? 0);
         this.bankCapture(day, at + 40 * 60_000);
       })();
       this.days += 1;
@@ -944,7 +949,8 @@ export interface ScaledStore {
 /**
  * Every capture but the last, every recognisable current row recognised, then
  * the last capture, in which the two oldest pending Vpass rows of each card
- * have disappeared, so their live events are stale.
+ * and of the MyJCB ledger have disappeared, so the MyJCB ones' live events are
+ * stale.
  */
 export async function scaledStore(options: ScaleOptions): Promise<ScaledStore> {
   const store = new ScaleStore(options);
