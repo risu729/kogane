@@ -231,12 +231,14 @@ function rpcError(
  * plus the purchase explanation while card purchase recognition is served and
  * the operations tools while their flag is on — and `run` is the one
  * dispatcher for all of them. The adapter never decides which tools exist: a
- * name `run` does not know is `unknown_tool`, not a route of its own.
+ * name `run` does not know is `unknown_tool`, not a route of its own. `tools`
+ * may be a function, which is then asked only by `tools/list`, so a list that
+ * needs the store is not computed for a message that does not show it.
  */
 export async function handleMcp(
   value: unknown,
   run: (name: string, body: unknown) => Promise<ToolResult | null>,
-  tools: readonly { name: string }[] = MCP_TOOLS,
+  tools: readonly { name: string }[] | (() => Promise<readonly { name: string }[]>) = MCP_TOOLS,
 ): Promise<Record<string, unknown> | null> {
   const request = parseRpc(value);
   if (!request) return rpcError(null, -32600, "invalid_request");
@@ -247,7 +249,11 @@ export async function handleMcp(
     case "ping":
       return { jsonrpc: "2.0", id: request.id, result: {} };
     case "tools/list":
-      return { jsonrpc: "2.0", id: request.id, result: { tools } };
+      return {
+        jsonrpc: "2.0",
+        id: request.id,
+        result: { tools: typeof tools === "function" ? await tools() : tools },
+      };
     case "tools/call": {
       const name = request.params["name"];
       if (typeof name !== "string") return rpcError(request.id, -32602, "unknown_tool");

@@ -302,6 +302,11 @@ agent path makes:
    (one for an `eventId` read) above it is `413 budget_exceeded`
    (`budget:maxRows=<n>`), before anything is read.
 
+"Before anything is read" is exact: the only statement the Worker runs before
+one of these refusals is the `sqlite_master` check that decides whether the
+tool exists at all — the same one the operator route and `kogane.capabilities`
+run — and no store row is read.
+
 The page's own bound is kept: a filter of more than 10,000 live events is
 `413 budget_exceeded` (`budget:cardPurchaseEvents=10000`) — the agent API's
 code for the route's `413 result_limit_exceeded` — rather than partly summed,
@@ -466,10 +471,13 @@ the closed request, and that no path moves a table, the change counter or the
 source revision. `services/app/test/purchases-explain.test.ts` repeats it over
 the real Worker: the same page as the query and as the operator route, one
 object over HTTP and MCP with provider text only under `data`, 401 before any
-grant and 403 for the operator without an agent grant, 404 and `unknown_tool`
-with the reader flag off or CORE 0047 absent, the refusal codes, and every
-table and the source revision unchanged. `test/agent-api.test.ts` pins the
-tool list and its schema with the capability on and off, and
+grant and 403 for the operator without an agent grant (neither preparing a
+statement), each grant and `maxRows` refusal preparing only the schema check,
+404 and `unknown_tool` with the reader flag off or CORE 0047 absent while
+`kogane.capabilities` reports `cardPurchaseRecognition: false`, the refusal
+codes, and every table and the source revision unchanged.
+`test/agent-api.test.ts` pins the tool list and its schema with the capability
+on and off, and
 `packages/observation-shared/test/card-purchase-candidates.test.ts` pins the
 contract (`validAgentCardPurchasePage` refuses an action or a plan payload).
 

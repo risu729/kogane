@@ -202,6 +202,25 @@ function overfull(db: D1Database): D1Database {
   });
 }
 
+/** The store with every statement the Worker prepares recorded, so "reads nothing" is checkable. */
+function recording(db: D1Database, statements: string[]): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) => {
+          statements.push(sql);
+          return target.prepare(sql);
+        };
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+/** The one statement that may precede a refusal: whether CORE 0047 is applied. */
+const isSchemaProbe = (sql: string) =>
+  sql.includes("sqlite_master") && sql.includes("card_purchase_recognitions");
+
 interface CallOptions {
   method?: string;
   body?: unknown;
@@ -210,6 +229,8 @@ interface CallOptions {
   enabled?: boolean;
   schema?: boolean;
   full?: boolean;
+  /** Every statement the Worker prepares against the store, in order. */
+  statements?: string[];
 }
 
 async function call(path: string, options: CallOptions = {}) {
@@ -232,14 +253,15 @@ async function call(path: string, options: CallOptions = {}) {
       : {},
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
+  const store =
+    options.schema === false
+      ? withoutPurchaseSchema(env.DB)
+      : options.full
+        ? overfull(env.DB)
+        : env.DB;
   return worker.fetch(new Request(`https://fixture.test${path}`, init), {
     ...env,
-    DB:
-      options.schema === false
-        ? withoutPurchaseSchema(env.DB)
-        : options.full
-          ? overfull(env.DB)
-          : env.DB,
+    DB: options.statements === undefined ? store : recording(store, options.statements),
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: "fixture-audience",
     EVENTS_V2_ENABLED: options.enabled === false ? "0" : "true",
@@ -357,17 +379,23 @@ describe("the agent reads the operator's page", () => {
 describe("authorization", () => {
   it("is Access first, then the agent grant, then records.read over the whole store", async () => {
     const before = await tables();
-    expect((await explain({}, { subject: null })).status).toBe(401);
+    // Access and the grant lookup touch no table at all.
+    const unauthenticated: string[] = [];
+    expect((await explain({}, { subject: null, statements: unauthenticated })).status).toBe(401);
     const unauthenticatedMcp = await call("/mcp", {
       subject: null,
       body: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+      statements: unauthenticated,
     });
     expect(unauthenticatedMcp.status).toBe(401);
+    expect(unauthenticated).toEqual([]);
     // No grant: the operator itself, and a stranger.
     for (const subject of ["synthetic-operator", "stranger"]) {
-      const response = await explain({}, { subject });
+      const statements: string[] = [];
+      const response = await explain({}, { subject, statements });
       expect(response.status, subject).toBe(403);
       expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
+      expect(statements).toEqual([]);
     }
     const cases: [Record<string, unknown>, string, string[]][] = [
       [
@@ -395,11 +423,15 @@ describe("authorization", () => {
       ],
     ];
     for (const [grant, code, refs] of cases) {
-      const response = await explain({}, { grants: { "synthetic-agent": grant } });
+      const statements: string[] = [];
+      const response = await explain({}, { grants: { "synthetic-agent": grant }, statements });
       expect(response.status).toBe(403);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body).toMatchObject({ schemaVersion: "financial-error-v1", code, refs });
       expect(JSON.stringify(body)).not.toMatch(/acct-card|1234|synthetic merchant|collector/u);
+      // Only the schema probe that decides whether the tool exists; no store row is read.
+      expect(statements).toHaveLength(1);
+      expect(isSchemaProbe(statements[0]!)).toBe(true);
     }
     // The agent itself never reaches the operator route.
     expect((await call("/api/v2/card-purchases")).status).toBe(403);
@@ -412,6 +444,15 @@ describe("authorization", () => {
     expect((await call(`${PATH}?period=2026-09`, { body: {} })).status).toBe(400);
   });
 });
+
+/** `cardPurchaseRecognition` as `kogane.capabilities` reports it to the calling agent. */
+async function advertised(options: CallOptions = {}): Promise<unknown> {
+  const response = await call("/api/agent/v1/capabilities", { ...options, body: {} });
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { api: Record<string, unknown> }).api[
+    "cardPurchaseRecognition"
+  ];
+}
 
 describe("served only while card purchase recognition is", () => {
   it("is neither listed nor callable with the reader flag off or CORE 0047 absent", async () => {
@@ -428,11 +469,28 @@ describe("served only while card purchase recognition is", () => {
         options,
       );
       expect(called["error"]).toMatchObject({ code: -32602, message: "unknown_tool" });
+      // The agent is told the same fact the tool list shows.
+      expect(await advertised(options)).toBe(false);
     }
     const listed = await mcp({ method: "tools/list" });
     expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toContain(
       "kogane.purchases.explain",
     );
+    expect(await advertised()).toBe(true);
+  });
+
+  it("is asked of the store only by a message that depends on it", async () => {
+    // `initialize` and `ping` show no tool list, so they prepare no statement.
+    for (const method of ["initialize", "ping"]) {
+      const statements: string[] = [];
+      expect((await mcp({ method }, { statements }))["result"], method).toBeDefined();
+      expect(statements, method).toEqual([]);
+    }
+    // A tool list asks once.
+    const statements: string[] = [];
+    await mcp({ method: "tools/list" }, { statements });
+    expect(statements).toHaveLength(1);
+    expect(isSchemaProbe(statements[0]!)).toBe(true);
   });
 });
 
@@ -476,12 +534,16 @@ describe("request and result bounds", () => {
       },
     };
     expect((await explain({}, { grants: small })).status).toBe(200);
-    const deep = await explain({ offset: 50 }, { grants: small });
+    const statements: string[] = [];
+    const deep = await explain({ offset: 50 }, { grants: small, statements });
     expect(deep.status).toBe(413);
     expect(await deep.json()).toMatchObject({
       code: "budget_exceeded",
       refs: ["budget:maxRows=60"],
     });
+    // Refused before the store is read, like the grant refusals.
+    expect(statements).toHaveLength(1);
+    expect(isSchemaProbe(statements[0]!)).toBe(true);
     expect(await tables()).toEqual(before);
   });
 });

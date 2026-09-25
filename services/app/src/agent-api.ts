@@ -168,16 +168,23 @@ export async function agentApi(
     const listOps = ops && grantsUsable(env);
     // The purchase explanation exists exactly while the operator route does
     // (`cardPurchaseRecognition`): otherwise it is neither listed nor callable.
-    const purchases = await cardPurchasesAvailable(env);
+    // That needs the store's schema, so it is asked once, and only by a message
+    // that depends on it: `initialize`, `ping` and notifications touch no table.
+    let served: Promise<boolean> | undefined;
+    const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
     const message = await handleMcp(
       await boundedJson(request),
       async (name, body) => {
-        if (name === PURCHASES_TOOL_NAME && !purchases) return null;
+        if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (isAgentToolName(name)) return callTool(name, body, context);
         if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, subject);
         return null;
       },
-      [...MCP_TOOLS, ...(purchases ? PURCHASES_MCP_TOOLS : []), ...(listOps ? OPS_MCP_TOOLS : [])],
+      async () => [
+        ...MCP_TOOLS,
+        ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
+        ...(listOps ? OPS_MCP_TOOLS : []),
+      ],
     );
     if (message === null) return new Response(null, { status: 202 });
     return json(message);
