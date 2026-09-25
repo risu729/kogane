@@ -1,5 +1,5 @@
 // Per-tick records of the scheduled lanes that otherwise leave only a log line
-// (migration 0048, docs/processor.md §6, docs/operations.md §1).
+// (migration 0049, docs/processor.md §6, docs/operations.md §1).
 //
 // `observation_sweep` and `collection_scan` keep their own lane state
 // (`observation_lane_state`, `collection_scan_state`), and the projection and
@@ -12,7 +12,7 @@
 // What a row may hold is decided here, per lane, by name: counts, flags and
 // the closed reason-code map of `purchase_recognition`. A field a lane adds
 // later is not recorded until it is listed, and no text value is ever copied
-// (the 0048 trigger refuses one anyway).
+// (the 0049 trigger refuses one anyway).
 import { CARD_USAGE_EXCLUSIONS } from "../../../packages/domain/src/card-purchase.ts";
 import type { OutboxDispatchResult } from "../../../packages/storage-d1/src/core/decision-outbox.ts";
 import type { identitySweep } from "../../../packages/storage-d1/src/core/identity-store.ts";
@@ -131,7 +131,7 @@ export type LaneTickResult =
   | { outcome: "skipped-by-flag" }
   | { outcome: "failed"; code: string };
 
-/** A code the 0048 check accepts; anything else is reported as `unknown`. */
+/** A code the 0049 check accepts; anything else is reported as `unknown`. */
 function safeCode(code: string): string {
   return /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(code) ? code : "unknown";
 }
@@ -201,7 +201,7 @@ export interface LaneTickSummary {
   counts: LaneTickCounts;
 }
 
-/** Read-only. Before migration 0048 there is no table, which is an empty list. */
+/** Read-only. Before migration 0049 there is no table, which is an empty list. */
 export async function laneTickSummary(db: D1Database, nowMs: number): Promise<LaneTickSummary[]> {
   try {
     return (await latestLaneTicks(db)).map((tick) => ({

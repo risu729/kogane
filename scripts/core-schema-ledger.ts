@@ -226,7 +226,7 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "bounded card purchase scan progress",
   },
-  // The Processor's last ticks per lane (0048): diagnosis bookkeeping pruned
+  // The Processor's last ticks per lane (0049): diagnosis bookkeeping pruned
   // to one day per lane, never evidence.
   processor_lane_ticks: {
     classification: "operational-mutable",

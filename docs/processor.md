@@ -248,7 +248,7 @@ the one row `operation_dispatch` writes then is its `skipped-by-flag` tick
 
 ### 6.1 Tick records
 
-Most lanes keep no state of their own, so until migration 0048 the only trace
+Most lanes keep no state of their own, so until migration 0049 the only trace
 of a tick was its log line, and "did `purchase_recognition` run?" could only be
 answered from Workers Logs. `runScheduled` now also writes one row per tick of
 each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
@@ -282,7 +282,7 @@ an `error_code` and `counts_json`:
 
 A lane whose stage is not wired at all records nothing. Only counts, flags and
 the closed exclusion codes of `purchase_recognition` are copied, by field
-name; the 0048 trigger refuses any text value, so no amount, key, account label
+name; the 0049 trigger refuses any text value, so no amount, key, account label
 or provider wording can be stored. A tick killed mid-lane (a Worker limit)
 leaves no row for that lane, and the gap is the signal.
 
@@ -441,7 +441,7 @@ property of the configuration, not of the runtime — so what is asserted is the
 binding set instead; a deploy that lost a binding is a broken deploy. Nothing
 in this route writes, runs a lane, moves a cursor or contacts a provider.
 `laneTicks` is diagnosis, not health: a lane whose latest tick `failed` does
-not turn the answer into a 503, and before migration 0048 the list is empty.
+not turn the answer into a 503, and before migration 0049 the list is empty.
 
 ## 14. Seams for later work items
 

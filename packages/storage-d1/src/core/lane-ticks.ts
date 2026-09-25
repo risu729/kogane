@@ -1,4 +1,4 @@
-// The last ticks of the Processor's scheduled lanes (migration 0048).
+// The last ticks of the Processor's scheduled lanes (migration 0049).
 //
 // Operational bookkeeping, not evidence: one row says that one lane ran,
 // was skipped because its flag is off, or failed with a safe code, when, and
@@ -14,7 +14,7 @@ export const LANE_TICK_RETENTION = 288;
 export type LaneTickOutcome = "ran" | "skipped-by-flag" | "failed";
 
 /**
- * Counts, flags and closed reason codes only. The 0048 trigger refuses any
+ * Counts, flags and closed reason codes only. The 0049 trigger refuses any
  * other shape, so no text value — no amount text, label or provider wording —
  * can be stored.
  */

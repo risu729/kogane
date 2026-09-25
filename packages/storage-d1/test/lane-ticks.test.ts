@@ -1,4 +1,4 @@
-// CORE 0048: the Processor's per-lane tick records. What the schema accepts is
+// CORE 0049: the Processor's per-lane tick records. What the schema accepts is
 // counts, flags and closed codes — never text — and what the writer keeps is
 // the latest day per lane. Synthetic rows only.
 import { Database } from "bun:sqlite";
@@ -17,7 +17,7 @@ import {
 } from "../src/migrations.ts";
 import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
 
-const MIGRATION_0048 = "0048_processor_lane_ticks.sql";
+const MIGRATION_0049 = "0049_processor_lane_ticks.sql";
 
 function schema(db: Database): string[] {
   return (
@@ -55,15 +55,15 @@ function insert(
   );
 }
 
-test("0048 is additive: one table, its index and two triggers, nothing else touched", () => {
+test("0049 is additive: one table, its index and two triggers, nothing else touched", () => {
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
-  for (const file of migrationFiles(CORE_MIGRATIONS_URL).filter((name) => name < MIGRATION_0048))
+  for (const file of migrationFiles(CORE_MIGRATIONS_URL).filter((name) => name < MIGRATION_0049))
     db.exec(migrationSql(CORE_MIGRATIONS_URL, file));
   const before = schema(db);
   const revision = db.query("SELECT * FROM core_source_revision").get();
   db.transaction(() => {
-    for (const sql of splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, MIGRATION_0048)))
+    for (const sql of splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, MIGRATION_0049)))
       db.run(sql);
   })();
   const after = schema(db);
@@ -116,6 +116,13 @@ test("counts hold counts, flags and one level of closed codes — never text", (
     '{"card 001":1}',
     '{"skipped":{"Card-001":1}}',
     '{"skipped":{"merchant name":1}}',
+    '{"scanned-rows":1}',
+    `{"${"k".repeat(65)}":1}`,
+    '{"scanned":1e3}',
+    // A repeated key: the second object would be read back by the first one's
+    // path, so its text would go unchecked.
+    '{"skipped":{"amount_zero":1},"skipped":{"merchant":"架空店舗"}}',
+    '{"scanned":1,"scanned":"98,765"}',
   ])
     expect(() => insert(db, { counts })).toThrow("processor_lane_tick_counts_invalid");
   // Not an object at all, or too long to be a count summary.

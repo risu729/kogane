@@ -106,7 +106,7 @@ four labels:
   are still in CORE today.
 - `operational-mutable` — job, replay, work-item and lane state. Rows are mutable by design; the
   tables stay in CORE until checkpoints and intake are separated. The bounded bookkeeping tables
-  belong here too: the scan cursors, and `processor_lane_ticks` (0048), whose rows are written
+  belong here too: the scan cursors, and `processor_lane_ticks` (0049), whose rows are written
   once and pruned to the latest day per lane — so it carries a `*_no_update` guard but no
   `*_no_delete` guard, and is not append-only.
 - `unclassified-keep` — not named by 04 §2. The chapter's own rule is that the default is to keep

@@ -1374,7 +1374,7 @@ async function status(env: Env): Promise<Response> {
     },
     laneState: laneState.results,
     replayPlans: plans.results,
-    // The latest tick of every lane that keeps no state of its own (0048).
+    // The latest tick of every lane that keeps no state of its own (0049).
     laneTicks: await laneTickSummary(env.DB, now),
   });
 }
@@ -1741,7 +1741,7 @@ function collectionEnv(env: Env): CollectionEnv & { OPS_DISPATCH_ENABLED?: strin
  * codes only, never provider values or exception text.
  *
  * The lanes that otherwise leave only that log line also record each tick in
- * `processor_lane_ticks` (migration 0048, `src/lane-ticks.ts`): ran, skipped
+ * `processor_lane_ticks` (migration 0049, `src/lane-ticks.ts`): ran, skipped
  * because the flag is off, or failed with the same safe code. A lane whose
  * stage is not wired records nothing, and a flag that is off still logs
  * nothing. */

@@ -44,10 +44,13 @@ const job = (id: number) =>
     .bind(id)
     .first<{ lane: string; status: string; replay_plan_id: number | null }>();
 
-test("harness applies every Layer B migration in order through 0048", () => {
+test("harness applies every Layer B migration in order through 0049", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
-  expect(names.at(-1)).toBe("0048_processor_lane_ticks.sql");
+  expect(names.at(-1)).toBe("0049_processor_lane_ticks.sql");
+  // 0048 is the reconciliation scan cursor, reviewed separately: this pin holds
+  // with or without it, and nothing else may take its place.
+  const cursor = names.filter((name) => name === "0048_reconciliation_scan_cursor.sql");
   expect(names).toEqual([
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
@@ -79,7 +82,8 @@ test("harness applies every Layer B migration in order through 0048", () => {
     "0045_expand_card_settlement_commands.sql",
     "0046_st_george_balance_snapshot.sql",
     "0047_card_purchase_recognition.sql",
-    "0048_processor_lane_ticks.sql",
+    ...cursor,
+    "0049_processor_lane_ticks.sql",
   ]);
   expect([...names].sort()).toEqual(names);
 });
@@ -452,7 +456,7 @@ test("U08 lanes report skipped by default and sit in their stated order", async 
   expect(lines[4]).toEqual({ event: "operation_dispatch", flag: "true" });
 }, 60000);
 
-test("with its flag on, purchase_recognition sits right after reconciliation_sweep", async () => {
+test("with its flag on, purchase_recognition sits right after the two reconciliation lanes", async () => {
   const lines: Record<string, unknown>[] = [];
   const log = (line: string) => lines.push(JSON.parse(line));
   const stages = {
@@ -460,6 +464,7 @@ test("with its flag on, purchase_recognition sits right after reconciliation_swe
     identity: () => Promise.resolve({ ok: true }),
     balanceProjection: () => Promise.resolve({ ok: true }),
     reconcile: () => Promise.resolve({ ok: true }),
+    settlements: () => Promise.resolve({ ok: true }),
     purchases: () => Promise.resolve({ ok: true }),
     rewards: () => Promise.resolve({ ok: true }),
     decisions: () => Promise.resolve({ ok: true }),
@@ -486,6 +491,9 @@ test("with its flag on, purchase_recognition sits right after reconciliation_swe
     "identity_sweep",
     "balance_projection",
     "reconciliation_sweep",
+    // Split out of `reconcile` under the same flag, and still before the
+    // purchase lane, as when it ran inside it (docs/processor.md §6).
+    "card_settlement_sweep",
     "purchase_recognition",
     "reward_claims_sweep",
     "decision_outbox",

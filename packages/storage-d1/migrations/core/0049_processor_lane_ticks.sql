@@ -40,9 +40,13 @@ CREATE INDEX processor_lane_ticks_lane ON processor_lane_ticks(lane,id);
 CREATE TRIGGER processor_lane_ticks_no_update BEFORE UPDATE ON processor_lane_ticks
 BEGIN SELECT RAISE(ABORT,'processor lane ticks are written once'); END;
 -- Keys are identifiers; top-level values are non-negative integers, booleans
--- or one object of {lower_snake_case code: non-negative integer}.
+-- or one object of {lower_snake_case code: non-negative integer}. A top-level
+-- key may appear once: a nested object is read back by its path, which names
+-- only the first of two equal keys, so a second one would go unchecked.
 CREATE TRIGGER processor_lane_ticks_counts BEFORE INSERT ON processor_lane_ticks
-WHEN EXISTS(SELECT 1 FROM json_each(NEW.counts_json) f
+WHEN (SELECT count(*) FROM json_each(NEW.counts_json))
+  <>(SELECT count(DISTINCT key) FROM json_each(NEW.counts_json))
+ OR EXISTS(SELECT 1 FROM json_each(NEW.counts_json) f
   WHERE length(f.key) NOT BETWEEN 1 AND 64 OR f.key NOT GLOB '[A-Za-z]*' OR f.key GLOB '*[^A-Za-z0-9_]*'
   OR f.type NOT IN ('integer','true','false','object') OR (f.type='integer' AND f.atom<0))
  OR EXISTS(SELECT 1 FROM json_each(NEW.counts_json) f JOIN json_each(NEW.counts_json,f.fullkey) g

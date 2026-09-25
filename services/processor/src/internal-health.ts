@@ -151,8 +151,8 @@ export async function internalHealthBody(env: Env): Promise<{ status: number; bo
     /* Reported as an empty list; `core` already says whether CORE answers. */
   }
   // The latest tick of each lane that otherwise leaves only a log line
-  // (migration 0048): outcome, safe error code, when, and its counts. Before
-  // 0048 there is no table, which is an empty list.
+  // (migration 0049): outcome, safe error code, when, and its counts. Before
+  // 0049 there is no table, which is an empty list.
   const laneTicks = await laneTickSummary(env.DB, now);
   let collectionScan: Record<string, unknown> = { lane: COLLECTION_SCAN_LANE, recorded: false };
   try {

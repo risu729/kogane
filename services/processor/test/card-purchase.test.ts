@@ -974,7 +974,7 @@ test("log lines carry counts only: no amount, merchant, account or identifier", 
     merged: 0,
     groupsSkipped: 0,
   });
-  // The tick is recorded (migration 0048) with exactly the counts of that
+  // The tick is recorded (migration 0049) with exactly the counts of that
   // line, so "did the lane run, and what did it do?" no longer needs the logs.
   const ticks = await w.env.DB.prepare(
     "SELECT outcome,error_code,counts_json FROM processor_lane_ticks WHERE lane='purchase_recognition'",

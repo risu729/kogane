@@ -237,7 +237,7 @@ load budgets and the recovery drills for these stages are in
 The lanes that keep no state of their own — `identity_sweep`,
 `reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition`,
 `reward_claims_sweep`, `operation_dispatch` and `decision_outbox` — also
-record every tick in `processor_lane_ticks` (migration 0048): `ran` with its
+record every tick in `processor_lane_ticks` (migration 0049): `ran` with its
 counts, `failed` with the same safe code, or `skipped-by-flag` when the gate
 above is off, which still logs nothing. The last day per lane is kept
 (`docs/processor.md` §6.1).

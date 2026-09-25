@@ -1,5 +1,5 @@
 // The per-tick records of the lanes that otherwise leave only a log line
-// (migration 0048, docs/processor.md §6). Before them, whether
+// (migration 0049, docs/processor.md §6). Before them, whether
 // `purchase_recognition` had run at all could only be read from Workers Logs.
 //
 // Synthetic stage results only: every count below is invented, and the
@@ -247,7 +247,7 @@ test("a failed lane records `failed` with its safe code, never the message, and 
   expect(byLane["reward_claims_sweep"]).toMatchObject({ outcome: "ran" });
   expect(byLane["decision_outbox"]).toMatchObject({ outcome: "ran" });
   expect(JSON.stringify(rows)).not.toMatch(/98765|架空|merchant|not an Error/u);
-  // A code that is not a code is reported as `unknown`, as the 0048 check demands.
+  // A code that is not a code is reported as `unknown`, as the 0049 check demands.
   expect(laneTick("purchase_recognition", 1, 2, { outcome: "failed", code: "a message" })).toEqual({
     lane: "purchase_recognition",
     startedAtMs: 1,

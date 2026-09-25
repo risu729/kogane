@@ -535,7 +535,7 @@ retired a whole full page, `proposed` counts new pending-to-posted candidates,
 the candidate groups too large to pair that tick.
 
 The same counts, field for field, are recorded for every tick in
-`processor_lane_ticks` (migration 0048) with the tick's start and end and its
+`processor_lane_ticks` (migration 0049) with the tick's start and end and its
 outcome — `ran`, `skipped-by-flag` while the flag is off, or `failed` with a
 safe code — for one day. `laneTicks` in the Processor's `/status` and
 `/internal/health` shows the latest one, so whether the lane ran no longer has
@@ -545,7 +545,7 @@ to be read from Workers Logs ([operations.md](operations.md#lane-tick-records)).
 
 | Flag                           | Where                     | Default | Effect when on                                                                             |
 | ------------------------------ | ------------------------- | ------- | ------------------------------------------------------------------------------------------ |
-| `PURCHASE_RECOGNITION_ENABLED` | `services/processor` vars | `"0"`   | The `purchase_recognition` lane runs right after `reconciliation_sweep` and writes events. |
+| `PURCHASE_RECOGNITION_ENABLED` | `services/processor` vars | `"0"`   | The `purchase_recognition` lane runs right after `card_settlement_sweep` and writes events. |
 
 `"1"` or `"true"` turns it on; any other value leaves the lane unrun and silent
 in the log; its only write is then the `skipped-by-flag` tick record above.

@@ -696,10 +696,10 @@
       "sha256": "4ae010e7a881b839cd376fec814c1bc518b62b04b7c0c7e75b72a38077f4875b"
     },
     {
-      "file": "0048_processor_lane_ticks.sql",
+      "file": "0049_processor_lane_ticks.sql",
       "statementCount": 4,
       "insertStatements": [],
-      "sha256": "6da5ebce43873e792cf293ae14354924f49f64890cf1df0a8e72134c429382bf"
+      "sha256": "817c9cc5bfa93da3066561963003b73d91153071f34c0d8d51cf2e9f077e7146"
     }
   ],
   "tables": [
@@ -15578,7 +15578,7 @@
       "table": "processor_lane_ticks",
       "timing": "BEFORE",
       "event": "INSERT",
-      "sqlSha256": "0cfc0f584680c868"
+      "sqlSha256": "5fffe0baf15d1617"
     },
     {
       "name": "processor_lane_ticks_no_update",
@@ -16859,6 +16859,6 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "41fb2154d91061c2bfe57585e3b2f9d5007b4eea24c8376ee7a08b5f1d0d2a71"
+    "schemaSha256": "623a9471725b0b3be1f49027b500ef6725c541787e7b24c6522180b52c4fb647"
   }
 }

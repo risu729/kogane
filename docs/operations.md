@@ -51,7 +51,7 @@ the other lanes that keep no state of their own left only a Workers Logs line
 per tick. Working out whether `purchase_recognition` had run at all, whether it
 failed, or whether its flag was simply off meant searching Workers Logs for
 `"event":"purchase_recognition"` and its `_failed` twin, and "no line" could
-mean off, not deployed, or killed. Since migration 0048 every tick of those
+mean off, not deployed, or killed. Since migration 0049 every tick of those
 lanes is a row in `processor_lane_ticks`, kept for one day per lane
 ([processor.md §6.1](processor.md#61-tick-records) lists the lanes and the
 counts each keeps).

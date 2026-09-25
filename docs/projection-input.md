@@ -68,7 +68,7 @@ build stale the moment it wrote a row, and rebuild for ever (05 §2, G2-04):
 `ops_request_stages` (an operator's request and its stage log say what was
 asked, never what the projection reads), the card scan cursors
 `card_settlement_scan_cursor` and `card_purchase_scan_cursor`, and the
-Processor's per-lane tick records `processor_lane_ticks` (0048; that a lane
+Processor's per-lane tick records `processor_lane_ticks` (0049; that a lane
 ran is not something a projection reads). `fetch_runs` and `fetch_artifacts` are excluded for a
 different reason: evidence reaches a reader only once its run is sealed and its
 parse published, and both of those are in the ledger.
