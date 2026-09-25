@@ -1347,9 +1347,10 @@ codes in production, not wording, and they are two different fields. Every web
 row carries a full-width `１` (6,053 rows) or an empty text (230); every
 customized row carries `0` (2,395), never `1` (read-only aggregate counts over
 every row this parser wrote to CORE, 2026-09-24). The parser keeps both
-verbatim. Neither field's code table is documented: card purchase recognition
-accepts the web code `1` and no `bunkatsuYaku` value, so a pending Vpass row
-is not recognised until the owner verifies what `0` means
+verbatim. The provider documents neither field's code table: card purchase
+recognition accepts the web code `1` and, on the owner's confirmation
+(2026-09-25) that it is a single payment, the `bunkatsuYaku` `0`; every other
+value stays unsupported until it is observed and confirmed
 ([single payment, per source](economic-events.md#single-payment-per-source)).
 
 The provider issues no row id. A transaction's external id is
