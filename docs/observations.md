@@ -1333,12 +1333,16 @@ transaction with a parse warning rather than being assigned a guessed zero.
 Both families retain the complete provider row and explicit sign/mapping
 provenance in `extra`.
 
-The payment type (`data[6]` on the web family, `bunkatsuYaku` on the customized
-one, also copied to `description`) is a one-digit provider code in production,
-not wording: a full-width digit on the web family (blank on amountless rows)
-and an ASCII digit on the customized family. The parser keeps it verbatim; what
-the codes mean is not documented, and card purchase recognition accepts only
-`1` ([single payment, per source](economic-events.md#single-payment-per-source)).
+The payment-type fields (`data[6]` on the web family, `bunkatsuYaku` on the
+customized one, each also copied to `description`) are one-digit provider
+codes in production, not wording, and they are two different fields. Every web
+row carries a full-width `１` (6,053 rows) or an empty text (230); every
+customized row carries `0` (2,395), never `1` (read-only aggregate counts over
+every row this parser wrote to CORE, 2026-09-24). The parser keeps both
+verbatim. Neither field's code table is documented: card purchase recognition
+accepts the web code `1` and no `bunkatsuYaku` value, so a pending Vpass row
+is not recognised until the owner verifies what `0` means
+([single payment, per source](economic-events.md#single-payment-per-source)).
 
 The provider issues no row id. A transaction's external id is
 `vpass:<card>:<month>:<family>:<fingerprint>:<occurrence>` on the first page

@@ -129,7 +129,8 @@ export interface CurrentCardUsageRow {
   // Provider extras; null when absent, not text, empty or over the bound.
   /**
    * Where each source's payment type (支払区分) is: Vpass web `data[6]` and
-   * customized `bunkatsuYaku` (a one-digit code), MyJCB `summaryCells[1]`, the
+   * customized `bunkatsuYaku` (one-digit codes of two different fields),
+   * MyJCB `summaryCells[1]`, the
    * combined `ご利用先など／支払区分` cell (merchant and `1回払` together). Only
    * the domain's single-payment rule reads it.
    */
@@ -159,8 +160,9 @@ const MYJCB = "fa.source_id = 'myjcb' AND p.parser_name = 'myjcb-credit-ledger'"
 //   production rows carry a one-digit full-width code there, `１`) plus
 //   `_kogane.statementFamily` = 'web' and `_kogane.statementMonth`.
 // - vpass.ts parseCustomized: status 'unconfirmed'; `extra` is the provider
-//   row (`bunkatsuYaku` is the payment type, the same text as `description`;
-//   production rows carry a one-digit ASCII code, `1`) plus
+//   row (`bunkatsuYaku` is the payment-type field, the same text as
+//   `description`; every production row carries `0`, a field whose meaning
+//   is unverified, so the domain accepts no value of it) plus
 //   `_kogane.statementFamily` = 'customized', `_kogane.statementMonth`
 //   and `_kogane.providerSaleCode` (the row's `uriageKbn`: '5' sale, '6' refund).
 // - myjcb.ts myJcbCreditLedger: status 'confirmed'/'unconfirmed'; `extra` is

@@ -57,8 +57,11 @@ Concrete limits in the current code:
   mutations per tick, plus the candidate pass's one proposal batch and at most
   20 provider-linked merges). Installment, revolving and bonus rows, amountless
   rows and rows without a stable card identity are excluded, and so is every
-  Vpass payment-type code but `1` until an installment row shows what the
-  others mean ([single payment, per source](economic-events.md#single-payment-per-source)).
+  Vpass web payment-type code but `1` until an installment row shows what the
+  others mean. Pending Vpass (customized) rows are not recognised at all: their
+  `bunkatsuYaku` is `0` on every row observed and what it means is unverified,
+  so no Vpass `authorized` event is written until the owner confirms it
+  ([single payment, per source](economic-events.md#single-payment-per-source)).
   A pending row and its posted row can now be
   [linked as one purchase](economic-events.md#pending-to-posted-links) by a
   reviewed decision (or by the rule for a pair the provider itself links, which
