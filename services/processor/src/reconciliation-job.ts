@@ -6,8 +6,10 @@
 // Vpass uses unconfirmed/posted; MyJCB uses unconfirmed/confirmed. MyJCB's
 // posted payment can be an installment slice, so only rows whose explicit
 // usage and payment totals agree participate in the pending purchase match,
-// and only under an absolute payment month (`comparablePayment`). A MyJCB
-// confirmed row takes part in stage B only (`inStageA`).
+// and only under a known payment month: an absolute label, or a relative
+// `detailMonth-N` label resolved from the row's capture time
+// (`statementPeriodOf`, `comparablePayment`). A MyJCB confirmed row takes part
+// in stage B only (`inStageA`).
 //
 // // Nothing is accepted automatically. Auto-acceptance needs a link id the
 // provider itself issued for the pair, exposed by the parser as
@@ -29,6 +31,7 @@ import {
 } from "../../../packages/domain/src/values.ts";
 import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import {
+  cardStatementPeriod,
   comparableCardPayment,
   statementPeriod,
 } from "../../../packages/domain/src/card-purchase.ts";
@@ -99,6 +102,10 @@ interface FactRow {
   scale: number | null;
   value_basis: string | null;
   statement_period: string | null;
+  /** `_kogane.period` verbatim (MyJCB's label, possibly the relative `detailMonth-N`). */
+  period_label: string | null;
+  /** The `fetched_at` of the row's artifact: the capture a relative label is resolved from. */
+  fetched_at: string | null;
   provider_link_id: string | null;
   identity_origin: string | null;
   usage_amount_text: string | null;
@@ -119,6 +126,7 @@ export const factQuery = `SELECT t.id,t.parse_run_id,t.source_account,t.external
  t.counterparty,t.currency,a.source_id,fr.producer_id,ses.external_id_namespace,
  d.status AS value_status,d.coefficient,d.scale,d.basis AS value_basis,
  coalesce(${jsonText("$._kogane.statementMonth")},replace(${jsonText("$._kogane.period")},'-','')) AS statement_period,
+ ${jsonText("$._kogane.period")} AS period_label,a.fetched_at,
  ${jsonText("$._kogane.providerLinkId")} AS provider_link_id,
  ${jsonText("$._kogane.identityOrigin")} AS identity_origin,
  ${jsonText("$._kogane.usageAmountText")} AS usage_amount_text,
@@ -171,6 +179,28 @@ function originOf(row: FactRow): MatchFact["identifierOrigin"] {
     : "provider";
 }
 
+/**
+ * The statement period a row is paired under. Vpass: its `statementMonth` as
+ * stored. MyJCB: the payment month `YYYY-MM`, read as recognition reads it: an
+ * absolute label (`YYYY年M月お支払い分`, or a `statementMonth`), else a relative
+ * `detailMonth-N` resolved from the capture time of the row's own artifact
+ * (`cardStatementPeriod`; relative-statement-period-v1 places `detailMonth-0`
+ * and `detailMonth-1`). Null when neither places the month. The raw relative
+ * label is never a group: it is a position in the provider's list on the
+ * capture day, so rows of different payment months share it over time.
+ */
+function statementPeriodOf(row: FactRow): string | null {
+  if (row.source_id !== "myjcb") return row.statement_period;
+  return (
+    statementPeriod(row.statement_period) ??
+    cardStatementPeriod({
+      sourceId: row.source_id,
+      statementPeriod: row.period_label,
+      capturedAt: row.fetched_at,
+    })
+  );
+}
+
 export function factOf(row: FactRow, slice: ReconciliationSlice): MatchFact {
   return {
     ref: {
@@ -197,7 +227,7 @@ export function factOf(row: FactRow, slice: ReconciliationSlice): MatchFact {
     quantity: quantityOf(row),
     occurred: occurredOf(row),
     counterparty: row.counterparty,
-    statementPeriod: row.statement_period,
+    statementPeriod: statementPeriodOf(row),
     // Ownership is a separate judgement; this slice never guesses one (UC23).
     ownerRef: null,
   };
@@ -207,7 +237,7 @@ export function factOf(row: FactRow, slice: ReconciliationSlice): MatchFact {
 export function groupFacts(facts: readonly MatchFact[]): Map<string, MatchFact[]> {
   const groups = new Map<string, MatchFact[]>();
   for (const fact of facts) {
-    const key = `${fact.sourceAccount} ${fact.statementPeriod ?? ""}`;
+    const key = `${fact.sourceAccount}\u0000${fact.statementPeriod ?? ""}`;
     const group = groups.get(key);
     if (group) group.push(fact);
     else groups.set(key, [fact]);
@@ -319,19 +349,17 @@ export async function reconciliationSweep(
  * ledger parser's display text (`1,200円`) through the same grammar card
  * purchase recognition uses.
  *
- * A MyJCB confirmed row must also carry an absolute payment month, read as
- * recognition reads it (`statementPeriod`). The collector writes the relative
- * fallback `detailMonth-N` for every month the past-months API does not label
- * (docs/sources/myjcb.md: the first connection's menu lists months 0..8 and
- * the API only 9..17). That label is a position in the provider's month list
- * on the capture day, so rows of different payment months share it over time,
- * and a pair grouped by it would claim `same_statement_period` falsely. */
+ * A MyJCB confirmed row must also carry a known payment month, read as
+ * recognition reads it (`statementPeriodOf`). The collector writes the
+ * relative fallback `detailMonth-N` for every month the past-months API does
+ * not label (docs/sources/myjcb.md: the first connection's menu lists months
+ * 0..8 and the API only 9..17). That label is a position in the provider's
+ * month list on the capture day, so it names a month only together with its
+ * capture time, and a position the rule does not place (`detailMonth-2` and
+ * beyond) names none. This job pairs only inside a known payment month; the
+ * recognition lane's candidate pass pairs such a row by its usage month. */
 function comparablePayment(row: FactRow): boolean {
-  if (
-    row.source_id === "myjcb" &&
-    row.status === "confirmed" &&
-    statementPeriod(row.statement_period) === null
-  )
+  if (row.source_id === "myjcb" && row.status === "confirmed" && statementPeriodOf(row) === null)
     return false;
   return comparableCardPayment({
     sourceId: row.source_id,

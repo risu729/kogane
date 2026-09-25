@@ -1,6 +1,6 @@
 # Sony銀行 read-only Worker PoC
 
-Sony銀行の現行Web BFFへ毎回新規ログインし、総残高、円・外貨普通預金取引履歴、公式CSV、Sony Bank WALLETの直近15か月明細をprivate R2へ保存する独立Workerである。Chrome、Browser Rendering、Container、TLS impersonation、Akamai対策は使用しない。
+Sony銀行の現行Web BFFへ毎回新規ログインし、総残高、円・外貨普通預金取引履歴、公式CSV、Sony Bank WALLETの直近15か月明細を共有DATA bucket（`kogane-raw-evidence`）へ保存する独立Workerである。Chrome、Browser Rendering、Container、TLS impersonation、Akamai対策は使用しない。
 
 ## Runtime profile
 
@@ -33,17 +33,11 @@ Sony銀行の現行Web BFFへ毎回新規ログインし、総残高、円・外
 
 日次Cronは21:00 UTC（日本時間06:00）に当月1日から実行日までを収集する。手動`POST /trigger?from=YYYY-MM-DD&to=YYYY-MM-DD`は最大366日で、Bearer認証が必要である。
 
-manifest保存後は内部Service Bindingで中央raw-evidence importerを呼ぶ。正常runは32 Worker invocation上限を超えるため、即時呼出しは検証済み`deferred`として終了し、元R2をdurable outboxとして保持する。`scripts/backfill-raw-evidence.sh`がcursorを保存し、10 objectずつstaged inventoryへ転送して最後にsealする。既存の`sony-bank-worker-poc-v2` objectはnative SHA-256がないlegacyでもmanifest SHA-256との再計算一致を必須とし、新規objectはimmutable conditional putとR2 native SHA-256の両方を必須とする。
+収集後、runは`packages/collection`で共有DATA bucketへ書く。上記の各artifactは`objects/<2 hex>/<sha256>`へcontent-addressedで保存し、すべてのobjectの後にterminal manifestを書く。objectとterminalはimmutable conditional putとR2 native SHA-256付きで書き、terminalのないrunは保存完了として扱わない。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。source専用bucket、中央raw-evidence importerへのService Binding、`deferred`応答と`scripts/backfill-raw-evidence.sh`は2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 ```text
-raw/sony-bank/YYYY/MM/DD/<run-id>/gross-balance.json
-raw/sony-bank/YYYY/MM/DD/<run-id>/yen-history-page-0001.json
-raw/sony-bank/YYYY/MM/DD/<run-id>/yen-history.csv
-raw/sony-bank/YYYY/MM/DD/<run-id>/foreign-history-usd-page-0001.json
-raw/sony-bank/YYYY/MM/DD/<run-id>/foreign-history-usd.csv
-raw/sony-bank/YYYY/MM/DD/<run-id>/wallet-history-2026-08.html
-raw/sony-bank/YYYY/MM/DD/<run-id>/collection-summary.json
-raw/sony-bank/YYYY/MM/DD/<run-id>/manifest.json
+objects/<2 hex>/<sha256>                 gross-balance.json、yen-history.csv、wallet-history-YYYY-MM.html、manifest.jsonなど各artifact
+runs/sony-bank/<run-id>/terminal.json    最後に書くrunの完了記録（artifact keyとobjectの対応を持つ）
 ```
 
 login response、氏名、Cookie値、CSRF、password、WALLETの一時SSO値、JSESSIONID、hidden form値はR2へ保存しない。WALLET HTMLは保存直前にこれらを除去する。取得した残高・履歴には個人金融情報が含まれるため、bucketをpublicにしない。
@@ -66,8 +60,8 @@ exact replayが冪等であることを確認した。さらに旧v1 manifestを
 中央content-addressed R2 objectのSHA-256およびbyte数が一致することを確認した。確認では本文や
 金融値を標準出力・documentationへ記録していない。
 
-現在のbackfillはoperatorがscriptを実行する方式である。source R2はdurable outboxとして保持し、
-削除しない。将来のreconcilerはmanifest eventとrepair scanから同じ冪等import contractを呼び出す。
+このbackfill scriptとsource bucketは2026-09-13に廃止した。source bucketの全objectは中央DATAへ
+コピーしてSHA-256を検証した後に削除しており、再送するoutboxはない（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 ローカルで実口座を検証する場合は、認証JSONを標準出力やshell引数へ置かず、600相当で保護した
 ファイルを`SONY_BANK_CREDENTIAL_FILE`に指定する。
@@ -82,7 +76,7 @@ SONY_BANK_CREDENTIAL_FILE=/secure/path/sony-bank.json \
 - `SONY_BANK_CREDENTIAL_JSON`: `branchNum`、`accountNum`、`loginPwd`だけを持つJSON
 - `ADMIN_TRIGGER_TOKEN`: 手動triggerのBearer token
 
-中央importer側は`collector-r2-sony-bank`専用credentialを使い、他sourceのcredentialを流用しない。
+このWorkerは中央credentialを持たない。旧importer用のingest client `collector-r2-sony-bank`は2026-09-13に無効化した。
 
 Secret値をsource、Wrangler config、shell履歴、標準出力へ置かない。
 
@@ -91,7 +85,6 @@ bun install --frozen-lockfile
 bun test
 mise run //services/collector-sony-bank:typecheck
 mise run //services/collector-sony-bank:dry-run
-wrangler r2 bucket create kogane-sony-bank-collector-poc
 wrangler deploy
 wrangler secret put SONY_BANK_CREDENTIAL_JSON
 wrangler secret put ADMIN_TRIGGER_TOKEN
@@ -100,22 +93,21 @@ wrangler secret put ADMIN_TRIGGER_TOKEN
 ## 作成するCloudflare resourceとcleanup
 
 - Worker: `kogane-sony-bank-collector-poc`
-- R2 bucket: `kogane-sony-bank-collector-poc`
+- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。このWorker専用のbucketはない）
 - Cron: `0 21 * * *`
 - Worker secrets: 上記2件
 
-PoCを廃棄するときは、R2の必要なraw artifactを退避した後にWorker、bucketの順で削除する。R2 bucketの削除は保存データを回復不能にするため、内容を確認してから行う。
+PoCを廃棄するときはWorkerだけを削除する。共有DATA bucketは他のcollectorとProcessorも使うため削除しない。旧source専用bucket `kogane-sony-bank-collector-poc`は2026-09-13に削除済み。
 
 ### Failure diagnostics
 
-Collection failures emit a structured `*-collection-failure` event before teardown,
-manifest storage, or central import. Join on `runId`; use `phase` to distinguish
-collection from manifest-write, raw-evidence-import, teardown, and relay events.
-The source R2 manifest retains the same three failure fields (`operation`,
-`errorType`, `message`). Its bounded message includes the safe stage and available
-HTTP status; structured logs expose these as `diagnostics` fields. The central
-importer continues to normalize failure messages, so use the source manifest or
-Worker logs for diagnosis.
+Collection failures emit a structured `*-collection-failure` event before teardown
+or the DATA write. Join on `runId`; use `phase` to distinguish collection from
+teardown, relay and shared-persist events. The collector manifest stored in DATA
+retains the same three failure fields (`operation`, `errorType`, `message`). Its
+bounded message includes the safe stage and available HTTP status; structured logs
+expose these as `diagnostics` fields. Use that manifest or the Worker logs for
+diagnosis.
 
 No exception message, stack, cause, request URL, credential, response body, or
 unrecognized provider text is logged. Sony logs only fixed operation IDs/currencies
@@ -132,8 +124,9 @@ JPY now follows the same zero-transaction CSV rule as foreign currencies: after
 validating every official history JSON page, request CSV only when the total is
 positive. Keep the original zero-row JSON, balance and WALLET evidence; do not
 fabricate an empty CSV. A positive-history CSV error still fails collection.
-The central importer permits missing JPY CSV only with validated zero-row history
-evidence; the manifest and collection-summary field shapes remain unchanged.
+No importer re-checks this any more: the collector itself omits JPY CSV only after
+validating zero-row history, and the manifest and collection-summary field shapes
+remain unchanged.
 
 This matches Sony's public `eaba0600/search` frontend: its `csvdlBtn` section is
 rendered only after a successful history response with `countCnt !== 0`.

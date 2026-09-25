@@ -41,24 +41,29 @@ is whether its public API exposes auto-imported rows.
      matching `CardUseDetailRequest` in the Android app.
 7. Writes the original JSON bytes page by page plus a small `manifest.json`.
 
-The hosted Worker sanitizes each response with `vpass-json-sanitizer` v1
-(`src/sanitize.ts`) and writes one run per card to the shared DATA bucket
-through `packages/collection`: content-addressed objects first, the
-`terminal-v1` manifest last (`src/shared-collection.ts`,
-[`../../docs/collection.md`](../../docs/collection.md)). A card or session
-that collected nothing writes a `failed` terminal with no artifact. The Worker
-has no Service Binding and no Queue of its own: the R2 notification of the
-terminal wakes the Processor, which registers the run in process
-([`../../docs/processor.md`](../../docs/processor.md)).
+The hosted Worker sanitizes each card's responses with `vpass-json-sanitizer`
+v1 (`src/sanitize.ts`), which replaces authentication, session, device and
+card-reference fields, and writes one run per card into the shared `DATA`
+bucket (`kogane-raw-evidence`) through `packages/collection`: the
+content-addressed objects first, then the `terminal-v1` manifest. A card that
+collected nothing still writes a `failed` terminal with no artifact. The
+Processor registers each terminal in process
+([processor.md](../../docs/processor.md)); see
+[collection.md](../../docs/collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc)
+for the artifact keys and terminal fields.
+
+The per-source bucket, the import Queue and its dead-letter queue, the private
+importer Service Binding and `scripts/backfill-raw-evidence.sh` were retired on
+2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). No GitHub
+Actions schedule is used; the existing Worker cron remains the sole scheduled
+trigger.
 
 Registration is bounded per invocation by an operation budget, not by the
-number of statement pages (issue #87, `docs/processor.md` §3.3). A card of
-about twenty pages registers in one invocation; a longer one yields with its
-progress in CORE and is continued on the next Processor cron tick, so it is
-sealed within minutes rather than in one call that could pass a documented
-per-invocation limit. The earlier importer, its signed continuations, its
-Queue and the per-source bucket are retired
-([`../../docs/legacy-retirement.md`](../../docs/legacy-retirement.md)).
+number of statement pages (issue #87, [processor.md](../../docs/processor.md)
+§3.3). A card of about twenty pages registers in one invocation; a longer one
+yields with its progress in CORE and is continued on the next Processor cron
+tick, so it is sealed within minutes rather than in one call that could pass a
+documented per-invocation limit.
 
 The PoC deliberately does not turn the provider JSON into final ledger rows.
 That parsing belongs to Kogane's deterministic observation layer; keeping the

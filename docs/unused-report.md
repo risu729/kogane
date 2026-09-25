@@ -47,6 +47,10 @@ unused-file candidates were:
 - `services/collector-vpoint/src/vpoint-pay-raw-evidence.ts`
 - `services/collector-vpoint/src/vpoint-pay-reconcile.ts`
 
+Two of these, `services/collector-smbc-direct/src/raw-evidence-types.ts` and
+`services/collector-vpoint/src/vpoint-pay-raw-evidence.ts`, were leftovers of
+the retired importer and were removed on 2026-09-24.
+
 The report also flags root `vitest`, `wrangler` in `packages/collection`, and
 `ws` in `services/collector-sbi-shinsei` as unused development dependencies.
 These are review candidates, not verified removals. Numerous exported functions
