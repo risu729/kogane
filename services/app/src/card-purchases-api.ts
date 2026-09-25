@@ -1,9 +1,11 @@
 // `GET /api/v2/card-purchases`: recognised card purchases explained through
 // their provider statement, the reviewed settlement and the bank debit
 // (packages/application/src/query/card-purchases.ts). Read-only and
-// operator-only, like the card settlement review: the agent query service
-// cannot yet enforce per-source scopes on these rows, so agents read
-// observations through the `activity` intent instead (docs/agent-api.md).
+// operator-only, like the card settlement review: this route carries the
+// review actions of each candidate. An agent reads the same page through the
+// agent API's `kogane.purchases.explain` instead, graded by its own grant,
+// served only while `cardPurchasesAvailable` is, and without those actions
+// (packages/application/src/query/purchases-explain.ts, docs/agent-api.md).
 import {
   CARD_PURCHASE_EVENT_ID,
   CARD_PURCHASE_PERIOD,

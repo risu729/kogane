@@ -213,9 +213,17 @@ contract in `packages/collection/src/stages.ts`, before this table is reached.
 
 ```text
 observation_sweep → collection_scan → identity_sweep → balance_projection
-  → reconciliation_sweep → purchase_recognition → reward_claims_sweep
-  → reward_read_projection → report_job → operation_dispatch → decision_outbox
+  → reconciliation_sweep → card_settlement_sweep → purchase_recognition
+  → reward_claims_sweep → reward_read_projection → report_job
+  → operation_dispatch → decision_outbox
 ```
+
+`card_settlement_sweep` shares `RECONCILIATION_ENABLED` with
+`reconciliation_sweep` and used to run inside it, its counts nested in that
+lane's log line as `cardSettlements`. It is its own lane now, with its own
+`card_settlement_sweep` log line, `card_settlement_sweep_failed` event and tick
+record ([card-settlements.md](card-settlements.md)), so a failure of either
+sweep no longer hides the other's counts.
 
 `purchase_recognition` runs only while `PURCHASE_RECOGNITION_ENABLED` is `"1"`
 or `"true"` (`"true"` in production since 2026-09-24); it turns adopted
@@ -240,8 +248,60 @@ failure is logged as its own event and stops nothing else. Both new lanes are
 always wired, like `balance_projection`: while their flags are off each logs
 one line per tick — `{"event":"collection_scan","enabled":false,"status":"skipped",…}`,
 `{"event":"operation_dispatch","enabled":false,"status":"skipped",…}` — and
-touches neither R2 nor CORE, so an operator can see from the log that the
-lane exists and is off ([observation-lanes.md](observation-lanes.md)).
+touches neither R2 nor any table it owns, so an operator can see from the log
+that the lane exists and is off ([observation-lanes.md](observation-lanes.md));
+the one row `operation_dispatch` writes then is its `skipped-by-flag` tick
+(§6.1).
+
+### 6.1 Tick records
+
+Most lanes keep no state of their own, so until migration 0049 the only trace
+of a tick was its log line, and "did `purchase_recognition` run?" could only be
+answered from Workers Logs. `runScheduled` now also writes one row per tick of
+each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
+`packages/storage-d1/src/core/lane-ticks.ts`):
+
+| Lane                    | Counts recorded                                                                                                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `identity_sweep`        | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                      |
+| `reconciliation_sweep`  | `slices`, `scanned`, `groups`, `groupsSkipped`, `proposed`, `written`, `autoAccepted`                                                                                                            |
+| `card_settlement_sweep` | `scanned`, `proposed`, `written`                                                                                                                                                                 |
+| `purchase_recognition`  | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped` |
+| `reward_claims_sweep`   | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                            |
+| `operation_dispatch`    | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                         |
+| `decision_outbox`       | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                          |
+
+Not recorded, because they already keep their own record: `observation_sweep`
+(`observation_lane_state`), `collection_scan` (`collection_scan_state`),
+`balance_projection` and `reward_read_projection` (their build records and
+READ pointers), and `report_job` (its runs and report events).
+
+Each row carries the lane, `started_at_ms` and `finished_at_ms`, an `outcome`,
+an `error_code` and `counts_json`:
+
+- `ran` — the stage returned; `counts_json` holds the fields above, by name.
+- `skipped-by-flag` — the lane's flag is off, so the stage was not called
+  (or, for the always-wired `operation_dispatch`, it reported
+  `enabled: false`); the log still gets no line, and `counts_json` is `{}`.
+- `failed` — the stage threw; `error_code` is the same safe code the
+  `<lane>_failed` log line carries (a pipeline code or the error's constructor
+  name, `unknown` for anything that is not a code) and `counts_json` is `{}`.
+
+A lane whose stage is not wired at all records nothing. Only counts, flags and
+the closed exclusion codes of `purchase_recognition` are copied, by field
+name; the 0049 trigger refuses any text value, so no amount, key, account label
+or provider wording can be stored. A tick killed mid-lane (a Worker limit)
+leaves no row for that lane, and the gap is the signal.
+
+The table is bounded: each insert deletes that lane's rows beyond the latest
+288 (one day of the five-minute cron) in the same batch. Rows are never
+updated. It is `operational-mutable` in the CORE ledger and outside the
+source-revision ledger, so recording a tick never makes a projection stale. A
+row that cannot be written is logged as
+`{"event":"lane_tick_record_failed","lane":…,"code":…}` and changes nothing
+the lane did. `GET /status` (`mise run //services/processor:ops status`) and
+`GET /internal/health` (§13) report the latest tick of each lane as
+`laneTicks`; reading them is in [operations.md](operations.md#lane-tick-records).
 
 ## 7. Operations dispatch
 
@@ -379,6 +439,7 @@ never a value:
 | `bindings`         | which of `DB`, `READ`, `EVIDENCE`, `DATA` this deployment actually has                |
 | `flags`            | the declared value of every lane flag of §9                                           |
 | `lanes`            | `observation_lane_state`: how long ago each lane last swept                           |
+| `laneTicks`        | the latest `processor_lane_ticks` row of each lane (§6.1): outcome, code, age, counts |
 | `collectionScan`   | the bounded scan's cursor: how stale it is, whether it is mid-cycle, pages and cycles |
 | `readPointer`      | the READ active pointer: present or not, and how long ago it was switched             |
 
@@ -386,6 +447,8 @@ The queue _consumer_ cannot be introspected from inside the isolate — it is a
 property of the configuration, not of the runtime — so what is asserted is the
 binding set instead; a deploy that lost a binding is a broken deploy. Nothing
 in this route writes, runs a lane, moves a cursor or contacts a provider.
+`laneTicks` is diagnosis, not health: a lane whose latest tick `failed` does
+not turn the answer into a 503, and before migration 0049 the list is empty.
 
 ## 14. Seams for later work items
 

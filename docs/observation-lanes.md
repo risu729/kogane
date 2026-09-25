@@ -293,6 +293,7 @@ each keeps its own bound.
 | Notification backlog           | `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                                                                  |
 | Lane liveness                  | `laneState[]` (last sweep time, last created/executed counts, cursor)                                                        |
 | Replay progress                | `replayPlans[]` (active plans and plans updated in the last seven days)                                                      |
+| Scheduled lane ticks           | `laneTicks[]` (latest `processor_lane_ticks` row per lane: outcome, safe code, age, counts; `docs/processor.md` §6.1)        |
 
 Eligible/unsupported/oversized reasons, parsed-B versus sealed-identity
 coverage, candidate-versus-active, and raw integrity results remain on the
@@ -318,12 +319,13 @@ run…"):
 | 3   | `identity_sweep`         | Always (`docs/identity.md`).                                                                                                                                                                                                                                                                                                     |
 | 4   | `balance_projection`     | Always runs and reports itself `skipped` while `BALANCE_PROJECTION_ENABLED` is anything but `"1"` (`docs/balance-read-model.md`). With `READ_PROJECTION_ENABLED` on it writes the READ database instead of the CORE tables of migration 0030, and completes the CORE job only after READ is published (`docs/read-model-d1.md`). |
 | 5   | `reconciliation_sweep`   | Only when `RECONCILIATION_ENABLED` is `"1"` or `"true"`; otherwise the stage is not run and logs nothing (`docs/economic-events.md`).                                                                                                                                                                                            |
-| 6   | `purchase_recognition`   | Only when `PURCHASE_RECOGNITION_ENABLED` is `"1"` or `"true"`; otherwise the stage is not run and logs nothing. Turns adopted Vpass/MyJCB usage rows into purchase and refund events, then writes pending-to-posted candidates for the groups it read and merges only provider-linked pairs (`docs/economic-events.md`).         |
-| 7   | `reward_claims_sweep`    | Only when `REWARD_CLAIMS_ENABLED` is `"1"` or `"true"` (`docs/rewards.md`).                                                                                                                                                                                                                                                      |
-| 8   | `reward_read_projection` | Only when `REWARD_READ_PROJECTION_ENABLED` is `"1"` or `"true"` (U16, `docs/rewards.md` §12).                                                                                                                                                                                                                                    |
-| 9   | `report_job`             | Only when `REPORTS_ENABLED` is `"true"` (`docs/calculation-and-reports.md`).                                                                                                                                                                                                                                                     |
-| 10  | `operation_dispatch`     | Always; dispatches only when `OPS_DISPATCH_ENABLED` is `"1"` or `"true"`, otherwise logs `status: "skipped"` (U06/U08, `docs/processor.md`, `docs/ops-api.md`).                                                                                                                                                                  |
-| 11  | `decision_outbox`        | Always, and last: it runs after the projections a decision may have invalidated (A09, `docs/change-lifecycle.md`).                                                                                                                                                                                                               |
+| 6   | `card_settlement_sweep`  | Under the same flag as `reconciliation_sweep`, as its own lane: card statement totals and bank debits become settlement candidates (`docs/card-settlements.md`).                                                                                                                                                                 |
+| 7   | `purchase_recognition`   | Only when `PURCHASE_RECOGNITION_ENABLED` is `"1"` or `"true"`; otherwise the stage is not run and logs nothing. Turns adopted Vpass/MyJCB usage rows into purchase and refund events, then writes pending-to-posted candidates for the groups it read and merges only provider-linked pairs (`docs/economic-events.md`).         |
+| 8   | `reward_claims_sweep`    | Only when `REWARD_CLAIMS_ENABLED` is `"1"` or `"true"` (`docs/rewards.md`).                                                                                                                                                                                                                                                      |
+| 9   | `reward_read_projection` | Only when `REWARD_READ_PROJECTION_ENABLED` is `"1"` or `"true"` (U16, `docs/rewards.md` §12).                                                                                                                                                                                                                                    |
+| 10  | `report_job`             | Only when `REPORTS_ENABLED` is `"true"` (`docs/calculation-and-reports.md`).                                                                                                                                                                                                                                                     |
+| 11  | `operation_dispatch`     | Always; dispatches only when `OPS_DISPATCH_ENABLED` is `"1"` or `"true"`, otherwise logs `status: "skipped"` (U06/U08, `docs/processor.md`, `docs/ops-api.md`).                                                                                                                                                                  |
+| 12  | `decision_outbox`        | Always, and last: it runs after the projections a decision may have invalidated (A09, `docs/change-lifecycle.md`).                                                                                                                                                                                                               |
 
 Why those positions. `collection_scan` registers terminals the shared DATA
 bucket already holds, so it runs before `identity_sweep`: a run it finds this
@@ -348,6 +350,14 @@ the identity sweep from running. A failure code is either the pipeline's safe
 code or the error's constructor name, never exception text. Health signals,
 load budgets and the recovery drills for these stages are in
 `docs/operations.md`.
+
+The lanes that keep no state of their own — `identity_sweep`,
+`reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition`,
+`reward_claims_sweep`, `operation_dispatch` and `decision_outbox` — also
+record every tick in `processor_lane_ticks` (migration 0049): `ran` with its
+counts, `failed` with the same safe code, or `skipped-by-flag` when the gate
+above is off, which still logs nothing. The last day per lane is kept
+(`docs/processor.md` §6.1).
 
 ## Invariants kept and how they were verified
 

@@ -33,6 +33,13 @@ A bounded Processor sweep reads published observations, retaining provider
 identity and acquisition namespace. Exact same-unit amounts and nearby dates
 produce candidates only. They never cause automatic acceptance.
 
+The sweep is the `card_settlement_sweep` lane, right after
+`reconciliation_sweep` and under the same `RECONCILIATION_ENABLED` flag. It
+logs `{"event":"card_settlement_sweep","scanned":…,"proposed":…,"written":…}`
+(or `card_settlement_sweep_failed` with a safe code) and records each tick,
+including a `skipped-by-flag` one, in `processor_lane_ticks`
+([processor.md §6.1](processor.md#61-tick-records)).
+
 The `カード照合` page shows the source facts, evidence links, candidate rationale,
 current readiness blockers and decision history. An authenticated human operator
 can plan an acceptance or rejection; the confirmation page then simulates,
@@ -107,7 +114,9 @@ complete the broader [economic-event roadmap](roadmap.md).
 
 The operator-only `カード利用` page (`/purchases`, capability
 `cardPurchaseRecognition`, `GET /api/v2/card-purchases`) reads the chain from a
-recognised card purchase: 利用 → 請求 → 引落.
+recognised card purchase: 利用 → 請求 → 引落. An agent with a whole-store
+`records.read` grant reads the same chain through `kogane.purchases.explain`
+([agent API](agent-api.md#card-purchase-explanation)).
 
 - A posted purchase joins the provider statement of the same resolved account,
   source and statement period (`YYYY-MM`): `card_statement_facts` whose
@@ -213,8 +222,11 @@ the effect in words:
 
 None of these adds or removes an amount, and the captured figure stays the same.
 Approval is refused while any of these is missing or changed: a pin, the offered
-action, or the candidate itself. The route is operator-only, so an agent sees
-neither the candidates nor the actions.
+action, or the candidate itself. The route is operator-only. An agent reads the
+same candidates through the agent API's `kogane.purchases.explain`
+([agent API](agent-api.md#card-purchase-explanation)) with every fact and
+blocker but without `actions` or `relation`, so it can report a candidate and
+never review one: the decision stays on this page.
 
 ## Verification
 
