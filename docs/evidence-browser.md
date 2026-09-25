@@ -689,8 +689,9 @@ rather than a second implementation. See [Agent API](agent-api.md) for the
 grants, tools, result contract, error codes, prompt-injection rules and the
 `AGENT_API_GRANTS` configuration; the deployment facts are:
 
-- `POST /api/agent/v1/{capabilities,context.open,financial.query,explain,reconcile.propose}`
-  and `POST /mcp` are one of the browser's two non-GET allow-lists (the other
+- `POST /api/agent/v1/{capabilities,context.open,financial.query,explain,reconcile.propose}`,
+  `POST /api/agent/v1/purchases.explain` while card purchase recognition is
+  served, and `POST /mcp` are one of the browser's two non-GET allow-lists (the other
   is the change lifecycle's `/api/command/v1/*`). Both are registered
   explicitly in `src/worker.ts` before the GET-only check, behind the same
   `auth.ts` gate as every read route, with bounded bodies, `no-store` and the

@@ -1,9 +1,13 @@
-// The five tools of the agent API, bound to this Worker's read model.
+// The tools of the agent API, bound to this Worker's read model: the five
+// that are always served, and `kogane.purchases.explain` while the deployment
+// serves card purchase recognition.
 //
 // There is exactly one implementation of each: the HTTP route, the MCP
 // adapter and the human UI's shared-query route all call `callTool`, so no
 // transport can hold semantics of its own and the UI cannot compute a figure
-// the agent API would compute differently (AT72).
+// the agent API would compute differently (AT72). The purchase explanation is
+// the operator page's own query (`queryCardPurchases`), called through the
+// application service that grades it for an agent.
 //
 // Everything below is composed from the application service and the explicit
 // read repository. No route in this file names a table, an ordering, a column
@@ -15,16 +19,19 @@ import {
   ERROR_STATUS,
   executeQuery,
   explain,
+  explainCardPurchases,
   financialError,
   type Grant,
   openContext,
   parseExplainRequest,
   parseProposalRequest,
+  parsePurchasesExplainRequest,
   parseQueryRequest,
   proposeReconciliation,
   type QueryRequest,
 } from "../../../packages/application/src/index";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
   interpretationContext,
   LATEST_IDENTITY_RELEASE,
@@ -34,6 +41,7 @@ import { centralStoreCapabilities } from "./capabilities";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import { proposalStore } from "./proposals";
 
+/** The tools every configured deployment serves. */
 export const AGENT_TOOL_NAMES = [
   "kogane.capabilities",
   "kogane.context.open",
@@ -41,13 +49,19 @@ export const AGENT_TOOL_NAMES = [
   "kogane.explain",
   "kogane.reconcile.propose",
 ] as const;
-export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
+/**
+ * Served only while the deployment serves card purchase recognition (the
+ * `cardPurchaseRecognition` capability): otherwise its path is 404 and its
+ * MCP name is `unknown_tool`, as the operator route is absent.
+ */
+export const PURCHASES_TOOL_NAME = "kogane.purchases.explain";
+export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number] | typeof PURCHASES_TOOL_NAME;
 
 /** Largest request body any agent route reads, in bytes. */
 export const MAX_REQUEST_BYTES = 65_536;
 
 export function isAgentToolName(value: string): value is AgentToolName {
-  return (AGENT_TOOL_NAMES as readonly string[]).includes(value);
+  return value === PURCHASES_TOOL_NAME || (AGENT_TOOL_NAMES as readonly string[]).includes(value);
 }
 
 export interface ToolResult {
@@ -174,6 +188,21 @@ export async function callTool(
       });
       if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       return { status: 200, body: outcome.receipt };
+    }
+    case "kogane.purchases.explain": {
+      // Whether the deployment serves it is the transport's question (it
+      // needs the store's schema); everything else — the capability, the
+      // perimeter, the bounds and what a candidate may carry — is the
+      // application service's.
+      const parsed = parsePurchasesExplainRequest(body);
+      if (!parsed.ok) return failure(parsed.code, "purchases.explain", parsed.refs);
+      const outcome = await explainCardPurchases({
+        grant: context.grant,
+        sql: d1Executor(context.db),
+        request: parsed.value,
+      });
+      if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      return { status: 200, body: outcome.explanation };
     }
   }
 }

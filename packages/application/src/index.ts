@@ -211,6 +211,16 @@ export {
   type ReportedStateRow,
 } from "./query/execute.ts";
 export {
+  explainCardPurchases,
+  parsePurchasesExplainRequest,
+  PURCHASES_EXPLAIN_CAPABILITY,
+  PURCHASES_EXPLAIN_KEYS,
+  PURCHASES_EXPLAIN_MAX_OFFSET,
+  type PurchasesExplainOutcome,
+  type PurchasesExplanation,
+  withoutReviewAffordances,
+} from "./query/purchases-explain.ts";
+export {
   DEFAULT_EXPLAIN_DEPTH,
   explain,
   type ExplainReader,
