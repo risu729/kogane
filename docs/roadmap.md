@@ -85,8 +85,11 @@ Concrete limits in the current code:
   and its posted row are separate events until a reviewed link merges them
   (the review screen exists: the purchases page lists the open candidates and
   reviews each purchase's link with accept, reject or withdraw through the
-  change lifecycle), agents cannot read it, and no statement-versus-purchases
-  difference is computed.
+  change lifecycle), and no statement-versus-purchases difference is computed.
+  An agent with a whole-store `records.read` grant reads the same page through
+  [`kogane.purchases.explain`](agent-api.md#card-purchase-explanation), without
+  the review actions; a grant scoped to some sources or accounts is refused
+  because the page cannot yet be recomputed inside that scope.
 
 ## Delivery order and the next milestone
 

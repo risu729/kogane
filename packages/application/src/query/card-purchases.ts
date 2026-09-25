@@ -74,7 +74,7 @@ const CARD_PURCHASE_CANDIDATE_LIMIT = 10;
  * larger filter is refused rather than partially summed; a statement period
  * narrows it.
  */
-const CARD_PURCHASE_SUMMARY_LIMIT = 10_000;
+export const CARD_PURCHASE_SUMMARY_LIMIT = 10_000;
 export const CARD_PURCHASE_PERIOD = /^[0-9]{4}-(?:0[1-9]|1[0-2])$/u;
 export const CARD_PURCHASE_EVENT_ID = /^(?:purchase|refund)_[0-9a-f]{64}$/u;
 /** The provider usage and statement dates are Japanese civil dates. */
