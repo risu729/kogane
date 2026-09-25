@@ -112,7 +112,8 @@ artifacts an hour, so the 3,133 artifacts still at 1.1.0 on 2026-09-24 drain in
 roughly 9 to 10 hours with no operator action, where the 4 jobs a tick this
 release shipped with would have needed about 65 hours
 ([observation lanes](observation-lanes.md#repair-budget-and-drain-rate)). The
-identity sweep takes every re-parse on the tick that publishes it. A 1.2.0 job
+identity sweep takes a re-parse on the tick that publishes it unless its
+200-observation cap or an older backlog defers it a tick. A 1.2.0 job
 is a normal run, not a candidate: its successful parse
 supersedes the artifact's 1.1.0 run and moves the publication pointer in the
 same transaction ([publication gate](publication-gate.md)). An

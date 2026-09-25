@@ -56,7 +56,9 @@ test("the repair budget, the identity budget that keeps pace with it and the har
   // The sum is what the identity stage has to cover, and identitySweep
   // refuses more than 40 runs a call (checked against the function below):
   // a larger sum would fail the identity stage on every tick.
-  expect(LANE_BUDGETS.incremental + LANE_BUDGETS.repair).toBeLessThanOrEqual(IDENTITY_SWEEP_MAX_RUNS);
+  expect(LANE_BUDGETS.incremental + LANE_BUDGETS.repair).toBeLessThanOrEqual(
+    IDENTITY_SWEEP_MAX_RUNS,
+  );
   // The drain rate counts ticks of the deployed cron.
   const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
   const minutes = /"crons": \["\*\/(\d+) \* \* \* \*"\]/u.exec(wrangler)?.[1];

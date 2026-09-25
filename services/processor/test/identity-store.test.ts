@@ -898,7 +898,7 @@ test("a 40-run sweep stops at 200 observations and the next sweep identifies the
     identifiedRuns: 2,
     identifiedObservations: 7 + 69,
   });
-  expect(
-    await count("current_identity_observations", "parse_run_id BETWEEN 3736 AND 3739"),
-  ).toBe(4 * 69);
+  expect(await count("current_identity_observations", "parse_run_id BETWEEN 3736 AND 3739")).toBe(
+    4 * 69,
+  );
 }, 30000);
