@@ -745,3 +745,131 @@ test("the scan stops at a spent budget and leaves its cursor where it was", asyn
   const next = await collectionScan(harness.env, { budget: new RegistrationBudget() });
   expect(next).toMatchObject({ registered: 2 });
 }, 60_000);
+
+/**
+ * The in-process port, except that `method` runs to completion and then the
+ * invocation dies: what a Worker killed between two calls of the final step
+ * leaves behind.
+ */
+function dyingAfter(
+  method: keyof RunRegistrationPort,
+  calls: Calls,
+): (env: IngestEnv) => RunRegistrationPort {
+  return (env) => {
+    const port = directRegistrationPort(env, CLIENT) as unknown as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >;
+    const wrapped: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
+    for (const [name, operation] of Object.entries(port))
+      wrapped[name] = async (...args: unknown[]) => {
+        (calls[name] ??= []).push({ cost: 0, usedBefore: 0, r2Before: 0 });
+        const result = await operation.apply(port, args);
+        if (name === method) throw new Error("invocation ended");
+        return result;
+      };
+    return wrapped as unknown as RunRegistrationPort;
+  };
+}
+
+test("an invocation that dies inside the final step is finished by the next one, each effect once", async () => {
+  // Between the run report and the seal, and between the seal and the link,
+  // for a direct seal and a staged one. The next invocation re-enters the
+  // final step: the run report and the seal answer from what CORE holds under
+  // the same report key and the same attempt id, and the link is made once.
+  for (const artifacts of [6, DIRECT_SEAL_ARTIFACTS + 5])
+    for (const method of [
+      "addRunReport",
+      artifacts > DIRECT_SEAL_ARTIFACTS ? "sealStagedInventory" : "seal",
+    ] as const) {
+      const harness = collectionHarness();
+      await persistShape(harness, { artifacts, units: 2 });
+      const calls: Calls = {};
+      const budget = new RegistrationBudget(1_000_000);
+      await expect(
+        registerOnce(harness, budget, { port: dyingAfter(method, calls) }),
+      ).rejects.toThrow("invocation ended");
+      expect(count(harness, "SELECT count(*) AS n FROM fetch_run_seals")).toBe(
+        method === "addRunReport" ? 0 : 1,
+      );
+      expect(
+        count(harness, "SELECT count(*) AS n FROM collection_runs WHERE registered_at IS NULL"),
+      ).toBe(1);
+
+      const rest = await registerUntilDone(harness);
+      expect(rest.map((invocation) => invocation.outcome.outcome)).toEqual(["registered"]);
+      expect(count(harness, "SELECT count(*) AS n FROM fetch_runs")).toBe(1);
+      expect(count(harness, "SELECT count(*) AS n FROM fetch_run_reports")).toBe(1);
+      expect(count(harness, "SELECT count(*) AS n FROM fetch_unit_reports")).toBe(2);
+      expect(count(harness, "SELECT count(*) AS n FROM fetch_run_seals")).toBe(1);
+      expect(count(harness, "SELECT count(*) AS n FROM run_inventories")).toBe(1);
+      expect(count(harness, "SELECT count(*) AS n FROM ingestion_attempts")).toBe(1);
+      expect(
+        count(
+          harness,
+          "SELECT count(*) AS n FROM ingestion_attempts WHERE external_attempt_id = ?",
+          `run-001:${REGISTRATION_CONTRACT_VERSION}`,
+        ),
+      ).toBe(1);
+      expect(
+        stageRows(harness)
+          .filter((row) => row.stage === "registered")
+          .map((row) => row.state),
+      ).toEqual(["completed"]);
+      // Asked again, it is simply registered.
+      expect(await registerOnce(harness, new RegistrationBudget())).toMatchObject({
+        outcome: "already_registered",
+      });
+    }
+}, 120_000);
+
+test("an inventory resumed with a different chunk size stages every item once, on the new boundaries", async () => {
+  // A staged run that yields part-way through its inventory in chunks of 7,
+  // then resumes in the contract's chunks of 30: the resume adds only the
+  // items the inventory does not hold, so the boundaries move and nothing is
+  // staged twice.
+  const shape: Shape = { artifacts: DIRECT_SEAL_ARTIFACTS + 12 };
+  const register = (harness: CollectionHarness, budget: RegistrationBudget, calls: Calls) =>
+    registerTerminal({
+      env: { DB: harness.env.DB, EVIDENCE: harness.env.EVIDENCE },
+      bucket: harness.env.EVIDENCE,
+      clientId: CLIENT,
+      source: SOURCE,
+      runId: "run-001",
+      budget,
+      inventoryChunk: 7,
+      port: recordingPort(() => budget, calls),
+    });
+  const probe = collectionHarness();
+  await persistShape(probe, shape);
+  const measured: Calls = {};
+  const unlimited = new RegistrationBudget(1_000_000);
+  await register(probe, unlimited, measured);
+  expect(measured["addInventoryItems"]).toHaveLength(Math.ceil(62 / 7));
+  // Room for exactly two chunks of seven, not the third.
+  const limit =
+    measured["addInventoryItems"]![2]!.usedBefore + inventoryChunkReserve(7) + AUDIT_RESERVE - 1;
+
+  const harness = collectionHarness();
+  await persistShape(harness, shape);
+  const first: Calls = {};
+  const budget = new RegistrationBudget(limit);
+  expect(await register(harness, budget, first)).toMatchObject({
+    outcome: "pending",
+    phase: "inventory",
+  });
+  expect(first["addInventoryItems"]).toHaveLength(2);
+  expect(count(harness, "SELECT count(*) AS n FROM run_inventory_items")).toBe(14);
+
+  const calls: Calls = {};
+  const rest = await registerUntilDone(harness, { calls });
+  expect(rest.at(-1)!.outcome.outcome).toBe("registered");
+  // 48 items left: one chunk of 30 and one of 18, no artifact catalogued again.
+  expect(calls["addInventoryItems"]).toHaveLength(2);
+  expect(calls["addArtifact"]).toBeUndefined();
+  expect(count(harness, "SELECT count(*) AS n FROM run_inventory_items")).toBe(62);
+  expect(count(harness, "SELECT count(DISTINCT artifact_key) AS n FROM run_inventory_items")).toBe(
+    62,
+  );
+  expect(count(harness, "SELECT count(*) AS n FROM fetch_run_seals")).toBe(1);
+}, 120_000);

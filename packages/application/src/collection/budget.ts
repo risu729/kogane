@@ -76,7 +76,8 @@ export const INVENTORY_ITEM_RESERVE = 4;
  * The final step: the run report, the seal — direct, of at most
  * `DIRECT_SEAL_ARTIFACTS` items, or staged — and the link and completion that
  * record it (measured 32 at the direct-seal maximum, 16 staged). They are one
- * step so that none of them is ever made twice.
+ * step so that no yield separates them; an invocation that ends inside it is
+ * finished by the next, which finds the report and the seal already recorded.
  */
 export const FINAL_STEP_RESERVE = 64;
 

@@ -50,7 +50,7 @@ What the consumer does with each outcome, exactly:
 | `invalid` (account, bucket, shape), `ignored` (not a terminal) | acked     | not a fact about a terminal in the DATA bucket                                             |
 | `registered`, `already_registered`, `blocked`, `missing`       | acked     | done, or nothing further a retry could change                                              |
 | `pending` (operation budget spent, progress recorded)          | acked     | the run is unsealed and the next scan tick continues it; retrying would push it to the DLQ |
-| `deferred` (the batch's budget was spent before it started)    | retried   | nothing was registered; the next delivery starts it with a fresh budget                    |
+| `deferred` (the batch's budget was spent before it started)    | retried   | nothing was registered; a later delivery starts it, or the scan if it lands in the DLQ     |
 | `retryable` (ingest client or route absent)                    | retried   | a configuration fix will make it succeed; after `max_retries` it lands in the DLQ          |
 | the handler threw                                              | retried   | a CORE or R2 failure; the log carries a safe code only                                     |
 
@@ -245,7 +245,16 @@ it lists anything, so a large run finishes over consecutive ticks instead of
 waiting for the walk to come round to it. A registration that could not start
 because the invocation's budget was already spent is `deferred`: nothing was
 registered, the queue retries the message, the scan leaves its cursor, and an
-`import` operation waits with `registration_deferred`.
+`import` operation waits with `registration_deferred`. A message deferred on
+every delivery reaches the DLQ after `max_retries` like any retried message,
+and the scan walk registers its run anyway (G1-04).
+
+The final step is never split by a yield, but an invocation can still end
+inside it. The next call then re-enters it: the run report is found under its
+report key, the seal under its attempt id
+(`<runId>:terminal-registration-v1`), and the link is made once, so each is
+recorded once. The same test file kills an invocation after the run report
+and after the seal, for a direct and a staged seal.
 
 Objects are verified before anything is recorded for them. On the first call
 that happens before the fetch run exists, for as many artifacts as the
