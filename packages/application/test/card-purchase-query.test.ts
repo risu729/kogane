@@ -4,12 +4,17 @@
 // writers store them (card-purchase-world.ts). Synthetic values only.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
-import { classifyCardUsage, type CardUsageFact } from "../../domain/src/card-purchase.ts";
+import {
+  classifyCardUsage,
+  recognitionKey,
+  type CardUsageFact,
+} from "../../domain/src/card-purchase.ts";
 import { exactQuantity } from "../../domain/src/values.ts";
 import { currentCardUsageSql, type CurrentCardUsageRow } from "../../read-model/src/card-usage.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
-import { baseWorld, PRODUCER, VPASS_NAMESPACE } from "../../read-model/test/card-usage-fixture.ts";
+import { baseWorld, myjcbRoot } from "../../read-model/test/card-usage-fixture.ts";
 import { factOf } from "../../storage-d1/test/card-purchase-fixture.ts";
+import { myJcbCreditStatement } from "../../parsers/src/parsers/myjcb.ts";
 import {
   CARD_PURCHASE_PAGE_SIZE,
   CardPurchaseLimitError,
@@ -362,6 +367,67 @@ describe("card purchase explanation", () => {
     });
     expect(page.summary.statementTotals).toEqual([]);
     expect(JSON.stringify(page)).not.toContain("providerTotal");
+  });
+
+  test("a relative MyJCB label joins the statement the same capture's page names", async () => {
+    // One MyJCB capture on 2026-09-26 (JST, after the 15th closing): the
+    // ledger at position 1 carries the collector's relative `detailMonth-1`,
+    // and the confirmed page of that position names its own month in its
+    // heading and payment date, read by the deployed statement parser.
+    const captured = "2026-09-26T00:00:00.000Z";
+    const page = myJcbCreditStatement.parse(
+      new TextEncoder().encode(
+        '<!doctype html><html><body><h1>MyJCB</h1><h1>カードご利用代金明細(確定分)</h1><h2>2026年10月お支払い分のカードご利用明細</h2><div class="detail-list-01"></div><dl><dt>2026年10月13日(火)お支払い金額合計</dt><dd>500円</dd></dl></body></html>',
+      ),
+      {
+        id: 1,
+        sourceId: "myjcb",
+        runStatus: "success",
+        runFailureCount: 0,
+        dataset: "credit-detail",
+        artifactKey: "connection-a/credit-detail-01.html",
+        statementState: "confirmed",
+        period: "detailMonth-1",
+        url: null,
+        mime: "text/html; charset=utf-8",
+        fetchedAt: captured,
+        sha256: "a".repeat(64),
+      },
+    ).observations[0]!;
+    const kogane = page.extra["_kogane"] as { period: string; paymentDate: string };
+    expect(kogane).toMatchObject({ period: "2026-10", paymentDate: "2026-10-13" });
+    const w = world();
+    // The recognition lane's fact of the ledger row: the label verbatim and
+    // the capture time of its own artifact.
+    const eventId = await w.recognise(
+      factOf(5, { statementPeriod: "detailMonth-1", capturedAt: captured }),
+    );
+    const statement = w.statement({
+      source: "myjcb",
+      sourceAccount: "myjcb:connection-a:root",
+      accountId: "acct-jcb",
+      period: kogane.period,
+      total: 500,
+      paymentDate: kogane.paymentDate,
+    });
+    const [item] = (await queryCardPurchases(w.sql, { eventId })).items;
+    expect(item).toMatchObject({
+      sourceId: "myjcb",
+      state: "captured",
+      statementPeriod: "2026-10",
+      statement: {
+        status: "linked",
+        ref: { kind: "balance", id: `balance:${statement.observationId}` },
+        period: "2026-10",
+        paymentDate: { kind: "local-date", value: "2026-10-13" },
+      },
+    });
+    // The stored label is never rewritten; the period is derived.
+    expect(
+      w.db
+        .query("SELECT statement_period FROM card_purchase_recognitions WHERE event_id=?")
+        .all(eventId),
+    ).toEqual([{ statement_period: "2026-10" }]);
   });
 
   test("a changed card ordinal joins the statement by resolved account", async () => {
@@ -751,6 +817,7 @@ function factFrom(row: CurrentCardUsageRow): CardUsageFact {
     usageDate: row.as_of,
     paymentType: row.payment_type,
     statementPeriod: row.statement_period,
+    capturedAt: row.snapshot_fetched_at,
     providerSaleCode: row.provider_sale_code,
     usageAmountText: row.usage_amount_text,
     paymentAmountText: row.payment_amount_text,
@@ -762,7 +829,7 @@ describe("current provider rows", () => {
   test("rows the provider still shows are current, and unrecognised current rows are counted", async () => {
     // The read model's snapshot world: published captures, a Vpass month that
     // flipped from pending to posted, installment and amountless rows.
-    const { store, replacedCustomized } = baseWorld();
+    const { store, replacedCustomized, unconfirmed } = baseWorld();
     const db = store.db;
     try {
       const sql: SqlExecutor = {
@@ -772,67 +839,54 @@ describe("current provider rows", () => {
           (db.query(query).get(...(args as never[])) as T | null) ?? null,
       };
       const page = currentCardUsageSql({ afterId: 0, limit: 1000 });
-      const rows = db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
+      const read = () => db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
+      const rows = read();
       const recognisable = rows.map(factFrom).filter((fact) => classifyCardUsage(fact).ok);
       expect(recognisable.length).toBeGreaterThan(0);
       expect(recognisable.length).toBeLessThan(rows.length);
-      for (const fact of recognisable) await recognise(db, fact);
-      // A pending sale of the month the web capture replaced: no longer displayed.
-      const vanished = db
-        .query(
-          `SELECT t.id,t.parse_run_id,t.source_account,t.external_id,t.as_of,
-            json_extract(t.extra_json,'$.bunkatsuYaku') AS payment_type,
-            json_extract(t.extra_json,'$._kogane.statementMonth') AS statement_period,
-            d.coefficient,d.scale
-           FROM transaction_observations t JOIN observation_decimal_values d
-            ON d.kind='transaction' AND d.observation_id=t.id
-           WHERE t.parse_run_id=? AND t.status='unconfirmed' AND t.amount_minor<0`,
-        )
-        .get(replacedCustomized.parse) as {
-        id: number;
-        parse_run_id: number;
-        source_account: string;
-        external_id: string;
-        as_of: string;
-        payment_type: string;
-        statement_period: string;
-        coefficient: string;
-        scale: number;
-      };
-      const replaced = await recognise(db, {
-        observationId: vanished.id,
-        parseRunId: vanished.parse_run_id,
-        sourceId: "vpass",
-        producerId: PRODUCER,
-        externalIdNamespace: VPASS_NAMESPACE,
-        sourceAccount: vanished.source_account,
-        externalId: vanished.external_id,
-        accountId: "acct-card-a",
-        identityPolicyFamily: "vpass-card-binding",
-        providerStatus: "unconfirmed",
-        amount: exactQuantity(
-          "JPY",
-          { coefficient: vanished.coefficient, scale: vanished.scale },
-          "decimal-v1",
-        ),
-        usageDate: vanished.as_of,
-        paymentType: vanished.payment_type,
-        statementPeriod: vanished.statement_period,
-        providerSaleCode: "5",
-        usageAmountText: null,
-        paymentAmountText: null,
-        newestRepresentation: true,
+      // No Vpass pending row is recognised: its bunkatsuYaku (`0` on every
+      // production row) is unverified, so the replaced customized capture
+      // never held an event.
+      expect(
+        rows
+          .filter((row) => row.provider_family === "customized")
+          .map((row) => classifyCardUsage(factFrom(row)))
+          .every((outcome) => !outcome.ok && outcome.reasonCode === "payment_type_unsupported"),
+      ).toBe(true);
+      expect(recognisable.map((fact) => fact.parseRunId)).not.toContain(replacedCustomized.parse);
+      const events = new Map<number, string>();
+      for (const fact of recognisable) events.set(fact.observationId, await recognise(db, fact));
+      // A newer MyJCB unconfirmed capture no longer shows the pending rows of
+      // the last one: their authorized events stay, their rows are no longer current.
+      const later = store.myjcbLedger({
+        run: store.run("myjcb"),
+        connection: "conn-a",
+        detailMonth: 0,
+        state: "unconfirmed",
+        period: "202608",
+        fetchedAt: "2026-06-30T00:00:00.000Z",
+        rows: [{ date: "2026/06/25", merchant: "架空店舗M", amount: "700", paymentType: "1回払" }],
       });
+      store.identify(later, myjcbRoot("conn-a", "acct-jcb"), { version: 1 });
+      const replaced = new Set(
+        unconfirmed.observations.flatMap((id) => (events.has(id) ? [events.get(id)!] : [])),
+      );
+      expect(replaced.size).toBeGreaterThan(0);
+      const current = read();
+      const held = new Set(recognisable.map((fact) => JSON.stringify(recognitionKey(fact))));
       const result = await queryCardPurchases(sql);
-      expect(result.coverage.unrecognizedCurrentRows).toBe(rows.length - recognisable.length);
-      expect(result.items).toHaveLength(recognisable.length + 1);
+      expect(result.coverage.unrecognizedCurrentRows).toBe(
+        current.filter((row) => !held.has(row.recognition_key!)).length,
+      );
+      expect(result.items).toHaveLength(recognisable.length);
       for (const item of result.items)
-        expect(item.sourceRows.every((row) => row.current)).toBe(item.eventId !== replaced);
-      expect(result.items.find((item) => item.eventId === replaced)).toMatchObject({
-        state: "authorized",
-        statement: { status: "unlinked", reasonCode: "not_posted" },
-        sourceRows: [{ role: "pending", current: false }],
-      });
+        expect(item.sourceRows.every((row) => row.current)).toBe(!replaced.has(item.eventId));
+      for (const eventId of replaced)
+        expect(result.items.find((item) => item.eventId === eventId)).toMatchObject({
+          state: "authorized",
+          statement: { status: "unlinked", reasonCode: "not_posted" },
+          sourceRows: [{ role: "pending", current: false }],
+        });
     } finally {
       db.close();
     }

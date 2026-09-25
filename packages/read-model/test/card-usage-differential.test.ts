@@ -354,8 +354,7 @@ class RandomStore {
             page: `${family === "customized" && page > 0 ? "answer" : "top"}-${String(page).padStart(3, "0")}`,
             family,
             // A pending page shows the pool's rows with the customized family's code.
-            rows:
-              family === "web" ? this.rows(pool, true) : asCustomized(this.rows(pool, false)),
+            rows: family === "web" ? this.rows(pool, true) : asCustomized(this.rows(pool, false)),
             fetchedAt,
             publication,
           });

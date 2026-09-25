@@ -28,12 +28,13 @@ JST当月までをinclusiveに走査し、想定外応答に対して120か月�
 app API collectorは停止している。Cronはなく、手動の`/trigger`、`/probe`、
 `/reset-credentials`はHTTP 410を返す。遅延配送されたscheduled eventも収集しない。
 `/health`は`collectionEnabled: false`と`status: "disabled"`を返す。
-R2原本、Durable Object、既存secretsは保持する。VポイントPay通知メールは
+Durable Objectと既存secretsは保持する。旧source専用bucketのR2原本は2026-09-13に中央DATAへ
+コピー・検証した後に削除した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。VポイントPay通知メールは
 `services/collector-vpoint/`で引き続き収集する。以下の認証・デプロイ説明は研究記録である。
 
-Layer Aの中央取り込みも、ここに残るapp snapshotや停止中endpointは対象にしない。
-`services/collector-vpoint`が保存した`raw/v-point-pay-email/...`のEML/JSON pairだけを専用Importerが
-read-onlyで検証する。email source、app API source、Vポイント本体から生成したreconciliationは
+VポイントPayの中央evidenceは、`services/collector-vpoint`が共有DATA bucketへ保存する
+`v-point-pay-email` runだけである（旧専用Importerは2026-09-13に廃止）。app snapshotや停止中
+endpointは対象にしない。email source、app API source、Vポイント本体から生成したreconciliationは
 別境界であり、このWorkerのCronやpollingを有効化する変更は別途live contract確認後に行う。
 
 認証不要の`/probe`による到達確認は、残高・明細取得の成功を意味しない。
@@ -63,13 +64,14 @@ refresh token寿命、端末revoke、実enum値はowner accountでのlive検証�
 
 ## R2 layout
 
+再有効化した場合、runは共有DATA bucketへ次のartifactを`objects/<2 hex>/<sha256>`として保存し、
+最後にterminal `runs/v-point-pay/<run-id>/terminal.json`を書く。
+
 ```text
-raw/v-point-pay/YYYY/MM/DD/<run-id>/
-  balance.json
-  transactions-YYYYMM.json
-  ...
-  collection-summary.json
-  manifest.json
+balance.json
+transactions-YYYYMM.json
+...
+collection-summary.json
 ```
 
 ## 開発とデプロイ
@@ -83,7 +85,7 @@ mise run //services/collector-vpoint-pay:dry-run
 
 必要なresources/secrets:
 
-- R2 bucket: `kogane-vpoint-pay-collector-poc`
+- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
 - SQLite Durable Object: `VPointPayCredentialState`
 - secret: `VPOINT_PAY_REFRESH_TOKEN`
 - secret: `VPOINT_PAY_DEVICE_UUID`
@@ -97,7 +99,8 @@ manual collectionは`POST /trigger`。`GET /health`は秘密値・口座デー�
 検証環境を削除するときは次を一組で削除する。
 
 1. Worker `kogane-vpoint-pay-collector-poc`（Cron、secrets、Durable Objectを含む）
-2. R2 bucket `kogane-vpoint-pay-collector-poc`
+
+共有DATA bucketは他のcollectorとProcessorも使うため削除しない。
 
 ## 2026-08-31 deployment checkpoint
 

@@ -57,15 +57,23 @@ interface SeededRow {
 }
 
 /**
- * Four Vpass captures of one card (runs 1–3 and a pending run) and one MyJCB
- * capture. Observations 1, 3 and 4 are the same provider row (same key)
- * re-fetched: 3 shows the same content, 4 a corrected amount.
+ * Three Vpass captures of one card (runs 1–3) and a MyJCB confirmed and
+ * unconfirmed ledger (runs 4 and 5). Observations 1, 3 and 4 are the same
+ * provider row (same key) re-fetched: 3 shows the same content, 4 a corrected
+ * amount. The pending row (2) and its posted row (6) are MyJCB's: a Vpass
+ * pending (customized) row is not recognised until the meaning of its
+ * payment-type field (`bunkatsuYaku`, `0` on every production row) is
+ * verified, so the Vpass pending side is not exercised here yet.
  */
 const ROWS: readonly SeededRow[] = [
   vpass(1, 1, "vpass:card-001:202608:web:row-a:0", "posted", -1234),
-  vpass(2, 1, "vpass:card-001:202608:customized:row-b:0", "unconfirmed", -1200),
+  myjcb(2, 5, "myjcb-credit-ledger:unconfirmed:row-b:0", "unconfirmed", -1200),
   vpass(3, 2, "vpass:card-001:202608:web:row-a:0", "posted", -1234),
   vpass(4, 3, "vpass:card-001:202608:web:row-a:0", "posted", -1300),
+  myjcb(6, 4, "myjcb-credit-ledger:confirmed:row-d:0", "confirmed", -1234),
+  // A Vpass pending row as production shows it (bunkatsuYaku `0`): stored and
+  // keyed like any row, never recognised by the rule yet.
+  vpass(7, 1, "vpass:card-001:202608:customized:row-b:0", "unconfirmed", -1200),
   {
     // The shapes production MyJCB rows carry: the payment type inside the
     // combined ご利用先など／支払区分 cell, and display amounts.
@@ -99,13 +107,38 @@ function vpass(
     externalId,
     status,
     amount,
-    // The production payment-type code: full width on the web (posted) page,
-    // ASCII on the customized (unconfirmed) one.
-    paymentType: status === "posted" ? "１" : "1",
+    // The production payment-type shapes: the web (posted) page's code, full
+    // width, and the customized (unconfirmed) page's bunkatsuYaku `0`.
+    paymentType: status === "posted" ? "１" : "0",
     usageDate: "2026-08-15",
     statementPeriod: "202609",
     usageAmountText: null,
     paymentAmountText: null,
+  };
+}
+
+/** A MyJCB single payment in the production shape: usage equal to payment. */
+function myjcb(
+  observationId: number,
+  parseRunId: number,
+  externalId: string,
+  status: string,
+  amount: number,
+): SeededRow {
+  const text = `${(-amount).toLocaleString("en-US")}円`;
+  return {
+    observationId,
+    parseRunId,
+    sourceId: "myjcb",
+    sourceAccount: "myjcb:connection-a:root",
+    externalId,
+    status,
+    amount,
+    paymentType: "synthetic merchant 1回払",
+    usageDate: "2026-08-14",
+    statementPeriod: "2026年9月お支払い分",
+    usageAmountText: text,
+    paymentAmountText: text,
   };
 }
 
@@ -153,7 +186,8 @@ export function seedCardRows(db: Database): void {
     [1, 1, "vpass", "months/202608/web-1.json"],
     [2, 1, "vpass", "months/202608/web-2.json"],
     [3, 1, "vpass", "months/202608/web-3.json"],
-    [4, 2, "myjcb", "connection-a/credit-ledger-00.json"],
+    [4, 2, "myjcb", "connection-a/credit-ledger-01.json"],
+    [5, 2, "myjcb", "connection-a/credit-ledger-00.json"],
   ];
   for (const [id, session, source, key] of runs) {
     run(
@@ -229,6 +263,7 @@ export function factOf(
     usageDate: row.usageDate,
     paymentType: row.paymentType,
     statementPeriod: row.statementPeriod,
+    capturedAt: "2026-09-07T00:00:00.000Z",
     providerSaleCode: null,
     usageAmountText: row.usageAmountText,
     paymentAmountText: row.paymentAmountText,

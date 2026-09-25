@@ -1,7 +1,7 @@
 // The card purchase recognition contract (packages/domain/src/card-purchase.ts)
 // against what the deployed Vpass and MyJCB parsers actually emit for payloads
-// in the shapes production rows have (a one-digit Vpass payment-type code,
-// full width on the web page and ASCII on the customized one; MyJCB's
+// in the shapes production rows have (a full-width one-digit Vpass code in the
+// web page's data[6], `0` in the customized page's bunkatsuYaku; MyJCB's
 // payment type inside the combined ご利用先など／支払区分 cell), rather than
 // against hand-written rows. Every row, name and amount here is synthetic.
 import { readFileSync } from "node:fs";
@@ -55,7 +55,12 @@ function paymentTypeOf(sourceId: string, extra: Record<string, unknown>): string
 }
 
 /** The read model's view of one parsed row, with identity resolved. */
-function factOf(sourceId: string, row: TransactionObservation, index: number): CardUsageFact {
+function factOf(
+  sourceId: string,
+  row: TransactionObservation,
+  index: number,
+  fetchedAt: string,
+): CardUsageFact {
   const kogane = (row.extra["_kogane"] ?? {}) as Record<string, unknown>;
   const text = (key: string) => (typeof kogane[key] === "string" ? (kogane[key] as string) : null);
   return {
@@ -73,6 +78,7 @@ function factOf(sourceId: string, row: TransactionObservation, index: number): C
     usageDate: row.asOf ?? null,
     paymentType: paymentTypeOf(sourceId, row.extra),
     statementPeriod: text("statementMonth") ?? text("period"),
+    capturedAt: fetchedAt,
     providerSaleCode: text("providerSaleCode"),
     usageAmountText: text("usageAmountText"),
     paymentAmountText: text("paymentAmountText"),
@@ -89,7 +95,7 @@ function rows(
   return parser
     .parse(data, artifact)
     .observations.filter((row): row is TransactionObservation => row.kind === "transaction")
-    .map((row, index) => factOf(sourceId, row, index));
+    .map((row, index) => factOf(sourceId, row, index, artifact.fetchedAt));
 }
 
 /** Kind, state, magnitude and statement period, or the exclusion reason. */
@@ -358,8 +364,8 @@ test("Vpass statement pages as parsed: web and customized rows, sale codes and r
       }),
     );
   const [posted] = vpass("web.json");
-  // Production codes: full width on the web page, ASCII on the customized one,
-  // the same text the parser also writes to `description`.
+  // Production shapes, the same text the parser also writes to `description`:
+  // a full-width code on the web page, `0` in the customized page's bunkatsuYaku.
   expect([posted!.paymentType, posted!.paymentType?.normalize("NFKC")]).toEqual(["１", "1"]);
   expect(outcome(posted!)).toEqual({
     kind: "purchase",
@@ -368,28 +374,20 @@ test("Vpass statement pages as parsed: web and customized rows, sale codes and r
     period: "2026-08",
   });
   const [sale, ret] = vpass("customized.json");
-  expect([sale!.paymentType, ret!.paymentType]).toEqual(["1", "1"]);
+  expect([sale!.paymentType, ret!.paymentType]).toEqual(["0", "0"]);
   expect([sale!.providerSaleCode, ret!.providerSaleCode]).toEqual(["5", "6"]);
-  expect(outcome(sale!)).toEqual({
-    kind: "purchase",
-    state: "authorized",
-    amount: "2000",
-    period: "2026-08",
-  });
-  expect(outcome(ret!)).toEqual({
-    kind: "refund",
-    state: "authorized",
-    amount: "1500",
-    period: "2026-08",
-  });
+  // What bunkatsuYaku means is unverified: no customized row is recognised,
+  // whatever its value, the sale and the return alike.
+  for (const paymentType of ["0", "1", "１", null]) {
+    expect(outcome({ ...sale!, paymentType })).toEqual({ excluded: "payment_type_unsupported" });
+    expect(outcome({ ...ret!, paymentType })).toEqual({ excluded: "payment_type_unsupported" });
+  }
   // Without the trusted card binding a Vpass card ordinal is not an identity.
   expect(outcome({ ...posted!, identityPolicyFamily: "identity-default" })).toEqual({
     excluded: "card_identity_unstable",
   });
-  // Every code but 1 is unverified and stays excluded, as does the wording the
-  // fixtures used to invent and the blank the amountless web rows carry.
-  for (const paymentType of ["２", "2", "5", "", null, "1回払い", "一回払い"]) {
+  // Every web code but 1 is unverified and stays excluded, as does the
+  // wording the fixtures used to invent and a blank.
+  for (const paymentType of ["２", "2", "5", "0", "", null, "1回払い", "一回払い"])
     expect(outcome({ ...posted!, paymentType })).toEqual({ excluded: "payment_type_unsupported" });
-    expect(outcome({ ...sale!, paymentType })).toEqual({ excluded: "payment_type_unsupported" });
-  }
 });

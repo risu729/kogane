@@ -102,11 +102,20 @@ export interface CurrentCardUsageRow {
   display_state: CardUsageDisplayState | null;
   /** Provider usage date, `YYYY-MM-DD` as both parsers write it. */
   as_of: string | null;
-  /** Vpass `_kogane.statementMonth` (`YYYYMM`); MyJCB `_kogane.period` (the provider label, verbatim). */
+  /**
+   * Vpass `_kogane.statementMonth` (`YYYYMM`); MyJCB `_kogane.period` (the
+   * provider label, verbatim, possibly the collector's relative
+   * `detailMonth-N`). Never resolved here: the domain reads it together with
+   * `snapshot_fetched_at` (packages/domain/src/relative-period.ts).
+   */
   statement_period: string | null;
   /** The snapshot unit: the Vpass card ordinal (`card-NNN`) or the MyJCB connection id. */
   snapshot_unit: string | null;
-  /** The snapshot's time: the newest artifact of the Vpass card-month, the MyJCB artifact's own. */
+  /**
+   * The snapshot's time: the newest artifact of the Vpass card-month, the
+   * MyJCB artifact's own. A MyJCB snapshot is one ledger artifact, so this is
+   * the capture a relative `statement_period` is resolved from.
+   */
   snapshot_fetched_at: string;
 
   // decimal-v1 (migration 0024); the unit is the observation's currency.

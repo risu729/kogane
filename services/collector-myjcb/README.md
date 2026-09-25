@@ -1,6 +1,6 @@
 # MyJCB read-only Worker PoC
 
-MyJCBの公式WebをCloudflare WorkersのScheduled handlerから読み、取得時の公式HTMLと取得manifestをprivate R2へ追記保存する独立PoCである。`mnie`は利用せず、Okuraのコードも取り込んでいない。
+MyJCBの公式WebをCloudflare WorkersのScheduled handlerから読み、取得時の公式HTMLと取得manifestを共有DATA bucket（`kogane-raw-evidence`）へ追記保存する独立PoCである。`mnie`は利用せず、Okuraのコードも取り込んでいない。
 
 Worker PoCは2026-08-31にdeployし、第一のMyJCB IDで実auth testまで完了した。Bitwardenから一項目だけをlocal syncし、Browser Runの一時virtual authenticatorでpasskey assertionを生成してmypageへ到達した後、cookieとUser-Agentを通常のWorker `fetch`へ移管した。過去月JSONによるavailable月列挙、credit detail取得、private R2への20 artifactとmanifest保存が1 runで成功し、failureは0だった。raw credential、WebAuthn assertion、cookie、明細値、file hashはcommit／logしていない。
 
@@ -163,8 +163,12 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 
 ## R2 layout
 
+runは`packages/collection`で共有DATA bucketへ書く。各artifactは`objects/<2 hex>/<sha256>`へ
+content-addressedで保存し、最後にterminal `runs/myjcb/<run-id>/terminal.json`を書く。collectorが
+取得しうるartifact keyは次のlayoutに従い、terminalは保存したartifactごとにkeyとobjectを対応付ける。
+
 ```text
-raw/myjcb/YYYY/MM/DD/<run-id>/
+<run>/
   manifest.json
   <connection-id>/
     credit-menu.html
@@ -183,13 +187,15 @@ raw/myjcb/YYYY/MM/DD/<run-id>/
     discovery.json
 ```
 
-HTMLは取得時sourceをUTF-8へdecodeし、script/style/metaと埋込み要素、event/data属性、navigation URL、form action、全value/textarea、token/session類似属性、16桁card番号を決定的に除去・置換してから保存する。login/mypage HTMLは保存しない。各R2 objectにはSHA-256、dataset、state、periodをmetadataとして持たせる。manifestにはrun/connection/artifact/failureのmetadataだけを入れ、cookie値や実明細値をlogへ出さない。bucketはpublicにしない。
+`debit-*`とCSV/PDF/OFXのdatasetは中央契約で未観測である。これらを含むrunは`artifact_dataset_unobserved`で拒否され、objectもterminalも`DATA`へ書かない。
+
+HTMLは取得時sourceをUTF-8へdecodeし、script/style/metaと埋込み要素、event/data属性、navigation URL、form action、全value/textarea、token/session類似属性、16桁card番号を決定的に除去・置換してから保存する。login/mypage HTMLは保存しない。各objectのR2 metadataは`packages/collection`が書く`sha256`と`byteSize`だけである。manifestにはrun/connection/artifact/failureのmetadataだけを入れ、cookie値や実明細値をlogへ出さない。bucketはpublicにしない。
 
 ## Cronと手動実行
 
 `wrangler.jsonc`のCron `0 21 * * *`（06:00 JST）からWorkerの`scheduled()`を直接呼ぶ。GitHub Actionsをschedulerとして使わない。
 
-手動runは`POST /trigger`だけで、`ADMIN_TRIGGER_TOKEN`が必要。`GET /health`はsecret不要でsource/schemaだけを返す。保存済みoutboxの中央転送は管理Bearer付き`POST /backfill-raw-evidence?limit=1`からService Bindingで内部Importerを呼ぶ。一回にR2 objectを1件だけ走査し、大きいrunはHMACで束縛されたopaque cursorを使って最大5 artifactずつ再開する。完走後もsource R2は削除しない。
+手動runは`POST /trigger`だけで、`ADMIN_TRIGGER_TOKEN`が必要。`GET /health`はsecret不要でsource/schemaだけを返す。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。中央Importerへの転送、`POST /backfill-raw-evidence`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 ```sh
 bun install --frozen-lockfile
@@ -200,17 +206,11 @@ mise run //services/collector-myjcb:dry-run
 
 live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第一connectionの実credential testまで行った。成功runは1 connection、20 artifact、failure 0で、内訳はcredit detail 11、parsed ledger 6、menu 1、過去月JSON 1、discovery 1だった。このrunでは公式CSV/PDF/OFX linkが提示されず、export artifactは0だった。従ってこのconnectionではHTML ledgerが実データsourceとして必要であり、別IDでexportが存在する場合だけ確定月をCSV中心へ最適化する。manifestとsource-preserving artifactはprivate R2へ保存し、実値やsecretはPRへ含めない。
 
-作成済みpersistent resourceはWorker `kogane-myjcb-collector-poc`、private R2 bucket同名、Cron `0 21 * * *`、admin/connection secret群である。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄対象一覧はこの4分類と、debug中にR2へ作られたfailed/success manifests以下のobjectsである。廃棄時は先にR2 object一覧と必要artifactの退避を確認してからWorkerを削除し、最後にR2 bucketを削除する。bucket削除は金融sourceを回復不能にするため自動cleanup scriptにはしない。
+作成済みpersistent resourceはWorker `kogane-myjcb-collector-poc`、Cron `0 21 * * *`、admin/connection secret群である。保存先は共有DATA bucket `kogane-raw-evidence`で、旧private R2 bucket同名は2026-09-13に中央DATAへコピー・検証した後に削除した。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時はWorkerとsecretだけを削除し、他のcollectorとProcessorも使う共有DATA bucketは削除しない。
 
 Cronとmanual triggerのoverlap lockは未実装である。同一IDの同時login/readを避けるため、Durable Object lockまたはQueueによる一接続一実行の直列化をdeploy/merge前要件とする。本PRのPoCをそのままscheduled運用しない。
 
-中央Importerの冪等性はこのoverlap問題を解決しない。同じmanifest/run IDの再送は同じ中央runへ収束するが、collectorが別UUIDで二回収集した場合は別の取得事実として両方を保持する。したがって内容hashでrunを潰さず、重複実行の抑止はcollectorの実行lockで行う。raw-evidence導入では既存Cronを変更せず、追加のscheduled triggerやGitHub Actions cronも作らない。
-
-historical outboxは次でbounded backfillできる。cursorはowner-only `0600` fileへ原子的に保存され、完了時に削除される。
-
-```sh
-services/collector-myjcb/scripts/backfill-raw-evidence.sh
-```
+Processorの登録の冪等性はこのoverlap問題を解決しない。同じrun IDとterminal digestの再送は同じrunへ収束するが、collectorが別UUIDで二回収集した場合は別の取得事実として両方を保持する。したがって内容hashでrunを潰さず、重複実行の抑止はcollectorの実行lockで行う。raw-evidence導入では既存Cronを変更せず、追加のscheduled triggerやGitHub Actions cronも作らない。
 
 ## synthetic test
 

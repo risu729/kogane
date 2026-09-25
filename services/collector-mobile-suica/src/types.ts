@@ -55,32 +55,3 @@ export interface CollectionManifest {
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
 }
-
-export interface CollectionResult extends CollectionManifest {
-  manifestKey: string;
-  central: RawEvidenceImportResult;
-}
-
-export interface RawEvidenceImportResult {
-  source: "mobile-suica";
-  manifestKey: string;
-  status: "sealed";
-  centralRunId: number;
-  artifactCount: number;
-  sealed: true;
-  finalChunkAllObjectsReused: boolean;
-}
-
-export interface RawEvidenceBackfillPageResult {
-  source: "mobile-suica";
-  scannedObjectCount: number;
-  importedManifestCount: number;
-  skippedManifestCount: number;
-  deferredManifestCount: number;
-  failedManifestCount: number;
-  nextCursor: string | null;
-  truncated: boolean;
-  failureCode?: string;
-  failedManifestKey?: string;
-  result?: RawEvidenceImportResult;
-}

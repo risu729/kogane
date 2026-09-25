@@ -32,6 +32,7 @@ import {
   vpassCard,
 } from "./card-usage-fixture";
 import { LEGACY_CURRENT_CARD_USAGE_SQL } from "./card-usage-legacy-sql";
+import { resolveRelativePeriod } from "../../domain/src/relative-period.ts";
 
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
 const TOKEN_C = `vpass-card-v1-${"c".repeat(64)}`;
@@ -871,6 +872,70 @@ describe("current card usage", () => {
     });
     expect(ids(usage(store.db))).toEqual(posted.observations);
     expect(ids(usage(store.db))).toEqual(cardTransactionIds(store.db));
+  });
+
+  test("a relative MyJCB label comes back verbatim beside its own capture time, never resolved here", () => {
+    // relative-statement-period-v1 (packages/domain/src/relative-period.ts)
+    // reads exactly these two columns: the collector's `detailMonth-N` label
+    // and the `fetched_at` of the ledger artifact that carries it.
+    const store = new CardStore();
+    const root = myjcbRoot("conn-a", "acct-jcb");
+    const row = (date: string): UsageRow => ({
+      date,
+      merchant: "架空店舗R",
+      amount: "600",
+      paymentType: "1回払",
+      other: "600",
+    });
+    const run = store.run("myjcb");
+    const pending = store.myjcbLedger({
+      run,
+      connection: "conn-a",
+      detailMonth: 0,
+      state: "unconfirmed",
+      period: "detailMonth-0",
+      fetchedAt: "2026-09-15T15:00:00.000Z",
+      rows: [row("2026/09/16")],
+    });
+    store.identify(pending, root, { version: 1 });
+    const closed = store.myjcbLedger({
+      run,
+      connection: "conn-a",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "detailMonth-1",
+      fetchedAt: "2026-09-15T15:00:01.000Z",
+      rows: [row("2026/09/01")],
+    });
+    store.identify(closed, root, { version: 1 });
+    const rows = usage(store.db);
+    const view = (id: number) => rows.find((entry) => entry.observation_id === id)!;
+    expect(view(pending.observations[0]!)).toMatchObject({
+      display_state: "pending",
+      statement_period: "detailMonth-0",
+      snapshot_fetched_at: "2026-09-15T15:00:00.000Z",
+    });
+    expect(view(closed.observations[0]!)).toMatchObject({
+      display_state: "posted",
+      statement_period: "detailMonth-1",
+      snapshot_fetched_at: "2026-09-15T15:00:01.000Z",
+    });
+    // What the domain derives from them: the capture is 2026-09-16 00:00 in
+    // Tokyo (the 15th in UTC), so position 0 is the cycle paid in November
+    // and position 1 the one paid in October.
+    expect(
+      rows.map((entry) =>
+        resolveRelativePeriod({
+          sourceId: entry.source_id,
+          label: entry.statement_period,
+          fetchedAt: entry.snapshot_fetched_at,
+        }),
+      ),
+    ).toEqual(
+      rows.map((entry) =>
+        entry.observation_id === pending.observations[0] ? "2026-11" : "2026-10",
+      ),
+    );
   });
 
   test("identity equals the named views for every mapping status and policy fallback", () => {

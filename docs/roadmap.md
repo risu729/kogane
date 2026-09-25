@@ -36,11 +36,18 @@ Concrete limits in the current code:
   purchase recognition remain extensions; this is not complete event coverage.
 - [The pending/posted job](../services/processor/src/reconciliation-job.ts)
   proposes Vpass pairs and MyJCB pairs whose confirmed row's usage and payment
-  amounts (`1,200円`) agree and whose ledgers share an absolute payment month;
+  amounts (`1,200円`) agree and whose ledgers name the same payment month;
   every pair stays a candidate for review. An installment payment amount is
-  not silently compared with a purchase amount. MyJCB ledgers labelled with the
-  collector's relative `detailMonth-N` fallback are not paired, which on the
-  surveyed connection covers its unconfirmed and recent confirmed months.
+  not silently compared with a purchase amount. The collector's relative
+  `detailMonth-N` labels are resolved from their capture time
+  ([`relative-statement-period-v1`](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
+  but only positions 0 and 1 are placed: a confirmed MyJCB row at a later
+  relative position has no payment month, so this job leaves it unpaired and
+  the operator view shows it as `period_unrecognized`. The recognition lane's
+  candidate pass still pairs it by usage month. On the surveyed connection the
+  collector records `detailMonth=1` as `unconfirmed` (its page has no export
+  link), so that month's rows stay pending, its statement page is rejected,
+  and only one of its two unconfirmed ledgers is current.
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind
@@ -78,9 +85,10 @@ Concrete limits in the current code:
   figures kept apart. It is not a complete card history: excluded shapes and
   rows the recognition writer has not reached are only counted, a pending row
   and its posted row are separate events until a reviewed link merges them
-  (the purchases page lists each purchase's candidates and reviews them
-  through the change lifecycle), agents cannot read it, and no
-  statement-versus-purchases difference is computed.
+  (the review screen exists: the purchases page lists the open candidates and
+  reviews each purchase's link with accept, reject or withdraw through the
+  change lifecycle), agents cannot read it, and no statement-versus-purchases
+  difference is computed.
 
 ## Delivery order and the next milestone
 
@@ -103,10 +111,11 @@ finishing a representative bank, card, broker or rewards flow.
 **The current milestone is to complete card usage → statement → bank debit
 coverage without counting an expense twice.** The first statement/debit review
 slice is implemented, and so is the first purchase-event writer for supported
-single-payment card usage (on in production since 2026-09-24), with reviewed
-pending-to-posted purchase linking and its review screen; source ownership,
-supported bank coverage, partial payments and refund handling still need
-completion.
+single-payment card usage (on in production since 2026-09-24), and so is the
+pending-to-posted link review: the purchases page lists the open candidates
+and reviews each purchase's link (accept, reject, withdraw) through the change
+lifecycle. Source ownership, supported bank coverage, partial payments and
+refund handling still need completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The numbered phases below retain the original layer identifiers. They describe

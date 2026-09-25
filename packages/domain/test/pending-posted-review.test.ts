@@ -57,6 +57,7 @@ function row(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
     // The combined ご利用先など／支払区分 cell production MyJCB rows carry.
     paymentType: "架空店舗 1回払",
     statementPeriod: "2026年9月お支払い分",
+    capturedAt: "2026-09-07T00:00:00.000Z",
     providerSaleCode: null,
     usageAmountText: "1,234円",
     paymentAmountText: "1,234円",

@@ -59,6 +59,7 @@ function vpassRow(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
     // A posted (web family) row's payment-type code, full width as production shows it.
     paymentType: "１",
     statementPeriod: "202609",
+    capturedAt: "2026-09-07T00:00:00.000Z",
     providerSaleCode: null,
     usageAmountText: null,
     paymentAmountText: null,
@@ -645,8 +646,13 @@ describe("drafts and content identity", () => {
       kind: first.revision.kind,
       state: first.revision.state,
       contentDigest: first.contentDigest,
+      statementPeriod: first.sidecar.statementPeriod,
     };
-    const next = { kind: "purchase" as const, state: "captured" as const };
+    const next = {
+      kind: "purchase" as const,
+      state: "captured" as const,
+      statementPeriod: first.sidecar.statementPeriod,
+    };
     expect(
       nextCardPurchaseAction({
         live: { ...live, evidenceAdopted: true },
@@ -689,14 +695,24 @@ describe("drafts and content identity", () => {
           state: authorized.revision.state,
           contentDigest: authorized.contentDigest,
           evidenceAdopted: true,
+          statementPeriod: authorized.sidecar.statementPeriod,
         },
         next: { ...next, contentDigest: first.contentDigest },
       }),
     ).toBe("revise");
-    // A statement period or policy release is not content.
-    expect((await recognise(vpassRow({ statementPeriod: "2026-10" }))).contentDigest).toBe(
-      first.contentDigest,
-    );
+    // A statement period or policy release is not content...
+    const periodChanged = await recognise(vpassRow({ statementPeriod: "2026-10" }));
+    expect(periodChanged.contentDigest).toBe(first.contentDigest);
+    // ...but a sidecar period derived differently from the same row is still
+    // a revision (a relative label resolved from its capture time), adopted
+    // evidence or not, never "nothing to do".
+    for (const evidenceAdopted of [true, false])
+      expect(
+        nextCardPurchaseAction({
+          live: { ...live, evidenceAdopted, statementPeriod: null },
+          next: { ...next, contentDigest: periodChanged.contentDigest, statementPeriod: "2026-10" },
+        }),
+      ).toBe("revise");
     // A later revision of the same content is its own decision.
     const second = await recognise(vpassRow(), 2);
     expect(second.contentDigest).toBe(first.contentDigest);
@@ -708,7 +724,7 @@ describe("drafts and content identity", () => {
     expect(
       nextCardPurchaseAction({
         live: { ...live, evidenceAdopted: true },
-        next: { kind: "refund", state: "captured", contentDigest: "other" },
+        next: { kind: "refund", state: "captured", contentDigest: "other", statementPeriod: null },
       }),
     ).toBe("blocked");
     expect(
