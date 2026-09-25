@@ -270,3 +270,62 @@ export async function readUnitReport(
     .bind(unitId, reportKey)
     .first<Row>();
 }
+
+// ── what a staged registration already recorded (issue #87) ────────────
+//
+// A registration that spans invocations must not redo its structure on every
+// call: the manifest may name 1,000 units and 1,000 ranges, and re-adding each
+// one is several statements. One read per kind tells the caller what exists,
+// so each call spends its budget only on what is missing.
+
+export interface RunUnitRow {
+  id: number;
+  unit_kind: string;
+  unit_key: string;
+  parent_unit_id: number | null;
+}
+
+/** Every unit of one run, in id order. */
+export async function readRunUnits(db: D1Like, runId: number): Promise<RunUnitRow[]> {
+  const rows = await db
+    .prepare(
+      `
+    SELECT id, unit_kind, unit_key, parent_unit_id
+    FROM fetch_units WHERE fetch_run_id = ? ORDER BY id
+  `,
+    )
+    .bind(runId)
+    .all<RunUnitRow>();
+  return rows.results;
+}
+
+/** The range keys one run already has. */
+export async function readRunRangeKeys(db: D1Like, runId: number): Promise<string[]> {
+  const rows = await db
+    .prepare(
+      `
+    SELECT range_key FROM fetch_run_ranges WHERE fetch_run_id = ? ORDER BY range_key
+  `,
+    )
+    .bind(runId)
+    .all<{ range_key: string }>();
+  return rows.results.map((row) => row.range_key);
+}
+
+/** The unit reports one run's units already have, by unit id and report key. */
+export async function readRunUnitReportKeys(
+  db: D1Like,
+  runId: number,
+): Promise<{ fetch_unit_id: number; report_key: string }[]> {
+  const rows = await db
+    .prepare(
+      `
+    SELECT r.fetch_unit_id, r.report_key
+    FROM fetch_unit_reports r JOIN fetch_units u ON u.id = r.fetch_unit_id
+    WHERE u.fetch_run_id = ? ORDER BY r.id
+  `,
+    )
+    .bind(runId)
+    .all<{ fetch_unit_id: number; report_key: string }>();
+  return rows.results;
+}

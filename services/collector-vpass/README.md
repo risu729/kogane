@@ -58,6 +58,13 @@ importer Service Binding and `scripts/backfill-raw-evidence.sh` were retired on
 Actions schedule is used; the existing Worker cron remains the sole scheduled
 trigger.
 
+Registration is bounded per invocation by an operation budget, not by the
+number of statement pages (issue #87, [processor.md](../../docs/processor.md)
+§3.3). A card of about twenty pages registers in one invocation; a longer one
+yields with its progress in CORE and is continued on the next Processor cron
+tick, so it is sealed within minutes rather than in one call that could pass a
+documented per-invocation limit.
+
 The PoC deliberately does not turn the provider JSON into final ledger rows.
 That parsing belongs to Kogane's deterministic observation layer; keeping the
 responses intact makes it possible to re-parse them later.

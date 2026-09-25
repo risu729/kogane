@@ -16,17 +16,25 @@
 // Everything here is behind `SHARED_R2_INGEST_ENABLED`, default off: the
 // queue this consumer is declared on has to exist before the flag is turned
 // on, and no collector writes the shared layout until U09.
+//
+// Every registration an invocation makes shares one operation budget
+// (`RegistrationBudget`, issue #87): the consumer's whole batch, or the scan
+// and the operations dispatch of one cron tick together. A registration that
+// reaches the budget yields `pending` with its progress in CORE, and the scan
+// continues pending runs first on every tick, before it lists new terminals.
 import {
+  REGISTRATION_CONTRACT_VERSION,
+  RegistrationBudget,
   registerTerminal,
   type RegisterTerminalOutcome,
 } from "../../../../packages/application/src/collection/index.ts";
-import { directRegistrationPort } from "../../../../packages/application/src/ingest/index.ts";
 import type { IngestEnv } from "../../../../packages/application/src/ingest/contract.ts";
 import type { R2BucketLike } from "../../../../packages/collection/src/bucket.ts";
 import { listTerminals } from "../../../../packages/collection/src/reader.ts";
 import {
   advanceCollectionScan,
   readCollectionScanState,
+  readPendingRegistrations,
 } from "../../../../packages/storage-d1/src/core/collection-runs.ts";
 import {
   parseTerminalNotification,
@@ -38,6 +46,8 @@ import {
 export const DEFAULT_SCAN_PAGE = 25;
 /** Runs registered in one cron tick; the rest wait for the next one. */
 export const DEFAULT_SCAN_REGISTRATIONS = 5;
+/** Staged registrations continued in one cron tick, before the page is listed. */
+export const DEFAULT_SCAN_CONTINUATIONS = 5;
 
 /**
  * What the collection lanes need from the Worker environment. Structural, so
@@ -69,19 +79,28 @@ function ingestClient(env: CollectionEnv): string {
   return configured && /^[a-z0-9-]{1,100}$/u.test(configured) ? configured : DEFAULT_INGEST_CLIENT;
 }
 
-/** One registration, through the in-process port: no HTTP hop, no byte copied. */
+export interface RegistrationOptions {
+  artifactBudget?: number;
+  inventoryChunk?: number;
+  /** The invocation's shared budget; a registration without one gets its own. */
+  budget?: RegistrationBudget;
+}
+
+/**
+ * One registration, through the in-process port: no HTTP hop, no Service
+ * Binding call, no byte copied. The port is built by the use case over the
+ * metered bindings, so everything it does counts against the budget.
+ */
 export function registerCollectionRun(
   env: CollectionEnv,
   run: { source: string; runId: string },
-  options: { artifactBudget?: number; inventoryChunk?: number } = {},
+  options: RegistrationOptions = {},
 ): Promise<RegisterTerminalOutcome> {
-  const clientId = ingestClient(env);
   const ingestEnv: IngestEnv = { DB: env.DB, EVIDENCE: env.EVIDENCE };
   return registerTerminal({
     env: ingestEnv,
     bucket: env.EVIDENCE,
-    clientId,
-    port: directRegistrationPort(ingestEnv, clientId),
+    clientId: ingestClient(env),
     source: run.source,
     runId: run.runId,
     ...options,
@@ -104,6 +123,10 @@ export interface ScanSummary {
    * advances and the next cycle tries again (G1-13).
    */
   failed: number;
+  /** Staged registrations continued before the page was listed. */
+  continued: number;
+  /** Registrations not started because the invocation's budget was spent. */
+  deferred: number;
   /** True when this tick finished the walk and the next one starts over. */
   cycleComplete: boolean;
   /** True when the tick stopped on its own budget and left the cursor put. */
@@ -113,7 +136,11 @@ export interface ScanSummary {
 export interface ScanOptions {
   pageLimit?: number;
   maxRegistrations?: number;
+  /** Staged registrations continued per tick before the page is listed. */
+  maxContinuations?: number;
   artifactBudget?: number;
+  /** The invocation's shared registration budget; the scan gets its own when absent. */
+  budget?: RegistrationBudget;
   now?: () => Date;
   /** Told the safe code of each registration that threw. */
   onFailure?: (code: string) => void;
@@ -124,8 +151,25 @@ function safeFailureCode(error: unknown): string {
   return error instanceof Error ? error.name || error.constructor.name : "unknown";
 }
 
+/** Adds one registration's outcome to the tick's counts. */
+function count(summary: ScanSummary, outcome: RegisterTerminalOutcome["outcome"]): void {
+  if (outcome === "registered") summary.registered += 1;
+  else if (outcome === "already_registered") summary.alreadyRegistered += 1;
+  else if (outcome === "pending") summary.pending += 1;
+  else if (outcome === "blocked") summary.blocked += 1;
+  else if (outcome === "retryable") summary.retryable += 1;
+  else if (outcome === "deferred") summary.deferred += 1;
+  else summary.missing += 1;
+}
+
 /**
  * One bounded page of the terminal scan.
+ *
+ * Staged registrations come first. A run that yielded at an earlier
+ * invocation's budget has its progress in CORE and a `pending` stage naming
+ * its fetch run; up to `maxContinuations` of them, oldest first, are
+ * continued before anything is listed, so a large run finishes over
+ * consecutive ticks instead of waiting for the walk to come round to it.
  *
  * The cursor only advances when the whole page was dealt with. A tick that
  * runs out of its registration budget leaves the cursor where it was, so the
@@ -149,6 +193,8 @@ export async function collectionScan(
     retryable: 0,
     missing: 0,
     failed: 0,
+    continued: 0,
+    deferred: 0,
     cycleComplete: false,
     budgetExhausted: false,
   };
@@ -159,25 +205,19 @@ export async function collectionScan(
   const now = options.now ?? (() => new Date());
   const pageLimit = Math.max(1, options.pageLimit ?? DEFAULT_SCAN_PAGE);
   const maxRegistrations = Math.max(1, options.maxRegistrations ?? DEFAULT_SCAN_REGISTRATIONS);
-  const state = await readCollectionScanState(env.DB);
-  const page = await listTerminals(env.EVIDENCE, {
-    limit: pageLimit,
-    ...(state?.cursor ? { cursor: state.cursor } : {}),
-  });
+  const maxContinuations = Math.max(0, options.maxContinuations ?? DEFAULT_SCAN_CONTINUATIONS);
+  const budget = options.budget ?? new RegistrationBudget();
+  const registration: RegistrationOptions = {
+    budget,
+    ...(options.artifactBudget === undefined ? {} : { artifactBudget: options.artifactBudget }),
+  };
+  const summary: ScanSummary = { ...empty, status: "scanned" };
 
-  const summary = { ...empty, status: "scanned" as const, listed: page.terminals.length };
-  let worked = 0;
-  let budgetExhausted = false;
-  for (const terminal of page.terminals) {
-    if (worked >= maxRegistrations) {
-      budgetExhausted = true;
-      break;
-    }
+  /** One registration; false when the invocation's budget is spent. */
+  const attempt = async (run: { source: string; runId: string }): Promise<boolean> => {
     let outcome: RegisterTerminalOutcome;
     try {
-      outcome = await registerCollectionRun(env, terminal, {
-        ...(options.artifactBudget === undefined ? {} : { artifactBudget: options.artifactBudget }),
-      });
+      outcome = await registerCollectionRun(env, run, registration);
     } catch (error) {
       // A failure that is not a verdict — R2 or CORE unavailable, or a
       // refusal CORE made that the derivation did not foresee. Counted, not
@@ -185,23 +225,57 @@ export async function collectionScan(
       // this run forever (G1-13). The code is logged, never the message.
       options.onFailure?.(safeFailureCode(error));
       summary.failed += 1;
-      worked += 1;
-      continue;
+      return true;
     }
     // One poisonous terminal is its own blocked run and does not end the page
-    // (15 §2, G1-13); the loop below simply counts what happened.
-    if (outcome.outcome === "registered") summary.registered += 1;
-    else if (outcome.outcome === "already_registered") summary.alreadyRegistered += 1;
-    else if (outcome.outcome === "pending") summary.pending += 1;
-    else if (outcome.outcome === "blocked") summary.blocked += 1;
-    else if (outcome.outcome === "retryable") summary.retryable += 1;
-    else summary.missing += 1;
-    // A run that was already registered cost one query, not a registration,
-    // so it does not consume the tick's budget.
-    if (outcome.outcome !== "already_registered") worked += 1;
+    // (15 §2, G1-13); this simply counts what happened.
+    count(summary, outcome.outcome);
+    return outcome.outcome !== "deferred";
+  };
+
+  const continuations =
+    maxContinuations === 0
+      ? []
+      : await readPendingRegistrations(env.DB, REGISTRATION_CONTRACT_VERSION, maxContinuations);
+  let budgetExhausted = false;
+  for (const run of continuations) {
+    summary.continued += 1;
+    if (!(await attempt({ source: run.source, runId: run.run_id }))) {
+      budgetExhausted = true;
+      break;
+    }
   }
 
-  const cursor = budgetExhausted ? (state?.cursor ?? null) : page.cursor;
+  const state = await readCollectionScanState(env.DB);
+  let cursor = state?.cursor ?? null;
+  let truncated = true;
+  if (!budgetExhausted) {
+    const page = await listTerminals(env.EVIDENCE, {
+      limit: pageLimit,
+      ...(state?.cursor ? { cursor: state.cursor } : {}),
+    });
+    summary.listed = page.terminals.length;
+    let worked = 0;
+    for (const terminal of page.terminals) {
+      if (worked >= maxRegistrations) {
+        budgetExhausted = true;
+        break;
+      }
+      const before = summary.alreadyRegistered;
+      if (!(await attempt(terminal))) {
+        budgetExhausted = true;
+        break;
+      }
+      // A run that was already registered cost one query, not a
+      // registration, so it does not consume the tick's count.
+      if (summary.alreadyRegistered === before) worked += 1;
+    }
+    if (!budgetExhausted) {
+      cursor = page.cursor;
+      truncated = page.truncated;
+    }
+  }
+
   await advanceCollectionScan(env.DB, {
     cursor,
     nowMs: now().valueOf(),
@@ -211,7 +285,7 @@ export async function collectionScan(
   });
   return {
     ...summary,
-    cycleComplete: !budgetExhausted && !page.truncated,
+    cycleComplete: !budgetExhausted && !truncated,
     budgetExhausted,
   };
 }
@@ -228,7 +302,8 @@ export type QueueOutcome =
         | "pending"
         | "blocked"
         | "retryable"
-        | "missing";
+        | "missing"
+        | "deferred";
     }
   | { outcome: "ignored"; reason: string }
   | { outcome: "invalid"; code: string }
@@ -237,11 +312,13 @@ export type QueueOutcome =
 /**
  * One R2 event notification. Returns what happened rather than throwing, so
  * the consumer can decide between acknowledging and retrying with the same
- * vocabulary the stage records use.
+ * vocabulary the stage records use. `deferred` means the batch's shared
+ * budget was spent before this run started; the consumer retries the message.
  */
 export async function handleTerminalNotification(
   env: CollectionEnv,
   delivery: QueueDelivery,
+  options: { budget?: RegistrationBudget } = {},
 ): Promise<QueueOutcome> {
   if (!sharedR2IngestEnabled(env.SHARED_R2_INGEST_ENABLED)) return { outcome: "flag_off" };
   let parsed;
@@ -258,6 +335,10 @@ export async function handleTerminalNotification(
   }
   if (parsed.outcome === "ignored") return { outcome: "ignored", reason: parsed.reason };
   const notification: TerminalNotification = parsed.notification;
-  const result = await registerCollectionRun(env, notification);
+  const result = await registerCollectionRun(
+    env,
+    notification,
+    options.budget === undefined ? {} : { budget: options.budget },
+  );
   return { outcome: result.outcome };
 }

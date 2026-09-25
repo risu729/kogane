@@ -40,11 +40,13 @@ test("real D1/R2 registration seals the terminal and its actual metadata feeds b
   const read = await readTerminal(bucket, "st-george", run.runId);
   if (read.outcome !== "found") throw new Error("terminal missing");
   const ingestEnv = { DB: testEnv.TEST_DB, EVIDENCE: testEnv.DATA } as unknown as IngestEnv;
+  // The port is built by registration over its metered bindings, so this
+  // also runs the operation meter against real workerd D1 and R2 bindings.
   const registration = await registerTerminal({
     env: ingestEnv,
     bucket,
     clientId: "processor-shared-r2",
-    port: directRegistrationPort(ingestEnv, "processor-shared-r2"),
+    port: (metered) => directRegistrationPort(metered, "processor-shared-r2"),
     source: "st-george",
     runId: run.runId,
   });

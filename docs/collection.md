@@ -391,7 +391,17 @@ the summary central storage held for one.
 
 A card (or a session that failed before a card was selected, as unit `run`)
 that collected nothing persists a `failed` terminal with no artifact at all
-(G1-09). Every stored object carries a `redacted` transformation with no
+(G1-09).
+
+Registration of a card run: one unit, one range and one artifact per page plus
+the four fixed artifacts, registered by the Processor in process with no
+Service Binding call. Each page costs about 20 operations (D1 statements and
+R2 calls) against a per-invocation budget of 500, so a card of about twenty
+pages registers in one invocation and a longer card is continued on the next
+cron tick with its progress in CORE (issue #87,
+[processor.md §3.3](processor.md#33-operation-budget-and-staged-registration-issue-87)).
+
+Every stored object carries a `redacted` transformation with no
 retained input, because the provider envelope that held the session was
 deliberately not kept; note that this differs from the legacy central
 descriptors, which recorded a statement page as `extracted` from the stored
