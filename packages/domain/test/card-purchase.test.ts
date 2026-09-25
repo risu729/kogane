@@ -15,10 +15,14 @@ import {
   classifyCardUsage,
   comparableCardPayment,
   myjcbAgreedAmount,
+  myjcbSinglePayment,
+  MYJCB_NOT_SINGLE_WORDS,
   nextCardPurchaseAction,
   recognitionKey,
   statementPeriod,
   validCardPurchaseFacts,
+  VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE,
+  VPASS_WEB_SINGLE_PAYMENT_CODE,
   type CardPurchaseDraft,
   type CardUsageFact,
 } from "../src/card-purchase.ts";
@@ -53,7 +57,8 @@ function vpassRow(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
     providerStatus: "posted",
     amount: observed("1234"),
     usageDate: "2026-08-15",
-    paymentType: "1回払い",
+    // A posted (web family) row's payment-type code, full width as production shows it.
+    paymentType: "１",
     statementPeriod: "202609",
     capturedAt: "2026-09-07T00:00:00.000Z",
     providerSaleCode: null,
@@ -72,6 +77,8 @@ function myjcbRow(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
     externalId: "myjcb-credit-ledger:confirmed:fingerprint:0",
     identityPolicyFamily: "identity-default",
     providerStatus: "confirmed",
+    // The combined ご利用先など／支払区分 cell production MyJCB rows carry.
+    paymentType: "架空店舗 1回払",
     statementPeriod: null,
     usageAmountText: "1,234",
     paymentAmountText: "1,234",
@@ -111,6 +118,9 @@ describe("SC03 pending, posted and a partial refund", () => {
     const row = byRef.get(ref)!;
     return vpassRow({
       providerStatus: vpassStatus[row.providerStatus as keyof typeof vpassStatus],
+      // What production shows: the customized (pending) family's bunkatsuYaku
+      // is `0` on every row, the web family's data[6] a full-width `１`.
+      paymentType: row.providerStatus === "pending" ? "0" : "１",
       amount: observed(row.amount),
       externalId: `vpass:card-001:202608:${row.providerStatus === "pending" ? "customized" : "web"}:${ref}:0`,
       ...overrides,
@@ -118,6 +128,7 @@ describe("SC03 pending, posted and a partial refund", () => {
   };
 
   test("SC03: pending 1,200 is authorized, posted 1,234 captured; authorized→captured allowed", () => {
+    // The customized row's bunkatsuYaku `0`, a single payment as the owner confirmed.
     const pending = classifyCardUsage(rowOf("obs:card:pending-1", { providerSaleCode: "5" }));
     const posted = classifyCardUsage(rowOf("obs:card:posted-1"));
     expect(pending).toMatchObject({ ok: true, kind: "purchase", state: "authorized" });
@@ -207,12 +218,20 @@ describe("SC03 pending, posted and a partial refund", () => {
     expect(outcome.exceptions.map((exception) => exception.code)).toEqual([
       "refund_target_unknown",
     ]);
-    // A Vpass customized return (sale code 6) is a pending refund.
-    expect(
-      classifyCardUsage(
-        rowOf("obs:card:refund-1", { providerStatus: "unconfirmed", providerSaleCode: "6" }),
-      ),
-    ).toMatchObject({ ok: true, kind: "refund", state: "authorized" });
+    // A Vpass customized return (sale code 6, bunkatsuYaku 0) is a pending
+    // refund; an unconfirmed code (1) is not recognised.
+    const customizedReturn = (paymentType: string) =>
+      rowOf("obs:card:refund-1", {
+        providerStatus: "unconfirmed",
+        providerSaleCode: "6",
+        paymentType,
+      });
+    expect(classifyCardUsage(customizedReturn("0"))).toMatchObject({
+      ok: true,
+      kind: "refund",
+      state: "authorized",
+    });
+    expect(reason(customizedReturn("1"))).toBe("payment_type_unsupported");
     expect(reason(rowOf("obs:card:refund-1", { providerSaleCode: "5" }))).toBe(
       "refund_shape_unverified",
     );
@@ -241,21 +260,21 @@ describe("SC04 installments", () => {
     expect([usage, payment]).toEqual(["12,000", "4,000"]);
     const slice = myjcbRow({
       amount: observed(fixture.schedule[0]!.principal),
-      paymentType: "分割",
+      paymentType: "架空店舗 分割",
       usageAmountText: usage,
       paymentAmountText: payment,
     });
     expect(reason(slice)).toBe("payment_type_unsupported");
     // Even a payment type that drifted to look single cannot hide the slice.
-    expect(reason({ ...slice, paymentType: "1回払い" })).toBe("installment_amount_differs");
-    expect(reason({ ...slice, paymentType: "1回払い", paymentAmountText: null })).toBe(
+    expect(reason({ ...slice, paymentType: "架空店舗 1回払" })).toBe("installment_amount_differs");
+    expect(reason({ ...slice, paymentType: "架空店舗 1回払", paymentAmountText: null })).toBe(
       "payment_split_unknown",
     );
     // A pending usage row of the same purchase is not recognised either.
     expect(
       reason({
         ...slice,
-        paymentType: "1回払い",
+        paymentType: "架空店舗 1回払",
         providerStatus: "unconfirmed",
         amount: observed(fixture.purchase.amount),
       }),
@@ -285,10 +304,10 @@ describe("SC04 installments", () => {
     });
   });
 
-  test("MyJCB display text (1,234円, 一回払い) is read with the ledger parser's grammar", () => {
-    // The shapes the MyJCB ledger parser emits for tests/fixtures/observation-pipeline/myjcb.
+  test("MyJCB display text (1,234円, 1回払) is read with the ledger parser's grammar", () => {
+    // The shapes the MyJCB ledger parser emits for production rows.
     const display = myjcbRow({
-      paymentType: "一回払い",
+      paymentType: "架空店舗 1回払",
       usageAmountText: "1,234円",
       paymentAmountText: "1,234円",
     });
@@ -310,12 +329,12 @@ describe("SC04 installments", () => {
     const slice = {
       ...display,
       amount: observed("400"),
-      paymentType: "分割払い",
+      paymentType: "架空店舗B 分割払い",
       usageAmountText: "1,200円",
       paymentAmountText: "400円",
     };
     expect(reason(slice)).toBe("payment_type_unsupported");
-    expect(reason({ ...slice, paymentType: "一回払い" })).toBe("installment_amount_differs");
+    expect(reason({ ...slice, paymentType: "架空店舗B 1回払" })).toBe("installment_amount_differs");
     // Anything that is not an exact display integer is not read as a number.
     for (const text of ["1,23円", "1.5円", "1,234ドル", "円", "", "01,234円", "1,234円円"])
       expect(reason({ ...display, usageAmountText: text })).toBe("payment_split_unknown");
@@ -366,15 +385,110 @@ describe("SC04 installments", () => {
 });
 
 describe("exclusions", () => {
-  test("Vpass: 2回払い/分割/リボ/ボーナス一括/blank → payment_type_unsupported", () => {
-    for (const paymentType of ["2回払い", "分割", "リボ", "ボーナス一括", "", "  ", null])
+  test("Vpass: a web (posted) row's code 1 (１) and a customized (pending) row's bunkatsuYaku 0 are single payments; every other code or wording is unsupported", () => {
+    // The web family's production shape: a full-width digit in data[6], the
+    // same code as ASCII 1 after NFKC.
+    expect(reason(vpassRow({ paymentType: "１" }))).toBe("recognised");
+    expect(reason(vpassRow({ paymentType: "1" }))).toBe("recognised");
+    // The customized family's bunkatsuYaku is a different field: `0` on every
+    // production row, a single payment as the owner confirmed. Every other
+    // value, the web family's `1` included, is unconfirmed and unsupported.
+    const customized = (paymentType: string | null, providerSaleCode: string) =>
+      vpassRow({
+        paymentType,
+        providerStatus: "unconfirmed",
+        providerSaleCode,
+        amount: observed(providerSaleCode === "5" ? "1234" : "-1234"),
+      });
+    for (const providerSaleCode of ["5", "6"])
+      for (const paymentType of ["0", "０"])
+        expect(reason(customized(paymentType, providerSaleCode))).toBe("recognised");
+    for (const paymentType of ["1", "１", "2", "00", " 0", "", null])
+      for (const providerSaleCode of ["5", "6"])
+        expect(reason(customized(paymentType, providerSaleCode))).toBe("payment_type_unsupported");
+    // No web code other than 1 has been observed, so none is guessed: 2, 5, a
+    // two-digit code, a blank (the amountless web rows) and absent are unsupported.
+    for (const paymentType of ["２", "2", "5", "0", "０", "11", "01", "", " ", null])
       expect(reason(vpassRow({ paymentType }))).toBe("payment_type_unsupported");
-    // Width and surrounding spaces are normalised; the wording itself is not guessed.
-    expect(reason(vpassRow({ paymentType: " １回払い " }))).toBe("recognised");
-    expect(reason(vpassRow({ paymentType: "１回払い" }))).toBe("recognised");
-    expect(reason(vpassRow({ paymentType: "一回払い" }))).toBe("recognised");
-    for (const paymentType of ["1回払", "一括払い", "1回払い（リボ変更）", "ボーナス一回払い"])
+    // Wording is not a Vpass shape any more, however single it reads, and a
+    // padded code is not the code.
+    for (const paymentType of [
+      "1回払い",
+      "１回払い",
+      "一回払い",
+      "1回払",
+      "分割",
+      "リボ",
+      "ボーナス一括",
+      " 1 ",
+      "1 ",
+    ])
       expect(reason(vpassRow({ paymentType }))).toBe("payment_type_unsupported");
+    expect([VPASS_WEB_SINGLE_PAYMENT_CODE, VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE]).toEqual([
+      "1",
+      "0",
+    ]);
+  });
+
+  test("MyJCB: the combined cell holds 1回払 and no installment, revolving, bonus or cash-advance word", () => {
+    const single = [
+      "架空店舗 1回払",
+      "架空店舗 1回払い",
+      "架空店舗 一回払い",
+      "架空店舗 １回払",
+      "架空店舗 1 回払",
+      "架空店舗１回払",
+      "1回払 架空店舗",
+      // A merchant name ending in a digit, separated from the payment type.
+      "架空店舗2 1回払",
+      "ABC 12 1回払",
+    ];
+    for (const paymentType of single) {
+      expect(myjcbSinglePayment(paymentType)).toBe(true);
+      expect(reason(myjcbRow({ paymentType }))).toBe("recognised");
+      expect(reason(myjcbRow({ paymentType, providerStatus: "unconfirmed" }))).toBe("recognised");
+    }
+    const unsupported = [
+      "架空店舗 2回払",
+      "架空店舗 2回払い",
+      "架空店舗 二回払い",
+      "架空店舗 11回払",
+      "架空店舗 十一回払い",
+      // A digit glued to the count reads as the larger count, never as 1.
+      "架空店舗21回払",
+      "架空店舗 分割払い",
+      "架空店舗 分割(3回)",
+      "架空店舗 1回払 分割",
+      "架空店舗 リボ払",
+      "架空店舗 ﾘﾎﾞ払い",
+      "架空店舗 ボーナス1回払",
+      "架空店舗 ボーナス一括",
+      "架空店舗 キャッシング1回払い",
+      "架空店舗 ｷｬｯｼﾝｸﾞ1回払",
+      "架空店舗 1回払 2回払",
+      "架空店舗 一括払い",
+      // A merchant name holding one of the words excludes the row too: a
+      // skipped purchase is safe, a guessed one is not.
+      "架空リボン店 1回払",
+      "架空分割店 1回払",
+      // The shapes production MyJCB rows do not have: a merchant alone, the
+      // two-character label of the cell the parser took for the payment type,
+      // a Vpass code, blank and absent.
+      "架空店舗",
+      "架空",
+      "1",
+      "",
+      "  ",
+      null,
+    ];
+    for (const paymentType of unsupported) {
+      expect(myjcbSinglePayment(paymentType)).toBe(false);
+      expect(reason(myjcbRow({ paymentType }))).toBe("payment_type_unsupported");
+    }
+    expect([...MYJCB_NOT_SINGLE_WORDS]).toEqual(["分割", "リボ", "ボーナス", "キャッシング"]);
+    // A MyJCB wording is not a Vpass code, and a Vpass code is not a MyJCB wording.
+    expect(reason(vpassRow({ paymentType: "架空店舗 1回払" }))).toBe("payment_type_unsupported");
+    expect(reason(myjcbRow({ paymentType: "１" }))).toBe("payment_type_unsupported");
   });
 
   test("amountless/unparsed/zero/non-JPY rows excluded with a reason, never zero (INV05)", () => {
@@ -471,7 +585,7 @@ describe("drafts and content identity", () => {
       },
     });
     // The stored facts carry codes, amounts and dates only.
-    expect(JSON.stringify(draft.sidecar.facts)).not.toContain("1回払い");
+    expect(JSON.stringify(draft.sidecar.facts)).not.toMatch(/回払|１|架空/u);
     expect(validCardPurchaseFacts(draft.sidecar.facts)).toBe(true);
     expect(validCardPurchaseFacts({ ...draft.sidecar.facts, merchant: "synthetic shop" })).toBe(
       false,
@@ -503,7 +617,7 @@ describe("drafts and content identity", () => {
         action: "recognize",
         eventId,
         revision: 1,
-        fact: vpassRow({ paymentType: "リボ" }),
+        fact: vpassRow({ paymentType: "２" }),
       }),
     ).toBeNull();
   });
@@ -538,11 +652,13 @@ describe("drafts and content identity", () => {
         next: { ...next, contentDigest: refetched.contentDigest },
       }),
     ).toBe("reanchor");
+    // The customized (pending) row of the same purchase: bunkatsuYaku `0`.
+    const pendingRow = vpassRow({ providerStatus: "unconfirmed", paymentType: "0" });
     for (const changed of [
       vpassRow({ accountId: "acct-other" }),
       vpassRow({ amount: observed("1300") }),
       vpassRow({ usageDate: "2026-08-16" }),
-      vpassRow({ providerStatus: "unconfirmed" }),
+      pendingRow,
     ]) {
       const draft = await recognise(changed);
       expect(draft.contentDigest).not.toBe(first.contentDigest);
@@ -555,7 +671,7 @@ describe("drafts and content identity", () => {
     }
     // A state change is a revision exactly when eventTransition allows it:
     // authorized → captured is, captured → authorized (above) is not.
-    const authorized = await recognise(vpassRow({ providerStatus: "unconfirmed" }));
+    const authorized = await recognise(pendingRow);
     expect(
       nextCardPurchaseAction({
         live: {

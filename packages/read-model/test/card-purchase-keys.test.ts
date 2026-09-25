@@ -137,10 +137,21 @@ async function recognizeAll(db: Database): Promise<Map<number, CardPurchaseDraft
   return drafts;
 }
 
+/**
+ * Pending rows of a MyJCB unconfirmed ledger, which a newer ledger replaces;
+ * `VPASS_PENDING` is a Vpass customized row in the production shape
+ * (`bunkatsuYaku` `0`, a single payment as the owner confirmed).
+ */
 const PENDING_ROWS: readonly UsageRow[] = [
-  { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払い" },
-  { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1回払い" },
+  { date: "2026/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払" },
+  { date: "2026/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1回払" },
 ];
+const VPASS_PENDING: UsageRow = {
+  date: "26/05/03",
+  merchant: "架空店舗A",
+  amount: "1,200",
+  paymentType: "0",
+};
 
 /** One bound Vpass card-month capture of card-001, identified through the trusted binding. */
 function vpassCapture(
@@ -167,6 +178,29 @@ function vpassCapture(
   return parsed;
 }
 
+/** A MyJCB unconfirmed ledger of connection conn-a; a newer one replaces the last. */
+function myjcbPending(store: CardStore, fetchedAt: string, rows: readonly UsageRow[]): Parsed {
+  const parsed = store.myjcbLedger({
+    run: store.run("myjcb"),
+    connection: "conn-a",
+    detailMonth: 0,
+    state: "unconfirmed",
+    period: "2026年7月お支払い分",
+    fetchedAt,
+    rows,
+  });
+  store.identify(parsed, myjcbRoot("conn-a", "acct-jcb"), { version: 1 });
+  return parsed;
+}
+
+/** A later unconfirmed row: its capture no longer shows `PENDING_ROWS`. */
+const LATER_PENDING: UsageRow = {
+  date: "2026/06/02",
+  merchant: "架空店舗K",
+  amount: "900",
+  paymentType: "1回払",
+};
+
 /** A MyJCB confirmed ledger: one single payment and one installment slice. */
 function myjcbCapture(store: CardStore): Parsed {
   const parsed = store.myjcbLedger({
@@ -177,7 +211,7 @@ function myjcbCapture(store: CardStore): Parsed {
     period: "2026年6月お支払い分",
     fetchedAt: "2026-05-12T00:00:00.000Z",
     rows: [
-      { date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払い" },
+      { date: "2026/04/20", merchant: "架空店舗G", amount: "1,000", paymentType: "1回払" },
       {
         date: "2026/04/21",
         merchant: "架空店舗H",
@@ -195,21 +229,19 @@ function myjcbCapture(store: CardStore): Parsed {
 describe("recognition keys against current card usage", () => {
   test("stale keys are live recognised keys whose row is no longer current; retired ones are not reported", async () => {
     const store = new CardStore();
-    const pending = vpassCapture(store, "customized", "2026-05-10T00:00:00.000Z", PENDING_ROWS);
+    const pending = myjcbPending(store, "2026-05-10T00:00:00.000Z", PENDING_ROWS);
     const jcb = myjcbCapture(store);
     const drafts = await recognizeAll(store.db);
-    // The two pending Vpass rows and the MyJCB single payment; never the installment slice.
+    // The two pending MyJCB rows and the confirmed single payment; never the installment slice.
     expect([...drafts.keys()].sort((a, b) => a - b)).toEqual([
       ...pending.observations,
       jcb.observations[0]!,
     ]);
     expect(stale(store.db)).toEqual([]);
 
-    // The web capture of the same card-month replaces the customized one.
-    const posted = vpassCapture(store, "web", "2026-06-10T00:00:00.000Z", [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" },
-    ]);
-    expect(usage(store.db).map((row) => row.observation_id)).toContain(posted.observations[0]!);
+    // A newer unconfirmed ledger that no longer shows them replaces the old one.
+    const later = myjcbPending(store, "2026-06-10T00:00:00.000Z", [LATER_PENDING]);
+    expect(usage(store.db).map((row) => row.observation_id)).toContain(later.observations[0]!);
     const expected = pending.observations.map((observation): StaleCardPurchaseKeyRow => {
       const draft = drafts.get(observation)!;
       return {
@@ -248,11 +280,12 @@ describe("recognition keys against current card usage", () => {
 
   test("a revision that still holds one current key is not stale; once none is current, all its keys are", async () => {
     const store = new CardStore();
-    // A pending row, captured before its month's web capture replaces it.
-    vpassCapture(store, "customized", "2026-05-10T00:00:00.000Z", [PENDING_ROWS[0]!]);
+    // A Vpass pending row, captured before its month's web capture replaces
+    // it.
+    vpassCapture(store, "customized", "2026-05-10T00:00:00.000Z", [VPASS_PENDING]);
     const [pending] = usage(store.db);
     vpassCapture(store, "web", "2026-06-10T00:00:00.000Z", [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" },
+      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1" },
     ]);
     const [posted] = usage(store.db);
     expect(posted!.observation_id).not.toBe(pending!.observation_id);
@@ -288,7 +321,7 @@ describe("recognition keys against current card usage", () => {
     // A later web capture no longer shows the posted row: now every key of
     // the revision is stale, and both are reported together.
     vpassCapture(store, "web", "2026-06-20T00:00:00.000Z", [
-      { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1回払い" },
+      { date: "26/05/09", merchant: "架空店舗D", amount: "2,500", paymentType: "1" },
     ]);
     expect(
       stale(store.db).map((row) => [row.event_id, row.recognition_key, row.key_count]),
@@ -301,21 +334,20 @@ describe("recognition keys against current card usage", () => {
 
   test("unrecognised current rows are the rows no live revision holds", async () => {
     const store = new CardStore();
-    vpassCapture(store, "customized", "2026-05-10T00:00:00.000Z", PENDING_ROWS);
+    vpassCapture(store, "customized", "2026-05-10T00:00:00.000Z", [VPASS_PENDING]);
+    myjcbPending(store, "2026-05-10T00:00:00.000Z", PENDING_ROWS);
     myjcbCapture(store);
     const current = usage(store.db);
-    expect(current).toHaveLength(4);
-    expect(unrecognized(store.db)).toBe(4);
+    expect(current).toHaveLength(5);
+    expect(unrecognized(store.db)).toBe(5);
     await recognizeAll(store.db);
     // Only the installment slice is left.
     expect(unrecognized(store.db)).toBe(1);
 
-    // A newer web capture: its row is current and not yet recognised, while
-    // the replaced pending rows are held but no longer current, so they do
-    // not count (they are stale keys instead).
-    vpassCapture(store, "web", "2026-06-10T00:00:00.000Z", [
-      { date: "26/05/03", merchant: "架空店舗A", amount: "1,234", paymentType: "1回払い" },
-    ]);
+    // A newer unconfirmed ledger: its row is current and not yet recognised,
+    // while the replaced pending rows are held but no longer current, so they
+    // do not count (they are stale keys instead).
+    myjcbPending(store, "2026-06-10T00:00:00.000Z", [LATER_PENDING]);
     expect(unrecognized(store.db)).toBe(2);
     await recognizeAll(store.db);
     expect(unrecognized(store.db)).toBe(1);

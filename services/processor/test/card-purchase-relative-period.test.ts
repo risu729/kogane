@@ -76,7 +76,7 @@ const ROW: UsageRow = {
   date: "2026/09/10",
   merchant: "架空店舗P",
   amount: "1,000",
-  paymentType: "1回払い",
+  paymentType: "1回払",
   other: "1,000",
 };
 /** 2026-09-26 in Tokyo, after the 15th closing: position 0 is paid in 2026-11, position 1 in 2026-10. */

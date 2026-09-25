@@ -124,10 +124,10 @@ function holders(db: Database) {
     .all();
 }
 
-/** The pending row (obs 2, authorized) and the posted row (obs 1, captured), each its own event. */
+/** The MyJCB pending row (obs 2, authorized) and its posted row (obs 6, captured), each its own event. */
 async function pair(db: Database) {
   const pending = await recognised(db, factOf(2));
-  const posted = await recognised(db, factOf(1));
+  const posted = await recognised(db, factOf(6));
   const merge = await cardPurchaseMerge({ survivor: live(pending), absorbed: live(posted) });
   if (!merge) throw new Error("merge rejected");
   return { pending, posted, merge };
@@ -190,7 +190,7 @@ describe("pending-to-posted merge and split batches", () => {
       });
       // Posted evidence first, then the pending row.
       expect(merge.draft.revision.evidenceSupport.map((ref) => ref.id)).toEqual([
-        "transaction:1",
+        "transaction:6",
         "transaction:2",
       ]);
       // A replay writes nothing anywhere.

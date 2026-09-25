@@ -123,10 +123,13 @@ export class PurchaseWorld {
   }
 
   /**
-   * One more Vpass usage row on the fixture's first run (source account
-   * `vpass:card-001` unless given), as the fact the read model would return.
+   * One more usage row, as the fact the read model would return: a Vpass web
+   * row on the fixture's first run (source account `vpass:card-001` unless
+   * given), or with `source: "myjcb"` a MyJCB ledger row (confirmed on run 4,
+   * unconfirmed on run 5) whose usage and payment texts agree.
    */
   usage(input: {
+    source?: "vpass" | "myjcb";
     externalId: string;
     status?: "posted" | "unconfirmed";
     amount?: number;
@@ -137,26 +140,38 @@ export class PurchaseWorld {
     counterparty?: string;
   }): CardUsageFact {
     const id = this.next();
-    const status = input.status ?? "posted";
+    const myjcb = input.source === "myjcb";
+    const status = myjcb
+      ? input.status === "unconfirmed"
+        ? "unconfirmed"
+        : "confirmed"
+      : (input.status ?? "posted");
     const amount = input.amount ?? -1000;
     const usageDate = input.usageDate ?? "2026-08-20";
-    const sourceAccount = input.sourceAccount ?? "vpass:card-001";
+    const sourceAccount =
+      input.sourceAccount ?? (myjcb ? "myjcb:connection-a:root" : "vpass:card-001");
+    const parseRun = myjcb ? (status === "unconfirmed" ? 5 : 4) : 1;
+    const text = `${(-amount).toLocaleString("en-US")}円`;
     this.run(
       `INSERT INTO transaction_observations(id,parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,
         currency,description,counterparty,as_of,observed_at,raw_locator,extra_json)
-       VALUES(?,1,?,?,?,?,?,0,'JPY','1回払い',?,?,'2026-09-07T00:00:00Z',?,'{}')`,
+       VALUES(?,?,?,?,?,?,?,0,'JPY',?,?,?,'2026-09-07T00:00:00Z',?,'{}')`,
       id,
+      parseRun,
       sourceAccount,
       input.externalId,
       status,
       amount,
       String(amount),
+      myjcb ? "架空" : "１",
       input.counterparty ?? "synthetic merchant",
       usageDate,
       `json:$.rows[${id}]`,
     );
-    return factOf(1, {
+    return factOf(myjcb ? 6 : 1, {
       observationId: id,
+      parseRunId: parseRun,
+      ...(myjcb ? { usageAmountText: text, paymentAmountText: text } : {}),
       externalId: input.externalId,
       providerStatus: status,
       amount: exactQuantity("JPY", integerDecimal(amount), "decimal-v1"),

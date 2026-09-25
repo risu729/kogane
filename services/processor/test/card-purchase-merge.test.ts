@@ -41,23 +41,24 @@ import { disposeWorlds, NOW, world, type UsageRow, type World } from "./card-pur
 
 afterEach(disposeWorlds);
 
+/** A customized (pending) row: bunkatsuYaku `0`, as every production row carries it. */
 const PENDING: UsageRow = {
   date: "26/05/03",
   merchant: "架空店舗A",
   amount: "1,200",
-  paymentType: "1回払い",
+  paymentType: "0",
 };
 const POSTED: UsageRow = {
   date: "26/05/03",
   merchant: "架空店舗A",
   amount: "1,234",
-  paymentType: "1回払い",
+  paymentType: "1",
 };
 const OTHER: UsageRow = {
   date: "26/05/06",
   merchant: "架空店舗C",
   amount: "700",
-  paymentType: "1回払い",
+  paymentType: "1",
 };
 
 function counts(result: CardPurchaseSweepResult) {
@@ -270,7 +271,9 @@ test("two posted rows of the same amount are two candidates and never merge by t
   const same: UsageRow = { ...PENDING, amount: "900" };
   await w.vpass({ family: "customized", fetchedAt: "2026-05-10T00:00:00.000Z", rows: [same] });
   await w.sweep();
-  await w.vpass({ family: "web", fetchedAt: "2026-06-10T00:00:00.000Z", rows: [same, same] });
+  // Posted, the same purchase shows the web family's code.
+  const posted: UsageRow = { ...same, paymentType: "1" };
+  await w.vpass({ family: "web", fetchedAt: "2026-06-10T00:00:00.000Z", rows: [posted, posted] });
   expect(counts(await w.sweep())).toEqual({
     ...NOTHING,
     retired: 1,
@@ -295,7 +298,7 @@ test("MyJCB rows with only relative period labels (detailMonth-N) meet by usage 
     date: "2026/05/10",
     merchant: "架空店舗J",
     amount: "800",
-    paymentType: "1回払い",
+    paymentType: "1回払",
   };
   // Pending and confirmed captures the collector could only label relatively.
   await w.myjcb({
@@ -353,7 +356,7 @@ test("MyJCB twins of one amount and day under relative labels are both candidate
     date: "2026/05/10",
     merchant: "架空店舗J",
     amount: "800",
-    paymentType: "1回払い",
+    paymentType: "1回払",
   };
   await w.myjcb({
     state: "unconfirmed",
@@ -583,7 +586,7 @@ test("the reconciliation lane and the purchase lane propose one pair once, under
     date: "2026/05/10",
     merchant: "架空店舗J",
     amount: "800",
-    paymentType: "1回払い",
+    paymentType: "1回払",
   };
   // A Vpass month whose pending capture the posted one replaced, and a MyJCB
   // pending and confirmed capture under one absolute payment month (#238:

@@ -5,6 +5,15 @@
 // expanded `CURRENT_CARD_USAGE_SQL` of that commit; the two wrappers are its
 // `STALE_CARD_PURCHASE_KEYS_SQL` and `UNRECOGNIZED_CARD_USAGE_COUNT_SQL`, verbatim.
 // Never edit these by hand, and never import them outside tests.
+//
+// One deliberate exception: the MyJCB branch of the `payment_type` column
+// reads `summaryCells[1]`, the combined ご利用先など／支払区分 cell, as the
+// current text does since production rows showed the payment type is there
+// (the shipped text read `summaryCells[_kogane.paymentTypeCellIndex]`). The
+// differentials compare every column, and this one is a per-row projection
+// that no plan choice (join order, materialization, ranking) reads, so the
+// shipped text keeps proving what it was frozen for, the plan rewrite, while a
+// column change the rewrite did not make is not reported as a row difference.
 export const LEGACY_CURRENT_CARD_USAGE_SQL = `WITH ranked_myjcb_snapshots AS (
          SELECT p.fetch_artifact_id,
                 ROW_NUMBER() OVER (
@@ -127,15 +136,9 @@ export const LEGACY_CURRENT_CARD_USAGE_SQL = `WITH ranked_myjcb_snapshots AS (
               AND length(json_extract(t.extra_json, '$.bunkatsuYaku')) BETWEEN 1 AND 256
             THEN json_extract(t.extra_json, '$.bunkatsuYaku') END
               END
-            WHEN fa.source_id = 'myjcb' AND p.parser_name = 'myjcb-credit-ledger' AND json_valid(t.extra_json) THEN
-              CASE json_extract(t.extra_json, '$._kogane.paymentTypeCellIndex')
-                WHEN 2 THEN CASE WHEN json_valid(t.extra_json) AND json_type(t.extra_json, '$.summaryCells[2]') = 'text'
-              AND length(json_extract(t.extra_json, '$.summaryCells[2]')) BETWEEN 1 AND 256
-            THEN json_extract(t.extra_json, '$.summaryCells[2]') END
-                WHEN 3 THEN CASE WHEN json_valid(t.extra_json) AND json_type(t.extra_json, '$.summaryCells[3]') = 'text'
-              AND length(json_extract(t.extra_json, '$.summaryCells[3]')) BETWEEN 1 AND 256
-            THEN json_extract(t.extra_json, '$.summaryCells[3]') END
-              END
+            WHEN fa.source_id = 'myjcb' AND p.parser_name = 'myjcb-credit-ledger' THEN CASE WHEN json_valid(t.extra_json) AND json_type(t.extra_json, '$.summaryCells[1]') = 'text'
+              AND length(json_extract(t.extra_json, '$.summaryCells[1]')) BETWEEN 1 AND 256
+            THEN json_extract(t.extra_json, '$.summaryCells[1]') END
             END AS payment_type,
                 CASE WHEN fa.source_id = 'vpass' AND p.parser_name = 'vpass-statement-page' THEN CASE WHEN json_valid(t.extra_json) AND json_type(t.extra_json, '$._kogane.providerSaleCode') = 'text'
               AND length(json_extract(t.extra_json, '$._kogane.providerSaleCode')) BETWEEN 1 AND 256

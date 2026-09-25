@@ -30,6 +30,7 @@ import {
   unrecognizedCardUsageCountSql,
 } from "../src/index";
 import {
+  asCustomized,
   CardStore,
   myjcbRoot,
   type Parsed,
@@ -62,7 +63,15 @@ const ORDINALS = ["card-001", "card-002", "card-003", "card-004"] as const;
 const MONTHS = ["202604", "202605", "202606"] as const;
 const CONNECTIONS = ["conn-a", "conn-b"] as const;
 const PERIODS = ["202605", "2026年6月お支払い分", "2026年7月お支払い分"] as const;
-const PAYMENT_TYPES = ["1回払い", "1回払い", "1回払い", "2回払い", "リボ", "分割"] as const;
+/**
+ * Mostly single payments, in each source's production shape (the Vpass web
+ * code, MyJCB's wording); the rest are shapes recognition skips. A customized
+ * (pending) page shows every row with `CUSTOMIZED_PAYMENT_TYPE`.
+ */
+const PAYMENT_TYPES = {
+  vpass: ["1", "1", "1", "2", "5", ""],
+  myjcb: ["1回払", "1回払", "1回払", "2回払", "リボ", "分割"],
+} as const;
 
 type Publication = "published" | "unpublished" | "none";
 
@@ -159,7 +168,7 @@ class RandomStore {
     let pool = this.pools.get(key);
     if (pool === undefined) {
       pool = Array.from({ length: 6 }, (_, index): UsageRow => {
-        const paymentType = this.pick(PAYMENT_TYPES);
+        const paymentType: string = this.pick(PAYMENT_TYPES[myjcb ? "myjcb" : "vpass"]);
         const yen = (this.int(1, 300) * 100).toLocaleString("en-US");
         const amount = this.chance(0.1) ? `-${yen}` : yen;
         return {
@@ -344,7 +353,8 @@ class RandomStore {
             // Web pages are all `top-NNN`; customized pages after the first are `answer-NNN`.
             page: `${family === "customized" && page > 0 ? "answer" : "top"}-${String(page).padStart(3, "0")}`,
             family,
-            rows: this.rows(pool, family === "web"),
+            // A pending page shows the pool's rows with the customized family's code.
+            rows: family === "web" ? this.rows(pool, true) : asCustomized(this.rows(pool, false)),
             fetchedAt,
             publication,
           });

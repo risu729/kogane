@@ -81,7 +81,7 @@ const refOf = (fact: { observationId: number; parseRunId: number }): SourceFactR
 });
 
 /**
- * A Vpass pending authorisation of 1,200 and the posted charge of 1,234, each
+ * A MyJCB pending authorisation of 1,200 and the posted charge of 1,234, each
  * its own recognised event, with the stage-B candidate that names both (still
  * open: it may be accepted or rejected), and the posted charge's statement
  * settled by an accepted SMBC debit.
@@ -90,13 +90,15 @@ async function world() {
   const w = new PurchaseWorld();
   worlds.push(w);
   const pendingFact = w.usage({
-    externalId: "vpass:card-001:202609:customized:row-p:0",
+    source: "myjcb",
+    externalId: "myjcb-credit-ledger:unconfirmed:row-p:0",
     status: "unconfirmed",
     amount: -1200,
     usageDate: "2026-08-20",
   });
   const postedFact = w.usage({
-    externalId: "vpass:card-001:202609:web:row-q:0",
+    source: "myjcb",
+    externalId: "myjcb-credit-ledger:confirmed:row-q:0",
     status: "posted",
     amount: -1234,
     usageDate: "2026-08-21",
@@ -117,8 +119,8 @@ async function world() {
     "2026-09-24T01:00:00.000Z",
   );
   const statement = w.statement({
-    source: "vpass",
-    sourceAccount: "vpass:card-001",
+    source: "myjcb",
+    sourceAccount: "myjcb:connection-a:root",
     accountId: "acct-card",
     period: "2026-09",
     total: 1234,
@@ -127,7 +129,7 @@ async function world() {
   w.settle({
     statement,
     bank: w.bankDebit(1234),
-    source: "vpass",
+    source: "myjcb",
     accountId: "acct-card",
     period: "2026-09",
     total: 1234,

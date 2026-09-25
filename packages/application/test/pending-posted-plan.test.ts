@@ -116,20 +116,22 @@ interface Scenario {
 }
 
 /**
- * A Vpass pending authorisation of 1,200 that has left the provider's display
+ * A MyJCB pending authorisation of 1,200 that has left the provider's display
  * (retired), and the posted charge of 1,234, each its own recognised event.
  */
 async function scenario(options: { retirePending?: boolean } = {}): Promise<Scenario> {
   const w = new PurchaseWorld();
   worlds.push(w);
   const pendingFact = w.usage({
-    externalId: "vpass:card-001:202609:customized:row-p:0",
+    source: "myjcb",
+    externalId: "myjcb-credit-ledger:unconfirmed:row-p:0",
     status: "unconfirmed",
     amount: -1200,
     usageDate: "2026-08-20",
   });
   const postedFact = w.usage({
-    externalId: "vpass:card-001:202609:web:row-q:0",
+    source: "myjcb",
+    externalId: "myjcb-credit-ledger:confirmed:row-q:0",
     status: "posted",
     amount: -1234,
     usageDate: "2026-08-21",
@@ -575,7 +577,8 @@ describe("pending-to-posted review", () => {
     await s.w.revise(
       s.postedEvent,
       s.w.usage({
-        externalId: "vpass:card-001:202609:web:row-q:0",
+        source: "myjcb",
+        externalId: "myjcb-credit-ledger:confirmed:row-q:0",
         status: "posted",
         amount: -1300,
         usageDate: "2026-08-21",
@@ -873,7 +876,8 @@ describe("pending-to-posted review", () => {
     const s = await scenario();
     // A posted row of another card account.
     const other = s.w.usage({
-      externalId: "vpass:card-001:202609:web:row-r:0",
+      source: "myjcb",
+      externalId: "myjcb-credit-ledger:confirmed:row-r:0",
       status: "posted",
       amount: -1200,
       usageDate: "2026-08-20",
@@ -883,7 +887,8 @@ describe("pending-to-posted review", () => {
     const accountId = propose(s.w, s.pending, refOf(other));
     // An unrecognised posted row.
     const bare = s.w.usage({
-      externalId: "vpass:card-001:202609:web:row-s:0",
+      source: "myjcb",
+      externalId: "myjcb-credit-ledger:confirmed:row-s:0",
       status: "posted",
       amount: -1200,
     });

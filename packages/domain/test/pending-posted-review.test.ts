@@ -46,7 +46,8 @@ function row(overrides: Partial<CardUsageFact> = {}): CardUsageFact {
     providerStatus: "posted",
     amount: exactQuantity("JPY", integerDecimal(-1234), "decimal-v1"),
     usageDate: "2026-08-21",
-    paymentType: "1回払い",
+    // The web family's payment-type code as production shows it (full width).
+    paymentType: "１",
     statementPeriod: "202609",
     capturedAt: "2026-09-07T00:00:00.000Z",
     providerSaleCode: null,
@@ -64,6 +65,8 @@ const PENDING = row({
   providerStatus: "unconfirmed",
   amount: exactQuantity("JPY", integerDecimal(-1200), "decimal-v1"),
   usageDate: "2026-08-20",
+  // The customized family's bunkatsuYaku, `0` on every production row.
+  paymentType: "0",
   providerSaleCode: "5",
 });
 

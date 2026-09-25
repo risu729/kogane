@@ -1,7 +1,9 @@
 // The card purchase recognition contract (packages/domain/src/card-purchase.ts)
-// against what the deployed Vpass and MyJCB parsers actually emit for the
-// synthetic fixtures, rather than against hand-written rows. Every row, name
-// and amount here is synthetic.
+// against what the deployed Vpass and MyJCB parsers actually emit for payloads
+// in the shapes production rows have (a full-width one-digit Vpass code in the
+// web page's data[6], `0` in the customized page's bunkatsuYaku; MyJCB's
+// payment type inside the combined ご利用先など／支払区分 cell), rather than
+// against hand-written rows. Every row, name and amount here is synthetic.
 import { readFileSync } from "node:fs";
 import { expect, test } from "bun:test";
 import {
@@ -36,6 +38,22 @@ function meta(overrides: Partial<ArtifactMeta>): ArtifactMeta {
   };
 }
 
+/**
+ * The payment type where the read model reads it (packages/read-model/src/
+ * card-usage.ts `PAYMENT_TYPE`): Vpass web `data[6]`, Vpass customized
+ * `bunkatsuYaku`, MyJCB `summaryCells[1]`. Empty text reads as absent.
+ */
+function paymentTypeOf(sourceId: string, extra: Record<string, unknown>): string | null {
+  const kogane = (extra["_kogane"] ?? {}) as Record<string, unknown>;
+  const value =
+    sourceId === "myjcb"
+      ? (extra["summaryCells"] as unknown[])[1]
+      : kogane["statementFamily"] === "web"
+        ? (extra["data"] as unknown[])[6]
+        : extra["bunkatsuYaku"];
+  return typeof value === "string" && value.length > 0 && value.length <= 256 ? value : null;
+}
+
 /** The read model's view of one parsed row, with identity resolved. */
 function factOf(
   sourceId: string,
@@ -58,7 +76,7 @@ function factOf(
     providerStatus: row.status ?? null,
     amount: exactQuantity(row.currency!, integerDecimal(row.amountMinor!), "decimal-v1"),
     usageDate: row.asOf ?? null,
-    paymentType: row.description ?? null,
+    paymentType: paymentTypeOf(sourceId, row.extra),
     statementPeriod: text("statementMonth") ?? text("period"),
     capturedAt: fetchedAt,
     providerSaleCode: text("providerSaleCode"),
@@ -105,15 +123,73 @@ function myjcb(file: string, state: string, period: string): CardUsageFact[] {
   );
 }
 
-test("MyJCB ledger rows as parsed: 一回払い and 円 amounts are recognised, the installment slice is not", async () => {
-  const [pending] = myjcb("credit-ledger-00.json", "unconfirmed", "2026年9月お支払い分");
-  const [slice, refund] = myjcb("credit-ledger-02.json", "confirmed", "2026年7月お支払い分");
-  // What the parser hands over: display text, not numbers.
+/** A MyJCB ledger in the production row shape, parsed by the deployed parser. */
+function productionLedger(
+  state: "confirmed" | "unconfirmed",
+  period: string,
+  ledgerRows: { summaryCells: string[]; expanded: Record<string, string> }[],
+): CardUsageFact[] {
+  const detailMonth = state === "confirmed" ? 2 : 0;
+  const ledger = {
+    schemaVersion: 1,
+    detailMonth,
+    period,
+    state,
+    headers: [
+      "ご利用日",
+      "ご利用先など",
+      "支払区分",
+      state === "confirmed" ? "今回のお支払い金額" : "ご利用金額",
+    ],
+    rows: ledgerRows,
+  };
+  return rows(
+    myJcbCreditLedger,
+    "myjcb",
+    new TextEncoder().encode(JSON.stringify(ledger)),
+    meta({
+      artifactKey: `connection-a/credit-ledger-0${detailMonth}.json`,
+      statementState: state,
+      period,
+    }),
+  );
+}
+
+test("MyJCB ledger rows as production shows them: 1回払 in the combined cell and 円 amounts are recognised, the installment slice is not", async () => {
+  // Production rows: the merchant and the payment type share summaryCells[1];
+  // the cell the parser takes for the payment type holds a two-character label.
+  const [pending] = productionLedger("unconfirmed", "2026年9月お支払い分", [
+    {
+      summaryCells: ["2026/ 09/01", "架空予約 1回払", "架空", "2,000円"],
+      expanded: { 今回のお支払い金額: "2,000円", 摘要: "未確定", 今回回数: "1", 備考: "" },
+    },
+  ]);
+  const [purchase, slice, refund] = productionLedger("confirmed", "2026年7月お支払い分", [
+    {
+      summaryCells: ["2026/06/14", "架空店舗 1回払", "1,000円", "架空"],
+      expanded: { ご利用金額: "1,000円", 摘要: "", 今回回数: "1", 備考: "", 訂正サイン: "" },
+    },
+    {
+      summaryCells: ["2026/06/15", "架空家電 分割払い", "400円", "架空"],
+      expanded: { ご利用金額: "1,200円", 摘要: "", 今回回数: "2", 備考: "", 訂正サイン: "" },
+    },
+    {
+      summaryCells: ["2026/06/16", "架空返品 1回払", "-500円", "架空"],
+      expanded: { ご利用金額: "-500円", 摘要: "取消", 今回回数: "1", 備考: "", 訂正サイン: "" },
+    },
+  ]);
+  // What the read model hands over: the combined cell and display text, not numbers.
   expect([pending!.paymentType, pending!.usageAmountText, pending!.paymentAmountText]).toEqual([
-    "一回払い",
+    "架空予約 1回払",
     "2,000円",
     "2,000円",
   ]);
+  expect(outcome(purchase!)).toEqual({
+    kind: "purchase",
+    state: "captured",
+    amount: "1000",
+    period: "2026-07",
+  });
   expect(outcome(pending!)).toEqual({
     kind: "purchase",
     state: "authorized",
@@ -121,7 +197,8 @@ test("MyJCB ledger rows as parsed: 一回払い and 円 amounts are recognised, 
     period: "2026-09",
   });
   expect(outcome(slice!)).toEqual({ excluded: "payment_type_unsupported" });
-  expect(outcome({ ...slice!, paymentType: "一回払い" })).toEqual({
+  // A payment type that drifted to look single cannot hide the slice.
+  expect(outcome({ ...slice!, paymentType: "架空家電 1回払" })).toEqual({
     excluded: "installment_amount_differs",
   });
   expect(outcome(refund!)).toEqual({
@@ -132,7 +209,7 @@ test("MyJCB ledger rows as parsed: 一回払い and 円 amounts are recognised, 
   });
   // Every recognised row becomes a valid draft whose sidecar carries the
   // statement's YYYY-MM and none of the provider's text.
-  for (const fact of [pending!, refund!]) {
+  for (const fact of [pending!, purchase!, refund!]) {
     const classified = classifyCardUsage(fact);
     if (!classified.ok) throw new Error("unreachable");
     const draft = await cardPurchaseRevision({
@@ -142,35 +219,25 @@ test("MyJCB ledger rows as parsed: 一回払い and 円 amounts are recognised, 
       fact,
     });
     expect(draft?.sidecar.statementPeriod).toBe(statementPeriod(fact.statementPeriod));
-    expect(JSON.stringify(draft?.sidecar.facts)).not.toMatch(/円|回払い|架空/u);
+    expect(JSON.stringify(draft?.sidecar.facts)).not.toMatch(/円|回払|架空/u);
   }
+  // Fail-safe on a shape production does not have: the synthetic fixture's
+  // rows put 一回払い in a cell of their own and the merchant alone in the
+  // combined cell, so nothing there states the payment type and the row is
+  // skipped, never guessed from another cell.
+  const [legacyPending] = myjcb("credit-ledger-00.json", "unconfirmed", "2026年9月お支払い分");
+  expect(legacyPending!.paymentType).toBe("架空予約");
+  expect(outcome(legacyPending!)).toEqual({ excluded: "payment_type_unsupported" });
 });
 
 test("the reconciliation rule reads MyJCB's display amounts as recognition does", () => {
-  // A confirmed, positive, single-payment row (synthetic, same shape as the fixture).
-  const ledger = {
-    schemaVersion: 1,
-    detailMonth: 2,
-    period: "2026年7月お支払い分",
-    state: "confirmed",
-    headers: ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"],
-    rows: [
-      {
-        summaryCells: ["2026/06/20", "架空店", "1,000円", "一回払い"],
-        expanded: { ご利用金額: "1,000円", 摘要: "", 今回回数: "1", 備考: "", 訂正サイン: "" },
-      },
-    ],
-  };
-  const [row] = rows(
-    myJcbCreditLedger,
-    "myjcb",
-    new TextEncoder().encode(JSON.stringify(ledger)),
-    meta({
-      artifactKey: "connection-a/credit-ledger-02.json",
-      statementState: "confirmed",
-      period: ledger.period,
-    }),
-  );
+  // A confirmed, positive, single-payment row in the production shape.
+  const [row] = productionLedger("confirmed", "2026年7月お支払い分", [
+    {
+      summaryCells: ["2026/06/20", "架空店 1回払", "1,000円", "架空"],
+      expanded: { ご利用金額: "1,000円", 摘要: "", 今回回数: "1", 備考: "", 訂正サイン: "" },
+    },
+  ]);
   expect(outcome(row!)).toEqual({
     kind: "purchase",
     state: "captured",
@@ -188,9 +255,10 @@ test("the reconciliation rule reads MyJCB's display amounts as recognition does"
   // guard reads it with the same grammar recognition uses.
   expect([row!.usageAmountText, row!.paymentAmountText]).toEqual(["1,000円", "1,000円"]);
   expect(comparable(row!)).toBe(true);
-  // The fixture's confirmed ledger: the installment slice (400円 of 1,200円)
-  // and the refund (-500円) never take part in matching; the pending row is
-  // not constrained by the guard.
+  // The guard reads the amount texts, never the payment type, so it holds for
+  // the fixture ledgers' rows as well, whatever cell their payment type is
+  // in: the installment slice (400円 of 1,200円) and the refund (-500円)
+  // never take part in matching; the pending row is not constrained.
   const [slice, refund] = myjcb("credit-ledger-02.json", "confirmed", "2026年7月お支払い分");
   expect([slice!.usageAmountText, slice!.paymentAmountText]).toEqual(["1,200円", "400円"]);
   expect(comparable(slice!)).toBe(false);
@@ -203,7 +271,10 @@ test("a closed position-1 statement, as the collector now records it, is a captu
   // services/collector-myjcb decides the state from the page: a `(確定分)`
   // page without export links is `confirmed`, its ledger carries the confirmed
   // header set and the expanded `ご利用金額`, and its period is the relative
-  // fallback label (the collector test pins this exact JSON). Synthetic row.
+  // fallback label (the collector test pins this JSON). The row is in the
+  // production shape: `1回払` in the combined ご利用先など／支払区分 cell and a
+  // two-character label where the parser looks for the payment type.
+  // Synthetic row.
   const ledger = {
     schemaVersion: 1,
     detailMonth: 1,
@@ -212,7 +283,7 @@ test("a closed position-1 statement, as the collector now records it, is a captu
     headers: ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"],
     rows: [
       {
-        summaryCells: ["2026/01/05", "架空商店", "一回払い", "1,000円"],
+        summaryCells: ["2026/01/05", "架空商店 1回払", "架空", "1,000円"],
         expanded: { ご利用金額: "1,000円", 摘要: "架空摘要", 今回回数: "1" },
       },
     ],
@@ -250,8 +321,9 @@ test("a closed position-1 statement, as the collector now records it, is a captu
 
 test("recognition and the matching guard never disagree on a parsed MyJCB row", () => {
   // Every usage/payment text pair below is parsed by the deployed ledger
-  // parser, confirmed and unconfirmed, next to the fixture's own rows. With the
-  // payment type held single, a confirmed row takes part in pending-to-posted
+  // parser, confirmed and unconfirmed, in the production row shape, next to
+  // the fixture's own rows. With the payment type held single (the combined
+  // cell's 1回払), a confirmed row takes part in pending-to-posted
   // matching exactly when recognition recognises it as a purchase, so no row
   // recognition excludes for its amounts (installment_amount_differs,
   // payment_split_unknown, refund_shape_unverified) is ever compared.
@@ -271,7 +343,7 @@ test("recognition and the matching guard never disagree on a parsed MyJCB row", 
       state,
       headers: ["ご利用日", "ご利用先など", "支払区分", displayed],
       rows: pairs.map(([cell, text], index) => ({
-        summaryCells: ["2026/09/10", `架空店${index}`, cell, "一回払い"],
+        summaryCells: ["2026/09/10", `架空店${index} 1回払`, cell, "架空"],
         expanded: { ...(text === undefined ? {} : { [other]: text }), 摘要: "", 備考: "" },
       })),
     };
@@ -307,7 +379,7 @@ test("recognition and the matching guard never disagree on a parsed MyJCB row", 
       usageAmountText: fact.usageAmountText,
       paymentAmountText: fact.paymentAmountText,
     });
-    const classified = classifyCardUsage({ ...fact, paymentType: "一回払い" });
+    const classified = classifyCardUsage({ ...fact, paymentType: "架空店 1回払" });
     const outcome = classified.ok ? classified.kind : classified.reasonCode;
     seen.add(`${fact.providerStatus}:${outcome}`);
     if (fact.providerStatus === "unconfirmed") {
@@ -344,6 +416,9 @@ test("Vpass statement pages as parsed: web and customized rows, sale codes and r
       }),
     );
   const [posted] = vpass("web.json");
+  // Production shapes, the same text the parser also writes to `description`:
+  // a full-width code on the web page, `0` in the customized page's bunkatsuYaku.
+  expect([posted!.paymentType, posted!.paymentType?.normalize("NFKC")]).toEqual(["１", "1"]);
   expect(outcome(posted!)).toEqual({
     kind: "purchase",
     state: "captured",
@@ -351,7 +426,10 @@ test("Vpass statement pages as parsed: web and customized rows, sale codes and r
     period: "2026-08",
   });
   const [sale, ret] = vpass("customized.json");
+  expect([sale!.paymentType, ret!.paymentType]).toEqual(["0", "0"]);
   expect([sale!.providerSaleCode, ret!.providerSaleCode]).toEqual(["5", "6"]);
+  // bunkatsuYaku `0` is a single payment, as the owner confirmed: the sale is
+  // an authorized purchase and the return an authorized refund.
   expect(outcome(sale!)).toEqual({
     kind: "purchase",
     state: "authorized",
@@ -364,8 +442,17 @@ test("Vpass statement pages as parsed: web and customized rows, sale codes and r
     amount: "1500",
     period: "2026-08",
   });
+  // Every other value is unconfirmed and stays excluded.
+  for (const paymentType of ["1", "１", "2", "", null, "1回払い"]) {
+    expect(outcome({ ...sale!, paymentType })).toEqual({ excluded: "payment_type_unsupported" });
+    expect(outcome({ ...ret!, paymentType })).toEqual({ excluded: "payment_type_unsupported" });
+  }
   // Without the trusted card binding a Vpass card ordinal is not an identity.
   expect(outcome({ ...posted!, identityPolicyFamily: "identity-default" })).toEqual({
     excluded: "card_identity_unstable",
   });
+  // Every web code but 1 is unverified and stays excluded, as does the
+  // wording the fixtures used to invent and a blank.
+  for (const paymentType of ["２", "2", "5", "0", "", null, "1回払い", "一回払い"])
+    expect(outcome({ ...posted!, paymentType })).toEqual({ excluded: "payment_type_unsupported" });
 });
