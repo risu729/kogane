@@ -1,6 +1,7 @@
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import type { ArtifactMeta, BalanceObservation, Parser, ParseResult } from "../types.ts";
 import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
+import { readMyJcbStatementPage } from "../../../../packages/domain/src/myjcb-statement-page.ts";
 import {
   exactKeys,
   normalizedDate,
@@ -298,33 +299,23 @@ function statementElements(
 function statementNodes(node: StatementNode, tag: string): StatementElement[] {
   return statementElements(node, (element) => element.tagName === tag);
 }
-function statementClassNodes(node: StatementNode, className: string): StatementElement[] {
-  return statementElements(node, (element) =>
-    (element.attrs.find((attribute) => attribute.name === "class")?.value ?? "")
-      .split(/\s+/u)
-      .includes(className),
-  );
-}
 function statementText(node: StatementNode): string {
   if ("value" in node) return node.value;
   return "childNodes" in node ? node.childNodes.map(statementText).join("") : "";
 }
 
-/** The heading of a closed statement page: the page's own statement that it is confirmed. */
-const CONFIRMED_STATEMENT_HEADING = "カードご利用代金明細(確定分)";
-
 /**
  * The statement state the page states about itself (statement parser 1.1.0,
- * docs/observations.md). A closed statement carries exactly one
- * `CONFIRMED_STATEMENT_HEADING` h1, and each ledger header displays the
- * amount label of one state: the fourth label of `CONFIRMED_HEADERS`
- * (`今回のお支払い金額`) or of `UNCONFIRMED_HEADERS` (`ご利用金額`).
+ * docs/observations.md), read by `readMyJcbStatementPage`, which the collector
+ * uses too, so the two readings cannot drift:
  *
- * - the heading, with confirmed or no amount headers: `confirmed`;
- * - no heading and unconfirmed amount headers: `unconfirmed`;
- * - no heading otherwise: `unknown`. A confirmed header without the heading
- *   proves nothing more: the page does not state that it is closed, so no
- *   total is read from it, exactly as before;
+ * - exactly one `(確定分)` h1, over a confirmed or no amount header: `confirmed`;
+ * - no heading, and no ledger or a ledger with no rows: `unknown`. An empty
+ *   ledger's header label states nothing about a statement it has no rows of;
+ * - no heading, and rows under the unconfirmed header: `unconfirmed`;
+ * - no heading, and rows under a confirmed or no amount header: `unknown`. The
+ *   page does not state that it is closed, so no total is read from it,
+ *   exactly as before;
  * - more than one heading, a header with both labels, ledgers that disagree,
  *   or the heading over an unconfirmed header: the page contradicts itself
  *   and the parse fails.
@@ -333,28 +324,10 @@ const CONFIRMED_STATEMENT_HEADING = "カードご利用代金明細(確定分)";
  * result as a cross-check (`_kogane.manifestStatementState`).
  */
 function statementPageState(document: StatementNode): "confirmed" | "unconfirmed" | "unknown" {
-  const headings = statementNodes(document, "h1").filter(
-    (node) => statementText(node).replace(/\s+/gu, "") === CONFIRMED_STATEMENT_HEADING,
-  ).length;
-  const amountHeaders = new Set(
-    statementClassNodes(document, "detail-list-01").flatMap((ledger) => {
-      const head = statementClassNodes(ledger, "head")[0];
-      const text = head ? statementText(head).replace(/\s+/gu, "") : "";
-      const confirmed = text.includes(CONFIRMED_HEADERS[3]!);
-      const unconfirmed = text.includes(UNCONFIRMED_HEADERS[3]!);
-      if (confirmed && unconfirmed) return ["both"];
-      return confirmed ? ["confirmed"] : unconfirmed ? ["unconfirmed"] : [];
-    }),
-  );
-  if (
-    headings > 1 ||
-    amountHeaders.has("both") ||
-    amountHeaders.size > 1 ||
-    (headings === 1 && amountHeaders.has("unconfirmed"))
-  )
-    throw new Error("myjcb statement confirmation conflicts");
-  if (headings === 1) return "confirmed";
-  return amountHeaders.has("unconfirmed") ? "unconfirmed" : "unknown";
+  const { reading } = readMyJcbStatementPage(document);
+  if (reading === "conflict") throw new Error("myjcb statement confirmation conflicts");
+  if (reading === "confirmed" || reading === "unconfirmed") return reading;
+  return "unknown";
 }
 
 /**

@@ -197,6 +197,11 @@ the first run after the deploy, position 1 is stored as `confirmed`, and its
 ledger keeps the `ご利用金額` that the unconfirmed labels never read.
 
 Version 1.1.0 of the statement parser applies the same reading to stored pages.
+Both read the page through one function, `readMyJcbStatementPage` in
+`packages/domain/src/myjcb-statement-page.ts`, so they count headings, ledger
+rows and amount labels the same way; only the collector adds position rules. A
+page without the heading whose ledger has no rows is `unknown` to both,
+whatever its header label.
 The collector manifest's state, which reaches the parser as artifact metadata,
 is no longer an input. It is a cross-check: the total records it as
 `_kogane.manifestStatementState` next to `_kogane.statementState` and

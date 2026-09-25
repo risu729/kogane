@@ -356,7 +356,7 @@ checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査し�
 
 collectorは状態をpage自身から決める（`services/collector-myjcb/src/parsers.ts`の`creditStatementState`）。pageは状態を二か所で示す。一つは`カードご利用代金明細(確定分)`のh1で、もう一つはledger headerの金額label（確定は`今回のお支払い金額`、未確定は`ご利用金額`。parserの`CONFIRMED_HEADERS`／`UNCONFIRMED_HEADERS`の4番目）である。
 
-`(確定分)` h1だけが「締め済み明細である」というpage自身の表明である。
+`(確定分)` h1だけが「締め済み明細である」というpage自身の表明である。h1、ledger行、金額labelの読み取りは`packages/domain/src/myjcb-statement-page.ts`の`readMyJcbStatementPage`一か所にあり、collectorと`myjcb-credit-statement-total@1.1.0`が共用する。position規則はcollectorだけが加える。
 
 | `(確定分)` h1 | ledger                                          | 記録する状態                                         |
 | ------------- | ----------------------------------------------- | ---------------------------------------------------- |

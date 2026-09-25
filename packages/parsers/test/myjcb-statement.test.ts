@@ -162,6 +162,25 @@ describe("the statement state is the page's own (1.1.0)", () => {
     expect(parse(statementPage([], [UNCONFIRMED_HEAD]), misStated).warnings).toEqual([
       "statement_total_not_confirmed",
     ]);
+    // An empty ledger without the heading states nothing, whatever its header
+    // label: the collector's `unknown` for positions 7 and 8 agrees, with no
+    // warning and no total.
+    const emptyRow =
+      '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はありません</div></div></div>';
+    const emptyUnconfirmed = statementPage([], [UNCONFIRMED_HEAD]).replace(
+      `${UNCONFIRMED_HEAD}</div>`,
+      `${UNCONFIRMED_HEAD}</div>${emptyRow}`,
+    );
+    expect(emptyUnconfirmed).toContain("w-100per");
+    for (const statementState of ["unknown", "unconfirmed", null] as const) {
+      const empty = parse(emptyUnconfirmed, {
+        ...misStated,
+        artifactKey: "connection-a/credit-detail-07.html",
+        statementState,
+      });
+      expect(empty.observations).toHaveLength(0);
+      expect(empty.warnings).toEqual(["statement_total_not_confirmed"]);
+    }
     // The collector's `unknown` for a page without the heading agrees.
     expect(
       parse(statementPage([], [UNCONFIRMED_HEAD]), { ...misStated, statementState: "unknown" })

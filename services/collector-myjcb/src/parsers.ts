@@ -1,6 +1,10 @@
 import type { DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
 import { StopConditionError } from "./types";
 import { parse, serialize, type DefaultTreeAdapterMap } from "parse5";
+import {
+  CONFIRMED_STATEMENT_HEADING,
+  readMyJcbStatementPage,
+} from "../../../packages/domain/src/myjcb-statement-page";
 
 type HtmlNode = DefaultTreeAdapterMap["node"];
 type HtmlElement = DefaultTreeAdapterMap["element"];
@@ -18,11 +22,12 @@ export interface CreditLedgerSnapshot {
 export type CreditStatementState = "confirmed" | "unconfirmed" | "unknown";
 
 /**
- * The heading a closed MyJCB credit statement page carries. It is the page's
- * own statement that its ledger is the confirmed (確定) one, so it is compared
- * exactly after whitespace removal, never searched for as a substring.
+ * The heading a closed MyJCB credit statement page carries. The page reading
+ * (heading, ledger rows, amount labels) lives in
+ * packages/domain/src/myjcb-statement-page.ts, shared with the
+ * statement parser so the two cannot drift.
  */
-export const CONFIRMED_STATEMENT_HEADING = "カードご利用代金明細(確定分)";
+export { CONFIRMED_STATEMENT_HEADING };
 
 /**
  * The ledger header sets of a confirmed and of an unconfirmed page. The fourth
@@ -33,8 +38,6 @@ export const CONFIRMED_STATEMENT_HEADING = "カードご利用代金明細(確�
  */
 const CONFIRMED_LEDGER_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
 const UNCONFIRMED_LEDGER_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"];
-const CONFIRMED_AMOUNT_HEADER = CONFIRMED_LEDGER_HEADERS[3]!;
-const UNCONFIRMED_AMOUNT_HEADER = UNCONFIRMED_LEDGER_HEADERS[3]!;
 
 export interface PastMonthAvailability {
   readonly detailMonth: number;
@@ -303,39 +306,24 @@ export function parseCreditLedger(
  *   stops the collection; an older position is `unknown`, so one old page
  *   never halts the daily run.
  *
+ * The page reading is `readMyJcbStatementPage`, the one the statement parser
+ * uses; the position rules are the collector's own.
  * `unknown` stores the page as evidence and no ledger artifact. A page that
  * contradicts itself stops the collection at every position
  * (`credit-statement-state`): more than one heading, a header with both
  * labels, ledgers that disagree, or the heading over an unconfirmed header.
  */
 export function creditStatementState(html: string, detailMonth: number): CreditStatementState {
-  const document = parse(html);
-  const headings = findElements(
-    document,
-    (element) =>
-      element.tagName === "h1" && compactText(nodeText(element)) === CONFIRMED_STATEMENT_HEADING,
-  ).length;
-  const ledgers = findElements(document, (element) => hasClass(element, "detail-list-01"));
-  const rowCount = ledgers.reduce((count, ledger) => count + ledgerRows(ledger).length, 0);
-  const amountHeaders = new Set(
-    ledgers.flatMap((ledger): ("confirmed" | "unconfirmed" | "both")[] => {
-      const header = findElements(ledger, (element) => hasClass(element, "head"))[0];
-      const text = header ? compactText(nodeText(header)) : "";
-      const confirmed = text.includes(CONFIRMED_AMOUNT_HEADER);
-      const unconfirmed = text.includes(UNCONFIRMED_AMOUNT_HEADER);
-      if (confirmed && unconfirmed) return ["both"];
-      return confirmed ? ["confirmed"] : unconfirmed ? ["unconfirmed"] : [];
-    }),
-  );
+  const page = readMyJcbStatementPage(parse(html));
   // Counts and label codes only: the page's text never reaches the log.
   const shape = (event: string) =>
     JSON.stringify({
       event,
       detailMonth,
-      confirmedHeadings: headings,
-      ledgerCount: ledgers.length,
-      rowCount,
-      amountHeaders: [...amountHeaders].sort(),
+      confirmedHeadings: page.headings,
+      ledgerCount: page.ledgerCount,
+      rowCount: page.rowCount,
+      amountHeaders: page.amountHeaders,
     });
   const stop = (message: string): never => {
     console.warn(shape("myjcb-credit-statement-state"));
@@ -345,50 +333,27 @@ export function creditStatementState(html: string, detailMonth: number): CreditS
     console.warn(shape("myjcb-credit-statement-unstated"));
     return "unknown";
   };
-  if (
-    headings > 1 ||
-    amountHeaders.has("both") ||
-    amountHeaders.size > 1 ||
-    (headings === 1 && amountHeaders.has("unconfirmed"))
-  ) {
+  if (page.reading === "conflict") {
     return stop("MyJCB credit detail heading and ledger headers disagree on the statement state");
   }
   if (detailMonth === 0) {
-    if (headings === 1) return stop("MyJCB detailMonth 0 stated a confirmed statement");
+    if (page.reading === "confirmed")
+      return stop("MyJCB detailMonth 0 stated a confirmed statement");
     return "unconfirmed";
   }
-  if (headings === 1) return "confirmed";
-  if (ledgers.length === 0) return "unknown";
-  if (rowCount === 0) return unstated();
-  if (amountHeaders.has("unconfirmed")) return detailMonth === 1 ? "unconfirmed" : unstated();
-  if (detailMonth === 1) {
-    return stop("MyJCB credit detail ledger rows have no stated statement state");
+  switch (page.reading) {
+    case "confirmed":
+      return "confirmed";
+    case "unknown":
+      return page.ledgerCount === 0 ? "unknown" : unstated();
+    case "unconfirmed":
+      return detailMonth === 1 ? "unconfirmed" : unstated();
+    case "unstated-rows":
+      if (detailMonth === 1) {
+        return stop("MyJCB credit detail ledger rows have no stated statement state");
+      }
+      return unstated();
   }
-  return unstated();
-}
-
-const EMPTY_LEDGER_MARKER = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u;
-
-/**
- * The `.content` rows of a ledger, without the structurally known empty-ledger
- * row (one `w-100per` cell under the empty marker). A row of any other shape
- * counts, so `parseCreditLedger` still stops on it.
- */
-function ledgerRows(ledger: HtmlElement): HtmlElement[] {
-  const hasEmptyMarker = EMPTY_LEDGER_MARKER.test(nodeText(ledger));
-  return directElementChildren(ledger)
-    .filter((element) => hasClass(element, "content"))
-    .filter((row) => !(hasEmptyMarker && isEmptyLedgerRow(row)));
-}
-
-function isEmptyLedgerRow(row: HtmlElement): boolean {
-  const itemCell = findElements(row, (element) => hasClass(element, "item-cell"))[0];
-  if (!itemCell) return false;
-  const children = directElementChildren(itemCell);
-  return (
-    children.filter((element) => hasClass(element, "cell")).length === 1 &&
-    children.some((element) => hasClass(element, "w-100per"))
-  );
 }
 
 function safeClassNames(element: HtmlElement): string[] {
@@ -529,10 +494,6 @@ function decodeHtml(value: string): string {
 
 function normalizeText(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
-}
-
-function compactText(value: string): string {
-  return value.replace(/\s+/gu, "");
 }
 
 function findElements(node: HtmlNode, predicate: (element: HtmlElement) => boolean): HtmlElement[] {
