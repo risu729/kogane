@@ -233,6 +233,13 @@ only the pairs a provider itself linked, bounded per tick
 ([economic-events.md](economic-events.md#card-purchase-recognition)). A
 reviewed merge or split is the change lifecycle's commit, not this lane's.
 
+`observation_sweep` executes at most 12 incremental, 28 repair and 8 replay
+jobs a tick, and `identity_sweep` takes up to 40 parse runs, the incremental
+and repair budgets together, so a re-parse is identified on the tick that
+published it unless the sweep's 200-observation cap or an older backlog defers
+it to the next ticks; the repair budget sets how fast a parser version bump drains
+([observation-lanes.md](observation-lanes.md#repair-budget-and-drain-rate)).
+
 `collection_scan` sits after the parse sweep and before identity so a run
 found this tick can reach identity and parsing on the same tick.
 `operation_dispatch` sits before `decision_outbox`, which stays last, after
