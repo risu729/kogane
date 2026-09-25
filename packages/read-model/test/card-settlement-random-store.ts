@@ -8,7 +8,9 @@
 //   the `statementMonth`-only period shape, missing due dates, other snapshot
 //   semantics and malformed extras, and two namespaces for one card;
 // - identity: none, unsealed, sealed, a newer sealed policy that maps the row to
-//   another source account, and a newer unsealed one that must not win;
+//   another source account, and a newer unsealed one that must not win; for
+//   Vpass, a policy-2 run pinned to the trusted card binding, which wins while
+//   the binding is trusted and must not once its run is excluded;
 // - mappings: two cards resolved to one account, and remapped revisions;
 // - ownership claims: none, `account:`-prefixed, two owners, a claim whose
 //   decision was superseded (alone or beside a live one), a rejected claim, a
@@ -57,6 +59,16 @@ const SOURCE_ACCOUNTS: readonly SourceAccount[] = [
 ];
 
 type Bind = string | number | null;
+
+/** A trusted Vpass card binding and the capture unit it binds. */
+interface VpassBinding {
+  /** The binding fetch run, which a test may exclude. */
+  run: number;
+  unit: number;
+  artifact: number;
+  token: string;
+  financialUnit: number;
+}
 
 export interface RandomSettlementStore {
   db: Database;
@@ -280,6 +292,8 @@ class Builder {
     dataset: string;
     parser: string;
     fetchedAtMs: number;
+    /** The card unit the artifact belongs to (a Vpass card ordinal). */
+    unitKey?: string;
     insert: (parse: number) => { kind: "balance" | "transaction"; id: number }[];
   }): { parse: number; observations: { kind: "balance" | "transaction"; id: number }[] } {
     const id = this.id();
@@ -305,16 +319,19 @@ class Builder {
       input.fetchedAtMs,
     );
     const descriptor = id.toString(16).padStart(64, "0");
+    const unit =
+      input.unitKey === undefined ? null : this.unit(id, input.unitKey, input.fetchedAtMs);
     this.run(
-      `INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,producer_id,first_ingested_by_client_id,artifact_key,artifact_role,
+      `INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,producer_id,first_ingested_by_client_id,fetch_unit_id,artifact_key,artifact_role,
         payload_fidelity,container_kind,lineage_disposition,dataset,declared_media_type,media_type_basis,fetched_at_ms,fetched_at_basis,
         sha256,byte_size,descriptor_version,descriptor_sha256,recorded_at_ms)
-       VALUES(?,?,?,?,?,?,'provider_response','exact','single','not_applicable',?,'application/json','response_header',?,'response',?,3,'v1',?,?)`,
+       VALUES(?,?,?,?,?,?,?,'provider_response','exact','single','not_applicable',?,'application/json','response_header',?,'response',?,3,'v1',?,?)`,
       id,
       id,
       input.source,
       PRODUCER,
       CLIENT,
+      unit,
       input.key,
       input.dataset,
       input.fetchedAtMs,
@@ -380,6 +397,112 @@ class Builder {
     return { parse: id, observations };
   }
 
+  /** One card unit of a fetch run, with its successful terminal report. */
+  private unit(run: number, key: string, at: number): number {
+    const unit = this.id();
+    this.run(
+      `INSERT INTO fetch_units(id,fetch_run_id,unit_kind,unit_key,terminal_report_required,recorded_by_client_id,recorded_at_ms)
+       VALUES(?,?,'card',?,1,?,?)`,
+      unit,
+      run,
+      key,
+      CLIENT,
+      at,
+    );
+    this.run(
+      `INSERT INTO fetch_unit_reports(fetch_unit_id,report_key,report_kind,recorded_by_client_id,normalized_outcome,recorded_at_ms)
+       VALUES(?,'terminal','terminal',?,'success',?)`,
+      unit,
+      CLIENT,
+      at,
+    );
+    return unit;
+  }
+
+  /**
+   * The trusted importer card binding run of one Vpass card capture, in the
+   * capture's session (migration 0020 `trusted_vpass_card_bindings`): one card
+   * unit keyed by the card token and its binding sidecar.
+   */
+  private vpassBinding(
+    session: number,
+    card: string,
+    at: number,
+  ): Omit<VpassBinding, "financialUnit"> {
+    const run = this.id();
+    const token = `vpass-card-v1-${run.toString(16).padStart(64, "0")}`;
+    this.run(
+      `INSERT INTO fetch_runs(id,acquisition_session_id,producer_id,source_id,first_recorded_by_client_id,source_run_key,first_recorded_at_ms)
+       VALUES(?,?,?,'vpass',?,?,?)`,
+      run,
+      session,
+      PRODUCER,
+      CLIENT,
+      `${card}-vpass-card-binding-v1`,
+      at,
+    );
+    const unit = this.unit(run, token, at);
+    const artifact = this.id();
+    const descriptor = artifact.toString(16).padStart(64, "0");
+    this.run(
+      `INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,producer_id,first_ingested_by_client_id,fetch_unit_id,artifact_key,artifact_role,
+        payload_fidelity,container_kind,lineage_disposition,dataset,format_id,format_version,declared_media_type,media_type_basis,
+        fetched_at_ms,fetched_at_basis,sha256,byte_size,descriptor_version,descriptor_sha256,recorded_at_ms)
+       VALUES(?,?,'vpass',?,?,?,'card-identity-binding.json','collector_derived','transformed','single','source_not_retained_for_security',
+        'card-identity-binding','vpass-card-identity-binding-json','1','application/json','response_header',?,'response',?,3,'v1',?,?)`,
+      artifact,
+      run,
+      PRODUCER,
+      CLIENT,
+      unit,
+      at,
+      SHA,
+      descriptor,
+      at,
+    );
+    for (const [index, kind] of ["extracted", "redacted"].entries())
+      this.run(
+        `INSERT INTO artifact_transform_steps(fetch_artifact_id,step_index,step_kind,transformer_id,transformer_version,recorded_by_client_id,recorded_at_ms)
+         VALUES(?,?,?,'synthetic','1',?,?)`,
+        artifact,
+        index,
+        kind,
+        CLIENT,
+        at,
+      );
+    this.run(
+      `INSERT INTO run_inventories(id,fetch_run_id,inventory_sha256,expected_artifact_count,declaration_basis,created_at_ms,created_by_client_id)
+       VALUES(?,?,?,1,'operator',?,?)`,
+      run,
+      run,
+      descriptor,
+      at,
+      CLIENT,
+    );
+    this.run(
+      "INSERT INTO run_inventory_items(inventory_id,fetch_run_id,artifact_key,sha256,descriptor_sha256) VALUES(?,?,'card-identity-binding.json',?,?)",
+      run,
+      run,
+      SHA,
+      descriptor,
+    );
+    this.run(
+      `INSERT INTO fetch_run_reports(fetch_run_id,report_key,report_kind,recorded_by_client_id,normalized_outcome,recorded_at_ms)
+       VALUES(?,'terminal','terminal',?,'success',?)`,
+      run,
+      CLIENT,
+      at,
+    );
+    this.run(
+      "INSERT INTO fetch_run_seals(inventory_id,fetch_run_id,sealed_at_ms,sealed_by_client_id) VALUES(?,?,?,?)",
+      run,
+      run,
+      at,
+      CLIENT,
+    );
+    return { run, unit, artifact, token };
+  }
+
   /**
    * A later exclusion of the run from financial views (after its identity was
    * sealed: a seal needs a visible artifact).
@@ -399,9 +522,18 @@ class Builder {
     ref: string,
     observations: readonly { kind: "balance" | "transaction"; id: number }[],
     sealed: boolean,
+    pin?: VpassBinding,
   ): void {
     const run = `ir-${parse}-${policy}`;
     this.run("INSERT INTO identity_runs VALUES(?,?,?,'2026-09-01')", run, parse, policy);
+    if (pin !== undefined)
+      this.run(
+        "INSERT INTO identity_vpass_bindings VALUES(?,?,?,?)",
+        run,
+        pin.financialUnit,
+        pin.artifact,
+        pin.token,
+      );
     for (const { kind, id } of observations)
       this.run(
         "INSERT INTO identity_observations VALUES(?,?,?,?,?,?,'[]')",
@@ -417,14 +549,18 @@ class Builder {
   }
 
   /**
-   * The identity of one parse: none, unsealed or sealed at policy 1, and for a
-   * source other than Vpass (whose policy 2 needs a card binding) sometimes a
-   * policy-2 run mapping it elsewhere, sealed (it wins) or not (it must not).
+   * The identity of one parse: none, unsealed or sealed at policy 1, and
+   * sometimes a policy-2 run mapping it elsewhere. For a source other than
+   * Vpass that run is sealed (it wins) or not (it must not); for Vpass it is
+   * pinned to the capture's trusted card binding and sealed, and the binding
+   * run may later be excluded, which makes the run ineligible (migration 0020
+   * `eligible_identity_runs`) so that policy 1 wins again.
    */
   identity(
     source: SourceAccount,
     parse: number,
     observations: readonly { kind: "balance" | "transaction"; id: number }[],
+    binding?: VpassBinding,
   ): void {
     if (this.chance(0.08, "no identity")) return;
     const peers = SOURCE_ACCOUNTS.filter((entry) => entry.source === source.source);
@@ -432,7 +568,24 @@ class Builder {
       ? this.pick(peers).ref
       : source.ref;
     this.identityRun(parse, 1, ref, observations, !this.chance(0.1, "unsealed identity"));
-    if (source.source === "vpass" || !this.chance(0.3)) return;
+    if (source.source === "vpass") {
+      // The pin needs the binding to be trusted now: a failed capture has none.
+      const trusted =
+        binding !== undefined &&
+        this.db
+          .query("SELECT 1 FROM trusted_vpass_card_bindings WHERE financial_artifact_id=?")
+          .get(parse) !== null;
+      if (!trusted || !this.chance(0.4)) return;
+      this.identityRun(parse, 2, this.pick(peers).ref, observations, true, binding);
+      if (this.chance(0.5, "binding no longer trusted"))
+        this.run(
+          "INSERT INTO fetch_run_annotations(fetch_run_id,annotation_kind,reason_code,recorded_at_ms) VALUES(?,'exclude_from_financial_views','synthetic',0)",
+          binding.run,
+        );
+      else this.drawn.add("pinned binding policy");
+      return;
+    }
+    if (!this.chance(0.3)) return;
     const sealed = this.chance(0.6);
     this.drawn.add(sealed ? "newer sealed policy" : "newer unsealed policy");
     this.identityRun(parse, 2, this.pick(peers).ref, observations, sealed);
@@ -462,9 +615,12 @@ class Builder {
       ? "credit_statement_balance"
       : "credit_statement_payment_amount";
     const total = 1_000 + Math.floor(this.next() * 20) * 1_000;
+    // A Vpass capture belongs to its card's unit, as the importer's does.
+    const card = vpass ? source.raw.slice("vpass:".length) : undefined;
     const { parse, observations } = this.capture({
       source: source.source,
       namespace,
+      unitKey: card,
       key: vpass ? `months/${month}/top-000.json` : `conn-a/credit-detail-01.html`,
       dataset: vpass ? "statement-page" : "credit-detail",
       parser: vpass ? "vpass-statement-page" : "myjcb-credit-statement-total",
@@ -485,10 +641,25 @@ class Builder {
         return [{ kind: "balance", id }];
       },
     });
-    this.identity(source, parse, observations);
+    const binding =
+      card === undefined
+        ? undefined
+        : { ...this.vpassBinding(parse, card, fetchedAtMs), financialUnit: this.unitOf(parse) };
+    this.identity(source, parse, observations, binding);
     this.maybeExclude(parse);
     if (facts["paymentDate"] !== undefined && this.chance(0.7))
       this.debits(due, total, fetchedAtMs);
+  }
+
+  /** The card unit of a capture's artifact. */
+  private unitOf(artifact: number): number {
+    return (
+      this.db
+        .query("SELECT fetch_unit_id AS unit FROM fetch_artifacts WHERE id=?")
+        .get(artifact) as {
+        unit: number;
+      }
+    ).unit;
   }
 
   /** One bank capture of one to three rows around a due date. */
@@ -661,6 +832,8 @@ export const RANDOM_STATES = [
   "unsealed identity",
   "newer sealed policy",
   "newer unsealed policy",
+  "pinned binding policy",
+  "binding no longer trusted",
   "second namespace",
   "statementMonth only",
   "no payment date",
