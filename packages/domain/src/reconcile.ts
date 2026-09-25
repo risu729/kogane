@@ -9,7 +9,8 @@
 // correspondence across sources. Provider-identifier equality is only ever
 // evaluated inside one identifier namespace: source, credential epoch and
 // account namespace must all agree, because provider ids are reused and some
-// are run-scoped.
+// are run-scoped. Stage A pairs only identifiers the provider issued; a
+// collector fingerprint pairs nothing (`stageAProposals`).
 import type { RelationKind } from "./decisions.ts";
 import { hasExactKeys, isOneOf, isRecord, isRefList, isText } from "./guards.ts";
 import { validSourceFactRef, type SourceFactRef } from "./events.ts";
@@ -49,6 +50,8 @@ export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 export const RATIONALE_CODES = [
   "provider_link_id_equal",
   "provider_identifier_equal",
+  // Carried by the stage A rows written before stage A stopped pairing
+  // collector fingerprints; no rule produces it any more (`stageAProposals`).
   "collector_fingerprint_identifier",
   "same_identifier_namespace",
   "same_source_account",
@@ -142,7 +145,11 @@ export interface MatchFact {
 }
 
 export interface MatchOptions {
-  /** Maximum civil-day distance for stage B/C date closeness. */
+  /**
+   * The matching window, in civil days. Stage B: the most days a posted row's
+   * day may follow its pending row's day (`postedInWindow`). Stage C: the most
+   * days apart the two sides' days may be.
+   */
   dayWindow: number;
   policyRelease: string;
 }
@@ -173,19 +180,44 @@ function localDay(value: TemporalValue): string | null {
   return null;
 }
 
+/** Civil days from `from` to `to` (negative when `to` is earlier), or null without a day on both sides. */
+function daysAfter(from: TemporalValue, to: TemporalValue): number | null {
+  const left = localDay(from);
+  const right = localDay(to);
+  if (left === null || right === null) return null;
+  const x = parseLocalDate(left);
+  const y = parseLocalDate(right);
+  if (!x || !y) return null;
+  return daysBetween(x, y);
+}
+
 /**
  * Civil-day distance, or null when either side is not anchored to a day. A
  * period or an unknown time yields null rather than a guessed day, so a rule
  * that needs closeness simply does not fire.
  */
 export function dayDistance(a: TemporalValue, b: TemporalValue): number | null {
-  const left = localDay(a);
-  const right = localDay(b);
-  if (left === null || right === null) return null;
-  const x = parseLocalDate(left);
-  const y = parseLocalDate(right);
-  if (!x || !y) return null;
-  return Math.abs(daysBetween(x, y));
+  const days = daysAfter(a, b);
+  return days === null ? null : Math.abs(days);
+}
+
+/**
+ * Stage B's matching window: the posted row's day is the pending row's day or
+ * at most `dayWindow` days after it. A posted charge always follows its
+ * authorisation, so a posted row dated before its pending row is not its
+ * posting. Both Vpass displays and both MyJCB ledgers date a row by the
+ * provider's usage day (`riyouDate`, `ご利用日`), not by the day it posted, so
+ * the posting lag of up to about 60 days does not widen the gap between the
+ * two days; a later merchant sales day can, by a few days. A side without a
+ * day is never in the window: the rule does not guess one.
+ */
+export function postedInWindow(
+  pending: TemporalValue,
+  posted: TemporalValue,
+  dayWindow: number,
+): boolean {
+  const days = daysAfter(pending, posted);
+  return days !== null && days >= 0 && days <= dayWindow;
 }
 
 function amountsEqual(a: Quantity, b: Quantity): boolean {
@@ -241,8 +273,16 @@ function proposal(input: {
 
 /**
  * Stage A — the same provider row observed twice. Only an identifier the
- * provider issued, inside one namespace, is strong enough to accept
- * automatically; a collector fingerprint is proposed and reviewed.
+ * provider issued, on both sides and inside one namespace, pairs two rows,
+ * and such a pair is strong enough to accept automatically.
+ *
+ * A collector fingerprint, or an identifier whose origin was not recorded,
+ * pairs nothing. Two captures of one displayed row share a fingerprint by
+ * construction (Vpass and MyJCB derive every external id from the row's
+ * content and its occurrence), so each daily re-capture would be one more
+ * candidate that can never be accepted automatically and that no reviewer
+ * needs: which capture a reader sees is already decided by snapshot
+ * currentness (docs/publication-gate.md), not by a relation.
  */
 export function stageAProposals(
   facts: readonly MatchFact[],
@@ -254,12 +294,10 @@ export function stageAProposals(
       const left = facts[i]!;
       const right = facts[j]!;
       if (left.externalId === null || left.externalId !== right.externalId) continue;
+      if (left.identifierOrigin !== "provider" || right.identifierOrigin !== "provider") continue;
       const mismatch = scopeMismatch(left.scope, right.scope);
       if (mismatch.length > 0) continue; // Outside its namespace the id proves nothing.
-      const provider =
-        left.identifierOrigin === "provider" && right.identifierOrigin === "provider";
       const rationale: RationaleCode[] = ["provider_identifier_equal", "same_identifier_namespace"];
-      if (!provider) rationale.push("collector_fingerprint_identifier");
       if (amountsEqual(left.quantity, right.quantity)) rationale.push("amount_equal");
       out.push(
         proposal({
@@ -268,15 +306,8 @@ export function stageAProposals(
           left,
           right,
           rationaleCodes: rationale,
-          rejectionConditions: provider
-            ? ["identifier_namespace_differs", "credential_epoch_differs"]
-            : [
-                "identifier_namespace_differs",
-                "credential_epoch_differs",
-                "provider_link_absent",
-                "amount_differs",
-              ],
-          autoAcceptable: provider,
+          rejectionConditions: ["identifier_namespace_differs", "credential_epoch_differs"],
+          autoAcceptable: true,
           policyRelease: options.policyRelease,
         }),
       );
@@ -290,6 +321,17 @@ export function stageAProposals(
  * provider. Amount and date closeness alone can only produce a candidate: two
  * purchases of the same amount on the same day must not be collapsed (SC03,
  * UC13). Only an explicit provider link id makes the pair auto-acceptable.
+ *
+ * Without a provider link, a pair is a candidate only inside the matching
+ * window (`postedInWindow`): a posted row dated before its pending row or more
+ * than `dayWindow` days after it is not proposed at all, whatever else agrees,
+ * and a shared statement period alone never pairs two rows. Inside the window
+ * the amounts need not agree: a posted amount can legitimately differ from
+ * its authorisation (a foreign-currency charge converted at posting, a fuel or
+ * hotel hold), so `amount_equal` stays a rationale and `amount_differs` a
+ * rejection condition for the reviewer, and equal-amount pairs come first. A
+ * pair the provider itself linked is proposed whatever its days: the link is
+ * the provider's own statement, not a heuristic.
  */
 export function stageBProposals(
   facts: readonly MatchFact[],
@@ -299,6 +341,7 @@ export function stageBProposals(
   const posted = facts.filter((fact) => fact.settlementState === "posted");
   const out: ReconciliationProposal[] = [];
   const candidatesPerPending = new Map<string, number>();
+  const candidatesPerPosted = new Map<string, number>();
   const drafts: {
     left: MatchFact;
     right: MatchFact;
@@ -311,11 +354,10 @@ export function stageBProposals(
       if (!sameScope(left.scope, right.scope) || left.sourceAccount !== right.sourceAccount)
         continue;
       const linked = left.providerLinkId !== null && left.providerLinkId === right.providerLinkId;
-      const distance = dayDistance(left.occurred, right.occurred);
-      const closeInTime = distance !== null && distance <= options.dayWindow;
+      const inWindow = postedInWindow(left.occurred, right.occurred, options.dayWindow);
+      if (!linked && !inWindow) continue;
       const samePeriod =
         left.statementPeriod !== null && left.statementPeriod === right.statementPeriod;
-      if (!linked && !(closeInTime || samePeriod)) continue;
       const rationale: RationaleCode[] = [
         "status_pending_to_posted",
         "same_identifier_namespace",
@@ -324,7 +366,7 @@ export function stageBProposals(
       if (linked) rationale.push("provider_link_id_equal");
       else rationale.push("no_provider_link_id");
       if (samePeriod) rationale.push("same_statement_period");
-      if (closeInTime) rationale.push("date_within_window");
+      if (inWindow) rationale.push("date_within_window");
       if (amountsEqual(left.quantity, right.quantity)) rationale.push("amount_equal");
       if (
         left.counterparty !== null &&
@@ -341,14 +383,28 @@ export function stageBProposals(
             "candidate_not_unique",
           ];
       drafts.push({ left, right, rationale, rejections, linked });
-      // Ambiguity is counted among heuristic candidates only: a pair the
+      // Ambiguity is counted among heuristic candidates only, from both
+      // ends: a pending row with more than one posted candidate, and a posted
+      // row more than one pending row could have become (two same-amount
+      // purchases on one day, one of them posted so far: SC03). A pair the
       // provider itself linked is not weakened by a look-alike row.
-      if (!linked)
+      if (!linked) {
         candidatesPerPending.set(left.ref.id, (candidatesPerPending.get(left.ref.id) ?? 0) + 1);
+        candidatesPerPosted.set(right.ref.id, (candidatesPerPosted.get(right.ref.id) ?? 0) + 1);
+      }
     }
   }
-  for (const draft of drafts) {
-    const ambiguous = !draft.linked && (candidatesPerPending.get(draft.left.ref.id) ?? 0) > 1;
+  // Equal amounts first, each part in pending-then-posted order, so a bounded
+  // writer spends its budget on the likeliest pairs first.
+  const equalFirst = [
+    ...drafts.filter((draft) => draft.rationale.includes("amount_equal")),
+    ...drafts.filter((draft) => !draft.rationale.includes("amount_equal")),
+  ];
+  for (const draft of equalFirst) {
+    const ambiguous =
+      !draft.linked &&
+      ((candidatesPerPending.get(draft.left.ref.id) ?? 0) > 1 ||
+        (candidatesPerPosted.get(draft.right.ref.id) ?? 0) > 1);
     out.push(
       proposal({
         kind: "pending_to_posted",

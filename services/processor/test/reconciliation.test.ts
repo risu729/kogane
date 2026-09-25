@@ -19,10 +19,16 @@ import type { ArtifactMeta, TransactionObservation } from "../../../packages/par
 import { decideProposal, type ProposalCommand } from "../src/reconciliation-commands.ts";
 import {
   factOf,
-  factQuery,
+  factPageQuery,
+  GROUP_LIMIT,
+  GROUP_READ_LIMIT,
+  LOOKUP_CHUNK,
   reconciliationEnabled,
   reconciliationSweep,
   RECONCILIATION_SLICES,
+  SCAN_LIMIT,
+  WRITE_BATCH,
+  WRITE_LIMIT,
   type ReconciliationSlice,
 } from "../src/reconciliation-job.ts";
 import { runScheduled } from "../src/worker.ts";
@@ -151,7 +157,7 @@ test("slices cover Vpass and guarded MyJCB pending/posted pairs", () => {
   expect(reconciliationEnabled("1")).toBe(true);
 });
 
-test("both Vpass id forms stay collector fingerprints, so stage A only proposes them", () => {
+test("both Vpass id forms stay collector fingerprints, so stage A pairs neither", () => {
   // vpass-statement-page@1.2.0 names every page after the first in the
   // external id and records `...+page+occurrence` as its identityOrigin. Both
   // origins must still read as collector fingerprints, never provider ids.
@@ -213,11 +219,12 @@ test("both Vpass id forms stay collector fingerprints, so stage A only proposes 
   expect(later.identifierOrigin).toBe("collector-fingerprint");
   // The same row on two pages of one capture: two ids, nothing to propose.
   expect(stageAProposals([first, later])).toEqual([]);
-  // The same later-page row in two captures: proposed for review, never accepted.
-  const [proposal, ...others] = stageAProposals([later, fact(parsed("answer-001"), 3)]);
-  expect(others).toEqual([]);
-  expect(proposal).toMatchObject({ kind: "provider_same", stage: "A", autoAcceptable: false });
-  expect(proposal!.rationaleCodes).toContain("collector_fingerprint_identifier");
+  // The same row in two captures shares its fingerprint, and is still not a
+  // provider row id: snapshot currentness, not a relation, picks the capture.
+  const again = fact(parsed("answer-001"), 3);
+  expect(again.externalId).toBe(later.externalId);
+  expect(stageAProposals([later, again])).toEqual([]);
+  expect(stageAProposals([first, fact(parsed("top-000"), 4)])).toEqual([]);
 });
 
 test("a pending and a posted row of one card become one candidate, accepted by nobody", async () => {
@@ -800,10 +807,11 @@ async function citing(observations: readonly number[]): Promise<StoredProposal[]
 /** The facts of one connection exactly as the job reads them, before the installment guard. */
 async function unguardedFacts(connection: string): Promise<MatchFact[]> {
   const rows = await db
-    .prepare(factQuery)
+    .prepare(factPageQuery)
     .bind(
       MYJCB.sourceId,
       JSON.stringify([...MYJCB.pendingStatuses, ...MYJCB.postedStatuses]),
+      0,
       1_000,
     )
     .all<Parameters<typeof factOf>[0]>();
@@ -1050,8 +1058,8 @@ test("a confirmed row at a position the rule does not place (detailMonth-2) pair
 });
 
 test("a MyJCB confirmed row re-captured by a later run is not proposed as the same row", async () => {
-  // Stage A over MyJCB confirmed rows is left out: every daily run re-captures
-  // each listed month, and the lane only needs these rows for stage B.
+  // Every daily run re-captures each listed month under the same collector
+  // fingerprint, which is not a provider row id: stage A pairs nothing.
   const row = {
     date: "2026/09/22",
     merchant: "架空文具",
@@ -1060,9 +1068,14 @@ test("a MyJCB confirmed row re-captured by a later run is not proposed as the sa
   };
   const first = await seedLedger("conn-recapture", "confirmed", [row]);
   const second = await seedLedger("conn-recapture", "confirmed", [row]);
-  const [unguarded, ...others] = stageAProposals(await unguardedFacts("conn-recapture"));
-  expect(others).toEqual([]);
-  expect(unguarded).toMatchObject({ kind: "provider_same", stage: "A", autoAcceptable: false });
+  const captures = await unguardedFacts("conn-recapture");
+  expect(captures).toHaveLength(2);
+  expect(captures[0]!.externalId).toBe(captures[1]!.externalId);
+  expect(captures.map((fact) => fact.identifierOrigin)).toEqual([
+    "collector-fingerprint",
+    "collector-fingerprint",
+  ]);
+  expect(stageAProposals(captures)).toEqual([]);
   const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-06T00:00:00Z" });
   expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
   expect(await citing([...first, ...second])).toEqual([]);
@@ -1075,4 +1088,514 @@ test("a MyJCB confirmed row re-captured by a later run is not proposed as the sa
     ["B", `transaction:${pending}`],
     ["B", `transaction:${pending}`],
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// Stage A over parsed Vpass captures, the scan cursor, and the matching window
+// ---------------------------------------------------------------------------
+
+const NOW = "2026-10-10T00:00:00Z";
+
+/** A synthetic slice of its own, so each test below pages only its own rows. */
+function syntheticSlice(sourceId: string): ReconciliationSlice {
+  return { sourceId, pendingStatuses: ["unconfirmed"], postedStatuses: ["posted"] };
+}
+
+/** The observation ids a `seedRows` parse stored, in row order. */
+async function observationsOf(parseId: number): Promise<number[]> {
+  const rows = await db
+    .prepare("SELECT id FROM transaction_observations WHERE parse_run_id=? ORDER BY id")
+    .bind(parseId)
+    .all<{ id: number }>();
+  return rows.results.map((row) => row.id);
+}
+
+async function cursorOf(sourceId: string): Promise<number | null> {
+  return (
+    (
+      await db
+        .prepare("SELECT last_observation_id FROM reconciliation_scan_cursor WHERE source_id=?")
+        .bind(sourceId)
+        .first<{ last_observation_id: number }>()
+    )?.last_observation_id ?? null
+  );
+}
+
+/** The D1 binding, counting proposal inserts, digest lookups and batches sent through it. */
+function counting(target: D1Database): {
+  db: D1Database;
+  sent: { inserts: number; lookups: number; batches: number };
+} {
+  const sent = { inserts: 0, lookups: 0, batches: 0 };
+  return {
+    sent,
+    db: {
+      prepare(sql: string) {
+        if (sql.startsWith("INSERT INTO reconciliation_proposals")) sent.inserts += 1;
+        if (sql.startsWith("SELECT proposal_digest")) sent.lookups += 1;
+        return target.prepare(sql);
+      },
+      batch(statements: D1PreparedStatement[]) {
+        sent.batches += 1;
+        return target.batch(statements);
+      },
+    } as unknown as D1Database,
+  };
+}
+
+/**
+ * One published capture of the synthetic Vpass statement page fixture, parsed
+ * by the deployed parser (vpass-statement-page@1.2.0) and stored exactly as it
+ * emits each row.
+ */
+async function seedVpassCapture(family: "customized" | "web", page: string): Promise<number[]> {
+  const artifactId = (nextArtifact += 1);
+  const parseId = (nextParse += 1);
+  const key = `cards/card-001/months/202608/${page}.json`;
+  const bytes = readFileSync(
+    new URL(
+      `../../../tests/fixtures/observation-pipeline/vpass-parser-boundaries/${family}.json`,
+      import.meta.url,
+    ),
+  );
+  await seedArtifact(env, artifactId, "vpass", "statement-page", key, new Uint8Array(bytes));
+  await db
+    .prepare(
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,?,'2026-08-30','pending','[]')",
+    )
+    .bind(parseId, artifactId, vpassStatementPage.name, vpassStatementPage.version)
+    .run();
+  const parsed = vpassStatementPage
+    .parse(bytes, {
+      id: artifactId,
+      sourceId: "vpass",
+      runStatus: "success",
+      runFailureCount: 0,
+      dataset: "statement-page",
+      url: null,
+      mime: "application/json",
+      artifactKey: key,
+      fetchUnitKey: "card-001",
+      fetchedAt: "2026-08-30T00:00:00.000Z",
+      sha256: "0".repeat(64),
+    } satisfies ArtifactMeta)
+    .observations.filter((row): row is TransactionObservation => row.kind === "transaction");
+  const ids: number[] = [];
+  for (const row of parsed) {
+    const inserted = await db
+      .prepare(
+        `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,description,counterparty,as_of,observed_at,raw_locator,extra_json)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+      )
+      .bind(
+        parseId,
+        row.sourceAccount,
+        row.externalId ?? null,
+        row.status ?? null,
+        row.amountMinor ?? null,
+        row.amountText ?? null,
+        row.amountScale ?? null,
+        row.currency ?? null,
+        row.description ?? null,
+        row.counterparty ?? null,
+        row.asOf ?? null,
+        row.observedAt ?? null,
+        row.rawLocator,
+        JSON.stringify(row.extra),
+      )
+      .first<{ id: number }>();
+    ids.push(inserted!.id);
+  }
+  await db.prepare("UPDATE parse_runs SET status='ok' WHERE id=?").bind(parseId).run();
+  await publishParse(db, parseId);
+  return ids;
+}
+
+test("two captures parsed by the deployed Vpass 1.2.0 parser write no stage A proposal", async () => {
+  // Every daily capture re-lists the month: the same rows under the same
+  // collector fingerprints, on the first page and on a later one.
+  const captures = [
+    ...(await seedVpassCapture("customized", "top-000")),
+    ...(await seedVpassCapture("customized", "top-000")),
+    ...(await seedVpassCapture("customized", "answer-001")),
+    ...(await seedVpassCapture("customized", "answer-001")),
+    ...(await seedVpassCapture("web", "top-000")),
+    ...(await seedVpassCapture("web", "top-000")),
+  ];
+  const ids = await db
+    .prepare(
+      `SELECT external_id,json_extract(extra_json,'$._kogane.identityOrigin') AS origin,count(*) AS n
+       FROM transaction_observations WHERE id IN (SELECT value FROM json_each(?))
+       GROUP BY external_id ORDER BY external_id`,
+    )
+    .bind(JSON.stringify(captures))
+    .all<{ external_id: string; origin: string; n: number }>();
+  // Each external id is shared by its two captures, and both origins are
+  // collector fingerprints the job never reads as provider ids.
+  expect(ids.results.map((row) => row.n)).toEqual(ids.results.map(() => 2));
+  expect(new Set(ids.results.map((row) => row.origin))).toEqual(
+    new Set([
+      "sanitized-row+card+month+family+occurrence",
+      "sanitized-row+card+month+family+page+occurrence",
+    ]),
+  );
+  await reconciliationSweep(db, { slices: [VPASS], now: NOW });
+  expect((await citing(captures)).filter((row) => row.stage === "A")).toEqual([]);
+  expect(
+    await db
+      .prepare(
+        "SELECT count(*) AS n FROM reconciliation_proposals WHERE kind='provider_same' AND EXISTS(SELECT 1 FROM json_each(target_refs_json) r WHERE json_extract(r.value,'$.id') IN (SELECT 'transaction:'||value FROM json_each(?)))",
+      )
+      .bind(JSON.stringify(captures))
+      .first<{ n: number }>(),
+  ).toEqual({ n: 0 });
+});
+
+test("a provider row id seen in two captures is still a stage A pair, accepted as a decision", async () => {
+  const slice = syntheticSlice("synthetic-provider-id");
+  const row = {
+    status: "posted",
+    amount: -2500,
+    asOf: "2026-07-05",
+    month: "2026-07",
+    family: "web",
+    origin: "provider-row-id",
+  };
+  const first = await observationsOf(await seedRows("synthetic-provider-id", "acct", [row]));
+  const second = await observationsOf(await seedRows("synthetic-provider-id", "acct", [row]));
+  const result = await reconciliationSweep(db, { slices: [slice], now: NOW });
+  expect(result).toMatchObject({ groups: 1, proposed: 1, written: 1, autoAccepted: 1 });
+  const [pair, ...others] = await citing([...first, ...second]);
+  expect(others).toEqual([]);
+  expect(pair).toMatchObject({
+    kind: "provider_same",
+    stage: "A",
+    status: "accepted",
+    targets: [`transaction:${first[0]}`, `transaction:${second[0]}`],
+  });
+  expect(pair!.rationale).toEqual(
+    expect.arrayContaining(["provider_identifier_equal", "same_identifier_namespace"]),
+  );
+  expect(pair!.rationale).not.toContain("collector_fingerprint_identifier");
+  expect(await reconciliationSweep(db, { slices: [slice], now: NOW })).toMatchObject({
+    known: 1,
+    written: 0,
+    autoAccepted: 0,
+  });
+});
+
+test("a slice larger than one page is visited in full across ticks, then wraps", async () => {
+  // The bounds docs/economic-events.md documents for one tick.
+  expect({
+    SCAN_LIMIT,
+    GROUP_LIMIT,
+    GROUP_READ_LIMIT,
+    WRITE_LIMIT,
+    LOOKUP_CHUNK,
+    WRITE_BATCH,
+  }).toEqual({
+    SCAN_LIMIT: 1_000,
+    GROUP_LIMIT: 200,
+    GROUP_READ_LIMIT: 2_000,
+    WRITE_LIMIT: 500,
+    LOOKUP_CHUNK: 1_000,
+    WRITE_BATCH: 100,
+  });
+  const slice = syntheticSlice("synthetic-paged");
+  // A July purchase whose posted row sits two rows after its pending row, and
+  // an August purchase that only later pages reach.
+  const july = await observationsOf(
+    await seedRows("synthetic-paged", "card-p", [
+      { status: "unconfirmed", amount: -100, asOf: "2026-07-01", month: "2026-07", family: "c" },
+      { status: "posted", amount: -999, asOf: "2026-07-25", month: "2026-07", family: "web" },
+      { status: "posted", amount: -100, asOf: "2026-07-02", month: "2026-07", family: "web" },
+    ]),
+  );
+  const august = await observationsOf(
+    await seedRows("synthetic-paged", "card-p", [
+      { status: "unconfirmed", amount: -200, asOf: "2026-08-01", month: "2026-08", family: "c" },
+      { status: "posted", amount: -200, asOf: "2026-08-03", month: "2026-08", family: "web" },
+    ]),
+  );
+  const tick = { slices: [slice], now: NOW, scanLimit: 2 };
+  expect(await cursorOf(slice.sourceId)).toBeNull();
+  // Page 1 holds July's pending row; its posted row is read with its group.
+  expect(await reconciliationSweep(db, tick)).toMatchObject({
+    scanned: 2,
+    groups: 1,
+    proposed: 1,
+    known: 0,
+    written: 1,
+  });
+  expect(await cursorOf(slice.sourceId)).toBe(july[1]!);
+  // Page 2 reaches August. July's pair is stored, so only August's is sent.
+  expect(await reconciliationSweep(db, tick)).toMatchObject({
+    scanned: 2,
+    groups: 2,
+    proposed: 2,
+    known: 1,
+    written: 1,
+  });
+  expect(await cursorOf(slice.sourceId)).toBe(august[0]!);
+  // The last, short page wraps the cursor to 0.
+  expect(await reconciliationSweep(db, tick)).toMatchObject({ scanned: 1, known: 1, written: 0 });
+  expect(await cursorOf(slice.sourceId)).toBe(0);
+  // The next cycle starts over and finds everything stored.
+  expect(await reconciliationSweep(db, tick)).toMatchObject({ scanned: 2, known: 1, written: 0 });
+  expect(await cursorOf(slice.sourceId)).toBe(july[1]!);
+  const stored = await citing([...july, ...august]);
+  expect(stored.map((row) => row.targets)).toEqual(
+    expect.arrayContaining([
+      [`transaction:${july[0]}`, `transaction:${july[2]}`],
+      [`transaction:${august[0]}`, `transaction:${august[1]}`],
+    ]),
+  );
+  expect(stored).toHaveLength(2);
+
+  // An exactly full last page wraps on the next tick, whose page is empty.
+  await db
+    .prepare("UPDATE reconciliation_scan_cursor SET last_observation_id=? WHERE source_id=?")
+    .bind(august[0]!, slice.sourceId)
+    .run();
+  expect(await reconciliationSweep(db, { ...tick, scanLimit: 1 })).toMatchObject({ scanned: 1 });
+  expect(await cursorOf(slice.sourceId)).toBe(august[1]!);
+  expect(await reconciliationSweep(db, { ...tick, scanLimit: 1 })).toMatchObject({ scanned: 0 });
+  expect(await cursorOf(slice.sourceId)).toBe(0);
+
+  // An overlapping tick moves the cursor after this tick read it: this
+  // tick's update is conditional on the value it read, so it leaves that move.
+  const overlapping = {
+    prepare(sql: string) {
+      if (!sql.startsWith("SELECT last_observation_id FROM reconciliation_scan_cursor"))
+        return db.prepare(sql);
+      return {
+        bind: (...args: unknown[]) => ({
+          async first() {
+            const read = await db
+              .prepare(sql)
+              .bind(...args)
+              .first();
+            await db
+              .prepare(
+                "UPDATE reconciliation_scan_cursor SET last_observation_id=? WHERE source_id=?",
+              )
+              .bind(august[0]!, slice.sourceId)
+              .run();
+            return read;
+          },
+        }),
+      };
+    },
+    batch: (statements: D1PreparedStatement[]) => db.batch(statements),
+  } as unknown as D1Database;
+  expect(await reconciliationSweep(overlapping, tick)).toMatchObject({ scanned: 2, written: 0 });
+  expect(await cursorOf(slice.sourceId)).toBe(august[0]!);
+});
+
+test("groups past the group read wait, and the cursor stops before their first row", async () => {
+  const slice = syntheticSlice("synthetic-deferred");
+  const rows = (month: string, day: string, amount: number) => [
+    { status: "unconfirmed", amount, asOf: `${month}-${day}`, month, family: "c" },
+    { status: "posted", amount, asOf: `${month}-${day}`, month, family: "web" },
+  ];
+  const may = await observationsOf(
+    await seedRows("synthetic-deferred", "card-d", rows("2026-05", "03", -300)),
+  );
+  const june = await observationsOf(
+    await seedRows("synthetic-deferred", "card-d", rows("2026-06", "04", -400)),
+  );
+  // Both groups are on the page, but only May fits a group read of two rows.
+  const tick = { slices: [slice], now: NOW, groupReadLimit: 2 };
+  expect(await reconciliationSweep(db, tick)).toMatchObject({
+    scanned: 4,
+    groups: 1,
+    groupsDeferred: 1,
+    written: 1,
+  });
+  expect(await cursorOf(slice.sourceId)).toBe(june[0]! - 1);
+  expect(await reconciliationSweep(db, tick)).toMatchObject({
+    scanned: 2,
+    groups: 1,
+    groupsDeferred: 0,
+    written: 1,
+  });
+  expect(await cursorOf(slice.sourceId)).toBe(0);
+  expect(await citing([...may, ...june])).toHaveLength(2);
+});
+
+test("only the posted row inside the window after its pending row is proposed", async () => {
+  const slice = syntheticSlice("synthetic-window");
+  const [pending, before, late, inside] = await observationsOf(
+    await seedRows("synthetic-window", "card-w", [
+      { status: "unconfirmed", amount: -500, asOf: "2026-08-10", month: "2026-08", family: "c" },
+      // Same card, month and amount, but dated before the authorisation.
+      { status: "posted", amount: -500, asOf: "2026-08-09", month: "2026-08", family: "web" },
+      // One day past the window.
+      { status: "posted", amount: -500, asOf: "2026-08-16", month: "2026-08", family: "web" },
+      { status: "posted", amount: -500, asOf: "2026-08-12", month: "2026-08", family: "web" },
+    ]),
+  );
+  expect(await reconciliationSweep(db, { slices: [slice], now: NOW })).toMatchObject({
+    groups: 1,
+    proposed: 1,
+    written: 1,
+  });
+  const [pair, ...others] = await citing([pending!, before!, late!, inside!]);
+  expect(others).toEqual([]);
+  expect(pair!.targets).toEqual([`transaction:${pending}`, `transaction:${inside}`]);
+  expect(pair!.rationale).toEqual(
+    expect.arrayContaining(["date_within_window", "same_statement_period", "amount_equal"]),
+  );
+  // The pairs outside the window were never candidates, so nothing is ambiguous.
+  expect(pair!.rationale).not.toContain("multiple_candidates");
+});
+
+test("a stored proposal is never sent again, and a decided one is never proposed again", async () => {
+  const slice = syntheticSlice("synthetic-resend");
+  const purchase = (day: string, amount: number) => [
+    { status: "unconfirmed", amount, asOf: `2026-07-${day}`, month: "2026-07", family: "c" },
+    { status: "posted", amount, asOf: `2026-07-${day}`, month: "2026-07", family: "web" },
+  ];
+  const first = await observationsOf(
+    await seedRows("synthetic-resend", "card-r", purchase("01", -300)),
+  );
+  const fresh = counting(db);
+  expect(await reconciliationSweep(fresh.db, { slices: [slice], now: NOW })).toMatchObject({
+    proposed: 1,
+    known: 0,
+    written: 1,
+  });
+  expect(fresh.sent).toEqual({ inserts: 1, lookups: 1, batches: 1 });
+  // The same rows again: one lookup, and not one statement sent to write.
+  const again = counting(db);
+  expect(await reconciliationSweep(again.db, { slices: [slice], now: NOW })).toMatchObject({
+    proposed: 1,
+    known: 1,
+    written: 0,
+  });
+  expect(again.sent).toEqual({ inserts: 0, lookups: 1, batches: 0 });
+  // A new purchase in the same group: only its pair is sent.
+  const second = await observationsOf(
+    await seedRows("synthetic-resend", "card-r", purchase("20", -400)),
+  );
+  const added = counting(db);
+  expect(await reconciliationSweep(added.db, { slices: [slice], now: NOW })).toMatchObject({
+    proposed: 2,
+    known: 1,
+    written: 1,
+  });
+  expect(added.sent).toEqual({ inserts: 1, lookups: 1, batches: 1 });
+  // A reviewer rejects the first pair; the rule never proposes it again.
+  const [firstPair] = await citing(first);
+  expect(firstPair!.targets).toEqual(first.map((id) => `transaction:${id}`));
+  expect(
+    await decideProposal(db, {
+      operationId: "op-reject-resend",
+      actorId: "reviewer",
+      actorVerification: "server",
+      action: "reject",
+      proposalId: firstPair!.id,
+      expectedStatus: "proposed",
+      method: "manual",
+      reason: "reviewed against the statement",
+    }),
+  ).toMatchObject({ ok: true });
+  const decided = counting(db);
+  expect(await reconciliationSweep(decided.db, { slices: [slice], now: NOW })).toMatchObject({
+    proposed: 2,
+    known: 2,
+    written: 0,
+  });
+  expect(decided.sent).toEqual({ inserts: 0, lookups: 1, batches: 0 });
+  const stored = await citing([...first, ...second]);
+  expect(stored.map((row) => row.status).sort()).toEqual(["proposed", "rejected"]);
+});
+
+test("the write budget holds the cursor on its page until the page's new pairs are written", async () => {
+  const slice = syntheticSlice("synthetic-budget");
+  const rows = await observationsOf(
+    await seedRows("synthetic-budget", "card-b", [
+      { status: "unconfirmed", amount: -100, asOf: "2026-09-01", month: "2026-09", family: "c" },
+      { status: "posted", amount: -100, asOf: "2026-09-01", month: "2026-09", family: "web" },
+      { status: "unconfirmed", amount: -200, asOf: "2026-09-15", month: "2026-09", family: "c" },
+      { status: "posted", amount: -200, asOf: "2026-09-16", month: "2026-09", family: "web" },
+    ]),
+  );
+  const tick = { slices: [slice], now: NOW, writeLimit: 1 };
+  expect(await reconciliationSweep(db, tick)).toMatchObject({ proposed: 2, written: 1 });
+  // One new pair is left, so the cursor has not moved past the page.
+  expect(await cursorOf(slice.sourceId)).toBeNull();
+  expect(await reconciliationSweep(db, tick)).toMatchObject({
+    proposed: 2,
+    known: 1,
+    written: 1,
+  });
+  // Both are written, and the short page leaves the cursor at 0.
+  expect(await cursorOf(slice.sourceId)).toBeNull();
+  expect(await citing(rows)).toHaveLength(2);
+  expect(await reconciliationSweep(db, tick)).toMatchObject({ known: 2, written: 0 });
+});
+
+test("a tick whose every write D1 rejects leaves its page instead of holding it for ever", async () => {
+  const slice = syntheticSlice("synthetic-rejected");
+  const rows = await observationsOf(
+    await seedRows("synthetic-rejected", "card-x", [
+      { status: "unconfirmed", amount: -100, asOf: "2026-09-01", month: "2026-09", family: "c" },
+      { status: "posted", amount: -100, asOf: "2026-09-01", month: "2026-09", family: "web" },
+      { status: "unconfirmed", amount: -200, asOf: "2026-09-15", month: "2026-09", family: "c" },
+      { status: "posted", amount: -200, asOf: "2026-09-16", month: "2026-09", family: "web" },
+    ]),
+  );
+  const rejecting = {
+    prepare: (sql: string) => db.prepare(sql),
+    batch: () => Promise.reject(new Error("synthetic rejection")),
+  } as unknown as D1Database;
+  // Two new pairs and room for one: the page would be held, but nothing
+  // was written, so holding it would only send the same batch again.
+  const tick = { slices: [slice], now: NOW, scanLimit: 2, writeLimit: 1 };
+  expect(await reconciliationSweep(rejecting, tick)).toMatchObject({
+    proposed: 2,
+    written: 0,
+    failed: 1,
+  });
+  expect(await cursorOf(slice.sourceId)).toBe(rows[1]!);
+  expect(await citing(rows)).toEqual([]);
+  // A tick that writes something still holds its page for the pair left over.
+  expect(await reconciliationSweep(db, tick)).toMatchObject({ proposed: 2, written: 1 });
+  expect(await cursorOf(slice.sourceId)).toBe(rows[1]!);
+  expect(await reconciliationSweep(db, tick)).toMatchObject({ known: 1, written: 1 });
+  expect(await cursorOf(slice.sourceId)).toBe(rows[3]!);
+  expect(await citing(rows)).toHaveLength(2);
+});
+
+test("the stored digests are looked up a chunk at a time, the last chunk short", async () => {
+  const slice = syntheticSlice("synthetic-chunks");
+  // One pending row and three posted rows in its window: three candidates.
+  const rows = await observationsOf(
+    await seedRows("synthetic-chunks", "card-k", [
+      { status: "unconfirmed", amount: -300, asOf: "2026-09-10", month: "2026-09", family: "c" },
+      { status: "posted", amount: -300, asOf: "2026-09-10", month: "2026-09", family: "web" },
+      { status: "posted", amount: -300, asOf: "2026-09-11", month: "2026-09", family: "web" },
+      { status: "posted", amount: -300, asOf: "2026-09-12", month: "2026-09", family: "web" },
+    ]),
+  );
+  // One digest past a full chunk (as 1,001 against 1,000): a second lookup.
+  const over = counting(db);
+  expect(
+    await reconciliationSweep(over.db, { slices: [slice], now: NOW, lookupChunk: 2 }),
+  ).toMatchObject({ proposed: 3, known: 0, written: 3 });
+  expect(over.sent).toEqual({ inserts: 3, lookups: 2, batches: 1 });
+  // Exactly one full chunk (as 1,000): one lookup, and every digest found.
+  const exact = counting(db);
+  expect(
+    await reconciliationSweep(exact.db, { slices: [slice], now: NOW, lookupChunk: 3 }),
+  ).toMatchObject({ proposed: 3, known: 3, written: 0 });
+  expect(exact.sent).toEqual({ inserts: 0, lookups: 1, batches: 0 });
+  // The short last chunk finds its stored digest too.
+  const again = counting(db);
+  expect(
+    await reconciliationSweep(again.db, { slices: [slice], now: NOW, lookupChunk: 2 }),
+  ).toMatchObject({ proposed: 3, known: 3, written: 0 });
+  expect(again.sent).toEqual({ inserts: 0, lookups: 2, batches: 0 });
+  expect(await citing(rows)).toHaveLength(3);
 });

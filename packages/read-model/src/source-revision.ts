@@ -106,6 +106,9 @@ export const REVISION_EXCLUDED_TABLES = [
   // Card purchase recognition scan progress (migration 0047); the recognitions
   // themselves move the revision through their decision_revisions rows.
   "card_purchase_scan_cursor",
+  // Reconciliation sweep scan progress (migration 0048); the proposals it
+  // writes are what readers see, the cursor is only where the sweep is.
+  "reconciliation_scan_cursor",
   // The Processor's per-lane tick records (migration 0049): that a lane ran is
   // not something any projection reads.
   "processor_lane_ticks",

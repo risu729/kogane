@@ -48,9 +48,6 @@ test("harness applies every Layer B migration in order through 0049", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
   expect(names.at(-1)).toBe("0049_processor_lane_ticks.sql");
-  // 0048 is the reconciliation scan cursor, reviewed separately: this pin holds
-  // with or without it, and nothing else may take its place.
-  const cursor = names.filter((name) => name === "0048_reconciliation_scan_cursor.sql");
   expect(names).toEqual([
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
@@ -82,7 +79,7 @@ test("harness applies every Layer B migration in order through 0049", () => {
     "0045_expand_card_settlement_commands.sql",
     "0046_st_george_balance_snapshot.sql",
     "0047_card_purchase_recognition.sql",
-    ...cursor,
+    "0048_reconciliation_scan_cursor.sql",
     "0049_processor_lane_ticks.sql",
   ]);
   expect([...names].sort()).toEqual(names);

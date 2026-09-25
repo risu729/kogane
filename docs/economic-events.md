@@ -183,13 +183,50 @@ returned side by side with `cross_unit_requires_fx_model`; signed amounts in
 ## Matching stages
 
 - **Stage A — the same provider row observed twice.** Provider-identifier
-  equality inside one identifier namespace. A collector fingerprint is not a
-  provider identifier: such a pair is proposed and reviewed.
+  equality inside one identifier namespace, and **only for identifiers the
+  provider issued** (`identifierOrigin: "provider"` on both sides, which the
+  job reads from the parser's `_kogane.identityOrigin`); such a pair is
+  auto-acceptable. A collector fingerprint, or an origin nobody recorded,
+  pairs nothing: SBI Shinsei's `txnReferenceNo` and PayPay's
+  `transactionNumber` are provider row ids, but their parsers record no
+  origin and neither source is in a slice, so they pair nothing yet either. Vpass and MyJCB derive every external id from the row's
+  content and occurrence, so each daily capture of a displayed row carries the
+  same fingerprint: stage A over them was one more `provider_same` candidate
+  per pair of captures, never auto-acceptable, and nothing for a reviewer to
+  decide (no surface lists or reviews one), because which capture a reader
+  sees is already decided by snapshot currentness
+  ([publication gate](publication-gate.md)), not by a relation. The
+  `provider_same` rows written before this rule (about 26,000 in production,
+  all `proposed`, carrying `collector_fingerprint_identifier`) stay as they
+  are: proposals are append-only and nothing resolves or deletes them. The
+  candidate reads select stage B proposals by the `(kind, stage)` index of
+  CORE `0048`, so those rows are never read by them.
 - **Stage B — a revision or a second display inside one provider.** Pending
   against posted. Amount and date closeness alone yields a candidate, never an
   acceptance: two purchases of the same amount on the same day must not be
-  collapsed (UC13, UC23, SC03). More than one heuristic candidate for one
-  pending row marks all of them `multiple_candidates` / `candidate_not_unique`.
+  collapsed (UC13, UC23, SC03). Without a provider link id a pair is a
+  candidate only **inside the matching window**: the posted row's day is the
+  pending row's day or at most `DEFAULT_MATCH_OPTIONS.dayWindow` (5) days
+  after it (`postedInWindow`). A posted charge always follows its
+  authorisation, and both Vpass displays and both MyJCB ledgers date a row by
+  the provider's usage day, not by the day it posted, so the posting lag of up
+  to about 60 days does not show between the two days; a later merchant sales
+  day can, by a few days. A posted row dated before its pending row or past
+  the window, or a row without a provider day, is not proposed at all, and a
+  shared statement period alone never pairs two rows: before this rule every
+  pending row of a month was paired with every posted row of it (40 pending ×
+  60 posted rows made 2,400 candidates, nearly all ambiguous). Inside the
+  window the amounts need not agree, because a posted amount can differ from
+  its authorisation (a foreign-currency charge converted at posting, a fuel or
+  hotel hold): `amount_equal` stays a rationale and `amount_differs` a
+  rejection condition for the reviewer, and equal-amount pairs come first. More
+  than one heuristic candidate for one pending row, or for one posted row (two
+  same-amount purchases on one day, one of them posted so far), marks all of
+  them `multiple_candidates` / `candidate_not_unique`. A pair the provider itself
+  linked is proposed whatever its days. The window only removes pairs:
+  `proposalIdentity` (kind, stage, method, policy release, targets) is
+  unchanged, so every pair still proposed keeps its stored digest and a
+  decided pair is never proposed again (pinned in `test/reconcile.test.ts`).
 - **Stage C — a correspondence across sources.** Equal opposite amounts on
   nearby days never establish ownership; without an established owner on both
   sides the candidate carries `owner_not_established`, and cross-source
@@ -223,17 +260,19 @@ inside one provider's own displays**:
   the capture day and names a different payment month as months pass, so rows
   grouped under it would claim `same_statement_period` falsely. A pending
   `detailMonth-0` row therefore pairs with the `detailMonth-1` confirmed row
-  the next cycle moves it to when both resolve to one month, and the same
-  label captured in another cycle groups apart. That needs the collector to
+  the next cycle moves it to when both resolve to one month (and the posted
+  day is inside the [matching window](#matching-stages)), and the same label
+  captured in another cycle groups apart. That needs the collector to
   record `detailMonth=1` as confirmed; on the surveyed connection it records
   it as `unconfirmed` (no export link,
   [observations](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
   so its rows are pending rows there. A confirmed row whose month
   neither the label nor the rule places (`detailMonth-2` and beyond) stays out
   of this job; the recognition lane's candidate pass, which groups MyJCB by
-  usage month, still pairs it. A confirmed row takes part in stage B only: its
-  stage A pairs would be the same row re-captured by each daily run, one
-  collector-fingerprint candidate per pair of captures.
+  usage month, still pairs it.
+
+Both sources' external ids are collector fingerprints, so stage A proposes
+nothing for either; it runs for the day a slice carries provider row ids.
 
 These are the only pairs in the deployed parser set where both sides of a
 pending/posted revision exist in one identifier namespace, so no cross-source
@@ -491,9 +530,12 @@ relative label resolves to a payment month from its capture time, but the
 confirmed row of the same purchase can sit at a later position the rule does
 not place (`detailMonth-2` and beyond), so grouping by period would keep the
 two apart. The usage date is the one key both displays of a purchase share.
-Stage B then admits a pair when the usage dates are within its day window or
-both sides carry the same statement period (`same_statement_period`, never
-claimed otherwise); the amount is a rationale code, never a filter. Within a
+Stage B then admits a pair only when the posted usage day falls inside the
+[matching window](#matching-stages) after the pending one, whatever the
+periods (`same_statement_period` is a rationale, claimed only when both sides
+have the same one); the amount is a rationale code, never a filter. A pending
+and posted row whose usage days straddle a month end are in two MyJCB groups
+and are not paired by this pass. Within a
 group it pairs each single-key pending-origin event (`authorized`, or
 `unknown` after it left the display) against each single-key `captured`
 posted event of the same card account namespace and kind, never a purchase
@@ -506,8 +548,9 @@ as `transaction:<id>` pinned to `parse_run:<id>`, inserted only
 abort a second insert of an id). A pair already stored, proposed or decided, is
 never written again and never takes the write budget, and the ambiguity codes
 (`multiple_candidates`, `candidate_not_unique`) are kept. The recognition cursor cycles through every
-current row, so a pair is reached however many rows a source has; the
-reconciliation lane's first-1,000-rows read can no longer hide it. The amount
+current row, so a pair is reached however many rows a source has, as the
+reconciliation lane's own [scan cursor](#bounds-1) reaches it over every
+published row. The amount
 and counterparty are read from the rows to compare and never stored.
 
 **Merge.** A reviewed `relation.accept` of the candidate
@@ -590,9 +633,10 @@ larger read skips every group that tick) and at most 200 per group
 (`CANDIDATE_GROUP_LIMIT`; a larger group is skipped and counted), writes at
 most 100 new proposals in one batch (`CANDIDATE_WRITE_LIMIT`; a pair already
 stored never takes that budget), and merges at most 20 provider-linked pairs
-(`LINK_MERGE_LIMIT`), each its own batch. Stage B pairs every pending event with
-every posted event of a group, so a group of 200 events is up to 10,000 pairs:
-the stored ones are looked up 1,000 digests at a time
+(`LINK_MERGE_LIMIT`), each its own batch. Stage B pairs a pending event only
+with the posted events inside its matching window, but a group whose 200 events
+all fall inside one window is still up to 10,000 pairs: the stored ones are
+looked up 1,000 digests at a time
 (`CANDIDATE_LOOKUP_CHUNK`, about 67 KB of bound JSON, far below D1's 2 MB value
 limit) and only until the write budget is full. A tick therefore issues at most
 about 320 guarded batches, and a deferred tick pairs nothing: the candidate
@@ -902,7 +946,9 @@ new route.
 
 ## Deploy order and rollback
 
-1. Apply migration `0032_economic_events.sql` (schema; additive, writes no rows).
+1. Apply migration `0032_economic_events.sql` (schema; additive, writes no rows)
+   and `0048_reconciliation_scan_cursor.sql` (the sweep's scan cursor and the
+   `(kind, stage)` proposal index; additive, writes no rows).
 2. Deploy `services/processor` with `RECONCILIATION_ENABLED="0"`;
    turn it on when the candidates should start being produced.
 3. Deploy `services/app` with `EVENTS_V2_ENABLED="0"`; turn it on
@@ -915,12 +961,78 @@ deleted to undo a decision — a new revision is appended instead.
 
 ## Bounds
 
-One sweep reads at most 1,000 published rows per slice, pairs inside groups of
-at most 200 facts (larger groups are counted and skipped), and writes at most
-500 proposals. MyJCB confirmed rows join stage B only (see
-[the vertical slice](#the-vertical-slice-that-runs)). Its log line carries
-counts only: no amount, account label or provider text. One API page is 200
-rows.
+The sweep pages through each slice with a scan cursor, one row per slice in
+`reconciliation_scan_cursor` (CORE `0048`, operational progress and not
+evidence), so every published row is visited however large a slice grows.
+Before the cursor it re-read the same first 1,000 rows of each slice (by source
+account, then observation id) every tick, and rows past them were never paired.
+Per slice, one tick:
+
+1. reads at most 1,000 published rows after the cursor, by observation id
+   (`SCAN_LIMIT`);
+2. counts the published rows of every group (source account, statement
+   period; for MyJCB the payment month its label resolves to) those rows
+   belong to, in one pass that also names the rows of each
+   group of at most 200 rows; skips a larger group (`GROUP_LIMIT`, counted in
+   `groupsSkipped`), and reads the others whole by row id, at most 2,000 rows
+   in all (`GROUP_READ_LIMIT`; the page's first group to pair is always read,
+   so a deferred group never keeps the cursor where it is), so a pair is found
+   whichever pages its two rows fall on. A group that does not fit waits for the next tick
+   (`groupsDeferred`) and the cursor stops before its first row;
+3. runs stage A and stage B over each group read, looks the candidates'
+   digests up 1,000 at a time (`LOOKUP_CHUNK`, about 67 KB of bound JSON) and
+   writes only the proposals not stored yet, in batches of 100
+   (`WRITE_BATCH`), at most 500 new proposals per tick over every slice
+   (`WRITE_LIMIT`). A stored proposal, open or decided, is never sent again and
+   takes no write budget; before, every sweep re-sent an insert for every
+   candidate it computed;
+4. moves the cursor past the page, and back to 0 after the last page (an
+   exactly full last page wraps on the next tick, whose page is empty). While
+   new proposals of the page are left for the write budget the cursor stays on
+   the page, and the next tick writes the rest. The update is conditional on
+   the value this tick read, so an overlapping tick never pulls it back.
+
+A batch D1 rejects writes nothing and is counted in `failed`. While the page
+is held, the next tick sends its pairs again; a tick in which D1 rejected every
+batch it sent does not hold the page, so a rejection that repeats cannot keep
+the slice on one page, and those pairs are retried on the next cycle, as are
+the rejected pairs of a page the cursor has left. The log line carries counts only, no amount,
+account label, provider text or row id:
+
+```json
+{
+  "event": "reconciliation_sweep",
+  "slices": 2,
+  "scanned": 1000,
+  "groups": 4,
+  "groupsSkipped": 0,
+  "groupsDeferred": 0,
+  "proposed": 12,
+  "known": 11,
+  "written": 1,
+  "failed": 0,
+  "autoAccepted": 0
+}
+```
+
+`proposed` counts the candidates the matcher produced for the groups read,
+`known` those already stored. One API page is 200 rows.
+
+Cost, on the scaled store of [the read model's measurement](read-model.md#cost)
+(268,575 observations, 220,309 published Vpass pending and posted rows after
+180 daily captures; `bun:sqlite`, no table statistics): one tick of both
+slices took 1.5–3.2 s, about 0.5 s choosing the pages (the ids first, then
+only the page's rows with their JSON columns: 0.3 s against 2 s for Vpass)
+and 1–1.8 s finding the members of the groups the pages touched, which reads
+each published row's statement period once. The first-1,000-rows read it
+replaces took about 1 s and paired only those rows. What still grows with
+history is that pass: the lane reads every published capture, not only the
+current ones, so a Vpass statement month captured daily holds thousands of
+rows there and is counted in `groupsSkipped` rather than paired, as it was
+skipped or read in part before. On the smaller store the CI scale test builds
+(2,070 published Vpass rows after 21 daily captures, near production's
+3,300) a tick's reads take tens of milliseconds, and several of its Vpass
+months already hold more than 200 rows.
 
 ## Verified locally (synthetic data only)
 
@@ -937,7 +1049,9 @@ migration 0026.
   credited transfer; SC10 10,000 / 300 / 9,700 with payout and bank credit as
   two evidences of one settlement; conservation, fills and state machines) and
   `test/reconcile.test.ts` (stage A/B/C, UC23 candidate-only, ambiguity,
-  namespace scoping, the auto-acceptance invariant).
+  namespace scoping, the auto-acceptance invariant, collector fingerprints
+  pairing nothing, the stage B window with UC13/SC03/UC23 cases, and the
+  proposal identity pinned for the pairs still proposed).
 - `packages/read-model`: `test/events.test.ts` (both bases, explanation chain to
   the raw locator, outstanding 8,000 from settlements, non-exact principal left
   unknown, provider-against-derived difference with reasons, a wrong merge
@@ -954,7 +1068,14 @@ migration 0026.
   proposal writing nothing, a `detailMonth-0` row pairing with the
   `detailMonth-1` row its months resolve to, the same label in another cycle
   and an unplaced `detailMonth-2` row pairing nothing, and a re-captured
-  confirmed row kept out of stage A),
+  confirmed row kept out of stage A; two captures of the synthetic Vpass
+  fixture parsed by the deployed 1.2.0 parser writing no stage A proposal and
+  a synthetic provider row id still paired; a slice of several pages visited
+  in full and wrapped, an overlapping tick never pulling the cursor back, a
+  deferred group, the write budget holding the cursor on its page and a tick
+  whose every batch D1 rejected not holding it, the digest lookup's chunk
+  boundary, a stored proposal sending no statement and a decided one never
+  proposed again, and only the in-window posted row proposed),
   `test/card-purchase-relative-period.test.ts` (a `detailMonth-1` row's stored
   period is its statement's from the same capture and the explanation links
   them; `detailMonth-0` stores its resolved month and `detailMonth-2` stays
