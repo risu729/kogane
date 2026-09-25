@@ -565,8 +565,8 @@ to be read from Workers Logs ([operations.md](operations.md#lane-tick-records)).
 
 ### Flag, deploy and rollback
 
-| Flag                           | Where                     | Default | Effect when on                                                                             |
-| ------------------------------ | ------------------------- | ------- | ------------------------------------------------------------------------------------------ |
+| Flag                           | Where                     | Default | Effect when on                                                                              |
+| ------------------------------ | ------------------------- | ------- | ------------------------------------------------------------------------------------------- |
 | `PURCHASE_RECOGNITION_ENABLED` | `services/processor` vars | `"0"`   | The `purchase_recognition` lane runs right after `card_settlement_sweep` and writes events. |
 
 `"1"` or `"true"` turns it on; any other value leaves the lane unrun and silent
