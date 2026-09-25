@@ -62,7 +62,7 @@ export interface UsageRow {
    * width of Vpass web digits. Vpass web: the one-digit `data[6]` code, which
    * the web builder writes full width (`1` → `１`). Vpass customized:
    * `bunkatsuYaku`, a different field that is `0` on every production row
-   * (its meaning is unverified, so recognition accepts no value of it).
+   * (a single payment, as the owner confirmed).
    * MyJCB: the wording the combined `ご利用先など／支払区分` cell shows after
    * the merchant (`1回払`).
    */

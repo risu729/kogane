@@ -284,30 +284,16 @@ test("a re-fetch of the same month (new artifact, same external ids) creates no 
   ]);
 }, 60_000);
 
-test("a Vpass customized month is skipped; MyJCB pending rows → authorized, retired with no legs; the web snapshot → captured posted events", async () => {
+test("customized → authorized; the web snapshot of the month → captured posted events, pending retired with no legs", async () => {
   const w = await world();
-  // Every production customized row carries bunkatsuYaku `0`, whose meaning
-  // is unverified: no Vpass pending row is recognised, and none is guessed.
+  // Production customized rows carry bunkatsuYaku `0`, a single payment as the
+  // owner confirmed.
   await w.vpass({
     family: "customized",
     fetchedAt: "2026-05-10T00:00:00.000Z",
     rows: [
       { date: "26/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "0" },
       { date: "26/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "0" },
-    ],
-  });
-  expect(await w.sweep()).toMatchObject({
-    recognized: 0,
-    skipped: { payment_type_unsupported: 2 },
-  });
-  // The authorized side on MyJCB's pending ledger, whose rows are recognised.
-  await w.myjcb({
-    state: "unconfirmed",
-    period: "2026年6月お支払い分",
-    fetchedAt: "2026-05-10T00:00:00.000Z",
-    rows: [
-      { date: "2026/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払" },
-      { date: "2026/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1回払" },
     ],
   });
   expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 2 });
@@ -327,18 +313,10 @@ test("a Vpass customized month is skipped; MyJCB pending rows → authorized, re
     { kind: "refund", state: "authorized", role: "pending" },
   ]);
 
-  // The Vpass web capture replaces the customized month, and the next MyJCB
-  // unconfirmed ledger no longer shows the pending rows.
   await w.vpass({
     family: "web",
     fetchedAt: "2026-06-10T00:00:00.000Z",
     rows: [POSTED, { date: "26/05/06", merchant: "架空店舗C", amount: "700", paymentType: "1" }],
-  });
-  await w.myjcb({
-    state: "unconfirmed",
-    period: "2026年7月お支払い分",
-    fetchedAt: "2026-06-10T00:00:00.000Z",
-    rows: [],
   });
   const flipped = await w.sweep();
   expect(counts(flipped)).toEqual({ ...NOTHING, recognized: 2, retired: 2 });
@@ -374,6 +352,39 @@ test("a Vpass customized month is skipped; MyJCB pending rows → authorized, re
     unresolved: 2,
   });
   expect(counts(await w.sweep())).toEqual(NOTHING);
+}, 60_000);
+
+test("MyJCB pending rows → authorized; the next unconfirmed ledger that no longer shows them retires them with no legs", async () => {
+  const w = await world();
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "2026年6月お支払い分",
+    fetchedAt: "2026-05-10T00:00:00.000Z",
+    rows: [
+      { date: "2026/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払" },
+      { date: "2026/05/04", merchant: "架空返金A", amount: "-1,500", paymentType: "1回払" },
+    ],
+  });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 2 });
+  expect(await w.totals()).toMatchObject({ authorized: "1200", authorizedRefunds: "1500" });
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "2026年7月お支払い分",
+    fetchedAt: "2026-06-10T00:00:00.000Z",
+    rows: [],
+  });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, retired: 2 });
+  expect(
+    await w.count(
+      `SELECT count(*) AS n FROM economic_legs l JOIN current_economic_events e
+       ON e.event_id=l.event_id AND e.revision=l.revision`,
+    ),
+  ).toBe(0);
+  expect(await w.totals()).toMatchObject({
+    authorized: "0",
+    authorizedRefunds: "0",
+    unresolved: 2,
+  });
 }, 60_000);
 
 test("MyJCB: usage equal to payment is captured; the installment slice is skipped and writes nothing", async () => {
@@ -434,14 +445,15 @@ test("MyJCB: usage equal to payment is captured; the installment slice is skippe
   expect(await w.count("SELECT count(*) AS n FROM economic_event_revisions")).toBe(2);
 }, 60_000);
 
-test("production-shaped rows: the Vpass web code 1 (１) and MyJCB's 1回払 in the combined cell are recognised; Vpass customized rows (bunkatsuYaku 0) and other shapes are skipped with a reason", async () => {
+test("production-shaped rows: the Vpass web code 1 (１), the customized bunkatsuYaku 0 and MyJCB's 1回払 in the combined cell are recognised; other shapes are skipped with a reason", async () => {
   // The shapes the 2026-09-24 production diagnoses found, where every row was
   // skipped as payment_type_unsupported: a full-width digit in the web page's
   // data[6] (an empty text on some rows), `0` in the customized page's
   // bunkatsuYaku on every row, and MyJCB's 1回払 inside the combined
   // ご利用先など／支払区分 cell next to a two-character label. The world's
-  // builders write exactly these shapes. What bunkatsuYaku means is
-  // unverified, so no customized row is recognised, not even with `1`.
+  // builders write exactly these shapes. The owner confirmed that
+  // bunkatsuYaku `0` is a single payment; `1` is not observed and stays
+  // unsupported.
   const w = await world();
   await w.vpass({
     family: "web",
@@ -465,6 +477,7 @@ test("production-shaped rows: the Vpass web code 1 (１) and MyJCB's 1回払 in 
     rows: [
       { date: "26/06/01", merchant: "架空店舗E", amount: "1,500", paymentType: "0" },
       { date: "26/06/02", merchant: "架空返金E", amount: "-300", paymentType: "0" },
+      // A bunkatsuYaku no production row has shown: unconfirmed, so excluded.
       { date: "26/06/03", merchant: "架空店舗F", amount: "400", paymentType: "1" },
     ],
   });
@@ -522,20 +535,20 @@ test("production-shaped rows: the Vpass web code 1 (１) and MyJCB's 1回払 in 
   const result = await w.sweep();
   expect(result).toMatchObject({
     scanned: 11,
-    recognized: 3,
+    recognized: 5,
     revised: 0,
     reanchored: 0,
     retired: 0,
-    // Web ２ and １回払い, MyJCB's 分割払い, and all three customized rows.
-    skipped: { amount_not_exact: 1, payment_type_unsupported: 6, payment_split_unknown: 1 },
+    // Web ２ and １回払い, MyJCB's 分割払い and the customized `1`.
+    skipped: { amount_not_exact: 1, payment_type_unsupported: 4, payment_split_unknown: 1 },
     conflicts: 0,
     failed: 0,
   });
   expect(await w.totals()).toEqual({
     captured: "2234",
-    authorized: "0",
+    authorized: "1500",
     capturedRefunds: "500",
-    authorizedRefunds: "0",
+    authorizedRefunds: "300",
     unresolved: 0,
   });
   expect(
@@ -545,6 +558,8 @@ test("production-shaped rows: the Vpass web code 1 (１) and MyJCB's 1回払 in 
     ),
   ).toEqual([
     { source_id: "myjcb", kind: "purchase", state: "captured", payment_type: "single-payment" },
+    { source_id: "vpass", kind: "purchase", state: "authorized", payment_type: "single-payment" },
+    { source_id: "vpass", kind: "refund", state: "authorized", payment_type: "single-payment" },
     { source_id: "vpass", kind: "purchase", state: "captured", payment_type: "single-payment" },
     { source_id: "vpass", kind: "refund", state: "captured", payment_type: "single-payment" },
   ]);

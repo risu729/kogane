@@ -376,9 +376,22 @@ test("Vpass statement pages as parsed: web and customized rows, sale codes and r
   const [sale, ret] = vpass("customized.json");
   expect([sale!.paymentType, ret!.paymentType]).toEqual(["0", "0"]);
   expect([sale!.providerSaleCode, ret!.providerSaleCode]).toEqual(["5", "6"]);
-  // What bunkatsuYaku means is unverified: no customized row is recognised,
-  // whatever its value, the sale and the return alike.
-  for (const paymentType of ["0", "1", "１", null]) {
+  // bunkatsuYaku `0` is a single payment, as the owner confirmed: the sale is
+  // an authorized purchase and the return an authorized refund.
+  expect(outcome(sale!)).toEqual({
+    kind: "purchase",
+    state: "authorized",
+    amount: "2000",
+    period: "2026-08",
+  });
+  expect(outcome(ret!)).toEqual({
+    kind: "refund",
+    state: "authorized",
+    amount: "1500",
+    period: "2026-08",
+  });
+  // Every other value is unconfirmed and stays excluded.
+  for (const paymentType of ["1", "１", "2", "", null, "1回払い"]) {
     expect(outcome({ ...sale!, paymentType })).toEqual({ excluded: "payment_type_unsupported" });
     expect(outcome({ ...ret!, paymentType })).toEqual({ excluded: "payment_type_unsupported" });
   }

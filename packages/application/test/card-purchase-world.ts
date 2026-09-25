@@ -126,10 +126,7 @@ export class PurchaseWorld {
    * One more usage row, as the fact the read model would return: a Vpass web
    * row on the fixture's first run (source account `vpass:card-001` unless
    * given), or with `source: "myjcb"` a MyJCB ledger row (confirmed on run 4,
-   * unconfirmed on run 5) whose usage and payment texts agree. A Vpass pending
-   * (customized) row is never recognised until the meaning of its
-   * payment-type field (`bunkatsuYaku`, `0` in production) is verified, so a
-   * recognisable pending row is MyJCB's.
+   * unconfirmed on run 5) whose usage and payment texts agree.
    */
   usage(input: {
     source?: "vpass" | "myjcb";

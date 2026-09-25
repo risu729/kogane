@@ -844,15 +844,12 @@ describe("current provider rows", () => {
       const recognisable = rows.map(factFrom).filter((fact) => classifyCardUsage(fact).ok);
       expect(recognisable.length).toBeGreaterThan(0);
       expect(recognisable.length).toBeLessThan(rows.length);
-      // No Vpass pending row is recognised: its bunkatsuYaku (`0` on every
-      // production row) is unverified, so the replaced customized capture
-      // never held an event.
-      expect(
-        rows
-          .filter((row) => row.provider_family === "customized")
-          .map((row) => classifyCardUsage(factFrom(row)))
-          .every((outcome) => !outcome.ok && outcome.reasonCode === "payment_type_unsupported"),
-      ).toBe(true);
+      // Current Vpass pending rows (bunkatsuYaku `0`) are recognised as
+      // authorized; the replaced customized capture is not current.
+      const customized = rows.filter((row) => row.provider_family === "customized");
+      expect(customized.length).toBeGreaterThan(0);
+      for (const row of customized)
+        expect(classifyCardUsage(factFrom(row))).toMatchObject({ ok: true, state: "authorized" });
       expect(recognisable.map((fact) => fact.parseRunId)).not.toContain(replacedCustomized.parse);
       const events = new Map<number, string>();
       for (const fact of recognisable) events.set(fact.observationId, await recognise(db, fact));

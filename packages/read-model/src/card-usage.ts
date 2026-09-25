@@ -161,8 +161,8 @@ const MYJCB = "fa.source_id = 'myjcb' AND p.parser_name = 'myjcb-credit-ledger'"
 //   `_kogane.statementFamily` = 'web' and `_kogane.statementMonth`.
 // - vpass.ts parseCustomized: status 'unconfirmed'; `extra` is the provider
 //   row (`bunkatsuYaku` is the payment-type field, the same text as
-//   `description`; every production row carries `0`, a field whose meaning
-//   is unverified, so the domain accepts no value of it) plus
+//   `description`; every production row carries `0`, which the domain
+//   accepts as a single payment on the owner's confirmation) plus
 //   `_kogane.statementFamily` = 'customized', `_kogane.statementMonth`
 //   and `_kogane.providerSaleCode` (the row's `uriageKbn`: '5' sale, '6' refund).
 // - myjcb.ts myJcbCreditLedger: status 'confirmed'/'unconfirmed'; `extra` is

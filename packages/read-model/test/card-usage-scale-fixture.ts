@@ -16,10 +16,8 @@
 // identified through the card binding policy, every other parse through the
 // default policy. `scaledStore` then recognises every recognisable current row
 // through the guarded 0047 builder, as the purchase-recognition lane would, and
-// adds one more capture in which a few pending rows have gone, so stale keys
-// exist too. Only MyJCB pending rows are recognised (a Vpass customized row's
-// payment-type field is unverified), so the MyJCB unconfirmed ledger loses
-// rows too. Names, tokens and amounts are invented; no provider
+// adds one more capture in which a few pending rows (Vpass and MyJCB) have
+// gone, so stale keys exist too. Names, tokens and amounts are invented; no provider
 // row, card or account is real.
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
@@ -949,8 +947,7 @@ export interface ScaledStore {
 /**
  * Every capture but the last, every recognisable current row recognised, then
  * the last capture, in which the two oldest pending Vpass rows of each card
- * and of the MyJCB ledger have disappeared, so the MyJCB ones' live events are
- * stale.
+ * and of the MyJCB ledger have disappeared, so their live events are stale.
  */
 export async function scaledStore(options: ScaleOptions): Promise<ScaledStore> {
   const store = new ScaleStore(options);

@@ -4,9 +4,7 @@
 // deployment serves card purchase recognition, and without the review
 // affordances. A MyJCB pending authorisation and its posted charge are
 // recognised through the guarded builder the processor uses, with the stage-B
-// candidate that names both (a Vpass pending row is not recognised until the
-// meaning of its payment-type field, `bunkatsuYaku`, is verified); every value
-// is invented.
+// candidate that names both; every value is invented.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";

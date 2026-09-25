@@ -117,10 +117,7 @@ interface Scenario {
 
 /**
  * A MyJCB pending authorisation of 1,200 that has left the provider's display
- * (retired), and the posted charge of 1,234, each its own recognised event. A
- * Vpass pending row is not recognised until the meaning of its payment-type
- * field (`bunkatsuYaku`) is verified, so the Vpass pending side is not
- * exercised here yet.
+ * (retired), and the posted charge of 1,234, each its own recognised event.
  */
 async function scenario(options: { retirePending?: boolean } = {}): Promise<Scenario> {
   const w = new PurchaseWorld();

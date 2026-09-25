@@ -21,6 +21,7 @@ import {
   recognitionKey,
   statementPeriod,
   validCardPurchaseFacts,
+  VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE,
   VPASS_WEB_SINGLE_PAYMENT_CODE,
   type CardPurchaseDraft,
   type CardUsageFact,
@@ -126,30 +127,9 @@ describe("SC03 pending, posted and a partial refund", () => {
     });
   };
 
-  /**
-   * SC03's pending row as a MyJCB unconfirmed row: a Vpass pending row is not
-   * recognised until the meaning of its payment-type field is verified (see
-   * the Vpass exclusions below), so the authorized side of SC03 is exercised
-   * on MyJCB's own status words.
-   */
-  const myjcbPendingOf = (ref: string) => {
-    const amount = byRef.get(ref)!.amount;
-    const text = Number(amount).toLocaleString("en-US");
-    return myjcbRow({
-      providerStatus: "unconfirmed",
-      amount: observed(amount),
-      usageAmountText: text,
-      paymentAmountText: text,
-      externalId: `myjcb-credit-ledger:unconfirmed:${ref}:0`,
-    });
-  };
-
   test("SC03: pending 1,200 is authorized, posted 1,234 captured; authorized→captured allowed", () => {
-    // The Vpass pending row is skipped, never guessed: its bunkatsuYaku `0` is unverified.
-    expect(reason(rowOf("obs:card:pending-1", { providerSaleCode: "5" }))).toBe(
-      "payment_type_unsupported",
-    );
-    const pending = classifyCardUsage(myjcbPendingOf("obs:card:pending-1"));
+    // The customized row's bunkatsuYaku `0`, a single payment as the owner confirmed.
+    const pending = classifyCardUsage(rowOf("obs:card:pending-1", { providerSaleCode: "5" }));
     const posted = classifyCardUsage(rowOf("obs:card:posted-1"));
     expect(pending).toMatchObject({ ok: true, kind: "purchase", state: "authorized" });
     expect(posted).toMatchObject({ ok: true, kind: "purchase", state: "captured" });
@@ -169,7 +149,7 @@ describe("SC03 pending, posted and a partial refund", () => {
   });
 
   test("retirement has no live legs and infers neither refund nor cancellation (SC03 pending-vanished)", async () => {
-    const pending = await recognise(myjcbPendingOf("obs:card:pending-1"));
+    const pending = await recognise(rowOf("obs:card:pending-1"));
     const retired = await cardPurchaseRetirement({
       live: pending.revision,
       keys: pending.keys,
@@ -238,18 +218,20 @@ describe("SC03 pending, posted and a partial refund", () => {
     expect(outcome.exceptions.map((exception) => exception.code)).toEqual([
       "refund_target_unknown",
     ]);
-    // A Vpass customized return (sale code 6) is not recognised yet either:
-    // no bunkatsuYaku value is accepted until its meaning is verified.
-    for (const paymentType of ["0", "1"])
-      expect(
-        reason(
-          rowOf("obs:card:refund-1", {
-            providerStatus: "unconfirmed",
-            providerSaleCode: "6",
-            paymentType,
-          }),
-        ),
-      ).toBe("payment_type_unsupported");
+    // A Vpass customized return (sale code 6, bunkatsuYaku 0) is a pending
+    // refund; an unconfirmed code (1) is not recognised.
+    const customizedReturn = (paymentType: string) =>
+      rowOf("obs:card:refund-1", {
+        providerStatus: "unconfirmed",
+        providerSaleCode: "6",
+        paymentType,
+      });
+    expect(classifyCardUsage(customizedReturn("0"))).toMatchObject({
+      ok: true,
+      kind: "refund",
+      state: "authorized",
+    });
+    expect(reason(customizedReturn("1"))).toBe("payment_type_unsupported");
     expect(reason(rowOf("obs:card:refund-1", { providerSaleCode: "5" }))).toBe(
       "refund_shape_unverified",
     );
@@ -403,26 +385,27 @@ describe("SC04 installments", () => {
 });
 
 describe("exclusions", () => {
-  test("Vpass: a web (posted) row's code 1 (１) is a single payment; a customized (pending) row never is; every other code or wording is unsupported", () => {
+  test("Vpass: a web (posted) row's code 1 (１) and a customized (pending) row's bunkatsuYaku 0 are single payments; every other code or wording is unsupported", () => {
     // The web family's production shape: a full-width digit in data[6], the
     // same code as ASCII 1 after NFKC.
     expect(reason(vpassRow({ paymentType: "１" }))).toBe("recognised");
     expect(reason(vpassRow({ paymentType: "1" }))).toBe("recognised");
     // The customized family's bunkatsuYaku is a different field: `0` on every
-    // production row, and what it means is unverified, so no value is
-    // accepted, not the production `0` and not the web family's `1` either.
-    for (const paymentType of ["0", "1", "１", "０", "2", "", null])
+    // production row, a single payment as the owner confirmed. Every other
+    // value, the web family's `1` included, is unconfirmed and unsupported.
+    const customized = (paymentType: string | null, providerSaleCode: string) =>
+      vpassRow({
+        paymentType,
+        providerStatus: "unconfirmed",
+        providerSaleCode,
+        amount: observed(providerSaleCode === "5" ? "1234" : "-1234"),
+      });
+    for (const providerSaleCode of ["5", "6"])
+      for (const paymentType of ["0", "０"])
+        expect(reason(customized(paymentType, providerSaleCode))).toBe("recognised");
+    for (const paymentType of ["1", "１", "2", "00", " 0", "", null])
       for (const providerSaleCode of ["5", "6"])
-        expect(
-          reason(
-            vpassRow({
-              paymentType,
-              providerStatus: "unconfirmed",
-              providerSaleCode,
-              amount: observed(providerSaleCode === "5" ? "1234" : "-1234"),
-            }),
-          ),
-        ).toBe("payment_type_unsupported");
+        expect(reason(customized(paymentType, providerSaleCode))).toBe("payment_type_unsupported");
     // No web code other than 1 has been observed, so none is guessed: 2, 5, a
     // two-digit code, a blank (the amountless web rows) and absent are unsupported.
     for (const paymentType of ["２", "2", "5", "0", "０", "11", "01", "", " ", null])
@@ -441,7 +424,10 @@ describe("exclusions", () => {
       "1 ",
     ])
       expect(reason(vpassRow({ paymentType }))).toBe("payment_type_unsupported");
-    expect(VPASS_WEB_SINGLE_PAYMENT_CODE).toBe("1");
+    expect([VPASS_WEB_SINGLE_PAYMENT_CODE, VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE]).toEqual([
+      "1",
+      "0",
+    ]);
   });
 
   test("MyJCB: the combined cell holds 1回払 and no installment, revolving, bonus or cash-advance word", () => {
@@ -666,10 +652,8 @@ describe("drafts and content identity", () => {
         next: { ...next, contentDigest: refetched.contentDigest },
       }),
     ).toBe("reanchor");
-    // A Vpass pending row is not recognised yet (its payment-type field is
-    // unverified), so the authorized state comes from a MyJCB pending row:
-    // nextCardPurchaseAction reads kinds, states and digests only.
-    const pendingRow = myjcbRow({ providerStatus: "unconfirmed" });
+    // The customized (pending) row of the same purchase: bunkatsuYaku `0`.
+    const pendingRow = vpassRow({ providerStatus: "unconfirmed", paymentType: "0" });
     for (const changed of [
       vpassRow({ accountId: "acct-other" }),
       vpassRow({ amount: observed("1300") }),

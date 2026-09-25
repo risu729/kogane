@@ -60,10 +60,8 @@ interface SeededRow {
  * Three Vpass captures of one card (runs 1–3) and a MyJCB confirmed and
  * unconfirmed ledger (runs 4 and 5). Observations 1, 3 and 4 are the same
  * provider row (same key) re-fetched: 3 shows the same content, 4 a corrected
- * amount. The pending row (2) and its posted row (6) are MyJCB's: a Vpass
- * pending (customized) row is not recognised until the meaning of its
- * payment-type field (`bunkatsuYaku`, `0` on every production row) is
- * verified, so the Vpass pending side is not exercised here yet.
+ * amount. The pending row (2) and its posted row (6) are MyJCB's; 7 is a Vpass
+ * pending row.
  */
 const ROWS: readonly SeededRow[] = [
   vpass(1, 1, "vpass:card-001:202608:web:row-a:0", "posted", -1234),
@@ -71,8 +69,7 @@ const ROWS: readonly SeededRow[] = [
   vpass(3, 2, "vpass:card-001:202608:web:row-a:0", "posted", -1234),
   vpass(4, 3, "vpass:card-001:202608:web:row-a:0", "posted", -1300),
   myjcb(6, 4, "myjcb-credit-ledger:confirmed:row-d:0", "confirmed", -1234),
-  // A Vpass pending row as production shows it (bunkatsuYaku `0`): stored and
-  // keyed like any row, never recognised by the rule yet.
+  // A Vpass pending row as production shows it (bunkatsuYaku `0`).
   vpass(7, 1, "vpass:card-001:202608:customized:row-b:0", "unconfirmed", -1200),
   {
     // The shapes production MyJCB rows carry: the payment type inside the

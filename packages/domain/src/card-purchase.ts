@@ -61,17 +61,19 @@ export const CARD_PURCHASE_BASIS: RecognitionBasis = "purchase-recognition";
  *   `payment_type_unsupported` until a real installment, revolving or bonus
  *   row is observed (fail-safe).
  * - Vpass customized family (provider status `unconfirmed`, `bunkatsuYaku`):
- *   a different field whose encoding nothing documents. Every customized row
- *   ever collected carries `0`, never `1`, and `0` could as well mean "no
- *   installment agreement" as the opposite, so no value is accepted: every
- *   pending Vpass row is `payment_type_unsupported` until the owner verifies
- *   what the field means. Skipping a real purchase is safe; guessing one is
- *   not.
+ *   a different field whose encoding the provider does not document. Every
+ *   customized row ever collected carries `0` (2,395 rows), never `1`, and
+ *   the owner confirmed (2026-09-25) that `0` is a single payment (1回払い).
+ *   Exactly `0` after NFKC is a single payment; every other value (`1`, `2`,
+ *   a blank, any wording) is `payment_type_unsupported` until it is observed
+ *   and confirmed. Skipping a real purchase is safe; guessing one is not.
  * - MyJCB: the combined `ご利用先など／支払区分` cell (`summaryCells[1]`),
  *   which holds the merchant and the payment type (`1回払`). See
  *   `myjcbSinglePayment`.
  */
 export const VPASS_WEB_SINGLE_PAYMENT_CODE = "1";
+/** The customized family's `bunkatsuYaku` for a single payment, as the owner confirmed it. */
+export const VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE = "0";
 /**
  * Words of a MyJCB payment type that is not one single payment: installments,
  * revolving, bonus and cash advance (キャッシング1回払い is a loan, not a
@@ -386,8 +388,9 @@ export function myjcbSinglePayment(cell: string | null): boolean {
 
 /**
  * The per-source single-payment rule: the Vpass web family's code
- * (`VPASS_WEB_SINGLE_PAYMENT_CODE`), never a Vpass customized (pending) row,
- * and MyJCB's combined cell (`myjcbSinglePayment`). The Vpass parser writes
+ * (`VPASS_WEB_SINGLE_PAYMENT_CODE`), the Vpass customized family's
+ * `bunkatsuYaku` (`VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE`), and MyJCB's
+ * combined cell (`myjcbSinglePayment`). The Vpass parser writes
  * the web family as `posted` and the customized family as `unconfirmed`
  * (packages/parsers/src/parsers/vpass.ts), so the status names the family.
  */
@@ -398,7 +401,9 @@ function singlePayment(
 ): boolean {
   if (typeof value !== "string") return false;
   if (sourceId === "myjcb") return myjcbSinglePayment(value);
-  return providerStatus === "posted" && value.normalize("NFKC") === VPASS_WEB_SINGLE_PAYMENT_CODE;
+  const code = value.normalize("NFKC");
+  if (providerStatus === "posted") return code === VPASS_WEB_SINGLE_PAYMENT_CODE;
+  return providerStatus === "unconfirmed" && code === VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE;
 }
 
 function exactOf(quantity: Quantity): ExactDecimal | null {

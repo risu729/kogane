@@ -116,8 +116,8 @@ function bean(payload: Record<string, unknown>, name: string): Record<string, un
 
 /**
  * The Vpass customized family's `bunkatsuYaku` as every production row
- * carries it (read-only CORE D1 diagnosis of 2026-09-24): `0`. What the field
- * means is unverified, so recognition accepts no value of it.
+ * carries it (read-only CORE D1 diagnosis of 2026-09-24): `0`, a single
+ * payment as the owner confirmed.
  */
 export const CUSTOMIZED_PAYMENT_TYPE = "0";
 

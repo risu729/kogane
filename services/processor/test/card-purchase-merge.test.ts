@@ -2,12 +2,9 @@
 // and through the change lifecycle on D1: the candidate pass writes stage-B
 // proposals over recognised events, a pair the provider itself linked is
 // merged as a rule decision, a merged event is revised and retired like any
-// other, and a reviewed accept or withdrawal merges or splits it. MyJCB ledger
-// rows produced by the deployed parser on the real CORE schema in Miniflare: a
-// Vpass pending (customized) row is not recognised until the meaning of its
-// payment-type field (`bunkatsuYaku`, `0` on every production row) is
-// verified, so the Vpass pending side of a link is not exercised here yet.
-// Every card, amount, merchant, token and link id is synthetic.
+// other, and a reviewed accept or withdrawal merges or splits it. Vpass rows
+// produced by the deployed parser on the real CORE schema in Miniflare; every
+// card, amount, merchant, token and link id is synthetic.
 import { afterEach, expect, test } from "bun:test";
 import { CARD_PURCHASE_ACTOR } from "../../../packages/domain/src/card-purchase.ts";
 import type { CardPurchaseCandidate } from "../../../packages/domain/src/card-purchase-view.ts";
@@ -44,42 +41,25 @@ import { disposeWorlds, NOW, world, type UsageRow, type World } from "./card-pur
 
 afterEach(disposeWorlds);
 
-/** The payment month both ledgers of the pending and posted rows name. */
-const PERIOD = "2026年6月お支払い分";
+/** A customized (pending) row: bunkatsuYaku `0`, as every production row carries it. */
 const PENDING: UsageRow = {
-  date: "2026/05/03",
+  date: "26/05/03",
   merchant: "架空店舗A",
   amount: "1,200",
-  paymentType: "1回払",
+  paymentType: "0",
 };
 const POSTED: UsageRow = {
-  date: "2026/05/03",
+  date: "26/05/03",
   merchant: "架空店舗A",
   amount: "1,234",
-  paymentType: "1回払",
+  paymentType: "1",
 };
 const OTHER: UsageRow = {
-  date: "2026/05/06",
+  date: "26/05/06",
   merchant: "架空店舗C",
   amount: "700",
-  paymentType: "1回払",
+  paymentType: "1",
 };
-
-/** A confirmed MyJCB ledger of `PERIOD`. */
-function confirmed(
-  w: World,
-  fetchedAt: string,
-  rows: readonly UsageRow[],
-  rewrite?: (row: Observation) => Observation,
-) {
-  return w.myjcb({
-    state: "confirmed",
-    period: PERIOD,
-    fetchedAt,
-    rows,
-    ...(rewrite ? { rewrite } : {}),
-  });
-}
 
 function counts(result: CardPurchaseSweepResult) {
   return {
@@ -142,37 +122,26 @@ async function events(w: World) {
   );
 }
 
-/**
- * A pending MyJCB row, then the confirmed ledger that shows its posted row and
- * the next unconfirmed ledger that no longer shows it: the pending event is
- * retired.
- */
+/** A pending Vpass row, then the month's posted capture; the pending event is retired. */
 async function pendingThenPosted(
   w: World,
   posted: readonly UsageRow[],
   rewrite?: (row: Observation) => Observation,
 ) {
-  const pending = await pendingOf(w, "2026-05-10T00:00:00.000Z", [PENDING], rewrite);
-  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
-  const capture = await confirmed(w, "2026-06-10T00:00:00.000Z", posted, rewrite);
-  await pendingOf(w, "2026-06-10T00:00:00.000Z", []);
-  return { pending, capture };
-}
-
-/** An unconfirmed MyJCB ledger of `PERIOD`; a newer one replaces the last. */
-function pendingOf(
-  w: World,
-  fetchedAt: string,
-  rows: readonly UsageRow[],
-  rewrite?: (row: Observation) => Observation,
-) {
-  return w.myjcb({
-    state: "unconfirmed",
-    period: PERIOD,
-    fetchedAt,
-    rows,
+  const pending = await w.vpass({
+    family: "customized",
+    fetchedAt: "2026-05-10T00:00:00.000Z",
+    rows: [PENDING],
     ...(rewrite ? { rewrite } : {}),
   });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
+  const capture = await w.vpass({
+    family: "web",
+    fetchedAt: "2026-06-10T00:00:00.000Z",
+    rows: posted,
+    ...(rewrite ? { rewrite } : {}),
+  });
+  return { pending, capture };
 }
 
 function executor(w: World): SqlExecutor {
@@ -289,7 +258,7 @@ test("the candidate pass writes stage-B proposals over recognised events, once, 
 
 test("the candidate budget bounds each tick, and already stored pairs never take it", async () => {
   const w = await world();
-  await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "2026/05/07", amount: "800" }]);
+  await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "26/05/07", amount: "800" }]);
   expect(await w.sweep({ candidateWriteLimit: 1 })).toMatchObject({ retired: 1, proposed: 1 });
   expect(await w.sweep({ candidateWriteLimit: 1 })).toMatchObject({ proposed: 1 });
   expect(await w.sweep({ candidateWriteLimit: 1 })).toMatchObject({ proposed: 1 });
@@ -300,10 +269,11 @@ test("the candidate budget bounds each tick, and already stored pairs never take
 test("two posted rows of the same amount are two candidates and never merge by themselves (SC03)", async () => {
   const w = await world();
   const same: UsageRow = { ...PENDING, amount: "900" };
-  await pendingOf(w, "2026-05-10T00:00:00.000Z", [same]);
+  await w.vpass({ family: "customized", fetchedAt: "2026-05-10T00:00:00.000Z", rows: [same] });
   await w.sweep();
-  await confirmed(w, "2026-06-10T00:00:00.000Z", [same, same]);
-  await pendingOf(w, "2026-06-10T00:00:00.000Z", []);
+  // Posted, the same purchase shows the web family's code.
+  const posted: UsageRow = { ...same, paymentType: "1" };
+  await w.vpass({ family: "web", fetchedAt: "2026-06-10T00:00:00.000Z", rows: [posted, posted] });
   expect(counts(await w.sweep())).toEqual({
     ...NOTHING,
     retired: 1,
@@ -522,7 +492,7 @@ test("a merged event is revised when its content changes and retired when none o
 
   // A newer capture of the month no longer shows the posted row: the merged
   // event is retired holding both keys, with no leg.
-  await confirmed(w, "2026-06-20T00:00:00.000Z", [OTHER]);
+  await w.vpass({ family: "web", fetchedAt: "2026-06-20T00:00:00.000Z", rows: [OTHER] });
   expect(counts(await w.sweep())).toEqual({ ...NOTHING, retired: 1, recognized: 1 });
   const retired = (await events(w)).find((event) => event.event_id === merged!.event_id);
   expect(retired).toEqual({
@@ -540,7 +510,12 @@ test("a merged event is revised when its content changes and retired when none o
   expect(await w.totals()).toMatchObject({ captured: "700", unresolved: 1 });
 
   // The row reappears: the same event is captured again, still merged.
-  await confirmed(w, "2026-06-30T00:00:00.000Z", [POSTED, OTHER], linked("provider-auth-2"));
+  await w.vpass({
+    family: "web",
+    fetchedAt: "2026-06-30T00:00:00.000Z",
+    rows: [POSTED, OTHER],
+    rewrite: linked("provider-auth-2"),
+  });
   expect(counts(await w.sweep())).toEqual({ ...NOTHING, revised: 1 });
   expect((await events(w)).find((event) => event.event_id === merged!.event_id)).toEqual({
     event_id: merged!.event_id,
@@ -613,13 +588,11 @@ test("the reconciliation lane and the purchase lane propose one pair once, under
     amount: "800",
     paymentType: "1回払",
   };
-  // A MyJCB pending row the next unconfirmed ledger no longer shows, and a
-  // MyJCB pending and confirmed capture both still shown, each under one
-  // absolute payment month (#238: the only MyJCB shape the reconciliation
-  // lane pairs). A Vpass pending row is not recognised yet, so the purchase
-  // lane has no Vpass pair to propose.
+  // A Vpass month whose pending capture the posted one replaced, and a MyJCB
+  // pending and confirmed capture under one absolute payment month (#238:
+  // the only MyJCB shape the reconciliation lane pairs).
   const sources = {
-    retired: {
+    vpass: {
       seed: async (w: World) => {
         await pendingThenPosted(w, [POSTED]);
       },
@@ -739,7 +712,7 @@ test("the rule never merges again a provider-linked pair a reviewer split, even 
 
 test("the candidate pass looks up stored pairs a bounded chunk at a time", async () => {
   const w = await world();
-  await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "2026/05/07", amount: "800" }]);
+  await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "26/05/07", amount: "800" }]);
   expect(CANDIDATE_LOOKUP_CHUNK).toBe(1_000);
   // Every stored-pair lookup binds its digests as one JSON array; record their sizes.
   let lookups: number[] = [];

@@ -138,11 +138,9 @@ async function recognizeAll(db: Database): Promise<Map<number, CardPurchaseDraft
 }
 
 /**
- * Pending rows that recognition recognises: a MyJCB unconfirmed ledger's. A
- * Vpass pending (customized) row is never recognised until the meaning of its
- * payment-type field (`bunkatsuYaku`, `0` on every production row) is
- * verified, so it never holds a key; `VPASS_PENDING` shows it stays counted
- * as unrecognised.
+ * Pending rows of a MyJCB unconfirmed ledger, which a newer ledger replaces;
+ * `VPASS_PENDING` is a Vpass customized row in the production shape
+ * (`bunkatsuYaku` `0`, a single payment as the owner confirmed).
  */
 const PENDING_ROWS: readonly UsageRow[] = [
   { date: "2026/05/03", merchant: "架空店舗A", amount: "1,200", paymentType: "1回払" },
@@ -283,9 +281,7 @@ describe("recognition keys against current card usage", () => {
   test("a revision that still holds one current key is not stale; once none is current, all its keys are", async () => {
     const store = new CardStore();
     // A Vpass pending row, captured before its month's web capture replaces
-    // it. No Vpass pending row is recognised or merged by the lane yet (see
-    // `PENDING_ROWS`); the key is written by hand below, and the read treats
-    // every source's pending key alike.
+    // it.
     vpassCapture(store, "customized", "2026-05-10T00:00:00.000Z", [VPASS_PENDING]);
     const [pending] = usage(store.db);
     vpassCapture(store, "web", "2026-06-10T00:00:00.000Z", [
@@ -345,17 +341,16 @@ describe("recognition keys against current card usage", () => {
     expect(current).toHaveLength(5);
     expect(unrecognized(store.db)).toBe(5);
     await recognizeAll(store.db);
-    // The Vpass pending row (its payment-type field is unverified) and the
-    // installment slice are left.
-    expect(unrecognized(store.db)).toBe(2);
+    // Only the installment slice is left.
+    expect(unrecognized(store.db)).toBe(1);
 
     // A newer unconfirmed ledger: its row is current and not yet recognised,
     // while the replaced pending rows are held but no longer current, so they
     // do not count (they are stale keys instead).
     myjcbPending(store, "2026-06-10T00:00:00.000Z", [LATER_PENDING]);
-    expect(unrecognized(store.db)).toBe(3);
-    await recognizeAll(store.db);
     expect(unrecognized(store.db)).toBe(2);
+    await recognizeAll(store.db);
+    expect(unrecognized(store.db)).toBe(1);
     const staleBefore = stale(store.db);
     expect(staleBefore).toHaveLength(2);
 
@@ -364,7 +359,7 @@ describe("recognition keys against current card usage", () => {
     const parsed = { artifact: 0, parse: row!.parse_run_id, observations: [row!.observation_id] };
     store.appendRow(parsed, { externalId: null, extraJson: "{}" });
     expect(usage(store.db).some((entry) => entry.recognition_key === null)).toBe(true);
-    expect(unrecognized(store.db)).toBe(3);
+    expect(unrecognized(store.db)).toBe(2);
     // Nor does it hide a stale key: \`held_current\` is compared with \`NOT IN\`,
     // which a NULL would turn into "no row is stale".
     expect(stale(store.db)).toEqual(staleBefore);

@@ -84,9 +84,7 @@ const refOf = (fact: { observationId: number; parseRunId: number }): SourceFactR
  * A MyJCB pending authorisation of 1,200 and the posted charge of 1,234, each
  * its own recognised event, with the stage-B candidate that names both (still
  * open: it may be accepted or rejected), and the posted charge's statement
- * settled by an accepted SMBC debit. The pair is MyJCB's: a Vpass pending
- * row is not recognised until the meaning of its payment-type field
- * (`bunkatsuYaku`) is verified.
+ * settled by an accepted SMBC debit.
  */
 async function world() {
   const w = new PurchaseWorld();
