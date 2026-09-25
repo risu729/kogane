@@ -556,13 +556,21 @@ retired a whole full page, `proposed` counts new pending-to-posted candidates,
 `merged` provider-linked pairs merged as rule decisions, and `groupsSkipped`
 the candidate groups too large to pair that tick.
 
+The same counts, field for field, are recorded for every tick in
+`processor_lane_ticks` (migration 0049) with the tick's start and end and its
+outcome — `ran`, `skipped-by-flag` while the flag is off, or `failed` with a
+safe code — for one day. `laneTicks` in the Processor's `/status` and
+`/internal/health` shows the latest one, so whether the lane ran no longer has
+to be read from Workers Logs ([operations.md](operations.md#lane-tick-records)).
+
 ### Flag, deploy and rollback
 
-| Flag                           | Where                     | Default | Effect when on                                                                             |
-| ------------------------------ | ------------------------- | ------- | ------------------------------------------------------------------------------------------ |
-| `PURCHASE_RECOGNITION_ENABLED` | `services/processor` vars | `"0"`   | The `purchase_recognition` lane runs right after `reconciliation_sweep` and writes events. |
+| Flag                           | Where                     | Default | Effect when on                                                                              |
+| ------------------------------ | ------------------------- | ------- | ------------------------------------------------------------------------------------------- |
+| `PURCHASE_RECOGNITION_ENABLED` | `services/processor` vars | `"0"`   | The `purchase_recognition` lane runs right after `card_settlement_sweep` and writes events. |
 
-`"1"` or `"true"` turns it on; any other value leaves the lane unrun and silent.
+`"1"` or `"true"` turns it on; any other value leaves the lane unrun and silent
+in the log; its only write is then the `skipped-by-flag` tick record above.
 
 1. The release applies CORE `0047` before the Workers.
 2. Deploy `services/processor` with the flag `"0"`: the lane is skipped and
@@ -799,8 +807,11 @@ either.
 | `RECONCILIATION_ENABLED` | `services/processor` vars | `"0"`   | The scheduled `reconciliation_sweep` lane runs and writes candidates. |
 | `EVENTS_V2_ENABLED`      | `services/app` vars       | `"0"`   | `/api/v2/*` is served if the projection exists.                       |
 
-With both off, the scheduled worker logs no new event, writes nothing, and the
-browser serves no new route.
+With both off, the scheduled worker logs no new event, writes nothing but the
+`skipped-by-flag` tick records of `reconciliation_sweep` and
+`card_settlement_sweep` (`processor_lane_ticks`, one day kept;
+[processor.md §6.1](processor.md#61-tick-records)), and the browser serves no
+new route.
 
 ## Deploy order and rollback
 
