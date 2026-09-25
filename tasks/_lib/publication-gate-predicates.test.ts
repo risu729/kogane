@@ -80,6 +80,10 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   // Decorates published and superseded runs; adoption comes from the LEFT JOIN
   // on the projection, not from this status test (which only drops pending runs).
   "packages/read-model/src/organization.ts": 1,
+  // The keyed form of `current_identity_observations`' candidates: publication
+  // comes from its join on the projection; the status test is the view's own
+  // (migration 0026), kept so the keyed owners equal the view's.
+  "packages/read-model/src/card-settlement-ownership.ts": 1,
   // The local store experiment's writer and its backfill.
   "experiments/observation-pipeline-local/src/store.ts": 5,
 };

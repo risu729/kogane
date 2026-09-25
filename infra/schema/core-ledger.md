@@ -10,15 +10,15 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `6dc1077d1606c1a6c201918d79e4c5b9061e941995df1a2e60ed45854f20370a`
+Schema digest: `a8e14834690f62150ccd66ff5dfab6a81e70b3bc811dc0d7e62c841369b5d24e`
 
 ## Summary
 
-- Migrations applied: 49
+- Migrations applied: 50
 - Tables: 111 (all `STRICT`: yes)
 - Views: 39
 - Triggers: 400
-- Explicit indexes: 111
+- Explicit indexes: 112
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
 | classification | count | tables |
@@ -59,7 +59,7 @@ active_releases, allocations, approvals, calculation_runs, card_purchase_scan_cu
 | `card_purchase_recognitions` | core-keep | card purchase recognition evidence | yes | no | yes | card_purchase_recognitions_no_update | card_purchase_recognitions_no_delete | 10 | 3 | 1 | 5 |
 | `card_purchase_scan_cursor` | operational-mutable | bounded card purchase scan progress | yes | no | no | — | — | 2 | 0 | 0 | 0 |
 | `card_settlement_allocation_withdrawals` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_allocation_withdrawals_no_update | card_settlement_allocation_withdrawals_no_delete | 3 | 2 | 0 | 3 |
-| `card_settlement_candidates` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_candidates_no_update | card_settlement_candidates_no_delete | 11 | 4 | 2 | 3 |
+| `card_settlement_candidates` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_candidates_no_update | card_settlement_candidates_no_delete | 11 | 4 | 3 | 3 |
 | `card_settlement_decisions` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_decisions_no_update | card_settlement_decisions_no_delete | 8 | 3 | 0 | 6 |
 | `card_settlement_scan_cursor` | operational-mutable | bounded card settlement scan progress | yes | no | no | — | — | 2 | 0 | 0 | 0 |
 | `change_plans` | core-keep | change plans, approvals and receipts | yes | no | no | — | change_plans_no_delete | 10 | 0 | 1 | 3 |
@@ -235,4 +235,4 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0046_st_george_balance_snapshot.sql` | 1 | dataset_snapshot_policies |
 | `0047_card_purchase_recognition.sql` | 20 | card_purchase_scan_cursor |
 
-Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql
+Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql

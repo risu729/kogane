@@ -228,6 +228,73 @@ same candidates through the agent API's `kogane.purchases.explain`
 blocker but without `actions` or `relation`, so it can report a candidate and
 never review one: the decision stays on this page.
 
+## Cost
+
+D1 never runs `ANALYZE`, so its planner has no table statistics. Measured on
+that basis (every CORE migration, no `sqlite_stat*` table) on `bun:sqlite`
+and on workerd's SQLite through Miniflare, over the synthetic store of
+`packages/read-model/test/card-usage-scale-fixture.ts` at `STATEMENT_SCALE`:
+three Vpass cards, a MyJCB connection, SMBC and St.George captured daily for
+730 days through the deployed parsers, each capture restating the bills of the
+two posted months, the SMBC debit of every bill on its due date, and the
+settlement reviews the sweep proposes after each capture (one per recapture
+of a bill once its debit is in), most months accepted. That is 628,173
+transaction and 16,790 balance observations (5,840 of them statement totals),
+16,056 published parses, 104 current statements, 3,763 candidates (77
+accepted, 9 rejected) and 5,337 live purchase events. Median wall time of the
+shipped reads and of the current ones:
+
+| Read                                           | Shipped  | Now    | Shipped, workerd | Now, workerd |
+| ---------------------------------------------- | -------- | ------ | ---------------- | ------------ |
+| `queryCardPurchases`, first unfiltered page    | 2,436 ms | 665 ms | 3,356 ms         | 1,037 ms     |
+| `queryCardPurchases`, first page of one period | 1,284 ms | 560 ms | 1,368 ms         | 803 ms       |
+| `queryCardPurchases`, one event                | 1,128 ms | 540 ms | 1,237 ms         | 741 ms       |
+| its statement read (104 statements)            | 590 ms   | 83 ms  | —                | 121 ms       |
+| its settlement read (104 statements)           | 1,346 ms | 21 ms  | —                | 38 ms        |
+| sweep: a page of 100 statements with owners    | 562 ms   | 97 ms  | 623 ms           | 112 ms       |
+| sweep: debits around one due date, with owners | 3,465 ms | 53 ms  | 3,612 ms         | 67 ms        |
+
+The shipped reads resolved owners through `card_settlement_fact_ownership`,
+whose `current_identity_observations` source materializes the candidate
+identity runs of every published parse (`SCAN pub`) and which groups every
+identity of the kind before any key applies: once per request for the
+statements, and for the sweep once per tick for the statements plus once per
+statement for the debits, over every transaction identity of the store (up to
+100 bank reads a tick: about six minutes of reading at this size). The reads
+now name their statements or debits first and resolve owners through
+`packages/read-model/src/card-settlement-ownership.ts`, the same view text
+applied to the parses of those observations only; the view is unchanged. They
+reach identities through `identity_observation_lookup (kind, observation_id)`
+and the identity runs' keys, and the rest through the primary keys and
+`published_parse_runs_run`. The settlement read matched each statement's
+reviews by three `json_extract` terms over every candidate, for every
+statement asked for; migration `0050_statement_fact_indexes.sql` indexes
+exactly those expressions (`card_settlement_candidates_statement_period`), so
+its text is unchanged and each statement's reviews are found by key.
+
+What still grows with history: `card_statement_facts` ranks every captured
+statement total once per request and once per sweep tick (74 ms here; the
+scan of every balance observation is 4 ms of it, and neither a partial index
+on the statement metric nor an index on `metric` changed the time), and
+`card_bank_debit_facts` ranks every SMBC row once per statement of the sweep's
+page (51 ms here, so a full page of 100 is about 5 s of D1 time a tick).
+Candidates accrue one per recapture of a paid bill, reached by the index. The
+rest of the purchases page is the current card usage pass
+([read model](read-model.md#cost)). The review and commit reads of
+`card_settlement_readiness` still use the whole ownership view and are not
+changed here: on this store the first page of the `カード照合` list took 42 s.
+
+`packages/application/test/card-statement-scale.test.ts` and
+`services/processor/test/card-settlement-scale.test.ts` compare the purchases
+pages and the sweep's reads with the shipped text on a smaller store of the
+same shape, fail on a plan that reads the owners of the whole store or scans
+the candidates, and check that the sweep itself, run over that store, proposes
+nothing the fixture has not written; `KOGANE_CARD_STATEMENT_SCALE=full` builds
+the store above and prints the timings. The same comparisons run on small
+random stores that draw every identity, mapping and ownership-claim state the
+views distinguish (`card-settlement-ownership.test.ts`,
+`card-statement-differential.test.ts`).
+
 ## Verification
 
 Synthetic tests cover authoritative totals, missing/ambiguous dates and totals,

@@ -9,6 +9,7 @@ import {
   CARD_SETTLEMENT_POLICY,
 } from "../../../packages/domain/src/card-settlement.ts";
 import { parseLocalDate } from "../../../packages/domain/src/time.ts";
+import { cardSettlementOwnershipCtes } from "../../../packages/read-model/src/card-settlement-ownership.ts";
 
 interface Row {
   id: number;
@@ -29,6 +30,33 @@ interface Row {
   evidence_refs_json: string | null;
 }
 const LIMIT = 1000;
+/**
+ * The next page of current provider statements after the cursor, with their
+ * owners. The page is chosen first and only its statements are owned, through
+ * the keyed form of `card_settlement_fact_ownership`
+ * (packages/read-model/src/card-settlement-ownership.ts): joined whole, the view
+ * read every published parse and every balance identity of the store on each
+ * tick (docs/card-settlements.md, Cost). `?1` is the cursor, `?2` the page size.
+ */
+export const CARD_SETTLEMENT_STATEMENTS_SQL = `WITH page AS MATERIALIZED (
+ SELECT * FROM card_statement_facts WHERE id>?1 ORDER BY id LIMIT ?2
+), observed AS (SELECT id AS observation_id FROM page),
+${cardSettlementOwnershipCtes("balance")}
+SELECT page.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_json FROM page
+ LEFT JOIN ownership ON ownership.observation_id=page.id ORDER BY page.id`;
+/**
+ * The bank debits within three days of one due date (`?1`, `?2`), at most `?3`
+ * by id, with their owners, resolved for those debits only: joined whole, the
+ * ownership view grouped every transaction identity of the store, once per
+ * statement of the page.
+ */
+export const CARD_SETTLEMENT_BANK_DEBITS_SQL = `WITH debits AS MATERIALIZED (
+ SELECT * FROM card_bank_debit_facts
+ WHERE substr(as_of,1,10) BETWEEN date(?1,'-3 days') AND date(?2,'+3 days') ORDER BY id LIMIT ?3
+), observed AS (SELECT id AS observation_id FROM debits),
+${cardSettlementOwnershipCtes("transaction")}
+SELECT debits.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_json FROM debits
+ LEFT JOIN ownership ON ownership.observation_id=debits.id ORDER BY debits.id`;
 function amount(row: Row, debit = false): Quantity | null {
   if (row.value_status !== "exact" || row.coefficient === null || row.scale === null) return null;
   const coefficient = debit ? row.coefficient.replace(/^-/, "") : row.coefficient;
@@ -60,9 +88,7 @@ export async function cardSettlementSweep(
     cursor.last_statement_id = 0;
   }
   const statements = await db
-    .prepare(`SELECT s.*,o.account_id,o.owner_ref,o.evidence_refs_json FROM card_statement_facts s
- LEFT JOIN card_settlement_fact_ownership o ON o.kind='balance' AND o.observation_id=s.id
- WHERE s.id>? ORDER BY s.id LIMIT ?`)
+    .prepare(CARD_SETTLEMENT_STATEMENTS_SQL)
     .bind(cursor?.last_statement_id ?? 0, 100)
     .all<Row>();
   let proposed = 0,
@@ -83,9 +109,7 @@ export async function cardSettlementSweep(
       continue;
     }
     const banks = await db
-      .prepare(`SELECT b.*,o.account_id,o.owner_ref,o.evidence_refs_json FROM card_bank_debit_facts b
- LEFT JOIN card_settlement_fact_ownership o ON o.kind='transaction' AND o.observation_id=b.id
- WHERE substr(b.as_of,1,10) BETWEEN date(?,'-3 days') AND date(?,'+3 days') ORDER BY b.id LIMIT ?`)
+      .prepare(CARD_SETTLEMENT_BANK_DEBITS_SQL)
       .bind(statement.payment_date, statement.payment_date, LIMIT)
       .all<Row>();
     scanned += banks.results.length;
