@@ -293,7 +293,7 @@ class Builder {
     parser: string;
     fetchedAtMs: number;
     /** The card unit the artifact belongs to (a Vpass card ordinal). */
-    unitKey?: string;
+    unitKey?: string | undefined;
     insert: (parse: number) => { kind: "balance" | "transaction"; id: number }[];
   }): { parse: number; observations: { kind: "balance" | "transaction"; id: number }[] } {
     const id = this.id();
