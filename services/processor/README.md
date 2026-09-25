@@ -15,8 +15,9 @@ Every five minutes, the Worker runs three independently budgeted lanes (see
 `docs/observation-lanes.md`, migration `0035_observation_job_lanes.sql`):
 `incremental` consumes the durable work items a D1 trigger appends whenever a
 run is sealed and executes up to 12 jobs; `repair` advances the historical
-cyclic cursor over at most 100 artifact IDs and executes up to 4 jobs, so lost
-notifications and new parser versions are still discovered; `replay` steps
+cyclic cursor over at most 100 artifact IDs and executes up to 28 jobs, so lost
+notifications and new parser versions are still discovered and a version bump
+re-parses history at 336 artifacts an hour; `replay` steps
 operator-created plans and executes up to 8 jobs. A large replay never delays
 newly sealed evidence. Jobs are
 unique per artifact/parser/version. Failed attempts remain in `parse_runs`.
