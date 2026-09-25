@@ -26,6 +26,8 @@ afterAll(async () => {
 });
 
 const TICKS_PER_HOUR = 12; // the cron in wrangler.jsonc, pinned below
+// identitySweep's own bound on runs per call, held against the function below.
+const IDENTITY_SWEEP_MAX_RUNS = 40;
 // vpass-statement-page 1.2.0: artifacts still published at 1.1.0 (2026-09-24).
 const BACKLOG = 3133;
 
@@ -51,6 +53,10 @@ test("the repair budget, the identity budget that keeps pace with it and the har
   expect(MAX_LANE_JOBS).toBe(40);
   for (const budget of Object.values(LANE_BUDGETS))
     expect(budget).toBeLessThanOrEqual(MAX_LANE_JOBS);
+  // The sum is what the identity stage has to cover, and identitySweep
+  // refuses more than 40 runs a call (checked against the function below):
+  // a larger sum would fail the identity stage on every tick.
+  expect(LANE_BUDGETS.incremental + LANE_BUDGETS.repair).toBeLessThanOrEqual(IDENTITY_SWEEP_MAX_RUNS);
   // The drain rate counts ticks of the deployed cron.
   const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
   const minutes = /"crons": \["\*\/(\d+) \* \* \* \*"\]/u.exec(wrangler)?.[1];
@@ -104,7 +110,10 @@ test("a tick with more repair work than the budget executes exactly the budget, 
   });
   // The identity sweep later in the same tick takes every run the repair lane
   // just published; at its former default of 8 it would have taken 8.
-  expect(event("identity_sweep")).toMatchObject({ processedRuns: REPAIR_JOBS_PER_SWEEP });
+  expect(event("identity_sweep")).toMatchObject({
+    processedRuns: REPAIR_JOBS_PER_SWEEP,
+    identifiedRuns: REPAIR_JOBS_PER_SWEEP,
+  });
   // The log carries counts, never a value.
   expect(JSON.stringify(lines)).not.toContain("987654");
 
@@ -115,7 +124,8 @@ test("a tick with more repair work than the budget executes exactly the budget, 
     executed: extra,
     pending: 0,
   });
-  expect(event("identity_sweep")).toMatchObject({ processedRuns: extra });
+  expect(event("identity_sweep")).toMatchObject({ processedRuns: extra, identifiedRuns: extra });
+  expect(JSON.stringify(lines)).not.toContain("987654");
   expect(
     await env.DB.prepare(
       "SELECT count(*) AS n FROM observation_parse_jobs WHERE lane='repair' AND status='done'",
@@ -129,7 +139,14 @@ test("the hard bound holds for an operator override and for the identity sweep",
     executed: 0,
     pending: 0,
   });
-  await expect(identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK + 1)).rejects.toThrow(
+  // IDENTITY_RUNS_PER_TICK is accepted and one more is refused: it is exactly
+  // identitySweep's maximum. Everything above is identified, so nothing is left.
+  expect(await identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK)).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  await expect(identitySweep(env.DB, resolveIdentity, IDENTITY_SWEEP_MAX_RUNS + 1)).rejects.toThrow(
     "identity_batch_invalid",
   );
 }, 30000);

@@ -1700,8 +1700,9 @@ export interface ScheduledStages {
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
-  // Sized to what the parse lanes publish per tick, so a re-parse is
-  // identified on the tick that published it (IDENTITY_RUNS_PER_TICK).
+  // Sized to what the incremental and repair lanes publish per tick, so a
+  // re-parse is identified on the tick that published it unless the sweep's
+  // 200-observation cap or an older backlog defers it (IDENTITY_RUNS_PER_TICK).
   identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).

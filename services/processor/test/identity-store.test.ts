@@ -877,3 +877,28 @@ test("one row of any observation kind prevents the empty fast path", async () =>
   });
   expect(calls).toBe(4);
 });
+
+test("a 40-run sweep stops at 200 observations and the next sweep identifies the rest", async () => {
+  // The scheduled identity stage takes 40 runs a tick (IDENTITY_RUNS_PER_TICK,
+  // docs/observation-lanes.md): the row cap, not the run cap, decides here.
+  await db.prepare("INSERT INTO sources VALUES('row-cap-fixture','synthetic')").run();
+  // 36 empty runs and four the size of the largest production Vpass page (69).
+  for (let id = 3700; id < 3740; id++) await seed(id, id >= 3736 ? 69 : 0, "row-cap-fixture");
+  expect(await identitySweep(db, otherIdentity, 40, "row-cap-fixture")).toEqual({
+    processedRuns: 39,
+    identifiedRuns: 38,
+    identifiedObservations: 200,
+  });
+  // The third large run stopped at the 200th row: its pages are kept, but no
+  // row of it is current until the run is sealed; the fourth was not reached.
+  expect(await count("current_identity_observations", "parse_run_id IN(3736,3737)")).toBe(138);
+  expect(await count("current_identity_observations", "parse_run_id IN(3738,3739)")).toBe(0);
+  expect(await identitySweep(db, otherIdentity, 40, "row-cap-fixture")).toEqual({
+    processedRuns: 2,
+    identifiedRuns: 2,
+    identifiedObservations: 7 + 69,
+  });
+  expect(
+    await count("current_identity_observations", "parse_run_id BETWEEN 3736 AND 3739"),
+  ).toBe(4 * 69);
+}, 30000);
