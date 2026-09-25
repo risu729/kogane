@@ -23,6 +23,7 @@ import { dispatchDecisionOutbox } from "./decision-outbox.ts";
 import { cardSettlementSweep } from "./card-settlement-job.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import { cardPurchaseSweep, purchaseRecognitionEnabled } from "./card-purchase-job.ts";
+import { laneTickSummary, recordTick, type LaneTickResult } from "./lane-ticks.ts";
 import {
   publicationConsistency,
   publishBatch,
@@ -1373,6 +1374,8 @@ async function status(env: Env): Promise<Response> {
     },
     laneState: laneState.results,
     replayPlans: plans.results,
+    // The latest tick of every lane that keeps no state of its own (0049).
+    laneTicks: await laneTickSummary(env.DB, now),
   });
 }
 
@@ -1653,6 +1656,12 @@ export interface ScheduledStages {
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
   /**
+   * The card settlement candidate sweep (docs/card-settlements.md). Gated by
+   * RECONCILIATION_ENABLED like `reconcile`, but its own lane: it fails, logs
+   * and records its tick on its own (docs/processor.md §6).
+   */
+  settlements?: (env: Env) => Promise<object>;
+  /**
    * Card purchase recognition (docs/economic-events.md). Absent stage, or
    * PURCHASE_RECOGNITION_ENABLED off, means the lane never runs and writes
    * nothing.
@@ -1690,10 +1699,8 @@ const defaultStages: ScheduledStages = {
   // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
-  reconcile: async (env) => ({
-    ...(await reconciliationSweep(env.DB)),
-    cardSettlements: await cardSettlementSweep(env.DB),
-  }),
+  reconcile: (env) => reconciliationSweep(env.DB),
+  settlements: (env) => cardSettlementSweep(env.DB),
   purchases: (env) => cardPurchaseSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
   rewardReadProjection: (env) => rewardReadProjectionStage(env),
@@ -1731,68 +1738,82 @@ function collectionEnv(env: Env): CollectionEnv & { OPS_DISPATCH_ENABLED?: strin
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
  * and never stops the identity projection. Log lines carry counts and safe
- * codes only, never provider values or exception text. */
+ * codes only, never provider values or exception text.
+ *
+ * The lanes that otherwise leave only that log line also record each tick in
+ * `processor_lane_ticks` (migration 0049, `src/lane-ticks.ts`): ran, skipped
+ * because the flag is off, or failed with the same safe code. A lane whose
+ * stage is not wired records nothing, and a flag that is off still logs
+ * nothing. */
 export async function runScheduled(
   env: Env,
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
 ): Promise<void> {
-  const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
-    ["observation_sweep", stages.parse],
+  const reconciliation = reconciliationEnabled(env.RECONCILIATION_ENABLED);
+  // [event, stage, whether its flag lets it run this tick]
+  const lanes: [string, ((env: Env) => Promise<object>) | undefined, boolean][] = [
+    ["observation_sweep", stages.parse, true],
     // U08: terminals persisted in the shared DATA bucket are registered
     // before the identity sweep, so a run found this tick can reach identity
     // and parsing on the same tick rather than waiting for the next one.
     // The stage reports itself `skipped` while SHARED_R2_INGEST_ENABLED is
     // off, like the projection lane, so an operator can see it is off.
-    ["collection_scan", stages.collection],
-    ["identity_sweep", stages.identity],
+    ["collection_scan", stages.collection, true],
+    ["identity_sweep", stages.identity, true],
     // The projection lane always runs and reports itself skipped while its
     // own flag is off (docs/balance-read-model.md).
-    ["balance_projection", stages.balanceProjection],
-    // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
-    // writes nothing new (docs/economic-events.md).
-    [
-      "reconciliation_sweep",
-      reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
-    ],
+    ["balance_projection", stages.balanceProjection, true],
+    // Off unless RECONCILIATION_ENABLED is set: a deploy with the flag off
+    // logs nothing new and records only a skipped tick
+    // (docs/economic-events.md).
+    ["reconciliation_sweep", stages.reconcile, reconciliation],
+    // Same flag, its own lane, so a failure of either sweep no longer hides
+    // the other's counts (docs/card-settlements.md).
+    ["card_settlement_sweep", stages.settlements, reconciliation],
     // Off unless PURCHASE_RECOGNITION_ENABLED is set: then adopted Vpass and
     // MyJCB usage rows become purchase/refund events, each with a rule
     // decision. Right after reconciliation, which reads the same rows as
     // candidates and writes none of these events (docs/economic-events.md).
     [
       "purchase_recognition",
-      purchaseRecognitionEnabled(env.PURCHASE_RECOGNITION_ENABLED) ? stages.purchases : undefined,
+      stages.purchases,
+      purchaseRecognitionEnabled(env.PURCHASE_RECOGNITION_ENABLED),
     ],
     // Off unless REWARD_CLAIMS_ENABLED is set, so a normal deploy promotes
     // nothing and logs nothing new (docs/rewards.md).
-    [
-      "reward_claims_sweep",
-      rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED) ? stages.rewards : undefined,
-    ],
+    ["reward_claims_sweep", stages.rewards, rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED)],
     // U16: the reward second stage reads the claims the sweep above promoted,
     // so it runs after it and before the report job. Off unless
     // REWARD_READ_PROJECTION_ENABLED is set (docs/rewards.md).
     [
       "reward_read_projection",
-      rewardReadProjectionEnabled(env.REWARD_READ_PROJECTION_ENABLED)
-        ? stages.rewardReadProjection
-        : undefined,
+      stages.rewardReadProjection,
+      rewardReadProjectionEnabled(env.REWARD_READ_PROJECTION_ENABLED),
     ],
     // Off unless REPORTS_ENABLED is set, for the same reason
     // (docs/calculation-and-reports.md).
-    ["report_job", reportsEnabled(env.REPORTS_ENABLED) ? stages.reports : undefined],
+    ["report_job", stages.reports, reportsEnabled(env.REPORTS_ENABLED)],
     // U06/U08: accepted operations are handed to their executor before the
     // outbox, so work this tick accepted can still reach it. Reports
     // `skipped` unless OPS_DISPATCH_ENABLED is set.
-    ["operation_dispatch", stages.operations],
+    ["operation_dispatch", stages.operations, true],
     // A09: the decision outbox runs last, after the projections a decision may
     // have invalidated (docs/change-lifecycle.md).
-    ["decision_outbox", stages.decisions],
+    ["decision_outbox", stages.decisions, true],
   ];
-  for (const [event, stage] of lanes) {
+  for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
+    const startedAtMs = Date.now();
+    if (!enabled) {
+      await recordTick(env.DB, event, startedAtMs, { outcome: "skipped-by-flag" }, log);
+      continue;
+    }
+    let tick: LaneTickResult;
     try {
-      log(JSON.stringify({ event, ...(await stage(env)) }));
+      const result = await stage(env);
+      log(JSON.stringify({ event, ...result }));
+      tick = { outcome: "ran", result };
     } catch (error) {
       const code =
         error instanceof PipelineError
@@ -1801,7 +1822,9 @@ export async function runScheduled(
             ? error.constructor.name
             : "unknown";
       log(JSON.stringify({ event: `${event}_failed`, code }));
+      tick = { outcome: "failed", code };
     }
+    await recordTick(env.DB, event, startedAtMs, tick, log);
   }
 }
 
