@@ -3,7 +3,7 @@
 // (packages/read-model/test/card-settlement-random-store.ts) that draw every
 // statement, identity, mapping and ownership-claim state the migration 0044
 // views distinguish; the settlement read, whose text is unchanged, is compared
-// with and without the migration 0048 index. Every value is synthetic.
+// with and without the migration 0050 index. Every value is synthetic.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { randomSettlementStore } from "../../read-model/test/card-settlement-random-store.ts";

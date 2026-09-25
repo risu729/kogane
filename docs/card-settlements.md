@@ -256,7 +256,7 @@ reach identities through `identity_observation_lookup (kind, observation_id)`
 and the identity runs' keys, and the rest through the primary keys and
 `published_parse_runs_run`. The settlement read matched each statement's
 reviews by three `json_extract` terms over every candidate, for every
-statement asked for; migration `0048_statement_fact_indexes.sql` indexes
+statement asked for; migration `0050_statement_fact_indexes.sql` indexes
 exactly those expressions (`card_settlement_candidates_statement_period`), so
 its text is unchanged and each statement's reviews are found by key.
 

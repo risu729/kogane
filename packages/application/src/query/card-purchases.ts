@@ -298,7 +298,7 @@ export const STATEMENT_SQL = `WITH wanted AS MATERIALIZED (
  * reserves an acceptance under: accepted first, then a review still due, then
  * a withdrawn and finally a rejected one, newest first within each. The three
  * `json_extract` terms are the expressions of
- * `card_settlement_candidates_statement_period` (migration 0048), which reaches
+ * `card_settlement_candidates_statement_period` (migration 0050), which reaches
  * each key's reviews directly; they must stay written exactly so.
  */
 export const SETTLEMENT_SQL = `SELECT account_id,source_id,period,id,facts_json,status,decision_revision_id,event_id,settlement_id FROM (

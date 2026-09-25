@@ -696,7 +696,7 @@
       "sha256": "4ae010e7a881b839cd376fec814c1bc518b62b04b7c0c7e75b72a38077f4875b"
     },
     {
-      "file": "0048_statement_fact_indexes.sql",
+      "file": "0050_statement_fact_indexes.sql",
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "49ffaf6193a075f2f7052dfb7a1bd67accabad51158e6528456520e1434cafef"
