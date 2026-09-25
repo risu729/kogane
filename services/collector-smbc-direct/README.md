@@ -20,7 +20,7 @@ SMBC sessionが全期間の途中で切れた場合も、再度QRを生成・承
 - normalized明細: 銀行側明細ID、日付、入出金額、摘要、取引後残高、方向
 - 各runのmanifest: 期間、chunk進捗、件数、artifact size、SHA-256、failure code、logout結果
 
-R2 keyは `raw/smbc-direct/YYYY/MM/DD/<run-id>/...`。口座番号や利用者名をkeyとmanifestへ入れない。
+月chunkは共有DATA bucket（`kogane-raw-evidence`）の `raw/smbc-direct/YYYY/MM/DD/<run-id>/...` へstagingし、run完了時にmanifestと照合して `objects/<2 hex>/<sha256>` へ書き、最後にterminal `runs/smbc-direct/<run-id>/terminal.json` を書く。口座番号や利用者名をkeyとmanifestへ入れない。
 
 ## セッション設計
 
@@ -45,25 +45,16 @@ printf '%s\n' '<item-id>' > /home/risu/.local/state/kogane/smbc-direct-bitwarden
 `SESSION_ENCRYPTION_KEY` は初回同期時に32 byteで生成し、ローカルの `smbc-direct-session-encryption-key` とWorker secretへ保存する。
 第三引数の管理token fileは未作成ならowner-onlyで生成され、`ADMIN_TRIGGER_TOKEN`として同期される。認証値は標準出力へ出さない。
 
-## 中央raw-evidenceへの転送
+## 中央raw-evidenceへの保存
 
-terminal manifestを保存した直後、`RAW_EVIDENCE_IMPORTER` Service Bindingで中央Importerをbest effort呼び出す。中央転送の失敗はsource収集結果を成功へ昇格・失敗へ降格させず、保存済みR2を後から再送できる。管理Bearer付き`POST /backfill-raw-evidence?limit=1`は1回につきsource R2を1 objectだけ走査し、大きいrunはopaque cursorで10 artifactずつ継続する。
-
-historical outboxはローカルのowner-only token fileとcursor fileを使って再送する。
-
-```bash
-services/collector-smbc-direct/scripts/backfill-raw-evidence.sh
-```
-
-scriptは1 pageずつ処理し、失敗manifestでは停止する。cursorはrepository外へ原子的に保存し、全件完了時に削除する。source R2は転送後も削除しない。GitHub Actions cron、Queue、追加scheduled triggerは使わない。
+runは`packages/collection`で共有DATA bucketへ直接書き、ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。stagingのre-readとその上限は[collection.md](../../docs/collection.md#smbc-direct-kogane-smbc-direct-backfill-poc)を参照。`RAW_EVIDENCE_IMPORTER` Service Binding、`POST /backfill-raw-evidence`、`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止した。旧bucketのstaging objectは同じkeyのまま中央DATAへ保存済みで、Durable Objectの進捗はDATAから再開できる（[legacy-retirement.md](../../docs/legacy-retirement.md)）。GitHub Actions cron、Queue、追加scheduled triggerは使わない。
 
 ## Cloudflare resources
 
 - Worker: `kogane-smbc-direct-backfill-poc`
 - Durable Object: `SmbcBackfillSession`
-- private R2: `kogane-smbc-direct-backfill-poc`
+- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
 - Worker secrets: `SMBC_CREDENTIAL_JSON`, `SESSION_ENCRYPTION_KEY`, `ADMIN_TRIGGER_TOKEN`
-- Service Binding: `RAW_EVIDENCE_IMPORTER` → `kogane-collector-r2-importer`
 - Worker-level Cloudflare Access: productionとpreviewを保護（preview自体は無効）
 
 Access未認証requestはWorker側でも403にする。POSTは同一originとcustom action headerを要求する。
@@ -93,7 +84,6 @@ Access未認証requestはWorker側でも403にする。POSTは同一originとcus
 検証終了時にまとめて削除する対象:
 
 - Worker `kogane-smbc-direct-backfill-poc`
-- R2 bucket `kogane-smbc-direct-backfill-poc` と全object
 - Durable Object instances/storage
 - Worker secretsとAccess application
 - `/home/risu/.local/state/kogane/smbc-direct-bitwarden-item-id`

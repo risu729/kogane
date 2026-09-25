@@ -472,6 +472,90 @@ ledger and displayed past-month shapes are therefore observed. Multiple
 connections, CSV/PDF/OFX, and debit were not observed, so they are not claimed
 as production-validated Layer B routes.
 
+### Relative period labels are resolved from the capture time
+
+Some providers name a period only by its position on the day it is shown.
+MyJCB's credit menu links `detailMonth=0..8`, and its past-months API labels
+only months 9–17 with an absolute `settlementYM`, so the collector stores
+`detailMonth-N` as the period of every other month
+(`services/collector-myjcb/src/collector.ts`). On the connection surveyed in
+[the MyJCB notes](sources/myjcb.md) that is every pending row and every recent
+confirmed month.
+
+**A relative label is never resolved at collection time.** The collector keeps
+storing exactly what the provider showed, and the label stays raw evidence
+that is never rewritten. Its calendar month is an interpretation, and evidence
+comes before schema: an interpretation must stay reproducible from the evidence
+it was derived from. Readers and processors therefore resolve the label
+afterwards, from the **capture time**: the `fetched_at` of the artifact that
+carries the label, plus the relative index. The derivation is a versioned rule
+like any other (`relative-statement-period-v1` in
+`packages/domain/src/relative-period.ts`). The policy applies to any source
+whose labels are relative (v1 places MyJCB's only, below); a derivation never
+changes a stored label, a parser version or an observation digest, and a
+corrected rule is a new version re-derived from the same captures.
+
+`relative-statement-period-v1` resolves MyJCB's `detailMonth-N` to the payment
+month `YYYY-MM`, the key `card_statement_facts.period` uses for the same
+provider. Let `d` be the capture's civil date in Asia/Tokyo. JCB closes a
+cycle on the 15th and collects it in the following month, so the statement
+that usage on `d` is billed to is paid in `P0` = the month of `d` plus 1 when
+`d` falls on the 1st–15th, plus 2 from the 16th. Then:
+
+- `detailMonth-0` is `P0`, the statement still accumulating (unconfirmed);
+- `detailMonth-1` is `P0 − 1`, the newest closed statement;
+- `detailMonth-N` for N ≥ 2 is not resolved (null, never a guess).
+
+The evidence is the surveyed connection's production captures, read as
+aggregates only (no date, amount or merchant is recorded): one capture after
+the month's confirmation date and eleven on JST days 1–11 of the next month.
+On both sides of that month boundary every `detailMonth-0` row's usage date
+falls in the cycle paid in `P0` and every `detailMonth-1` row's in `P0 − 1`,
+so the index follows the provider's billing cycle, not the calendar: "N months
+before the capture month" is off by one or two months, and month 0 is the
+current usage month's statement, not the current payment month's. The months
+the past-months API labels absolutely, N = 10 and N = 13, are `P0 − 8` and
+`P0 − 11` (the statement parser read the same months from those pages'
+headings), not `P0 − N`: the provider's numbering is not one uniform month
+offset across the menu and the past-month range, and menu months 2–8 carried
+no row in any capture, so nothing places them. They stay unresolved until a
+capture does, and the months that matter beyond them arrive labelled. The
+switch from `+1` to `+2` on the 16th is **not verified**: it is placed there
+by JCB's published schedule (the 15th closing, the amount confirmed around the
+24th of the month before payment, and one or two unconfirmed months listed at
+a time), and no capture yet falls on days 12–30 to show on which day the
+provider's position 0 moves to the next cycle. A capture on those days that
+contradicts it is corrected by a new rule version, never by editing v1.
+
+What the surveyed connection shows today limits what a resolved
+`detailMonth-1` achieves there. Its `detailMonth=1` page carries no export
+link, so the collector records that month as `unconfirmed` (it treats month 0
+or 1 without an export as unconfirmed) although the page heading says 確定分
+([the MyJCB notes](sources/myjcb.md)). That ledger's rows are pending rows,
+the statement parser rejects that page, so it has no `card_statement_facts`
+row, and both unconfirmed ledgers of the connection share the one
+unconfirmed snapshot the current views keep (above), so only the newer of the
+two is current for recognition. The rule still gives those pending rows their
+payment month; the statement join and the confirmed-row pairing a resolved
+`detailMonth-1` enables ([card settlements](card-settlements.md),
+[economic events](economic-events.md#the-vertical-slice-that-runs)) apply
+where the collector records that month as confirmed.
+
+Other relative labels surveyed (`services/collector-*`,
+`packages/parsers/src/parsers/*`, `docs/sources/*.md`):
+
+- MyJCB `credit-past-months` may carry the same `detailMonth-N` fallback as
+  its `settlementYM`. It is a statement payment metric, not card usage; every
+  observed capture labelled it absolutely, and its current view already ranks
+  a fallback by `detailMonth` inside the latest artifact. Out of scope.
+- MyJCB debit menus number months with `seq=N`; no debit artifact is parsed.
+  Out of scope until a debit parser exists.
+- V Point's `get_month` is a numeric provider enum kept unmapped in `extra`;
+  it names no period anything is joined on. Out of scope.
+- Vpass statement months (`months/YYYYMM`, `_kogane.statementMonth`),
+  MoneyForward months (the collector requests absolute `YYYY-MM` months) and
+  every bank's dated rows are absolute already.
+
 ### SMBC Direct normalized parsing
 
 SMBC Direct stores a Shift-JIS provider response and a UTF-8 normalized partner
