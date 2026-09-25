@@ -20,6 +20,7 @@ import {
   type CommandStore,
   type OperationReceipt,
 } from "../../../../packages/application/src/index.ts";
+import type { RegistrationBudget } from "../../../../packages/application/src/collection/index.ts";
 import { d1CommandStore } from "../../../../packages/storage-d1/src/core/command-store.ts";
 import type { D1Like } from "../../../../packages/storage-d1/src/d1.ts";
 import { registerCollectionRun, type CollectionEnv } from "../collection/index.ts";
@@ -52,6 +53,11 @@ export interface DispatchSummary {
 export interface DispatchOptions {
   limit?: number;
   now?: () => Date;
+  /**
+   * The cron invocation's registration budget, shared with the scan lane, so
+   * an `import` counts against the same bound as every other registration.
+   */
+  budget?: RegistrationBudget;
 }
 
 /**
@@ -96,7 +102,7 @@ export async function dispatchOperations(
   });
   summary.claimed = pending.length;
   for (const receipt of pending) {
-    const outcome = await dispatchOne(env, store, receipt, now);
+    const outcome = await dispatchOne(env, store, receipt, now, options.budget);
     if (outcome === "dispatched") summary.dispatched += 1;
     else if (outcome === "failed") summary.failed += 1;
     else if (outcome === "awaiting") summary.awaiting += 1;
@@ -112,11 +118,12 @@ async function dispatchOne(
   store: CommandStore,
   receipt: OperationReceipt,
   now: () => Date,
+  budget: RegistrationBudget | undefined,
 ): Promise<OneOutcome> {
   const at = now();
   switch (receipt.kind) {
     case "import":
-      return dispatchImport(env, store, receipt, at);
+      return dispatchImport(env, store, receipt, at, budget);
     case "replay":
       return dispatchReplay(env, store, receipt, at);
     case "projection":
@@ -142,13 +149,18 @@ async function dispatchImport(
   store: CommandStore,
   receipt: OperationReceipt,
   at: Date,
+  budget: RegistrationBudget | undefined,
 ): Promise<OneOutcome> {
   const payload = await operationRequestPayload(store, receipt.operationId);
   const source = typeof payload?.source === "string" ? payload.source : null;
   const runId = typeof payload?.runId === "string" ? payload.runId : null;
   if (!source || !runId) return fail(store, receipt, "operation_payload_invalid", at);
 
-  const result = await registerCollectionRun(env, { source, runId });
+  const result = await registerCollectionRun(
+    env,
+    { source, runId },
+    budget === undefined ? {} : { budget },
+  );
   const iso = at.toISOString();
   switch (result.outcome) {
     case "registered":
@@ -208,6 +220,18 @@ async function dispatchImport(
         now: iso,
         retryAtMs: at.valueOf() + RETRY_MS,
         failureCode: result.code,
+      });
+      return "retry";
+    case "deferred":
+      // This tick's registration budget was spent before the run started.
+      // Nothing was registered; the request waits for a later tick.
+      await recordDispatch({
+        store,
+        operationId: receipt.operationId,
+        outcome: "retry",
+        now: iso,
+        retryAtMs: at.valueOf() + RETRY_MS,
+        failureCode: "registration_deferred",
       });
       return "retry";
     default:

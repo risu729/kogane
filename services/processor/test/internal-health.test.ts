@@ -112,6 +112,21 @@ test("the answer carries the build identity, the stores, the flags and the curso
     "SHARED_R2_INGEST_ENABLED",
   );
   expect(health["collectionScan"]).toMatchObject({ lane: "collection_scan" });
+  // The registration budget this deployment enforces, next to the documented
+  // limits it is a fraction of, and the terminals still short of
+  // registration — counts and an age, nothing else (issue #87).
+  expect(health["registration"]).toEqual({
+    operationBudget: 500,
+    documented: {
+      workerInvocationsPerRequest: 32,
+      d1QueriesPerInvocation: 1000,
+      subrequestsPerInvocation: 10000,
+    },
+    recorded: true,
+    unregistered: 0,
+    pending: 0,
+    oldestPendingAgeMs: null,
+  });
   // No lane has ticked in this fixture: no record, rather than an invented one.
   expect(health["laneTicks"]).toEqual([]);
   // Nothing has been projected in this fixture, so the READ pointer is absent
