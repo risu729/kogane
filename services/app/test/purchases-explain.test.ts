@@ -2,9 +2,11 @@
 // and the real read model: the agent reads the operator's card purchase page
 // through the same query, graded by its own grant, served only while the
 // deployment serves card purchase recognition, and without the review
-// affordances. A pending authorisation and its posted charge are recognised
-// through the guarded builder the processor uses, with the stage-B candidate
-// that names both; every value is invented.
+// affordances. A MyJCB pending authorisation and its posted charge are
+// recognised through the guarded builder the processor uses, with the stage-B
+// candidate that names both (a Vpass pending row is not recognised until the
+// meaning of its payment-type field, `bunkatsuYaku`, is verified); every value
+// is invented.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,26 +43,26 @@ beforeAll(async () => {
   await seedRegistry();
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO producer_sources (producer_id,source_id) VALUES ('evidence-test','vpass')",
+      "INSERT INTO producer_sources (producer_id,source_id) VALUES ('evidence-test','myjcb')",
     ),
     env.DB.prepare(
-      "INSERT INTO ingest_client_routes (ingest_client_id,producer_id,source_id) VALUES ('evidence-test','evidence-test','vpass')",
+      "INSERT INTO ingest_client_routes (ingest_client_id,producer_id,source_id) VALUES ('evidence-test','evidence-test','myjcb')",
     ),
     env.DB.prepare(
       "INSERT INTO accounts(id,label,role,status) VALUES('acct-card','Synthetic card','liability','identified')",
     ),
   ]);
-  const run = await seedRun({ source: "vpass", count: 1 });
+  const run = await seedRun({ source: "myjcb", count: 1 });
   const parse = await env.DB.prepare(
     `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
-     VALUES(?,'vpass-statement-page','1','2026-09-11T00:00:00Z','ok','[]') RETURNING id`,
+     VALUES(?,'myjcb-credit-ledger','1','2026-09-11T00:00:00Z','ok','[]') RETURNING id`,
   )
     .bind(run.artifacts[0]!.id)
     .first<{ id: number }>();
   await publishParse(parse!.id);
   const recognise = async (row: {
     externalId: string;
-    status: "posted" | "unconfirmed";
+    status: "confirmed" | "unconfirmed";
     amount: number;
     usageDate: string;
     counterparty: string;
@@ -68,7 +70,7 @@ beforeAll(async () => {
     const observation = await env.DB.prepare(
       `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,
         currency,description,counterparty,as_of,raw_locator,extra_json)
-       VALUES(?,'vpass:card-001',?,?,?,?,0,'JPY','1回払い',?,?,'json:$.rows[0]','{}') RETURNING id`,
+       VALUES(?,'myjcb:connection-a:root',?,?,?,?,0,'JPY','架空',?,?,'json:$.rows[0]','{}') RETURNING id`,
     )
       .bind(
         parse!.id,
@@ -83,28 +85,29 @@ beforeAll(async () => {
     const fact: CardUsageFact = {
       observationId: observation!.id,
       parseRunId: parse!.id,
-      sourceId: "vpass",
+      sourceId: "myjcb",
       producerId: "evidence-test",
       externalIdNamespace: "fixture",
-      sourceAccount: "vpass:card-001",
+      sourceAccount: "myjcb:connection-a:root",
       externalId: row.externalId,
       accountId: "acct-card",
-      identityPolicyFamily: "vpass-card-binding",
+      identityPolicyFamily: "identity-default",
       providerStatus: row.status,
       amount: exactQuantity("JPY", integerDecimal(row.amount), "decimal-v1"),
       usageDate: row.usageDate,
-      paymentType: "1回払い",
+      // The combined ご利用先など／支払区分 cell; usage equal to payment.
+      paymentType: "synthetic merchant 1回払",
       statementPeriod: "202609",
       providerSaleCode: null,
-      usageAmountText: null,
-      paymentAmountText: null,
+      usageAmountText: `${(-row.amount).toLocaleString("en-US")}円`,
+      paymentAmountText: `${(-row.amount).toLocaleString("en-US")}円`,
       newestRepresentation: true,
     };
     const eventId = await cardPurchaseEventId("purchase", [
-      "vpass",
+      "myjcb",
       "evidence-test",
       "fixture",
-      "vpass:card-001",
+      "myjcb:connection-a:root",
       row.externalId,
     ]);
     const draft = await cardPurchaseRevision({ action: "recognize", eventId, revision: 1, fact });
@@ -118,15 +121,15 @@ beforeAll(async () => {
     return { eventId, observationId: observation!.id };
   };
   const pending = await recognise({
-    externalId: "vpass:card-001:202609:customized:row-p:0",
+    externalId: "myjcb-credit-ledger:unconfirmed:row-p:0",
     status: "unconfirmed",
     amount: -1200,
     usageDate: "2026-08-20",
     counterparty: "synthetic merchant",
   });
   const posted = await recognise({
-    externalId: "vpass:card-001:202609:web:row-q:0",
-    status: "posted",
+    externalId: "myjcb-credit-ledger:confirmed:row-q:0",
+    status: "confirmed",
     amount: -1234,
     usageDate: "2026-08-21",
     counterparty: HOSTILE,
@@ -412,12 +415,12 @@ describe("authorization", () => {
         ["capability:records.read"],
       ],
       [
-        { ...FULL_GRANT, scopes: { sources: ["vpass"], accounts: "*" } },
+        { ...FULL_GRANT, scopes: { sources: ["myjcb"], accounts: "*" } },
         "evidence_restricted",
         ["scope:source"],
       ],
       [
-        { ...FULL_GRANT, scopes: { sources: "*", accounts: ["vpass:card-001"] } },
+        { ...FULL_GRANT, scopes: { sources: "*", accounts: ["myjcb:connection-a:root"] } },
         "evidence_restricted",
         ["scope:account"],
       ],
