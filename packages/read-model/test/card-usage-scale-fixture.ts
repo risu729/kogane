@@ -1268,6 +1268,7 @@ export function factOf(row: CurrentCardUsageRow): CardUsageFact | null {
     usageDate: row.as_of,
     paymentType: row.payment_type,
     statementPeriod: row.statement_period,
+    capturedAt: row.snapshot_fetched_at,
     providerSaleCode: row.provider_sale_code,
     usageAmountText: row.usage_amount_text,
     paymentAmountText: row.payment_amount_text,

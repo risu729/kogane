@@ -6,9 +6,12 @@ production digest was recomputed or rewritten.
 
 `packages/evidence-contract` (`@kogane/evidence-contract`) is the single
 definition of the kogane-ingest v1 request schemas, the artifact descriptor
-normalization, the canonical encoding, and the digest. The collector importer
+normalization, the canonical encoding, and the digest. `packages/collection`,
+`packages/storage-d1` and `packages/application` (the Processor's in-process
+registration) import it by relative path. The collector importer
 (`services/collector-r2-importer`) and the raw-evidence Worker
-(`services/raw-evidence`) import it by relative path. The package is pure
+(`services/raw-evidence`), its consumers when A02 landed, were retired on
+2026-09-13 ([legacy-retirement.md](legacy-retirement.md)). The package is pure
 TypeScript: no HTTP, no R2, no D1, no credentials, no runtime dependencies.
 
 ## Why one definition
@@ -158,6 +161,9 @@ Tests:
   `verify-*-route.test.sh` scripts) pass unchanged; they cover resend, mid-run
   resume in chunks, and seal for every source.
 
+The importer and raw-evidence suites above were removed with those Workers on
+2026-09-13; the package-level golden vectors remain the contract's test.
+
 ## Adding or changing a field
 
 1. Decide whether the field is hash-relevant. A field that describes the
@@ -177,12 +183,11 @@ Tests:
 
 ## Deploy order and rollback
 
-No migration and no feature flag. The package is bundled into each Worker at
-deploy time, so deploy `services/raw-evidence` (schema unchanged, digests
-unchanged) and `services/collector-r2-importer` in either order; an old
-importer talking to the new server, or the reverse, computes the same v1
-bytes. Rollback target: the previous deployment of either Worker; the same v1
-inputs hash the same on both sides.
+No migration and no feature flag. The package is bundled into each consumer
+Worker at deploy time, and the same v1 inputs hash the same in every build.
+When A02 landed, that let `services/raw-evidence` and
+`services/collector-r2-importer` deploy in either order; both Workers have
+since been retired ([legacy-retirement.md](legacy-retirement.md)).
 
 ## Normalization sites (before and after A02)
 

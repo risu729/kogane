@@ -28,6 +28,7 @@ import {
   type UnknownStateReason,
 } from "./events.ts";
 import { hasExactKeys, isOneOf, isRecord } from "./guards.ts";
+import { resolveRelativePeriod } from "./relative-period.ts";
 import { validLocalDateText, type TemporalValue } from "./time.ts";
 import {
   compareDecimals,
@@ -124,8 +125,14 @@ export interface CardUsageFact {
   usageDate: string | null;
   /** Provider payment type (支払区分); compared, never stored. */
   paymentType: string | null;
-  /** `_kogane.statementMonth` or `_kogane.period` as parsed; normalised by `statementPeriod`. */
+  /** `_kogane.statementMonth` or `_kogane.period` as parsed; normalised by `cardStatementPeriod`. */
   statementPeriod: string | null;
+  /**
+   * The `fetched_at` of the artifact the statement label was read from: the
+   * capture time a relative label (MyJCB's `detailMonth-N`) is resolved
+   * against (`cardStatementPeriod`). Null when unknown.
+   */
+  capturedAt: string | null;
   /** Vpass customized `uriageKbn`: `5` sale, `6` return. */
   providerSaleCode: string | null;
   /** MyJCB `ご利用金額` and `今回のお支払い金額` display texts. */
@@ -278,8 +285,9 @@ export function comparableCardPayment(row: {
  *   paid in, which is the period the MyJCB statement parser derives from its
  *   payment date and cross-checks against this same label.
  *
- * Every other shape (the collector's `detailMonth-N` fallback, a date, free
- * text) is null, never a guess.
+ * Every other shape (the collector's relative `detailMonth-N` fallback, a
+ * date, free text) is null here, never a guess: a relative label names a month
+ * only together with its capture time (`cardStatementPeriod`).
  */
 export function statementPeriod(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -292,6 +300,27 @@ export function statementPeriod(value: unknown): string | null {
   if (year === undefined || month === undefined) return null;
   const number = Number(month);
   return number >= 1 && number <= 12 ? `${year}-${month}` : null;
+}
+
+/**
+ * The statement period of a usage row as `YYYY-MM`: its absolute label read by
+ * `statementPeriod`, else its relative label resolved from the row's capture
+ * time (`resolveRelativePeriod`, relative-statement-period-v1: MyJCB
+ * `detailMonth-0` and `detailMonth-1`). Null when neither places the month.
+ * The stored label is never rewritten; this is what recognition stores in its
+ * sidecar and what pending-to-posted matching groups MyJCB rows by.
+ */
+export function cardStatementPeriod(
+  fact: Pick<CardUsageFact, "sourceId" | "statementPeriod" | "capturedAt">,
+): string | null {
+  return (
+    statementPeriod(fact.statementPeriod) ??
+    resolveRelativePeriod({
+      sourceId: fact.sourceId,
+      label: fact.statementPeriod,
+      fetchedAt: fact.capturedAt,
+    })
+  );
 }
 
 function isCardSource(value: string): value is CardPurchaseSourceId {
@@ -607,7 +636,7 @@ export async function cardPurchaseRevision(input: {
     {
       accountId: fact.accountId,
       sourceId: fact.sourceId,
-      statementPeriod: statementPeriod(fact.statementPeriod),
+      statementPeriod: cardStatementPeriod(fact),
       facts: {
         providerStatus,
         amount: fact.amount,
@@ -965,6 +994,12 @@ export type CardPurchaseNextAction = "none" | "recognize" | "revise" | "reanchor
  * longer published is re-anchored to the current row; changed content is a
  * revision when the state change is allowed by `eventTransition` (a correction
  * inside one state is always allowed). A different kind is never a revision.
+ *
+ * The sidecar's statement period is not part of the content digest, so a
+ * period derived differently from the same row (a relative label the stored
+ * revision could not place, resolved from its capture time by
+ * `cardStatementPeriod`) is a revision of its own: the event is revised, never
+ * rewritten or deleted, and its earlier revision keeps the period it had.
  */
 export function nextCardPurchaseAction(input: {
   live: {
@@ -973,13 +1008,23 @@ export function nextCardPurchaseAction(input: {
     contentDigest: string;
     /** Every parse run the live evidence cites is still published. */
     evidenceAdopted: boolean;
+    /** The live sidecar's `statement_period`. */
+    statementPeriod: string | null;
   } | null;
-  next: { kind: CardPurchaseKind; state: EventState; contentDigest: string };
+  next: {
+    kind: CardPurchaseKind;
+    state: EventState;
+    contentDigest: string;
+    statementPeriod: string | null;
+  };
 }): CardPurchaseNextAction {
   const { live, next } = input;
   if (live === null) return "recognize";
   if (live.kind !== next.kind) return "blocked";
-  if (live.contentDigest === next.contentDigest) return live.evidenceAdopted ? "none" : "reanchor";
+  if (live.contentDigest === next.contentDigest) {
+    if (live.statementPeriod !== next.statementPeriod) return "revise";
+    return live.evidenceAdopted ? "none" : "reanchor";
+  }
   if (live.state === next.state) return "revise";
   return eventTransition(live.kind, live.state, next.state).ok ? "revise" : "blocked";
 }

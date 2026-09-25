@@ -10,6 +10,7 @@ import { currentCardUsageSql, type CurrentCardUsageRow } from "../../read-model/
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { baseWorld, PRODUCER, VPASS_NAMESPACE } from "../../read-model/test/card-usage-fixture.ts";
 import { factOf } from "../../storage-d1/test/card-purchase-fixture.ts";
+import { myJcbCreditStatement } from "../../parsers/src/parsers/myjcb.ts";
 import {
   CARD_PURCHASE_PAGE_SIZE,
   CardPurchaseLimitError,
@@ -362,6 +363,67 @@ describe("card purchase explanation", () => {
     });
     expect(page.summary.statementTotals).toEqual([]);
     expect(JSON.stringify(page)).not.toContain("providerTotal");
+  });
+
+  test("a relative MyJCB label joins the statement the same capture's page names", async () => {
+    // One MyJCB capture on 2026-09-26 (JST, after the 15th closing): the
+    // ledger at position 1 carries the collector's relative `detailMonth-1`,
+    // and the confirmed page of that position names its own month in its
+    // heading and payment date, read by the deployed statement parser.
+    const captured = "2026-09-26T00:00:00.000Z";
+    const page = myJcbCreditStatement.parse(
+      new TextEncoder().encode(
+        '<!doctype html><html><body><h1>MyJCB</h1><h1>カードご利用代金明細(確定分)</h1><h2>2026年10月お支払い分のカードご利用明細</h2><div class="detail-list-01"></div><dl><dt>2026年10月13日(火)お支払い金額合計</dt><dd>500円</dd></dl></body></html>',
+      ),
+      {
+        id: 1,
+        sourceId: "myjcb",
+        runStatus: "success",
+        runFailureCount: 0,
+        dataset: "credit-detail",
+        artifactKey: "connection-a/credit-detail-01.html",
+        statementState: "confirmed",
+        period: "detailMonth-1",
+        url: null,
+        mime: "text/html; charset=utf-8",
+        fetchedAt: captured,
+        sha256: "a".repeat(64),
+      },
+    ).observations[0]!;
+    const kogane = page.extra["_kogane"] as { period: string; paymentDate: string };
+    expect(kogane).toMatchObject({ period: "2026-10", paymentDate: "2026-10-13" });
+    const w = world();
+    // The recognition lane's fact of the ledger row: the label verbatim and
+    // the capture time of its own artifact.
+    const eventId = await w.recognise(
+      factOf(5, { statementPeriod: "detailMonth-1", capturedAt: captured }),
+    );
+    const statement = w.statement({
+      source: "myjcb",
+      sourceAccount: "myjcb:connection-a:root",
+      accountId: "acct-jcb",
+      period: kogane.period,
+      total: 500,
+      paymentDate: kogane.paymentDate,
+    });
+    const [item] = (await queryCardPurchases(w.sql, { eventId })).items;
+    expect(item).toMatchObject({
+      sourceId: "myjcb",
+      state: "captured",
+      statementPeriod: "2026-10",
+      statement: {
+        status: "linked",
+        ref: { kind: "balance", id: `balance:${statement.observationId}` },
+        period: "2026-10",
+        paymentDate: { kind: "local-date", value: "2026-10-13" },
+      },
+    });
+    // The stored label is never rewritten; the period is derived.
+    expect(
+      w.db
+        .query("SELECT statement_period FROM card_purchase_recognitions WHERE event_id=?")
+        .all(eventId),
+    ).toEqual([{ statement_period: "2026-10" }]);
   });
 
   test("a changed card ordinal joins the statement by resolved account", async () => {
@@ -751,6 +813,7 @@ function factFrom(row: CurrentCardUsageRow): CardUsageFact {
     usageDate: row.as_of,
     paymentType: row.payment_type,
     statementPeriod: row.statement_period,
+    capturedAt: row.snapshot_fetched_at,
     providerSaleCode: row.provider_sale_code,
     usageAmountText: row.usage_amount_text,
     paymentAmountText: row.payment_amount_text,
@@ -818,6 +881,7 @@ describe("current provider rows", () => {
         usageDate: vanished.as_of,
         paymentType: vanished.payment_type,
         statementPeriod: vanished.statement_period,
+        capturedAt: null,
         providerSaleCode: "5",
         usageAmountText: null,
         paymentAmountText: null,
