@@ -8,7 +8,10 @@ import { cardPurchaseSummary } from "../../../packages/domain/src/card-purchase.
 import type { EconomicEventRevision } from "../../../packages/domain/src/events.ts";
 import { exactQuantity, normalizeDecimal } from "../../../packages/domain/src/values.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
-import { myJcbCreditLedger } from "../../../packages/parsers/src/parsers/myjcb.ts";
+import {
+  myJcbCreditLedger,
+  myJcbCreditStatement,
+} from "../../../packages/parsers/src/parsers/myjcb.ts";
 import { vpassStatementPage } from "../../../packages/parsers/src/parsers/vpass.ts";
 import type { ArtifactMeta, Observation, Parser } from "../../../packages/parsers/src/types.ts";
 import {
@@ -336,6 +339,115 @@ export class World {
       }),
       input,
     );
+  }
+
+  /**
+   * One confirmed MyJCB `credit-detail` page of a connection, parsed by the
+   * deployed statement parser into its `credit_statement_payment_amount`, then
+   * published and identified. `period` is the manifest label (it may be the
+   * collector's relative `detailMonth-N`); the page's own heading and payment
+   * date name the month.
+   */
+  async myjcbStatement(input: {
+    fetchedAt: string;
+    detailMonth: number;
+    period: string;
+    /** The heading's payment month and the dated total, e.g. `2026年10月` and `2026年10月13日(火)`. */
+    heading: string;
+    paymentDay: string;
+    total: string;
+    connection?: string;
+  }): Promise<Capture> {
+    const connection = input.connection ?? "conn-a";
+    const run = this.id();
+    const unit = this.id();
+    const artifact = this.id();
+    const key = `${connection}/credit-detail-${String(input.detailMonth).padStart(2, "0")}.html`;
+    const html = `<!doctype html><html><body><h1>MyJCB</h1><h1>カードご利用代金明細(確定分)</h1><h2>${input.heading}お支払い分のカードご利用明細</h2><div class="detail-list-01"></div><dl><dt>${input.paymentDay}お支払い金額合計</dt><dd>${input.total}円</dd></dl></body></html>`;
+    await seedUnitRun(this.env, {
+      id: run,
+      source: "myjcb",
+      dataset: "credit-detail",
+      runOutcome: "success",
+      fetchedAtMs: Date.parse(input.fetchedAt),
+      units: [
+        {
+          id: unit,
+          key: connection,
+          outcome: "success",
+          artifacts: [{ id: artifact, key, payload: html }],
+        },
+      ],
+    });
+    await this.db.batch([
+      this.db
+        .prepare("UPDATE acquisition_sessions SET producer_id=?,external_id_namespace=? WHERE id=?")
+        .bind(PRODUCER, MYJCB_NAMESPACE, run),
+      this.db
+        .prepare(
+          "INSERT INTO observation_artifact_metadata(fetch_artifact_id,statement_state,period) VALUES(?,'confirmed',?)",
+        )
+        .bind(artifact, input.period),
+    ]);
+    const parse = this.id();
+    await this.db
+      .prepare(
+        "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,?,'2026-09-01','pending','[]')",
+      )
+      .bind(parse, artifact, myJcbCreditStatement.name, myJcbCreditStatement.version)
+      .run();
+    const observations: number[] = [];
+    const parsed = myJcbCreditStatement.parse(
+      new TextEncoder().encode(html),
+      meta(artifact, "myjcb", "credit-detail", key, input.fetchedAt, {
+        mime: "text/html; charset=utf-8",
+        statementState: "confirmed",
+        period: input.period,
+      }),
+    );
+    for (const row of parsed.observations as Observation[]) {
+      if (row.kind !== "balance") continue;
+      const inserted = await this.db
+        .prepare(
+          `INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,observed_at,raw_locator,extra_json)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+        )
+        .bind(
+          parse,
+          row.sourceAccount,
+          row.metric,
+          row.amountMinor ?? null,
+          row.amountText ?? null,
+          row.amountScale ?? null,
+          row.instrument ?? null,
+          row.asOf ?? null,
+          row.observedAt ?? null,
+          row.rawLocator,
+          JSON.stringify(row.extra),
+        )
+        .first<{ id: number }>();
+      observations.push(inserted!.id);
+    }
+    await this.db.prepare("UPDATE parse_runs SET status='ok' WHERE id=?").bind(parse).run();
+    await publishParse(this.db, parse);
+    await identifyParse(
+      this.db,
+      {
+        id: parse,
+        artifact_id: artifact,
+        source_id: "myjcb",
+        producer_id: PRODUCER,
+        fetch_run_id: run,
+      },
+      resolveIdentity,
+    );
+    return {
+      run,
+      artifact,
+      parse,
+      observations,
+      replay: () => Promise.reject(new Error("a statement capture is not replayed here")),
+    };
   }
 
   /** A pending parse run, its observations, `ok`, then publication and identity as asked. */

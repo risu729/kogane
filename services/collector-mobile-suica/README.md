@@ -64,11 +64,14 @@ WebAuthn assertionはR2、ログ、manifest、Gitへ保存しない。
 ## 収集物
 
 ```text
-raw/mobile-suica/YYYY/MM/DD/<run-id>/sf-history-page-0001.html
-raw/mobile-suica/YYYY/MM/DD/<run-id>/sf-history.json
-raw/mobile-suica/YYYY/MM/DD/<run-id>/collection-summary.json
-raw/mobile-suica/YYYY/MM/DD/<run-id>/manifest.json
+objects/<2 hex>/<sha256>                    sf-history-page-0001.html、sf-history.json、collection-summary.json
+runs/mobile-suica/<run-id>/terminal.json    最後に書くrunの完了記録（artifact keyとobjectの対応を持つ）
 ```
+
+runは`packages/collection`で共有DATA bucket（`kogane-raw-evidence`）へ書き、Processorが
+terminalをin-processで登録する（[processor.md](../../docs/processor.md)）。source専用bucket、
+`RAW_EVIDENCE_IMPORTER` Service Binding、backfill scriptは2026-09-13に廃止した
+（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 HTMLとJSONには本人の交通・購買履歴、残高、金額が含まれる。R2 bucketはpublicに
 しない。保存するHTMLは`baseVariable`を固定sentinelへ置換済みであり、元の値をR2へ
@@ -79,8 +82,7 @@ HTMLとJSONには本人の交通・購買履歴、残高、金額が含まれる
 `partial` / `history_boundary_unproven`とする。前日cursorへ進めず、完全取得を主張しない。
 manual triggerはpartialをHTTP 502、scheduled runはthrowとして可観測にする。
 
-各artifactのR2 custom metadataは`source`, `runId`, `dataset`, `sha256`の4項目だけである。
-manifest metadataは安全な`source`, `status`, `runId`の3項目だけを保存する。
+各objectのR2 custom metadataは`packages/collection`が書く`sha256`と`byteSize`だけである。
 
 ## Bitwardenからのローカル同期
 
@@ -116,21 +118,14 @@ mise run //services/collector-mobile-suica:dry-run
 `ADMIN_TRIGGER_TOKEN`はデプロイ完了後に設定する。Secret変更とcode deployは別version
 として反映されるため、診断・手動実行に使うローカル値とWorker側の値を最後に揃える。
 
-過去runはsecure token fileを読み、1回にmanifest 1件だけを中央へ送る。source R2 objectは
-削除・移動しない。
-
-```sh
-./scripts/backfill-raw-evidence.sh
-```
-
 ## resourceとcleanup
 
 - Worker: `kogane-mobile-suica-collector-poc`
 - Browser binding: `BROWSER`
-- R2 bucket: `kogane-mobile-suica-collector-poc`
-- Service binding: `RAW_EVIDENCE_IMPORTER` → `kogane-collector-r2-importer`
+- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
 - Cron: `10 21 * * *`
 - Secrets: `ADMIN_TRIGGER_TOKEN`, `JRE_ID_CREDENTIAL_JSON`
 
 旧`MOBILE_SUICA_SESSION_JSON`、`JRE_ID_FINGERPRINT`、TAMIA VPC bindingは実行に不要で
-ある。削除時はR2 artifactを確認・退避してからWorker、bucketの順で削除する。
+ある。削除時はWorkerだけを削除する。共有DATA bucketは他のcollectorとProcessorも使うため
+削除しない。
