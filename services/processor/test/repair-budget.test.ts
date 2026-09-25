@@ -135,6 +135,33 @@ test("a tick with more repair work than the budget executes exactly the budget, 
   ).toBe(total);
 }, 120000);
 
+test("pending counts only repair work that can still run, backing off included", async () => {
+  // Pending rows the lane can never execute: out of attempts, and of a parser
+  // version this build does not deploy. One more backs off into the future.
+  const job = (artifact: number, version: string, attempts: number, availableAt: number) =>
+    env.DB.prepare(
+      `INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms,attempts,available_at_ms)
+       SELECT ?1,parser_name,?2,'pending','repair',0,?3,?4 FROM observation_parse_jobs WHERE fetch_artifact_id=?1 LIMIT 1`,
+    ).bind(artifact, version, attempts, availableAt);
+  await env.DB.batch([
+    job(100, "0.0.0-not-deployed", 0, 0),
+    job(101, "0.0.0-not-deployed", 0, 0),
+    env.DB.prepare(
+      "UPDATE observation_parse_jobs SET status='pending',attempts=5 WHERE fetch_artifact_id=102",
+    ),
+    env.DB.prepare(
+      "UPDATE observation_parse_jobs SET status='pending',available_at_ms=?2 WHERE fetch_artifact_id=?1",
+    ).bind(103, Date.now() + 3_600_000),
+  ]);
+  expect((await sweep(env, { lane: "repair" })).lanes.repair).toMatchObject({
+    executed: 0,
+    pending: 1,
+  });
+  await env.DB.prepare(
+    "DELETE FROM observation_parse_jobs WHERE parser_version='0.0.0-not-deployed' OR fetch_artifact_id IN(102,103)",
+  ).run();
+}, 30000);
+
 test("the hard bound holds for an operator override and for the identity sweep", async () => {
   expect((await sweep(env, { lane: "repair", maxJobs: 1000 })).lanes.repair).toMatchObject({
     budget: MAX_LANE_JOBS,

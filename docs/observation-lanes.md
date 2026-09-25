@@ -303,7 +303,13 @@ The scheduled handler logs each stage as its own JSON event with counts only,
 in this order (`runScheduled` in `services/processor/src/worker.ts`). In the
 `observation_sweep` line every lane reports its `budget`, the jobs it
 `executed` (parsed or failed) and the jobs still `pending` in it, so a drain's
-progress is readable tick by tick:
+progress is readable tick by tick. `pending` uses the ready query's own
+eligibility (`RUNNABLE_JOB_SQL`) without its clock: a job backing off is
+counted, one out of attempts, of a parser version this build does not deploy
+or of a paused or cancelled replay plan is not, since it never drains. It
+reads the lane's pending rows through `observation_jobs_lane_ready`
+(`repair-budget.test.ts` "pending counts only repair work that can still
+run…"):
 
 | #   | Event                    | Gate                                                                                                                                                                                                                                                                                                                             |
 | --- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

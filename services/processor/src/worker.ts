@@ -706,7 +706,9 @@ export interface LaneSummary {
   budget: number;
   /** Jobs that ran to a parse run this sweep (`parsed + error`). */
   executed: number;
-  /** Jobs of the lane still pending after this sweep, ready or backing off. */
+  /** Pending jobs of the lane that can still run after this sweep, ready or
+   * backing off; jobs out of attempts, of an undeployed parser or of a
+   * stopped replay plan are not counted. */
   pending: number;
 }
 export interface SweepOptions {
@@ -996,6 +998,18 @@ async function maintenance(env: Env): Promise<void> {
   await registerDeployedReleases(env.DB);
 }
 
+/**
+ * Whether a job of lane ?1 can still run: attempts left (?2), a deployed
+ * parser (?4, a JSON list of name/version) and, for replay work, a running
+ * plan. Shared by the ready query, which adds the clock (?3), and the pending
+ * count, so the two cannot drift. Paused or cancelled plans stop unclaimed
+ * replay jobs only; a claimed lease finishes through the same fenced publish
+ * path as every other job.
+ */
+const RUNNABLE_JOB_SQL = `j.lane=?1 AND j.attempts<?2
+      AND EXISTS(SELECT 1 FROM json_each(?4) r WHERE json_extract(r.value,'$.name')=j.parser_name AND json_extract(r.value,'$.version')=j.parser_version)
+      AND (j.replay_plan_id IS NULL OR EXISTS(SELECT 1 FROM observation_replay_plans p WHERE p.id=j.replay_plan_id AND p.status='running'))`;
+
 async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummary> {
   const summary: LaneSummary = {
     created: 0,
@@ -1028,21 +1042,13 @@ async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummar
     summary.plans = creation.plans;
     cursor = creation.cursor;
   }
-  // Paused or cancelled plans stop unclaimed replay jobs only; a claimed lease
-  // finishes through the same fenced publish path as every other job.
+  const deployed = JSON.stringify(PARSERS.map(({ name, version }) => ({ name, version })));
   const ready = await env.DB.prepare(
-    `SELECT * FROM observation_parse_jobs j WHERE j.lane=?1 AND attempts<?2 AND ((status='pending' AND available_at_ms<=?3) OR (status='running' AND lease_until_ms<=?3))
-      AND EXISTS(SELECT 1 FROM json_each(?4) r WHERE json_extract(r.value,'$.name')=j.parser_name AND json_extract(r.value,'$.version')=j.parser_version)
-      AND (j.replay_plan_id IS NULL OR EXISTS(SELECT 1 FROM observation_replay_plans p WHERE p.id=j.replay_plan_id AND p.status='running'))
+    `SELECT * FROM observation_parse_jobs j WHERE ${RUNNABLE_JOB_SQL}
+      AND ((status='pending' AND available_at_ms<=?3) OR (status='running' AND lease_until_ms<=?3))
       ORDER BY priority DESC,available_at_ms,fetch_artifact_id LIMIT ?5`,
   )
-    .bind(
-      lane,
-      MAX_ATTEMPTS,
-      Date.now(),
-      JSON.stringify(PARSERS.map(({ name, version }) => ({ name, version }))),
-      budget,
-    )
+    .bind(lane, MAX_ATTEMPTS, Date.now(), deployed, budget)
     .all<Job>();
   for (const job of ready.results) {
     const parser = PARSERS.find(
@@ -1057,12 +1063,16 @@ async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummar
   if (lane === "replay") summary.plans += await completeReplayPlans(env);
   summary.executed = summary.parsed + summary.error;
   // Counts only: what is left for the next ticks, so the scheduled log line
-  // shows a drain's progress (observation_jobs_lane_ready covers the count).
+  // shows a drain's progress. The ready query's own eligibility predicate
+  // without its clock condition: a job backing off still drains, but one out
+  // of attempts, of an undeployed parser or of a stopped plan never does and
+  // is not counted. observation_jobs_lane_ready bounds it to the lane's
+  // pending rows.
   summary.pending =
     (await env.DB.prepare(
-      "SELECT count(*) AS n FROM observation_parse_jobs WHERE lane=? AND status='pending'",
+      `SELECT count(*) AS n FROM observation_parse_jobs j WHERE ${RUNNABLE_JOB_SQL} AND j.status='pending'`,
     )
-      .bind(lane)
+      .bind(lane, MAX_ATTEMPTS, null, deployed)
       .first<number>("n")) ?? 0;
   await env.DB.prepare(
     "UPDATE observation_lane_state SET cursor=?,last_sweep_at_ms=?,last_created=?,last_executed=? WHERE lane=?",
