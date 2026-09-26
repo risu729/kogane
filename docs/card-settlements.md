@@ -39,6 +39,12 @@ provider id, so a newer capture that fails them withdraws the row instead of
 letting an older capture stand. Credits, zero debits, foreign-currency rows,
 rows without a provider id and rows of other parsers are never debits.
 
+The sweep reads the debits whose `debit_date` is within three days of a due
+date (at most 1,000 per due date). Before 0052 it read SMBC rows by the first
+ten characters of `as_of` and skipped, after reading them, those not of the
+midnight-JST form; such rows no longer take a place in that limit or count in
+the sweep's `scanned`, and the SMBC pairs it proposes are otherwise the same.
+
 Mizuho and Sony Bank are not adapters. Their history ids are fingerprints of
 the row's fields and its position (`mizuho:<fingerprint>:<occurrence>`,
 `sony-bank-history:<date+signed amount+after-balance+currency>:<n>`), so one

@@ -86,6 +86,69 @@ function checkStore(db: Database): { smbc: number; sbiShinsei: number } {
 }
 
 describe("card_bank_debit_facts (migration 0052)", () => {
+  /**
+   * Each branch's `debit_date` CASE, as the migration stored it (read back
+   * from the schema, not copied), over every shape near its valid one: the
+   * sweep matched SMBC with the regex before 0052, and SBI Shinsei's posting
+   * date is a bare civil date. Substitutions, insertions and deletions of
+   * every character, over an alphabet of the shape's own characters and near
+   * misses (other digits, an embedded NUL, a trailing newline, astral chars).
+   */
+  test.each([
+    ["smbc-bank", "2026-09-07T00:00:00+09:00", SMBC_DATE],
+    ["sbi-shinsei-bank", "2026-09-07", /^([0-9]{4}-[0-9]{2}-[0-9]{2})$/u],
+  ] as const)(
+    "%s: debit_date is exactly its regex over every as_of shape",
+    (adapter, valid, regex) => {
+      const { db } = randomSettlementStore(1, new Set());
+      const view = (
+        db
+          .query("SELECT sql FROM sqlite_master WHERE type='view' AND name='card_bank_debit_facts'")
+          .get() as { sql: string }
+      ).sql;
+      const expression = [
+        ...view.matchAll(
+          /SELECT \*,(CASE WHEN [\s\S]*?END) AS debit_date,\s*'([a-z-]+)' AS adapter/gu,
+        ),
+      ].find((match) => match[2] === adapter)?.[1];
+      expect(expression).toBeDefined();
+      const query = db.query(`SELECT ${expression} AS debit_date FROM (SELECT ?1 AS as_of)`);
+      const shapes: (string | null)[] = [
+        null,
+        "",
+        "2026-09-07",
+        "2026-09-07T00:00:00+09:00",
+        "2026-09-07T00:00:00Z",
+        "2026-09-07T00:00:00+00:00",
+        "2026-09-07T09:00:00+09:00",
+        "2026-09-07T00:00:00.000+09:00",
+        "2026-09-07t00:00:00+09:00",
+        "2026-09-07 00:00:00+09:00",
+        "2026-13-45T00:00:00+09:00",
+        "20260907",
+      ];
+      const alphabet = [..."0123456789-T:+Zt ./\u0000\n\uFF10\u0660\u00E9", "\u{1F4B4}"];
+      for (let index = 0; index <= valid.length; index += 1) {
+        if (index < valid.length) shapes.push(valid.slice(0, index) + valid.slice(index + 1));
+        for (const char of alphabet) {
+          shapes.push(valid.slice(0, index) + char + valid.slice(index));
+          if (index < valid.length)
+            shapes.push(valid.slice(0, index) + char + valid.slice(index + 1));
+        }
+      }
+      let admitted = 0;
+      for (const asOf of shapes) {
+        const expected = asOf?.match(regex)?.[1] ?? null;
+        if (expected !== null) admitted += 1;
+        expect([asOf, (query.get(asOf) as { debit_date: string | null }).debit_date]).toEqual([
+          asOf,
+          expected,
+        ]);
+      }
+      expect(admitted).toBeGreaterThan(20);
+    },
+  );
+
   test("the SMBC branch is the 0044 view on random stores; SBI Shinsei rows are the provider's own JPY debits", () => {
     let smbc = 0;
     let sbiShinsei = 0;

@@ -59,9 +59,13 @@ and the provider's civil date.
   an `as_of` of the form `YYYY-MM-DDT00:00:00+09:00` (the only form the
   sweep's regex matched) and NULL otherwise. D1 refuses a `GLOB` pattern
   longer than 50 bytes (`LIKE or GLOB pattern too complex`), so the view
-  globs the date part only and compares the time part as text; the
+  globs the date part only and compares the whole `as_of` with that date and
+  the fixed time as text (`length()` and `substr()` stop at an embedded NUL,
+  so a length check alone would admit a value the regex refuses); the
   Miniflare-backed processor test caught the longer pattern, which
-  `bun:sqlite` accepts.
+  `bun:sqlite` accepts. `packages/read-model/test/card-bank-debit-facts.test.ts`
+  checks the stored expression against the regex over every one-character
+  edit of the valid shape.
 - **SBI Shinsei branch**, each predicate with its evidence in the parser
   (`packages/parsers/src/parsers/sbi-shinsei-top-balances-and-activity.ts`)
   and the synthetic fixture
@@ -72,17 +76,23 @@ and the provider's civil date.
     `txnReferenceNo`);
   - on the newest capture of the id: `status IS NULL` (the parser sets none),
     `currency='JPY'` (the statement totals are yen; an activity block of a
-    foreign-currency account carries that currency), `_kogane.amountSignSource
-='debit'` (the provider's own debit column) and `coefficient LIKE '-%'`
-    (a zero debit is stored unsigned, `0`, so it is excluded, as is every
-    credit);
-  - `debit_date` is `as_of` when it is `YYYY-MM-DD`, which the parser always
-    writes, and NULL otherwise.
-    No predicate the plan listed had to change. Currency, status and sign are
-    judged after ranking, as SMBC's are, so a newer capture that fails them
-    withdraws the row rather than letting an older one stand.
+    foreign-currency account carries that currency),
+    `_kogane.amountSignSource='debit'` (the provider's own debit column) and
+    `coefficient LIKE '-%'` (a zero debit is stored unsigned, `0`, so it is
+    excluded, as is every credit);
+  - `debit_date` is `as_of` when it is exactly `YYYY-MM-DD` (ten bytes), which
+    the parser always writes, and NULL otherwise.
+
+  No predicate the plan listed had to change. Currency, status and sign are
+  judged after ranking, as SMBC's are, so a newer capture that fails them
+  withdraws the row rather than letting an older one stand.
+
 - The sweep selects debits by `debit_date` within three days of the due date
-  and uses it as the debit's date, instead of the SMBC regex.
+  and uses it as the debit's date, instead of the SMBC regex. The pairs it
+  proposes are the same for SMBC; what differs is that an SMBC row of any other
+  `as_of` shape inside the window (a date-only or a timed `as_of`) is no longer
+  read and then skipped, so it no longer takes one of the bank read's 1,000
+  rows per due date and no longer counts in the sweep's `scanned`.
 - `card_settlement_readiness` keeps its 0044 text: it reads the view by id and
   keys reservations by `bank_key`, whose shape is the same for both adapters.
   Its keyed form (`cardSettlementReadinessCtes`, #256) restates the view's

@@ -7,7 +7,9 @@
 -- SMBC keeps the 0044 predicate unchanged; its `debit_date` is the date part
 -- of the midnight-JST `as_of` the sweep's regex accepted, and NULL otherwise.
 -- (D1 refuses a GLOB pattern longer than 50 bytes, so only the date part is
--- globbed; the time part is compared as text.)
+-- globbed; the whole value is compared as text with that date and the fixed
+-- time, which, unlike length() and substr(), also sees past an embedded NUL.
+-- The SBI Shinsei branch checks the byte length for the same reason.)
 --
 -- SBI Shinsei admits rows of `sbi-shinsei-top-balances-and-activity` only:
 -- the provider row id `txnReferenceNo` as the external id, the provider's own
@@ -52,7 +54,7 @@ WITH ranked AS (
  WHERE a.source_id='sbi-shinsei-bank' AND p.parser_name='sbi-shinsei-top-balances-and-activity'
  AND t.external_id IS NOT NULL AND t.external_id<>''
 )
-SELECT *,CASE WHEN length(as_of)=25 AND substr(as_of,11)='T00:00:00+09:00'
+SELECT *,CASE WHEN as_of=substr(as_of,1,10)||'T00:00:00+09:00'
  AND substr(as_of,1,10) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN substr(as_of,1,10) END AS debit_date,
  'smbc-bank' AS adapter
 FROM ranked WHERE position=1 AND status='posted' AND json_valid(extra_json)
@@ -60,7 +62,7 @@ FROM ranked WHERE position=1 AND status='posted' AND json_valid(extra_json)
  AND json_extract(extra_json,'$._kogane.amountSignSource')='direction'
  AND coefficient LIKE '-%'
 UNION ALL
-SELECT *,CASE WHEN length(as_of)=10 AND as_of GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN as_of END AS debit_date,
+SELECT *,CASE WHEN length(CAST(as_of AS BLOB))=10 AND as_of GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN as_of END AS debit_date,
  'sbi-shinsei-bank' AS adapter
 FROM sbi_shinsei_ranked WHERE position=1 AND status IS NULL AND unit_ref='JPY' AND json_valid(extra_json)
  AND json_extract(extra_json,'$._kogane.amountSignSource')='debit'

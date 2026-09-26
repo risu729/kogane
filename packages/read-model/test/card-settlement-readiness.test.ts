@@ -142,12 +142,25 @@ describe("keyed card settlement readiness on random stores", () => {
       [],
     ];
     const text = keyed(cardSettlementReadinessCtes());
+    // The bank adapter of each candidate's debit, so both adapters are seen
+    // current and not current.
+    const adapter = new Map(
+      db
+        .query(
+          `SELECT c.id,a.source_id FROM card_settlement_candidates c
+           JOIN transaction_observations t ON t.id=c.bank_observation_id
+           JOIN parse_runs p ON p.id=t.parse_run_id
+           JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id`,
+        )
+        .values() as [string, string][],
+    );
     for (const set of sets) {
       const args = [JSON.stringify(set)];
       const found = all(db, text, args) as Record<string, number | string>[];
       expect(found as unknown[]).toEqual(all(db, shipped, args));
       for (const row of found) {
         for (const flag of FLAGS) drawn.add(`${flag}=${row[flag]}`);
+        drawn.add(`${adapter.get(String(row["id"]))} debit: bank_current=${row["bank_current"]}`);
         if (FLAGS.every((flag) => row[flag] === 1)) drawn.add("ready");
       }
     }
@@ -158,6 +171,10 @@ describe("keyed card settlement readiness on random stores", () => {
     const required = [
       ...READINESS_STATES,
       ...FLAGS.flatMap((flag) => [`${flag}=0`, `${flag}=1`]),
+      ...["smbc-bank", "sbi-shinsei-bank"].flatMap((source) => [
+        `${source} debit: bank_current=0`,
+        `${source} debit: bank_current=1`,
+      ]),
       "ready",
     ];
     expect(required.filter((state) => !drawn.has(state))).toEqual([]);
