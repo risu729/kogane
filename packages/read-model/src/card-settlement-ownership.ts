@@ -29,35 +29,51 @@
 // test compares its read with the shipped text.
 export type OwnershipKind = "balance" | "transaction";
 
-export function cardSettlementOwnershipCtes(kind: OwnershipKind): string {
-  return `owned_runs AS MATERIALIZED (
- SELECT DISTINCT r.parse_run_id FROM observed
- CROSS JOIN identity_observations o ON o.kind='${kind}' AND o.observation_id=observed.observation_id
+/**
+ * Names for another set of these CTEs in the same statement (the readiness
+ * CTEs own statements and debits together): `prefix` goes before every CTE
+ * name (`owned_runs` ... `ownership`), and `observed` names the caller's CTE
+ * of observation ids. Without them the text is the one above.
+ */
+export interface OwnershipCteNames {
+  prefix?: string;
+  observed?: string;
+}
+
+export function cardSettlementOwnershipCtes(
+  kind: OwnershipKind,
+  names: OwnershipCteNames = {},
+): string {
+  const at = names.prefix ?? "";
+  const observed = names.observed ?? "observed";
+  return `${at}owned_runs AS MATERIALIZED (
+ SELECT DISTINCT r.parse_run_id FROM ${observed}
+ CROSS JOIN identity_observations o ON o.kind='${kind}' AND o.observation_id=${observed}.observation_id
  CROSS JOIN identity_runs r ON r.id=o.identity_run_id
-), owned_candidates AS MATERIALIZED (
+), ${at}owned_candidates AS MATERIALIZED (
  SELECT r.id,r.parse_run_id,r.policy_version
- FROM owned_runs
- CROSS JOIN published_parse_runs pub ON pub.parse_run_id=owned_runs.parse_run_id
+ FROM ${at}owned_runs
+ CROSS JOIN published_parse_runs pub ON pub.parse_run_id=${at}owned_runs.parse_run_id
  CROSS JOIN parse_runs p ON p.id=pub.parse_run_id
  CROSS JOIN eligible_identity_runs r ON r.parse_run_id=p.id
  CROSS JOIN identity_run_seals seal ON seal.identity_run_id=r.id
  CROSS JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
  CROSS JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
  WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
-), owned_latest AS MATERIALIZED (
+), ${at}owned_latest AS MATERIALIZED (
  SELECT parse_run_id,max(policy_version) AS policy_version
- FROM owned_candidates GROUP BY parse_run_id
-), owned_identity AS MATERIALIZED (
- SELECT o.* FROM (SELECT DISTINCT observation_id FROM observed) observed_ids
+ FROM ${at}owned_candidates GROUP BY parse_run_id
+), ${at}owned_identity AS MATERIALIZED (
+ SELECT o.* FROM (SELECT DISTINCT observation_id FROM ${observed}) observed_ids
  CROSS JOIN identity_observations o ON o.kind='${kind}' AND o.observation_id=observed_ids.observation_id
- CROSS JOIN owned_candidates r ON r.id=o.identity_run_id
- CROSS JOIN owned_latest l ON l.parse_run_id=r.parse_run_id AND l.policy_version=r.policy_version
-), ownership AS (
+ CROSS JOIN ${at}owned_candidates r ON r.id=o.identity_run_id
+ CROSS JOIN ${at}owned_latest l ON l.parse_run_id=r.parse_run_id AND l.policy_version=r.policy_version
+), ${at}ownership AS (
 SELECT owned.kind,owned.observation_id,
  CASE WHEN count(DISTINCT m.account_id)=1 THEN min(m.account_id) END AS account_id,
  CASE WHEN count(DISTINCT m.account_id)=1 AND count(DISTINCT r.to_ref)=1 THEN min(r.to_ref) END AS owner_ref,
  json_array('account_mapping:'||min(m.id),'relation:'||min(r.id),'decision:'||min(d.id)) AS evidence_refs_json
-FROM owned_identity owned
+FROM ${at}owned_identity owned
 CROSS JOIN current_account_mappings m ON m.source_account_id=owned.source_account_id
 LEFT JOIN entity_relations r ON r.from_ref IN(m.account_id,'account:'||m.account_id)
  AND r.kind=CASE WHEN owned.kind='balance' THEN 'liable_party' ELSE 'beneficial_owner' END AND r.status='accepted'

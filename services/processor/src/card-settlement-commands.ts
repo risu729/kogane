@@ -8,6 +8,7 @@ import {
   validCardSettlementFacts,
   cardSettlementEligible,
 } from "../../../packages/domain/src/card-settlement.ts";
+import { cardSettlementReadinessCtes } from "../../../packages/read-model/src/card-settlement-readiness.ts";
 
 interface Row {
   id: string;
@@ -18,6 +19,28 @@ interface Row {
   event_id: string | null;
   settlement_id: string | null;
 }
+/**
+ * The reservation's condition, binds (id, revision, status): the candidate is
+ * still at the planned revision and status and, for an acceptance, every
+ * `card_settlement_readiness` flag holds. It is evaluated inside the statement
+ * that reserves the receipt, so a source, ownership or allocation change
+ * between plan and commit still writes nothing. The flags are judged for this
+ * candidate alone, through the keyed form of the view
+ * (packages/read-model/src/card-settlement-readiness.ts): the whole view cost
+ * seconds per commit on a two-year store (docs/card-settlements.md, Cost).
+ */
+export function cardSettlementCommitGuardSql(accept: boolean): string {
+  return (
+    `EXISTS(WITH chosen AS (SELECT ? AS id), ${cardSettlementReadinessCtes()}
+   SELECT 1 FROM chosen JOIN card_settlement_reviews c ON c.id=chosen.id JOIN readiness ready ON ready.id=c.id
+   WHERE c.revision=? AND c.status=?` +
+    (accept
+      ? " AND ready.statement_current=1 AND ready.bank_current=1 AND ready.ownership_current=1 AND ready.allocation_available=1"
+      : "") +
+    ")"
+  );
+}
+
 export const cardSettlementMutation: MutationPlanner = async (input) => {
   const { store, plan, principal, operationId, now, guard } = input;
   if (!plan.kind.startsWith("card-settlement.")) return null;
@@ -165,13 +188,7 @@ export const cardSettlementMutation: MutationPlanner = async (input) => {
     decisionRevisionId: decisionId,
     result,
     precondition: {
-      sql:
-        `EXISTS(SELECT 1 FROM card_settlement_reviews c JOIN card_settlement_readiness ready ON ready.id=c.id
-   WHERE c.id=? AND c.revision=? AND c.status=?` +
-        (accept
-          ? " AND ready.statement_current=1 AND ready.bank_current=1 AND ready.ownership_current=1 AND ready.allocation_available=1"
-          : "") +
-        ")",
+      sql: cardSettlementCommitGuardSql(accept),
       binds: [row.id, expected, withdraw ? "accepted" : "proposed"],
     },
   };
