@@ -81,7 +81,7 @@ function review(row: ReviewRow): CardSettlementReview {
  * `?3` the offset), newest first, with their `card_settlement_readiness`
  * flags. The page is chosen first and only its candidates are judged, through
  * the keyed form of the view (card-settlement-readiness.ts): joined whole, the
- * view ranked every statement total and SMBC row and resolved the owners of
+ * view ranked every statement total and bank debit row and resolved the owners of
  * the whole store for every candidate (docs/card-settlements.md, Cost).
  * A review is one candidate and its latest decision, so choosing candidates
  * chooses the same reviews.

@@ -22,6 +22,8 @@ interface Row {
   scale: number | null;
   payment_date: string | null;
   as_of: string | null;
+  /** The bank adapter's civil debit date (`card_bank_debit_facts`, 0052). */
+  debit_date?: string | null;
   period: string | null;
   statement_key: string;
   bank_key: string;
@@ -48,11 +50,13 @@ SELECT page.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_j
  * The bank debits within three days of one due date (`?1`, `?2`), at most `?3`
  * by id, with their owners, resolved for those debits only: joined whole, the
  * ownership view grouped every transaction identity of the store, once per
- * statement of the page.
+ * statement of the page. The window is on each adapter's own `debit_date`
+ * (migration 0052): SMBC's is the date of its midnight-JST `as_of`, the only
+ * shape the sweep ever matched, and SBI Shinsei's is its posting date.
  */
 export const CARD_SETTLEMENT_BANK_DEBITS_SQL = `WITH debits AS MATERIALIZED (
  SELECT * FROM card_bank_debit_facts
- WHERE substr(as_of,1,10) BETWEEN date(?1,'-3 days') AND date(?2,'+3 days') ORDER BY id LIMIT ?3
+ WHERE debit_date BETWEEN date(?1,'-3 days') AND date(?2,'+3 days') ORDER BY id LIMIT ?3
 ), observed AS (SELECT id AS observation_id FROM debits),
 ${cardSettlementOwnershipCtes("transaction")}
 SELECT debits.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_json FROM debits
@@ -115,8 +119,7 @@ export async function cardSettlementSweep(
     scanned += banks.results.length;
     for (const bank of banks.results) {
       const debit = amount(bank, true);
-      const bankDate =
-        bank.as_of?.match(/^([0-9]{4}-[0-9]{2}-[0-9]{2})T00:00:00[+]09:00$/)?.[1] ?? null;
+      const bankDate = bank.debit_date ?? null;
       if (!debit || !bankDate || !parseLocalDate(bankDate)) continue;
       const facts = cardSettlementCandidate(
         {
