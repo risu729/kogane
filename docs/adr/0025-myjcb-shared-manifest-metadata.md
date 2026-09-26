@@ -15,6 +15,8 @@
   [ADR 0005](0005-myjcb-statement-state-from-page.md) and
   [ADR 0007](0007-myjcb-statement-identity.md) (what the statement state and
   period are used for)
+- Amends: [ADR 0022](0022-registration-artifact-datasets.md) (its MyJCB
+  consequence: parses no longer fail at metadata extraction)
 - Merge order: after #269 (ADR 0022) and #265 (ADR 0021); see Consequences.
 
 ## Context
@@ -83,7 +85,8 @@ the following:
     `connections` lists.
   - The entry is the one that names this artifact's object: the same
     `sha256`, `bytes` equal to the raw object's size, and `key` equal to
-    `objectKey(sha256)`. A missing object gives `manifest_artifact_mismatch`,
+    `objectKey(sha256)`. A missing object (in the manifest, or a subject
+    without a raw object to size) gives `manifest_artifact_mismatch`,
     and an object listed under another dataset gives
     `manifest_dataset_mismatch`.
   - When the same bytes are listed more than once (two connections with an
@@ -132,10 +135,13 @@ unreachable), which is a separate decision and is not taken here.
   `unit-independent-v1` admits it, so the work item ends `not_eligible` and no
   parse job is created. `myjcb-shared-r2.test.ts` pins this. The importer
   wrote the connection's own status (`success`) as the unit outcome. This
-  blocker is left open here. The collector cannot change the terminals it has
-  already written, so the fix is a registration-side decision. The code shows
-  GLOBAL PASS's plan does the same (unit coverage `partial` on success); that
-  has not been exercised.
+  blocker is left open here. It is a defect in the collector's declaration,
+  to be fixed in `myJcbRunPlan` by a separate change; the Processor's
+  eligibility rules are not loosened for it. Terminals already written keep
+  their declaration (a terminal is immutable), and whether those are ever
+  parsed is a separate, open decision. The code shows GLOBAL PASS's plan
+  declares the same (`sharedOutcome`: unit and run coverage `partial` on
+  success); that has not been exercised.
 - For every input the importer branch completed, the output is identical,
   and every error it raised is raised again (tested against the extractor
   frozen at 396a370). No stored projection changes. `legacy-metadata-v1`
@@ -159,7 +165,8 @@ unreachable), which is a separate decision and is not taken here.
     refused `manifest_artifact_mismatch` whose entries carry neither field.
     Each class is asserted to occur.
   - Shared-shape cases: lookup by object, `absent`, agreeing and disagreeing
-    duplicates, another object, size or key, an unlisted connection, another
+    duplicates, another object, size or key, no raw object to size, an
+    unlisted connection, another
     dataset, and a wrongly typed value.
 - `services/processor/test/myjcb-shared-r2.test.ts` (Miniflare, all
   migrations, the operator bootstrap):

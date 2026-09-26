@@ -162,9 +162,11 @@ Concrete limits in the current code:
   but a MyJCB run is still not parsed: the collector reports every unit's
   coverage as `partial`, registration turns that into a `partial` unit
   outcome, and a run with a non-success unit is `not_eligible` for parse jobs.
-  The collector cannot change terminals it has already written, so this needs
-  a registration-side decision, which is still open. The code shows GLOBAL
-  PASS's plan does the same; that has not been exercised.
+  That is a defect in the collector's declaration, to be fixed in
+  `myJcbRunPlan` by a separate change, not by loosening eligibility. Terminals
+  already written keep their declaration, and whether they are ever parsed is
+  still open. The code shows GLOBAL PASS's plan declares the same; that has
+  not been exercised.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.

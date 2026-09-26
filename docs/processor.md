@@ -440,7 +440,9 @@ lookup is unchanged. MyJCB runs are still not parsed, for a different reason:
 maps that to the unit outcome `partial`, and `observation_fetch_runs` counts
 such a run as `partial`. Neither the run scope nor `unit-independent-v1`
 admits it, so the work item ends `not_eligible`
-(`services/processor/test/myjcb-shared-r2.test.ts`).
+(`services/processor/test/myjcb-shared-r2.test.ts`). That is a defect in the
+collector's declaration, left open; the eligibility rules stay as they are
+([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md#consequences)).
 
 ## 4. No byte is copied
 
