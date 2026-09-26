@@ -206,7 +206,10 @@ INV06, per case:
   jobs fail visibly; that is a recorded limit, not a double. (Read from the
   code; no test here registers a MyJCB terminal, since MyJCB terminals do not
   register today at all: after ADR 0014 they are blocked
-  `artifact_lineage_unstated`.)
+  `artifact_lineage_unstated`.) (Amended by
+  [ADR 0025](0025-myjcb-shared-manifest-metadata.md): the extractor now also
+  finds a shared manifest's entry by the artifact's object; MyJCB runs are
+  then held back earlier, by their `partial` unit coverage.)
 - **Blocked runs (P1, P2/P3; the 14 + 14 SBI runs).** Their v1 blocks are
   write-once on the v1 rows; under v2 each terminal gets one fresh attempt.
   A refusal about the terminal's own bytes repeats and blocks the v2 row too:
@@ -255,7 +258,8 @@ INV06, per case:
   (the Mobile Suica and V Point Pay email runs sealed under v1) is counted
   twice there. No financial read counts it twice. Not fixed here.
 - MyJCB parses fail at metadata extraction until the extractor reads the
-  terminal-era manifest (see above).
+  terminal-era manifest (see above; amended by
+  [ADR 0025](0025-myjcb-shared-manifest-metadata.md)).
 - **Drain estimate** (from the constants and synthetic measurements, not a
   production measurement): `collection_scan` runs every five minutes, lists
   25 terminals, starts at most 5 registrations and continues at most 5
