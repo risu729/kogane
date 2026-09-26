@@ -836,7 +836,14 @@ whatever that capture's state. So:
   event once and recognises the posted row once as `captured`;
 - two captures of one position are never current together, whatever months
   the rule gives them, so an error in the unverified switch on the 16th cannot
-  keep one statement current twice from its captures of the 15th and 16th;
+  keep one statement current twice from its captures of the 15th and 16th at
+  one position. Across the two positions the month is the only link: if the
+  switch day is wrong and, on the day the statement moves to position 1,
+  position 1 is published before position 0, the last capture of position 0
+  and the new capture of position 1 are two months and the statement is
+  current twice until position 0 is published again (the mirror case hides a
+  statement for the same lag). Pending captures between the two switch days
+  are also keyed by the wrong month;
 - across connections that one account resolves, a pending row must also come
   from the account's newest capture of its position (card usage step 3), so a
   replaced connection's pending capture is not current beside the new one's;

@@ -107,13 +107,39 @@ information.
   weighed.
 - The switch on the 16th stays unverified. The position rule bounds its
   effect: two captures of one position are never current together, whatever
-  months the rule gives them. If the switch is wrong, pending captures between
-  the 16th and the provider's real switch are keyed by the wrong month; the
-  month rule can then treat an older capture of one position and a newer
-  capture of the other as one statement and hide the older until its own
-  position is captured again, which only a publication lag between the two
-  positions exposes. A capture on days 12–30 that contradicts the rule is
-  corrected by a new rule version, never by editing v1.
+  months the rule gives them, so a statement that stays at one position is
+  current once however the rule keys it. What a wrong switch day still does:
+  - pending captures between the rule's switch and the provider's real one
+    are keyed by the wrong month (listed and grouped under it);
+  - across the two positions the month is the only link, so when the rule and
+    the provider disagree about the day a statement moves from position 0 to
+    position 1, and position 1 of the move day is published while position 0
+    is not yet, the last capture of position 0 (still showing the statement)
+    and the new capture of position 1 are two months and **both current: one
+    statement current twice**, recognised twice by the lane, until position 0
+    is published again and ends the older capture (the lane then retires its
+    events). The mirror case hides a statement instead: a newer capture of one
+    position keyed to the same month as an older capture of the other
+    position, showing a different statement, shadows it until that position
+    is captured again. Both last only as long as the publication lag between
+    the two positions; neither can be told apart from a correct move without
+    the rows themselves. `card-usage.test.ts` pins the double case ("limit:
+    with a wrong switch day …").
+
+  A capture on days 12–30 that contradicts the rule is corrected by a new rule
+  version, never by editing v1.
+
+- Other limits, not changed here. A pending capture of position 0 stays
+  current while its position is not published again, so if no capture of the
+  statement's position 1 is published between the 16th and its confirmation,
+  and position 0 is still unpublished when the confirmed capture of position 1
+  arrives, the statement is current as pending and as confirmed until position
+  0 is published (the single unconfirmed slot had the same gap when no
+  unconfirmed capture was published in that window). Across connections the
+  step-3 rule sees rows, not captures: a replacing connection's capture with
+  no rows at a position does not end another connection's pending rows there
+  (as step 3's slot rule already did not). A capture without a statement state
+  is not pending: the position rules leave it, as before.
 - Deploy: nothing is re-parsed or rewritten, no migration. Where the newest
   captures hold a pending position 1 beside position 0, position 0's rows
   become current and are recognised on the next tick. A position-1 capture
@@ -133,11 +159,33 @@ replacing only position 0; a confirmed capture ending its statement's pending
 one; an older capture of a position not current where the rule resolves it to
 another month; a statement's position-0 capture ended by its newer position-1
 capture while the new position 0 is unpublished; a replaced connection's
-pending capture ended by the new connection's. Each read-model rule was
-removed in turn to see these tests fail.
+pending capture ended by the new connection's; two connections of one account
+in one run both current, and a later run of one position ending only that
+position of the other connection; a capture without a state left alone; and
+the wrong-switch-day double above. Each read-model rule (the month slot, the
+position rank, step 3's position rule) was removed in turn to see these tests
+fail.
 `services/processor/test/myjcb-statement-identity.test.ts`: two pending
 statements recognised once each, a later capture of one of them retiring
 nothing, and the confirmation retiring one pending event and recognising one
-captured event. The frozen shipped text still equals the current reads on the
-differential and scale stores, which draw pending captures at position 0 only,
-and the scale test's plan checks pass unchanged.
+captured event; and the move from position 0 to position 1 on the 16th, in
+both publication orders: position 1 first retires the old key and recognises
+the new one in one tick, position 0 first leaves the statement absent for a
+tick; it is never live twice.
+
+The frozen shipped text (`card-usage-legacy-sql.ts`) no longer states the
+intended rows, by design: it keeps one pending slot per connection, and since
+ADR 0007 it keys confirmed captures by the raw period. The row differentials
+(`card-usage-differential.test.ts`, `card-usage-scale.test.ts`,
+`card-purchase-keys.test.ts`, every scenario of `card-usage.test.ts`, and
+`packages/application/test/card-purchase-scale.test.ts`) therefore compare the
+current reads with the shipped text with these rules substituted
+(`STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL`): its plan untouched, the slot from
+`myjcbStatementSlot`, and "newest of its slot", "newest of its position" and
+step 3's position rule restated as NOT EXISTS instead of window functions. The
+random stores now draw pending and confirmed captures at positions 0 and 1,
+relative labels, per-connection runs and two connections of one account, and
+the coverage check requires that the shipped one-slot text differs, that the
+position rank and the step-3 rule each decide a row, and that two pending
+statements of one connection are current. The plan checks still run the
+unmodified shipped text and pass unchanged.

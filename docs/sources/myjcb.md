@@ -406,7 +406,7 @@ read modelは未確定captureも明細（支払月）で区切る（[ADR 0016](.
 
 - 同じ日の二つの未確定明細は両方currentになり、後のcaptureはその明細だけを置き換える。
 - 明細が確定し、position 1が`confirmed`として取得されると、同じreadで未確定captureはcurrentでなくなる。二つが同時にcurrentになることはない。状態はexternal idに含まれるため、purchase laneは保留eventを一度retireし、確定行を`captured`として一度認識する。
-- 一つのpositionの二つのcaptureは、規則がどの月を与えても同時にcurrentにならない。16日の切替（未検証）が誤っていても、15日と16日のcaptureで同じ明細が二重にcurrentになることはない。
+- 一つのpositionの二つのcaptureは、規則がどの月を与えても同時にcurrentにならない。16日の切替（未検証）が誤っていても、同じpositionの15日と16日のcaptureで同じ明細が二重にcurrentになることはない。ただしposition間を結ぶのは月だけである。切替日が誤っていて、明細がposition 1へ移る日にposition 1がposition 0より先に公開されると、position 0の最後のcaptureとposition 1の新しいcaptureが別の月になり、position 0が再び公開されるまで同じ明細が二重にcurrentになる（逆の場合は同じ遅延の間、明細が隠れる）。二つの切替日の間の未確定captureは誤った月で区切られる。
 - 一つのaccountに解決される別connection間でも、保留行はそのpositionのaccount内で最新のrunから来なければならない（card usageのstep 3）。置き換えられたconnectionの未確定captureは新connectionのcaptureと並んでcurrentにならない。
 
 recognition keyは変わらない（keyは行のexternal id）。position 0からposition 1へ移る未確定明細は、labelが行のfingerprintに入るため16日に一度新しいkeyになる。これは既知の制約で、ここでは変えない。保存済みevidenceとlabelは書き換えず、migrationも不要である。deploy時、最新captureでposition 1が未確定なら、position 0の保留行がcurrentになり認識される。testは`packages/read-model/test/card-usage.test.ts`（「two pending MyJCB statements are two slots」）と`services/processor/test/myjcb-statement-identity.test.ts`にある。

@@ -14,6 +14,8 @@
 // that no plan choice (join order, materialization, ranking) reads, so the
 // shipped text keeps proving what it was frozen for, the plan rewrite, while a
 // column change the rewrite did not make is not reported as a row difference.
+import { myjcbStatementSlot } from "../src/sql";
+
 export const LEGACY_CURRENT_CARD_USAGE_SQL = `WITH ranked_myjcb_snapshots AS (
          SELECT p.fetch_artifact_id,
                 ROW_NUMBER() OVER (
@@ -264,3 +266,129 @@ export const LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL = `SELECT count(*) AS unre
        WHERE usage.recognition_key IS NULL
           OR NOT EXISTS (SELECT 1 FROM current_card_purchase_keys k
                           WHERE k.recognition_key = usage.recognition_key)`;
+
+// ── The shipped plan with the MyJCB statement slots substituted ──────────
+//
+// ADR 0007 and ADR 0016 changed which MyJCB capture is current on purpose, so
+// the shipped text above no longer states the intended rows wherever a store
+// holds a confirmed statement under two positions, two pending statements of
+// one connection, or a pending capture its position has since replaced. The
+// differentials compare the current reads with the text below instead: the
+// shipped text, its plan untouched, with exactly those rules restated in
+// another form. The slot is `myjcbStatementSlot` (its month reading is checked
+// against the domain rule in card-usage.test.ts); "newest of its slot" and
+// "newest capture of its position" are NOT EXISTS over a newer capture rather
+// than ROW_NUMBER; and step 3's position rule is a NOT EXISTS over the
+// account's runs of the position rather than FIRST_VALUE. The shipped text
+// itself stays for the plan checks and for the tests that show what changed.
+
+const substitute = (text: string, from: string, to: string): string => {
+  if (text.split(from).length !== 2)
+    throw new Error(`card-usage-legacy-sql: expected exactly one ${JSON.stringify(from)}`);
+  return text.replace(from, () => to);
+};
+
+const MYJCB_START = "WITH ranked_myjcb_snapshots AS (";
+const MYJCB_END = "), eligible_vpass_snapshots AS (";
+const shippedMyjcb = LEGACY_CURRENT_CARD_USAGE_SQL.slice(
+  LEGACY_CURRENT_CARD_USAGE_SQL.indexOf(MYJCB_START),
+  LEGACY_CURRENT_CARD_USAGE_SQL.indexOf(MYJCB_END),
+);
+/** The shipped capture filter, from its FROM to its dataset predicate. */
+const shippedCaptures = shippedMyjcb.slice(
+  shippedMyjcb.indexOf("FROM parse_runs p"),
+  shippedMyjcb.indexOf("AND fa.dataset = 'credit-ledger'") +
+    "AND fa.dataset = 'credit-ledger'".length,
+);
+const newer = (other: string, self: string, time: string, id: string): string =>
+  `(${other}.${time} > ${self}.${time} OR (${other}.${time} = ${self}.${time} AND ${other}.${id} > ${self}.${id}))`;
+
+const STATEMENT_SLOT_MYJCB = `WITH myjcb_captures AS (
+         SELECT p.fetch_artifact_id, fa.id AS artifact_id, fa.source_id, fa.artifact_key,
+                substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1) AS connection,
+                fa.statement_state, fa.fetched_at,
+                ${myjcbStatementSlot("fa")} AS statement_slot
+         ${shippedCaptures}
+       ), current_myjcb_snapshots AS (
+         SELECT capture.fetch_artifact_id
+         FROM myjcb_captures capture
+         WHERE capture.statement_slot IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM myjcb_captures other
+             WHERE other.source_id = capture.source_id
+               AND other.connection = capture.connection
+               AND other.statement_state IS capture.statement_state
+               AND other.statement_slot = capture.statement_slot
+               AND ${newer("other", "capture", "fetched_at", "artifact_id")})
+           AND (capture.statement_state IS NOT 'unconfirmed' OR NOT EXISTS (SELECT 1 FROM myjcb_captures other
+             WHERE other.source_id = capture.source_id
+               AND other.artifact_key = capture.artifact_key
+               AND ${newer("other", "capture", "fetched_at", "artifact_id")}))
+       `;
+
+const SHIPPED_MYJCB_SLOT = `ELSE json_array(
+                    fa.statement_state,
+                    CASE WHEN fa.statement_state = 'unconfirmed' THEN '' ELSE fa.period END
+                  )
+                END AS snapshot_slot,`;
+const STATEMENT_MYJCB_SLOT = `ELSE json_array(fa.statement_state, ${myjcbStatementSlot("fa")})
+                END AS snapshot_slot,
+                CASE WHEN snapshot.fetch_run_id IS NULL
+                  THEN substr(fa.artifact_key, instr(fa.artifact_key, '/') + 1)
+                END AS myjcb_position,
+                CASE WHEN snapshot.fetch_run_id IS NULL AND fa.statement_state IS 'unconfirmed'
+                  THEN substr(fa.artifact_key, instr(fa.artifact_key, '/') + 1)
+                END AS pending_position,`;
+
+const representation = (row: string): string =>
+  `CASE WHEN ${row}.account_id IS NULL THEN json_array('unit', ${row}.snapshot_unit)
+                      ELSE json_array('account', ${row}.account_id) END`;
+/** Rows of `row`'s account (or unit) and source at the position `position`. */
+const samePosition = (other: string, row: string, position: string): string =>
+  `${other}.source_id = ${row}.source_id AND ${other}.myjcb_position = ${row}.${position}
+                 AND ${representation(other)} = ${representation(row)}`;
+const SHIPPED_STEP_3 = `WHERE fetch_run_id = newest_run
+       )`;
+// A pending row's run is the newest of its position when no other run's row of
+// that position is newer than the newest row of its own run there.
+const STATEMENT_STEP_3 = `WHERE fetch_run_id = newest_run
+           AND (pending_position IS NULL OR NOT EXISTS (
+             SELECT 1 FROM card_usage other
+             WHERE ${samePosition("other", "representations", "pending_position")}
+               AND other.fetch_run_id <> representations.fetch_run_id
+               AND (other.snapshot_fetched_at > (
+                     SELECT MAX(own.snapshot_fetched_at) FROM card_usage own
+                     WHERE ${samePosition("own", "representations", "pending_position")}
+                       AND own.fetch_run_id = representations.fetch_run_id)
+                 OR (other.snapshot_fetched_at = (
+                     SELECT MAX(own.snapshot_fetched_at) FROM card_usage own
+                     WHERE ${samePosition("own", "representations", "pending_position")}
+                       AND own.fetch_run_id = representations.fetch_run_id)
+                   AND other.fetch_run_id > representations.fetch_run_id))))
+       )`;
+
+/** The shipped current card usage text with ADR 0007's and ADR 0016's MyJCB rules. */
+export const STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL = substitute(
+  substitute(
+    substitute(LEGACY_CURRENT_CARD_USAGE_SQL, shippedMyjcb, STATEMENT_SLOT_MYJCB),
+    SHIPPED_MYJCB_SLOT,
+    STATEMENT_MYJCB_SLOT,
+  ),
+  SHIPPED_STEP_3,
+  STATEMENT_STEP_3,
+);
+
+const STATEMENT_SLOT_ALL_CURRENT_USAGE = `(${STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL})`;
+
+/** `LEGACY_STALE_CARD_PURCHASE_KEYS_SQL` over the statement-slot text. */
+export const STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL = substitute(
+  LEGACY_STALE_CARD_PURCHASE_KEYS_SQL,
+  LEGACY_ALL_CURRENT_USAGE,
+  STATEMENT_SLOT_ALL_CURRENT_USAGE,
+);
+
+/** `LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL` over the statement-slot text. */
+export const STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL = substitute(
+  LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
+  LEGACY_ALL_CURRENT_USAGE,
+  STATEMENT_SLOT_ALL_CURRENT_USAGE,
+);

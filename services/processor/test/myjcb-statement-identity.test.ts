@@ -287,3 +287,81 @@ test("two pending statements on one day are both current, and each is recognised
   ]);
   expect(counts(await w.sweep())).toEqual(NOTHING);
 }, 180_000);
+
+test("a pending statement moving from position 0 to position 1 on the 16th changes keys once, retired before or with its re-recognition, never live twice (ADR 0016)", async () => {
+  const w = await world();
+  const live = async () =>
+    (await events(w)).filter((event) => event.state === "authorized" || event.state === "captured");
+  // 2026-09-15 (JST): the cycle closing today is position 0, paid in October.
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-0",
+    detailMonth: 0,
+    fetchedAt: "2026-09-15T00:00:00.000Z",
+    rows: [M],
+  });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
+  expect(await w.totals()).toMatchObject({ captured: "0", authorized: "1200" });
+
+  // 2026-09-16: position 1 is published first. It shows the same statement
+  // under `detailMonth-1`, a new fingerprint and so a new key, in the same
+  // month slot: the capture of the 15th stops being current in the same read.
+  // One tick retires the old event before it recognises the new one.
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-1",
+    detailMonth: 1,
+    fetchedAt: "2026-09-16T00:00:01.000Z",
+    rows: [M],
+  });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1, retired: 1 });
+  expect((await live()).length).toBe(1);
+  expect(await w.totals()).toMatchObject({ captured: "0", authorized: "1200" });
+
+  // Position 0 then shows the next cycle: recognised once, nothing retired.
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-0",
+    detailMonth: 0,
+    fetchedAt: "2026-09-16T00:00:02.000Z",
+    rows: [N],
+  });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
+  expect((await live()).length).toBe(2);
+  expect(await w.totals()).toMatchObject({ captured: "0", authorized: "1600" });
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+}, 180_000);
+
+test("when position 0 of the 16th is published before position 1, the moving statement is absent for a tick, never current twice (ADR 0016)", async () => {
+  const w = await world();
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-0",
+    detailMonth: 0,
+    fetchedAt: "2026-09-15T00:00:00.000Z",
+    rows: [M],
+  });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
+  // Position 0 of the 16th replaces the capture of the 15th (its position's
+  // newer capture): M's pending event retires and N is recognised.
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-0",
+    detailMonth: 0,
+    fetchedAt: "2026-09-16T00:00:00.000Z",
+    rows: [N],
+  });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1, retired: 1 });
+  expect(await w.totals()).toMatchObject({ captured: "0", authorized: "400" });
+  // Position 1 arrives: M is recognised again under its new key, once.
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-1",
+    detailMonth: 1,
+    fetchedAt: "2026-09-16T00:00:01.000Z",
+    rows: [M],
+  });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
+  expect(await w.totals()).toMatchObject({ captured: "0", authorized: "1600" });
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+}, 180_000);

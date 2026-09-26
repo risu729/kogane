@@ -32,7 +32,10 @@ import {
   VPASS_NAMESPACE,
   vpassCard,
 } from "./card-usage-fixture";
-import { LEGACY_CURRENT_CARD_USAGE_SQL } from "./card-usage-legacy-sql";
+import {
+  LEGACY_CURRENT_CARD_USAGE_SQL,
+  STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
+} from "./card-usage-legacy-sql";
 import { resolveRelativePeriod } from "../../domain/src/relative-period.ts";
 
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
@@ -61,7 +64,9 @@ function usage(db: Database, afterId = 0, limit = CARD_USAGE_PAGE_LIMIT): Curren
   const page = currentCardUsageSql({ afterId, limit });
   const rows = db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
   expect(rows).toEqual(
-    db.query(LEGACY_CURRENT_CARD_USAGE_SQL).all(...(page.args as never[])) as CurrentCardUsageRow[],
+    db
+      .query(STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL)
+      .all(...(page.args as never[])) as CurrentCardUsageRow[],
   );
   return rows;
 }
@@ -1095,10 +1100,12 @@ describe("current card usage", () => {
 });
 
 describe("a MyJCB statement is one snapshot slot wherever its position moved", () => {
-  /** One page of current usage, without the shipped-text differential: the slot is what changed. */
+  /**
+   * One page of current usage. The shipped text keeps its one-slot rules, so
+   * the differential is against it with the statement-slot rules substituted.
+   */
   function current(db: Database): CurrentCardUsageRow[] {
-    const page = currentCardUsageSql({ afterId: 0, limit: CARD_USAGE_PAGE_LIMIT });
-    return db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
+    return usage(db);
   }
   const root = myjcbRoot("conn-a", "acct-jcb");
   const purchase: UsageRow = {
@@ -1298,10 +1305,12 @@ describe("a MyJCB statement is one snapshot slot wherever its position moved", (
 });
 
 describe("two pending MyJCB statements are two slots (ADR 0016)", () => {
-  /** One page of current usage, without the shipped-text differential: the pending slot is what changed. */
+  /**
+   * One page of current usage, checked against the shipped text with the
+   * statement-slot rules substituted (the shipped text keeps one pending slot).
+   */
   function current(db: Database): number[] {
-    const page = currentCardUsageSql({ afterId: 0, limit: CARD_USAGE_PAGE_LIMIT });
-    return ids(db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[]);
+    return ids(usage(db));
   }
   /** The current MyJCB ledger captures (artifact ids), as both reads compose them. */
   function snapshots(db: Database): number[] {
@@ -1343,11 +1352,14 @@ describe("two pending MyJCB statements are two slots (ADR 0016)", () => {
       fetchedAt: string;
       rows: readonly UsageRow[];
       publication?: "published" | "unpublished";
+      /** Default conn-a; conn-b resolves to the same account once `sameAccount` mapped it. */
+      connection?: "conn-a" | "conn-b";
     },
   ): Parsed {
+    const connection = input.connection ?? "conn-a";
     const parsed = store.myjcbLedger({
       run: input.run ?? store.run("myjcb"),
-      connection: "conn-a",
+      connection,
       detailMonth: input.detailMonth,
       state: input.state ?? "unconfirmed",
       period: input.period ?? `detailMonth-${input.detailMonth}`,
@@ -1355,8 +1367,15 @@ describe("two pending MyJCB statements are two slots (ADR 0016)", () => {
       rows: input.rows,
       ...(input.publication === undefined ? {} : { publication: input.publication }),
     });
-    if (parsed.observations.length > 0) store.identify(parsed, root, { version: 1 });
+    if (parsed.observations.length > 0)
+      store.identify(parsed, connection === "conn-a" ? root : connB, { version: 1 });
     return parsed;
+  }
+  const connB = { ...myjcbRoot("conn-b", "acct-jcb-b"), account: "acct-jcb" };
+  /** A reviewed mapping resolves connection B to connection A's account. */
+  function sameAccount(store: CardStore): void {
+    store.mapAccount(myjcbRoot("conn-b", "acct-jcb-b"));
+    store.mapAccount(connB, "manual");
   }
   /** One run on a JST day from the 16th: position 0 is paid in 2026-11, position 1 in 2026-10. */
   function twoPending(store: CardStore, fetchedAt: string, open: readonly UsageRow[]) {
@@ -1505,5 +1524,114 @@ describe("two pending MyJCB statements are two slots (ADR 0016)", () => {
     const rows = current(store.db);
     expect(rows).toEqual(replacement.observations);
     for (const id of old.observations) expect(rows).not.toContain(id);
+  });
+
+  test("two connections of one account: one run keeps both, and a newer run of a position ends only that position of the other", () => {
+    const store = new CardStore();
+    sameAccount(store);
+    const run = store.run("myjcb");
+    const fetchedAt = "2026-09-20T00:00:00.000Z";
+    const zeroA = ledger(store, { run, detailMonth: 0, fetchedAt, rows: [openCycle] });
+    const oneA = ledger(store, {
+      run,
+      detailMonth: 1,
+      fetchedAt: "2026-09-20T00:00:00.500Z",
+      rows: [closedCycle],
+    });
+    const zeroB = ledger(store, {
+      run,
+      connection: "conn-b",
+      detailMonth: 0,
+      fetchedAt: "2026-09-20T00:00:01.000Z",
+      rows: [openLater],
+    });
+    // One run is one representation: every unit it captured is current.
+    expect(current(store.db)).toEqual([
+      ...zeroA.observations,
+      ...oneA.observations,
+      ...zeroB.observations,
+    ]);
+    // 2026-09-25: a run of connection B alone shows position 1 confirmed. It
+    // ends connection A's pending position 1 (another slot, so only the
+    // position rule does), and neither connection's position 0.
+    const confirmedB = ledger(store, {
+      connection: "conn-b",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-10",
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    expect(current(store.db)).toEqual([
+      ...zeroA.observations,
+      ...zeroB.observations,
+      ...confirmedB.observations,
+    ]);
+  });
+
+  test("a capture without a statement state is not pending, so the account position rule leaves it", () => {
+    const store = new CardStore();
+    sameAccount(store);
+    const stateless = ledger(store, {
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-09",
+      fetchedAt: "2026-08-20T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    // Metadata is append-only; this test alone rewrites it to draw a NULL state.
+    store.db.exec("DROP TRIGGER observation_artifact_metadata_no_update");
+    store.db.run(
+      "UPDATE observation_artifact_metadata SET statement_state=NULL WHERE fetch_artifact_id=?",
+      [stateless.artifact],
+    );
+    const newer = ledger(store, {
+      connection: "conn-b",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-10",
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+      rows: [openCycle],
+    });
+    // As before ADR 0016: its own slot, newest there, and no pending rule applies.
+    expect(current(store.db)).toEqual([...stateless.observations, ...newer.observations]);
+  });
+
+  test("limit: with a wrong switch day, a position-0 publication lag keeps one statement current twice until position 0 is published", () => {
+    const store = new CardStore();
+    // Suppose the provider moved position 0 to the next cycle on the 17th, not
+    // the 16th the rule assumes. The capture of the 16th still shows the closed
+    // cycle at position 0, and the rule keys it by the next month.
+    const sixteenth = ledger(store, {
+      detailMonth: 0,
+      fetchedAt: "2026-09-16T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    // The 17th: position 1 (the closed cycle) is published, position 0 not yet.
+    const run = store.run("myjcb");
+    ledger(store, {
+      run,
+      detailMonth: 0,
+      fetchedAt: "2026-09-17T00:00:00.000Z",
+      rows: [openCycle],
+      publication: "unpublished",
+    });
+    const one = ledger(store, {
+      run,
+      detailMonth: 1,
+      fetchedAt: "2026-09-17T00:00:00.500Z",
+      rows: [closedCycle],
+    });
+    // Two positions, two months: the closed cycle is current twice (ADR 0016,
+    // consequences). With the right switch day both captures are one month and
+    // only the newer is current (the test above).
+    expect(current(store.db)).toEqual([...sixteenth.observations, ...one.observations]);
+    // Publishing position 0 again ends it.
+    const zero = ledger(store, {
+      detailMonth: 0,
+      fetchedAt: "2026-09-17T01:00:00.000Z",
+      rows: [openCycle],
+    });
+    expect(current(store.db)).toEqual([...one.observations, ...zero.observations]);
   });
 });

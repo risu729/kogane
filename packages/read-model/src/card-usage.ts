@@ -310,7 +310,7 @@ export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPA
                 CASE WHEN snapshot.fetch_run_id IS NULL
                   THEN substr(fa.artifact_key, instr(fa.artifact_key, '/') + 1)
                 END AS snapshot_position,
-                snapshot.fetch_run_id IS NULL AND fa.statement_state = 'unconfirmed'
+                snapshot.fetch_run_id IS NULL AND fa.statement_state IS 'unconfirmed'
                   AS pending_capture,
                 dv.status AS value_status, dv.coefficient, dv.scale, dv.basis AS value_basis,
                 t.currency AS unit_ref,

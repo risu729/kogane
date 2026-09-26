@@ -192,7 +192,16 @@ or identity rows whole; `KOGANE_CARD_USAGE_SCALE=full` builds this store and
 prints the timings. `card-usage-differential.test.ts` makes the same comparison
 on small random stores that draw every state the shipped reads handle, and
 every scenario of `card-usage.test.ts` and `card-purchase-keys.test.ts` runs
-both texts.
+both texts. The MyJCB currentness rules changed on purpose after the text was
+frozen ([ADR 0007](adr/0007-myjcb-statement-identity.md),
+[ADR 0016](adr/0016-myjcb-pending-statement-slots.md)), so the row comparisons
+run the shipped text with those rules substituted and its plan untouched
+(`STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL`, the rules restated as NOT EXISTS
+rather than window functions), and the random stores draw pending and
+confirmed captures at positions 0 and 1 so that the substituted rules decide
+rows; the plan checks run the unmodified shipped text. This proves the plan
+rewrite and the rule change separately: the rewrite returns what the shipped
+plan returns under the intended rules, not the shipped rows byte for byte.
 
 ## Parity proof
 
