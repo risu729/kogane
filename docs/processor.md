@@ -108,6 +108,20 @@ the terminal already is, so one capture is never parsed twice (§3.4).
 | Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)      |
 | Registered under an earlier contract version, descriptors unchanged (§3.4)                                               | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it           |
 
+The derivation does not re-check every seal rule. A manifest whose units'
+`artifactCount` disagrees with the artifacts that name them, or that puts a
+step other than `decrypted`/`extracted` on a provider role, is refused by
+CORE's seal trigger (`run_inventory_incomplete`), which is not a derivation
+refusal: registration rethrows it, records no stage row, and the run is
+retried on every tick with its artifacts catalogued and unsealed. The
+collectors are what keeps that from happening
+([ADR 0021](adr/0021-collector-registration-contract.md),
+[collection: the registration contract](collection.md#shared-data-bucket-per-source-u09)):
+`services/processor/test/collector-plans.test.ts` registers every collector's
+real `*RunPlan` output against the whole CORE schema and the operator
+bootstrap (`infra/bootstrap/ingest-clients.sql`), and fails on any block, any
+retryable stage or any unsealed run.
+
 A resumed registration reads what the run already has — its units, ranges,
 catalogued artifacts, staged inventory items and unit reports, one statement
 each — and skips it, so the budget is spent on new work and a run of any size

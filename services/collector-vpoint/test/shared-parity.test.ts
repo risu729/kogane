@@ -159,6 +159,13 @@ describe("v-point: the shared target persists the legacy bytes (U09 parity, G1-0
       expect(stored.bytes).toBe(entry.byteSize);
       expect(persisted).toEqual(legacyBytes);
       assertAbsent(persisted, [COOKIE_SECRET], entry.artifactKey);
+      // ADR 0021: a re-encoded response states its step with no retained
+      // input; the collector's own summary is generated and states none.
+      expect(
+        result.manifest.transformations
+          .filter((step) => step.outputArtifactKey === entry.artifactKey)
+          .map((step) => [step.stepKind, step.transformerId, step.inputArtifactKeys]),
+      ).toEqual(entry.role === "collector_derived" ? [["reencoded", "collector-v-point", []]] : []);
     }
     const terminal = await sharedBytes(shared, terminalKey("v-point", runId));
     assertAbsent(terminal, [COOKIE_SECRET], "the terminal");
