@@ -299,10 +299,14 @@ carry a provider link id) pairs them as follows:
   captured in another cycle groups apart. The collector now records a
   confirmed page by the month the page names
   ([observations](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)),
-  which groups with the pending rows its month resolves. A confirmed row whose month
-  neither the label nor the rule places (`detailMonth-2` and beyond) stays out
-  of this job; the recognition lane's candidate pass, which groups MyJCB by
-  usage month, still pairs it.
+  which groups with the pending rows its month resolves. A confirmed row whose
+  month neither the label nor the rule places (`detailMonth-2` and beyond,
+  only in captures stored before that fix) stays out of this job, and it is
+  not current either
+  ([release note](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)),
+  so the purchase lane does not recognise or pair it. A capture of the same
+  statement under the month its page names is current, and the candidate pass
+  pairs its rows.
 
 Both sources' external ids are collector fingerprints, so stage A proposes
 nothing for either; it runs for the day a slice carries provider row ids. A
@@ -1060,18 +1064,23 @@ account label, provider text or row id:
 Cost, measured by `services/processor/test/reconciliation-coverage.test.ts`
 on the scaled store of [the read model's measurement](read-model.md#cost)
 (`KOGANE_RECONCILIATION_SCALE=full`: 268,573 observations, 220,309 published
-Vpass rows after 180 daily captures; `bun:sqlite`, no table statistics). With
+Vpass rows after 180 daily captures; `bun:sqlite`, no table statistics). The
+fixture builds 268,573 observations today (`scaledStore(FULL_SCALE).counts`,
+checked 2026-09-26); the read model's page quotes 268,575 from its own earlier
+run, which was not repeated here. With
 stage B (the slices until 2026-09-26), ten ticks read 2,000 rows each and took
 2.6 s per tick; they paired 34 groups and skipped 146 with more than 200
 published rows, because every capture of a month counts, and proposed 1,380
 candidates (one per pair of captures of a purchase). With the deployed
 stage-A-only slices, the same ten ticks read the same pages, 2,000 rows each,
 in 0.43 s per tick, and read no group, look up no digest and write nothing:
-no Vpass or MyJCB row carries a provider-issued id. On the CI store (2,070
-published Vpass rows after 21 daily captures, near production's 3,300) one
-cycle is three ticks either way (4,521 rows read): 74 ms per tick with stage B
-(33 groups paired, 17 skipped, 228 candidates) and 50 ms without (no group,
-no candidate). Built capture by capture with both lanes after each day, as
+no Vpass or MyJCB row carries a provider-issued id. These figures are what
+the test prints in that mode; it asserts none of them. On the CI store (2,070
+published Vpass rows after 21 daily captures, near production's 3,300) a
+one-off local run of the same measurement, which the test neither prints nor
+asserts, gave one cycle of three ticks either way (4,521 rows read): 74 ms
+per tick with stage B (33 groups paired, 17 skipped, 228 candidates) and
+50 ms without (no group, no candidate). Built capture by capture with both lanes after each day, as
 production runs them, that store gave the lane's stage B 292 proposals over
 its history against the candidate pass's 26, one per purchase pair
 ([where stage B runs](#matching-stages)). What still grows with history is
