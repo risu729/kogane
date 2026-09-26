@@ -10,8 +10,9 @@
   `services/processor/test/registration-datasets.test.ts`
 - Related: [ADR 0010](0010-terminal-registration-budget.md) (registration
   budget), [ADR 0023](0023-vpass-collector-card-binding.md) (no trusted card
-  binding for collector-vpass runs; #260), ADR 0024 (terminal scan cursor,
-  in flight)
+  binding for collector-vpass runs; #260),
+  [ADR 0024](0024-collection-scan-judged-terminals.md) (the scan moves past
+  judged terminals; #267, merged)
 - Merge order: after #259 ([ADR 0014](0014-collector-producer-ids.md), collector producer ids, merged); see Consequences.
 
 ## Context
@@ -268,10 +269,22 @@ INV06, per case:
   (tens of operations each, so ten or more per tick); the re-registrations
   that seal are the 13 Mobile Suica runs plus the V Point Pay email runs
   sealed since #259, about four per tick. That is on the order of 15–30
-  ticks, **about 1.5–3 hours** of cron time. The clock starts only once the
-  scan walks the whole prefix: old terminals get no notification and are
-  reached only through the scan, which is stuck on its first page in
-  production until ADR 0024 lands.
+  ticks, **about 1.5–3 hours** of cron time. Old terminals get no
+  notification and are reached only through the scan walk, which moves past
+  judged terminals since [ADR 0024](0024-collection-scan-judged-terminals.md)
+  (#267).
+- Interplay with ADR 0024. The scan answers a terminal already judged
+  "under the current registration contract and the same terminal digest"
+  from its `collection_runs` row and spends nothing on it. The v1 verdicts
+  (the blocked SBI runs, the retryable pre-#259 terminals) are keyed by v1,
+  so after the bump none of them answers for v2: the scan reaches each
+  terminal, and it gets one v2 attempt that spends one of the tick's five.
+  That is what re-judges the blocked SBI runs; they block again (above) and
+  from then on are answered from their v2 row. A retryable v2 refusal (the
+  pre-#259 producer) is retried at most once per ADR 0024's interval. A
+  carry-over answers `already_registered`, which spends none of the five,
+  like any registered terminal, and costs at most one preamble and one
+  structure step of the operation budget.
 
 ## Verification
 

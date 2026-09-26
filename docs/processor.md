@@ -70,6 +70,48 @@ the next tick lists the same page; the runs it already registered answer in
 one query each and the rest make progress. That cannot skip a run, which a
 remembered position inside a page could.
 
+**What spends one of the five** ([ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
+Only new work does: a registration, a pending run the listing reaches, a
+first verdict, a retry that is due, a missing terminal, a registration that
+threw. The continuations that run before the listing have their own bound of
+five and spend none of these. A terminal
+CORE has already judged under the current registration contract and the same
+terminal digest is answered from its `collection_runs` row and spends
+nothing:
+
+| Listed terminal                                                  | Attempted?                                   | Spends one of the five | Holds the page |
+| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------- | -------------- |
+| no `collection_runs` row yet                                     | always                                       | yes                    | if over budget |
+| registered                                                       | no (`already_registered`)                    | no                     | no             |
+| blocked                                                          | never again under this contract version      | no                     | no             |
+| newest `registered` stage `retryable`, recorded under 24 h ago   | no; its recorded code is counted             | no                     | no             |
+| newest `registered` stage `retryable`, recorded 24 h ago or more | yes, once; a repeat refusal appends a row    | yes                    | if over budget |
+| `pending`                                                        | yes (continued first, and again when listed) | yes, when listed       | if over budget |
+
+Such an answer costs three operations of the invocation's budget (the
+terminal read, the conditional insert and the row read) for a registered or
+blocked run, four for an unreadable terminal already recorded (it reads the
+bytes twice), and five for a retryable run within its interval (two stage
+reads more); it writes nothing. A page of 25 such terminals costs at most 125
+of the 500, plus the scan's own four (the list, the pending read, the state
+read and the state write), so a page of 25 judged terminals finishes in one tick and the cursor
+moves on even when nothing registered. The retry interval is
+`RETRYABLE_RETRY_INTERVAL_MS` (24 hours); each attempt that is refused again
+appends one `registered` `retryable` row, whose `recorded_at` is what the
+interval is measured from, so a retryable run is attempted at most once per
+day and only when the walk reaches it. A blocked run is never attempted again:
+the block is write-once, and only a new registration contract version, which
+is a new identity and so a new row, judges it again. The queue consumer passes
+no interval: every delivery is a real attempt, and the queue's own
+`max_retries` bounds it.
+
+`pages_completed` and `cycles_completed` in `collection_scan_state` count
+finished pages and finished walks only. A tick held by its budget records when
+it ran and what it saw (`last_scan_at_ms`, `last_seen`, `last_registered`,
+`last_blocked`) and leaves both counters and the cursor as they were. Before
+ADR 0024 every tick counted a page, and a held tick on the first page, whose
+cursor is null, also counted a cycle.
+
 A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
 made that the derivation did not foresee — is counted in the lane's `failed`
 and logged by its error class only; nothing is recorded for that run, the
@@ -93,20 +135,20 @@ earlier version registered whose descriptors the new version does not change
 is **carried over** instead: the new version's row is linked to the fetch run
 the terminal already is, so one capture is never parsed twice (§3.4).
 
-| Situation                                                                                                                | Outcome                                            | Recorded                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| First sighting of a valid terminal                                                                                       | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                       |
-| Same terminal again                                                                                                      | no-op                                              | nothing new                                                                                     |
-| Different manifest, same run id (under any contract version)                                                             | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                           |
-| Source not in the collector mapping (§3.1)                                                                               | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                     |
-| Source maps to an id CORE has no active row for                                                                          | blocked `source_undeclared`, no port call          | as above                                                                                        |
-| `providerOutcome: failed` with no provider artifact                                                                      | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)      |
-| Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage) | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                   |
-| Referenced object missing or resized                                                                                     | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                    |
-| Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13) |
-| Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state                                             |
-| Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)      |
-| Registered under an earlier contract version, descriptors unchanged (§3.4)                                               | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it           |
+| Situation                                                                                                                | Outcome                                            | Recorded                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| First sighting of a valid terminal                                                                                       | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                         |
+| Same terminal again                                                                                                      | no-op                                              | nothing new                                                                                       |
+| Different manifest, same run id (under any contract version)                                                             | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                             |
+| Source not in the collector mapping (§3.1)                                                                               | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                       |
+| Source maps to an id CORE has no active row for                                                                          | blocked `source_undeclared`, no port call          | as above                                                                                          |
+| `providerOutcome: failed` with no provider artifact                                                                      | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)        |
+| Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage) | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                     |
+| Referenced object missing or resized                                                                                     | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                      |
+| Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
+| Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state or per attempt 24 h after the last (ADR 0024) |
+| Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
+| Registered under an earlier contract version, descriptors unchanged (§3.4)                                               | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it             |
 
 A resumed registration reads what the run already has — its units, ranges,
 catalogued artifacts, staged inventory items and unit reports, one statement
@@ -410,7 +452,8 @@ projected`, each with a state of `pending | completed | retryable | blocked`.
   `coverage_status`. Its corruption is not evidence about what the provider
   returned.
 - `collection_scan_state` is operational: resetting it re-walks the prefix
-  rather than losing anything.
+  rather than losing anything. Its `pages_completed` and `cycles_completed`
+  count finished pages and walks, not ticks (ADR 0024).
 
 `completed` is refused for the four reasons that are never completion
 (`queued`, `building`, `flag_off`, `no_processor`) by the shared stage
