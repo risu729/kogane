@@ -216,7 +216,7 @@ test("a Mobile Suica run sealed under v1 without datasets registers again under 
   expect(observed).toBeGreaterThan(0);
   const identified = await identity();
   expect(identified).toEqual({
-    observations: observed,
+    observations: observed!,
     parses: 1,
     runs: 1,
     fetch_run_id: v2Run,

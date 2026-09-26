@@ -322,13 +322,17 @@ async function registerWithin(context: Registration): Promise<RegisterTerminalOu
   // A second manifest under the same run id is a disagreement about what that
   // run was, and the earlier record stays. Nothing is overwritten and nothing
   // is merged (03 §3, G1-06).
-  const conflict = await conflictingDigest(context, row);
+  // One read of every row this run id has, under any version: the conflict
+  // check and the carry-over both judge from it, so an ordinary registration
+  // costs no more than before the version bump (ADR 0022).
+  const siblings = await readCollectionRunsFor(env.DB, row.source, row.run_id);
+  const conflict = conflictingDigest(row, siblings);
   if (conflict) return block(context, row, "terminal_digest_conflict", "registered", now());
   const refusal = await refusalFor(context, manifest);
   if (refusal) return block(context, row, refusal, "registered", now());
 
   try {
-    const carried = await carryOver(context, manifest, row);
+    const carried = await carryOver(context, manifest, row, siblings);
     if (carried) return carried;
     return await register(context, manifest, row);
   } catch (error) {
@@ -418,10 +422,10 @@ async function carryOver(
   context: Registration,
   manifest: TerminalManifest,
   row: CollectionRunRow,
+  siblings: readonly CollectionRunRow[],
 ): Promise<RegisterTerminalOutcome | null> {
   const { env, budget } = context;
-  if (await readLatestCollectionStage(env.DB, row.id, "registered")) return null;
-  const previous = (await readCollectionRunsFor(env.DB, row.source, row.run_id)).find(
+  const previous = siblings.find(
     (other) =>
       other.id !== row.id &&
       other.terminal_digest === row.terminal_digest &&
@@ -430,6 +434,10 @@ async function carryOver(
       other.registered_at !== null,
   );
   if (!previous || previous.fetch_run_id === null) return null;
+  // A row of this version that already started registering is continued, not
+  // carried over. Read only once an earlier registration exists, so a terminal
+  // no earlier version registered spends nothing here.
+  if (await readLatestCollectionStage(env.DB, row.id, "registered")) return null;
   if (!budget.fits(STRUCTURE_STEP_RESERVE)) {
     budget.deferred += 1;
     return { outcome: "deferred" };
@@ -852,8 +860,7 @@ async function recordBlockedTerminal(
  * row that was itself refused as a conflict is not the earlier record, so it
  * does not block the digest that was registered first.
  */
-async function conflictingDigest(context: Registration, row: CollectionRunRow): Promise<boolean> {
-  const rows = await readCollectionRunsFor(context.env.DB, row.source, row.run_id);
+function conflictingDigest(row: CollectionRunRow, rows: readonly CollectionRunRow[]): boolean {
   return rows.some(
     (other) =>
       other.id !== row.id &&
