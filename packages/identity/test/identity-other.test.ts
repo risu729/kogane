@@ -53,6 +53,45 @@ describe("non-SBI account identification", () => {
       "unresolved",
     );
   });
+  test("Mizuho ordinary deposits are provider-local by branch and account number", () => {
+    const account = "mizuho-bank:ordinary:001:1234567";
+    const balance = otherIdentity(
+      input("mizuho-bank", account, { kind: "balance", currency: null, instrument: "JPY" }),
+    );
+    const transaction = otherIdentity(input("mizuho-bank", account, { fetchRunId: 99 }));
+    expect(balance.account).toEqual({
+      key: [account],
+      label: "みずほ銀行 普通預金",
+      role: "deposit",
+      status: "provider-local",
+      reason: "provider-branch-and-account",
+    });
+    expect(balance.issues).toEqual([]);
+    // Balance and history rows of one account share the reference, across runs.
+    expect(transaction.account.key).toEqual(balance.account.key);
+    expect(transaction.instruments).toEqual([currencyIdentity("JPY", "unit")]);
+    expect(
+      otherIdentity(input("mizuho-bank", "mizuho-bank:ordinary:001:7654321")).account.key,
+    ).not.toEqual(balance.account.key);
+    for (const unexpected of [
+      "mizuho-bank:ordinary:01:1234567",
+      "mizuho-bank:ordinary:001:123456",
+      "mizuho-bank:ordinary:001:12345678",
+      "mizuho-bank:savings:001:1234567",
+      "mizuho-bank:ordinary:001:1234567:extra",
+      "mizuho-bank:ordinary-yen",
+      "mizuho:ordinary:001:1234567",
+    ]) {
+      const plan = otherIdentity(input("mizuho-bank", unexpected));
+      expect(plan.account).toMatchObject({
+        key: [unexpected],
+        label: "みずほ銀行 普通預金",
+        status: "unresolved",
+        reason: "unrecognized-source-account",
+      });
+      expect(plan.issues).toContain("unrecognized-source-account");
+    }
+  });
   test("Vpass durable binding is trusted input only and ignores ordinal, run and forged extra", () => {
     const binding = {
       cardToken: `vpass-card-v1-${"a".repeat(64)}`,
