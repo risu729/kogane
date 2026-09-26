@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import worker from "../src/worker";
 const token = "synthetic-admin-token-00000000000000000000";
 const context = { waitUntil() {} } as unknown as ExecutionContext;
@@ -43,4 +43,64 @@ test("the Tamia relay rejects unauthenticated or arbitrary destinations before a
   expect(
     (await worker.fetch(request({ authorization: `Bearer ${token}` }), env, context)).status,
   ).toBe(403);
+});
+
+test("empty POST streams reach the coordinator; any request bytes are rejected", async () => {
+  const fetch = vi.fn(async () => Response.json({ status: "ready" }));
+  const env = {
+    ...bindings(),
+    SESSION_STATE: { idFromName: () => "test", get: () => ({ fetch }) },
+  } as unknown as Env;
+  for (const path of ["/trigger", "/resume"]) {
+    for (const body of [null, "", new Uint8Array()]) {
+      const response = await worker.fetch(
+        new Request(`https://test${path}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}` },
+          body,
+        }),
+        env,
+        context,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: "ready" });
+    }
+    for (const body of [" ", "{}", "credentials=synthetic"]) {
+      expect(
+        (
+          await worker.fetch(
+            new Request(`https://test${path}`, {
+              method: "POST",
+              headers: { authorization: `Bearer ${token}`, "content-length": "0" },
+              body,
+            }),
+            env,
+            context,
+          )
+        ).status,
+      ).toBe(400);
+    }
+  }
+  expect(fetch).toHaveBeenCalledTimes(6);
+});
+
+test("nonempty streamed input is cancelled before coordinator access", async () => {
+  const cancel = vi.fn();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array([1]));
+    },
+    cancel,
+  });
+  const response = await worker.fetch(
+    new Request("https://test/trigger", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body,
+    }),
+    bindings(),
+    context,
+  );
+  expect(response.status).toBe(400);
+  expect(cancel).toHaveBeenCalledOnce();
 });

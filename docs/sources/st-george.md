@@ -41,8 +41,19 @@ verified, so storage retries do not repeat authentication. Credentials, cookies,
 hidden form state and raw capture bodies never enter this state or Git.
 
 The service is registered for repository CI and the existing release workflow.
-There is no cron enabled by default and no production deployment or credential
-provisioning was performed during this integration.
+PR #214 merged and the Worker secrets were provisioned out of band. The original
+release (34747193708) uploaded the Worker but its public health postcheck returned
+HTTP 404. Later release 36123890722 at `c246de9` passed both public and authenticated
+health gates. On 2026-09-26, a fresh health check returned HTTP 200, the active
+source/ingest route and migration 0046 were present, and no St.George collection
+had yet been registered.
+
+The first authenticated administrative POST returned `no-parameters-accepted`
+before any bank request: an empty incoming POST can still expose a body stream.
+The request guard now checks for actual bytes and cancels nonempty input instead
+of treating a non-null stream as a supplied parameter. Regression tests cover
+empty streams, nonempty bodies and cancellation. Cron remains disabled until an
+authenticated cloud collection and downstream publication are verified.
 
 ## Automation PoC (2026-09-13)
 

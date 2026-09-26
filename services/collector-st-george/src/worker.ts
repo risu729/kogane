@@ -75,7 +75,7 @@ export default {
       return Response.json({ error: "not-found" }, { status: 404 });
     if (!authorized(request, env.ADMIN_TRIGGER_TOKEN))
       return Response.json({ error: "unauthorized" }, { status: 401 });
-    if (url.searchParams.size !== 0 || request.body !== null)
+    if (url.searchParams.size !== 0 || (await hasRequestBytes(request)))
       return Response.json({ error: "no-parameters-accepted" }, { status: 400 });
     const state = env.SESSION_STATE.get(env.SESSION_STATE.idFromName("st-george"));
     return state.fetch(new Request(`https://state${url.pathname}`, { method: "POST" }));
@@ -86,6 +86,27 @@ export default {
     if (!response.ok) throw new Error("st-george-collection-not-completed");
   },
 } satisfies ExportedHandler<Env>;
+
+// Incoming POSTs may have a non-null stream even when the wire body is empty.
+// Reject the first byte without buffering arbitrary authenticated input.
+async function hasRequestBytes(request: Request): Promise<boolean> {
+  if (!request.body) return false;
+  const reader = request.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return false;
+      if (value.byteLength > 0) {
+        await reader.cancel();
+        return true;
+      }
+    }
+  } catch {
+    return true;
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 async function collect(env: Env): Promise<CollectionOutput> {
   const credential = parseCredential(env.ST_GEORGE_CREDENTIAL_JSON);
