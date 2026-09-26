@@ -94,12 +94,14 @@ Concrete limits in the current code:
   ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
 - Shared-R2 registration gives an artifact the parser dataset it needs since
   2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
-  every registered artifact had none, so only Mizuho's were parsed). It
-  applies to terminals first registered after it: the registration contract
-  version was not bumped, because re-registering an already parsed Mizuho
-  capture would list its transactions twice, so the Mobile Suica runs
-  registered before it stay unparsed and runs blocked before it stay blocked.
-  Vpass captures are withheld (above), and MyJCB captures fail at metadata
+  every registered artifact had none, so only Mizuho's were parsed). The
+  registration contract moved to `terminal-registration-v2`: runs sealed
+  without a dataset (Mobile Suica since 2026-09-12) register again and are
+  parsed once, while a run v2 does not change (Mizuho) is carried over rather
+  than parsed a second time. Old terminals are reached only by the scan walk,
+  so they drain as the scan cycles through `runs/`. Blocked runs are tried
+  once more and block again where their terminal itself is refused. Vpass
+  captures are withheld (above), and MyJCB captures fail at metadata
   extraction until the extractor reads the collector's shared manifest.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with

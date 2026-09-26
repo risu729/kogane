@@ -1,4 +1,4 @@
-# ADR 0022: Give registered shared-R2 artifacts their parser dataset, without a contract bump
+# ADR 0022: Give registered shared-R2 artifacts their parser dataset
 
 - Status: proposed
 - Date: 2026-09-26
@@ -12,9 +12,7 @@
   budget), [ADR 0023](0023-vpass-collector-card-binding.md) (no trusted card
   binding for collector-vpass runs; #260), ADR 0024 (terminal scan cursor,
   in flight)
-- Merge order: after #259 (collector producer ids). It does not wait for the
-  collector registration-contract PR (lineage and unit counts), because it
-  re-registers nothing (see "Contract version").
+- Merge order: after #259 (collector producer ids); see Consequences.
 
 ## Context
 
@@ -106,54 +104,86 @@ Deliberately not mapped:
   (ADR 0023, option 3); the test pins the withheld list, so that move is a
   visible change.
 
-### Contract version: not bumped
+### Contract version: bumped to `terminal-registration-v2`, with carry-over
 
-`REGISTRATION_CONTRACT_VERSION` stays `terminal-registration-v1`, against the
-rule written next to it, because a bump double-counts. What a bump does,
-read from the code:
+The table changes what a terminal means in CORE, so
+`REGISTRATION_CONTRACT_VERSION` moves to `terminal-registration-v2`, and the
+v1 derivation is kept (`DATASETS_BY_VERSION`) so a v1 registration stays
+reproducible. What the bump does, read from the code:
 
 - `collection_runs` is unique on (source, run_id, terminal_digest,
   registration_contract_version) and the scan is a full cyclic walk of
-  `runs/`, so every persisted terminal is a new row under the new version and
-  registers again: **every source's runs, registered or blocked**.
-- `createRunRequest` puts the version into `sourceRunKey`, so each is a
-  **second fetch run** in the **same acquisition session** (the external
-  session id is unchanged). The objects are the same: `adoptObject` finds the
-  same sha256, so no raw object and no byte is added. The fetch artifacts,
-  the seal (its attempt id carries the version), the observation work item,
-  the parse jobs and the **parse runs are all new**.
-- A v1 block is write-once on its own row; the terminal gets one fresh attempt
-  under v2, which blocks again whenever the refusal is about the terminal's own
-  bytes (a lineage or unit count the collector stated wrongly cannot change in
-  an immutable terminal) and succeeds only where the refusal was about CORE's
-  configuration.
+  `runs/`, so every persisted terminal gets a new row under v2 the next time
+  the scan reaches it: **every source's runs, registered or blocked**.
+- A plain re-registration would be a **second fetch run** (the version is in
+  `sourceRunKey`) in the **same acquisition session** (the external session
+  id is unchanged), over the same objects (`adoptObject` finds the same
+  sha256; no raw object or byte is added), with new fetch artifacts, a new seal
+  (its attempt id carries the version), a new observation work item and **new
+  parse runs**.
+
+That is what the already-sealed NULL runs need: fetch artifacts are
+append-only, so a Mobile Suica run sealed under v1 (and a V Point Pay email
+run sealed after #259) is made parseable only by a new registration whose
+artifacts carry the dataset. It is also what doubles a capture that v1
+already parsed. Registered again, a Mizuho capture is parsed twice, and
+Mizuho history rows have no provider identity in the transaction list
+(`mizuho-ordinary-history` is not among the parsers `TRANSACTIONS_SQL` groups
+by external id, because the parser marks cross-page identity unproven), so
+every one of its transactions would be listed twice and every balance would
+show twice in the balance history. A first version of this change measured
+exactly that on a synthetic Mizuho terminal: 2 → 4 listed transactions, 2 → 2
+latest balances, 2 → 4 balance-history rows.
+
+So the bump comes with **carry-over** (`carryOver` in `register-terminal.ts`):
+
+- A v2 row for a terminal that an earlier version registered (sealed and
+  linked) is **linked to that fetch run** — no second fetch run — when v2 does
+  not change its descriptors: every artifact of the manifest is catalogued in
+  that run with the same sha256 and the same descriptor digest v2 derives for
+  it against that run, and the catalogue holds nothing else. The row gets a
+  completed `registered` stage naming the fetch run and answers
+  `already_registered`. Units, ranges, reports and the run request are the
+  same derivation in both versions; a later version that changes one of them
+  must extend the comparison.
+- A terminal whose descriptors **do** change registers again as a new
+  revision, as migration 0039 intends. v2 changes a descriptor only by giving
+  an artifact a dataset, and only where v1 left it NULL, which no parser
+  accepts outside Mizuho (Mizuho is not in the table). So every re-registered
+  terminal's v1 artifacts were never parsed, and its capture is parsed once,
+  under v2. `scripts/artifact-datasets.test.ts` proves this per artifact
+  shape.
+- A blocked, retryable or unfinished v1 row is not carried over: the terminal
+  gets a fresh attempt under v2.
+
+Migration 0039's comment says a changed contract "registers the run again as
+a new revision instead of silently reusing the old one". Carry-over does not
+change that for a terminal whose meaning changed; for one whose meaning did
+not, it reuses the registration explicitly — a linked row and a stage naming
+the fetch run — rather than silently. This ADR amends that design point.
 
 INV06, per case:
 
-- **Mobile Suica (registered under v1).** Its v1 artifacts are NULL, which no
-  parser accepts (`scripts/artifact-datasets.test.ts`: without the table only
-  Mizuho's artifacts are read), so a v2 registration would be the first parse
-  of each capture: no double. The capture would appear twice in the recorded
-  views (fetch runs, artifacts), which list appearances and count nothing.
-- **Mizuho (registered and parsed under v1).** The v2 registration is parsed
-  again. The account list is an artifact container and latest balances rank
-  one witness per account and metric, so balances stay once. But Mizuho
-  history rows have no provider identity in the transaction list
-  (`mizuho-ordinary-history` is not among the parsers `TRANSACTIONS_SQL`
-  groups by external id, because the parser marks cross-page identity
-  unproven), so **every transaction of the capture is listed twice**, and the
-  balance history shows each balance twice.
-  `registration-datasets.test.ts` registers one synthetic Mizuho terminal
-  under the current and a second version: 2 → 4 listed transactions, 2 → 2
-  latest balances, 2 → 4 balance-history rows.
-- **St George (if registered under v1).** Transactions group by external id
-  and balances are a container, so the lists stay once; the history would
-  show two witnesses.
-- **Vpass.** Withheld: every artifact stays NULL, no job is created, and
+- **Mobile Suica (13 runs sealed under v1) and V Point Pay email (sealed
+  after #259).** Re-registered under v2: a second fetch run whose normalized
+  artifact carries its dataset, parsed once. The v1 fetch run stays sealed and
+  unparsed. The capture appears twice in the recorded views (fetch runs,
+  artifacts), which list appearances and count nothing; transactions,
+  balances and snapshots come from the one parse. Tested with a synthetic
+  Mobile Suica terminal: sealed under v1 with no dataset and no parse, then
+  under v2 one parse, two listed transactions, one current balance, and a
+  redelivery changes nothing.
+- **Mizuho (registered and parsed under v1).** Carried over: one fetch run,
+  one set of parses. Tested: after v2, 2 artifacts in 1 fetch run, no new
+  parse, 2 transactions, 2 latest balances, 2 balance-history rows, and the
+  carry-over costs at most one preamble and one structure step of the budget.
+- **St George (if registered under v1).** v1 already named its dataset;
+  carried over.
+- **Vpass.** Withheld in v1 and v2 alike, so carried over, and never parsed:
   `eligible_vpass_snapshots` requires a published parse of every statement
-  page of a card-month, so nothing becomes current; the test registers a
-  collector-vpass capture and shows no dataset, no job, no eligible snapshot
-  and unchanged card usage.
+  page of a card-month, so nothing becomes current. Tested: a collector-vpass
+  capture registered under v1 and v2 has no dataset, no job, no eligible
+  snapshot and leaves card usage unchanged.
 - **MyJCB.** Mapped, but not yet parseable from a terminal: the metadata
   extractor (`services/processor/src/metadata-extractors/myjcb.ts`) finds the
   manifest entry by `connectionId`/`filename`, which the shared collector's
@@ -162,52 +192,49 @@ INV06, per case:
   jobs fail visibly; that is a recorded limit, not a double. (Read from the
   code; no test here registers a MyJCB terminal, since MyJCB terminals do not
   register today at all: P1.)
-
-Because the Mizuho case doubles, the version is not bumped. The table applies
-to terminals **first registered** after this change; a run registered or
-blocked before keeps what it has. The ways out, none decided here:
-
-1. give Mizuho history rows a read-model identity (needs evidence that a row's
-   fields identify it across pages, which the parser marks unproven);
-2. let a new version reuse an earlier registration whose derivation it does
-   not change (migration 0039 documents the opposite — a new version
-   registers again rather than silently reusing — so this needs its own ADR);
-3. re-register only the runs whose descriptors change.
+- **Blocked runs (P1, P2/P3; the 14 + 14 SBI runs).** Their v1 blocks are
+  write-once on the v1 rows; under v2 each terminal gets one fresh attempt.
+  A refusal about the terminal's own bytes repeats and blocks the v2 row too:
+  the SBI terminals state lineage and unit counts the registration refuses
+  (P2/P3), and a terminal is immutable, so the collector-side fix cannot
+  change them. Those runs therefore block again, harmlessly (one attempt
+  each, nothing sealed); only a refusal about CORE's configuration (a missing
+  ingest route, which is `retryable`, not blocked) can succeed on the new
+  attempt. Nothing is doubled: a blocked run has no seal and no parse.
 
 ## Consequences
 
-- New Mobile Suica terminals register `sf-history.json` as `sf-history` and
-  are parsed. The 13 Mobile Suica runs registered before stay NULL and
-  unparsed until one of the ways out above is decided; their bytes and
-  registrations are kept.
-- Sources now blocked (P1, P2/P3) get the table when their terminals first
-  register. Runs already blocked stay blocked: nothing here re-registers
-  them. Without a bump, this PR has no ordering dependency on the
-  collector-side lineage fix; it merges after #259.
-- A registration left `pending` by the previous release when this one deploys
-  can finish with artifacts catalogued before the table (NULL) and after it
-  (mapped). Its seal compares the inventory with the catalogue and refuses a
-  mismatch, so such a run blocks with `inventory_mismatch` rather than sealing
-  a mixed derivation. Only small-run sources register today (Mobile Suica,
-  three artifacts; Mizuho, whose derivation does not change), so this needs a
-  budget yield inside a Mobile Suica run at the deploy; `/internal/health`
-  shows it.
+- Every terminal gets a v2 row as the scan reaches it. Mobile Suica and V
+  Point Pay email runs sealed under v1 become parseable; every other
+  registered run is carried over; blocked runs are attempted once more.
+- The health route's `unregistered` count now counts rows of the current
+  version only: after the bump a v1 row that was retryable or unfinished is
+  never worked again, and its terminal is counted under v2 when the scan
+  reaches it. A v1 registration left `pending` at the deploy stays unsealed,
+  and so invisible to every reader; its terminal registers afresh under v2.
+- Merge order: after #259 (collector producer ids), so V Point Pay email runs
+  sealed with NULL are among those made parseable. It does not need the
+  collector-side lineage fix first: the SBI runs block again either way
+  (above), which costs one attempt each.
 - MyJCB parses fail at metadata extraction until the extractor reads the
   terminal-era manifest (see above).
-- **Drain estimate, for whichever way out is chosen** (an estimate from the
-  constants, not a production measurement): `collection_scan` runs every five
-  minutes, lists 25 terminals, starts at most 5 registrations and continues at
-  most 5 pending ones, inside the 500-operation budget of #250. Metered on the
+- **Drain estimate** (from the constants and synthetic measurements, not a
+  production measurement): `collection_scan` runs every five minutes, lists
+  25 terminals, starts at most 5 registrations and continues at most 5
+  pending ones, inside the 500-operation budget of #250; a carried-over or
+  already registered terminal does not count against the 5. Metered on the
   synthetic terminals of `registration-datasets.test.ts`, a three-artifact
-  Mobile Suica run costs 118 operations and a two-artifact Mizuho run 103;
-  ADR 0010 measured a 34-artifact Vpass card at two invocations, and an
-  eleven-artifact Mizuho run takes most of one. So about four small runs, or
-  one large one, register per tick. Fourteen days of every running source is
-  on the order of 150–250 terminals, roughly 50–100 ticks, **about 4–8 hours**
-  of cron time. That clock starts only once the scan walks the whole prefix
-  again: old terminals are reached only through the scan (no notification is
-  sent for them), and the scan is stuck on its first page in production until
-  ADR 0024 lands.
+  Mobile Suica run costs 118 operations and a two-artifact Mizuho run 103; a
+  carry-over costs at most 32 (asserted); ADR 0010 measured a 34-artifact
+  Vpass card at two invocations. Fourteen days of every running source is on
+  the order of 150–250 terminals. Most are carried over or blocked again
+  (tens of operations each, so ten or more per tick); the re-registrations
+  that seal are the 13 Mobile Suica runs plus the V Point Pay email runs
+  sealed since #259, about four per tick. That is on the order of 15–30
+  ticks, **about 1.5–3 hours** of cron time. The clock starts only once the
+  scan walks the whole prefix: old terminals get no notification and are
+  reached only through the scan, which is stuck on its first page in
+  production until ADR 0024 lands.
 
 ## Verification
 
@@ -218,10 +245,10 @@ blocked before keeps what it has. The ways out, none decided here:
   or named unreachable; every registered parser except PayPay's is reached;
   every rule is exercised; a wrong role or media type is never mapped; the
   withheld list is exactly Vpass; without the table only Mizuho's artifacts
-  are read.
+  are read; v2 changes a descriptor only where v1 left an artifact no parser
+  read.
 - `services/processor/test/registration-datasets.test.ts` (every real
-  migration, Miniflare): a Mobile Suica terminal registers `sf-history`, is
-  parsed once and lists the same rows after a redelivery; a collector-vpass
-  capture registers with no dataset, gets no job and changes neither the
-  eligible Vpass snapshots nor card usage; one Mizuho terminal registered
-  under two contract versions lists its transactions twice.
+  migration, Miniflare): the three cases above — a Mobile Suica run sealed
+  under v1 without datasets re-registers under v2 and parses once; a Mizuho
+  run parsed under v1 is carried over by v2 and listed once; a collector-vpass
+  capture under v1 and v2 is never parsed and moves no card snapshot.

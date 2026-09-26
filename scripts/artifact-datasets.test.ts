@@ -27,6 +27,8 @@ import {
   COLLECTOR_SOURCE_IDS,
   coreSourceId,
   datasetByRules,
+  REGISTRATION_CONTRACT_VERSION,
+  REGISTRATION_CONTRACT_VERSIONS,
   WITHHELD_ARTIFACT_DATASETS,
 } from "../packages/application/src/collection/descriptors.ts";
 import { PARSERS } from "../packages/parsers/src/parsers/registry.ts";
@@ -658,6 +660,33 @@ describe("the registration dataset table (ADR 0022)", () => {
           parsers: [],
         });
     }
+  });
+
+  test("v2 changes a descriptor only where v1 left an artifact no parser read", async () => {
+    // The INV06 half of the version bump: a terminal v2 registers again is
+    // one whose v1 artifacts were never parsed, so its capture is parsed
+    // once; every other terminal is carried over, not registered again.
+    const v1 = REGISTRATION_CONTRACT_VERSIONS[0];
+    expect(REGISTRATION_CONTRACT_VERSION).not.toBe(v1);
+    let changed = 0;
+    for (const sample of await allSamples()) {
+      const before = artifactDataset(sample.source, sample, v1);
+      const after = artifactDataset(sample.source, sample);
+      if (before === after) continue;
+      changed += 1;
+      expect({ artifact: `${sample.source}/${sample.artifactKey}`, before }).toEqual({
+        artifact: `${sample.source}/${sample.artifactKey}`,
+        before: null,
+      });
+      expect(accepting(meta(sample, before))).toEqual([]);
+    }
+    expect(changed).toBeGreaterThan(0);
+    // St George's snapshot is the one dataset v1 already named.
+    const snapshot = SAMPLES.find((sample) => sample.source === "st-george")!;
+    expect(artifactDataset("st-george", snapshot, v1)).toBe("account-snapshot");
+    expect(() => artifactDataset("st-george", snapshot, "terminal-registration-v0")).toThrow(
+      "registration_contract_unknown",
+    );
   });
 
   test("an unmapped artifact of a mapped source is read by no parser", async () => {

@@ -43,16 +43,28 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  * (03 §4): when the mapping below changes what a terminal means in CORE, the
  * same run registers again as a new revision instead of reusing the old one.
  *
- * The dataset table (`ARTIFACT_DATASETS`, ADR 0022) is the one change that
- * did not bump it. A bump would register every persisted run a second time,
- * and a second registration of an already parsed capture lists its
- * transactions twice for a source whose rows have no provider identity in the
- * read model (Mizuho; `services/processor/test/registration-datasets.test.ts`
- * shows it). Until that is resolved the version stays, so the table applies to
- * terminals first registered after it shipped; a run registered or blocked
- * before keeps what it has.
+ * - `terminal-registration-v1`: no artifact dataset but St George's snapshot.
+ * - `terminal-registration-v2` (ADR 0022): the dataset table
+ *   `ARTIFACT_DATASETS`.
+ *
+ * A terminal already registered under an earlier version whose descriptors
+ * the current version does not change is not registered again: the new
+ * version's row is linked to the run it already is (`carryOver` in
+ * `register-terminal.ts`, ADR 0022). Registering it again would parse the same
+ * capture twice, and a Mizuho capture's transactions would be listed twice.
  */
-export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v1";
+export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v2";
+
+/** Every version this code can derive, oldest first; each derivation is kept reproducible. */
+export const REGISTRATION_CONTRACT_VERSIONS = [
+  "terminal-registration-v1",
+  REGISTRATION_CONTRACT_VERSION,
+] as const;
+export type RegistrationContractVersion = (typeof REGISTRATION_CONTRACT_VERSIONS)[number];
+
+export function isRegistrationContractVersion(value: string): value is RegistrationContractVersion {
+  return (REGISTRATION_CONTRACT_VERSIONS as readonly string[]).includes(value);
+}
 
 /** The external id namespace every shared-R2 acquisition session is recorded under. */
 export const EXTERNAL_ID_NAMESPACE = "shared-r2";
@@ -373,10 +385,25 @@ export const WITHHELD_ARTIFACT_DATASETS: Readonly<
 export function artifactDataset(
   collectorSource: string,
   artifact: Pick<TerminalArtifact, "artifactKey" | "role" | "mediaType">,
+  contractVersion: string = REGISTRATION_CONTRACT_VERSION,
 ): string | null {
-  if (!Object.hasOwn(ARTIFACT_DATASETS, collectorSource)) return null;
-  return datasetByRules(ARTIFACT_DATASETS[collectorSource]!, artifact);
+  if (!isRegistrationContractVersion(contractVersion)) fail("registration_contract_unknown");
+  const table = DATASETS_BY_VERSION[contractVersion];
+  if (!Object.hasOwn(table, collectorSource)) return null;
+  return datasetByRules(table[collectorSource]!, artifact);
 }
+
+/**
+ * The dataset table of each registration contract version. `v1` is kept so
+ * that what a registration under it meant stays reproducible: it named one
+ * dataset, St George's snapshot, and left every other artifact without one.
+ */
+const DATASETS_BY_VERSION: Readonly<
+  Record<RegistrationContractVersion, Readonly<Record<string, readonly ArtifactDatasetRule[]>>>
+> = {
+  "terminal-registration-v1": { "st-george": ARTIFACT_DATASETS["st-george"]! },
+  "terminal-registration-v2": ARTIFACT_DATASETS,
+};
 
 /** The dataset the first matching rule names, or null. */
 export function datasetByRules(
@@ -702,6 +729,7 @@ export function artifactRequest(
   manifest: TerminalManifest,
   artifact: TerminalArtifact,
   unitIds: ReadonlyMap<string, number>,
+  contractVersion: string = REGISTRATION_CONTRACT_VERSION,
 ): ArtifactRequest {
   const role = artifactRole(artifact.role);
   const steps = transformSteps(manifest, artifact);
@@ -715,7 +743,7 @@ export function artifactRequest(
   if (artifact.unitKey !== undefined && fetchUnitId === null) fail("artifact_unit_unknown");
   // The closed per-source table (ADR 0022). An artifact it does not name
   // keeps no dataset and so does not inherit financial eligibility.
-  const dataset = artifactDataset(manifest.source, artifact);
+  const dataset = artifactDataset(manifest.source, artifact, contractVersion);
   return {
     artifactKey: artifact.artifactKey,
     ...(dataset === null ? {} : { dataset }),

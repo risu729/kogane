@@ -1,6 +1,7 @@
 // ADR 0022 against every real migration: registration gives a shared-R2
-// artifact the dataset its parser reads, and what a registration contract
-// version bump would do to a capture that is already registered.
+// artifact the dataset its parser reads, and the bump to
+// `terminal-registration-v2` makes a run sealed under v1 without datasets
+// parseable while never parsing one capture twice (INV06).
 //
 // Synthetic bytes only: the shared parser fixtures and the Mizuho fixture.
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -15,8 +16,11 @@ import {
 } from "../../../packages/storage-d1/src/migrations.ts";
 import { persistRun } from "../../../packages/collection/src/writer.ts";
 import {
+  PREAMBLE_RESERVE,
   REGISTRATION_CONTRACT_VERSION,
+  RegistrationBudget,
   registerTerminal,
+  STRUCTURE_STEP_RESERVE,
 } from "../../../packages/application/src/collection/index.ts";
 import { mobileSuicaRunPlan } from "../../collector-mobile-suica/src/shared-run.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
@@ -74,6 +78,21 @@ afterAll(async () => {
   await mf?.dispose();
 });
 
+/** The version production registered under until ADR 0022. */
+const V1 = "terminal-registration-v1";
+
+/** One registration under an explicit contract version (the current one when omitted). */
+function register(source: string, runId: string, contractVersion?: string) {
+  return registerTerminal({
+    env: { DB: env.DB, EVIDENCE: env.EVIDENCE },
+    bucket: env.EVIDENCE,
+    clientId: "processor-shared-r2",
+    source,
+    runId,
+    ...(contractVersion === undefined ? {} : { contractVersion }),
+  });
+}
+
 async function rows(query: { sql: string; args: readonly unknown[] }): Promise<unknown[]> {
   return (
     await env.DB.prepare(query.sql)
@@ -82,7 +101,7 @@ async function rows(query: { sql: string; args: readonly unknown[] }): Promise<u
   ).results;
 }
 
-test("a Mobile Suica terminal registers its normalized rows as `sf-history` and they parse once", async () => {
+test("a Mobile Suica run sealed under v1 without datasets registers again under v2 and parses once", async () => {
   const sfHistory = readFileSync(`${FIXTURES_ROOT}mobile-suica-parser-boundaries/sf-history.json`);
   const plan = await mobileSuicaRunPlan({
     runId: "suica-synthetic-1",
@@ -116,31 +135,64 @@ test("a Mobile Suica terminal registers its normalized rows as `sf-history` and 
     failureCodes: [],
   });
   expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
-  const source = { source: "mobile-suica", runId: "suica-synthetic-1" };
-  expect(await registerCollectionRun(env, source)).toMatchObject({
-    outcome: "registered",
-    artifacts: 3,
-  });
-  expect(
-    (
-      await env.DB.prepare(
-        "SELECT artifact_key,dataset FROM fetch_artifacts WHERE source_id='mobile-suica' ORDER BY artifact_key",
-      ).all()
-    ).results,
-  ).toEqual([
-    { artifact_key: "collection-summary.json", dataset: null },
-    { artifact_key: "sf-history-page-0001.html", dataset: null },
-    { artifact_key: "sf-history.json", dataset: "sf-history" },
-  ]);
-  expect(await sweep(env)).toMatchObject({ parsed: 1, error: 0 });
+  const runId = "suica-synthetic-1";
+  const datasets = () =>
+    env.DB.prepare(
+      "SELECT fetch_run_id,artifact_key,dataset FROM fetch_artifacts WHERE source_id='mobile-suica' ORDER BY fetch_run_id,artifact_key",
+    )
+      .all()
+      .then((result) => result.results);
   const transactions = transactionsSql({ source: "mobile-suica" }, 0);
-  const listed = await rows(transactions);
-  expect(listed.length).toBeGreaterThan(0);
+  const balances = latestBalancesSql({ source: "mobile-suica" }, 0, PAGE_LIMIT);
 
-  // The same terminal again is the same registration: no second fetch run,
-  // no second parse, the same rows.
-  expect(await registerCollectionRun(env, source)).toMatchObject({
+  // Production today: sealed under v1, every artifact without a dataset, and
+  // nothing parses it.
+  const v1 = await register("mobile-suica", runId, V1);
+  expect(v1).toMatchObject({ outcome: "registered", artifacts: 3 });
+  const v1Run = (v1 as { fetchRunId: number }).fetchRunId;
+  expect(await datasets()).toEqual([
+    { fetch_run_id: v1Run, artifact_key: "collection-summary.json", dataset: null },
+    { fetch_run_id: v1Run, artifact_key: "sf-history-page-0001.html", dataset: null },
+    { fetch_run_id: v1Run, artifact_key: "sf-history.json", dataset: null },
+  ]);
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  expect(await rows(transactions)).toEqual([]);
+
+  // Under v2 its descriptors change, so it registers again: a second fetch
+  // run over the same objects, whose normalized rows carry `sf-history`.
+  const v2 = await registerCollectionRun(env, { source: "mobile-suica", runId });
+  expect(v2).toMatchObject({ outcome: "registered", artifacts: 3 });
+  const v2Run = (v2 as { fetchRunId: number }).fetchRunId;
+  expect(v2Run).not.toBe(v1Run);
+  expect(await datasets()).toEqual([
+    { fetch_run_id: v1Run, artifact_key: "collection-summary.json", dataset: null },
+    { fetch_run_id: v1Run, artifact_key: "sf-history-page-0001.html", dataset: null },
+    { fetch_run_id: v1Run, artifact_key: "sf-history.json", dataset: null },
+    { fetch_run_id: v2Run, artifact_key: "collection-summary.json", dataset: null },
+    { fetch_run_id: v2Run, artifact_key: "sf-history-page-0001.html", dataset: null },
+    { fetch_run_id: v2Run, artifact_key: "sf-history.json", dataset: "sf-history" },
+  ]);
+  expect(
+    await env.DB.prepare(
+      "SELECT COUNT(DISTINCT sha256) AS n FROM fetch_artifacts WHERE source_id='mobile-suica'",
+    ).first<number>("n"),
+  ).toBe(3);
+  expect(await sweep(env)).toMatchObject({ parsed: 1, error: 0 });
+  // One parse of one capture: the fixture's two transactions and one current
+  // post-transaction balance, each listed once.
+  expect(
+    await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM parse_runs p JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE a.source_id='mobile-suica'",
+    ).first<number>("n"),
+  ).toBe(1);
+  const listed = await rows(transactions);
+  expect(listed).toHaveLength(2);
+  expect(await rows(balances)).toHaveLength(1);
+
+  // Delivered again, it is the same registration: nothing new, the same rows.
+  expect(await registerCollectionRun(env, { source: "mobile-suica", runId })).toMatchObject({
     outcome: "already_registered",
+    fetchRunId: v2Run,
   });
   expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
   expect(await rows(transactions)).toEqual(listed);
@@ -148,7 +200,7 @@ test("a Mobile Suica terminal registers its normalized rows as `sf-history` and 
     await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM fetch_runs WHERE source_id='mobile-suica'",
     ).first<number>("n"),
-  ).toBe(1);
+  ).toBe(2);
 }, 60000);
 
 test("a collector-vpass capture registers without a dataset, is never parsed and moves no card snapshot", async () => {
@@ -202,9 +254,15 @@ test("a collector-vpass capture registers without a dataset, is never parsed and
       ),
     ),
   });
+  // Registered under v1, then under v2, which withholds the same dataset and
+  // so carries the registration over.
+  expect(await register("vpass", "vpass-synthetic-card-001", V1)).toMatchObject({
+    outcome: "registered",
+    artifacts: 4,
+  });
   expect(
     await registerCollectionRun(env, { source: "vpass", runId: "vpass-synthetic-card-001" }),
-  ).toMatchObject({ outcome: "registered", artifacts: 4 });
+  ).toMatchObject({ outcome: "already_registered" });
   expect(
     (
       await env.DB.prepare(
@@ -222,14 +280,13 @@ test("a collector-vpass capture registers without a dataset, is never parsed and
   expect(before.eligible).toEqual([{ n: 0 }]);
 }, 60000);
 
-test("a contract version bump registers a parsed capture again and lists its Mizuho transactions twice", async () => {
-  // Why ADR 0022 does not bump REGISTRATION_CONTRACT_VERSION. A bump makes
-  // every persisted terminal a new (source, run, digest, version) row: a
-  // second fetch run over the same objects, second artifacts, second parses.
-  // Container snapshots and latest balances still pick one capture, but a
-  // Mizuho history row has no provider identity in the transaction list, so
-  // each registration of one capture contributes its rows once more. When a
-  // later change resolves that, this test is where it shows.
+test("a Mizuho capture parsed under v1 is carried over by v2, not registered and listed twice", async () => {
+  // A bump makes every persisted terminal a new (source, run, digest,
+  // version) row. Registered again, a capture parsed under v1 would be a
+  // second fetch run, second artifacts and second parses; Mizuho history rows
+  // have no provider identity in the transaction list, so each would be
+  // listed twice. v2 does not change a Mizuho descriptor, so the v2 row is
+  // linked to the fetch run the terminal already is.
   const runId = "mizuho-synthetic-bump";
   const pages = [
     { key: "account-list.html", unit: "account-list", html: mizuhoAccountHtml() },
@@ -277,51 +334,54 @@ test("a contract version bump registers a parsed capture again and lists its Miz
       ),
     ),
   });
-  const register = (contractVersion?: string) =>
-    registerTerminal({
-      env: { DB: env.DB, EVIDENCE: env.EVIDENCE },
-      bucket: env.EVIDENCE,
-      clientId: "processor-shared-r2",
-      source: "mizuho-bank",
-      runId,
-      ...(contractVersion === undefined ? {} : { contractVersion }),
-    });
-  expect(await register()).toMatchObject({ outcome: "registered", artifacts: 2 });
+  expect(await register("mizuho-bank", runId, V1)).toMatchObject({
+    outcome: "registered",
+    artifacts: 2,
+  });
   expect(await sweep(env)).toMatchObject({ parsed: 2, error: 0 });
   const transactions = transactionsSql({ source: "mizuho-bank" }, 0);
   const balances = latestBalancesSql({ source: "mizuho-bank" }, 0, PAGE_LIMIT);
   const history = { sql: `${BALANCE_HISTORY_SQL} WHERE fa.source_id = ?`, args: ["mizuho-bank"] };
-  const once = {
+  const listed = async () => ({
     transactions: (await rows(transactions)).length,
     balances: (await rows(balances)).length,
     history: (await rows(history)).length,
-  };
-  expect(once).toEqual({ transactions: 2, balances: 2, history: 2 });
+  });
+  expect(await listed()).toEqual({ transactions: 2, balances: 2, history: 2 });
+  const fetchRun = await env.DB.prepare(
+    "SELECT fetch_run_id FROM collection_runs WHERE source='mizuho-bank' AND run_id=?",
+  )
+    .bind(runId)
+    .first<number>("fetch_run_id");
 
-  const bumped = `${REGISTRATION_CONTRACT_VERSION}-bump-probe`;
-  expect(await register(bumped)).toMatchObject({ outcome: "registered", artifacts: 2 });
+  // The carry-over is one bounded step: the preamble and one structure step.
+  const budget = new RegistrationBudget();
+  expect(
+    await registerCollectionRun(env, { source: "mizuho-bank", runId }, { budget }),
+  ).toMatchObject({ outcome: "already_registered", fetchRunId: fetchRun });
+  expect(budget.meter.total).toBeLessThanOrEqual(PREAMBLE_RESERVE + STRUCTURE_STEP_RESERVE);
   expect(
     (
       await env.DB.prepare(
-        "SELECT registration_contract_version AS version, fetch_run_id IS NOT NULL AS linked FROM collection_runs WHERE source='mizuho-bank' AND run_id=? ORDER BY id",
+        "SELECT registration_contract_version AS version, fetch_run_id FROM collection_runs WHERE source='mizuho-bank' AND run_id=? ORDER BY id",
       )
         .bind(runId)
         .all()
     ).results,
   ).toEqual([
-    { version: REGISTRATION_CONTRACT_VERSION, linked: 1 },
-    { version: bumped, linked: 1 },
+    { version: V1, fetch_run_id: fetchRun },
+    { version: REGISTRATION_CONTRACT_VERSION, fetch_run_id: fetchRun },
   ]);
-  // The objects are the same; the fetch runs, artifacts and parses are new.
   expect(
     await env.DB.prepare(
       "SELECT COUNT(DISTINCT sha256) AS objects, COUNT(*) AS artifacts, COUNT(DISTINCT fetch_run_id) AS runs FROM fetch_artifacts WHERE source_id='mizuho-bank'",
     ).first(),
-  ).toEqual({ objects: 2, artifacts: 4, runs: 2 });
-  expect(await sweep(env)).toMatchObject({ parsed: 2, error: 0 });
-  expect({
-    transactions: (await rows(transactions)).length,
-    balances: (await rows(balances)).length,
-    history: (await rows(history)).length,
-  }).toEqual({ transactions: 4, balances: 2, history: 4 });
+  ).toEqual({ objects: 2, artifacts: 2, runs: 1 });
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  expect(await listed()).toEqual({ transactions: 2, balances: 2, history: 2 });
+  // Asked again, still one registration.
+  expect(await registerCollectionRun(env, { source: "mizuho-bank", runId })).toMatchObject({
+    outcome: "already_registered",
+    fetchRunId: fetchRun,
+  });
 }, 60000);

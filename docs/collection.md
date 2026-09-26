@@ -245,9 +245,11 @@ below are its source: a collector that renames an artifact, changes its role
 or declares another media type leaves that artifact without a dataset, and so
 unparsed, until the table follows. Vpass statement pages are withheld and
 registered without a dataset until the collector derives the trusted card
-binding ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). Runs
-registered before the table keep the datasets they
-were registered with.
+binding ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). The table is
+registration contract `terminal-registration-v2`: a run registered under v1
+whose artifacts gain a dataset registers again under v2 (its v1 artifacts were
+never parsed), and every other v1 registration is carried over unchanged, so
+no capture is parsed twice.
 
 ### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 
