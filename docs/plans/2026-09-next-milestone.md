@@ -515,6 +515,17 @@ Dependencies: P2-1 and P2-2 are independent of everything, including Part 1. P2-
 
 ### P2-2 — `feat: parse SBI Shinsei exchange rates and promote provider prices to price observations` (~3k lines)
 
+> **Update 2026-09-26 (P2-2).** Implemented with migration **0053** (0051 and
+> 0052 are taken by other pull requests of this plan) and recorded in
+> [ADR 0020](../adr/0020-price-promotion-by-rule.md). The survey could read
+> only artifact metadata: 29 `exchange-rate` artifacts, `artifact_key`
+> `raw-exchange-rate.json`, all from successful runs. The currency list,
+> `customerCategory` values and `transactionTime` presence are in the payload
+> bytes in R2 and were not surveyed, so no currency's quote basis is verified
+> and the lane promotes no FX row yet (`unsupported_currency`). The position
+> rules promote today. The lane runs without a flag, right before
+> `report_job`.
+
 **Survey (read-only).** The stored `exchange-rate` artifacts' `dataset`/`artifact_key`, the currency list, `customerCategory` values and `transactionTime` presence. Shapes only.
 
 **Parser.** `packages/parsers/src/parsers/sbi-shinsei-exchange-rate.ts` 1.0.0:

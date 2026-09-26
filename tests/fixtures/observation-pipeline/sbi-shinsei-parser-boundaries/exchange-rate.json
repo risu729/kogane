@@ -1,0 +1,29 @@
+{
+  "responseParam": {
+    "exchangeRateInformation": {
+      "requestParam": {},
+      "responseParam": {
+        "transactionTime": "20260907090100",
+        "exchangeRates": [
+          {
+            "currency": "USD",
+            "customerCategory": "SYNTHETIC",
+            "buyRate": "145.00",
+            "sellRate": "147.00",
+            "midRate": "146.00"
+          },
+          {
+            "currency": "EUR",
+            "customerCategory": "SYNTHETIC",
+            "buyRate": "160.25",
+            "sellRate": "162.75",
+            "midRate": "161.5"
+          }
+        ]
+      },
+      "header": {},
+      "errorInfo": {}
+    }
+  },
+  "header": { "adapterResultCode": "0" }
+}

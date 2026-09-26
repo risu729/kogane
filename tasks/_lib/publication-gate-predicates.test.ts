@@ -86,6 +86,10 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   "packages/read-model/src/card-settlement-ownership.ts": 1,
   // The local store experiment's writer and its backfill.
   "experiments/observation-pipeline-local/src/store.ts": 5,
+  // Price promotion writer (ADR 0020): promotes the claims of every successful
+  // run, published or not, so a parse published later is not missed. Which
+  // price a reader uses is decided by price-selection.ts through the projection.
+  "services/processor/src/price-promotion-job.ts": 2,
 };
 
 /** Migrations that may state the legacy rule: those up to the gate itself. */
