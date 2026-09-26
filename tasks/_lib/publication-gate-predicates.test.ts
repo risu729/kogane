@@ -84,6 +84,10 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   // comes from its join on the projection; the status test is the view's own
   // (migration 0026), kept so the keyed owners equal the view's.
   "packages/read-model/src/card-settlement-ownership.ts": 1,
+  // The dated form of the same candidates (docs/reported-state.md): the
+  // chosen parses come from the projection; the status test is the view's
+  // own, kept so the dated identities equal the view's rows.
+  "packages/read-model/src/dated-state.ts": 1,
   // The local store experiment's writer and its backfill.
   "experiments/observation-pipeline-local/src/store.ts": 5,
   // Price promotion writer (ADR 0020): promotes the claims of every successful

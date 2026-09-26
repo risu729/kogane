@@ -118,7 +118,7 @@ describe("G1-02/G1-15 the V Point run is written to the shared bucket, terminal 
     if (read.outcome !== "found") return;
     const manifest = read.manifest;
     expect(manifest.source).toBe("v-point");
-    expect(manifest.producer).toBe("collector-vpoint");
+    expect(manifest.producer).toBe("collector-v-point");
     expect(manifest.producerVersion).toBe(PRODUCER_VERSION);
     expect(manifest.attemptId).toBe(input.attemptId);
     expect(manifest.providerOutcome).toBe("success");
@@ -243,6 +243,7 @@ describe("G1-16 one delivered mail, two sources, one session", () => {
     if (read.outcome !== "found") throw new Error("terminal_missing");
     const manifest = read.manifest;
     expect(manifest.source).toBe("v-point-pay-email");
+    expect(manifest.producer).toBe("collector-v-point-pay-email");
     expect(manifest.runId).toBe(prepared.event.id);
     expect(manifest.providerOutcome).toBe("success");
     expect(
