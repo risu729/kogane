@@ -6,6 +6,7 @@ balances, valuations, P&L, and tax views can be recomputed later under
 different rules.
 
 - [Design](docs/design.md)
+- [Agent instructions](AGENTS.md)
 - [ADR 0001: provenance classification plus domain axes](docs/adr/0001-domain-axes.md)
 - [ADR 0002: card purchases per provider row, one live holder per key](docs/adr/0002-card-purchase-recognition.md)
 - [ADR 0003: relative period labels are evidence](docs/adr/0003-relative-period-labels.md)
