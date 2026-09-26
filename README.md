@@ -20,6 +20,7 @@ different rules.
 - [ADR 0011: keyed ownership CTEs](docs/adr/0011-keyed-ownership-ctes.md)
 - [ADR 0012: Mizuho identity policy version 2](docs/adr/0012-mizuho-identity-policy-v2.md)
 - [ADR 0013: agent read access to card purchases](docs/adr/0013-agent-card-purchase-read.md)
+- [ADR 0015: source authority v2 names CORE source ids](docs/adr/0015-source-authority-v2.md)
 - [Next-milestone plan (proposed)](docs/plans/2026-09-next-milestone.md)
 - [Domain contracts (`packages/domain`)](docs/domain-contracts.md)
 - [Package layout and import boundaries](docs/package-layout.md)
