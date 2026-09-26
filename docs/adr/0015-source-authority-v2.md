@@ -30,13 +30,17 @@ list is `unreviewed`, silently. Under `source-authority-v1`:
 There is no closed list of CORE source ids in code. The ids are rows the CORE
 migrations insert (0002, 0003) and delete (0043 removes `kogane-synthetic`);
 `COLLECTOR_SOURCE_IDS` covers only sources with a collector and still names
-`kogane-synthetic`, which CORE no longer holds.
+`kogane-synthetic`, which CORE no longer holds: it is the verification source
+the test harnesses seed themselves, and `scripts/config-bootstrap.test.ts`
+already exempts it from the production routes.
 
 The release id enters the snapshot identity twice: as
 `authorityPolicyRelease` in the input manifest (`projectionInputManifest`,
 stored with the captured input) and in `projectionBuildDigest`, which with the
-input digest forms the snapshot's content key. No SQL column, READ pointer or
-selection compares the release string; nothing else stores it.
+input digest forms the snapshot's content key. The manifest is also copied
+into the READ snapshot row (`balance_read_snapshots.input_manifest_json`),
+where the App reads only `publishedHighWaterParseRunId`. No SQL, READ pointer
+or selection compares the release string.
 
 ## Options considered
 
