@@ -15,6 +15,15 @@
 export { APPROVAL_TTL_SECONDS_DEFAULT, approve, type ApproveInput } from "./command/approve.ts";
 export {
   commandKey,
+  CARD_REVIEW_KINDS,
+  type CardInstallmentLinkPayload,
+  type CardInstallmentUnlinkPayload,
+  type CardPurchaseExcludePayload,
+  type CardPurchaseRestorePayload,
+  type CardRefundAllocatePayload,
+  type CardRefundWithdrawPayload,
+  type CardReviewKind,
+  type CardReviewPayload,
   CHANGE_KINDS,
   COMMAND_CAPABILITIES,
   type ApprovalReceipt,
@@ -34,6 +43,7 @@ export {
   type IdentityReleasePayload,
   type IdentitySubject,
   IDENTITY_SUBJECTS,
+  isCardReviewKind,
   isChangeKind,
   type MutationInput,
   type MutationPlanner,
@@ -105,7 +115,12 @@ export {
   relationSubjectRef,
   subjectRefOf,
 } from "./operations/sql.ts";
-export { resolveAndSimulate } from "./operations/targets.ts";
+export {
+  resolveAndSimulate,
+  REVIEW_PLANNERS,
+  type ResolvedPlan,
+  type ReviewPlanner,
+} from "./operations/targets.ts";
 
 // ── operations services (02 §4, U06) ─────────────────────────────────
 export {

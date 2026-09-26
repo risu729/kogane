@@ -11,8 +11,13 @@
 // conflict rule the default does not enable) which of two disagreeing
 // witnesses wins. Equal ranks never break a tie, so an unproven overlap
 // between two direct sources stays unresolved rather than picking one.
+//
+// Every id below is a CORE `sources.id` (the rows the CORE migrations seed);
+// test/authority.test.ts refuses any other, so a renamed source cannot fall
+// silently to `unreviewed`. v2 (ADR 0015) corrected the MoneyForward id and
+// added the Mizuho and St.George direct sources.
 
-export const AUTHORITY_POLICY_RELEASE = "source-authority-v1";
+export const AUTHORITY_POLICY_RELEASE = "source-authority-v2";
 
 export const AUTHORITY_RANKS = {
   /** The institution's own screen or API for its own accounts. */
@@ -29,11 +34,12 @@ export type AuthorityRank = (typeof AUTHORITY_RANKS)[keyof typeof AUTHORITY_RANK
  * one in the current inventory; a new aggregator is added here with its
  * evidence, never by lowering a direct source instead.
  */
-const AGGREGATOR_SOURCES: readonly string[] = ["moneyforward"];
+const AGGREGATOR_SOURCES: readonly string[] = ["moneyforward-me"];
 
 /** Direct sources whose reports are the institution's own statement. */
 const DIRECT_SOURCES: readonly string[] = [
   "global-pass",
+  "mizuho-bank",
   "mobile-suica",
   "myjcb",
   "sbi-securities",
@@ -41,6 +47,7 @@ const DIRECT_SOURCES: readonly string[] = [
   "sbi-vc-trade",
   "smbc-bank",
   "sony-bank",
+  "st-george",
   "v-point",
   "v-point-pay",
   "vpass",

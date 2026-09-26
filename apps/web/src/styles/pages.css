@@ -667,3 +667,11 @@
   font-size: var(--text-md);
   margin-top: var(--space-4);
 }
+
+/* ── reported state on a date ──────────────────────────────────────── */
+
+/* Positions, balances and card payables: a few columns each; the payables'
+ * six columns keep their statuses on one line. */
+.reported-state-table {
+  min-width: 44rem;
+}

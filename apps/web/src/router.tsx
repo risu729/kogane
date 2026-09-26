@@ -114,6 +114,8 @@ export type Route =
   | { name: "balances" }
   | { name: "summaries" }
   | { name: "positions" }
+  /** Every account as its providers last reported it on a chosen date. */
+  | { name: "reportedState" }
   | { name: "identities" }
   | { name: "rewards" }
   | { name: "reconciliation" }
@@ -150,6 +152,7 @@ export function matchRoute(path: string): Route {
     if (first === "balances") return { name: "balances" };
     if (first === "summaries") return { name: "summaries" };
     if (first === "positions") return { name: "positions" };
+    if (first === "state") return { name: "reportedState" };
     if (first === "identities") return { name: "identities" };
     if (first === "rewards") return { name: "rewards" };
     if (first === "reconciliation") return { name: "reconciliation" };

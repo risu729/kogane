@@ -586,6 +586,22 @@ export function positionsSql(scope: CollectionScope, offset: number): PageSql {
 }
 
 /**
+ * The provider row a valuation `v` belongs to, beside position `po` of parse
+ * `p` with the same parse run, source account and code: source-specific
+ * locator guards keep equal codes in two markets apart. Shared with the dated
+ * reported state (dated-state.ts), so both match a valuation the same way.
+ */
+export const POSITION_VALUATION_LOCATOR = `CASE p.parser_name
+      WHEN 'sbi-foreign-cash-positions'
+        THEN v.raw_locator = po.raw_locator || '.evaluationProfitLoss'
+      WHEN 'sbi-domestic-cash-positions'
+        THEN CAST(substr(v.raw_locator, 28) AS INTEGER)
+          BETWEEN CAST(substr(po.raw_locator, 28) AS INTEGER)
+          AND CAST(substr(po.raw_locator, 28) AS INTEGER) + 422
+      ELSE 1
+    END`;
+
+/**
  * Provider-reported valuations of the given positions, matched within the
  * same parse snapshot and provider row. Source-specific locator guards keep
  * equal codes in two markets apart. Valuations are never summed or converted.
@@ -601,15 +617,7 @@ export const POSITION_VALUATIONS_SQL = `WITH ${SNAPSHOT_CTES}
     JOIN ${visibleEvidence.fetchArtifacts} fa ON fa.id = p.fetch_artifact_id
     JOIN ${visibleEvidence.fetchRuns} f ON f.id = fa.fetch_run_id
     WHERE po.id IN (SELECT value FROM json_each(?1))
-      AND ${ACTIVE} AND ${CURRENT_SNAPSHOT} AND CASE p.parser_name
-      WHEN 'sbi-foreign-cash-positions'
-        THEN v.raw_locator = po.raw_locator || '.evaluationProfitLoss'
-      WHEN 'sbi-domestic-cash-positions'
-        THEN CAST(substr(v.raw_locator, 28) AS INTEGER)
-          BETWEEN CAST(substr(po.raw_locator, 28) AS INTEGER)
-          AND CAST(substr(po.raw_locator, 28) AS INTEGER) + 422
-      ELSE 1
-    END`;
+      AND ${ACTIVE} AND ${CURRENT_SNAPSHOT} AND ${POSITION_VALUATION_LOCATOR}`;
 
 const observationCount = (table: ObservationTable, alias: string): string =>
   `(SELECT COUNT(*) FROM ${table} ${alias}

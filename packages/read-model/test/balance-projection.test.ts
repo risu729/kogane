@@ -248,6 +248,43 @@ describe("balance projection builder", () => {
     ).toEqual(["50000", "50000"]);
   });
 
+  test("source-authority-v2: Mizuho no longer yields to another bank on an unproven overlap", () => {
+    // Two banks' own deposit balances in one target, provider-local, with no
+    // adopted relation between them. v1 ranked `mizuho-bank` unreviewed, so
+    // the other bank was adopted and Mizuho alone was left unresolved; as two
+    // direct sources neither may win an unproven overlap (ADR 0015).
+    const build = (mizuhoRank: number) =>
+      buildBalanceProjection(
+        [
+          deposit("m-smbc", "source_account:smbc:ordinary", "70000", {
+            subjectStatus: "provider-local",
+            authorityRank: authorityRank("smbc-bank"),
+          }),
+          deposit("m-mizuho", "source_account:mizuho:ordinary", "50000", {
+            subjectStatus: "provider-local",
+            sourceId: "mizuho-bank",
+            sourceAccount: "mizuho-bank:ordinary:001:1234567",
+            parser: "mizuho-account-list@1.0.0",
+            parserName: "mizuho-account-list",
+            authorityRank: mizuhoRank,
+          }),
+        ],
+        [],
+      );
+    const v1 = build(AUTHORITY_RANKS.unreviewed);
+    expect(stateOf(v1, "m-smbc").state).toBe("adopted");
+    expect(stateOf(v1, "m-mizuho")).toMatchObject({
+      state: "unresolved",
+      reasonCode: "overlap_unknown",
+    });
+    const v2 = build(authorityRank("mizuho-bank"));
+    for (const scopeKey of ["m-smbc", "m-mizuho"])
+      expect(stateOf(v2, scopeKey)).toMatchObject({
+        state: "unresolved",
+        reasonCode: "overlap_unknown",
+      });
+  });
+
   test("SC15: the four meanings of an empty fetch stay four different answers", () => {
     const outcomes = sc15.cases.map((entry) => snapshotEligibility(entry.claim as CoverageClaim));
     expect(
@@ -362,7 +399,7 @@ describe("balance projection builder", () => {
 
   test("the source authority policy ranks aggregators below direct sources", () => {
     expect(authorityRank("smbc-bank")).toBe(AUTHORITY_RANKS.direct);
-    expect(authorityRank("moneyforward")).toBe(AUTHORITY_RANKS.aggregator);
+    expect(authorityRank("moneyforward-me")).toBe(AUTHORITY_RANKS.aggregator);
     expect(authorityRank("synthetic-unknown-source")).toBe(AUTHORITY_RANKS.unreviewed);
   });
 

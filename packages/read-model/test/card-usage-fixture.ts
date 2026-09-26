@@ -81,7 +81,7 @@ interface AccountSpec {
   status?: "identified" | "provider-local" | "aggregate" | "unresolved";
 }
 
-function migrated(): Database {
+export function migrated(): Database {
   const db = new Database(":memory:");
   db.exec(LAYER_A);
   for (const name of readdirSync(MIGRATIONS)

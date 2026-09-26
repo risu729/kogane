@@ -29,6 +29,7 @@ interface ViewState {
   "purchases.period": string;
   "purchases.draft": string;
   "purchases.offset": number;
+  "reportedState.date": string;
 }
 const Context = createContext<{
   state: ViewState;
@@ -56,6 +57,7 @@ export function ViewStateProvider({ children }: { children: ReactNode }): ReactN
     "purchases.period": "",
     "purchases.draft": "",
     "purchases.offset": 0,
+    "reportedState.date": "",
   }));
   return <Context.Provider value={{ state, setState }}>{children}</Context.Provider>;
 }

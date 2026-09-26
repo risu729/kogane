@@ -8,9 +8,18 @@ server, an approval binds a human to that exact plan, and a commit applies it
 in one guarded transaction and hands back a stable receipt.
 
 There is **no external money action** here and none can be added by
-configuration. The command kinds are a closed list in code:
-`identity.assign`, `identity.release-override`, `relation.accept`,
-`relation.reject`.
+configuration. The command kinds are a closed list in code (`CHANGE_KINDS`,
+`packages/application/src/command/contract.ts`), and the `change_plans.kind`
+and `operation_receipts.operation_kind` CHECK constraints admit exactly the same list:
+
+| Kinds                                                                          | Since | Plannable                                                                        |
+| ------------------------------------------------------------------------------ | ----- | -------------------------------------------------------------------------------- |
+| `identity.assign`, `identity.release-override`                                 | 0031  | yes                                                                              |
+| `relation.accept`, `relation.reject`                                           | 0031  | yes                                                                              |
+| `card-settlement.accept`, `card-settlement.reject`, `card-settlement.withdraw` | 0045  | yes ([card settlements](card-settlements.md))                                    |
+| `card-purchase.exclude`, `card-purchase.restore`                               | 0051  | no: [refused](#card-purchase-review-kinds-migration-0051) until a planner exists |
+| `card-refund.allocate`, `card-refund.withdraw`                                 | 0051  | no: refused until a planner exists                                               |
+| `card-installment.link`, `card-installment.unlink`                             | 0051  | no: refused until a planner exists                                               |
 
 ## The four steps
 
@@ -68,8 +77,8 @@ and `account_mappings` before and after a failing guard.
 Reviewing a [pending-to-posted card usage link](economic-events.md#pending-to-posted-links)
 rides on `relation.accept` / `relation.reject`, the way the card ownership
 review does, so the closed kind list and the `change_plans` /
-`operation_receipts` CHECKKs stay as they are. The payload is the candidate's
-`relation` from `GET /api/v2/card-purchases`, plus a reason:
+`operation_receipts` kind CHECK constraints stay as they are. The payload is
+the candidate's `relation` from `GET /api/v2/card-purchases`, plus a reason:
 
 ```json
 {
@@ -140,6 +149,53 @@ again only through a new proposal, which the purchase lane writes when either
 row's event moves to a new observation
 ([economic-events.md](economic-events.md#pending-to-posted-links)).
 
+## Card purchase review kinds (migration 0051)
+
+[ADR 0017](adr/0017-card-purchase-review-commands.md) adds six kinds for the
+reviews of a recognised card purchase that no relation kind can state
+honestly: "this row is not a purchase", "this refund belongs to that
+purchase" and "these rows are later portions of that installment plan".
+Migration `0051_card_purchase_review_commands.sql` rebuilds `change_plans`,
+`approvals`, `operation_receipts` and `decision_outbox` the way 0045 did,
+statement by statement, so the two kind CHECK constraints admit them; every row, index
+and trigger is carried over unchanged.
+
+The payload contract (`validPayload`) takes exact keys only, with the id
+shapes the lanes name, and the reason must be non-blank text of at most 1000
+characters:
+
+| Kind                      | Payload                                      | Checked                                                                                                                                                                                   |
+| ------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `card-purchase.exclude`   | `{ eventId, reasonCode, reason }`            | `purchase_<sha256>` or `refund_<sha256>`; `reasonCode` one of `card_fee`, `cash_advance`, `own_account_transfer`, `provider_adjustment`, `other`                                          |
+| `card-purchase.restore`   | `{ eventId, reason }`                        | as above                                                                                                                                                                                  |
+| `card-refund.allocate`    | `{ refundEventId, purchaseEventId, reason }` | a `refund_` id and a `purchase_` id                                                                                                                                                       |
+| `card-refund.withdraw`    | `{ allocationId, reason }`                   | `ra_<sha256>`                                                                                                                                                                             |
+| `card-installment.link`   | `{ obligationId, portionRefs, reason }`      | `obl_cp_<sha256>`; 1–36 distinct `transaction:<id>@parse_run:<id>` rows                                                                                                                   |
+| `card-installment.unlink` | `{ obligationId, portionKeys, reason }`      | `obl_cp_<sha256>`; 1–36 distinct recognition keys, each the compact JSON text of `[source, producer, namespace or null, account, external id]`, at most 2048 characters as 0047 stores it |
+
+**Limit.** The command API takes a request body of at most 16 KiB
+(`services/app/src/command-api.ts`), so a link or unlink whose 36 entries are
+long keys can exceed it and would need more than one plan; the change that
+adds installment links decides how it splits them.
+
+The reason codes, the subject prefixes (`card-usage-exclusion:`,
+`card-refund:`, `card-refund-target:`, `card-installment:`) and the
+invalidations (`review:card-purchase-exclusion`,
+`review:card-refund-allocation`, `review:card-installment-link`) are named in
+`packages/domain/src/card-purchase-review.ts`; nothing reads the prefixes or
+invalidations yet.
+
+**What happens today.** Nothing is executable. `resolveAndSimulate` looks a
+review kind up in `REVIEW_PLANNERS` (`packages/application/src/operations/targets.ts`),
+which is empty, so `plan` answers `400 unsupported_semantics` with the kind as
+its ref, before the plan is stored: no `change_plans` row is written. The
+processor registers `cardReviewMutation` for all six kinds, and it returns
+null; a commit of a plan row of these kinds that reached the table any other
+way re-simulates in `failureReason`, answers `unsupported_semantics` and
+writes nothing. The confirmation screen has labels for the six kinds, and no
+screen offers them. A later change registers one kind's planner and writer;
+none adds a kind or rebuilds these tables again.
+
 ## Tables (migration `0031_operations.sql`)
 
 Additive only. No existing table, view, trigger or row is altered, and a Worker
@@ -153,6 +209,11 @@ and 0035/0036/0037, and applies in any of those orders.
 | `approvals`          | `approval_id` (PK), `plan_id`, `plan_digest`, `approver_actor`, `approver_verification` (always `server`), `scope_json`, `expires_at`, `uses_remaining`, `created_at`.                                                                                                                                                                                                |
 | `operation_receipts` | `operation_id` (PK), `principal`, `operation_kind`, `payload_digest`, `plan_id`, `status` (`accepted`/`published`/`failed`), `result_json`, `created_at`, `published_at`; `UNIQUE(principal, operation_id)`.                                                                                                                                                          |
 | `decision_outbox`    | `id`, `decision_revision_id`, `principal`, `operation_id`, `target`, `enqueued_at`, `processed_at`, `attempts`, `last_error_code`, `outcome`, plus the lease/backoff columns; `UNIQUE(decision_revision_id, target)`. Migration 0038 adds `progress_code`, `pending_polls`, `blocked_code`, `required_source_revision`, `evidence_ref` and `applied_source_revision`. |
+
+Migrations 0045 and 0051 rebuilt these four tables only to widen the kind
+CHECK constraints of `change_plans` and `operation_receipts`; columns, keys, indexes and
+triggers are those of 0031 and 0038, and every row was copied with explicit
+column lists.
 
 Triggers, following 0018/0029:
 
@@ -474,9 +535,24 @@ already recorded is never undone by a DELETE — an undo is a new revision
   and a bare `pending_to_posted` plan stored before the review existed refused
   at commit. `services/processor/test/card-purchase-merge.test.ts` runs an
   accept and a withdrawal through the processor's planners on D1.
-- `packages/application/test/command.test.ts` (11 tests): the closed kind list,
-  payloads that reject a caller-supplied impact/approval/revisions, digest
-  sensitivity to every input, grants, and the error table.
+- `packages/application/test/command.test.ts`: the closed kind list,
+  payloads that reject a caller-supplied impact/approval/revisions, the review
+  kinds' exact keys, id shapes, closed reason codes and 1–36 portion lists,
+  digest sensitivity to every input, grants, and the error table.
+- `packages/application/test/card-review-plan.test.ts`: planning each review
+  kind, as a human or an agent, is refused with `unsupported_semantics` and
+  writes no row in any command table; a malformed payload is still
+  `invalid_command`; a plan row of a review kind inserted directly and
+  approved commits nothing, with the plan still `approved` and the approval
+  unspent. `services/processor/test/change-lifecycle.test.ts` checks the same
+  refusal through the processor route and that every kind has a writer slot.
+- `packages/storage-d1/test/command-vocabulary-migration.test.ts`: 0051 on a
+  store migrated through 0050 with history of every earlier kind and status —
+  every row preserved, `PRAGMA foreign_key_check` empty after each statement,
+  index and trigger SQL byte-identical, table SQL identical apart from the
+  widened CHECK, the six kinds accepted and unknown ones refused,
+  append-only and forward-only triggers still firing, and an interrupted
+  migration rolled back whole.
 - `apps/web/test/confirm.browser.test.ts` (8 tests): read-only
   without the capability, no action on a stale plan, accepted vs published
   shown distinctly, and a pending-to-posted review shown against the candidate
