@@ -5,10 +5,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   ACTOR_PATTERN,
+  CARD_REVIEW_KINDS,
   CHANGE_KINDS,
   COMMAND_ERROR_CODES,
   configuredGrantLoader,
   type GrantConfigProblem,
+  isCardReviewKind,
   isChangeKind,
   MAX_SUBJECTS_PER_LIST,
   parseSubjectList,
@@ -38,7 +40,18 @@ describe("payloads", () => {
       "card-settlement.accept",
       "card-settlement.reject",
       "card-settlement.withdraw",
+      "card-purchase.exclude",
+      "card-purchase.restore",
+      "card-refund.allocate",
+      "card-refund.withdraw",
+      "card-installment.link",
+      "card-installment.unlink",
     ]);
+    // The review kinds are exactly the tail the 0051 CHECK added (ADR 0017).
+    expect<readonly string[]>([...CARD_REVIEW_KINDS]).toEqual(CHANGE_KINDS.slice(7));
+    expect(CHANGE_KINDS.filter(isCardReviewKind)).toEqual([...CARD_REVIEW_KINDS]);
+    for (const kind of ["card-purchase.delete", "card-refund", "card-installment.relink"])
+      expect(isChangeKind(kind)).toBe(false);
     expect(
       CHANGE_KINDS.some((kind) => /^(?:payment|transfer|order|withdrawal|send)\./u.test(kind)),
     ).toBe(false);
@@ -100,6 +113,150 @@ describe("payloads", () => {
     expect(validPayload("relation.accept", { ...relation, toRef: relation.fromRef })).toBe(false);
     expect(validPayload("relation.accept", { ...relation, relationKind: "same_as" })).toBe(false);
     expect(validPayload("relation.accept", { ...relation, evidenceRefs: ["a", "a"] })).toBe(false);
+  });
+});
+
+describe("card purchase review payloads (ADR 0017)", () => {
+  const hex = (digit: string) => digit.repeat(64);
+  const purchase = `purchase_${hex("a")}`;
+  const refund = `refund_${hex("b")}`;
+  const obligation = `obl_cp_${hex("c")}`;
+  const allocation = `ra_${hex("d")}`;
+  const reason = "Reviewed the statement row";
+  const valid = {
+    "card-purchase.exclude": { eventId: purchase, reasonCode: "card_fee", reason },
+    "card-purchase.restore": { eventId: refund, reason },
+    "card-refund.allocate": { refundEventId: refund, purchaseEventId: purchase, reason },
+    "card-refund.withdraw": { allocationId: allocation, reason },
+    "card-installment.link": {
+      obligationId: obligation,
+      portionRefs: ["transaction:12@parse_run:3", "transaction:13@parse_run:3"],
+      reason,
+    },
+    "card-installment.unlink": {
+      obligationId: obligation,
+      portionKeys: [JSON.stringify(["myjcb", "producer", null, "card", "row-2"])],
+      reason,
+    },
+  } as const;
+
+  test("each kind accepts exactly its documented keys", () => {
+    for (const kind of CARD_REVIEW_KINDS) {
+      const payload = valid[kind];
+      expect(validPayload(kind, payload)).toBe(true);
+      for (const extra of [
+        { amount: "1000" },
+        { expectedRevisions: {} },
+        { approved: true },
+        { decisionRevisionId: "dr_1" },
+      ])
+        expect(validPayload(kind, { ...payload, ...extra })).toBe(false);
+      for (const key of Object.keys(payload)) {
+        const { [key]: _dropped, ...missing } = payload as Record<string, unknown>;
+        expect(validPayload(kind, missing)).toBe(false);
+      }
+      expect(validPayload(kind, { ...payload, reason: " " })).toBe(false);
+      expect(validPayload(kind, { ...payload, reason: "x".repeat(1001) })).toBe(false);
+      // A review payload is never read as another kind's.
+      for (const other of CARD_REVIEW_KINDS)
+        if (other !== kind) expect(validPayload(other, payload)).toBe(false);
+      expect(validPayload("relation.accept", payload)).toBe(false);
+    }
+  });
+
+  test("every exclusion reason code is closed", () => {
+    for (const reasonCode of [
+      "card_fee",
+      "cash_advance",
+      "own_account_transfer",
+      "provider_adjustment",
+      "other",
+    ])
+      expect(
+        validPayload("card-purchase.exclude", { ...valid["card-purchase.exclude"], reasonCode }),
+      ).toBe(true);
+    for (const reasonCode of ["fee", "CARD_FEE", "", null, 1, "installment_portion"])
+      expect(
+        validPayload("card-purchase.exclude", { ...valid["card-purchase.exclude"], reasonCode }),
+      ).toBe(false);
+  });
+
+  test("ids are the shapes the lanes and later writers name, and nothing else", () => {
+    for (const eventId of [
+      "purchase_1",
+      `purchase_${hex("A")}`,
+      `fee_${hex("a")}`,
+      `event:${purchase}`,
+      `${purchase} `,
+      42,
+    ]) {
+      expect(
+        validPayload("card-purchase.exclude", { ...valid["card-purchase.exclude"], eventId }),
+      ).toBe(false);
+      expect(validPayload("card-purchase.restore", { eventId, reason })).toBe(false);
+    }
+    // A refund is allocated from a refund to a purchase, never the other way round.
+    const allocate = valid["card-refund.allocate"];
+    expect(validPayload("card-refund.allocate", { ...allocate, refundEventId: purchase })).toBe(
+      false,
+    );
+    expect(validPayload("card-refund.allocate", { ...allocate, purchaseEventId: refund })).toBe(
+      false,
+    );
+    for (const allocationId of [
+      `allocation:${allocation}`,
+      `ra_${hex("d").slice(1)}`,
+      `cs_${hex("d")}`,
+    ])
+      expect(validPayload("card-refund.withdraw", { allocationId, reason })).toBe(false);
+    for (const obligationId of [`obl_${hex("c")}`, `obligation:${obligation}`, ""])
+      expect(
+        validPayload("card-installment.link", { ...valid["card-installment.link"], obligationId }),
+      ).toBe(false);
+  });
+
+  test("portion lists hold one to 36 distinct, well-formed entries", () => {
+    const link = valid["card-installment.link"];
+    const refs = (count: number) =>
+      Array.from({ length: count }, (_, index) => `transaction:${index + 1}@parse_run:1`);
+    expect(validPayload("card-installment.link", { ...link, portionRefs: refs(36) })).toBe(true);
+    for (const portionRefs of [
+      [],
+      refs(37),
+      ["transaction:1@parse_run:1", "transaction:1@parse_run:1"],
+      ["transaction:1"],
+      ["transaction:0@parse_run:1"],
+      ["balance:1@parse_run:1"],
+      "transaction:1@parse_run:1",
+    ])
+      expect(validPayload("card-installment.link", { ...link, portionRefs })).toBe(false);
+    const unlink = valid["card-installment.unlink"];
+    const key = (row: string) => JSON.stringify(["myjcb", "producer", "ns", "card", row]);
+    expect(
+      validPayload("card-installment.unlink", {
+        ...unlink,
+        portionKeys: Array.from({ length: 36 }, (_, index) => key(`row-${index}`)),
+      }),
+    ).toBe(true);
+    for (const portionKeys of [
+      [],
+      Array.from({ length: 37 }, (_, index) => key(`row-${index}`)),
+      [key("a"), key("a")],
+      ['["myjcb","producer",null,"card"]'],
+      ['["myjcb", "producer", null, "card", "row"]'],
+      ['["myjcb","producer",null,"card",""]'],
+      ['[null,"producer",null,"card","row"]'],
+      ["not json"],
+    ])
+      expect(validPayload("card-installment.unlink", { ...unlink, portionKeys })).toBe(false);
+    // Link names rows, unlink names held keys; the two lists are not interchangeable.
+    expect(
+      validPayload("card-installment.link", {
+        obligationId: obligation,
+        portionKeys: unlink.portionKeys,
+        reason,
+      }),
+    ).toBe(false);
   });
 });
 
