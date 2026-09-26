@@ -136,7 +136,7 @@ parses, even for a direct read of the core identity view without UI joins.
 Only the retired importer wrote the sidecar, and the trusted view accepts only
 its producer, `collector-r2-importer`
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). A run of the Vpass
-collector (producer `vpass-json` today; #259 renames it `collector-vpass`) has
+collector (producer `collector-vpass`, [ADR 0014](adr/0014-collector-producer-ids.md)) has
 no sidecar to find: the collector stores no
 binding artifact, redacts the session bean the token was derived from before
 storing anything, holds no fingerprint secret, and registers under the session

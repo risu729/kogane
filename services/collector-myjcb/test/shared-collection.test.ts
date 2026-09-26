@@ -98,7 +98,7 @@ describe("G1-02/G1-16 shared mode persists each connection's pages and then the 
     const read = await readTerminal(bucket, "myjcb", runId);
     if (read.outcome !== "found") throw new Error("unreachable");
     const manifest = read.manifest;
-    expect(manifest.producer).toBe("myjcb-worker");
+    expect(manifest.producer).toBe("collector-myjcb");
     expect(manifest.providerOutcome).toBe("success");
     // A card exposes a rolling set of statement periods, so a finished run is
     // not a claim about the card's whole history.

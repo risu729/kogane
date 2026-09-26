@@ -35,7 +35,7 @@ import type { BackfillManifest, BackfillProgress, StoredArtifact } from "./types
 
 /** `runs/<source>/…` in DATA. The Processor maps it to the CORE source `smbc-bank`. */
 export const SHARED_SOURCE = "smbc-direct";
-const PRODUCER = "collector-smbc-direct";
+export const PRODUCER = "collector-smbc-direct";
 const MANIFEST_ARTIFACT_KEY = "manifest.json";
 const JSON_MEDIA_TYPE = "application/json";
 /** The single unit the central descriptors already use for this source. */

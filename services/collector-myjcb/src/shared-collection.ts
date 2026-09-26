@@ -34,8 +34,9 @@ import {
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 
-const SOURCE = "myjcb";
-const PRODUCER = "myjcb-worker";
+export const SOURCE = "myjcb";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-myjcb";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 /**
  * Datasets the central path has never accepted: the importer refuses a run

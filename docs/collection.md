@@ -225,6 +225,15 @@ CORE source id through the closed table `COLLECTOR_SOURCE_IDS` in
 ([processor.md §3.1](processor.md#31-collector-ids-core-source-ids-and-producers));
 no collector carries the CORE id.
 
+Its `producer` is `collector-<collector id>`, the terminal's own `source`
+with the prefix `collector-` (`collector-vpass`, `collector-prestia-globalpass`,
+`collector-v-point-pay-email`), because that is the producer of the
+Processor's route for the source; a terminal naming any other producer is
+refused as `inactive_ingest_route`
+([ADR 0014](adr/0014-collector-producer-ids.md)).
+`tests/collector-producers.test.ts` checks every collector's terminal
+constants against the routes in `config/ingest-clients.json`.
+
 | Collector Worker                   | Terminal `source` (`runs/<source>/…`) | CORE source id     |
 | ---------------------------------- | ------------------------------------- | ------------------ |
 | `kogane-sbi-shinsei-collector-poc` | `sbi-shinsei`                         | `sbi-shinsei-bank` |
@@ -254,8 +263,8 @@ enforced on the way to central storage: a wallet page that still carries a
 field (`loginPwd`, `password`, `csrf`, …), throws a stable code and the run
 writes no terminal instead of publishing the value (G3-08).
 
-Terminal fields: one unit `account` (`unitKind: account`); ranges
-`request-window` (the requested `from`/`to`) and, when wallet statements were
+Terminal fields: `producer: collector-sony-bank`; one unit `account`
+(`unitKind: account`); ranges `request-window` (the requested `from`/`to`) and, when wallet statements were
 collected, `wallet-months`; one `terminal` report carrying the outcome;
 `requestedScope.scopeKind = date_range` over the same window;
 `coverageStatus` `complete` for a successful window, `partial` for a partial
@@ -290,7 +299,8 @@ also re-serialized its _parsed_ view of the manifest, adding `filename`,
 artifact key, not stated by the collector. The collector's manifest is its own
 record and does not carry them.)
 
-Terminal fields: one unit per account (`account-NN`, `unitKind: account`),
+Terminal fields: `producer: collector-moneyforward-me`; one unit per account
+(`account-NN`, `unitKind: account`),
 taken from the collector's own filename grammar — the run-wide
 `accounts.html` index belongs to no unit; a `months-account-NN`
 `declared_coverage` range per account covering the monthly fragments that were
@@ -335,8 +345,8 @@ importer's central bytes also carried its parsed `connectionId`, `filename`
 and `ordinal` per artifact; the collector's manifest keeps its own artifact
 shape.)
 
-Terminal fields: one unit per connection (`<connectionId>`,
-`unitKind: connection`), so several cards in one run stay distinguishable and
+Terminal fields: `producer: collector-myjcb`; one unit per connection
+(`<connectionId>`, `unitKind: connection`), so several cards in one run stay distinguishable and
 are never merged into one (G1-16); no ranges, because the statement periods are
 provider labels rather than machine ranges and stay in the manifest artifact;
 one `terminal` report carrying the outcome; `requestedScope.scopeKind =
@@ -378,7 +388,7 @@ then re-checked, so output that still holds a sensitive value fails the run
 instead of being stored. The artifact keys are the ones central storage already
 uses, so the same run registers the same way.
 
-Terminal fields: one run **per card**, `runId = <session run id>-card-NNN`,
+Terminal fields: `producer: collector-vpass`; one run **per card**, `runId = <session run id>-card-NNN`,
 all cards of one session carrying that session id as `acquisitionSessionRef`,
 so several cards stay distinguishable instead of collapsing into one run
 (G1-16). One unit per card (`unitKind: card`), a `statement-months`
@@ -444,7 +454,7 @@ artifact. The collector manifest itself is _not_ stored as an artifact: the
 terminal is the run record, so `manifest.json` (role `collector_manifest` for
 legacy runs) has no equivalent.
 
-Terminal: `source: v-point`, `producer: collector-vpoint`, `producerVersion:
+Terminal: `source: v-point`, `producer: collector-v-point`, `producerVersion:
 COLLECTOR_SCHEMA_VERSION` (`vpoint-worker-poc-v2`), `runId` the collector's own
 run UUID, `attemptId: attempt-<runId>`, `requestedScope: full_snapshot` over
 unit `account`, one unit (`account`/`collection`) whose `artifactCount` is the
@@ -473,7 +483,8 @@ from the V Point Pay sender, and the stored event records
 trusted SPF/DKIM result. The V Point _login code_ mail is never stored: it is
 parsed for the code and dropped.
 
-Terminal: `source: v-point-pay-email`, `runId` the SHA-256 of the stored
+Terminal: `source: v-point-pay-email`, `producer: collector-v-point-pay-email`
+(one Worker, but a producer per source), `runId` the SHA-256 of the stored
 message, `attemptId: message-<that digest>`, run window the message's own date,
 `providerOutcome: success`, `coverageStatus: complete`, one unit
 (`notification`/`message`), and one transformation (`extracted`,
@@ -506,7 +517,7 @@ them is an artifact, and a failure becomes a machine code
 than the redacted provider message the legacy manifest kept — a terminal
 states codes only (12 §6).
 
-Terminal: `source: v-point-pay`, `producer: collector-vpoint-pay`,
+Terminal: `source: v-point-pay`, `producer: collector-v-point-pay`,
 `producerVersion: COLLECTOR_SCHEMA_VERSION` (`vpoint-pay-worker-poc-v1`),
 `requestedScope: month_range` from the provider's own `inquiry_period` to the
 current JST month, one matching `requested-months` range with basis `source`,
@@ -664,7 +675,8 @@ source `sbi-shinsei-bank`).
 
 Container + Durable Object + browser binding + `tamia`/`cf1` tunnels; one daily
 cron (`17 18 * * *`), unchanged. Terminal source id `prestia-globalpass` (the
-Processor maps it to the CORE source `global-pass`).
+Processor maps it to the CORE source `global-pass`), producer
+`collector-prestia-globalpass`.
 
 | Artifact                  | Role                         | Bytes                                                      |
 | ------------------------- | ---------------------------- | ---------------------------------------------------------- |
