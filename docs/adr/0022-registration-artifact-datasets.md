@@ -191,7 +191,8 @@ INV06, per case:
   before it can publish and cannot displace the importer-era snapshots. Its
   jobs fail visibly; that is a recorded limit, not a double. (Read from the
   code; no test here registers a MyJCB terminal, since MyJCB terminals do not
-  register today at all: P1.)
+  register today at all: after ADR 0014 they are blocked
+  `artifact_lineage_unstated`.)
 - **Blocked runs (P1, P2/P3; the 14 + 14 SBI runs).** Their v1 blocks are
   write-once on the v1 rows; under v2 each terminal gets one fresh attempt.
   A refusal about the terminal's own bytes repeats and blocks the v2 row too:
