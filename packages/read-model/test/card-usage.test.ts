@@ -15,6 +15,7 @@ import {
 } from "../src/index";
 import {
   MYJCB_LEDGER_SNAPSHOT_CTES,
+  myjcbStatementMonth,
   transactionsSql,
   VPASS_STATEMENT_SNAPSHOT_CTES,
 } from "../src/sql";
@@ -1090,5 +1091,208 @@ describe("current card usage", () => {
     expect(extras(view(oversized))).toEqual(["customized", null, null, null]);
     expect(view(atBound).payment_type).toBe("y".repeat(CARD_USAGE_TEXT_BOUND));
     for (const id of keyless) expect(view(id).recognition_key).toBeNull();
+  });
+});
+
+describe("a MyJCB statement is one snapshot slot wherever its position moved", () => {
+  /** One page of current usage, without the shipped-text differential: the slot is what changed. */
+  function current(db: Database): CurrentCardUsageRow[] {
+    const page = currentCardUsageSql({ afterId: 0, limit: CARD_USAGE_PAGE_LIMIT });
+    return db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
+  }
+  const root = myjcbRoot("conn-a", "acct-jcb");
+  const purchase: UsageRow = {
+    date: "2026/08/20",
+    merchant: "架空店舗V",
+    amount: "1,500",
+    paymentType: "1回払",
+    other: "1,500",
+  };
+  const later: UsageRow = { ...purchase, date: "2026/09/20", merchant: "架空店舗W", amount: "300" };
+  const externalId = (db: Database, id: number): string =>
+    (
+      db.query("SELECT external_id FROM transaction_observations WHERE id = ?").get(id) as {
+        external_id: string;
+      }
+    ).external_id;
+
+  test("the month reading equals relative-statement-period-v1 and reads the absolute shapes", () => {
+    const db = new Database(":memory:");
+    const read = (period: string, fetchedAt: string | null): string | null =>
+      (
+        db.query(`SELECT ${myjcbStatementMonth("?1", "?2")} AS month`).get(period, fetchedAt) as {
+          month: string | null;
+        }
+      ).month;
+    // Every seventh hour for a year, across both sides of the 15th and a year end.
+    const end = Date.parse("2027-01-10T00:00:00.000Z");
+    for (let at = Date.parse("2025-12-01T00:00:00.000Z"); at < end; at += 7 * 3_600_000)
+      for (const label of ["detailMonth-0", "detailMonth-1", "detailMonth-2", "detailMonth-10"]) {
+        const fetchedAt = new Date(at).toISOString();
+        expect(read(label, fetchedAt)).toBe(
+          resolveRelativePeriod({ sourceId: "myjcb", label, fetchedAt }),
+        );
+      }
+    expect(read("detailMonth-1", null)).toBeNull();
+    // The edges, named: the JST day boundary, the 15th/16th switch to the
+    // millisecond, and both year wraps of P0 and of P0 - 1.
+    for (const [fetchedAt, zero, one] of [
+      ["2026-09-15T14:59:59.999Z", "2026-10", "2026-09"],
+      ["2026-09-15T15:00:00.000Z", "2026-11", "2026-10"],
+      ["2026-09-15T23:59:59+09:00", "2026-10", "2026-09"],
+      ["2026-12-31T14:59:59.999Z", "2027-02", "2027-01"],
+      ["2026-12-31T15:00:00.000Z", "2027-02", "2027-01"],
+      ["2026-11-15T15:00:00.000Z", "2027-01", "2026-12"],
+      ["2026-12-14T15:00:00.000Z", "2027-01", "2026-12"],
+      ["2026-12-15T15:00:00.000Z", "2027-02", "2027-01"],
+      ["2026-12-31T15:00:00.000Z", "2027-02", "2027-01"],
+      ["2027-01-10T00:00:00.000Z", "2027-02", "2027-01"],
+      ["2025-12-31T15:00:00.000Z", "2026-02", "2026-01"],
+    ] as const) {
+      expect([read("detailMonth-0", fetchedAt), read("detailMonth-1", fetchedAt)]).toEqual([
+        zero,
+        one,
+      ]);
+      for (const label of ["detailMonth-0", "detailMonth-1"])
+        expect(read(label, fetchedAt)).toBe(
+          resolveRelativePeriod({ sourceId: "myjcb", label, fetchedAt }),
+        );
+    }
+    // D1 refuses a LIKE or GLOB pattern over 50 bytes ("pattern too complex").
+    for (const sql of [CURRENT_CARD_USAGE_SQL, transactionsSql({}, 0).sql])
+      for (const [, pattern] of sql.matchAll(/(?:GLOB|LIKE) '([^']*)'/gu))
+        expect(new TextEncoder().encode(pattern).length).toBeLessThanOrEqual(50);
+    for (const [label, month] of [
+      ["2026-09", "2026-09"],
+      ["202609", "2026-09"],
+      ["2026年9月", "2026-09"],
+      ["2026年9月お支払い分", "2026-09"],
+      ["2026年10月お支払い分", "2026-10"],
+      ["２０２６年 ９月お支払い分", "2026-09"],
+      ["2026-13", null],
+      ["202600", null],
+      ["2026年0月", null],
+      ["2026年13月お支払い分", null],
+      ["令和8年9月", null],
+    ] as const)
+      expect(read(label, "2026-09-26T00:00:00.000Z")).toBe(month);
+  });
+
+  test("a statement captured at position 1 and later at position 2 is current once, from its newest capture", () => {
+    const store = new CardStore();
+    // 2026-09-26: the statement paid in October is position 1; the page names it.
+    const first = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-10",
+      fetchedAt: "2026-09-26T00:00:00.000Z",
+      rows: [purchase],
+    });
+    store.identify(first, root, { version: 1 });
+    expect(ids(current(store.db))).toEqual(first.observations);
+    // 2026-10-26: November's statement is position 1, October's position 2.
+    const run = store.run("myjcb");
+    const november = store.myjcbLedger({
+      run,
+      connection: "conn-a",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-11",
+      fetchedAt: "2026-10-26T00:00:00.000Z",
+      rows: [later],
+    });
+    const moved = store.myjcbLedger({
+      run,
+      connection: "conn-a",
+      detailMonth: 2,
+      state: "confirmed",
+      period: "2026-10",
+      fetchedAt: "2026-10-26T00:00:01.000Z",
+      rows: [purchase],
+    });
+    store.identify(november, root, { version: 1 });
+    store.identify(moved, root, { version: 1 });
+    const rows = current(store.db);
+    expect(ids(rows)).toEqual([...november.observations, ...moved.observations]);
+    // The moved row keeps its external id: the period, not the position, is in its fingerprint.
+    expect(externalId(store.db, moved.observations[0]!)).toBe(
+      externalId(store.db, first.observations[0]!),
+    );
+    expect(ids(rows)).toEqual(cardTransactionIds(store.db));
+  });
+
+  test("a relative position-1 capture from before the collector named months is the statement it resolves to", () => {
+    const store = new CardStore();
+    const legacy = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "detailMonth-1",
+      fetchedAt: "2026-09-26T00:00:00.000Z",
+      rows: [purchase],
+    });
+    store.identify(legacy, root, { version: 1 });
+    expect(ids(current(store.db))).toEqual(legacy.observations);
+    // The same statement a month later at position 2, named by its page: one
+    // slot (2026-10), so only the newer capture is current. Its row has a new
+    // external id, once, because its label is new.
+    const moved = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 2,
+      state: "confirmed",
+      period: "2026-10",
+      fetchedAt: "2026-10-26T00:00:00.000Z",
+      rows: [purchase],
+    });
+    store.identify(moved, root, { version: 1 });
+    expect(ids(current(store.db))).toEqual(moved.observations);
+    expect(externalId(store.db, moved.observations[0]!)).not.toBe(
+      externalId(store.db, legacy.observations[0]!),
+    );
+    expect(ids(current(store.db))).toEqual(cardTransactionIds(store.db));
+  });
+
+  test("a confirmed position no rule places is never current, so no statement is current twice", () => {
+    const store = new CardStore();
+    const resolved = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "detailMonth-1",
+      fetchedAt: "2026-09-26T00:00:00.000Z",
+      rows: [purchase],
+    });
+    store.identify(resolved, root, { version: 1 });
+    // The same statement at position 2 under a relative label a month on.
+    // With one slot per position both captures were current: one purchase twice.
+    const unplaced = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 2,
+      state: "confirmed",
+      period: "detailMonth-2",
+      fetchedAt: "2026-10-26T00:00:00.000Z",
+      rows: [purchase],
+    });
+    store.identify(unplaced, root, { version: 1 });
+    expect(ids(current(store.db))).toEqual(resolved.observations);
+    expect(ids(current(store.db))).toEqual(cardTransactionIds(store.db));
+    // Pending captures keep their one shared slot, whatever their label.
+    const pending = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      detailMonth: 0,
+      state: "unconfirmed",
+      period: "detailMonth-0",
+      fetchedAt: "2026-10-26T00:00:02.000Z",
+      rows: [later],
+    });
+    store.identify(pending, root, { version: 1 });
+    expect(ids(current(store.db))).toEqual([...resolved.observations, ...pending.observations]);
   });
 });

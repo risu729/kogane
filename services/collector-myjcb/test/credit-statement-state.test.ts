@@ -5,8 +5,10 @@ import type { ReadResponse } from "../src/client";
 import { collectCredit, type CreditReadClient } from "../src/collector";
 import {
   CONFIRMED_STATEMENT_HEADING,
+  creditStatementPeriod,
   creditStatementState,
   parseCreditLedger,
+  settlementMonth,
 } from "../src/parsers";
 import { StopConditionError } from "../src/types";
 
@@ -21,14 +23,21 @@ function row(amountLabel: string, cells: readonly string[], amount: string): str
     )}</div><div class="item-more"><ul class="list"><li><span>${amountLabel}</span><span>${amount}</span></li><li><span>摘要</span><span>架空摘要</span></li><li><span>今回回数</span><span>1</span></li></ul></div></div>`;
 }
 
-/** A detail page: optional headings, an optional ledger head, rows, export links. */
+/**
+ * A detail page: optional headings, the payment months its `h2` names, an
+ * optional ledger head, rows, export links.
+ */
 function page(options: {
   readonly headings?: readonly string[];
+  readonly months?: readonly string[];
   readonly head?: string | null;
   readonly rows?: readonly string[];
   readonly exportMonth?: number;
 }): string {
-  const headings = (options.headings ?? []).map((heading) => `<h1>${heading}</h1>`).join("");
+  const headings = [
+    ...(options.headings ?? []).map((heading) => `<h1>${heading}</h1>`),
+    ...(options.months ?? []).map((month) => `<h2>${month}お支払い分のカードご利用明細</h2>`),
+  ].join("");
   const exports =
     options.exportMonth === undefined
       ? ""
@@ -53,6 +62,7 @@ const pendingRow = row(
 /** Position 1 as the surveyed connection shows it: a closed statement, no export links. */
 const closedWithoutExports = page({
   headings: [CONFIRMED_STATEMENT_HEADING],
+  months: ["2026年2月"],
   rows: [confirmedRow],
 });
 const mutable = page({ head: UNCONFIRMED_HEAD, rows: [pendingRow] });
@@ -161,8 +171,14 @@ function response(text: string, contentType = "text/html; charset=utf-8"): ReadR
   return { url: new URL("https://my.jcb.co.jp/"), status: 200, contentType, body };
 }
 
-/** A credit menu listing `months`, their pages, and an older-month API with nothing available. */
-function client(pages: Readonly<Record<number, string>>): CreditReadClient {
+/**
+ * A credit menu listing `months`, their pages, and an older-month API that
+ * lists `past` (by default nothing available).
+ */
+function client(
+  pages: Readonly<Record<number, string>>,
+  past: readonly Record<string, unknown>[] = [],
+): CreditReadClient {
   const menu = `<!doctype html><html><body>${Object.keys(pages)
     .map(
       (month) =>
@@ -181,7 +197,7 @@ function client(pages: Readonly<Record<number, string>>): CreditReadClient {
       response(
         JSON.stringify({
           jsonrpc: "2.0",
-          result: { errId: "0", errMessage: "", detailPastJsonInfo: [] },
+          result: { errId: "0", errMessage: "", detailPastJsonInfo: past },
           id: "030100601",
         }),
         "application/json",
@@ -207,7 +223,8 @@ describe("collectCredit", () => {
     expect(JSON.parse(String(ledger?.body))).toEqual({
       schemaVersion: 1,
       detailMonth: 1,
-      period: "detailMonth-1",
+      // The month the page names, not its position (creditStatementPeriod).
+      period: "2026-02",
       state: "confirmed",
       headers: ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"],
       rows: [
@@ -270,5 +287,111 @@ describe("collectCredit", () => {
     await expect(collectCredit(client({ 0: mutable, 1: exporting }), "x")).rejects.toMatchObject({
       code: "credit-statement-state",
     });
+  });
+});
+
+describe("creditStatementPeriod", () => {
+  const closed = (months: readonly string[]) =>
+    page({ headings: [CONFIRMED_STATEMENT_HEADING], months, rows: [confirmedRow] });
+  const period = (html: string, detailMonth: number, settlementYM?: string) =>
+    creditStatementPeriod({
+      html,
+      detailMonth,
+      state: creditStatementState(html, detailMonth),
+      settlementYM,
+    });
+
+  test("a confirmed page records the payment month it names, whatever its position", () => {
+    for (const detailMonth of [1, 2, 8])
+      expect(period(closed(["2026年2月"]), detailMonth)).toBe("2026-02");
+    // Whitespace and markup inside the heading are not part of it.
+    const spaced = closed([]).replace(
+      "</h1><input",
+      "</h1><h2>2026年 <span>10月</span>お支払い分の\nカードご利用明細</h2><input",
+    );
+    expect(period(spaced, 1)).toBe("2026-10");
+  });
+
+  test("a page that is not a confirmed statement keeps its relative label or its API label", () => {
+    expect(period(mutable, 0)).toBe("detailMonth-0");
+    expect(period(mutable, 1)).toBe("detailMonth-1");
+    // An unknown older page names no statement, even when an h2 names a month.
+    expect(period(page({ months: ["2026年2月"], head: null }), 5)).toBe("detailMonth-5");
+    expect(period(mutable, 1, "202601")).toBe("202601");
+  });
+
+  test("a month the past-months API labels keeps its label, which must agree with the page", () => {
+    for (const label of ["202602", "2026年2月お支払い分", "２０２６年２月", "2026-02"]) {
+      expect(settlementMonth(label)).toBe("2026-02");
+      expect(period(closed(["2026年2月"]), 10, label)).toBe(label);
+    }
+    // A page that names no month keeps the API's label, as before.
+    expect(period(closed([]), 10, "202602")).toBe("202602");
+    expect(stopCode(() => period(closed(["2026年2月"]), 10, "202603"))).toBe(
+      "credit-statement-period",
+    );
+    expect(settlementMonth("2026年13月")).toBeNull();
+    expect(settlementMonth("detailMonth-3")).toBeNull();
+  });
+
+  test("a confirmed page that names no month, or more than one, stops the collection", () => {
+    for (const months of [[], ["2026年2月", "2026年3月"], ["2026年13月"]])
+      expect(stopCode(() => period(closed(months), 2))).toBe("credit-statement-period");
+  });
+});
+
+describe("a statement moving down the list", () => {
+  const closed = (month: string, cells: readonly string[]) =>
+    page({
+      headings: [CONFIRMED_STATEMENT_HEADING],
+      months: [month],
+      rows: [row("ご利用金額", cells, cells[3]!)],
+    });
+  const february = closed("2026年2月", ["2026/01/05", "架空商店", "一回払い", "1,000円"]);
+  const march = closed("2026年3月", ["2026/02/07", "架空書店", "一回払い", "500円"]);
+  const ledger = (artifacts: readonly { filename: string; body: unknown }[], name: string) =>
+    JSON.parse(String(artifacts.find((artifact) => artifact.filename === name)?.body)) as Record<
+      string,
+      unknown
+    >;
+
+  test("keeps its period from position 1 to position 2, with the position beside it", async () => {
+    const before = await collectCredit(client({ 0: mutable, 1: february }), "x");
+    const after = await collectCredit(client({ 0: mutable, 1: march, 2: february }), "x");
+    const first = ledger(before.artifacts, "credit-ledger-01.json");
+    const moved = ledger(after.artifacts, "credit-ledger-02.json");
+    expect([first["detailMonth"], moved["detailMonth"]]).toEqual([1, 2]);
+    expect([first["period"], moved["period"]]).toEqual(["2026-02", "2026-02"]);
+    // The rows are the same, so the two ledgers differ only in the position.
+    expect({ ...moved, detailMonth: 1 }).toEqual(first);
+    expect(ledger(after.artifacts, "credit-ledger-01.json")["period"]).toBe("2026-03");
+    // Position 0 names no month and keeps its relative label.
+    expect(ledger(after.artifacts, "credit-ledger-00.json")["period"]).toBe("detailMonth-0");
+    expect(
+      after.artifacts
+        .filter((artifact) => /-02\.(?:html|json)$/u.test(artifact.filename))
+        .map((artifact) => [artifact.statementState, artifact.period]),
+    ).toEqual([
+      ["confirmed", "2026-02"],
+      ["confirmed", "2026-02"],
+    ]);
+  });
+
+  test("a month the past-months API labels keeps the API's label", async () => {
+    const { artifacts } = await collectCredit(
+      client({ 0: mutable, 1: march, 10: february }, [
+        { detailMonth: "10", detailAvailableFlag: "1", settlementYM: "2026年2月お支払い分" },
+      ]),
+      "x",
+    );
+    expect(ledger(artifacts, "credit-ledger-10.json")["period"]).toBe("2026年2月お支払い分");
+    expect(ledger(artifacts, "credit-ledger-01.json")["period"]).toBe("2026-03");
+  });
+
+  test("a confirmed page that names no month stops the collection", async () => {
+    const unnamed = page({ headings: [CONFIRMED_STATEMENT_HEADING], rows: [confirmedRow] });
+    await expect(
+      collectCredit(client({ 0: mutable, 1: march, 2: unnamed }), "x"),
+    ).rejects.toMatchObject({ code: "credit-statement-period" });
   });
 });

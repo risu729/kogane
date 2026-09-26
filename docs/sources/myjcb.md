@@ -383,6 +383,21 @@ export linkは状態の根拠にしない。ただし、確定明細でないpag
 
 release noteと再parse手順は`docs/observations.md`の「MyJCB statement state from the page (statement parser 1.1.0)」にある。
 
+## 明細の月（2026-09-26）
+
+providerは最新の締め済み明細をposition 1に置き、次の明細が締まるとposition 2へ移す。collectorは過去月APIがlabelしない月のperiodを`detailMonth-N`（position）で記録していた。periodはledger parserの行fingerprint、つまりexternal idとcard purchase recognitionのkeyに入るため、同じ明細の行が毎月新しいkeyになり、purchase laneは同じ購入をretireして認識し直していた。また、read modelは確定captureをperiodごとのslotに分けていたため、同じ明細がposition 1とposition 2の両方のslotでcurrentになり得た（二重計上）。
+
+collectorは確定明細pageが名乗る月をperiodにする（`services/collector-myjcb/src/parsers.ts`の`creditStatementPeriod`）。確定明細pageは`(確定分)` h1を持ち、`<h2>YYYY年M月お支払い分のカードご利用明細</h2>`で支払月を名乗る（`myjcb-credit-statement-total`が読むのと同じh2）。collectorはその月を`YYYY-MM`としてdetail、ledger、exportのperiodに記録する。positionはartifact keyとledgerの`detailMonth`に残る。相対labelを収集時に解決するのではなく、page自身が述べる絶対月を記録する。
+
+- 過去月APIがlabelする月は、従来どおり`settlementYM`をそのまま使う。pageも月を名乗る場合は同じ月でなければ停止する（`credit-statement-period`）。
+- それ以外の確定pageは、名乗る月がない、または二つ以上ある場合に停止する（`credit-statement-period`）。statement parserも同じpageを拒否する。
+- 未確定と`unknown`のpageは月を名乗らないため、`detailMonth-N`のままである。
+- 停止logには`detailMonth`、名乗った月の個数、API labelの有無だけを出し、月そのものは出さない。
+
+ledger parserは変更しない（version bumpなし）。同じ明細の行はどのpositionでも同じexternal idになる。read modelは確定captureのslotを明細（支払月）にする（`packages/read-model/src/sql.ts`の`myjcbStatementMonth`）。絶対period（`YYYY-MM`、`YYYYMM`、`YYYY年M月お支払い分`）はその月、`detailMonth-0`／`detailMonth-1`は`relative-statement-period-v1`で`fetched_at`から解決した月になる。一つの明細のcaptureは一つのslotに入り、最新のものだけがcurrentになる。規則が置けない確定`detailMonth-N`（N ≥ 2）はpositionであって明細を名指さないため、currentにしない。
+
+deploy時、`detailMonth-1`として確定記録された明細（#248以降のcapture）は、月を名乗る最初のcaptureに置き換わる。その明細の認識済み行は一度だけretireされ、新しいkeyで一度だけ認識される。二重計上はない。保留行、API labelの月、それ以降の月のkeyは変わらない。processor（read model）をcollectorと同時かそれより先にdeployする。設計比較（read modelだけのkey、parser release、collector）と理由は`docs/observations.md`の「MyJCB statements keep their identity when their position moves」にある。
+
 ## 共通 DATA R2 への切替 (U09)
 
 Collector は `COLLECTION_TARGET` var を持つ。既定の `legacy` は現行どおり

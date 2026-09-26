@@ -138,7 +138,7 @@ test("a detailMonth-1 row's stored period is its statement's, from the same capt
   expect(counts(await w.sweep())).toEqual(NOTHING);
 }, 120_000);
 
-test("detailMonth-0 stores its resolved payment month; a position the rule does not place stays unrecognised", async () => {
+test("detailMonth-0 stores its resolved payment month; a confirmed position the rule does not place is not current", async () => {
   const w = await world();
   await w.myjcb({
     state: "unconfirmed",
@@ -146,6 +146,11 @@ test("detailMonth-0 stores its resolved payment month; a position the rule does 
     fetchedAt: CAPTURED,
     rows: [{ ...ROW, date: "2026/09/20", merchant: "架空店舗Q", amount: "700", other: "700" }],
   });
+  // A confirmed page recorded by its position, as before the collector named
+  // months: `detailMonth-2` names no statement (a position shows another one
+  // every month), so the capture is never current and nothing is recognised
+  // from it (docs/observations.md, "MyJCB statements keep their identity
+  // when their position moves").
   await w.myjcb({
     state: "confirmed",
     period: "detailMonth-2",
@@ -153,13 +158,21 @@ test("detailMonth-0 stores its resolved payment month; a position the rule does 
     fetchedAt: CAPTURED,
     rows: [{ ...ROW, date: "2026/08/05", merchant: "架空店舗S", amount: "400", other: "400" }],
   });
+  // The same page as the collector records it now: by the month it names.
+  await w.myjcb({
+    state: "confirmed",
+    period: "2026-09",
+    detailMonth: 2,
+    fetchedAt: CAPTURED,
+    rows: [{ ...ROW, date: "2026/08/06", merchant: "架空店舗S", amount: "500", other: "500" }],
+  });
   expect(counts(await w.sweep())).toMatchObject({ recognized: 2, conflicts: 0, failed: 0 });
   expect(
     (await sidecars(w))
       .map((row): [string, string | null] => [row.status, row.statement_period])
       .sort(),
   ).toEqual([
-    ["confirmed", null],
+    ["confirmed", "2026-09"],
     ["unconfirmed", "2026-11"],
   ]);
   const page = await queryCardPurchases(executor(w));
@@ -168,10 +181,8 @@ test("detailMonth-0 stores its resolved payment month; a position the rule does 
     statementPeriod: "2026-11",
     statement: { status: "unlinked", reasonCode: "not_posted" },
   });
-  expect(byStatus.get("captured")).toMatchObject({
-    statementPeriod: null,
-    statement: { status: "unlinked", reasonCode: "period_unrecognized" },
-  });
+  expect(byStatus.get("captured")).toMatchObject({ statementPeriod: "2026-09" });
+  expect(await w.totals()).toMatchObject({ captured: "500", authorized: "700" });
 }, 120_000);
 
 test("a recognition stored without a period is revised with the resolved one, never rewritten", async () => {
@@ -246,9 +257,13 @@ test("a pending row pairs with its posted row by usage month, and claims one sta
     expect.arrayContaining(["same_statement_period", "date_within_window", "amount_equal"]),
   );
   // A month later the next run lists a newer closed statement at position 1
-  // and this one at position 2, which the rule does not place; nothing is
-  // pending any more. The earlier captures leave the display (retired), and
-  // the pair still meets by usage month, without a statement-period claim.
+  // and this one at position 2, both under relative labels as captured
+  // before the collector named months; nothing is pending any more. The
+  // pending capture leaves the display (retired). `detailMonth-2` names no
+  // statement, so that capture is never current: this statement stays current
+  // from its position-1 capture, whose slot (2026-10) no newer capture has
+  // taken, and keeps its event and its one proposal. Under one slot per
+  // position it was current twice, retired and recognised again.
   await w.myjcb({
     state: "unconfirmed",
     period: "detailMonth-0",
@@ -269,16 +284,16 @@ test("a pending row pairs with its posted row by usage month, and claims one sta
     fetchedAt: "2026-10-26T00:00:00.000Z",
     rows: [matching],
   });
-  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 2, retired: 2, proposed: 1 });
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1, retired: 1 });
   const rationales = (
     await w.all<{ rationale_codes_json: string }>(
       "SELECT rationale_codes_json FROM reconciliation_proposals ORDER BY created_at,id",
     )
   ).map((row) => JSON.parse(row.rationale_codes_json) as string[]);
-  expect(rationales).toHaveLength(2);
-  expect(rationales.filter((codes) => codes.includes("same_statement_period"))).toHaveLength(1);
-  for (const codes of rationales)
-    expect(codes).toEqual(expect.arrayContaining(["date_within_window", "amount_equal"]));
+  expect(rationales).toHaveLength(1);
+  expect(rationales[0]).toEqual(
+    expect.arrayContaining(["same_statement_period", "date_within_window", "amount_equal"]),
+  );
   expect(await w.totals()).toMatchObject({ captured: "1200", authorized: "0" });
   expect(counts(await w.sweep())).toEqual(NOTHING);
 }, 120_000);
