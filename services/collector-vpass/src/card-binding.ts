@@ -61,8 +61,10 @@ export interface VpassBindingInput {
 type JsonObject = Record<string, unknown>;
 
 class Unavailable extends Error {
-  constructor(readonly code: VpassBindingUnavailable) {
+  readonly code: VpassBindingUnavailable;
+  constructor(code: VpassBindingUnavailable) {
     super(code);
+    this.code = code;
   }
 }
 
@@ -122,9 +124,10 @@ function deriveTuple(input: VpassBindingInput): [string, string, string] {
   // importer required. Names are consistency checks only, never identity.
   const listEnvelope = envelope(input.cardListRawJson);
   const bean = objectOr(
-    objectOr(objectOr(listEnvelope["body"], "binding_inventory_invalid")["content"], "binding_inventory_invalid")[
-      "DropdownListInitDisplayServiceBean"
-    ],
+    objectOr(
+      objectOr(listEnvelope["body"], "binding_inventory_invalid")["content"],
+      "binding_inventory_invalid",
+    )["DropdownListInitDisplayServiceBean"],
     "binding_inventory_invalid",
   );
   const entries = bean["multiCardInfoList"];
@@ -143,9 +146,10 @@ function deriveTuple(input: VpassBindingInput): [string, string, string] {
     throw new Unavailable("binding_inventory_invalid");
   }
 
-  const selectionValue = objectOr(envelope(input.selectCardRawJson)["header"], "binding_envelope_invalid")[
-    "vpSessionBean"
-  ];
+  const selectionValue = objectOr(
+    envelope(input.selectCardRawJson)["header"],
+    "binding_envelope_invalid",
+  )["vpSessionBean"];
   const discoveryValue = objectOr(
     envelope(input.webMeisaiTopRawJson)["header"],
     "binding_envelope_invalid",

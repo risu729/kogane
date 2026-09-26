@@ -108,7 +108,9 @@ function collectorCardRun(overrides: Partial<VpassCardRun> = {}): VpassCardRun {
     webMeisaiTopRawJson: envelope({ WebMeisaiTopDisplayServiceBean: {} }, bean),
     months: {
       "202608": {
-        pages: [{ kind: "top", index: 0, rawJson: JSON.stringify(vpassPayload("web", "202608", ROWS)) }],
+        pages: [
+          { kind: "top", index: 0, rawJson: JSON.stringify(vpassPayload("web", "202608", ROWS)) },
+        ],
         transactionCount: ROWS.length,
       },
     },
@@ -223,9 +225,10 @@ describe("ADR 0023 a registered collector card run", () => {
     expect(plan.run.units.map((unit) => unit.unitKey)).toEqual(["card-001", token]);
 
     // Registration wrote the run shape the view's shared-R2 branch reads.
-    expect(
-      one("SELECT status,failure_count FROM observation_fetch_runs WHERE id=?", run),
-    ).toEqual({ status: "success", failure_count: 0 });
+    expect(one("SELECT status,failure_count FROM observation_fetch_runs WHERE id=?", run)).toEqual({
+      status: "success",
+      failure_count: 0,
+    });
     expect(
       one(
         `SELECT s.external_id_namespace AS namespace, r.producer_id AS producer, r.source_run_key AS run_key
@@ -266,9 +269,11 @@ describe("ADR 0023 a registered collector card run", () => {
     ).toEqual([{ n: 1 }]);
 
     // Every financial artifact of the card unit binds to the one token.
-    const trusted = all<{ card_token: string; financial_unit_key: string; binding_artifact_id: number }>(
-      "SELECT card_token,financial_unit_key,binding_artifact_id FROM trusted_vpass_card_bindings",
-    );
+    const trusted = all<{
+      card_token: string;
+      financial_unit_key: string;
+      binding_artifact_id: number;
+    }>("SELECT card_token,financial_unit_key,binding_artifact_id FROM trusted_vpass_card_bindings");
     expect(trusted).toHaveLength(4);
     for (const row of trusted) {
       expect(row).toEqual({
@@ -281,9 +286,10 @@ describe("ADR 0023 a registered collector card run", () => {
     // Identity: policy 2 selected through the view, the pin and seal triggers
     // (which join the view) accepted it, and the rows resolve to the token.
     await parsePage();
-    expect(
-      one("SELECT policy_family,policy_version FROM identity_run_contexts"),
-    ).toEqual({ policy_family: "vpass-card-binding", policy_version: 2 });
+    expect(one("SELECT policy_family,policy_version FROM identity_run_contexts")).toEqual({
+      policy_family: "vpass-card-binding",
+      policy_version: 2,
+    });
     expect(all("SELECT card_token FROM identity_vpass_bindings")).toEqual([{ card_token: token }]);
     expect(one<{ n: number }>("SELECT count(*) AS n FROM identity_run_seals").n).toBe(1);
     expect(
@@ -374,7 +380,8 @@ function appendOnly(before: Record<string, unknown>, after: Record<string, unkno
 }
 
 describe("ADR 0023 the view's shared-R2 branch keeps the importer's evidence requirements", () => {
-  const TRUSTED = "SELECT count(*) AS n FROM trusted_vpass_card_bindings WHERE financial_artifact_id=?";
+  const TRUSTED =
+    "SELECT count(*) AS n FROM trusted_vpass_card_bindings WHERE financial_artifact_id=?";
 
   test("one binding unit and artifact in a successful collector run, nothing more and nothing less", async () => {
     const w = await world();
@@ -391,7 +398,11 @@ describe("ADR 0023 the view's shared-R2 branch keeps the importer's evidence req
         identify: null,
       });
     const bindingUnit = (run: number) =>
-      w.all<{ id: number }>("SELECT id FROM fetch_units WHERE fetch_run_id=? AND unit_key=?", run, TOKEN_A);
+      w.all<{ id: number }>(
+        "SELECT id FROM fetch_units WHERE fetch_run_id=? AND unit_key=?",
+        run,
+        TOKEN_A,
+      );
 
     const trusted = await capture();
     expect(await w.count(TRUSTED, trusted.artifact)).toBe(1);
@@ -403,7 +414,9 @@ describe("ADR 0023 the view's shared-R2 branch keeps the importer's evidence req
     // Another namespace.
     const namespace = await capture();
     await w.db
-      .prepare("UPDATE acquisition_sessions SET external_id_namespace='vpass-worker-card-v1' WHERE id=?")
+      .prepare(
+        "UPDATE acquisition_sessions SET external_id_namespace='vpass-worker-card-v1' WHERE id=?",
+      )
       .bind(namespace.run)
       .run();
     expect(await w.count(TRUSTED, namespace.artifact)).toBe(0);
@@ -419,7 +432,9 @@ describe("ADR 0023 the view's shared-R2 branch keeps the importer's evidence req
     // A third unit in the run.
     const third = await capture();
     await w.db
-      .prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,'card-900','card')")
+      .prepare(
+        "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,'card-900','card')",
+      )
       .bind(900_001, third.run)
       .run();
     expect(await w.count(TRUSTED, third.artifact)).toBe(0);
@@ -455,7 +470,13 @@ describe("ADR 0023 the view's shared-R2 branch keeps the importer's evidence req
 describe("ADR 0023 purchase recognition moves to the collector's binding", () => {
   test("the importer's event of the card-month retires and is recognised again once, on the same account entity", async () => {
     const w = await world();
-    await w.vpass({ family: "web", card: "card-001", month: "202608", fetchedAt: "2026-08-10T00:00:00.000Z", rows: ROWS });
+    await w.vpass({
+      family: "web",
+      card: "card-001",
+      month: "202608",
+      fetchedAt: "2026-08-10T00:00:00.000Z",
+      rows: ROWS,
+    });
     expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
     const before = await w.all<{ producer: string; account_id: string }>(LIVE);
     expect(before.map((row) => row.producer)).toEqual([PRODUCER]);
@@ -503,7 +524,13 @@ describe("ADR 0023 purchase recognition moves to the collector's binding", () =>
 
   test("without the collector's binding its rows are skipped as account_not_resolved", async () => {
     const w = await world();
-    await w.vpass({ family: "web", card: "card-001", month: "202608", fetchedAt: "2026-08-10T00:00:00.000Z", rows: ROWS });
+    await w.vpass({
+      family: "web",
+      card: "card-001",
+      month: "202608",
+      fetchedAt: "2026-08-10T00:00:00.000Z",
+      rows: ROWS,
+    });
     expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
     await w.vpass({
       family: "web",
@@ -527,7 +554,13 @@ describe("ADR 0023 purchase recognition moves to the collector's binding", () =>
 
   test("a token derived under another key is another account entity: nothing carries over, nothing is counted twice", async () => {
     const w = await world();
-    await w.vpass({ family: "web", card: "card-001", month: "202608", fetchedAt: "2026-08-10T00:00:00.000Z", rows: ROWS });
+    await w.vpass({
+      family: "web",
+      card: "card-001",
+      month: "202608",
+      fetchedAt: "2026-08-10T00:00:00.000Z",
+      rows: ROWS,
+    });
     expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
     const before = await w.all<{ account_id: string }>(LIVE);
     await w.vpass({

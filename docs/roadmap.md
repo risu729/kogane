@@ -83,14 +83,17 @@ Concrete limits in the current code:
   reviewed decision (or by the rule for a pair the provider itself links, which
   no deployed source does yet); candidates are proposed, never merged by
   amount and date. Excluding a row by decision and allocating a refund to a
-  purchase are not available yet. Only the retired importer's Vpass runs
-  carry a trusted card binding: a parsed capture of the Vpass collector would
-  retire the importer-era purchases of its card-month and its rows would be
-  skipped as `account_not_resolved`. The collector's captures are not parsed
-  today (their terminals name the producer `vpass-json`, which has no ingest
-  route, and their artifacts are registered without a parser dataset); they
-  stay unparsed until the collector writes a binding
-  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
+  purchase are not available yet. The Vpass collector writes a trusted card
+  binding only once the owner sets its `VPASS_CARD_BINDING_KEY` secret to the
+  retired importer's key, and only if the provider's responses still carry the
+  card tuple, which has not been observed since the importer was retired;
+  without one, a parsed collector capture would retire the importer-era
+  purchases of its card-month and its rows would be skipped as
+  `account_not_resolved`. The collector's statement pages are registered
+  without a parser dataset, so none is parsed today; releasing them is a
+  later change, made after the owner has set the key and checked that the
+  collector's tokens match the importer's
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
   email route), V Point Pay and GLOBAL PASS had no registered collector run
   between 2026-09-12 and the release that carries
@@ -103,11 +106,15 @@ Concrete limits in the current code:
   those runs. The `collection_scan` walk does not revisit them either: it
   stops at a page holding more than five terminals that never register
   ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences)).
-  Once collector-vpass runs register, the importer's Vpass purchase events of
-  every re-captured card-month are retired and not recognised again, because
-  the trusted card binding exists only for the importer's producer; MyJCB
-  events are retired and recognised again once under the collector's key and
-  a new provider-local account.
+  Once collector-vpass runs register and are parsed, the importer's Vpass
+  purchase events of every re-captured card-month are retired and recognised
+  again once, on the same account, where the collector's run carries a card
+  binding, and not recognised again where it does not (ADR 0023). MyJCB
+  events are retired, but the collector's MyJCB runs register as `partial`
+  (every connection unit reports `partial` coverage, and a partial unit makes
+  the fetch run partial), and identity reads no partial run, so the
+  collector's MyJCB rows stay unresolved and are not recognised again until
+  that is changed.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.

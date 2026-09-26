@@ -131,26 +131,86 @@ older result. The writer's keyed eligibility view stays unchanged. This avoids
 the old plan that multiplied acquisition terminal reports by all successful
 parses, even for a direct read of the core identity view without UI joins.
 
-### Collector-vpass runs have no trusted binding
+### Collector-vpass runs bind in their own run
 
-Only the retired importer wrote the sidecar, and the trusted view accepts only
-its producer, `collector-r2-importer`
-([ADR 0023](adr/0023-vpass-collector-card-binding.md)). A run of the Vpass
-collector (producer `vpass-json` today; #259 renames it `collector-vpass`) has
-no sidecar to find: the collector stores no
-binding artifact, redacts the session bean the token was derived from before
-storing anything, holds no fingerprint secret, and registers under the session
-namespace `shared-r2` with a registration run key, which the view's session and
-run-key joins cannot match. Were its rows parsed, they would resolve to
-run-scoped `unresolved` accounts under the collector's producer, and card
-purchase recognition would skip them as `account_not_resolved`. Even with a trusted token, a
-collector row's source account would differ from the importer-era one, because
-the reference includes the producer, so importer-era mappings and manual
-decisions would not carry over. The collector's captures therefore stay
-unparsed: today its artifacts are registered without a parser dataset and its
-producer has no ingest route, and the change that gives registered artifacts
-their parser datasets (ADR 0022) withholds the Vpass dataset until a
-collector-written binding is implemented, which amends ADR 0023.
+The Vpass collector (`collector-vpass`) writes the binding itself
+([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
+Before it sanitizes a card's responses, the Worker derives the same token the
+retired importer did (the tuple from the selection and discovery
+`vpSessionBean`, the same consistency checks, HMAC-SHA-256 of
+`["vpass-card-binding-v1", externalId, globalid, cardCode]`, key version
+`collector-r2-v1`) with the Worker secret `VPASS_CARD_BINDING_KEY`, and stores
+only the token: a second `card` unit of the card's run, keyed by the token, with
+one `collector_derived` artifact `card-identity-binding.json`. Registration
+gives that artifact the dataset `card-identity-binding` and format
+`vpass-card-identity-binding-json` version `1`. Without the secret, with a
+malformed secret, without the tuple or with a tuple that fails a check, the run
+is stored with no binding and the Worker log carries one closed code
+(`binding_key_absent`, `binding_key_invalid`, `binding_tuple_absent`,
+`binding_tuple_invalid`, `binding_selection_mismatch`,
+`binding_inventory_invalid`, `binding_envelope_invalid`).
+
+Migration 0055 recreates `trusted_vpass_card_bindings` to accept this shape;
+the importer's rows are exactly migration 0021's. The evidence is the same: a
+successful, sealed Vpass run whose `card-NNN` unit holds the financial
+artifact, and exactly one binding unit keyed `vpass-card-v1-<64 hex>` with a
+successful terminal report, holding the one binding artifact of that dataset
+and format. Only the place differs: the collector's binding is inside the
+card's own run (producer `collector-vpass`, session namespace `shared-r2`, run
+key `<session>-card-NNN:terminal-registration-v<N>`) instead of a sibling run,
+and the run may hold no other unit and no second binding. Policy 2, its pins,
+the seal trigger and `eligible_identity_runs` read the view, so they need no
+change.
+
+The card's unit reports `complete` coverage. A `partial` unit makes
+registration record a `partial` unit report, which makes the whole fetch run
+`partial` in `observation_fetch_runs`; neither this view nor
+`current_identity_observations` reads a partial run, so every row would stay
+unresolved even with a binding.
+
+**Account continuity.** A source-account reference still includes the
+producer, so a collector row gets its own source account
+`["vpass:card", <token>]` under `collector-vpass`. Its automatic mapping points
+at the account entity derived from the importer's reference for the same
+token, so the importer-era entity id is unchanged and both producers' source
+accounts map to one entity. What is keyed by the entity carries over: its
+label, role and status, ownership links on `account:<entity>`, and the
+`account_id` card purchases and settlements carry. What is keyed by the
+importer's source account does not: its mapping revisions and any manual
+decision on it. If an operator had re-mapped the importer's source account to
+another entity, the collector's source account still maps by rule to the
+token's entity and needs its own decision. A token derived under a different
+key is a different entity with nothing carried over. Card purchases churn once
+per card-month (the recognition key carries the producer): the importer's
+event is retired and the collector's is recognised on the same account, and
+nothing is counted twice.
+
+**Owner action and check.** Set the Worker secret on `kogane-vpass-collector-poc`:
+`wrangler secret put VPASS_CARD_BINDING_KEY` with the value of the retired
+importer's `ORIGIN_FINGERPRINT_KEY` (64 lowercase hex characters). No
+repository check can prove it is the same key. After the next collection,
+compare token counts (read-only, counts only):
+
+```sql
+SELECT r.producer_id, count(DISTINCT u.unit_key) AS tokens,
+       count(DISTINCT CASE WHEN EXISTS(
+         SELECT 1 FROM fetch_units i JOIN fetch_runs ir ON ir.id=i.fetch_run_id
+         WHERE ir.producer_id='collector-r2-importer' AND i.unit_key=u.unit_key)
+       THEN u.unit_key END) AS known_to_importer
+FROM fetch_units u JOIN fetch_runs r ON r.id=u.fetch_run_id
+WHERE r.source_id='vpass' AND u.unit_key GLOB 'vpass-card-v1-*'
+GROUP BY r.producer_id;
+```
+
+For `collector-vpass`, `known_to_importer` equal to `tokens` for the cards the
+importer also saw means the key is the importer's. Zero means a different key:
+remove the secret and keep the Vpass pages unparsed; the bindings already
+registered stay (evidence is append-only), and each such card would become a
+new account entity if its pages were parsed, so it needs a decision first. The
+collector's statement pages are not parsed today: registration gives them no
+parser dataset, and the change that introduces parser datasets for shared-R2
+artifacts (ADR 0022) withholds the Vpass one. Releasing it is a later change,
+made after this check.
 
 ## Policy 2: Mizuho rule re-identification
 

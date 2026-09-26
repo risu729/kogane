@@ -1646,14 +1646,18 @@ the append-only evidence or observations. Pending customized and posted web
 rows remain separate; matching them belongs to the reconciler, not Layer B.
 
 The latest snapshot is chosen per card and statement month regardless of the
-producer, so a parsed capture of the Vpass collector (producer `vpass-json`,
-`collector-vpass` after #259) would replace the importer's capture of the same
-card-month. Its rows carry the
-same `vpass:card-NNN` source account, but no trusted card binding exists for
-collector runs, so identity would map them to run-scoped unresolved accounts
-and card purchase recognition would skip them. The collector's captures are
-registered without a parser dataset, so none is parsed today
-([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
+producer, so a parsed capture of the Vpass collector (`collector-vpass`) would
+replace the importer's capture of the same card-month. Its rows carry the same
+`vpass:card-NNN` source account. When the collector held the binding key and
+the responses carried the card tuple, its run holds a trusted card binding of
+its own (migration 0055), identity policy 2 maps the rows to the card token's
+account entity, which is the importer-era entity for the same token, and card
+purchase recognition retires the importer-era events of that card-month and
+recognises the collector's once on the same account. Without a binding the
+rows map to run-scoped unresolved accounts and recognition skips them as
+`account_not_resolved`. The collector's statement pages are registered without
+a parser dataset, so none is parsed today
+([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
 
 The checked-in remote read-only canary validates the source R2 manifest and
 pagination contract first, then invokes the same parser with the Layer A card

@@ -407,14 +407,8 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
     const cases: [string, Partial<VpassCardRun>, string?][] = [
       ["binding_key_invalid", {}, "5E".repeat(32)],
       ["binding_key_invalid", {}, "5e".repeat(31)],
-      [
-        "binding_tuple_absent",
-        { selectCardRawJson, webMeisaiTopRawJson },
-      ],
-      [
-        "binding_tuple_invalid",
-        { webMeisaiTopRawJson },
-      ],
+      ["binding_tuple_absent", { selectCardRawJson, webMeisaiTopRawJson }],
+      ["binding_tuple_invalid", { webMeisaiTopRawJson }],
       [
         "binding_tuple_invalid",
         {

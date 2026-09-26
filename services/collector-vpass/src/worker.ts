@@ -436,16 +436,20 @@ async function captureCard(
       // writes the terminal last; nothing goes to the per-source bucket and
       // the importer is never called (G1-15).
       stage = "shared-persist";
-      const outcome = await persistCardRun(sharedBucket(env.DATA), {
-        sessionRunId: runId,
-        cardLabel,
-        startedAt: started.toISOString(),
-        completedAt: summary.completedAt,
-        cardListRawJson: cardList.rawText,
-        selectCardRawJson: selection.rawText,
-        webMeisaiTopRawJson: top.rawText,
-        months: captures as SharedMonths,
-      }, env.VPASS_CARD_BINDING_KEY);
+      const outcome = await persistCardRun(
+        sharedBucket(env.DATA),
+        {
+          sessionRunId: runId,
+          cardLabel,
+          startedAt: started.toISOString(),
+          completedAt: summary.completedAt,
+          cardListRawJson: cardList.rawText,
+          selectCardRawJson: selection.rawText,
+          webMeisaiTopRawJson: top.rawText,
+          months: captures as SharedMonths,
+        },
+        env.VPASS_CARD_BINDING_KEY,
+      );
       console.log(JSON.stringify(sharedRunDiagnostic(runId, cardLabel, outcome)));
       // A run whose terminal was not written is not a finished run (G1-01).
       if (!sharedRunPersisted(outcome)) throw new Error("shared_persist_incomplete");

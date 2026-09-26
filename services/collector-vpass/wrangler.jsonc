@@ -21,14 +21,6 @@
       "bucket_name": "kogane-raw-evidence"
     }
   ],
-  // Secrets (set with `wrangler secret put`, never committed): VPASS_ID,
-  // VPASS_PASSWORD, VPASS_DEVICE_ID, VPASS_AUTH_PUBLIC_KEY_B64,
-  // VPASS_CONFIG_PUBLIC_KEY_B64, ADMIN_TRIGGER_TOKEN, and the optional
-  // VPASS_CARD_BINDING_KEY (ADR 0023): 64 lowercase hex characters, the same
-  // value as the retired importer's ORIGIN_FINGERPRINT_KEY (key version
-  // collector-r2-v1). Without it the collector stores no card binding and
-  // Vpass rows stay unresolved. It is not listed as required so that a
-  // deploy without it still collects.
   "vars": {},
   "triggers": {
     "crons": ["0 21 * * *"]

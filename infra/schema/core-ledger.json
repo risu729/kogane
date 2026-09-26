@@ -712,6 +712,12 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "49ffaf6193a075f2f7052dfb7a1bd67accabad51158e6528456520e1434cafef"
+    },
+    {
+      "file": "0055_vpass_collector_card_binding.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "6405637a42ccda557e0a3708f57fe07ca38267846dbcb297c56ed20700a8fd36"
     }
   ],
   "tables": [
@@ -13358,7 +13364,7 @@
         "binding_artifact_id",
         "card_token"
       ],
-      "sqlSha256": "d035700de928c047"
+      "sqlSha256": "c96fed249670a526"
     }
   ],
   "triggers": [
@@ -16935,6 +16941,6 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "a8e14834690f62150ccd66ff5dfab6a81e70b3bc811dc0d7e62c841369b5d24e"
+    "schemaSha256": "464ebfde849136e8d01b9605a40f0c651ead844796898eb0a6ce951182d8f784"
   }
 }
