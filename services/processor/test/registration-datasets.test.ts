@@ -375,7 +375,7 @@ test("a Mizuho capture parsed under v1 is carried over by v2, not registered and
   expect(
     await env.DB.prepare(
       "SELECT COUNT(DISTINCT sha256) AS objects, COUNT(*) AS artifacts, COUNT(DISTINCT fetch_run_id) AS runs FROM fetch_artifacts WHERE source_id='mizuho-bank'",
-    ).first(),
+    ).first<Record<string, number>>(),
   ).toEqual({ objects: 2, artifacts: 2, runs: 1 });
   expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
   expect(await listed()).toEqual({ transactions: 2, balances: 2, history: 2 });
