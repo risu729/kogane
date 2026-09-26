@@ -304,6 +304,17 @@ test("nothing is taken from an entry that does not name the artifact's object an
       row,
     ),
   ).toEqual({ error: "manifest_artifact_mismatch" });
+  // No raw object to size: a manifest's `bytes: null` does not stand in for it.
+  const unsized = "c".repeat(64);
+  expect(
+    await refused(
+      sharedManifest({
+        ...sharedEntry(unsized, 0, "credit-ledger", ledger),
+        bytes: null,
+      }),
+      artifact("conn-a/credit-ledger-01.json", "credit-ledger", unsized),
+    ),
+  ).toEqual({ error: "manifest_artifact_mismatch" });
   // A connection the manifest does not list.
   expect(
     await refused(
