@@ -24,6 +24,7 @@ different rules.
 - [ADR 0016: MyJCB pending statements keyed by payment month, current while their position shows them](docs/adr/0016-myjcb-pending-statement-slots.md)
 - [ADR 0017: card purchase review command kinds](docs/adr/0017-card-purchase-review-commands.md)
 - [ADR 0019: reported state on a date](docs/adr/0019-dated-reported-state.md)
+- [ADR 0022: parser datasets for registered shared-R2 artifacts (proposed)](docs/adr/0022-registration-artifact-datasets.md)
 - [ADR 0023: no trusted card binding for collector-vpass runs](docs/adr/0023-vpass-collector-card-binding.md)
 - [ADR 0024: the collection scan does not spend registrations on judged terminals](docs/adr/0024-collection-scan-judged-terminals.md)
 - [Next-milestone plan (proposed)](docs/plans/2026-09-next-milestone.md)
