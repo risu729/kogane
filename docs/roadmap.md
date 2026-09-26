@@ -111,7 +111,13 @@ Concrete limits in the current code:
   Past the route check, registration still stops for three of them: a Vpass
   run's seal is refused (`run_inventory_incomplete`, a statement page is a
   `provider_response` with a `redacted` step), and MyJCB and V Point runs are
-  blocked `artifact_lineage_unstated`. No artifact of these sources is
+  blocked `artifact_lineage_unstated`. A seal refused that way, and the
+  sbi-vc-trade terminals whose unit declares another artifact count than the
+  run holds, used to throw and be attempted again on every walk; since the
+  [ADR 0024 amendment](adr/0024-collection-scan-judged-terminals.md#amendment-2026-09-26-a-seal-core-refuses-is-a-verdict)
+  the run is blocked `run_inventory_incomplete` once, its fetch run stays
+  unsealed and is named by the blocked stage, and the walk answers it from
+  its row. Those terminals still never register. No artifact of these sources is
   catalogued with a parser dataset (Vpass's is withheld, the others are
   refused before cataloguing), so none is parsed and the importer's
   captures stay current
