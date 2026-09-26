@@ -29,6 +29,20 @@ const REASONS: Record<string, string> = {
   settlement_not_eligible: "採用に必要な条件が揃っていません",
 };
 
+/**
+ * The bank a settlement debit came from, by the adapter's source id
+ * (docs/card-settlements.md, Bank adapters). An id without a label is shown
+ * as stored.
+ */
+const BANK_SOURCES: Record<string, string> = {
+  "smbc-bank": "三井住友銀行",
+  "sbi-shinsei-bank": "SBI新生銀行",
+};
+
+export function bankSourceLabel(sourceId: string): string {
+  return Object.hasOwn(BANK_SOURCES, sourceId) ? BANK_SOURCES[sourceId]! : sourceId;
+}
+
 export function settlementReason(code: string): string {
   return Object.hasOwn(REASONS, code) ? REASONS[code]! : code;
 }
@@ -96,7 +110,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
           <DateValue value={facts.statement.paymentDate} />
         </KvRow>
         <KvRow label="銀行の取得元">
-          {facts.bankDebit.sourceId} · {facts.bankDebit.sourceAccount}
+          {bankSourceLabel(facts.bankDebit.sourceId)} · {facts.bankDebit.sourceAccount}
         </KvRow>
         <KvRow label="銀行明細の出金額">
           <SettlementQuantity value={facts.bankDebit.amount} />

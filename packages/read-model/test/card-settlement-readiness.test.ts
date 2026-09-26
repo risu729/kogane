@@ -1,5 +1,6 @@
 // The keyed readiness CTEs (src/card-settlement-readiness.ts) against the
-// migration 0044 view they stand in for, row for row, on small random stores
+// migration 0044 view they stand in for (reading the migration 0052 bank debit
+// view, both adapters), row for row, on small random stores
 // (card-settlement-random-store.ts) whose reviews cite current and older
 // statements and debits under their own and other keys, with owners, evidence
 // and decisions drawn around the ones the store holds. Each flag both holds and
@@ -16,8 +17,11 @@ import {
 } from "./card-settlement-random-store";
 import { statementPlanProblems } from "./card-statement-plan";
 
-/** CI draws seeds 1–12; KOGANE_CARD_SETTLEMENT_SEEDS=n draws seeds 1–n. */
-const SEED_COUNT = Number(process.env["KOGANE_CARD_SETTLEMENT_SEEDS"] ?? 12);
+/**
+ * CI draws seeds 1–16 (12 until the SBI Shinsei rows joined the stores and
+ * moved every draw after them); KOGANE_CARD_SETTLEMENT_SEEDS=n draws seeds 1–n.
+ */
+const SEED_COUNT = Number(process.env["KOGANE_CARD_SETTLEMENT_SEEDS"] ?? 16);
 if (!Number.isSafeInteger(SEED_COUNT) || SEED_COUNT < 1)
   throw new Error("KOGANE_CARD_SETTLEMENT_SEEDS must be a positive integer");
 const SEEDS = Array.from({ length: SEED_COUNT }, (_, index) => index + 1);
@@ -52,6 +56,23 @@ const MUTATIONS: [string, string, string][] = [
     "  ORDER BY a.fetched_at DESC,t.id DESC) AS position",
     "  ORDER BY a.fetched_at,t.id DESC) AS position",
   ],
+  [
+    "rank only the candidates' own SBI Shinsei debits",
+    " WHERE a.source_id='sbi-shinsei-bank'",
+    " WHERE t.id IN (SELECT bank_observation_id FROM ready_candidates) AND a.source_id='sbi-shinsei-bank'",
+  ],
+  [
+    "an SBI Shinsei row of another parser",
+    " AND p.parser_name='sbi-shinsei-top-balances-and-activity'",
+    "",
+  ],
+  ["an SBI Shinsei row in another currency", " AND unit_ref='JPY'", ""],
+  [
+    "an SBI Shinsei row whose side the provider did not state",
+    " AND json_extract(extra_json,'$._kogane.amountSignSource')='debit'",
+    "",
+  ],
+  ["an SBI Shinsei row with a status", "status IS NULL AND unit_ref", "unit_ref"],
   [
     "a newer statement of any account",
     "    AND newer_owner.account_id=json_extract(ready_candidate.facts_json,'$.statement.accountId')\n",

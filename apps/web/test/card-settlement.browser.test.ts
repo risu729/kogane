@@ -186,6 +186,20 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("the bank is named by its adapter, and an unlabelled source is shown as stored", async () => {
+    review.facts.bankDebit.sourceId = "sbi-shinsei-bank";
+    let page = await open();
+    let text = await page.locator("main").innerText();
+    expect(text).toContain("SBI新生銀行 · synthetic-bank");
+    expect(text).not.toContain("sbi-shinsei-bank");
+    await page.close();
+    review = settlementReview();
+    page = await open();
+    text = await page.locator("main").innerText();
+    expect(text).toContain("sony-bank · synthetic-bank");
+    await page.close();
+  });
+
   test("server impact remains separate from purchase expense and requires approve then commit", async () => {
     const page = await open();
     const text = await page.locator("main").innerText();

@@ -21,8 +21,15 @@ export interface CardStatementFact {
   paymentDate: TemporalValue;
   period: string | null;
 }
+/**
+ * One bank debit as a bank adapter of `card_bank_debit_facts` admits it
+ * (migration 0052: `smbc-bank`, `sbi-shinsei-bank`; docs/card-settlements.md,
+ * Bank adapters): a provider row id, the provider's own debit direction, and
+ * the provider's civil date in `occurred`.
+ */
 export interface CardBankDebitFact {
   ref: SourceFactRef;
+  /** The adapter's source id; which bank a card pays from is never configured. */
   sourceId: string;
   sourceAccount: string;
   accountId: string | null;
@@ -64,6 +71,10 @@ export interface CardSettlementImpact {
   liabilityBalanceDelta: null;
 }
 export const CARD_SETTLEMENT_POLICY = "card-statement-settlement-v1";
+/**
+ * Days between the due date and the bank's debit date. A debit posted later
+ * (a long holiday run) yields no candidate: a stated limit, not a guess.
+ */
 export const CARD_SETTLEMENT_DAY_WINDOW = 3;
 
 function positive(quantity: Quantity): boolean {
