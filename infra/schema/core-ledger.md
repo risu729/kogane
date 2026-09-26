@@ -10,11 +10,11 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `a8e14834690f62150ccd66ff5dfab6a81e70b3bc811dc0d7e62c841369b5d24e`
+Schema digest: `3841906bbd4de206c313e4a065dafa6e19f0e9a9278fb5a2835acc5b6e56e9bf`
 
 ## Summary
 
-- Migrations applied: 50
+- Migrations applied: 51
 - Tables: 111 (all `STRICT`: yes)
 - Views: 39
 - Triggers: 400
@@ -234,5 +234,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0045_expand_card_settlement_commands.sql` | 34 | approvals_expanded, change_plans_expanded, decision_outbox_expanded, operation_receipts_expanded |
 | `0046_st_george_balance_snapshot.sql` | 1 | dataset_snapshot_policies |
 | `0047_card_purchase_recognition.sql` | 20 | card_purchase_scan_cursor |
+| `0051_card_purchase_review_commands.sql` | 34 | approvals_expanded, change_plans_expanded, decision_outbox_expanded, operation_receipts_expanded |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql

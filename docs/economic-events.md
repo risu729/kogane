@@ -651,6 +651,21 @@ What stays proposal-only: every candidate without a provider link id, which
 is every one the deployed parsers produce today (no source supplies a
 pending-to-posted link id; see [above](#which-sources-supply-a-provider-link-id)).
 
+### Review commands for purchases (migration 0051)
+
+Three later reviews of a recognised purchase have their own change kinds:
+excluding a row that is not a purchase (`card-purchase.exclude` /
+`card-purchase.restore`), allocating a refund to its purchase
+(`card-refund.allocate` / `card-refund.withdraw`), and linking later
+installment portions to their obligation (`card-installment.link` /
+`card-installment.unlink`). Migration 0051 admits them in the command tables
+and the payload contract validates them
+([ADR 0017](adr/0017-card-purchase-review-commands.md),
+[change lifecycle](change-lifecycle.md#card-purchase-review-kinds-migration-0051)).
+None of them does anything yet: no planner is registered, so planning one is
+refused with `unsupported_semantics` and writes no row, and no screen offers
+them. Nothing here changes a purchase, a refund or a figure today.
+
 ### Bounds
 
 One tick (every five minutes) retires at most 100 events (`RETIRE_LIMIT`),
