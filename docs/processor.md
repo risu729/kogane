@@ -126,17 +126,20 @@ The identity is the tuple of plan 03 §4:
 (source, runId, terminalDigest, registrationContractVersion)
 ```
 
-`registrationContractVersion` is `terminal-registration-v1`, the version of the
-`terminal-v1` → ingest-contract derivation in
-`packages/application/src/collection/descriptors.ts`. When that derivation
-changes what a terminal _means_ in CORE, the same run registers again as a new
-revision and the old registration is kept.
+`registrationContractVersion` is `terminal-registration-v2` (since ADR 0022;
+`v1` before it), the version of the `terminal-v1` → ingest-contract
+derivation in `packages/application/src/collection/descriptors.ts`. When that
+derivation changes what a terminal _means_ in CORE, the same run registers
+again as a new revision and the old registration is kept. A terminal an
+earlier version registered whose descriptors the new version does not change
+is **carried over** instead: the new version's row is linked to the fetch run
+the terminal already is, so one capture is never parsed twice (§3.4).
 
 | Situation                                                                                                                | Outcome                                            | Recorded                                                                                          |
 | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | First sighting of a valid terminal                                                                                       | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                         |
 | Same terminal again                                                                                                      | no-op                                              | nothing new                                                                                       |
-| Different manifest, same run id                                                                                          | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                             |
+| Different manifest, same run id (under any contract version)                                                             | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                             |
 | Source not in the collector mapping (§3.1)                                                                               | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                       |
 | Source maps to an id CORE has no active row for                                                                          | blocked `source_undeclared`, no port call          | as above                                                                                          |
 | `providerOutcome: failed` with no provider artifact                                                                      | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)        |
@@ -145,6 +148,7 @@ revision and the old registration is kept.
 | Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
 | Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state or per attempt 24 h after the last (ADR 0024) |
 | Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
+| Registered under an earlier contract version, descriptors unchanged (§3.4)                                               | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it             |
 
 A resumed registration reads what the run already has — its units, ranges,
 catalogued artifacts, staged inventory items and unit reports, one statement
@@ -299,7 +303,7 @@ and the scan walk registers its run anyway (G1-04).
 The final step is never split by a yield, but an invocation can still end
 inside it. The next call then re-enters it: the run report is found under its
 report key, the seal under its attempt id
-(`<runId>:terminal-registration-v1`), and the link is made once, so each is
+(`<runId>:<registration contract version>`), and the link is made once, so each is
 recorded once. The same test file kills an invocation after the run report
 and after the seal, for a direct and a staged seal.
 
@@ -310,7 +314,7 @@ invocation — so a missing or resized object still blocks with no fetch run at
 all (G1-14). Beyond that window each object is verified in its own step just
 before it is catalogued; a problem there blocks the run before its seal.
 
-**Versioning.** The registration contract stays `terminal-registration-v1`.
+**Versioning.** Staging (#250) kept the registration contract version.
 Staging changes how many calls a registration takes, not what a terminal means
 in CORE: the descriptors, the inventory digest and the seal's attempt id are
 byte-identical, so a bump would only register every run a second time as a new
@@ -329,6 +333,90 @@ once by an `import` operation) and completes on its existing inventory. Both
 cases are tested. Queue messages are R2 notifications before and after, so
 none in flight changes meaning. The health route's `registration` counts
 (§13) show how many terminals are still short of registration.
+
+### 3.4 Artifact datasets (ADR 0022)
+
+`terminal-v1` has no dataset field, and every parser except Mizuho's selects
+its artifacts by dataset, so the derivation supplies one. `artifactRequest`
+looks the artifact up in the closed table `ARTIFACT_DATASETS` (in
+`descriptors.ts`), keyed by the terminal's `source`: a rule names an exact
+artifact key or a whole-key pattern, the role and the media types the
+collector declares, and the dataset. An artifact that matches no rule — or
+matches a key with another role or media type — is registered with no
+dataset, which no parser but Mizuho's reads. Nothing is guessed.
+
+What the table maps (from each collector's persist path and each parser's
+`accepts`; [ADR 0022](adr/0022-registration-artifact-datasets.md) has the
+full list):
+
+- Mobile Suica `sf-history.json` → `sf-history`; Money Forward's index,
+  detail and monthly pages; MyJCB's discovery, past-months, detail and ledger
+  artifacts; GlobalPass activity pages; the SBI Securities, SBI Shinsei and
+  SBI VC Trade datasets; SMBC's normalized balance and transactions; Sony
+  Bank's balance, history pages, history CSVs and wallet pages; St George's
+  account snapshot; V Point's balance, SMFG point and history pages; the V
+  Point Pay notification event.
+- Not mapped: evidence no parser reads (manifests, summaries, raw pages beside
+  their normalized form); Mizuho, whose parsers read artifacts without a
+  dataset; MyJCB `credit-menu.html`, whose parser requires a media type
+  parameter a terminal cannot carry.
+- **Withheld: Vpass.** The statement-page rule is kept in
+  `WITHHELD_ARTIFACT_DATASETS` and not applied, so collector-vpass captures
+  are registered but never parsed. A parsed collector capture would become
+  the current statement snapshot of its card-month and retire the importer-era
+  purchases, because it cannot yet bind to the trusted card identity
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). It is applied when
+  the collector derives the binding.
+
+`scripts/artifact-datasets.test.ts` checks the table against both sides:
+every mapped or withheld dataset is accepted by a registered parser, every
+dataset a parser requires from a shared-R2 source is mapped, withheld or named
+unreachable, and the withheld list is pinned.
+
+**Contract version and carry-over.** The table is `terminal-registration-v2`;
+`v1`'s derivation (St George's dataset only) is kept beside it
+(`DATASETS_BY_VERSION`). The version is part of the `collection_runs` key and
+of the fetch run's `sourceRunKey`, so the scan gives every persisted terminal
+a v2 row. Then, for a terminal v1 already registered:
+
+- **its descriptors change** (an artifact gains a dataset — Mobile Suica, and
+  V Point Pay email runs sealed with none): it registers again, a second fetch
+  run in the same session over the same objects whose artifacts carry the
+  dataset, and is parsed. Its v1 artifacts had no dataset, which no parser but
+  Mizuho's reads (Mizuho is not in the table), so the capture is parsed once;
+- **its descriptors do not change** (Mizuho, St George, Vpass, every source
+  the table does not name): it is carried over — the v2 row is linked to the
+  existing fetch run with a completed `registered` stage naming it, and the
+  call answers `already_registered`. Registering it again would parse the
+  capture twice, and Mizuho history rows, which have no provider identity in
+  the transaction list, would be listed twice. Unchanged means every artifact
+  is catalogued in that run with the same sha256 and the descriptor digest v2
+  derives for it there, and nothing else is;
+- **it was blocked, retryable or unfinished under v1**: it is attempted afresh
+  under v2. A refusal about the terminal's own bytes blocks again;
+- **its terminal was overwritten after v1 registered it** (a different
+  digest): blocked `terminal_digest_conflict`, because the conflict check
+  compares the rows of every version, not only v2's.
+
+This amends the design point migration 0039's comment states (a new version
+"registers the run again as a new revision instead of silently reusing the
+old one"): a migration comment cannot change, so this section is where the
+rule now lives. Only a terminal whose meaning changed registers again; one
+whose meaning did not is reused explicitly, by a linked row and a stage.
+
+A re-registered capture is parsed once, but its two fetch runs and their
+artifacts are both recorded evidence, so the agent `coverage` intent's
+per-source `collectionRunCount` and `artifactCount`, which count those rows,
+count it twice. No financial read does.
+
+`services/processor/test/registration-datasets.test.ts` shows each case on
+synthetic terminals, and the health route's `unregistered` count is per
+version, so v1 rows that will never be worked again do not stay in it.
+
+MyJCB artifacts are mapped but do not parse yet: the metadata extractor finds
+their manifest entry by `connectionId` and `filename`, which the shared
+collector's manifest does not carry, so each parse fails with
+`manifest_artifact_mismatch` and publishes nothing.
 
 ## 4. No byte is copied
 

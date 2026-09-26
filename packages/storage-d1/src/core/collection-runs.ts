@@ -280,7 +280,12 @@ export function readPendingRegistrations(
 }
 
 export interface RegistrationBacklog {
-  /** Runs seen and neither registered nor blocked, for any reason. */
+  /**
+   * Runs of this contract version seen and neither registered nor blocked,
+   * for any reason. A row of an earlier version is not counted: after a
+   * version bump it is never worked again, and the terminal is counted under
+   * the new version once the scan sees it (ADR 0022).
+   */
   unregistered: number;
   /** Of those, the staged registrations waiting for their next invocation. */
   pending: number;
@@ -297,7 +302,8 @@ export async function readRegistrationBacklog(
     db,
     `SELECT
        (SELECT count(*) FROM collection_runs
-         WHERE blocked_code IS NULL AND registered_at IS NULL) AS unregistered,
+         WHERE blocked_code IS NULL AND registered_at IS NULL
+           AND registration_contract_version = ?1) AS unregistered,
        count(*) AS pending,
        min(r.first_seen_at) AS oldest_pending_first_seen_at
        FROM collection_runs r

@@ -242,6 +242,24 @@ constants against the routes in `config/ingest-clients.json`.
 | `kogane-smbc-direct-backfill-poc`  | `smbc-direct`                         | `smbc-bank`        |
 | `kogane-mizuho-collector`          | `mizuho-bank`                         | `mizuho-bank`      |
 
+### Artifact datasets at registration (ADR 0022)
+
+A terminal names no parser dataset, and no collector adds one: the Processor
+derives it at registration from what the terminal already states — the
+artifact key, its role and its media type — through the closed table
+`ARTIFACT_DATASETS` in `packages/application/src/collection/descriptors.ts`
+([processor.md §3.4](processor.md#34-artifact-datasets-adr-0022),
+[ADR 0022](adr/0022-registration-artifact-datasets.md)). The artifact tables
+below are its source: a collector that renames an artifact, changes its role
+or declares another media type leaves that artifact without a dataset, and so
+unparsed, until the table follows. Vpass statement pages are withheld and
+registered without a dataset until the collector derives the trusted card
+binding ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). The table is
+registration contract `terminal-registration-v2`: a run registered under v1
+whose artifacts gain a dataset registers again under v2 (its v1 artifacts were
+never parsed), and every other v1 registration is carried over unchanged, so
+no capture is parsed twice.
+
 ### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 
 | Artifact key                                     | Role                         |
@@ -411,7 +429,8 @@ recognition needs that binding. The collector writes no such artifact, the
 sanitizer redacts the session bean the token was derived from, and the Worker
 holds no fingerprint secret, so its runs have no trusted binding and their rows
 would resolve to unresolved accounts if parsed; its artifacts are registered
-without a parser dataset, so they are not
+without a parser dataset — [ADR 0022](adr/0022-registration-artifact-datasets.md)
+withholds it — so they are not
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md),
 [identity operations](identity-operations.md#collector-vpass-runs-have-no-trusted-binding)).
 `services/collector-vpass/test/shared-collection.test.ts` pins this ("ADR 0023").

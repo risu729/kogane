@@ -678,9 +678,11 @@ async function previousReleaseState(
 test("a run the previous release left pending continues under the same identity", async () => {
   // Staged registration changes how many calls a registration takes, not
   // what a terminal means in CORE: descriptors, inventory digest and seal
-  // attempt are byte-identical, so the registration contract version stays
-  // `terminal-registration-v1` and the old progress is reused as it is.
-  expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v1");
+  // attempt are byte-identical, so #250 kept the registration contract
+  // version and old progress under the same version is reused as it is. (The
+  // version moved later, for ADR 0022's datasets; the state below is written
+  // under the current one.)
+  expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v2");
   const harness = collectionHarness();
   await persistShape(harness, { artifacts: 12 });
   const fetchRunId = await previousReleaseState(harness, 1, true);
