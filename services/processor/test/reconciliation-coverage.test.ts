@@ -140,14 +140,18 @@ interface Cycle {
   maxScanned: number;
 }
 
-/** One reconciliation cycle: ticks until every slice's cursor is back at 0 with nothing written. */
+/**
+ * One reconciliation cycle: ticks until every slice's cursor is back at 0
+ * with nothing written, or `maxTicks` ticks (then from cursor 0).
+ */
 async function laneCycle(
   db: Database,
   slices: readonly ReconciliationSlice[],
   now: string,
-  proposals?: Map<string, string>,
-  sent?: Sent,
+  options: { proposals?: Map<string, string>; sent?: Sent; maxTicks?: number | undefined } = {},
 ): Promise<Cycle> {
+  const { proposals, sent, maxTicks } = options;
+  if (maxTicks !== undefined) db.run("DELETE FROM reconciliation_scan_cursor");
   const totals = {
     scanned: 0,
     groups: 0,
@@ -168,7 +172,10 @@ async function laneCycle(
     });
     for (const [key, value] of Object.entries(result)) totals[key as keyof typeof totals] += value;
     maxScanned = Math.max(maxScanned, result.scanned);
-    if (result.written === 0 && cursorsAtZero(db, "reconciliation_scan_cursor"))
+    if (
+      tick === maxTicks ||
+      (result.written === 0 && cursorsAtZero(db, "reconciliation_scan_cursor"))
+    )
       return { ticks: tick, ms: Math.round(performance.now() - start), totals, maxScanned };
   }
   throw new Error("coverage: the reconciliation lane never wrapped");
@@ -202,7 +209,7 @@ beforeAll(async () => {
         exclusions.set(row.recognition_key, classified.reasonCode);
     }
     await purchaseCycle(store, now);
-    await laneCycle(store, STAGE_B_SLICES, now, stageB);
+    await laneCycle(store, STAGE_B_SLICES, now, { proposals: stageB });
   });
   db = built.store.db;
 }, TIMEOUT);
@@ -294,13 +301,13 @@ describe("the purchase lane's candidate pass covers the reconciliation lane's st
     async () => {
       const before = db.query("SELECT count(*) AS n FROM reconciliation_proposals").get();
       const sent: Sent = { groupReads: 0, lookups: 0, batches: 0 };
-      const cycle = await laneCycle(
-        db,
-        RECONCILIATION_SLICES,
-        "2026-09-25T00:00:00Z",
-        undefined,
+      // At full scale a cycle of the #243 lane takes over an hour; ten ticks
+      // of each are measured there instead.
+      const maxTicks = FULL ? 10 : undefined;
+      const cycle = await laneCycle(db, RECONCILIATION_SLICES, "2026-09-25T00:00:00Z", {
         sent,
-      );
+        maxTicks,
+      });
       expect(cycle.totals.scanned).toBeGreaterThan(0);
       expect(cycle.totals).toMatchObject({
         groups: 0,
@@ -314,8 +321,11 @@ describe("the purchase lane's candidate pass covers the reconciliation lane's st
       expect(sent).toEqual({ groupReads: 0, lookups: 0, batches: 0 });
       expect(db.query("SELECT count(*) AS n FROM reconciliation_proposals").get()).toEqual(before);
       if (FULL) {
-        // Before: the #243 lane's cycle over the whole store, on a proposal store of its own.
-        const stageBCycle = await laneCycle(db, STAGE_B_SLICES, "2026-09-25T00:00:00Z", new Map());
+        // Before: the #243 lane's ticks over the whole store, on a proposal store of its own.
+        const stageBCycle = await laneCycle(db, STAGE_B_SLICES, "2026-09-25T00:00:00Z", {
+          proposals: new Map(),
+          maxTicks,
+        });
         console.log(
           JSON.stringify(
             {

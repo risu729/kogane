@@ -1010,14 +1010,16 @@ Per slice, one tick:
    (`SCAN_LIMIT`);
 2. counts the published rows of every group (source account, statement
    period; for MyJCB the payment month its label resolves to) those rows
-   belong to, in one pass that also names the rows of each
+   belong to, when a row is one the slice's stages can pair (`pairable`: any
+   comparable row under stage B, only a row with a provider-issued id under
+   stage A alone, so none for the deployed Vpass and MyJCB slices), in one pass that also names the rows of each
    group of at most 200 rows; skips a larger group (`GROUP_LIMIT`, counted in
    `groupsSkipped`), and reads the others whole by row id, at most 2,000 rows
    in all (`GROUP_READ_LIMIT`; the page's first group to pair is always read,
    so a deferred group never keeps the cursor where it is), so a pair is found
    whichever pages its two rows fall on. A group that does not fit waits for the next tick
    (`groupsDeferred`) and the cursor stops before its first row;
-3. runs stage A and stage B over each group read, looks the candidates'
+3. runs the slice's stages over each group read, looks the candidates'
    digests up 1,000 at a time (`LOOKUP_CHUNK`, about 67 KB of bound JSON) and
    writes only the proposals not stored yet, in batches of 100
    (`WRITE_BATCH`), at most 500 new proposals per tick over every slice
@@ -1056,21 +1058,26 @@ account label, provider text or row id:
 `proposed` counts the candidates the matcher produced for the groups read,
 `known` those already stored. One API page is 200 rows.
 
-Cost, on the scaled store of [the read model's measurement](read-model.md#cost)
-(268,575 observations, 220,309 published Vpass pending and posted rows after
-180 daily captures; `bun:sqlite`, no table statistics): one tick of both
-slices took 1.5–3.2 s, about 0.5 s choosing the pages (the ids first, then
-only the page's rows with their JSON columns: 0.3 s against 2 s for Vpass)
-and 1–1.8 s finding the members of the groups the pages touched, which reads
-each published row's statement period once. The first-1,000-rows read it
-replaces took about 1 s and paired only those rows. What still grows with
-history is that pass: the lane reads every published capture, not only the
-current ones, so a Vpass statement month captured daily holds thousands of
-rows there and is counted in `groupsSkipped` rather than paired, as it was
-skipped or read in part before. On the smaller store the CI scale test builds
-(2,070 published Vpass rows after 21 daily captures, near production's
-3,300) a tick's reads take tens of milliseconds, and several of its Vpass
-months already hold more than 200 rows.
+Cost, measured by `services/processor/test/reconciliation-coverage.test.ts`
+on the scaled store of [the read model's measurement](read-model.md#cost)
+(`KOGANE_RECONCILIATION_SCALE=full`: 268,573 observations, 220,309 published
+Vpass rows after 180 daily captures; `bun:sqlite`, no table statistics). With
+stage B (the slices until 2026-09-26), ten ticks read 2,000 rows each and took
+2.6 s per tick; they paired 34 groups and skipped 146 with more than 200
+published rows, because every capture of a month counts, and proposed 1,380
+candidates (one per pair of captures of a purchase). With the deployed
+stage-A-only slices, the same ten ticks read the same pages, 2,000 rows each,
+in 0.43 s per tick, and read no group, look up no digest and write nothing:
+no Vpass or MyJCB row carries a provider-issued id. On the CI store (2,070
+published Vpass rows after 21 daily captures, near production's 3,300) one
+cycle is three ticks either way (4,521 rows read): 74 ms per tick with stage B
+(33 groups paired, 17 skipped, 228 candidates) and 50 ms without (no group,
+no candidate). Built capture by capture with both lanes after each day, as
+production runs them, that store gave the lane's stage B 292 proposals over
+its history against the candidate pass's 26, one per purchase pair
+([where stage B runs](#matching-stages)). What still grows with history is
+the page walk: every published capture is paged through, a cycle a little
+longer each day, and a tick's cost stays that of reading its pages.
 
 ## Verified locally (synthetic data only)
 
