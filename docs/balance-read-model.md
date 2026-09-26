@@ -72,10 +72,24 @@ writer fencing and captured CORE references; the contract is in
    aggregator lines and provider-local labels seen through a second route are
    deliberately absent, so their overlap stays unknown (INV06).
 6. **Authority.** `packages/read-model/src/authority.ts`
-   (`source-authority-v1`) supplies the caller policy `selectAdoptedSet`
-   takes: direct sources rank 0, aggregators rank 1, unreviewed sources rank 2. A rank never establishes that two scopes are the same measurement; it
+   (`source-authority-v2`, [ADR 0015](adr/0015-source-authority-v2.md))
+   supplies the caller policy `selectAdoptedSet` takes. It names sources by
+   CORE `sources.id`:
+
+   | Rank | Class      | Sources                                                                                                                                                                               |
+   | ---- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | 0    | direct     | `global-pass`, `mizuho-bank`, `mobile-suica`, `myjcb`, `sbi-securities`, `sbi-shinsei-bank`, `sbi-vc-trade`, `smbc-bank`, `sony-bank`, `st-george`, `v-point`, `v-point-pay`, `vpass` |
+   | 1    | aggregator | `moneyforward-me`                                                                                                                                                                     |
+   | 2    | unreviewed | every other source id                                                                                                                                                                 |
+
+   A rank never establishes that two scopes are the same measurement; it
    only decides which side of an unproven overlap stays adopted, and equal
-   ranks leave both sides unresolved.
+   ranks leave both sides unresolved. A test refuses a policy id that the
+   CORE migrations do not seed and a collector source that ranks
+   `unreviewed`. MoneyForward's balance rows resolve to no registered metric
+   today, so they are targeted on their own and never compete with a direct
+   source for one target; its rank takes effect only once a MoneyForward
+   metric shares a target with one.
 
 ### States and reason codes
 
@@ -226,6 +240,18 @@ field. Without the reader flag or a sealed snapshot it answers
 `unavailable` / `projection_not_built` instead of computing a figure from the
 observation rows behind the projection. See
 [Agent API](agent-api.md#query-intents) for the intent's contract.
+
+## Dated reported state
+
+The projection answers "now". What each provider reported on an earlier date
+is a separate per-request read, not a projection:
+[reported state on a date](reported-state.md) chooses, per container
+partition, the latest complete snapshot captured before the end of the date
+with the same snapshot rules (`snapshotCtes` with `cutoffParam`), and lists its
+rows per provider account with their registry metric and aggregation rule. It
+does not apply `selectAdoptedSet` and adds nothing, so it has no subtotal and
+no `liabilitiesCoverage` other than `partial`
+([ADR 0019](adr/0019-dated-reported-state.md)).
 
 ## Decisions and the outbox
 

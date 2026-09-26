@@ -48,6 +48,8 @@ export interface ClientFeatures {
   readonly cardOwnershipReview: boolean;
   /** Recognised card purchases are explained through statement and bank debit. */
   readonly cardPurchaseRecognition: boolean;
+  /** The reported state of every account on a chosen date is served. */
+  readonly reportedStateOnDate: boolean;
 }
 
 /** Every feature is off until capabilities are known. */
@@ -63,6 +65,7 @@ export const NO_FEATURES: ClientFeatures = {
   cardSettlementReconciliation: false,
   cardOwnershipReview: false,
   cardPurchaseRecognition: false,
+  reportedStateOnDate: false,
 };
 
 export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
@@ -83,5 +86,6 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     cardSettlementReconciliation: capabilities.cardSettlementReconciliation === true,
     cardOwnershipReview: capabilities.cardOwnershipReview === true,
     cardPurchaseRecognition: capabilities.cardPurchaseRecognition === true,
+    reportedStateOnDate: capabilities.reportedStateOnDate === true,
   };
 }
