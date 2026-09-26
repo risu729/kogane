@@ -122,7 +122,7 @@ describe("G1-02/G1-08/G1-16 a card run persists its sanitized set and then the t
     const read = await readTerminal(bucket, "vpass", runId);
     if (read.outcome !== "found") throw new Error("unreachable");
     const manifest = read.manifest;
-    expect(manifest.producer).toBe("vpass-json");
+    expect(manifest.producer).toBe("collector-vpass");
     expect(manifest.producerVersion).toBe("vpass-worker-card-v1");
     // G1-16: the card is its own run and keeps the session it came from.
     expect(manifest.runId).toBe(runId);
@@ -221,6 +221,51 @@ describe("G1-02/G1-08/G1-16 a card run persists its sanitized set and then the t
     const again = await persistCardRun(bucket, run());
     expect(again.result.outcome).toBe("already_persisted");
     expect(bucket.entries.size).toBe(objects);
+  });
+});
+
+describe("ADR 0023 a collector run carries no trusted card binding", () => {
+  // The retired importer derived the card binding token from the selection
+  // and discovery headers' session bean (external id, global id, card code),
+  // keyed with a fingerprint secret this Worker does not hold. Synthetic
+  // values of the same lengths the importer required (32, 32 and 13).
+  const externalId = "E".repeat(32);
+  const globalid = "G".repeat(32);
+  const cardCode = "C".repeat(13);
+  const withBean = (raw: string) => {
+    const parsed = JSON.parse(raw) as { header: Record<string, unknown> };
+    parsed.header["vpSessionBean"] = {
+      externalId,
+      globalid,
+      cardCode,
+      cardName: "SYNTHETIC CARD NAME",
+    };
+    return JSON.stringify(parsed);
+  };
+
+  test("no binding artifact is stored and the tuple a binding is derived from is redacted", async () => {
+    const bucket = new FakeR2Bucket();
+    await persistCardRun(
+      bucket,
+      run({
+        selectCardRawJson: withBean(selectCardRawJson),
+        webMeisaiTopRawJson: withBean(webMeisaiTopRawJson),
+      }),
+    );
+    const read = await readTerminal(bucket, "vpass", `${sessionRunId}-card-001`);
+    if (read.outcome !== "found") throw new Error("unreachable");
+    expect(read.manifest.artifacts.map((artifact) => artifact.artifactKey)).not.toContain(
+      "card-identity-binding.json",
+    );
+    expect(read.manifest.artifacts.map((artifact) => artifact.role)).not.toContain(
+      "collector_derived",
+    );
+    for (const entry of bucket.entries.values()) {
+      const text = new TextDecoder().decode(entry.bytes);
+      for (const value of [externalId, globalid, cardCode, "vpass-card-v1-"]) {
+        expect(text).not.toContain(value);
+      }
+    }
   });
 });
 
