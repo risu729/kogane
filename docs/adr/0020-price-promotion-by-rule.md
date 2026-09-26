@@ -2,7 +2,7 @@
 
 - Status: proposed
 - Date: 2026-09-26
-- Implemented by: the P2-2 pull request (SBI Shinsei exchange rates and price promotion)
+- Implemented by: #268
 - Carried by: [calculation and reports §1](../calculation-and-reports.md#price-sources-provider-claims-promoted-by-rule),
   [SBI Shinsei exchange-rate board](../sources/sbi-shinsei-bank.md#exchange-rate-board-parser-sbi-shinsei-exchange-rate-2026-09-26),
   [processor §6](../processor.md#6-lanes),
