@@ -170,6 +170,13 @@ export interface ApiCapabilities {
    */
   readonly cardPurchaseRecognition?: boolean;
   /**
+   * `GET /api/v2/reported-state` is served: what each provider last reported
+   * on a date, per account, with the card statements due around it and the
+   * coverage that names what is missing. False unless the store the server
+   * reads has the snapshot policy table and the statement and settlement views.
+   */
+  readonly reportedStateOnDate?: boolean;
+  /**
    * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
    * collection, re-registration, replay, rebuild, session refresh and the
    * progress of one accepted operation. False everywhere the
@@ -204,6 +211,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   cardSettlementReconciliation: false,
   cardOwnershipReview: false,
   cardPurchaseRecognition: false,
+  reportedStateOnDate: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -236,6 +244,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   cardSettlementReconciliation: false,
   cardOwnershipReview: false,
   cardPurchaseRecognition: false,
+  reportedStateOnDate: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
