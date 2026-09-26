@@ -1088,7 +1088,9 @@
           "main": "src/worker.ts",
           "role": "not-deployed",
           "liveWorker": false,
-          "crons": [],
+          "crons": [
+            "35 21 * * *"
+          ],
           "emailHandler": false,
           "d1": [],
           "r2": [
@@ -1555,6 +1557,11 @@
         "worker": "kogane-sony-bank-collector-poc",
         "cron": "0 21 * * *",
         "live": true
+      },
+      {
+        "worker": "kogane-st-george-collector",
+        "cron": "35 21 * * *",
+        "live": false
       },
       {
         "worker": "kogane-vpass-collector-poc",

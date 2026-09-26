@@ -71,6 +71,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | kogane-sbi-vc-session-poc | `*/15 * * * *` | yes |
 | kogane-sbi-vc-session-poc | `5 21 * * *` | yes |
 | kogane-sony-bank-collector-poc | `0 21 * * *` | yes |
+| kogane-st-george-collector | `35 21 * * *` | no |
 | kogane-vpass-collector-poc | `0 21 * * *` | yes |
 | kogane-vpoint-collector-poc | `15 21 * * *` | yes |
 
@@ -573,7 +574,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: TAMIA → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
 - Service bindings: —
-- Crons: —
+- Crons: `35 21 * * *`
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>EGRESS_MODE<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
