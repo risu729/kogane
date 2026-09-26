@@ -224,6 +224,12 @@ Miniflare, then running the parse sweep:
 - Sony Bank, Money Forward ME, V Point Pay and GLOBAL PASS were not run
   through registration.
 
+(Amended by [ADR 0021](0021-collector-registration-contract.md): the Vpass,
+MyJCB and V Point shapes above are fixed in the collectors for terminals
+written after their redeploy, and `services/processor/test/collector-plans.test.ts`
+now registers every collector's run plan, the four named here included.
+Terminals written before stay as described.)
+
 Whatever the registration outcome, nothing is parsed: `artifactRequest`
 (`descriptors.ts`) gives a collector artifact a `dataset` only for
 St.George's `account-snapshot.json`, so every other artifact is catalogued
