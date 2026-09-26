@@ -89,6 +89,9 @@ async function extractShared(
     .prepare("SELECT byte_size FROM raw_objects WHERE sha256=?")
     .bind(row.sha256)
     .first<number>("byte_size");
+  // An artifact always has its raw object; without one there is no size to
+  // match, and a manifest's `bytes: null` must not stand in for it.
+  if (typeof byteSize !== "number") throw new MetadataError("manifest_artifact_mismatch");
   const key = objectKey(row.sha256);
   const named = entries.filter(
     (entry) => entry.sha256 === row.sha256 && entry.bytes === byteSize && entry.key === key,
