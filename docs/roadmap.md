@@ -87,8 +87,9 @@ Concrete limits in the current code:
   carry a trusted card binding: a parsed capture of the Vpass collector would
   retire the importer-era purchases of its card-month and its rows would be
   skipped as `account_not_resolved`. The collector's captures are not parsed
-  today (their artifacts are registered without a parser dataset, and the
-  seal of a collector-vpass run is refused, below); they stay unparsed until
+  today (registration deliberately gives their artifacts no parser dataset,
+  [ADR 0022](adr/0022-registration-artifact-datasets.md), and the seal of a
+  collector-vpass run is refused, below); they stay unparsed until
   the collector writes a binding
   ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
@@ -107,11 +108,23 @@ Concrete limits in the current code:
   run's seal is refused (`run_inventory_incomplete`, a statement page is a
   `provider_response` with a `redacted` step), and MyJCB and V Point runs are
   blocked `artifact_lineage_unstated`. No artifact of these sources is
-  catalogued with a parser dataset, so none is parsed and the importer's
+  catalogued with a parser dataset (Vpass's is withheld, the others are
+  refused before cataloguing), so none is parsed and the importer's
   captures stay current
   ([ADR 0014, merge safety](adr/0014-collector-producer-ids.md#merge-safety)).
   Once MyJCB captures are parsed, its events are retired and recognised again
   once under the collector's key and a new provider-local account.
+- Shared-R2 registration gives an artifact the parser dataset it needs since
+  2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
+  every registered artifact had none, so only Mizuho's were parsed). The
+  registration contract moved to `terminal-registration-v2`: runs sealed
+  without a dataset (Mobile Suica since 2026-09-12) register again and are
+  parsed once, while a run v2 does not change (Mizuho) is carried over rather
+  than parsed a second time. Old terminals are reached only by the scan walk,
+  so they drain as the scan cycles through `runs/`. Blocked runs are tried
+  once more and block again where their terminal itself is refused. Vpass
+  captures are withheld (above), and MyJCB captures fail at metadata
+  extraction until the extractor reads the collector's shared manifest.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
