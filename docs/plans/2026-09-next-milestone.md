@@ -513,6 +513,8 @@ Dependencies: P2-1 and P2-2 are independent of everything, including Part 1. P2-
 
 **Docs.** `docs/balance-read-model.md` ("dated reported state"), `roadmap.md` (phase 8), a new section `docs/reported-state.md`.
 
+> **Update 2026-09-26 (P2-1).** Implemented as [reported state](../reported-state.md), decided in [ADR 0019](../adr/0019-dated-reported-state.md). No migration: measured at `STATEMENT_SCALE` without an index, one answer takes about 400 ms on `bun:sqlite`. Differences from the text above: a fourth read (`DATED_SNAPSHOTS_SQL`) lists every chosen snapshot, so a complete-empty capture and a container without one are both stated; identity is resolved through `dated_`-prefixed CTEs over the chosen parses (the same rows `current_identity_observations` gives them) rather than the view itself; payables are the statements due from D − 31 days (or undated and captured in the 45 days before the cutoff); settlement status is the purchases page's `SETTLEMENT_SQL`. The scaled store has no position containers, and nothing is measured on workerd.
+
 ### P2-2 — `feat: parse SBI Shinsei exchange rates and promote provider prices to price observations` (~3k lines)
 
 **Survey (read-only).** The stored `exchange-rate` artifacts' `dataset`/`artifact_key`, the currency list, `customerCategory` values and `transactionTime` presence. Shapes only.
