@@ -58,16 +58,36 @@ interface TransactionRow {
 
 /**
  * One page of current usage. Every scenario below is also a differential
- * check: the page must equal what the shipped query text returns.
+ * check: the page must equal what the shipped query text returns (with the
+ * MyJCB statement-slot rules substituted, card-usage-legacy-sql.ts).
  */
 function usage(db: Database, afterId = 0, limit = CARD_USAGE_PAGE_LIMIT): CurrentCardUsageRow[] {
   const page = currentCardUsageSql({ afterId, limit });
   const rows = db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
   expect(rows).toEqual(
-    db
-      .query(STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL)
-      .all(...(page.args as never[])) as CurrentCardUsageRow[],
+    expectedUsage(db)
+      .filter((row) => row.observation_id > afterId)
+      .slice(0, limit),
   );
+  return rows;
+}
+
+/**
+ * The comparison text's whole current set, read once per store state. Its
+ * cursor is only `observation_id > ?1 ORDER BY observation_id LIMIT ?2` after
+ * ranking, so a page of it is this set filtered and cut; reading it once keeps
+ * the paging scenarios within their time budget on a loaded runner.
+ */
+const expectedUsageCache = new WeakMap<
+  Database,
+  { changes: number; rows: CurrentCardUsageRow[] }
+>();
+function expectedUsage(db: Database): CurrentCardUsageRow[] {
+  const { changes } = db.query("SELECT total_changes() AS changes").get() as { changes: number };
+  const cached = expectedUsageCache.get(db);
+  if (cached?.changes === changes) return cached.rows;
+  const rows = db.query(STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL).all(0, -1) as CurrentCardUsageRow[];
+  expectedUsageCache.set(db, { changes, rows });
   return rows;
 }
 

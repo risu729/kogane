@@ -181,8 +181,9 @@ ADR 0007 it keys confirmed captures by the raw period. The row differentials
 `packages/application/test/card-purchase-scale.test.ts`) therefore compare the
 current reads with the shipped text with these rules substituted
 (`STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL`): its plan untouched, the slot from
-`myjcbStatementSlot`, and "newest of its slot", "newest of its position" and
-step 3's position rule restated as NOT EXISTS instead of window functions. The
+`myjcbStatementSlot`, "newest of its slot" and "newest of its position"
+restated as NOT EXISTS, and step 3's position rule as a GROUP BY, instead of
+window functions. The
 random stores now draw pending and confirmed captures at positions 0 and 1,
 relative labels, per-connection runs and two connections of one account, and
 the coverage check requires that the shipped one-slot text differs, that the

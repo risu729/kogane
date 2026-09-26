@@ -197,7 +197,7 @@ frozen ([ADR 0007](adr/0007-myjcb-statement-identity.md),
 [ADR 0016](adr/0016-myjcb-pending-statement-slots.md)), so the row comparisons
 run the shipped text with those rules substituted and its plan untouched
 (`STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL`, the rules restated as NOT EXISTS
-rather than window functions), and the random stores draw pending and
+and GROUP BY rather than window functions), and the random stores draw pending and
 confirmed captures at positions 0 and 1 so that the substituted rules decide
 rows; the plan checks run the unmodified shipped text. This proves the plan
 rewrite and the rule change separately: the rewrite returns what the shipped
