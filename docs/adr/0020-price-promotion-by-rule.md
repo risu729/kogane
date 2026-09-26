@@ -71,7 +71,9 @@ the FX policy.
   and nothing reads them until it selects them. At most 500 claims a tick,
   one cursor per claim kind in `price_promotion_cursor` (operational-mutable,
   outside the revision ledger), `INSERT … WHERE NOT EXISTS`, counts-only log
-  and tick record.
+  and tick record. A tick makes at most eight D1 calls: the cursor read, then
+  per claim kind the read bound, one page, the domestic record lookup
+  (valuation claims only) and one batch with the writes and the cursor.
 - **Selection.** `selectPrices` picks, per (base, quote, kind), the latest
   price with an instant effective time at or before the cutoff whose claim's
   parse run is currently published.
