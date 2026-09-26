@@ -14,6 +14,8 @@
 // that no plan choice (join order, materialization, ranking) reads, so the
 // shipped text keeps proving what it was frozen for, the plan rewrite, while a
 // column change the rewrite did not make is not reported as a row difference.
+import { myjcbStatementSlot } from "../src/sql";
+
 export const LEGACY_CURRENT_CARD_USAGE_SQL = `WITH ranked_myjcb_snapshots AS (
          SELECT p.fetch_artifact_id,
                 ROW_NUMBER() OVER (
@@ -264,3 +266,143 @@ export const LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL = `SELECT count(*) AS unre
        WHERE usage.recognition_key IS NULL
           OR NOT EXISTS (SELECT 1 FROM current_card_purchase_keys k
                           WHERE k.recognition_key = usage.recognition_key)`;
+
+// ── The shipped plan with the MyJCB statement slots substituted ──────────
+//
+// ADR 0007 and ADR 0016 changed which MyJCB capture is current on purpose, so
+// the shipped text above no longer states the intended rows wherever a store
+// holds a confirmed statement under two positions, two pending statements of
+// one connection, or a pending capture its position has since replaced. The
+// differentials compare the current reads with the text below instead: the
+// shipped text, its plan untouched, with exactly those rules restated in
+// another form. The slot is `myjcbStatementSlot` (its month reading is checked
+// against the domain rule in card-usage.test.ts); "newest of its slot" and
+// "newest capture of its position" are NOT EXISTS over a newer capture rather
+// than ROW_NUMBER; and step 3's position rule is a GROUP BY over the
+// account's rows of the position rather than FIRST_VALUE. The shipped text
+// itself stays for the plan checks and for the tests that show what changed.
+
+const substitute = (text: string, from: string, to: string): string => {
+  if (text.split(from).length !== 2)
+    throw new Error(`card-usage-legacy-sql: expected exactly one ${JSON.stringify(from)}`);
+  return text.replace(from, () => to);
+};
+
+const MYJCB_START = "WITH ranked_myjcb_snapshots AS (";
+const MYJCB_END = "), eligible_vpass_snapshots AS (";
+const shippedMyjcb = LEGACY_CURRENT_CARD_USAGE_SQL.slice(
+  LEGACY_CURRENT_CARD_USAGE_SQL.indexOf(MYJCB_START),
+  LEGACY_CURRENT_CARD_USAGE_SQL.indexOf(MYJCB_END),
+);
+/** The shipped capture filter, from its FROM to its dataset predicate. */
+const shippedCaptures = shippedMyjcb.slice(
+  shippedMyjcb.indexOf("FROM parse_runs p"),
+  shippedMyjcb.indexOf("AND fa.dataset = 'credit-ledger'") +
+    "AND fa.dataset = 'credit-ledger'".length,
+);
+const newer = (other: string, self: string, time: string, id: string): string =>
+  `(${other}.${time} > ${self}.${time} OR (${other}.${time} = ${self}.${time} AND ${other}.${id} > ${self}.${id}))`;
+
+const STATEMENT_SLOT_MYJCB = `WITH myjcb_captures AS MATERIALIZED (
+         SELECT p.fetch_artifact_id, fa.id AS artifact_id, fa.source_id, fa.artifact_key,
+                substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1) AS connection,
+                fa.statement_state, fa.fetched_at,
+                ${myjcbStatementSlot("fa")} AS statement_slot
+         ${shippedCaptures}
+       ), current_myjcb_snapshots AS (
+         SELECT capture.fetch_artifact_id
+         FROM myjcb_captures capture
+         WHERE capture.statement_slot IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM myjcb_captures other
+             WHERE other.source_id = capture.source_id
+               AND other.connection = capture.connection
+               AND other.statement_state IS capture.statement_state
+               AND other.statement_slot = capture.statement_slot
+               AND ${newer("other", "capture", "fetched_at", "artifact_id")})
+           AND (capture.statement_state IS NOT 'unconfirmed' OR NOT EXISTS (SELECT 1 FROM myjcb_captures other
+             WHERE other.source_id = capture.source_id
+               AND other.artifact_key = capture.artifact_key
+               AND ${newer("other", "capture", "fetched_at", "artifact_id")}))
+       `;
+
+const SHIPPED_MYJCB_SLOT = `ELSE json_array(
+                    fa.statement_state,
+                    CASE WHEN fa.statement_state = 'unconfirmed' THEN '' ELSE fa.period END
+                  )
+                END AS snapshot_slot,`;
+const STATEMENT_MYJCB_SLOT = `ELSE json_array(fa.statement_state, ${myjcbStatementSlot("fa")})
+                END AS snapshot_slot,
+                CASE WHEN snapshot.fetch_run_id IS NULL
+                  THEN substr(fa.artifact_key, instr(fa.artifact_key, '/') + 1)
+                END AS myjcb_position,
+                CASE WHEN snapshot.fetch_run_id IS NULL AND fa.statement_state IS 'unconfirmed'
+                  THEN substr(fa.artifact_key, instr(fa.artifact_key, '/') + 1)
+                END AS pending_position,`;
+
+const representation = (row: string): string =>
+  `CASE WHEN ${row}.account_id IS NULL THEN json_array('unit', ${row}.snapshot_unit)
+                      ELSE json_array('account', ${row}.account_id) END`;
+// Step 3's position rule as aggregates: per (source, position, account or
+// unit), the newest capture time and the largest run at it. `card_usage` is
+// materialized, as it is now read twice; materializing changes no row, and the
+// plan checks run the unmodified shipped text.
+const SHIPPED_CARD_USAGE = "), card_usage AS (";
+const STATEMENT_CARD_USAGE = "), card_usage AS MATERIALIZED (";
+const SHIPPED_REPRESENTATIONS = "), representations AS (";
+const STATEMENT_REPRESENTATIONS = `), position_rows AS MATERIALIZED (
+         SELECT source_id, myjcb_position, fetch_run_id, snapshot_fetched_at,
+                ${representation("card_usage")} AS representation
+         FROM card_usage
+         WHERE myjcb_position IS NOT NULL
+       ), position_times AS MATERIALIZED (
+         SELECT source_id, myjcb_position, representation,
+                MAX(snapshot_fetched_at) AS newest_at
+         FROM position_rows
+         GROUP BY source_id, myjcb_position, representation
+       ), position_newest AS MATERIALIZED (
+         SELECT rows.source_id, rows.myjcb_position, rows.representation,
+                MAX(rows.fetch_run_id) AS newest_run
+         FROM position_rows rows
+         JOIN position_times times
+           ON times.source_id = rows.source_id AND times.myjcb_position = rows.myjcb_position
+          AND times.representation = rows.representation
+          AND times.newest_at = rows.snapshot_fetched_at
+         GROUP BY rows.source_id, rows.myjcb_position, rows.representation
+       ), representations AS (`;
+const SHIPPED_STEP_3 = `FROM representations
+         WHERE fetch_run_id = newest_run
+       )`;
+const STATEMENT_STEP_3 = `FROM representations
+         LEFT JOIN position_newest newest
+           ON newest.source_id = representations.source_id
+          AND newest.myjcb_position = representations.pending_position
+          AND newest.representation = ${representation("representations")}
+         WHERE representations.fetch_run_id = representations.newest_run
+           AND (representations.pending_position IS NULL
+             OR representations.fetch_run_id = newest.newest_run)
+       )`;
+
+/** The shipped current card usage text with ADR 0007's and ADR 0016's MyJCB rules. */
+export const STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL = [
+  [shippedMyjcb, STATEMENT_SLOT_MYJCB],
+  [SHIPPED_MYJCB_SLOT, STATEMENT_MYJCB_SLOT],
+  [SHIPPED_CARD_USAGE, STATEMENT_CARD_USAGE],
+  [SHIPPED_REPRESENTATIONS, STATEMENT_REPRESENTATIONS],
+  [SHIPPED_STEP_3, STATEMENT_STEP_3],
+].reduce((text, [from, to]) => substitute(text, from!, to!), LEGACY_CURRENT_CARD_USAGE_SQL);
+
+const STATEMENT_SLOT_ALL_CURRENT_USAGE = `(${STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL})`;
+
+/** `LEGACY_STALE_CARD_PURCHASE_KEYS_SQL` over the statement-slot text. */
+export const STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL = substitute(
+  LEGACY_STALE_CARD_PURCHASE_KEYS_SQL,
+  LEGACY_ALL_CURRENT_USAGE,
+  STATEMENT_SLOT_ALL_CURRENT_USAGE,
+);
+
+/** `LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL` over the statement-slot text. */
+export const STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL = substitute(
+  LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
+  LEGACY_ALL_CURRENT_USAGE,
+  STATEMENT_SLOT_ALL_CURRENT_USAGE,
+);

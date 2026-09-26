@@ -9,7 +9,7 @@ import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { CURRENT_CARD_USAGE_SQL } from "../../read-model/src/card-usage.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
-import { LEGACY_CURRENT_CARD_USAGE_SQL } from "../../read-model/test/card-usage-legacy-sql.ts";
+import { STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL } from "../../read-model/test/card-usage-legacy-sql.ts";
 import {
   currentRowsDriver,
   explain,
@@ -26,12 +26,15 @@ beforeAll(async () => {
 
 /**
  * Runs every statement as given, or with the shipped current card usage query
- * in its place; `seen` collects the statements as given.
+ * in its place (with the MyJCB statement-slot rules of ADR 0007 and ADR 0016
+ * substituted, card-usage-legacy-sql.ts); `seen` collects the statements as given.
  */
 function executor(legacy: boolean, seen: string[] = []): SqlExecutor {
   // A function replacement: the query text is never read for `$` patterns.
   const text = (query: string): string =>
-    legacy ? query.replaceAll(CURRENT_CARD_USAGE_SQL, () => LEGACY_CURRENT_CARD_USAGE_SQL) : query;
+    legacy
+      ? query.replaceAll(CURRENT_CARD_USAGE_SQL, () => STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL)
+      : query;
   return {
     all: async <T>(query: string, args: readonly unknown[]): Promise<T[]> => {
       seen.push(query);

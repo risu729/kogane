@@ -106,8 +106,10 @@ checks in `src/read.ts` are unchanged.
 
 Which Vpass and MyJCB capture is current is defined once in `src/sql.ts`:
 `MYJCB_LEDGER_SNAPSHOT_CTES` (`current_myjcb_snapshots`: the newest published
-credit-ledger capture per connection, statement state and period, where every
-unconfirmed capture of a connection shares one slot) and
+credit-ledger capture per connection, statement state and statement, the
+payment month `myjcbStatementSlot` reads, where a pending capture is current
+only while it is also the newest capture of its position,
+[ADR 0016](adr/0016-myjcb-pending-statement-slots.md)) and
 `VPASS_STATEMENT_SNAPSHOT_CTES` (`current_vpass_snapshots`: per card unit and
 statement month, the newest fetch run whose statement pages all have an active
 parse, whatever the family), with the membership predicates
@@ -119,8 +121,9 @@ same CTEs for purchase recognition: every current Vpass and MyJCB usage row with
 its recognition key (the `bank_key` shape of migration 0044), resolved account,
 identity policy family, provider state and decimal-v1 amount. On top of the
 snapshot it keeps the newest fetch run per (resolved account, source, slot),
-where the slot is the Vpass statement month or the MyJCB state and period, and
-then the latest observation per key. Ranking runs over the whole current set
+where the slot is the Vpass statement month or the MyJCB state and statement
+(a pending MyJCB row must also come from the account's newest run of its
+position), and then the latest observation per key. Ranking runs over the whole current set
 before the `observation_id > afterId` cursor and the `limit` (1 to 1,000)
 apply. Two identical Vpass rows on different pages of one capture are two keys
 and two rows: the parser numbers identical rows per page, and since
@@ -189,7 +192,16 @@ or identity rows whole; `KOGANE_CARD_USAGE_SCALE=full` builds this store and
 prints the timings. `card-usage-differential.test.ts` makes the same comparison
 on small random stores that draw every state the shipped reads handle, and
 every scenario of `card-usage.test.ts` and `card-purchase-keys.test.ts` runs
-both texts.
+both texts. The MyJCB currentness rules changed on purpose after the text was
+frozen ([ADR 0007](adr/0007-myjcb-statement-identity.md),
+[ADR 0016](adr/0016-myjcb-pending-statement-slots.md)), so the row comparisons
+run the shipped text with those rules substituted and its plan untouched
+(`STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL`, the rules restated as NOT EXISTS
+and GROUP BY rather than window functions), and the random stores draw pending and
+confirmed captures at positions 0 and 1 so that the substituted rules decide
+rows; the plan checks run the unmodified shipped text. This proves the plan
+rewrite and the rule change separately: the rewrite returns what the shipped
+plan returns under the intended rules, not the shipped rows byte for byte.
 
 ## Parity proof
 

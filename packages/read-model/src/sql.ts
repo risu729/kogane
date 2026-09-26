@@ -223,31 +223,35 @@ export function myjcbStatementMonth(period: string, fetchedAt: string): string {
 
 /**
  * The snapshot slot of a MyJCB credit-ledger capture `fa` within its
- * connection: `''` for every unconfirmed capture (one slot, so a pending row
- * that left the newest capture is not current), and for a confirmed capture
- * the statement it shows, whatever position it was captured at. That is the
- * payment month (`myjcbStatementMonth`), so a statement captured at position
- * 1 and later at position 2 is one slot and its newest capture is current,
- * never both. A confirmed relative label no rule places (`detailMonth-2` and
- * beyond) is NULL: it names a position, not a statement, and a position shows
- * a different statement every month, so such a capture is never current. The
- * collector records such a page by the month the page names
- * (docs/sources/myjcb.md, 明細の月); only captures from before it did carry one.
- * Any other label the month reading does not place keeps itself as its slot,
- * as before.
+ * connection and statement state: the statement it shows, whatever position it
+ * was captured at. That is the payment month (`myjcbStatementMonth`), so a
+ * statement captured at position 1 and later at position 2 is one slot and its
+ * newest capture is current, never both; and two pending statements, position
+ * 0 and position 1 while the newest closed cycle is not yet confirmed, are two
+ * slots, both current (docs/adr/0016-myjcb-pending-statement-slots.md). A
+ * relative label no rule places (`detailMonth-2` and beyond) is NULL: it names
+ * a position, not a statement, and a position shows a different statement
+ * every month, so such a capture is never current. The collector records a
+ * confirmed page by the month the page names (docs/sources/myjcb.md, 明細の月);
+ * only captures from before it did carry such a label, and no unconfirmed
+ * capture ever did. Any other label the month reading does not place keeps
+ * itself as its slot.
  */
 export const myjcbStatementSlot = (fa: string): string =>
-  `CASE WHEN ${fa}.statement_state = 'unconfirmed' THEN ''
-            ELSE coalesce(${myjcbStatementMonth(`${fa}.period`, `${fa}.fetched_at`)},
-              CASE WHEN substr(${fa}.period, 1, 12) = 'detailMonth-' THEN NULL ELSE ${fa}.period END)
-          END`;
+  `coalesce(${myjcbStatementMonth(`${fa}.period`, `${fa}.fetched_at`)},
+              CASE WHEN substr(${fa}.period, 1, 12) = 'detailMonth-' THEN NULL ELSE ${fa}.period END)`;
 
 /**
  * MyJCB credit ledger: the newest published capture per (source, connection,
- * statement state, statement slot), `myjcbStatementSlot`. Every unconfirmed
- * capture of a connection shares one slot, so a pending row that left the
- * newest capture is not current; each confirmed statement is one slot however
- * its position moved. A capture without a slot is never current. Defines
+ * statement state, statement slot), `myjcbStatementSlot`, so each statement is
+ * one slot per state however its position moved. An unconfirmed capture is
+ * current only while its position still shows it: it must also be the newest
+ * published ledger capture of its artifact key (`<connection>/credit-ledger-NN.json`,
+ * the position), in any state. A pending statement therefore stops being
+ * current when its position is captured again showing the next cycle or the
+ * same statement closed (a confirmed capture, which is current in its own
+ * slot), and a pending row that left the newest capture of its position is
+ * not current. A capture without a slot is never current. Defines
  * `current_myjcb_snapshots(fetch_artifact_id, statement_slot)`.
  */
 export const MYJCB_LEDGER_SNAPSHOT_CTES = `ranked_myjcb_snapshots AS (
@@ -255,9 +259,14 @@ export const MYJCB_LEDGER_SNAPSHOT_CTES = `ranked_myjcb_snapshots AS (
                 ROW_NUMBER() OVER (
                   PARTITION BY source_id, connection, statement_state, statement_slot
                   ORDER BY fetched_at DESC, artifact_id DESC
-                ) AS snapshot_rank
+                ) AS snapshot_rank,
+                CASE WHEN statement_state = 'unconfirmed' THEN ROW_NUMBER() OVER (
+                  PARTITION BY source_id, artifact_key
+                  ORDER BY fetched_at DESC, artifact_id DESC
+                ) ELSE 1 END AS position_rank
          FROM (
            SELECT p.fetch_artifact_id, fa.id AS artifact_id, fa.source_id, fa.fetched_at,
+                  fa.artifact_key,
                   substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1) AS connection,
                   fa.statement_state,
                   ${myjcbStatementSlot("fa")} AS statement_slot
@@ -269,7 +278,7 @@ export const MYJCB_LEDGER_SNAPSHOT_CTES = `ranked_myjcb_snapshots AS (
        ), current_myjcb_snapshots AS (
          SELECT fetch_artifact_id, statement_slot
          FROM ranked_myjcb_snapshots
-         WHERE snapshot_rank = 1 AND statement_slot IS NOT NULL
+         WHERE snapshot_rank = 1 AND position_rank = 1 AND statement_slot IS NOT NULL
        )`;
 
 /**

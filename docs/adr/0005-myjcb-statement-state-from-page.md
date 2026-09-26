@@ -50,7 +50,9 @@ every position-1 page, and recognition treated its posted charges as
   the collector said at the time; they stop being current on the first run of
   the fixed collector.
 - Position 0's pending rows are no longer displaced from the connection's one
-  unconfirmed snapshot slot by position 1.
+  unconfirmed snapshot slot by position 1. (Amended by
+  [ADR 0016](0016-myjcb-pending-statement-slots.md): each pending statement
+  now has its own slot.)
 - The next position change of a statement (1 → 2) still changed its keys until
   [ADR 0007](0007-myjcb-statement-identity.md).
 

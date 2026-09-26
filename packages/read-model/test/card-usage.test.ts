@@ -32,7 +32,10 @@ import {
   VPASS_NAMESPACE,
   vpassCard,
 } from "./card-usage-fixture";
-import { LEGACY_CURRENT_CARD_USAGE_SQL } from "./card-usage-legacy-sql";
+import {
+  LEGACY_CURRENT_CARD_USAGE_SQL,
+  STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
+} from "./card-usage-legacy-sql";
 import { resolveRelativePeriod } from "../../domain/src/relative-period.ts";
 
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
@@ -55,14 +58,36 @@ interface TransactionRow {
 
 /**
  * One page of current usage. Every scenario below is also a differential
- * check: the page must equal what the shipped query text returns.
+ * check: the page must equal what the shipped query text returns (with the
+ * MyJCB statement-slot rules substituted, card-usage-legacy-sql.ts).
  */
 function usage(db: Database, afterId = 0, limit = CARD_USAGE_PAGE_LIMIT): CurrentCardUsageRow[] {
   const page = currentCardUsageSql({ afterId, limit });
   const rows = db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
   expect(rows).toEqual(
-    db.query(LEGACY_CURRENT_CARD_USAGE_SQL).all(...(page.args as never[])) as CurrentCardUsageRow[],
+    expectedUsage(db)
+      .filter((row) => row.observation_id > afterId)
+      .slice(0, limit),
   );
+  return rows;
+}
+
+/**
+ * The comparison text's whole current set, read once per store state. Its
+ * cursor is only `observation_id > ?1 ORDER BY observation_id LIMIT ?2` after
+ * ranking, so a page of it is this set filtered and cut; reading it once keeps
+ * the paging scenarios within their time budget on a loaded runner.
+ */
+const expectedUsageCache = new WeakMap<
+  Database,
+  { changes: number; rows: CurrentCardUsageRow[] }
+>();
+function expectedUsage(db: Database): CurrentCardUsageRow[] {
+  const { changes } = db.query("SELECT total_changes() AS changes").get() as { changes: number };
+  const cached = expectedUsageCache.get(db);
+  if (cached?.changes === changes) return cached.rows;
+  const rows = db.query(STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL).all(0, -1) as CurrentCardUsageRow[];
+  expectedUsageCache.set(db, { changes, rows });
   return rows;
 }
 
@@ -1095,10 +1120,12 @@ describe("current card usage", () => {
 });
 
 describe("a MyJCB statement is one snapshot slot wherever its position moved", () => {
-  /** One page of current usage, without the shipped-text differential: the slot is what changed. */
+  /**
+   * One page of current usage. The shipped text keeps its one-slot rules, so
+   * the differential is against it with the statement-slot rules substituted.
+   */
   function current(db: Database): CurrentCardUsageRow[] {
-    const page = currentCardUsageSql({ afterId: 0, limit: CARD_USAGE_PAGE_LIMIT });
-    return db.query(page.sql).all(...(page.args as never[])) as CurrentCardUsageRow[];
+    return usage(db);
   }
   const root = myjcbRoot("conn-a", "acct-jcb");
   const purchase: UsageRow = {
@@ -1282,7 +1309,7 @@ describe("a MyJCB statement is one snapshot slot wherever its position moved", (
     store.identify(unplaced, root, { version: 1 });
     expect(ids(current(store.db))).toEqual(resolved.observations);
     expect(ids(current(store.db))).toEqual(cardTransactionIds(store.db));
-    // Pending captures keep their one shared slot, whatever their label.
+    // A pending capture is its own statement's slot beside it.
     const pending = store.myjcbLedger({
       run: store.run("myjcb"),
       connection: "conn-a",
@@ -1294,5 +1321,337 @@ describe("a MyJCB statement is one snapshot slot wherever its position moved", (
     });
     store.identify(pending, root, { version: 1 });
     expect(ids(current(store.db))).toEqual([...resolved.observations, ...pending.observations]);
+  });
+});
+
+describe("two pending MyJCB statements are two slots (ADR 0016)", () => {
+  /**
+   * One page of current usage, checked against the shipped text with the
+   * statement-slot rules substituted (the shipped text keeps one pending slot).
+   */
+  function current(db: Database): number[] {
+    return ids(usage(db));
+  }
+  /** The current MyJCB ledger captures (artifact ids), as both reads compose them. */
+  function snapshots(db: Database): number[] {
+    return (
+      db
+        .query(
+          `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES} SELECT fetch_artifact_id FROM current_myjcb_snapshots ORDER BY 1`,
+        )
+        .all() as { fetch_artifact_id: number }[]
+    ).map((row) => row.fetch_artifact_id);
+  }
+  /** Current usage and the Transactions page agree on the MyJCB rows. */
+  function both(db: Database): number[] {
+    const rows = current(db);
+    expect(rows).toEqual(cardTransactionIds(db));
+    return rows;
+  }
+  const root = myjcbRoot("conn-a", "acct-jcb");
+  const usageRow = (date: string, merchant: string, amount: string): UsageRow => ({
+    date,
+    merchant,
+    amount,
+    paymentType: "1回払",
+    other: amount,
+  });
+  /** Usage in the cycle closed on 2026-09-15, paid in 2026-10. */
+  const closedCycle = usageRow("2026/09/05", "架空店舗M", "1,200");
+  /** Usage in the cycle accumulating from 2026-09-16, paid in 2026-11. */
+  const openCycle = usageRow("2026/09/18", "架空店舗N", "400");
+  const openLater = usageRow("2026/09/21", "架空店舗O", "250");
+
+  function ledger(
+    store: CardStore,
+    input: {
+      run?: number;
+      detailMonth: number;
+      state?: "confirmed" | "unconfirmed";
+      period?: string;
+      fetchedAt: string;
+      rows: readonly UsageRow[];
+      publication?: "published" | "unpublished";
+      /** Default conn-a; conn-b resolves to the same account once `sameAccount` mapped it. */
+      connection?: "conn-a" | "conn-b";
+    },
+  ): Parsed {
+    const connection = input.connection ?? "conn-a";
+    const parsed = store.myjcbLedger({
+      run: input.run ?? store.run("myjcb"),
+      connection,
+      detailMonth: input.detailMonth,
+      state: input.state ?? "unconfirmed",
+      period: input.period ?? `detailMonth-${input.detailMonth}`,
+      fetchedAt: input.fetchedAt,
+      rows: input.rows,
+      ...(input.publication === undefined ? {} : { publication: input.publication }),
+    });
+    if (parsed.observations.length > 0)
+      store.identify(parsed, connection === "conn-a" ? root : connB, { version: 1 });
+    return parsed;
+  }
+  const connB = { ...myjcbRoot("conn-b", "acct-jcb-b"), account: "acct-jcb" };
+  /** A reviewed mapping resolves connection B to connection A's account. */
+  function sameAccount(store: CardStore): void {
+    store.mapAccount(myjcbRoot("conn-b", "acct-jcb-b"));
+    store.mapAccount(connB, "manual");
+  }
+  /** One run on a JST day from the 16th: position 0 is paid in 2026-11, position 1 in 2026-10. */
+  function twoPending(store: CardStore, fetchedAt: string, open: readonly UsageRow[]) {
+    const run = store.run("myjcb");
+    const zero = ledger(store, { run, detailMonth: 0, fetchedAt, rows: open });
+    const one = ledger(store, {
+      run,
+      detailMonth: 1,
+      fetchedAt: fetchedAt.replace(".000Z", ".500Z"),
+      rows: [closedCycle],
+    });
+    return { zero, one };
+  }
+
+  test("both pending statements of one capture day are current; the shared slot kept only the newer", () => {
+    const store = new CardStore();
+    const { zero, one } = twoPending(store, "2026-09-20T00:00:00.000Z", [openCycle]);
+    expect(snapshots(store.db)).toEqual([zero.artifact, one.artifact]);
+    expect(both(store.db)).toEqual([...zero.observations, ...one.observations]);
+    // The shipped text: one unconfirmed slot per connection, so only position 1.
+    const page = currentCardUsageSql({ afterId: 0, limit: CARD_USAGE_PAGE_LIMIT });
+    expect(
+      ids(
+        store.db
+          .query(LEGACY_CURRENT_CARD_USAGE_SQL)
+          .all(...(page.args as never[])) as CurrentCardUsageRow[],
+      ),
+    ).toEqual(one.observations);
+  });
+
+  test("a later capture of one pending statement replaces only that one", () => {
+    const store = new CardStore();
+    const { zero, one } = twoPending(store, "2026-09-20T00:00:00.000Z", [openCycle]);
+    // The next day only position 0 is published so far: it replaces position
+    // 0's capture, and position 1's pending statement stays current.
+    const next = ledger(store, {
+      detailMonth: 0,
+      fetchedAt: "2026-09-21T00:00:00.000Z",
+      rows: [openCycle, openLater],
+    });
+    expect(snapshots(store.db)).toEqual([one.artifact, next.artifact]);
+    expect(both(store.db)).toEqual([...one.observations, ...next.observations]);
+    expect(zero.observations.some((id) => current(store.db).includes(id))).toBe(false);
+  });
+
+  test("a statement's confirmed capture ends its pending one; the other pending statement stays", () => {
+    const store = new CardStore();
+    const { one } = twoPending(store, "2026-09-20T00:00:00.000Z", [openCycle]);
+    // 2026-09-25: the closed cycle is confirmed and named by its page.
+    const run = store.run("myjcb");
+    const zero = ledger(store, {
+      run,
+      detailMonth: 0,
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+      rows: [openCycle, openLater],
+    });
+    const confirmed = ledger(store, {
+      run,
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-10",
+      fetchedAt: "2026-09-25T00:00:00.500Z",
+      rows: [closedCycle],
+    });
+    expect(snapshots(store.db)).toEqual([zero.artifact, confirmed.artifact]);
+    const rows = both(store.db);
+    expect(rows).toEqual([...zero.observations, ...confirmed.observations]);
+    // Never the pending and the confirmed capture of one statement together.
+    for (const id of one.observations) expect(rows).not.toContain(id);
+  });
+
+  test("an older capture of a position is not current, even where the rule resolves it to another month", () => {
+    const store = new CardStore();
+    // 2026-09-15 (JST): position 0 resolves to 2026-10.
+    const fifteenth = ledger(store, {
+      detailMonth: 0,
+      fetchedAt: "2026-09-15T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    expect(both(store.db)).toEqual(fifteenth.observations);
+    // 2026-09-16 (JST) resolves position 0 to 2026-11. Had the provider not
+    // moved position 0 to the next cycle yet (the 16th is not verified), this
+    // capture still shows the same statement and rows: the older capture of
+    // the position is not current, so the rows are never current twice.
+    const sixteenth = ledger(store, {
+      detailMonth: 0,
+      fetchedAt: "2026-09-16T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    expect(snapshots(store.db)).toEqual([sixteenth.artifact]);
+    expect(both(store.db)).toEqual(sixteenth.observations);
+  });
+
+  test("a statement captured at position 0 and then at position 1 is current once, from its newer capture", () => {
+    const store = new CardStore();
+    const fifteenth = ledger(store, {
+      detailMonth: 0,
+      fetchedAt: "2026-09-15T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    // 2026-09-16: position 1 is published, position 0 not yet. Position 0 of
+    // the 15th is still its position's newest capture, but position 1 of the
+    // 16th is the same statement (2026-10) and newer, so only it is current.
+    const run = store.run("myjcb");
+    ledger(store, {
+      run,
+      detailMonth: 0,
+      fetchedAt: "2026-09-16T00:00:00.000Z",
+      rows: [openCycle],
+      publication: "unpublished",
+    });
+    const one = ledger(store, {
+      run,
+      detailMonth: 1,
+      fetchedAt: "2026-09-16T00:00:00.500Z",
+      rows: [closedCycle],
+    });
+    expect(snapshots(store.db)).toEqual([one.artifact]);
+    const rows = both(store.db);
+    expect(rows).toEqual(one.observations);
+    for (const id of fifteenth.observations) expect(rows).not.toContain(id);
+  });
+
+  test("a pending statement of a replaced connection is not current beside the new connection's", () => {
+    const store = new CardStore();
+    const connB = myjcbRoot("conn-b", "acct-jcb-b");
+    const old = ledger(store, {
+      detailMonth: 1,
+      fetchedAt: "2026-09-20T00:00:00.500Z",
+      rows: [closedCycle],
+    });
+    // The account's new connection shows the same position confirmed: the old
+    // connection's pending capture of that position is not current.
+    store.mapAccount(connB);
+    store.mapAccount({ ...connB, account: "acct-jcb" }, "manual");
+    const replacement = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-b",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-10",
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    store.identify(replacement, { ...connB, account: "acct-jcb" }, { version: 1 });
+    const rows = current(store.db);
+    expect(rows).toEqual(replacement.observations);
+    for (const id of old.observations) expect(rows).not.toContain(id);
+  });
+
+  test("two connections of one account: one run keeps both, and a newer run of a position ends only that position of the other", () => {
+    const store = new CardStore();
+    sameAccount(store);
+    const run = store.run("myjcb");
+    const fetchedAt = "2026-09-20T00:00:00.000Z";
+    const zeroA = ledger(store, { run, detailMonth: 0, fetchedAt, rows: [openCycle] });
+    const oneA = ledger(store, {
+      run,
+      detailMonth: 1,
+      fetchedAt: "2026-09-20T00:00:00.500Z",
+      rows: [closedCycle],
+    });
+    const zeroB = ledger(store, {
+      run,
+      connection: "conn-b",
+      detailMonth: 0,
+      fetchedAt: "2026-09-20T00:00:01.000Z",
+      rows: [openLater],
+    });
+    // One run is one representation: every unit it captured is current.
+    expect(current(store.db)).toEqual([
+      ...zeroA.observations,
+      ...oneA.observations,
+      ...zeroB.observations,
+    ]);
+    // 2026-09-25: a run of connection B alone shows position 1 confirmed. It
+    // ends connection A's pending position 1 (another slot, so only the
+    // position rule does), and neither connection's position 0.
+    const confirmedB = ledger(store, {
+      connection: "conn-b",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-10",
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    expect(current(store.db)).toEqual([
+      ...zeroA.observations,
+      ...zeroB.observations,
+      ...confirmedB.observations,
+    ]);
+  });
+
+  test("a capture without a statement state is not pending, so the account position rule leaves it", () => {
+    const store = new CardStore();
+    sameAccount(store);
+    const stateless = ledger(store, {
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-09",
+      fetchedAt: "2026-08-20T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    // Metadata is append-only; this test alone rewrites it to draw a NULL state.
+    store.db.exec("DROP TRIGGER observation_artifact_metadata_no_update");
+    store.db.run(
+      "UPDATE observation_artifact_metadata SET statement_state=NULL WHERE fetch_artifact_id=?",
+      [stateless.artifact],
+    );
+    const newer = ledger(store, {
+      connection: "conn-b",
+      detailMonth: 1,
+      state: "confirmed",
+      period: "2026-10",
+      fetchedAt: "2026-09-25T00:00:00.000Z",
+      rows: [openCycle],
+    });
+    // As before ADR 0016: its own slot, newest there, and no pending rule applies.
+    expect(current(store.db)).toEqual([...stateless.observations, ...newer.observations]);
+  });
+
+  test("limit: with a wrong switch day, a position-0 publication lag keeps one statement current twice until position 0 is published", () => {
+    const store = new CardStore();
+    // Suppose the provider moved position 0 to the next cycle on the 17th, not
+    // the 16th the rule assumes. The capture of the 16th still shows the closed
+    // cycle at position 0, and the rule keys it by the next month.
+    const sixteenth = ledger(store, {
+      detailMonth: 0,
+      fetchedAt: "2026-09-16T00:00:00.000Z",
+      rows: [closedCycle],
+    });
+    // The 17th: position 1 (the closed cycle) is published, position 0 not yet.
+    const run = store.run("myjcb");
+    ledger(store, {
+      run,
+      detailMonth: 0,
+      fetchedAt: "2026-09-17T00:00:00.000Z",
+      rows: [openCycle],
+      publication: "unpublished",
+    });
+    const one = ledger(store, {
+      run,
+      detailMonth: 1,
+      fetchedAt: "2026-09-17T00:00:00.500Z",
+      rows: [closedCycle],
+    });
+    // Two positions, two months: the closed cycle is current twice (ADR 0016,
+    // consequences). With the right switch day both captures are one month and
+    // only the newer is current (the test above).
+    expect(current(store.db)).toEqual([...sixteenth.observations, ...one.observations]);
+    // Publishing position 0 again ends it.
+    const zero = ledger(store, {
+      detailMonth: 0,
+      fetchedAt: "2026-09-17T01:00:00.000Z",
+      rows: [openCycle],
+    });
+    expect(current(store.db)).toEqual([...one.observations, ...zero.observations]);
   });
 });

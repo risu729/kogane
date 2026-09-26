@@ -35,6 +35,7 @@ export {
   DEFAULT_INVENTORY_CHUNK,
   DIRECT_SEAL_ARTIFACTS,
   registerTerminal,
+  RETRYABLE_RETRY_INTERVAL_MS,
   type RegisterTerminalInput,
   type RegisterTerminalOutcome,
   type RegistrationPhase,

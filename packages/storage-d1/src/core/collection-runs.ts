@@ -335,6 +335,13 @@ export async function readCollectionScanState(db: D1Like): Promise<CollectionSca
 export interface CollectionScanProgress {
   /** The R2 cursor for the next tick; null finishes the cycle and restarts it. */
   cursor: string | null;
+  /**
+   * True when the tick dealt with its whole page. A tick held by its budget
+   * lists the same page again next time: it counts neither a page nor a
+   * cycle, even when that page is the first one and the cursor stays null
+   * (ADR 0024).
+   */
+  pageFinished: boolean;
   nowMs: number;
   seen: number;
   registered: number;
@@ -342,9 +349,11 @@ export interface CollectionScanProgress {
 }
 
 /**
- * Advances the cursor by one page. A finished walk (`cursor` null) counts a
+ * Records one tick of the scan. A finished page moves the cursor and counts a
+ * page; a finished walk (`cursor` null after a finished page) also counts a
  * cycle and starts the next tick at the beginning of the prefix again, which
- * is what makes a terminal confirmed late reachable at all (G1-12).
+ * is what makes a terminal confirmed late reachable at all (G1-12). A held
+ * tick only records when it ran and what it saw.
  */
 export async function advanceCollectionScan(
   db: D1Like,
@@ -353,8 +362,9 @@ export async function advanceCollectionScan(
   await run(
     db,
     `UPDATE collection_scan_state
-        SET cursor = ?2, last_scan_at_ms = ?3, pages_completed = pages_completed + 1,
-            cycles_completed = cycles_completed + CASE WHEN ?2 IS NULL THEN 1 ELSE 0 END,
+        SET cursor = ?2, last_scan_at_ms = ?3,
+            pages_completed = pages_completed + ?7,
+            cycles_completed = cycles_completed + CASE WHEN ?7 = 1 AND ?2 IS NULL THEN 1 ELSE 0 END,
             last_seen = ?4, last_registered = ?5, last_blocked = ?6
       WHERE lane = ?1`,
     [
@@ -364,6 +374,7 @@ export async function advanceCollectionScan(
       progress.seen,
       progress.registered,
       progress.blocked,
+      progress.pageFinished ? 1 : 0,
     ],
   );
 }

@@ -25,7 +25,9 @@ pending-to-posted matcher over recognised events.
 1. Keep both matchers for Vpass and MyJCB. Rejected: the lane pairs rows, and
    the shared snapshot definitions (`src/sql.ts` in `packages/read-model`)
    keep one capture per Vpass card and statement month, whatever the family,
-   and one unconfirmed MyJCB slot per connection. A pending capture and the
+   and one unconfirmed MyJCB slot per connection (since
+   [ADR 0016](0016-myjcb-pending-statement-slots.md), one per pending
+   statement, ended by any newer capture of its position). A pending capture and the
    posted capture it became are therefore never both current rows. Only
    recognised events keep both: an `authorized` event stays live, or retired
    to `unknown`, beside the `captured` one.

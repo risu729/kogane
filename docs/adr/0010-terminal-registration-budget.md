@@ -3,6 +3,9 @@
 - Status: accepted
 - Date: 2026-09-25
 - Implemented by: #250 (closes the question of issue #87)
+- Amended by: [ADR 0024](0024-collection-scan-judged-terminals.md) (a terminal
+  already judged no longer spends one of the scan's five attempts; the
+  operation budget is unchanged)
 - Carried by:
   [processor §3.3](../processor.md#33-operation-budget-and-staged-registration-issue-87),
   `packages/application/src/collection/budget.ts`,
