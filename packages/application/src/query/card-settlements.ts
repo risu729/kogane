@@ -9,6 +9,7 @@ import type {
   CardSettlementReview,
   CardSettlementReviewPage,
 } from "../../../domain/src/card-settlement-review.ts";
+import { cardSettlementReadinessCtes } from "../../../read-model/src/card-settlement-readiness.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
 export const CARD_SETTLEMENT_PAGE_SIZE = 50;
@@ -75,6 +76,32 @@ function review(row: ReviewRow): CardSettlementReview {
   };
 }
 
+/**
+ * The reviews `chosen` names (`?1` a proposal id, `?2` the page size plus one,
+ * `?3` the offset), newest first, with their `card_settlement_readiness`
+ * flags. The page is chosen first and only its candidates are judged, through
+ * the keyed form of the view (card-settlement-readiness.ts): joined whole, the
+ * view ranked every statement total and SMBC row and resolved the owners of
+ * the whole store for every candidate (docs/card-settlements.md, Cost).
+ * A review is one candidate and its latest decision, so choosing candidates
+ * chooses the same reviews.
+ */
+const reviewsSql = (chosen: string): string => `WITH chosen AS MATERIALIZED (
+ ${chosen}
+), ${cardSettlementReadinessCtes()}
+SELECT c.id,c.facts_json,c.revision,c.status,c.decision_revision_id,c.event_id,c.obligation_id,c.settlement_id,c.created_at,
+ r.statement_current,r.bank_current,r.ownership_current,r.allocation_available
+FROM chosen JOIN card_settlement_reviews c ON c.id=chosen.id LEFT JOIN readiness r ON r.id=c.id
+ORDER BY c.created_at DESC,c.id DESC`;
+/** A page of the list: every candidate is ordered (`?1` is NULL here). */
+export const CARD_SETTLEMENT_PAGE_SQL = reviewsSql(
+  "SELECT id FROM card_settlement_candidates review_page WHERE ?1 IS NULL ORDER BY created_at DESC,id DESC LIMIT ?2 OFFSET ?3",
+);
+/** One proposal by id, found by its key. */
+export const CARD_SETTLEMENT_REVIEW_SQL = reviewsSql(
+  "SELECT id FROM card_settlement_candidates WHERE id=?1 ORDER BY created_at DESC,id DESC LIMIT ?2 OFFSET ?3",
+);
+
 /** Offset lists and exact-id reads share the same financial and explanation DTO. */
 export async function queryCardSettlements(
   sql: SqlExecutor,
@@ -84,10 +111,7 @@ export async function queryCardSettlements(
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000)
     throw new Error("invalid_offset");
   const rows = await sql.all<ReviewRow>(
-    `SELECT c.id,c.facts_json,c.revision,c.status,c.decision_revision_id,c.event_id,c.obligation_id,c.settlement_id,c.created_at,
-       r.statement_current,r.bank_current,r.ownership_current,r.allocation_available
-     FROM card_settlement_reviews c LEFT JOIN card_settlement_readiness r ON r.id=c.id
-     WHERE (?1 IS NULL OR c.id=?1) ORDER BY c.created_at DESC,c.id DESC LIMIT ?2 OFFSET ?3`,
+    (input.proposalId ?? null) === null ? CARD_SETTLEMENT_PAGE_SQL : CARD_SETTLEMENT_REVIEW_SQL,
     [input.proposalId ?? null, CARD_SETTLEMENT_PAGE_SIZE + 1, offset],
   );
   const items = rows.slice(0, CARD_SETTLEMENT_PAGE_SIZE).map(review);

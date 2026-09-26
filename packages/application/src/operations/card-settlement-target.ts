@@ -5,6 +5,7 @@ import {
   validCardSettlementFacts,
   type CardSettlementStatus,
 } from "../../../domain/src/card-settlement.ts";
+import { cardSettlementReadinessCtes } from "../../../read-model/src/card-settlement-readiness.ts";
 import type {
   CardSettlementPayload,
   ChangeKind,
@@ -26,6 +27,17 @@ interface CandidateRow {
   allocation_available: number;
 }
 
+/**
+ * The candidate `?1` and its `card_settlement_readiness` flags, judged for that
+ * candidate alone through the keyed form of the view
+ * (packages/read-model/src/card-settlement-readiness.ts): the whole view cost
+ * seconds per plan on a two-year store (docs/card-settlements.md, Cost).
+ */
+export const CARD_SETTLEMENT_PLAN_SQL = `WITH chosen AS (SELECT ?1 AS id), ${cardSettlementReadinessCtes()}
+SELECT c.id,c.facts_json,c.status,c.revision,
+ r.statement_current,r.bank_current,r.ownership_current,r.allocation_available
+FROM chosen JOIN card_settlement_reviews c ON c.id=chosen.id JOIN readiness r ON r.id=c.id`;
+
 export async function cardSettlementPlan(
   store: CommandStore,
   kind: ChangeKind,
@@ -33,12 +45,7 @@ export async function cardSettlementPlan(
 ): Promise<CommandResult<{ resolved: ResolvedPlan }>> {
   const { proposalId } = payload as CardSettlementPayload;
   const subjectRef = `card-settlement:${proposalId}`;
-  const row = await store.first<CandidateRow>(
-    `SELECT c.id,c.facts_json,c.status,c.revision,
-      r.statement_current,r.bank_current,r.ownership_current,r.allocation_available
-     FROM card_settlement_reviews c JOIN card_settlement_readiness r ON r.id=c.id WHERE c.id=?1`,
-    [proposalId],
-  );
+  const row = await store.first<CandidateRow>(CARD_SETTLEMENT_PLAN_SQL, [proposalId]);
   if (!row) return commandError("target_missing", [subjectRef]);
   const withdraw = kind === "card-settlement.withdraw";
   if ((withdraw && row.status !== "accepted") || (!withdraw && row.status !== "proposed"))
