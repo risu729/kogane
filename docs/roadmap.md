@@ -83,7 +83,14 @@ Concrete limits in the current code:
   reviewed decision (or by the rule for a pair the provider itself links, which
   no deployed source does yet); candidates are proposed, never merged by
   amount and date. Excluding a row by decision and allocating a refund to a
-  purchase are not available yet.
+  purchase are not available yet. Only the retired importer's Vpass runs
+  carry a trusted card binding: a parsed capture of the Vpass collector would
+  retire the importer-era purchases of its card-month and its rows would be
+  skipped as `account_not_resolved`. The collector's captures are not parsed
+  today (their terminals name the producer `vpass-json`, which has no ingest
+  route, and their artifacts are registered without a parser dataset); they
+  stay unparsed until the collector writes a binding
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
