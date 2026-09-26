@@ -86,10 +86,10 @@ Concrete limits in the current code:
   purchase are not available yet. Only the retired importer's Vpass runs
   carry a trusted card binding: a parsed capture of the Vpass collector would
   retire the importer-era purchases of its card-month and its rows would be
-  skipped as `account_not_resolved`. Collector-vpass captures are not parsed
-  today (their terminals name a producer with no ingest route, and their
-  artifacts are registered without a parser dataset); they must stay unparsed
-  until the collector writes a binding
+  skipped as `account_not_resolved`. The collector's captures are not parsed
+  today (their terminals name the producer `vpass-json`, which has no ingest
+  route, and their artifacts are registered without a parser dataset); they
+  stay unparsed until the collector writes a binding
   ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
   email route), V Point Pay and GLOBAL PASS had no registered collector run
