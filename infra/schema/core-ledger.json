@@ -737,6 +737,12 @@
       "sha256": "39e131cf8e3f49e3caaef2e6300544592a350fcc08c488e08bf84a2d84fdb398"
     },
     {
+      "file": "0052_sbi_shinsei_bank_debits.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "a9b5dbb4251562acd3701818cf898a1a92e6e323cd7dc478ae76751740f4886d"
+    },
+    {
       "file": "0053_price_promotion.sql",
       "statementCount": 8,
       "insertStatements": [
@@ -13017,9 +13023,11 @@
         "coefficient",
         "scale",
         "bank_key",
-        "position"
+        "position",
+        "debit_date",
+        "adapter"
       ],
-      "sqlSha256": "1387875bba151f32"
+      "sqlSha256": "0fc6645b375107c9"
     },
     {
       "name": "card_settlement_fact_ownership",
@@ -17147,6 +17155,6 @@
       "0051_card_purchase_review_commands.sql",
       "0053_price_promotion.sql"
     ],
-    "schemaSha256": "21ea7485b551a282b14af8bf2d7e9e9c6049ee7cfe06716c25e57eb308e3bca1"
+    "schemaSha256": "c5811be682f124e8234e3cd602ffc3c73aed8ea14f011e7239e79c792376a073"
   }
 }

@@ -933,3 +933,23 @@ so the caveat travels with every result that uses it.
 (per 1 unit) from the live board, or grants read access to the stored boards
 in R2 for an aggregate survey; either is then recorded as the currency's
 `evidence` in `SBI_SHINSEI_FX_QUOTE_BASIS`, in a change that amends ADR 0020.
+
+## Parse status in production (2026-09-26)
+
+Read-only aggregate counts of the production CORE store, taken while adding
+the SBI Shinsei bank debit adapter to card settlement review
+([bank adapters](../card-settlements.md#bank-adapters),
+[ADR 0018](../adr/0018-sbi-shinsei-bank-debit-adapter.md)):
+
+- `top-accounts-balance-and-activity`: 29 stored captures. Parser
+  `sbi-shinsei-top-balances-and-activity` 0.1.1 rejected all 29 (parse run
+  status `error`, job code `parser_rejected`); 25 of them had also been parsed
+  by 0.1.0, and all 25 of those runs ended in `error` too.
+- `yen-deposit-account`: 29 stored captures, all 29 parsed by
+  `sbi-shinsei-yen-deposit-account` 0.1.1 (`ok`); the 25 earlier 0.1.0 runs
+  ended in `error`.
+
+So no published SBI Shinsei transaction observation exists, and the card
+settlement adapter admits nothing until the activity parser accepts the stored
+captures. Why the parser rejects them is not investigated here; it is an open
+limit, and the parser's strict shapes are unchanged.
