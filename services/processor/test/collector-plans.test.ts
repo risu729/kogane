@@ -101,6 +101,8 @@ function routeProducer(source: string): string {
 interface Registered {
   roles: string[];
   units: { unit_key: string; artifacts: number; declared: number | null }[];
+  /** Distinct parser datasets the registration gave the run's artifacts. */
+  datasets: (string | null)[];
 }
 
 /**
@@ -172,7 +174,12 @@ async function registerPlan(plan: PersistRunPlan, expectedArtifacts: number): Pr
     )
     .all(result.fetchRunId) as Registered["units"];
   for (const unit of units) expect(unit.artifacts).toBe(unit.declared!);
-  return { roles, units };
+  const datasets = (
+    h.db
+      .query("SELECT DISTINCT dataset FROM fetch_artifacts WHERE fetch_run_id=? ORDER BY dataset")
+      .all(result.fetchRunId) as { dataset: string | null }[]
+  ).map((row) => row.dataset);
+  return { roles, units, datasets };
 }
 
 // --- Sources that registered before this change -------------------------------
@@ -759,4 +766,7 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
     "sanitized_provider_capture/transformed/source_not_retained_for_security",
   ]);
   expect(registered.units).toEqual([{ unit_key: "card-001", artifacts: 4, declared: 4 }]);
+  // ADR 0022/0023 withhold Vpass from a parser dataset until the collector
+  // derives the card binding. The pages' new role must not lift that hold.
+  expect(registered.datasets).toEqual([null]);
 });

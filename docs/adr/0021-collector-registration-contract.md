@@ -6,8 +6,8 @@
   [collection: the registration contract](../collection.md#shared-data-bucket-per-source-u09),
   [processor §3](../processor.md#3-idempotency-and-what-blocks),
   `services/processor/test/collector-plans.test.ts`
-- Related: ADR 0014 and #259 (producer ids, blocker 1 below), the Processor PR for
-  registered artifacts without a `dataset` and its ADR 0022 (blocker 4)
+- Related: ADR 0014 and #259 (producer ids, blocker 1 below), ADR 0022 and
+  #269 (registered artifacts without a `dataset`, blocker 4)
 
 ## Context
 
@@ -40,7 +40,7 @@ selects. Four independent blockers:
    stage row, and retries every tick with the artifacts catalogued and
    unsealed: 14 sbi-vc-trade fetch runs, none visible.
 4. **`dataset` NULL** on registered artifacts, so no parser selects them.
-   Fixed by a Processor PR and its ADR 0022, not here.
+   Fixed by #269 and ADR 0022, not here.
 
 Nothing caught 2 or 3 before production. Each collector's suite read its own
 terminal, and the Processor's suite registered a synthetic vocabulary
@@ -119,9 +119,11 @@ The registration contract a collector states in its terminal:
   ([ADR 0014](0014-collector-producer-ids.md)); the test asserts that every
   plan names its route's producer and stubs nothing.
 
-The Processor's refusals, `descriptors.ts` and the registration contract
-version (`terminal-registration-v1`) are unchanged: every terminal that
-registered before registers to the same descriptors.
+This decision changes no Processor code: the refusals, `descriptors.ts` and
+the registration contract version are as ADR 0022 (#269) left them
+(`terminal-registration-v2`), and a terminal registers to the same
+descriptors with or without this change. The test registers under whatever
+version is current and does not depend on the dataset table.
 
 ## Consequences
 
