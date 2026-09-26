@@ -145,9 +145,10 @@ async function registered(key: string | undefined) {
   const result = await registerCollectionRun(h.env, { source: "vpass", runId: plan.run.runId });
   expect(result).toMatchObject({ outcome: "registered", artifacts: plan.artifacts.length });
   if (result.outcome !== "registered") throw new Error("unreachable");
-  const all = <T>(sql: string, ...binds: unknown[]) =>
+  const fetchRunId = result.fetchRunId;
+  const all = <T = Record<string, unknown>>(sql: string, ...binds: unknown[]) =>
     h.db.query(sql).all(...(binds as never[])) as T[];
-  const one = <T>(sql: string, ...binds: unknown[]) =>
+  const one = <T = Record<string, unknown>>(sql: string, ...binds: unknown[]) =>
     h.db.query(sql).get(...(binds as never[])) as T;
 
   /** Parse the statement page with the deployed parser, as the parse lane would. */
@@ -156,7 +157,7 @@ async function registered(key: string | undefined) {
       `SELECT a.id,a.sha256,a.artifact_key,u.unit_key FROM fetch_artifacts a
          JOIN fetch_units u ON u.id=a.fetch_unit_id
         WHERE a.fetch_run_id=? AND a.artifact_key GLOB 'months/*'`,
-      result.fetchRunId,
+      fetchRunId,
     );
     const stored = await h.bucket.get(objectKey(page.sha256));
     const bytes = new Uint8Array(await stored!.arrayBuffer());
@@ -209,13 +210,13 @@ async function registered(key: string | undefined) {
         artifact_id: page.id,
         source_id: "vpass",
         producer_id: COLLECTOR,
-        fetch_run_id: result.fetchRunId,
+        fetch_run_id: fetchRunId,
       },
       resolveIdentity,
     );
     return parse;
   }
-  return { h, plan, run: result.fetchRunId, all, one, parsePage };
+  return { h, plan, run: fetchRunId, all, one, parsePage };
 }
 
 describe("ADR 0023 a registered collector card run", () => {
@@ -225,12 +226,17 @@ describe("ADR 0023 a registered collector card run", () => {
     expect(plan.run.units.map((unit) => unit.unitKey)).toEqual(["card-001", token]);
 
     // Registration wrote the run shape the view's shared-R2 branch reads.
-    expect(one("SELECT status,failure_count FROM observation_fetch_runs WHERE id=?", run)).toEqual({
+    expect(
+      one<Record<string, unknown>>(
+        "SELECT status,failure_count FROM observation_fetch_runs WHERE id=?",
+        run,
+      ),
+    ).toEqual({
       status: "success",
       failure_count: 0,
     });
     expect(
-      one(
+      one<Record<string, unknown>>(
         `SELECT s.external_id_namespace AS namespace, r.producer_id AS producer, r.source_run_key AS run_key
            FROM fetch_runs r JOIN acquisition_sessions s ON s.id=r.acquisition_session_id WHERE r.id=?`,
         run,
@@ -286,7 +292,11 @@ describe("ADR 0023 a registered collector card run", () => {
     // Identity: policy 2 selected through the view, the pin and seal triggers
     // (which join the view) accepted it, and the rows resolve to the token.
     await parsePage();
-    expect(one("SELECT policy_family,policy_version FROM identity_run_contexts")).toEqual({
+    expect(
+      one<Record<string, unknown>>(
+        "SELECT policy_family,policy_version FROM identity_run_contexts",
+      ),
+    ).toEqual({
       policy_family: "vpass-card-binding",
       policy_version: 2,
     });
@@ -319,9 +329,11 @@ describe("ADR 0023 a registered collector card run", () => {
     ).toBe(0);
     expect(all("SELECT * FROM trusted_vpass_card_bindings")).toEqual([]);
     await parsePage();
-    expect(one("SELECT policy_family FROM identity_run_contexts")).toEqual({
-      policy_family: "identity-default",
-    });
+    expect(one<Record<string, unknown>>("SELECT policy_family FROM identity_run_contexts")).toEqual(
+      {
+        policy_family: "identity-default",
+      },
+    );
     expect(all("SELECT * FROM identity_vpass_bindings")).toEqual([]);
     expect(
       all(
