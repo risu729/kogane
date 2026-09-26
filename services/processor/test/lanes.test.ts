@@ -84,6 +84,7 @@ test("harness applies every Layer B migration in order through 0055", () => {
     "0050_statement_fact_indexes.sql",
     "0051_card_purchase_review_commands.sql",
     "0052_sbi_shinsei_bank_debits.sql",
+    "0053_price_promotion.sql",
     "0055_vpass_collector_card_binding.sql",
   ]);
   expect([...names].sort()).toEqual(names);
@@ -398,15 +399,25 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     "collection_scan",
     "identity_sweep",
     "balance_projection",
+    // Unflagged: it writes append-only prices only (ADR 0020).
+    "price_promotion",
     "operation_dispatch",
     "decision_outbox",
   ]);
+  expect(lines[4]).toEqual({
+    event: "price_promotion",
+    scanned: expect.any(Number),
+    promoted: expect.any(Number),
+    basis_unverified: expect.any(Number),
+    unsupported_currency: expect.any(Number),
+    written: expect.any(Number),
+  });
   expect(lines[0]).toHaveProperty("lanes");
   // The two U08 lanes are wired by default and, with their flags off, say so
   // and do nothing: no R2 list, no CORE write, no cursor movement
   // (docs/processor.md §6).
   expect(lines[1]).toMatchObject({ event: "collection_scan", enabled: false, status: "skipped" });
-  expect(lines[4]).toMatchObject({
+  expect(lines[5]).toMatchObject({
     event: "operation_dispatch",
     enabled: false,
     status: "skipped",
@@ -497,6 +508,57 @@ test("with its flag on, purchase_recognition sits right after the two reconcilia
     "card_settlement_sweep",
     "purchase_recognition",
     "reward_claims_sweep",
+    "decision_outbox",
+  ]);
+}, 60000);
+
+test("price_promotion runs after identity_sweep and right before report_job, whatever the flags", async () => {
+  const lines: Record<string, unknown>[] = [];
+  const log = (line: string) => lines.push(JSON.parse(line));
+  const ok = () => Promise.resolve({ ok: true });
+  const stages = {
+    parse: ok,
+    identity: ok,
+    balanceProjection: ok,
+    reconcile: ok,
+    settlements: ok,
+    purchases: ok,
+    rewards: ok,
+    rewardReadProjection: ok,
+    prices: ok,
+    reports: ok,
+    decisions: ok,
+  };
+  const on = {
+    RECONCILIATION_ENABLED: "true",
+    PURCHASE_RECOGNITION_ENABLED: "true",
+    REWARD_CLAIMS_ENABLED: "true",
+    REWARD_READ_PROJECTION_ENABLED: "true",
+    REPORTS_ENABLED: "true",
+  };
+  await runScheduled({ ...env, ...on } as unknown as Env, stages, log);
+  const events = lines.map((line) => line.event);
+  expect(events).toEqual([
+    "observation_sweep",
+    "identity_sweep",
+    "balance_projection",
+    "reconciliation_sweep",
+    "card_settlement_sweep",
+    "purchase_recognition",
+    "reward_claims_sweep",
+    "reward_read_projection",
+    "price_promotion",
+    "report_job",
+    "decision_outbox",
+  ]);
+  lines.length = 0;
+  const off = Object.fromEntries(Object.keys(on).map((flag) => [flag, "0"]));
+  await runScheduled({ ...env, ...off } as unknown as Env, stages, log);
+  expect(lines.map((line) => line.event)).toEqual([
+    "observation_sweep",
+    "identity_sweep",
+    "balance_projection",
+    "price_promotion",
     "decision_outbox",
   ]);
 }, 60000);

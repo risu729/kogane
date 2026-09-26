@@ -112,6 +112,10 @@ export const REVISION_EXCLUDED_TABLES = [
   // The Processor's per-lane tick records (migration 0049): that a lane ran is
   // not something any projection reads.
   "processor_lane_ticks",
+  // Price promotion scan progress (migration 0053): where the lane is, not
+  // what a reader sees. The prices and their claims stay outside the ledger
+  // like `price_observations` itself: valuation reads CORE per request.
+  "price_promotion_cursor",
 ] as const;
 
 export type LedgerTable =

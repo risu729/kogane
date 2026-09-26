@@ -194,7 +194,7 @@ const SAMPLES: readonly Sample[] = [
     artifactKey: "raw-exchange-rate.json",
     role: "sanitized_provider_capture",
     mediaType: json,
-    dataset: null,
+    dataset: "exchange-rate",
   },
   {
     source: "sbi-shinsei",
@@ -562,7 +562,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
     "foreign-cash-balances",
     "foreign-trade-records",
   ],
-  "sbi-shinsei-bank": ["top-accounts-balance-and-activity", "yen-deposit-account"],
+  "sbi-shinsei-bank": ["top-accounts-balance-and-activity", "yen-deposit-account", "exchange-rate"],
   "sbi-vc-trade": [
     "cash-balances",
     "account-margin",

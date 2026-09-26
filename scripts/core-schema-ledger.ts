@@ -257,6 +257,16 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   // price_observations, calculation_policies → CORE
   calculation_policies: { classification: "core-keep", planRow: "prices and calculation policies" },
   price_observations: { classification: "core-keep", planRow: "prices and calculation policies" },
+  // Which claim each promoted price came from (0053): evidence, append-only.
+  price_observation_claims: {
+    classification: "core-keep",
+    planRow: "prices and calculation policies",
+  },
+  // The price promotion lane's scan progress per claim kind (0053).
+  price_promotion_cursor: {
+    classification: "operational-mutable",
+    planRow: "bounded price promotion scan progress",
+  },
   // calculation_runs/results, report_artifacts/events → CORE + DATA R2
   calculation_results: { classification: "core-keep", planRow: "calculation runs and reports" },
   calculation_runs: { classification: "core-keep", planRow: "calculation runs and reports" },

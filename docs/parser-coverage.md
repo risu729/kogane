@@ -75,6 +75,18 @@ either throw or prove the whole container, so their claim is always complete;
 the Sony contract fixes the container at 17 rows (`expectedCount: 17`) and an
 empty Sony container is a schema drift, not a complete-empty snapshot.
 
+Parsers written after the conversion emit contract v2 from their first
+version and start on `coverage-v1`. `sbi-shinsei-exchange-rate` 1.0.0
+(migration 0053, [ADR 0020](adr/0020-price-promotion-by-rule.md)) reads SBI
+Shinsei's `exchange-rate` artifact as one complete container: every board row
+gives three rate cells, so its claim states `expectedCount = rows × 3`; an
+unreadable rate cell is a `row_unreadable` issue with impact `membership` and
+leaves the board partial; an empty board, an unknown field, a duplicate
+currency or a JPY row fails the artifact. Its policy row sets
+`replaces_previous_on_complete_empty = 0`. Its frozen expectations live in
+`coverage-contract/sbi-shinsei-exchange-rate-expected.json`, beside the
+historical `expected.json`.
+
 **Parser versions are unchanged.** The output contract gained fields, but
 `tests/fixtures/observation-pipeline/coverage-contract/expected.json` freezes the observations and
 warning strings every synthetic case produced before the change, and
