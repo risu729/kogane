@@ -415,11 +415,15 @@ and registration only records it. Each unit states its own coverage
 ([ADR 0026](adr/0026-collector-unit-coverage.md)): `complete` for a
 successful connection, which enumerated its credit months from the menu and
 the past-months response and kept every month's page, the ledger of every page
-that states its state, and every export a page offers. Any failed month,
-export or parse stops the whole connection, which then keeps no artifact and
-has an `unknown` unit with a safe error code, so a unit is either whole or
-empty; the collector never reports a connection `partial` (the plan would keep
-such a unit `partial`). A `complete` unit registers as the unit outcome
+that states its state, and every export a page offers. A page kept as
+`unknown` that shows ledger rows (no heading, position 2 or later) gets no
+ledger, so its rows reach no parser: the connection is then `partial`, its
+unit `partial` with `collector_partial`, and the run `partial` although no
+failure was recorded. Any failed month, export or parse stops the whole
+connection, which then keeps no artifact and has an `unknown` unit with a safe
+error code. `complete` assumes one detail page holds its whole month, which
+has not been observed or confirmed (an open limit,
+[ADR 0026](adr/0026-collector-unit-coverage.md#consequences)). A `complete` unit registers as the unit outcome
 `success`, as the importer's did, so a successful run is `success` in
 `observation_fetch_runs` and is parsed. Terminals written before ADR 0026
 declared every unit `partial`; they stay `partial` and `not_eligible`, and the

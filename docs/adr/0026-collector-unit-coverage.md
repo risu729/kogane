@@ -68,14 +68,33 @@ For MyJCB, a connection's `success` means the collector enumerated the
 credit months from the credit menu and the past-months response and kept,
 for every one of them, the redacted page, the ledger it derives from a page
 that states its state, and every export the page offers. A page whose state
-is `unknown` keeps its HTML and gets no ledger by rule (ADR 0005); that is the
-collector's defined output for that page, not a gap. Any month, export or
-parse that fails throws the whole connection away (the stop rule): the
-connection is reported `failed` or `human-required` with no artifact, and its
-unit is `unknown` with a safe error code. So today a MyJCB unit is either
-whole or empty. The collector never reports a connection `partial`; the plan
-keeps `partial` for one that does, and never widens it. Debit datasets are
-refused before anything is stored (`artifact_dataset_unobserved`).
+is `unknown` keeps its HTML and gets no ledger by rule (ADR 0005). When that
+page shows no ledger row (the older closed months production shows), nothing
+is missing. When it shows rows (no heading, rows at position 2 or later), those
+rows are kept only as HTML that no parser reads, so the month is not captured
+whole: `collectCredit` counts such months and `collectConnection` reports the
+connection `partial`, whose unit is `partial` with `collector_partial`, and
+the Worker makes the run `partial` even with no failure entry. Any month,
+export or parse that fails throws the whole connection away (the stop rule):
+the connection is reported `failed` or `human-required` with no artifact, and
+its unit is `unknown` with a safe error code. So a MyJCB unit is `complete`
+only when every month it enumerated reached a ledger or had no row. Debit
+datasets are refused before anything is stored
+(`artifact_dataset_unobserved`).
+
+A unit is one MyJCB ID (one connection): its root card's statement, which
+carries the family, ETC and QUICPay cards under it. Cards reached by switching
+to another ID (おまとめログイン) are other connections with their own
+credentials; switching is not implemented, so a unit never claims them.
+
+What `complete` rests on and nobody has verified: that one
+`detail.html?detailMonth=N&output=web` response carries every row of that
+month. The source note lists the row limit as unconfirmed, and the collector
+does not reconcile a page's rows with the total it states. The same unknown
+keeps GLOBAL PASS `partial`; MyJCB is declared `complete` because the retired
+importer recorded the same connections as `success` and every MyJCB parse so
+far rests on that claim. This is a limit, written in the source note and in
+Consequences, not an observation.
 
 ## Options considered
 
@@ -98,7 +117,8 @@ refused before anything is stored (`artifact_dataset_unobserved`).
 
 **Option 4.** `myJcbRunPlan` states each connection's unit coverage as it
 computes it: `complete` for a successful connection, `partial` for one that
-reports itself partial, `unknown` for a failed or human-required one. The
+reports itself partial (a month whose rows the collector withheld),
+`unknown` for a failed or human-required one. The
 run's `coverageStatus` stays `partial` on success (a claim about the cards'
 history, recorded only) and `unknown` on failure.
 
@@ -114,6 +134,17 @@ eligibility rules and registration are unchanged.
   sibling connection's failure makes the run `partial` but leaves a finished
   connection's unit `success`; its artifacts parse only for a dataset opted
   into `unit-independent-v1`, and no migration opts a MyJCB dataset in.
+- A connection with an `unknown` month that shows rows is `partial`, its
+  unit registers as `failed` (it carries `collector_partial`), and the run is
+  `partial` and `not_eligible`. How often production shows such a page has
+  not been measured; the logged `myjcb-credit-statement-unstated` event
+  (counts only) says when it happens.
+- **MyJCB `complete` assumes one detail page holds its whole month.** Whether
+  a month's page is capped or paginated has not been observed or confirmed
+  (source note, 未確認事項), and nothing compares a page's rows with its
+  stated total. If a page were ever truncated, a `complete` unit would miss
+  rows. Lifting this limit needs the same evidence GLOBAL PASS needs, or a
+  reconciliation of rows against the stated total in `packages/domain`.
 - **Terminals written before this deploy stay `partial` and are never
   parsed.** They are immutable. ADR 0022's contract v2 does not change that:
   it registers or carries a run over with unit reports derived from the same
@@ -145,8 +176,11 @@ eligibility rules and registration are unchanged.
   two-connection run declares both units `complete` and the run `partial`; a
   partial run with a human-required connection keeps the finished
   connection's unit `complete` and the blocked one `unknown` with
-  `human_required`; a connection that reports itself `partial` keeps a
-  `partial` unit with `collector_partial`.
+  `human_required`; a connection that reports itself `partial`, with no
+  failure entry, keeps a `partial` unit with `collector_partial`.
+- `services/collector-myjcb/test/credit-statement-state.test.ts`: an empty
+  `unknown` page withholds nothing; `unknown` pages that show rows are counted
+  as withheld months, which makes `collectConnection` report `partial`.
 - `services/processor/test/myjcb-shared-r2.test.ts` (Miniflare, all
   migrations, the operator bootstrap): the collector's real plan, unchanged,
   registers with run status and unit outcome `success`, creates four parse

@@ -133,9 +133,9 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * past-months response and kept every one of them: the page, the ledger the
  * collector derives from a page that states its state, and every export the
  * page offers. A month or an export that fails stops the whole connection
- * (ADR 0005's stop rule), which then keeps no artifact, so today a connection
- * is either whole or empty. `partial` stays for a connection that reports it,
- * which `collectConnection` does not produce.
+ * (ADR 0005's stop rule), which then keeps no artifact. `collectConnection`
+ * reports `partial` when a month's page shows rows but no stated state, so
+ * the rows were kept as HTML only; that unit stays `partial`.
  */
 function coverage(status: ConnectionSummary["status"]): CoverageStatus {
   if (status === "success") return "complete";

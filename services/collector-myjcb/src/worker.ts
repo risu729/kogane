@@ -118,7 +118,12 @@ async function runSharedCollection(
       }
     }
     const completedAt = new Date().toISOString();
-    const status = failures.length === 0 ? "success" : artifactCount === 0 ? "failed" : "partial";
+    // A connection that reports itself partial makes the run partial even
+    // without a failure (ADR 0026).
+    const whole =
+      failures.length === 0 &&
+      connections.every((connection) => connection.summary.status === "success");
+    const status = whole ? "success" : artifactCount === 0 ? "failed" : "partial";
     const input = {
       schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       runId,

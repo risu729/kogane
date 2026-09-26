@@ -175,7 +175,10 @@ Concrete limits in the current code:
   `partial` the same way and are not parsed: whether an activity page holds a
   whole month has not been observed. Vpass card runs also declare a
   `partial` unit, which will keep them from parsing once their captures get a
-  parser dataset.
+  parser dataset. A MyJCB connection's `complete` unit rests on the same
+  unobserved premise (one detail page holds its whole month), and a
+  connection whose older month shows rows without a stated state is
+  `partial` and its run is not parsed.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.

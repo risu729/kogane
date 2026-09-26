@@ -293,8 +293,9 @@ describe("G1-08/G1-09/G3-11 the outcome of the run survives persistence", () => 
   });
 
   test("ADR 0026: a connection that reports itself partial keeps a partial unit", async () => {
-    // `collectConnection` never reports `partial` today (a failed month stops
-    // the connection and keeps nothing); the plan still never widens one.
+    // `collectConnection` reports `partial` when a month's page shows rows it
+    // does not state the state of: the page is kept, its rows reach no
+    // parser. There is no failure entry, and the Worker makes the run partial.
     const whole = connection("account-one");
     const partial = {
       ...connection("account-two"),
@@ -304,14 +305,7 @@ describe("G1-08/G1-09/G3-11 the outcome of the run survives persistence", () => 
       input({
         status: "partial",
         connections: [whole, partial],
-        failures: [
-          {
-            connectionId: "account-two",
-            operation: "collect",
-            errorType: "Error",
-            message: "Collector operation failed",
-          },
-        ],
+        failures: [],
       }),
     );
     expect(plan.run.providerOutcome).toBe("partial");
