@@ -21,6 +21,7 @@ different rules.
 - [ADR 0012: Mizuho identity policy version 2](docs/adr/0012-mizuho-identity-policy-v2.md)
 - [ADR 0013: agent read access to card purchases](docs/adr/0013-agent-card-purchase-read.md)
 - [ADR 0015: source authority v2 names CORE source ids](docs/adr/0015-source-authority-v2.md)
+- [ADR 0016: MyJCB pending statements keyed by payment month, current while their position shows them](docs/adr/0016-myjcb-pending-statement-slots.md)
 - [ADR 0017: card purchase review command kinds](docs/adr/0017-card-purchase-review-commands.md)
 - [ADR 0019: reported state on a date](docs/adr/0019-dated-reported-state.md)
 - [ADR 0022: parser datasets for registered shared-R2 artifacts (proposed)](docs/adr/0022-registration-artifact-datasets.md)
