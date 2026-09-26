@@ -55,6 +55,16 @@ export function coreDatabase(from = "0017"): Database {
  * seal), the real registry, run and artifact tables with all their triggers.
  */
 export function fullCoreDatabase(): Database {
+  // Every migration runs once per process; each call gets its own copy of the
+  // resulting file image. Replaying all of CORE per call took most of a
+  // test's default 5 s budget on a loaded CI runner when a test built two.
+  coreImage ??= migratedCoreImage();
+  const db = Database.deserialize(coreImage);
+  db.exec("PRAGMA foreign_keys=ON");
+  return db;
+}
+let coreImage: Uint8Array | undefined;
+function migratedCoreImage(): Uint8Array {
   const directory = fileURLToPath(CORE_MIGRATIONS_URL);
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
@@ -62,7 +72,9 @@ export function fullCoreDatabase(): Database {
     .filter((entry) => entry.endsWith(".sql"))
     .sort())
     db.exec(readFileSync(join(directory, name), "utf8"));
-  return db;
+  const image = db.serialize();
+  db.close();
+  return image;
 }
 
 class SqliteStatement implements D1StatementLike {
