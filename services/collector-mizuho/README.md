@@ -14,9 +14,10 @@ sanitized evidence, and discards its session. Additional authentication or an
 unrecognized login page stops the run; the Worker neither answers challenges
 nor retries password submissions. Scheduled retries are explicitly disabled.
 `infra/deploy-order.json` includes the Worker in the normal production release,
-with a public health postcheck. Local WSL session-based reads have been verified;
-password login and authenticated cloud collection require their own live
-verification. Health success alone does not establish successful bank access.
+with a public health postcheck. Local WSL session-based reads have been verified,
+and the daily cron runs (password login and authenticated cloud collection) have
+registered in production since 2026-09-24. Health success alone does not
+establish successful bank access.
 
 ## Operations
 
