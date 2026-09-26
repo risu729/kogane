@@ -148,6 +148,7 @@ describe("G1-01/G1-02 persisting a run", () => {
 
     const read = await readTerminal(bucket, "prestia-globalpass", RUN_ID);
     if (read.outcome !== "found") throw new Error("unreachable");
+    expect(read.manifest.producer).toBe("collector-prestia-globalpass");
     expect(read.manifest.artifacts.map((entry) => entry.artifactKey)).toEqual([
       "activity-2099-01.html",
       "activity-2099-02.html",

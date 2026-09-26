@@ -30,7 +30,7 @@ import type { CollectionFailure, CollectionManifest, RawArtifact } from "./types
 /** `runs/<source>/…` in DATA. The CORE source id (`sbi-shinsei-bank`) is the
  * Processor's business; a terminal names the collector's own source. */
 export const SHARED_SOURCE = "sbi-shinsei";
-const PRODUCER = "collector-sbi-shinsei";
+export const PRODUCER = "collector-sbi-shinsei";
 const NORMALIZED_DATASET = "normalized";
 const TOP_BALANCES_ARTIFACT_KEY = "raw-top-accounts-balance-and-activity.json";
 const MANIFEST_ARTIFACT_KEY = "manifest.json";

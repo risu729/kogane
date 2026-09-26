@@ -63,26 +63,6 @@ const STARTED_AT = "2026-09-01T00:00:00.000Z";
 const COMPLETED_AT = "2026-09-01T00:05:00.000Z";
 const encoder = new TextEncoder();
 
-/**
- * Terminal sources whose collector, when this test was written, still named a
- * producer other than the one its ingest route declares
- * (`collector-<terminal source>`, `config/ingest-clients.json`). That is a
- * separate blocker (the producer-id PR, ADR 0021); this test stubs only the
- * producer field for them so the rest of the registration contract is still
- * proven. The test fails as soon as one of them names the route's producer,
- * so whoever lands the producer fix removes the source from this list.
- */
-const PRODUCER_FIX_PENDING = new Set([
-  "moneyforward-me",
-  "myjcb",
-  "prestia-globalpass",
-  "sony-bank",
-  "v-point",
-  "v-point-pay",
-  "v-point-pay-email",
-  "vpass",
-]);
-
 interface Harness {
   db: Database;
   bucket: FakeR2Bucket;
@@ -128,22 +108,15 @@ interface Registered {
  * contract: registered, sealed, not blocked, every artifact catalogued.
  */
 async function registerPlan(plan: PersistRunPlan, expectedArtifacts: number): Promise<Registered> {
-  const { source } = plan.run;
-  const expected = routeProducer(source);
-  let run = plan.run;
-  if (PRODUCER_FIX_PENDING.has(source)) {
-    expect(
-      run.producer,
-      `${source} now names its route's producer; drop it from the list`,
-    ).not.toBe(expected);
-    run = { ...run, producer: expected };
-  } else {
-    expect(run.producer).toBe(expected);
-  }
+  const { run } = plan;
+  const { source } = run;
+  // The producer the collector names is the one its route declares (ADR 0014);
+  // nothing here is stubbed.
+  expect(run.producer).toBe(routeProducer(source));
   expect(plan.artifacts).toHaveLength(expectedArtifacts);
 
   const h = harness();
-  const persisted = await persistRun(h.bucket, { run, artifacts: plan.artifacts });
+  const persisted = await persistRun(h.bucket, plan);
   expect(persisted.outcome).toBe("persisted");
   const result = await registerCollectionRun(h.env, { source, runId: run.runId });
   expect(result).toMatchObject({ outcome: "registered", artifacts: expectedArtifacts });
@@ -649,7 +622,7 @@ test("v-point-pay: re-encoded responses and a YYYY-MM month range register and s
   ]);
 });
 
-// --- Sources that only the producer fix stands between ------------------------
+// --- Sources the producer fix (ADR 0014) alone stood between -----------------
 
 test("v-point-pay-email: the message and the event extracted from it register and seal", async () => {
   const raw = encoder.encode("From: synthetic\r\n\r\nsynthetic body\r\n");

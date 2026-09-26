@@ -96,7 +96,7 @@ describe("G1-02 shared mode persists every artifact and then the terminal", () =
     expect(manifest.providerOutcome).toBe("success");
     expect(manifest.coverageStatus).toBe("complete");
     expect(manifest.safeErrorCode).toBeUndefined();
-    expect(manifest.producer).toBe("sony-bank-worker");
+    expect(manifest.producer).toBe("collector-sony-bank");
     expect(manifest.producerVersion).toBe(schemaVersion);
     expect(manifest.requestedScope).toEqual({
       scopeKind: "date_range",

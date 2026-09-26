@@ -31,7 +31,7 @@ export type { SharedRunSummary };
 
 /** `runs/<source>/…` in DATA; the CORE source id is the same string. */
 export const SHARED_SOURCE = "sbi-vc-trade";
-const PRODUCER = "collector-sbi-vc-trade";
+export const PRODUCER = "collector-sbi-vc-trade";
 const MANIFEST_ARTIFACT_KEY = "manifest.json";
 const JSON_MEDIA_TYPE = "application/json";
 /** The single unit the central descriptors already use for this source. */

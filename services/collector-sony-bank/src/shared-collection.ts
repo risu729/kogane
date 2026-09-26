@@ -32,8 +32,11 @@ import {
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 
-const SOURCE = "sony-bank";
-const PRODUCER = "sony-bank-worker";
+export const SOURCE = "sony-bank";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-sony-bank";
+/** The redaction step's transformer id; it stayed when the producer took the route's name. */
+const REDACTOR_ID = "sony-bank-worker";
 /** One credential, one account: the run's only addressable unit. */
 const UNIT_KEY = "account";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
@@ -253,7 +256,7 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
       transformations.push({
         transformationId: `redacted:${artifact.filename}`,
         stepKind: "redacted",
-        transformerId: PRODUCER,
+        transformerId: REDACTOR_ID,
         transformerVersion: input.schemaVersion,
         inputArtifactKeys: [],
         outputArtifactKey: artifact.filename,

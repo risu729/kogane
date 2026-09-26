@@ -34,14 +34,14 @@ import {
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 
-const SOURCE = "myjcb";
-const PRODUCER = "myjcb-worker";
+export const SOURCE = "myjcb";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-myjcb";
 /**
  * What derives a ledger or the discovery record from provider pages: this
- * collector, named by its collector id (ADR 0021). It is not the producer
- * constant above, so the terminal's lineage does not move with it.
+ * collector, named by its collector id (ADR 0021).
  */
-const TRANSFORMER_ID = "collector-myjcb";
+const TRANSFORMER_ID = PRODUCER;
 const LEDGER_FILENAME = /^credit-ledger-(\d{2})\.json$/u;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 /**

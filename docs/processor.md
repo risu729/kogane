@@ -149,7 +149,12 @@ not exist before U09, so the Processor's ingest routes are declared together
 with them in `config/ingest-clients.json` and applied as one idempotent SQL
 file (§10). `scripts/config-bootstrap.test.ts` checks that the declared
 routes are exactly the mapping table's entries and that every CORE id the
-table points at is a declared source.
+table points at is a declared source; `tests/collector-producers.test.ts`
+checks the collectors' side, that every terminal a collector writes names
+`collector-<its source>` and that the pair is one of those routes
+([ADR 0014](adr/0014-collector-producer-ids.md)). A terminal already written
+with another producer keeps it: it stays `retryable` with
+`inactive_ingest_route` and never registers.
 
 ### 3.2 Failed runs
 

@@ -39,7 +39,8 @@ import {
 
 /** `runs/<source>/…` in DATA. The Processor maps it to the CORE source `global-pass`. */
 export const SHARED_SOURCE = "prestia-globalpass";
-const PRODUCER = "collector-globalpass";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-prestia-globalpass";
 const MANIFEST_ARTIFACT_KEY = "manifest.json";
 const JSON_MEDIA_TYPE = "application/json";
 /** The single unit the central descriptors already use for this source. */

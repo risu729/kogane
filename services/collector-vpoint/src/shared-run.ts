@@ -29,8 +29,12 @@ import type { PreparedVPointPayEmail } from "./vpoint-pay-email";
 
 export const VPOINT_SOURCE = "v-point";
 export const VPOINT_PAY_EMAIL_SOURCE = "v-point-pay-email";
-/** Same producer for both sources: one Worker acquires them. */
-export const SHARED_PRODUCER = "collector-vpoint";
+/**
+ * One producer per source, `collector-<collector id>`, as the Processor's
+ * routes name them (ADR 0014); one Worker acquires both.
+ */
+export const VPOINT_PRODUCER = "collector-v-point";
+export const VPOINT_PAY_EMAIL_PRODUCER = "collector-v-point-pay-email";
 const VPOINT_UNIT_KEY = "account";
 const VPOINT_UNIT_KIND = "collection";
 const EMAIL_UNIT_KEY = "notification";
@@ -38,10 +42,9 @@ const EMAIL_UNIT_KIND = "message";
 const EMAIL_PARSER_ID = "vpoint-pay-email-parser";
 /**
  * What turns a V Point API response into a stored ledger artifact: this
- * collector, named by its collector id (ADR 0021). It is not the producer
- * constant above, so the terminal's lineage does not move with it.
+ * collector, named by its collector id (ADR 0021).
  */
-const VPOINT_TRANSFORMER_ID = "collector-v-point";
+const VPOINT_TRANSFORMER_ID = VPOINT_PRODUCER;
 const FALLBACK_ERROR_CODE = "collector_failed";
 /** The manifest's own machine-code charset; a code that fails it is replaced. */
 const SAFE_CODE = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
@@ -86,7 +89,7 @@ export async function vPointRunPlan(run: VPointSharedRun): Promise<PersistRunPla
   const safeErrorCode = providerOutcome === "success" ? undefined : failureCode(run.failureCodes);
   const fields: TerminalRunFields = {
     source: VPOINT_SOURCE,
-    producer: SHARED_PRODUCER,
+    producer: VPOINT_PRODUCER,
     producerVersion: run.producerVersion,
     runId: run.runId,
     attemptId: run.attemptId,
@@ -189,7 +192,7 @@ export async function vPointPayEmailRunPlan(
   };
   const fields: TerminalRunFields = {
     source: VPOINT_PAY_EMAIL_SOURCE,
-    producer: SHARED_PRODUCER,
+    producer: VPOINT_PAY_EMAIL_PRODUCER,
     producerVersion,
     runId: prepared.event.id,
     attemptId: `message-${prepared.event.id}`,

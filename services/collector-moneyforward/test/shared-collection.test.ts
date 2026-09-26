@@ -76,7 +76,7 @@ describe("G1-02 shared mode persists every page and then the terminal", () => {
     if (read.outcome !== "found") throw new Error("unreachable");
     const manifest = read.manifest;
     expect(manifest.source).toBe("moneyforward-me");
-    expect(manifest.producer).toBe("moneyforward-worker");
+    expect(manifest.producer).toBe("collector-moneyforward-me");
     expect(manifest.producerVersion).toBe(schemaVersion);
     expect(manifest.providerOutcome).toBe("success");
     expect(manifest.coverageStatus).toBe("complete");

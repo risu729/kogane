@@ -31,13 +31,13 @@ import {
 import type { RawArtifact } from "./types";
 
 export const VPOINT_PAY_SOURCE = "v-point-pay";
-export const SHARED_PRODUCER = "collector-vpoint-pay";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const SHARED_PRODUCER = "collector-v-point-pay";
 /**
  * What turns an app API response into a stored artifact: this collector,
- * named by its collector id (ADR 0021). It is not the producer constant above,
- * so the terminal's lineage does not move with it.
+ * named by its collector id (ADR 0021).
  */
-const TRANSFORMER_ID = "collector-v-point-pay";
+const TRANSFORMER_ID = SHARED_PRODUCER;
 const UNIT_KEY = "account";
 const UNIT_KIND = "collection";
 const FALLBACK_ERROR_CODE = "collector_failed";

@@ -6,7 +6,7 @@
   [collection: the registration contract](../collection.md#shared-data-bucket-per-source-u09),
   [processor §3](../processor.md#3-idempotency-and-what-blocks),
   `services/processor/test/collector-plans.test.ts`
-- Related: the producer-id PR (blocker 1 below), the Processor PR for
+- Related: ADR 0014 and #259 (producer ids, blocker 1 below), the Processor PR for
   registered artifacts without a `dataset` and its ADR 0022 (blocker 4)
 
 ## Context
@@ -21,7 +21,7 @@ selects. Four independent blockers:
 1. **Producer ids.** Eight terminal sources name a producer other than the
    one their ingest route declares (`collector-<terminal source>`), so the
    route is inactive and the run stays retryable. Fixed by the producer-id
-   PR, not here.
+   PR (#259, ADR 0014), not here.
 2. **`artifact_lineage_unstated`.** The derivation refuses a
    `collector_derived` artifact that no transformation names as its output,
    and CORE's CHECK (`0001_initial.sql`) forbids a derived artifact with
@@ -113,11 +113,9 @@ The registration contract a collector states in its terminal:
   and every unit's declared count equals its artifacts. It lives in
   `services/processor` because that workspace already runs the full CORE
   schema and typechecks cross-workspace sources cleanly.
-- **Producers are not changed here.** Until the producer-id PR lands, the
-  test stubs only the `producer` field for the sources in
-  `PRODUCER_FIX_PENDING`, and asserts that each of them still differs from its
-  route, so the list fails the test once the fix is merged and whoever merges
-  it removes the entries.
+- **Producers are not changed here.** They were fixed by #259
+  ([ADR 0014](0014-collector-producer-ids.md)); the test asserts that every
+  plan names its route's producer and stubs nothing.
 
 The Processor's refusals, `descriptors.ts` and the registration contract
 version (`terminal-registration-v1`) are unchanged: every terminal that
@@ -151,7 +149,8 @@ registered before registers to the same descriptors.
   Mobile Suica, St.George, SMBC Direct, sbi-securities, sbi-shinsei,
   sbi-vc-trade, GLOBAL PASS, MyJCB, V Point, V Point Pay, V Point Pay email,
   Money Forward ME, Sony Bank and Vpass. Run against the collector sources of
-  the base commit (bd3f1a5), 10 fail: `artifact_lineage_unstated`
+  the base commit (bd3f1a5, with the producer stubbed to the route's for the
+  eight sources #259 later fixed), 10 fail: `artifact_lineage_unstated`
   (sbi-securities, sbi-shinsei, MyJCB, V Point), `run_inventory_incomplete`
   (SMBC Direct, sbi-vc-trade, GLOBAL PASS, Vpass), `invalid_start_value`
   (V Point Pay) and the manifest-unit rule (Sony Bank, which registered);
