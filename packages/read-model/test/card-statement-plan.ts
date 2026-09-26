@@ -61,7 +61,8 @@ function ancestors(steps: readonly PlanStep[], step: PlanStep): string[] {
 
 /**
  * The `ranked` CTE of `card_statement_facts` and `card_bank_debit_facts`
- * (migration 0044) ranks every capture of the history, and `ready_statements`
+ * (migration 0044), and the `sbi_shinsei_ranked` branch migration 0052 adds to
+ * the latter, rank every capture of the history, and `ready_statements`
  * (card-settlement-readiness.ts) ranks the captures of the periods its
  * candidates' statements name; their whole read of the balance observations
  * (`b`) is the one documented in docs/card-settlements.md (Cost) and is
@@ -69,7 +70,7 @@ function ancestors(steps: readonly PlanStep[], step: PlanStep): string[] {
  */
 const insideRanked = (steps: readonly PlanStep[], step: PlanStep): boolean =>
   ancestors(steps, step).some((detail) =>
-    /^(?:CO-ROUTINE|MATERIALIZE) (?:ranked|ready_statements)$/u.test(detail),
+    /^(?:CO-ROUTINE|MATERIALIZE) (?:ranked|sbi_shinsei_ranked|ready_statements)$/u.test(detail),
   );
 
 /**
@@ -105,7 +106,7 @@ export function statementPlanProblems(
       if (step.detail === "SCAN CONSTANT ROW") return false;
       const name = step.detail.slice(5).split(" ")[0]!;
       if (bounded.has(name) || /^\(subquery-\d+\)$/u.test(name)) return false;
-      if (name === "ranked") return false;
+      if (name === "ranked" || name === "sbi_shinsei_ranked") return false;
       if (name === "b" && insideRanked(steps, step)) return false;
       return true;
     })
