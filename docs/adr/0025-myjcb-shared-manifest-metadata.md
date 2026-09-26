@@ -15,7 +15,7 @@
   [ADR 0005](0005-myjcb-statement-state-from-page.md) and
   [ADR 0007](0007-myjcb-statement-identity.md) (what the statement state and
   period are used for)
-- Merge order: after ADR 0022 (#269) and ADR 0021; see Consequences.
+- Merge order: after #269 (ADR 0022) and #265 (ADR 0021); see Consequences.
 
 ## Context
 
