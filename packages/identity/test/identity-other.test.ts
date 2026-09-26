@@ -116,6 +116,36 @@ describe("non-SBI account identification", () => {
     expect(forged.account.status).toBe("unresolved");
     expect(forged.account.key).toEqual(["vpass:card-001", "fetch-run", "4"]);
   });
+  test("ADR 0023: the collector's trusted token keys the same account reference as the importer's", () => {
+    const binding = {
+      cardToken: `vpass-card-v1-${"a".repeat(64)}`,
+      bindingArtifactId: 10,
+      financialUnitId: 20,
+    };
+    const importer = otherIdentity(
+      input("vpass", "vpass:card-001", {
+        producerId: "collector-r2-importer",
+        trustedVpassBinding: binding,
+      }),
+    );
+    const collector = otherIdentity(
+      input("vpass", "vpass:card-002", {
+        producerId: "collector-vpass",
+        fetchRunId: 99,
+        trustedVpassBinding: { ...binding, bindingArtifactId: 11, financialUnitId: 21 },
+      }),
+    );
+    expect(collector.account.key).toEqual(importer.account.key);
+    expect(collector.account.status).toBe("provider-local");
+    expect(importer.account.reason).toBe("verified-importer-durable-card-binding");
+    expect(collector.account.reason).toBe("verified-collector-durable-card-binding");
+    // Without the store-verified binding, a collector row stays run-scoped.
+    const unbound = otherIdentity(
+      input("vpass", "vpass:card-001", { producerId: "collector-vpass", fetchRunId: 99 }),
+    );
+    expect(unbound.account.status).toBe("unresolved");
+    expect(unbound.account.key).toEqual(["vpass:card-001", "fetch-run", "99"]);
+  });
   test("V Point common semantic buckets survive ordinal and run changes", () => {
     const extra = {
       point_type: 0,

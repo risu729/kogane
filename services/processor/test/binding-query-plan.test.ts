@@ -13,7 +13,9 @@ test("trusted binding lookup flattens to artifact primary key with the complete 
     for (const file of readdirSync(dir)
       .filter((f) => f.endsWith(".sql"))
       .sort()) {
-      if (file.startsWith("0021_")) continue;
+      // 0021 is applied below; 0055 recreates the view again and is checked
+      // after it (ADR 0023).
+      if (file.startsWith("0021_") || file.startsWith("0055_")) continue;
       db.exec(readFileSync(new URL(file, dir), "utf8"));
     }
     const before = db
@@ -57,6 +59,45 @@ test("trusted binding lookup flattens to artifact primary key with the complete 
       true,
     );
     expect(after.some((s) => s.startsWith("SCAN "))).toBe(false);
+
+    // Migration 0055 adds the shared-R2 branch as a UNION ALL arm. Each arm
+    // still starts from the artifact's primary key, nothing is materialized
+    // as a co-routine, and nothing scans (checked without table statistics).
+    const identityPlans = (): string[][] =>
+      ["eligible_identity_runs", "current_identity_observations"].map((view) =>
+        db
+          .prepare<{ detail: string }, []>(`EXPLAIN QUERY PLAN SELECT * FROM ${view} LIMIT 40`)
+          .all()
+          .map((r) => r.detail),
+      );
+    const fetchArtifactAccess = (plan: string[]) => plan.filter((s) => s.startsWith("SEARCH fa "));
+    const identityBefore = identityPlans();
+    db.exec(readFileSync(new URL("0055_vpass_collector_card_binding.sql", dir), "utf8"));
+    const lookup = db
+      .prepare<{ detail: string }, []>(query)
+      .all()
+      .map((r) => r.detail);
+    const correlatedLookup = db
+      .prepare<{ detail: string }, []>(correlated)
+      .all()
+      .map((r) => r.detail);
+    for (const plan of [lookup, correlatedLookup]) {
+      expect(plan.some((s) => s.includes("CO-ROUTINE"))).toBe(false);
+      expect(plan).toContain("UNION ALL");
+      expect(plan.filter((s) => s === "SEARCH fa USING INTEGER PRIMARY KEY (rowid=?)")).toHaveLength(
+        2,
+      );
+      expect(plan.some((s) => s.startsWith("SCAN fa"))).toBe(false);
+    }
+    expect(lookup.some((s) => s.startsWith("SCAN "))).toBe(false);
+    identityPlans().forEach((plan, index) => {
+      expect(plan.some((s) => s.includes("CO-ROUTINE"))).toBe(false);
+      // The importer's arm keeps the access path 0021 gave it, and the new
+      // arm takes the same one.
+      const access = fetchArtifactAccess(plan);
+      expect(access).toHaveLength(2);
+      expect(new Set(access)).toEqual(new Set(fetchArtifactAccess(identityBefore[index]!)));
+    });
   } finally {
     db.close();
   }

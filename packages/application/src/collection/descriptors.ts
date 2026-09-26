@@ -373,6 +373,39 @@ function fidelityAndLineage(
 }
 
 /**
+ * The Vpass card binding a collector derives (ADR 0023): the one
+ * `collector_derived` artifact the trusted binding view reads
+ * (`trusted_vpass_card_bindings`, migrations 0020, 0021 and 0055). The view
+ * requires this dataset and format, which `terminal-v1` cannot state, so the
+ * derivation names them for exactly this key, role and media type and for
+ * nothing else. It is not a parser dataset: no parser reads it, and the view
+ * checks the rest of the binding (the unit, the token shape, the run).
+ */
+export const VPASS_CARD_BINDING_DESCRIPTOR = {
+  source: "vpass",
+  artifactKey: "card-identity-binding.json",
+  role: "collector_derived",
+  mediaType: "application/json",
+  dataset: "card-identity-binding",
+  formatId: "vpass-card-identity-binding-json",
+  formatVersion: "1",
+} as const;
+
+function vpassCardBinding(
+  manifest: TerminalManifest,
+  artifact: TerminalArtifact,
+  role: ArtifactRole,
+): Pick<ArtifactRequest, "dataset" | "formatId" | "formatVersion"> {
+  const rule = VPASS_CARD_BINDING_DESCRIPTOR;
+  return manifest.source === rule.source &&
+    artifact.artifactKey === rule.artifactKey &&
+    role === rule.role &&
+    artifact.mediaType === rule.mediaType
+    ? { dataset: rule.dataset, formatId: rule.formatId, formatVersion: rule.formatVersion }
+    : {};
+}
+
+/**
  * One artifact descriptor.
  *
  * No origin block is recorded. The manifest states the object's key in the
@@ -407,6 +440,7 @@ export function artifactRequest(
     artifact.mediaType === "application/json"
       ? { dataset: "account-snapshot" }
       : {}),
+    ...vpassCardBinding(manifest, artifact, role),
     artifactRole: role,
     payloadFidelity,
     containerKind: "single",

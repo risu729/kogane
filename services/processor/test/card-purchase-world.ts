@@ -92,7 +92,11 @@ const MYJCB_LABEL = "架空";
 const myjcbCombinedCell = (row: Pick<UsageRow, "merchant" | "paymentType">): string =>
   row.paymentType === "" ? row.merchant : `${row.merchant} ${row.paymentType}`;
 
-function vpassPayload(family: "web" | "customized", month: string, rows: readonly UsageRow[]) {
+export function vpassPayload(
+  family: "web" | "customized",
+  month: string,
+  rows: readonly UsageRow[],
+) {
   if (family === "web") {
     const payload = template("web");
     payload["body"]["content"]["WebMeisaiTopDisplayServiceBean"]["meisaiList"] = rows.map(
@@ -245,6 +249,14 @@ export class World {
       card?: string;
       month?: string;
       token?: string | null;
+      /**
+       * Where the binding sits: `importer` (default), the retired importer's
+       * sibling run in a `vpass-worker-card-v1` session; `collector`, a second
+       * unit of the card's own run in a `shared-r2` session under the run key
+       * registration writes (ADR 0023; the shape
+       * `vpass-collector-binding.test.ts` registers from a real collector plan).
+       */
+      binding?: "importer" | "collector";
     },
   ): Promise<Capture> {
     const card = input.card ?? "card-001";
@@ -252,7 +264,10 @@ export class World {
     const run = this.id();
     const unit = this.id();
     const artifact = this.id();
-    const key = `cards/${card}/months/${month}/top-000.json`;
+    const collector = input.binding === "collector";
+    const key = collector
+      ? `months/${month}/top-000.json`
+      : `cards/${card}/months/${month}/top-000.json`;
     const payload = vpassPayload(input.family, month, input.rows);
     await seedUnitRun(this.env, {
       id: run,
@@ -268,11 +283,19 @@ export class World {
     await this.db.batch([
       this.db
         .prepare("UPDATE acquisition_sessions SET producer_id=?,external_id_namespace=? WHERE id=?")
-        .bind(input.producer ?? PRODUCER, VPASS_NAMESPACE, run),
+        .bind(input.producer ?? PRODUCER, collector ? "shared-r2" : VPASS_NAMESPACE, run),
       this.db.prepare("UPDATE fetch_units SET unit_kind='card' WHERE id=?").bind(unit),
+      ...(collector
+        ? [
+            this.db
+              .prepare("UPDATE fetch_runs SET source_run_key=? WHERE id=?")
+              .bind(`run-${run}-${card}:terminal-registration-v1`, run),
+          ]
+        : []),
     ]);
     const token = input.token === undefined ? TOKEN_A : input.token;
-    if (token !== null) await this.bind(run, card, token, input.producer ?? PRODUCER);
+    if (token !== null && collector) await this.bindInRun(run, token);
+    else if (token !== null) await this.bind(run, card, token, input.producer ?? PRODUCER);
     return this.parse(
       run,
       artifact,
@@ -312,6 +335,25 @@ export class World {
       this.db
         .prepare("INSERT INTO fetch_run_seals(fetch_run_id,sealed_at_ms) VALUES(?,0)")
         .bind(binding),
+    ]);
+  }
+
+  /** The collector's binding: a token unit and its artifact inside the card's own run (ADR 0023). */
+  private async bindInRun(run: number, token: string): Promise<void> {
+    const unit = this.id();
+    const artifact = this.id();
+    await this.db.batch([
+      this.db
+        .prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')")
+        .bind(unit, run, token),
+      this.db
+        .prepare("INSERT INTO fetch_unit_reports VALUES(?,'terminal','success',NULL)")
+        .bind(unit),
+      this.db
+        .prepare(
+          "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,artifact_role,format_id,format_version) VALUES(?,?,'vpass','card-identity-binding','card-identity-binding.json',?,'collector_derived','vpass-card-identity-binding-json','1')",
+        )
+        .bind(artifact, run, unit),
     ]);
   }
 

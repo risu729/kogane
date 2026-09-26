@@ -36,6 +36,13 @@ interface Env {
   VPASS_AUTH_PUBLIC_KEY_B64: string;
   VPASS_CONFIG_PUBLIC_KEY_B64: string;
   ADMIN_TRIGGER_TOKEN: string;
+  /**
+   * The card binding key (ADR 0023): 64 lowercase hex characters, the value of
+   * the retired importer's `ORIGIN_FINGERPRINT_KEY` (key version
+   * `collector-r2-v1`). Optional: without it every card run is stored with no
+   * binding and its rows stay unresolved.
+   */
+  VPASS_CARD_BINDING_KEY?: string;
 }
 type JsonObject = Record<string, unknown>;
 interface RawJsonResponse {
@@ -438,7 +445,7 @@ async function captureCard(
         selectCardRawJson: selection.rawText,
         webMeisaiTopRawJson: top.rawText,
         months: captures as SharedMonths,
-      });
+      }, env.VPASS_CARD_BINDING_KEY);
       console.log(JSON.stringify(sharedRunDiagnostic(runId, cardLabel, outcome)));
       // A run whose terminal was not written is not a finished run (G1-01).
       if (!sharedRunPersisted(outcome)) throw new Error("shared_persist_incomplete");

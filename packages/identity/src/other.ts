@@ -61,7 +61,14 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
           Number.isSafeInteger(binding.financialUnitId) &&
           binding.financialUnitId > 0
         ) {
-          account("card-statement", "verified-importer-durable-card-binding");
+          // The same token under the collector's producer (ADR 0023): the
+          // binding it wrote in its own run, checked by the same view.
+          account(
+            "card-statement",
+            input.producerId === "collector-vpass"
+              ? "verified-collector-durable-card-binding"
+              : "verified-importer-durable-card-binding",
+          );
           plan.account.key = ["vpass:card", binding.cardToken];
         } else snapshot("card-statement", "card-ordinal-needs-durable-provider-binding");
       }

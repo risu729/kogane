@@ -105,8 +105,10 @@ test("Vpass: the collector's capture of a card-month retires the importer's even
   expect(await w.totals()).toMatchObject({ captured: "1234" });
 
   // The collector's capture of the same card-month. The trusted binding view
-  // (migrations 0020/0021) accepts only the importer's producer, so even a
-  // binding-shaped sidecar under the collector's producer is not trusted.
+  // accepts the collector's producer only with the binding inside its own
+  // shared-R2 run (migration 0055, ADR 0023), so a sibling-run sidecar in the
+  // importer's shape under the collector's producer is not trusted.
+  // `vpass-collector-binding.test.ts` covers the collector's own binding.
   await w.vpass({
     family: "web",
     card: "card-001",
