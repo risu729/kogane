@@ -9,8 +9,9 @@
 // pointing at it.
 
 /** Releases known to this build. `legacy-metadata-v1` is the compatibility
- * extractor: exactly the rules `hydrateMeta` applied before A04, including
- * its reuse of an existing `observation_artifact_metadata` row. Its input
+ * extractor: the rules `hydrateMeta` applied before A04, including its reuse
+ * of an existing `observation_artifact_metadata` row, plus the MyJCB
+ * shared-manifest lookup for inputs those rules refused (ADR 0025). Its input
  * digest is always `unknown`, because the code that produced the historical
  * values is not recorded anywhere and is never reconstructed from today's. */
 export const LEGACY_METADATA_RELEASE = "legacy-metadata-v1";

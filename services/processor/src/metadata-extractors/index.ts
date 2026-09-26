@@ -2,10 +2,11 @@
 //
 // Two releases exist in this build.
 //
-//   legacy-metadata-v1  The compatibility extractor: exactly the rules
-//                       `hydrateMeta` applied before A04, including reusing an
-//                       existing `observation_artifact_metadata` row for
-//                       MyJCB and re-reading the Sony Bank media type every
+//   legacy-metadata-v1  The compatibility extractor: the rules `hydrateMeta`
+//                       applied before A04 (plus the MyJCB shared-manifest
+//                       lookup for inputs they refused, ADR 0025), including
+//                       reusing an existing `observation_artifact_metadata`
+//                       row for MyJCB and re-reading the Sony Bank media type every
 //                       time. It keeps writing that table, so the
 //                       `observation_fetch_artifacts` view and every reader
 //                       are unchanged. Its `input_digest` is `unknown`: the
