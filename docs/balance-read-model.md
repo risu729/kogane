@@ -241,6 +241,18 @@ field. Without the reader flag or a sealed snapshot it answers
 observation rows behind the projection. See
 [Agent API](agent-api.md#query-intents) for the intent's contract.
 
+## Dated reported state
+
+The projection answers "now". What each provider reported on an earlier date
+is a separate per-request read, not a projection:
+[reported state on a date](reported-state.md) chooses, per container
+partition, the latest complete snapshot captured before the end of the date
+with the same snapshot rules (`snapshotCtes` with `cutoffParam`), and lists its
+rows per provider account with their registry metric and aggregation rule. It
+does not apply `selectAdoptedSet` and adds nothing, so it has no subtotal and
+no `liabilitiesCoverage` other than `partial`
+([ADR 0019](adr/0019-dated-reported-state.md)).
+
 ## Decisions and the outbox
 
 A07 registers the real `balance-projection` processor of A09's decision outbox
