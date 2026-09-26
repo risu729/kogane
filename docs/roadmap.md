@@ -62,8 +62,10 @@ Concrete limits in the current code:
   before that fix) names no statement and is never current; the collector
   stops (`credit-statement-period`) on a confirmed page that names no month;
   a pending row and its posted row are still two keys, paired by review; and
-  when both position 0 and position 1 are unconfirmed (a closed cycle not
-  yet confirmed), they still share the one unconfirmed slot.
+  a pending statement's rows get new keys once when it moves from position 0
+  to position 1. When both positions are unconfirmed (a closed cycle not yet
+  confirmed), both pending statements are current, one slot each
+  ([ADR 0016](adr/0016-myjcb-pending-statement-slots.md)).
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind

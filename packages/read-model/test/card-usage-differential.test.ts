@@ -41,8 +41,9 @@ import {
 } from "./card-usage-fixture";
 import {
   LEGACY_CURRENT_CARD_USAGE_SQL,
-  LEGACY_STALE_CARD_PURCHASE_KEYS_SQL,
-  LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
+  STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
+  STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL,
+  STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
 } from "./card-usage-legacy-sql";
 import { factOf } from "./card-usage-scale-fixture";
 
@@ -125,6 +126,13 @@ class RandomStore {
       this.store.mapAccount(cardC);
       this.store.mapAccount({ ...cardC, account: "acct-card-a" }, "manual");
       drawn.add("two cards, one account");
+    }
+    if (this.chance(0.5)) {
+      // A reviewed mapping resolves connection B to connection A's account.
+      const connB = myjcbRoot("conn-b", "acct-jcb-conn-b");
+      this.store.mapAccount(connB);
+      this.store.mapAccount({ ...connB, account: "acct-jcb-conn-a" }, "manual");
+      drawn.add("two connections, one account");
     }
   }
 
@@ -372,10 +380,16 @@ class RandomStore {
   myjcbCapture(): void {
     const outcome = this.chance(0.15) ? "failure" : "success";
     drawn.add(`myjcb run ${outcome}`);
-    const run = this.store.run("myjcb", outcome);
-    const fetchedAt = this.at();
+    // One run for every connection, or now and then one run per connection.
+    const perConnection = this.chance(0.6);
+    if (perConnection) drawn.add("myjcb run per connection");
+    const shared = perConnection ? null : { run: this.store.run("myjcb", outcome), at: this.at() };
     for (const connection of CONNECTIONS) {
       if (!this.chance(0.75)) continue;
+      const { run, at: fetchedAt } = shared ?? {
+        run: this.store.run("myjcb", outcome),
+        at: this.at(),
+      };
       const spec = myjcbRoot(connection, `acct-jcb-${connection}`);
       const identify = (parsed: Parsed): void => {
         if (this.chance(0.1)) return;
@@ -383,9 +397,26 @@ class RandomStore {
       };
       for (let detail = 0; detail < 3; detail += 1) {
         if (!this.chance(0.7)) continue;
-        const state = detail === 0 ? "unconfirmed" : "confirmed";
+        // Position 0 is pending and position 2 confirmed; position 1 is either,
+        // pending from the 16th until the closed cycle is confirmed (ADR 0016).
+        // A confirmed position 0 is no production shape (the collector stops
+        // on it) but keeps the position rule honest about any state.
+        const state =
+          detail === 0
+            ? this.chance(0.1)
+              ? "confirmed"
+              : "unconfirmed"
+            : detail === 1 && this.chance(0.5)
+              ? "unconfirmed"
+              : "confirmed";
         drawn.add(`myjcb ${state}`);
-        const period = this.pick(PERIODS);
+        drawn.add(`myjcb ${state} position ${detail}`);
+        // The collector records a pending page by its position label and a
+        // confirmed page by its month; captures from before #255 carry a
+        // confirmed position label, which the slot rule resolves or ignores.
+        const relative = this.chance(state === "unconfirmed" ? 0.6 : 0.2);
+        if (relative) drawn.add(`myjcb ${state} relative label`);
+        const period = relative ? `detailMonth-${detail}` : this.pick(PERIODS);
         const pool = this.pool(
           `j-${connection}-${period}`,
           (day) => `2026/05/${String(day).padStart(2, "0")}`,
@@ -501,7 +532,7 @@ class RandomStore {
   async retire(): Promise<void> {
     const stale = all<StaleCardPurchaseKeyRow>(
       this.db,
-      LEGACY_STALE_CARD_PURCHASE_KEYS_SQL,
+      STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL,
       staleCardPurchaseKeysSql(1000).args,
     );
     for (const eventId of new Set(stale.map((row) => row.event_id))) {
@@ -529,7 +560,7 @@ function expectSameReads(db: Database): void {
   const current = same<CurrentCardUsageRow>(
     db,
     { sql: CURRENT_CARD_USAGE_SQL, args: [0, -1] },
-    LEGACY_CURRENT_CARD_USAGE_SQL,
+    STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
   );
   for (const limit of [25, 1000]) {
     const paged: CurrentCardUsageRow[] = [];
@@ -537,7 +568,7 @@ function expectSameReads(db: Database): void {
       const page = same<CurrentCardUsageRow>(
         db,
         currentCardUsageSql({ afterId, limit }),
-        LEGACY_CURRENT_CARD_USAGE_SQL,
+        STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
       );
       paged.push(...page);
       if (page.length < limit) break;
@@ -550,18 +581,50 @@ function expectSameReads(db: Database): void {
       same(
         db,
         currentCardUsageSql({ afterId: row.observation_id, limit }),
-        LEGACY_CURRENT_CARD_USAGE_SQL,
+        STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
       );
   for (const limit of [1, 3, 100, 1000]) {
     const stale = same<StaleCardPurchaseKeyRow>(
       db,
       staleCardPurchaseKeysSql(limit),
-      LEGACY_STALE_CARD_PURCHASE_KEYS_SQL,
+      STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL,
     );
     if (stale.length > 0) drawn.add("stale keys");
     if (stale.some((row) => row.key_count > 1)) drawn.add("stale merged revision");
   }
-  same(db, unrecognizedCardUsageCountSql(), LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL);
+  same(db, unrecognizedCardUsageCountSql(), STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL);
+
+  // The MyJCB rules the stores exercise: each is recorded when dropping it
+  // (or the shipped one-slot text) would change the rows.
+  const without = (from: string): CurrentCardUsageRow[] => {
+    expect(CURRENT_CARD_USAGE_SQL.split(from)).toHaveLength(2);
+    return all(db, CURRENT_CARD_USAGE_SQL.replace(from, ""), [0, -1]);
+  };
+  if (!Bun.deepEquals(all(db, LEGACY_CURRENT_CARD_USAGE_SQL, [0, -1]), current))
+    drawn.add("shipped one-slot text differs");
+  if (!Bun.deepEquals(without("AND position_rank = 1"), current))
+    drawn.add("position rule decides a capture");
+  if (
+    !Bun.deepEquals(
+      without("AND (NOT pending_capture OR fetch_run_id = newest_position_run)"),
+      current,
+    )
+  )
+    drawn.add("account position rule decides a row");
+  const pendingPositions = new Map<string, Set<string>>();
+  for (const row of current)
+    if (row.source_id === "myjcb" && row.display_state === "pending") {
+      const { artifact_key: key } = db
+        .query("SELECT artifact_key FROM observation_fetch_artifacts WHERE id=?")
+        .get(row.fetch_artifact_id) as { artifact_key: string };
+      const [connection = "", position = ""] = key.split("/");
+      pendingPositions.set(
+        connection,
+        (pendingPositions.get(connection) ?? new Set()).add(position),
+      );
+    }
+  if ([...pendingPositions.values()].some((positions) => positions.size > 1))
+    drawn.add("two pending statements current in one connection");
 
   const rows = current;
   if (rows.some((row) => row.recognition_key === null)) drawn.add("current row without a key");
@@ -628,6 +691,19 @@ describe("the rewritten reads equal the shipped reads on random card stores", ()
         "superseded parse",
         "tied capture time",
         "two cards, one account",
+        "two connections, one account",
+        "myjcb run per connection",
+        "myjcb confirmed position 0",
+        "myjcb confirmed position 1",
+        "myjcb confirmed position 2",
+        "myjcb unconfirmed position 0",
+        "myjcb unconfirmed position 1",
+        "myjcb confirmed relative label",
+        "myjcb unconfirmed relative label",
+        "shipped one-slot text differs",
+        "position rule decides a capture",
+        "account position rule decides a row",
+        "two pending statements current in one connection",
         "vpass customized",
         "vpass run failure",
         "vpass run success",

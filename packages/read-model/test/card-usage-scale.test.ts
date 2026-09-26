@@ -21,6 +21,9 @@ import {
   LEGACY_CURRENT_CARD_USAGE_SQL,
   LEGACY_STALE_CARD_PURCHASE_KEYS_SQL,
   LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
+  STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
+  STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL,
+  STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
 } from "./card-usage-legacy-sql";
 import { currentRowsDriver, explain, perRowKeyProbes, unboundedScans } from "./card-usage-plan";
 import {
@@ -73,19 +76,21 @@ describe("current card usage on a scaled store without statistics", () => {
       const current = rows(CURRENT_CARD_USAGE_SQL, ALL_PAGES) as CurrentCardUsageRow[];
       expect(current.length).toBeGreaterThan(0);
       expect(current).toEqual(
-        rows(LEGACY_CURRENT_CARD_USAGE_SQL, ALL_PAGES) as CurrentCardUsageRow[],
+        rows(STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL, ALL_PAGES) as CurrentCardUsageRow[],
       );
       // The lane's own paging: the same rows, in the same pages.
       const paged = allCurrentUsage(db);
       expect(paged).toEqual(current);
       const legacyPaged = allCurrentUsage(db, ({ afterId, limit }) => ({
-        sql: LEGACY_CURRENT_CARD_USAGE_SQL,
+        sql: STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
         args: [afterId, limit],
       }));
       expect(legacyPaged).toEqual(paged);
       const middle = current[Math.floor(current.length / 2)]!.observation_id;
       const page = currentCardUsageSql({ afterId: middle, limit: 500 });
-      expect(rows(page.sql, page.args)).toEqual(rows(LEGACY_CURRENT_CARD_USAGE_SQL, page.args));
+      expect(rows(page.sql, page.args)).toEqual(
+        rows(STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL, page.args),
+      );
     },
     TIMEOUT,
   );
@@ -96,12 +101,14 @@ describe("current card usage on a scaled store without statistics", () => {
       for (const limit of [1, 3, 100, 1000]) {
         const stale = staleCardPurchaseKeysSql(limit);
         const found = rows(stale.sql, stale.args);
-        expect(found).toEqual(rows(LEGACY_STALE_CARD_PURCHASE_KEYS_SQL, stale.args));
+        expect(found).toEqual(rows(STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL, stale.args));
         if (limit === 1000) expect(found.length).toBeGreaterThan(0);
       }
       const count = unrecognizedCardUsageCountSql();
       const unrecognized = rows(count.sql, count.args);
-      expect(unrecognized).toEqual(rows(LEGACY_UNRECOGNIZED_CARD_USAGE_COUNT_SQL, count.args));
+      expect(unrecognized).toEqual(
+        rows(STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL, count.args),
+      );
       expect((unrecognized[0] as { unrecognized: number }).unrecognized).toBeGreaterThan(0);
     },
     TIMEOUT,
