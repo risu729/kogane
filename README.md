@@ -26,6 +26,7 @@ different rules.
 - [ADR 0021: collectors state the registration contract](docs/adr/0021-collector-registration-contract.md)
 - [ADR 0022: parser datasets for registered shared-R2 artifacts (proposed)](docs/adr/0022-registration-artifact-datasets.md)
 - [ADR 0023: no trusted card binding for collector-vpass runs](docs/adr/0023-vpass-collector-card-binding.md)
+- [ADR 0025: the MyJCB metadata extractor reads both manifest shapes (proposed)](docs/adr/0025-myjcb-shared-manifest-metadata.md)
 - [Next-milestone plan (proposed)](docs/plans/2026-09-next-milestone.md)
 - [Domain contracts (`packages/domain`)](docs/domain-contracts.md)
 - [Package layout and import boundaries](docs/package-layout.md)

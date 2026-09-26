@@ -395,7 +395,12 @@ connection blocker and a failure message become coarse codes
 text never reaches the shared bucket either. (As for Money Forward, the
 importer's central bytes also carried its parsed `connectionId`, `filename`
 and `ordinal` per artifact; the collector's manifest keeps its own artifact
-shape.)
+shape.) The Processor's metadata extractor reads that shape. It finds an entry
+by the artifact's digest, size and content-addressed key, and takes the
+`statementState` and `period` the collector recorded. The connection and
+position come from the artifact key, as before
+([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)). The unit coverage
+below is still an open limit: it keeps these runs from being parsed.
 
 Terminal fields: `producer: collector-myjcb`; one unit per connection
 (`<connectionId>`, `unitKind: connection`), so several cards in one run stay distinguishable and
@@ -404,7 +409,11 @@ provider labels rather than machine ranges and stay in the manifest artifact;
 one `terminal` report carrying the outcome; `requestedScope.scopeKind =
 full_snapshot` over the connections. `coverageStatus` is `partial` even for a
 successful run — a MyJCB card exposes a rolling set of statement periods, so a
-finished run is not a claim about the card's whole history. A connection that
+finished run is not a claim about the card's whole history. That unit
+coverage becomes the unit outcome `partial` at registration, so a successful
+MyJCB run is `partial` in `observation_fetch_runs` and gets no parse job (an
+open limit, [ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md#consequences)).
+The importer recorded a successful connection's unit as `success`. A connection that
 needs a human is a `human-required` state on its own unit with
 `safeErrorCode: human_required`, and the run-level code is `human_required`
 when every blocked connection is waiting for a person: nothing here retries a

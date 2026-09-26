@@ -407,3 +407,13 @@ per-source bucket + importer 経由。`shared` にすると run は `packages/co
 中央と同じ redaction 不変条件を再検査する。connection は terminal の unit として
 分離され、human-required は unit の状態として記録するだけで再 login はしない。
 deploy 順と rollback は `docs/collection.md` の該当節を参照。
+
+### 共通 DATA R2 の manifest と明細メタデータ（2026-09-26、ADR 0025）
+
+ledger と明細 page の parser が使う statement state と period は、run の collector manifest から processor の metadata extractor（`services/processor/src/metadata-extractors/myjcb.ts`）が読む。terminal にはこれらの field がない。importer 時代の中央 manifest は各 artifact に `connectionId` と `filename` を持っており、extractor はその二つで entry を探していた。collector が共通 bucket に書く manifest の entry は `dataset`、`key`（`objects/<2 hex>/<sha256>`）、`mediaType`、`sha256`、`bytes` と、記録した場合の `statementState`／`period` だけを持つ。そのため共通 R2 の run はすべて `manifest_artifact_mismatch` で parse に失敗していた。
+
+extractor は二つの形を読む。importer 形（どれかの entry が `connectionId` か `filename` を持つ manifest）は従来どおり名前で探し、挙動は変えない。変更前の extractor を固定した differential test で同一性を確認している。共通形では、artifact と同じ digest、size、content-addressed key を名指す entry を探し、その entry の `statementState` と `period` を使う。connection は artifact key の先頭で、manifest の `connections` にあるものでなければならない。同じ bytes が複数の entry にある場合、全 entry の値が一致するときだけ使い、一致しなければ `manifest_artifact_ambiguous` で止める。位置や名前から値を推測しない。
+
+共通形の manifest には、importer 形が持っていた `connectionId`、`filename`、`ordinal` がない。extractor はどちらの形でもこれらを出力しない。connection と position は従来どおり artifact key から読む。entry の `mediaType`（parameter 付き）は使わないので、`credit-menu.html` は引き続き parser に届かない（ADR 0022）。
+
+未解決の制限：collector は成功した connection の unit coverage も `partial` と書く（card が見せる明細期間は一部だけのため）。registration はこれを unit outcome `partial` にし、`observation_fetch_runs` ではその run が `partial` になる。run scope でも `unit-independent-v1` でも parse 対象にならないので、共通 R2 の MyJCB run は metadata extractor に届く前に `not_eligible` で止まる（`services/processor/test/myjcb-shared-r2.test.ts`）。importer は成功した connection の unit を `success` と記録していた。書き込み済みの terminal は変更できないので、修正には registration 側の判断が必要である。

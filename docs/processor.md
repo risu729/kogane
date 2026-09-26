@@ -371,10 +371,18 @@ a v2 row. Then, for a terminal v1 already registered:
 synthetic terminals, and the health route's `unregistered` count is per
 version, so v1 rows that will never be worked again do not stay in it.
 
-MyJCB artifacts are mapped but do not parse yet: the metadata extractor finds
-their manifest entry by `connectionId` and `filename`, which the shared
-collector's manifest does not carry, so each parse fails with
-`manifest_artifact_mismatch` and publishes nothing.
+MyJCB artifacts are mapped. The shared collector's manifest has no
+`connectionId` or `filename` per entry, so the metadata extractor finds an
+entry by the object it names: the artifact's digest and size, and its
+content-addressed key
+([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)). It takes the
+collector's `statementState` and `period` from that entry. The importer-era
+lookup is unchanged. MyJCB runs are still not parsed, for a different reason:
+`myJcbRunPlan` reports every unit's coverage as `partial`, `unitReportRequest`
+maps that to the unit outcome `partial`, and `observation_fetch_runs` counts
+such a run as `partial`. Neither the run scope nor `unit-independent-v1`
+admits it, so the work item ends `not_eligible`
+(`services/processor/test/myjcb-shared-r2.test.ts`).
 
 ## 4. No byte is copied
 

@@ -133,7 +133,7 @@ Concrete limits in the current code:
   runs were blocked `artifact_lineage_unstated` — until the collectors
   changed with [ADR 0021](adr/0021-collector-registration-contract.md), for
   terminals written after that release. Vpass's datasets are withheld and
-  MyJCB's captures fail at metadata extraction (below), so none of these is
+  MyJCB's runs are not eligible for parsing (below), so none of these is
   parsed yet and the importer's
   captures stay current
   ([ADR 0014, merge safety](adr/0014-collector-producer-ids.md#merge-safety)).
@@ -148,8 +148,14 @@ Concrete limits in the current code:
   than parsed a second time. Old terminals are reached only by the scan walk,
   so they drain as the scan cycles through `runs/`. Blocked runs are tried
   once more and block again where their terminal itself is refused. Vpass
-  captures are withheld (above), and MyJCB captures fail at metadata
-  extraction until the extractor reads the collector's shared manifest.
+  captures are withheld (above). MyJCB's metadata extractor reads the
+  collector's shared manifest ([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)),
+  but a MyJCB run is still not parsed: the collector reports every unit's
+  coverage as `partial`, registration turns that into a `partial` unit
+  outcome, and a run with a non-success unit is `not_eligible` for parse jobs.
+  The collector cannot change terminals it has already written, so this needs
+  a registration-side decision, which is still open. The code shows GLOBAL
+  PASS's plan does the same; that has not been exercised.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
