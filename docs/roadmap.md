@@ -67,8 +67,10 @@ Concrete limits in the current code:
   before that fix) names no statement and is never current; the collector
   stops (`credit-statement-period`) on a confirmed page that names no month;
   a pending row and its posted row are still two keys, paired by review; and
-  when both position 0 and position 1 are unconfirmed (a closed cycle not
-  yet confirmed), they still share the one unconfirmed slot.
+  a pending statement's rows get new keys once when it moves from position 0
+  to position 1. When both positions are unconfirmed (a closed cycle not yet
+  confirmed), both pending statements are current, one slot each
+  ([ADR 0016](adr/0016-myjcb-pending-statement-slots.md)).
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind
@@ -105,9 +107,11 @@ Concrete limits in the current code:
   producer and stay unregistered in R2; for the snapshot sources the next
   capture shows the provider's state again, but V Point Pay notification
   emails of that period are registered only if a later decision registers
-  those runs. The `collection_scan` walk does not revisit them either: it
-  stops at a page holding more than five terminals that never register
-  ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences)).
+  those runs. The `collection_scan` walk no longer stops at a page of such
+  terminals: it answers them from their recorded refusal and retries each at
+  most once a day, where the refusal repeats
+  ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences),
+  [ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
   Past the route check, registration still stops for three of them: a Vpass
   run's seal is refused (`run_inventory_incomplete`, a statement page is a
   `provider_response` with a `redacted` step), and MyJCB and V Point runs are
