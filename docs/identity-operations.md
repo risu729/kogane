@@ -131,6 +131,27 @@ older result. The writer's keyed eligibility view stays unchanged. This avoids
 the old plan that multiplied acquisition terminal reports by all successful
 parses, even for a direct read of the core identity view without UI joins.
 
+### Collector-vpass runs have no trusted binding
+
+Only the retired importer wrote the sidecar, and the trusted view accepts only
+its producer, `collector-r2-importer`
+([ADR 0023](adr/0023-vpass-collector-card-binding.md)). A run of the Vpass
+collector (producer `collector-vpass`, [ADR 0014](adr/0014-collector-producer-ids.md)) has
+no sidecar to find: the collector stores no
+binding artifact, redacts the session bean the token was derived from before
+storing anything, holds no fingerprint secret, and registers under the session
+namespace `shared-r2` with a registration run key, which the view's session and
+run-key joins cannot match. Were its rows parsed, they would resolve to
+run-scoped `unresolved` accounts under the collector's producer, and card
+purchase recognition would skip them as `account_not_resolved`. Even with a trusted token, a
+collector row's source account would differ from the importer-era one, because
+the reference includes the producer, so importer-era mappings and manual
+decisions would not carry over. The collector's captures therefore stay
+unparsed: today its artifacts are registered without a parser dataset and its
+producer has no ingest route, and the change that gives registered artifacts
+their parser datasets (ADR 0022) withholds the Vpass dataset until a
+collector-written binding is implemented, which amends ADR 0023.
+
 ## Policy 2: Mizuho rule re-identification
 
 The resolver had no `mizuho-bank` rule when the Mizuho collector started, so

@@ -20,6 +20,7 @@ import { cardPurchasesAvailable } from "./card-purchases-api";
 import { cardSettlementsAvailable } from "./card-settlements-api";
 import { eventsV2Available, flagOn } from "./events-api";
 import { opsApiEnabled } from "./ops-api";
+import { reportedStateAvailable } from "./reported-state-api";
 import { rewardReadContext } from "./rewards-read";
 
 /** A11 reward reads. Off unless explicitly on; anything else, including absent, is off. */
@@ -55,6 +56,8 @@ export async function centralStoreCapabilities(env: Env): Promise<ApiCapabilitie
       cardOwnershipReview: settlement,
       // Needs the event reader flag and CORE 0047, like the route itself.
       cardPurchaseRecognition: await cardPurchasesAvailable(env),
+      // Needs only the CORE views it joins, like the route itself.
+      reportedStateOnDate: await reportedStateAvailable(env),
       // The operations API follows its own flag (02 §4, docs/ops-api.md). It is
       // advertised, never assumed: with the flag off the paths do not exist.
       opsApi: opsApiEnabled(env),

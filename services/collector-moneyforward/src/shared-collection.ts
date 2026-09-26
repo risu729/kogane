@@ -27,8 +27,9 @@ import {
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 
-const SOURCE = "moneyforward-me";
-const PRODUCER = "moneyforward-worker";
+export const SOURCE = "moneyforward-me";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-moneyforward-me";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 /** `account-NN-month-YYYY-MM.html`, the collector's own filename grammar. */
 const MONTHLY_FRAGMENT = /^account-(\d{2})-month-(\d{4}-\d{2})\.html$/u;
