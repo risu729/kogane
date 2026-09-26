@@ -221,9 +221,15 @@ by the artifact roles, never by the outcome alone:
   `sanitized_provider_capture`, `user_capture`): the run registers and seals
   like any other, and its terminal report says `failed`. Nothing is widened.
 
-`success` with `coverageStatus: partial` (GLOBAL PASS by design) is a
-success that registers as such, with the partial coverage recorded on the
-run row and in the unit reports.
+A run's own `coverageStatus` is recorded on the run row and nothing derives
+an outcome from it. A unit's coverage is what the collector says it captured
+of what the run set out to collect
+([ADR 0026](adr/0026-collector-unit-coverage.md)): `complete` becomes the
+unit report `success`, `partial` becomes `partial`, and a unit with a safe
+error code is `failed`. A run is `success` in `observation_fetch_runs` only
+when every unit report is `success`, so a `success` run with a `partial` unit
+(GLOBAL PASS and Vpass, whose collectors have not shown a month is whole) is
+`partial` there and gets no parse job.
 
 The collector's normalized `manifest.json` is one artifact among the others;
 registration never reads it. The terminal's own `artifacts[]` is the
@@ -435,12 +441,15 @@ entry by the object it names: the artifact's digest and size, and its
 content-addressed key
 ([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)). It takes the
 collector's `statementState` and `period` from that entry. The importer-era
-lookup is unchanged. MyJCB runs are still not parsed, for a different reason:
-`myJcbRunPlan` reports every unit's coverage as `partial`, `unitReportRequest`
-maps that to the unit outcome `partial`, and `observation_fetch_runs` counts
-such a run as `partial`. Neither the run scope nor `unit-independent-v1`
-admits it, so the work item ends `not_eligible`
-(`services/processor/test/myjcb-shared-r2.test.ts`).
+lookup is unchanged. A MyJCB terminal written before
+[ADR 0026](adr/0026-collector-unit-coverage.md) is still not parsed:
+`myJcbRunPlan` then reported every unit's coverage as `partial`,
+`unitReportRequest` maps that to the unit outcome `partial`, and
+`observation_fetch_runs` counts such a run as `partial`. Neither the run scope
+nor `unit-independent-v1` admits it, so the work item ends `not_eligible`.
+Since ADR 0026 a successful connection's unit is `complete`, and the run
+parses end to end (`services/processor/test/myjcb-shared-r2.test.ts` shows
+both).
 
 ## 4. No byte is copied
 

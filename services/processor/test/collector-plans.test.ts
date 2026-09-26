@@ -103,7 +103,15 @@ interface Registered {
   units: { unit_key: string; artifacts: number; declared: number | null }[];
   /** Distinct parser datasets the registration gave the run's artifacts. */
   datasets: (string | null)[];
+  /** The run's status in `observation_fetch_runs`, the one the parse gate reads. */
+  runStatus: string;
 }
+
+/**
+ * What each source's successful plan registered as, filled by `registerPlan`
+ * and read by the last test (ADR 0026). Tests in one file run in order.
+ */
+const registeredStatus = new Map<string, string>();
 
 /**
  * Persist the plan as the collector would and register it. Asserts the whole
@@ -179,7 +187,13 @@ async function registerPlan(plan: PersistRunPlan, expectedArtifacts: number): Pr
       .query("SELECT DISTINCT dataset FROM fetch_artifacts WHERE fetch_run_id=? ORDER BY dataset")
       .all(result.fetchRunId) as { dataset: string | null }[]
   ).map((row) => row.dataset);
-  return { roles, units, datasets };
+  const runStatus = (
+    h.db.query("SELECT status FROM observation_fetch_runs WHERE id=?").get(result.fetchRunId) as {
+      status: string;
+    }
+  ).status;
+  registeredStatus.set(source, runStatus);
+  return { roles, units, datasets, runStatus };
 }
 
 // --- Sources that registered before this change -------------------------------
@@ -769,4 +783,31 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
   // ADR 0022/0023 withhold Vpass from a parser dataset until the collector
   // derives the card binding. The pages' new role must not lift that hold.
   expect(registered.datasets).toEqual([null]);
+});
+
+test("ADR 0026: a successful plan's units state what the parse gate reads", () => {
+  // `observation_fetch_runs.status` is `success` only when every unit's
+  // terminal report is `success`, which registration derives from the unit
+  // coverage `complete`. Neither the run scope nor `unit-independent-v1`
+  // admits a `partial` run, so a source listed `partial` here is never parsed
+  // from its successful runs. GLOBAL PASS keeps `partial` because nobody has
+  // observed whether a month page paginates; Vpass keeps it until its month
+  // walk proves each month whole (ADR 0026, Consequences).
+  expect(Object.fromEntries([...registeredStatus].sort(([a], [b]) => a.localeCompare(b)))).toEqual({
+    "mizuho-bank": "success",
+    "mobile-suica": "success",
+    "moneyforward-me": "success",
+    myjcb: "success",
+    "prestia-globalpass": "partial",
+    "sbi-securities": "success",
+    "sbi-shinsei": "success",
+    "sbi-vc-trade": "success",
+    "smbc-direct": "success",
+    "sony-bank": "success",
+    "st-george": "success",
+    "v-point": "success",
+    "v-point-pay": "success",
+    "v-point-pay-email": "success",
+    vpass: "partial",
+  });
 });

@@ -429,4 +429,14 @@ extractor は二つの形を読む。importer 形（どれかの entry が `conn
 
 共通形の manifest には、importer 形が持っていた `connectionId`、`filename`、`ordinal` がない。extractor はどちらの形でもこれらを出力しない。connection と position は従来どおり artifact key から読む。entry の `mediaType`（parameter 付き）は使わないので、`credit-menu.html` は引き続き parser に届かない（ADR 0022）。
 
-未解決の制限：collector は成功した connection の unit coverage も `partial` と書く（card が見せる明細期間は一部だけのため）。registration はこれを unit outcome `partial` にし、`observation_fetch_runs` ではその run が `partial` になる。run scope でも `unit-independent-v1` でも parse 対象にならないので、共通 R2 の MyJCB run は metadata extractor に届く前に `not_eligible` で止まる（`services/processor/test/myjcb-shared-r2.test.ts`）。importer は成功した connection の unit を `success` と記録していた。書き込み済みの terminal は変更できないので、修正には registration 側の判断が必要である。
+ADR 0026 以前の collector は、成功した connection の unit coverage も `partial` と書いていた（card が見せる明細期間は一部だけのため）。registration はこれを unit outcome `partial` にし、`observation_fetch_runs` ではその run が `partial` になる。run scope でも `unit-independent-v1` でも parse 対象にならないので、その run は metadata extractor に届く前に `not_eligible` で止まる。これは次節で解消した。
+
+### connection の unit coverage（2026-09-26、ADR 0026）
+
+unit の coverage は「この run が集めようとしたものを、この unit が欠けなく取得したか」を表す。card の履歴全体についての主張ではない。履歴についての主張は run の `coverageStatus` が持ち、成功 run でも `partial` のままである（registration は記録するだけで、outcome を導かない）。
+
+成功した connection の unit は `complete` と書く。成功した connection は、credit menu と過去月 response が列挙した月をすべて取得している。各月について redact 済み page、状態を示す page から作る ledger、page が示す export をすべて保存する。状態が `unknown` の page は規則どおり HTML だけを保存する（ADR 0005）。これは欠落ではない。月、export、parse のどれかが失敗すると connection 全体を止め、その connection は artifact を持たず、unit は safe error code 付きの `unknown` になる。したがって現在の unit は「全部ある」か「何もない」のどちらかである。collector は connection を `partial` と報告しない。報告された場合、plan はその unit を `partial` のまま書き、広げない。
+
+`complete` の unit は registration で unit outcome `success` になる。importer 時代と同じである。成功 run は `observation_fetch_runs` で `success` になり、parse job が作られ、end to end で parse される（`services/processor/test/myjcb-shared-r2.test.ts`）。
+
+制限：ADR 0026 より前に書かれた terminal は変更できず、processor の eligibility 規則も緩めないので、その run は `partial`／`not_eligible` のまま parse されない。ADR 0022 の contract v2 でも変わらない（unit outcome は同じ terminal から導かれる）。MyJCB の明細は次の取得で再び見える snapshot なので、card がまだ見せている月の確定明細は ADR 0026 後の最初の成功 run で取り戻せる。失われるのは、その期間の未確定だけの履歴である。後の取得までに消えた未確定行（取消、または確定前の変更）は、parse された run のどれにも入らない。最初の対象 run までは importer の取得分が current のままである（ADR 0014）。

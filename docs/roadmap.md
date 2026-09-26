@@ -142,9 +142,10 @@ Concrete limits in the current code:
   changed with [ADR 0021](adr/0021-collector-registration-contract.md), for
   terminals written after that release. Those register with the parser
   datasets of [ADR 0022](adr/0022-registration-artifact-datasets.md), except
-  that Vpass statement pages are withheld from one and MyJCB's runs are not
-  eligible for parsing (below), so for those two sources the importer's
-  captures stay current
+  that Vpass statement pages are withheld from one and MyJCB's runs written
+  before [ADR 0026](adr/0026-collector-unit-coverage.md) are not eligible for
+  parsing (below), so for Vpass, and for MyJCB until its first run after ADR
+  0026, the importer's captures stay current
   ([ADR 0014, merge safety](adr/0014-collector-producer-ids.md#merge-safety)).
   Once MyJCB captures are parsed, its events are retired and recognised again
   once under the collector's key and a new provider-local account.
@@ -158,13 +159,18 @@ Concrete limits in the current code:
   so they drain as the scan cycles through `runs/`. Blocked runs are tried
   once more and block again where their terminal itself is refused. Vpass
   captures are withheld (above). MyJCB's metadata extractor reads the
-  collector's shared manifest ([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)),
-  but a MyJCB run is still not parsed: the collector reports every unit's
-  coverage as `partial`, registration turns that into a `partial` unit
-  outcome, and a run with a non-success unit is `not_eligible` for parse jobs.
-  The collector cannot change terminals it has already written, so this needs
-  a registration-side decision, which is still open. The code shows GLOBAL
-  PASS's plan does the same; that has not been exercised.
+  collector's shared manifest ([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)).
+  A MyJCB terminal written before [ADR 0026](adr/0026-collector-unit-coverage.md)
+  is never parsed: it reports every unit's coverage as `partial`,
+  registration turns that into a `partial` unit outcome, and a run with a
+  non-success unit is `not_eligible` for parse jobs. Terminals are immutable
+  and the eligibility rule is not loosened, so the confirmed statements of
+  those days come back with the next successful run, while pending-only rows
+  that disappeared before it are lost. GLOBAL PASS's successful runs are
+  `partial` the same way and are not parsed: whether an activity page holds a
+  whole month has not been observed. Vpass card runs also declare a
+  `partial` unit, which will keep them from parsing once their captures get a
+  parser dataset.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.

@@ -127,11 +127,29 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-function coverage(
-  status: ConnectionSummary["status"] | CollectionManifest["status"],
-): CoverageStatus {
+/**
+ * A connection's coverage of what the run set out to collect (ADR 0026). A
+ * `success` connection enumerated its credit months from the menu and the
+ * past-months response and kept every one of them: the page, the ledger the
+ * collector derives from a page that states its state, and every export the
+ * page offers. A month or an export that fails stops the whole connection
+ * (ADR 0005's stop rule), which then keeps no artifact, so today a connection
+ * is either whole or empty. `partial` stays for a connection that reports it,
+ * which `collectConnection` does not produce.
+ */
+function coverage(status: ConnectionSummary["status"]): CoverageStatus {
   if (status === "success") return "complete";
   return status === "partial" ? "partial" : "unknown";
+}
+
+/**
+ * The run's coverage is a claim about the cards' history, not about the
+ * snapshot the run requested: a card exposes a rolling set of statement
+ * periods, so even a fully successful run is `partial` here. Registration
+ * records it on the run and derives no outcome from it (ADR 0026).
+ */
+function runCoverage(status: CollectionManifest["status"]): CoverageStatus {
+  return status === "failed" ? "unknown" : "partial";
 }
 
 /** A blocked connection is a state to report, never a reason to retry a login
@@ -332,15 +350,13 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
       startedAt: input.startedAt,
       completedAt: input.completedAt,
       providerOutcome: outcome,
-      // A MyJCB card exposes a rolling set of statement periods, so even a
-      // fully successful run is not a claim about the card's whole history.
-      coverageStatus: input.status === "success" ? "partial" : coverage(input.status),
+      coverageStatus: runCoverage(input.status),
       persistenceComplete: true,
       ...(errorCode === undefined ? {} : { safeErrorCode: errorCode }),
-      units: units.map((unit) => ({
-        ...unit,
-        coverageStatus: unit.coverageStatus === "complete" ? "partial" : unit.coverageStatus,
-      })),
+      // Each unit states its own coverage unchanged. A whole connection is
+      // `complete`, which registration turns into the unit outcome `success`
+      // that the Processor's eligibility rules read (ADR 0026).
+      units,
       // The statement periods are provider labels, not machine ranges; they
       // stay in the collector manifest rather than becoming terminal ranges.
       ranges: [],
