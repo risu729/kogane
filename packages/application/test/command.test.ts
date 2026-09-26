@@ -247,8 +247,15 @@ describe("card purchase review payloads (ADR 0017)", () => {
       ['["myjcb","producer",null,"card",""]'],
       ['[null,"producer",null,"card","row"]'],
       ["not json"],
+      [key("r".repeat(2049 - key("").length))],
     ])
       expect(validPayload("card-installment.unlink", { ...unlink, portionKeys })).toBe(false);
+    // Any key the 0047 CHECK admits (at most 2048 characters) can be named.
+    const longest = key("r".repeat(2048 - key("").length));
+    expect(longest).toHaveLength(2048);
+    expect(validPayload("card-installment.unlink", { ...unlink, portionKeys: [longest] })).toBe(
+      true,
+    );
     // Link names rows, unlink names held keys; the two lists are not interchangeable.
     expect(
       validPayload("card-installment.link", {

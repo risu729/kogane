@@ -204,7 +204,7 @@ Dependencies:
 
 ### P1-1 — `feat: add the card purchase review command vocabulary` (~1.3k lines)
 
-_Update 2026-09-26:_ implemented by this PR, which takes CORE migration 0051
+_Update 2026-09-26:_ implemented by PR #261, which takes CORE migration 0051
 and records decision 1.1 as
 [ADR 0017](../adr/0017-card-purchase-review-commands.md).
 

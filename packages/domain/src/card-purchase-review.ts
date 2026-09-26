@@ -50,7 +50,8 @@ const ALLOCATION_ID = /^ra_[0-9a-f]{64}$/u;
 const OBLIGATION_ID = /^obl_cp_[0-9a-f]{64}$/u;
 /** A usage row pinned to the parse run it was read in (`pinnedRef`). */
 const PORTION_REF = /^transaction:[1-9][0-9]{0,15}@parse_run:[1-9][0-9]{0,15}$/u;
-const PORTION_KEY_MAX = 1024;
+/** The length bound of `card_purchase_recognition_keys.recognition_key` (CORE 0047). */
+const PORTION_KEY_MAX = 2048;
 
 /** `purchase_<sha256>` or `refund_<sha256>`, as `cardPurchaseEventId` names them. */
 export function isCardPurchaseEventId(value: unknown): value is string {

@@ -5,7 +5,7 @@
 - Decision owner: the owner accepted decision 1.1 of the
   [next-milestone plan](../plans/2026-09-next-milestone.md#11-add-real-command-kinds-with-one-rebuild-not-more-relation-markers)
   on 2026-09-26; this record carries it into the repository.
-- Implemented by: the PR that adds this record (plan P1-1)
+- Implemented by: PR #261 (plan P1-1)
 - Carried by: `packages/storage-d1/migrations/core/0051_card_purchase_review_commands.sql`,
   `CHANGE_KINDS` and `validPayload` in `packages/application/src/command/contract.ts`,
   `REVIEW_PLANNERS` in `packages/application/src/operations/targets.ts`,

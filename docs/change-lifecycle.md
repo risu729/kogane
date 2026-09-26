@@ -77,8 +77,8 @@ and `account_mappings` before and after a failing guard.
 Reviewing a [pending-to-posted card usage link](economic-events.md#pending-to-posted-links)
 rides on `relation.accept` / `relation.reject`, the way the card ownership
 review does, so the closed kind list and the `change_plans` /
-`operation_receipts` CHECKKs stay as they are. The payload is the candidate's
-`relation` from `GET /api/v2/card-purchases`, plus a reason:
+`operation_receipts` kind CHECK constraints stay as they are. The payload is
+the candidate's `relation` from `GET /api/v2/card-purchases`, plus a reason:
 
 ```json
 {
@@ -164,14 +164,19 @@ The payload contract (`validPayload`) takes exact keys only, with the id
 shapes the lanes name, and the reason must be non-blank text of at most 1000
 characters:
 
-| Kind                      | Payload                                      | Checked                                                                                                                                          |
-| ------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `card-purchase.exclude`   | `{ eventId, reasonCode, reason }`            | `purchase_<sha256>` or `refund_<sha256>`; `reasonCode` one of `card_fee`, `cash_advance`, `own_account_transfer`, `provider_adjustment`, `other` |
-| `card-purchase.restore`   | `{ eventId, reason }`                        | as above                                                                                                                                         |
-| `card-refund.allocate`    | `{ refundEventId, purchaseEventId, reason }` | a `refund_` id and a `purchase_` id                                                                                                              |
-| `card-refund.withdraw`    | `{ allocationId, reason }`                   | `ra_<sha256>`                                                                                                                                    |
-| `card-installment.link`   | `{ obligationId, portionRefs, reason }`      | `obl_cp_<sha256>`; 1–36 distinct `transaction:<id>@parse_run:<id>` rows                                                                          |
-| `card-installment.unlink` | `{ obligationId, portionKeys, reason }`      | `obl_cp_<sha256>`; 1–36 distinct recognition keys, each the compact JSON text of `[source, producer, namespace or null, account, external id]`   |
+| Kind                      | Payload                                      | Checked                                                                                                                                                                                   |
+| ------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `card-purchase.exclude`   | `{ eventId, reasonCode, reason }`            | `purchase_<sha256>` or `refund_<sha256>`; `reasonCode` one of `card_fee`, `cash_advance`, `own_account_transfer`, `provider_adjustment`, `other`                                          |
+| `card-purchase.restore`   | `{ eventId, reason }`                        | as above                                                                                                                                                                                  |
+| `card-refund.allocate`    | `{ refundEventId, purchaseEventId, reason }` | a `refund_` id and a `purchase_` id                                                                                                                                                       |
+| `card-refund.withdraw`    | `{ allocationId, reason }`                   | `ra_<sha256>`                                                                                                                                                                             |
+| `card-installment.link`   | `{ obligationId, portionRefs, reason }`      | `obl_cp_<sha256>`; 1–36 distinct `transaction:<id>@parse_run:<id>` rows                                                                                                                   |
+| `card-installment.unlink` | `{ obligationId, portionKeys, reason }`      | `obl_cp_<sha256>`; 1–36 distinct recognition keys, each the compact JSON text of `[source, producer, namespace or null, account, external id]`, at most 2048 characters as 0047 stores it |
+
+**Limit.** The command API takes a request body of at most 16 KiB
+(`services/app/src/command-api.ts`), so a link or unlink whose 36 entries are
+long keys can exceed it and would need more than one plan; the change that
+adds installment links decides how it splits them.
 
 The reason codes, the subject prefixes (`card-usage-exclusion:`,
 `card-refund:`, `card-refund-target:`, `card-installment:`) and the
