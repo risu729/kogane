@@ -40,9 +40,12 @@ Wrangler generates binding types. Secret names are declared in `env.d.ts`:
 - `RELAY_TOKEN`: separate bearer token of at least 32 characters for the constrained TCP relay.
 
 Non-secret settings are `COLLECTOR_SCHEMA_VERSION`, `EGRESS_MODE` and
-`RELAY_PUBLIC_URL`. The new service has no scheduled cron by default. The normal
-release workflow registers its bundle and deployment, but enabling recurring
-collection should follow a successful authenticated cloud run.
+`RELAY_PUBLIC_URL`. The configured daily schedule is 06:35 JST (`35 21 * * *`
+in UTC), with platform retries disabled. The same durable coordinator serializes
+manual and scheduled collection. An authentication/network failure blocks later
+runs until an operator resolves the cause and explicitly resumes collection.
+Enable this schedule only after authenticated cloud collection and downstream
+publication have been verified.
 
 `GET /health` reports service configuration without contacting the bank.
 Authenticated `POST /trigger` starts or resumes a collection/storage attempt.

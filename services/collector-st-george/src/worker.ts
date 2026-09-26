@@ -80,7 +80,9 @@ export default {
     const state = env.SESSION_STATE.get(env.SESSION_STATE.idFromName("st-george"));
     return state.fetch(new Request(`https://state${url.pathname}`, { method: "POST" }));
   },
-  async scheduled(_controller, env): Promise<void> {
+  async scheduled(controller, env): Promise<void> {
+    // A platform retry must not create a second bank login attempt.
+    controller.noRetry();
     const state = env.SESSION_STATE.get(env.SESSION_STATE.idFromName("st-george"));
     const response = await state.fetch(new Request("https://state/trigger", { method: "POST" }));
     if (!response.ok) throw new Error("st-george-collection-not-completed");
