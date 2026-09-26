@@ -9,6 +9,28 @@
 
 export const COMMAND_PREFIX = "/api/command/v1";
 
+/**
+ * How the confirmation screen names each change kind. The card purchase
+ * review kinds (ADR 0017) are listed so a plan of theirs is never shown by its
+ * raw code; the server refuses to plan them until their planners exist, and
+ * no screen offers them yet.
+ */
+export const COMMAND_KIND_LABELS: Readonly<Record<string, string>> = {
+  "identity.assign": "対応付けの手動確定",
+  "identity.release-override": "手動確定の解除（自動方針に戻す）",
+  "relation.accept": "関係の採用",
+  "relation.reject": "関係の却下",
+  "card-settlement.accept": "カード請求と銀行引落の対応付けを採用",
+  "card-settlement.reject": "カード決済の照合候補を却下",
+  "card-settlement.withdraw": "カード決済の採用を解除",
+  "card-purchase.exclude": "カード利用を購入から除外",
+  "card-purchase.restore": "購入からの除外を取り消す",
+  "card-refund.allocate": "返金を購入に充当",
+  "card-refund.withdraw": "返金の充当を取り消す",
+  "card-installment.link": "分割払いの後続回を支払計画に紐付け",
+  "card-installment.unlink": "分割払いの後続回の紐付けを解除",
+};
+
 export interface PlanTargetView {
   subjectRef: string;
   currentRevision: number;

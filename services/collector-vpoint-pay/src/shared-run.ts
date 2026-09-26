@@ -30,7 +30,8 @@ import {
 import type { RawArtifact } from "./types";
 
 export const VPOINT_PAY_SOURCE = "v-point-pay";
-export const SHARED_PRODUCER = "collector-vpoint-pay";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const SHARED_PRODUCER = "collector-v-point-pay";
 const UNIT_KEY = "account";
 const UNIT_KIND = "collection";
 const FALLBACK_ERROR_CODE = "collector_failed";

@@ -244,19 +244,22 @@ export async function seedUnitRun(
     runOutcome: "success" | "partial" | "failed";
     units: SeededUnit[];
     fetchedAtMs?: number;
+    /** Default `collector-r2-importer`, the retired importer's producer. */
+    producer?: string;
   },
 ): Promise<void> {
   const now = run.fetchedAtMs ?? Date.now();
+  const producer = run.producer ?? "collector-r2-importer";
   const statements: D1PreparedStatement[] = [
     env.DB.prepare("INSERT OR IGNORE INTO sources VALUES(?,?)").bind(run.source, run.source),
-    env.DB.prepare("INSERT OR IGNORE INTO producers VALUES('collector-r2-importer')"),
+    env.DB.prepare("INSERT OR IGNORE INTO producers VALUES(?)").bind(producer),
     env.DB.prepare("INSERT INTO acquisition_sessions(id,external_session_id) VALUES(?,?)").bind(
       run.id,
       `run-${run.id}`,
     ),
     env.DB.prepare(
       "INSERT INTO fetch_runs(id,source_id,acquisition_session_id,producer_id,first_recorded_at_ms) VALUES(?,?,?,?,?)",
-    ).bind(run.id, run.source, run.id, "collector-r2-importer", now),
+    ).bind(run.id, run.source, run.id, producer, now),
     env.DB.prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal',?,?,?)").bind(
       run.id,
       run.runOutcome,

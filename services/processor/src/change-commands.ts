@@ -91,6 +91,17 @@ function identityMutation(db: D1Database) {
   };
 }
 
+/**
+ * The card purchase review kinds (ADR 0017) have no writer yet. Their slot
+ * answers null, so a commit writes nothing and reports why through the plan's
+ * re-simulation; no plan of these kinds can exist until a planner is
+ * registered in `REVIEW_PLANNERS`, and each later change fills in its own
+ * kind here.
+ */
+export async function cardReviewMutation(_input: MutationInput): Promise<MutationWrites | null> {
+  return null;
+}
+
 export function changeMutationPlanners(db: D1Database): MutationPlanners {
   const identity = identityMutation(db);
   return {
@@ -101,6 +112,12 @@ export function changeMutationPlanners(db: D1Database): MutationPlanners {
     "card-settlement.accept": cardSettlementMutation,
     "card-settlement.reject": cardSettlementMutation,
     "card-settlement.withdraw": cardSettlementMutation,
+    "card-purchase.exclude": cardReviewMutation,
+    "card-purchase.restore": cardReviewMutation,
+    "card-refund.allocate": cardReviewMutation,
+    "card-refund.withdraw": cardReviewMutation,
+    "card-installment.link": cardReviewMutation,
+    "card-installment.unlink": cardReviewMutation,
   };
 }
 
