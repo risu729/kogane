@@ -318,8 +318,25 @@ interface Built {
   observations: { kind: Stored; id: number; observation: Observation }[];
 }
 
+/**
+ * The migrated schema, built once per test process and copied for each store.
+ * Running every migration is most of what building a store costs (about three
+ * quarters of a random settlement store, run inside each seed's test), and a
+ * copy of the same bytes is the same schema, views and triggers, never
+ * analyzed.
+ */
+let coreTemplate: Uint8Array | null = null;
+
 /** The complete CORE schema, every migration in order, foreign keys on, never analyzed. */
 export function fullCoreSchema(): Database {
+  coreTemplate ??= migrateCore().serialize();
+  const db = Database.deserialize(coreTemplate);
+  // A connection setting, not part of the copied bytes.
+  db.exec("PRAGMA foreign_keys=ON");
+  return db;
+}
+
+function migrateCore(): Database {
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
   for (const name of readdirSync(MIGRATIONS)
