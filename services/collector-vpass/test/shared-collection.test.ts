@@ -136,14 +136,21 @@ describe("G1-02/G1-08/G1-16 a card run persists its sanitized set and then the t
     ).toEqual([
       ["card-list.json", "sanitized_provider_capture"],
       ["manifest.json", "collector_manifest"],
-      ["months/202608/top-000.json", "provider_response"],
-      ["months/202609/top-000.json", "provider_response"],
+      // A statement page is sanitizer output with a `redacted` step, which
+      // CORE seals only on a sanitized capture (ADR 0021).
+      ["months/202608/top-000.json", "sanitized_provider_capture"],
+      ["months/202609/top-000.json", "sanitized_provider_capture"],
       ["select-card.json", "sanitized_provider_capture"],
       ["web-meisai-top.json", "sanitized_provider_capture"],
     ]);
+    // The card unit counts its five envelopes; the run manifest belongs to the
+    // run and names no unit (ADR 0021).
     expect(manifest.units).toEqual([
-      { unitKey: "card-001", unitKind: "card", artifactCount: 6, coverageStatus: "partial" },
+      { unitKey: "card-001", unitKind: "card", artifactCount: 5, coverageStatus: "partial" },
     ]);
+    expect(
+      manifest.artifacts.find((artifact) => artifact.artifactKey === "manifest.json")?.unitKey,
+    ).toBeUndefined();
     expect(manifest.ranges).toEqual([
       {
         rangeKey: "statement-months",
