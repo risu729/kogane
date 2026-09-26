@@ -107,7 +107,8 @@ test("a closed statement keeps its events from position 1 to 2 to 3; a pending r
   expect(await w.totals()).toMatchObject({ captured: "1700", authorized: "300" });
   expect(counts(await w.sweep())).toEqual(NOTHING);
 
-  // 2026-11-10: every statement moves down once more. Nothing changes.
+  // 2026-11-10: every statement moves down once more. A and P keep their
+  // events; only Q's pending event becomes captured, once.
   const october = await events(w);
   await run(
     w,

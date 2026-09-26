@@ -1134,6 +1134,30 @@ describe("a MyJCB statement is one snapshot slot wherever its position moved", (
         );
       }
     expect(read("detailMonth-1", null)).toBeNull();
+    // The edges, named: the JST day boundary, the 15th/16th switch to the
+    // millisecond, and both year wraps of P0 and of P0 - 1.
+    for (const [fetchedAt, zero, one] of [
+      ["2026-09-15T14:59:59.999Z", "2026-10", "2026-09"],
+      ["2026-09-15T15:00:00.000Z", "2026-11", "2026-10"],
+      ["2026-09-15T23:59:59+09:00", "2026-10", "2026-09"],
+      ["2026-12-31T14:59:59.999Z", "2027-02", "2027-01"],
+      ["2026-12-31T15:00:00.000Z", "2027-02", "2027-01"],
+      ["2026-11-15T15:00:00.000Z", "2027-01", "2026-12"],
+      ["2026-12-14T15:00:00.000Z", "2027-01", "2026-12"],
+      ["2026-12-15T15:00:00.000Z", "2027-02", "2027-01"],
+      ["2026-12-31T15:00:00.000Z", "2027-02", "2027-01"],
+      ["2027-01-10T00:00:00.000Z", "2027-02", "2027-01"],
+      ["2025-12-31T15:00:00.000Z", "2026-02", "2026-01"],
+    ] as const) {
+      expect([read("detailMonth-0", fetchedAt), read("detailMonth-1", fetchedAt)]).toEqual([
+        zero,
+        one,
+      ]);
+      for (const label of ["detailMonth-0", "detailMonth-1"])
+        expect(read(label, fetchedAt)).toBe(
+          resolveRelativePeriod({ sourceId: "myjcb", label, fetchedAt }),
+        );
+    }
     // D1 refuses a LIKE or GLOB pattern over 50 bytes ("pattern too complex").
     for (const sql of [CURRENT_CARD_USAGE_SQL, transactionsSql({}, 0).sql])
       for (const [, pattern] of sql.matchAll(/(?:GLOB|LIKE) '([^']*)'/gu))
