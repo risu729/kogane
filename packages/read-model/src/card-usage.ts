@@ -8,14 +8,16 @@
 //      as every current list);
 //   2. the row is in the latest complete container snapshot, by the very CTEs
 //      the Transactions page composes (`sql.ts`: a Vpass card unit + statement
-//      month, a MyJCB connection + statement state + period);
+//      month, a MyJCB connection + statement state + `myjcbStatementSlot`);
 //   3. the newest representation per (resolved account, source, snapshot
 //      slot) wins, so a card ordinal or MyJCB connection that changed under one
 //      resolved account does not keep an older capture current. The slot is
 //      the part of the step-2 partition that is not the unit: the statement
 //      month for Vpass (a month's capture flips from the customized family to
-//      the web family as one snapshot), the statement state and period for
-//      MyJCB (every unconfirmed capture shares one slot, exactly as in step 2).
+//      the web family as one snapshot), the statement state and statement for
+//      MyJCB (every unconfirmed capture shares one slot, and each confirmed
+//      statement is one slot whatever position it was captured at, exactly as
+//      in step 2).
 //      A representation is a fetch run: the newest run by (snapshot
 //      fetched_at, fetch run id), the step-2 Vpass order, keeps every one of
 //      its units, so two cards that one account resolves in the same run never
@@ -227,11 +229,11 @@ const PARSE_IDENTITY = `parse_identity AS MATERIALIZED (
  * with the whole store instead of with the current captures.
  */
 const CARD_ARTIFACTS = `card_artifacts AS MATERIALIZED (
-         SELECT fa.id
+         SELECT fa.id, NULL AS myjcb_slot
          FROM current_vpass_snapshots snapshot
          CROSS JOIN observation_fetch_artifacts fa ON ${VPASS_SNAPSHOT_MEMBER}
          UNION
-         SELECT fetch_artifact_id FROM current_myjcb_snapshots
+         SELECT fetch_artifact_id, statement_slot FROM current_myjcb_snapshots
        )`;
 
 /** The row's columns, in the order the result returns them. */
@@ -300,10 +302,7 @@ export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPA
                 END AS snapshot_unit,
                 coalesce(snapshot.fetched_at, fa.fetched_at) AS snapshot_fetched_at,
                 CASE WHEN snapshot.fetch_run_id IS NOT NULL THEN json_array(snapshot.statement_month)
-                  ELSE json_array(
-                    fa.statement_state,
-                    CASE WHEN fa.statement_state = 'unconfirmed' THEN '' ELSE fa.period END
-                  )
+                  ELSE json_array(fa.statement_state, candidate.myjcb_slot)
                 END AS snapshot_slot,
                 dv.status AS value_status, dv.coefficient, dv.scale, dv.basis AS value_basis,
                 t.currency AS unit_ref,

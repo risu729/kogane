@@ -3,6 +3,7 @@ import { decodeMyJcbHtml, MyJcbReadClient, type ReadResponse } from "./client";
 import { CookieJar } from "./cookie-jar";
 import { loginWithBitwardenPasskey, loginWithOfficialProtection } from "./login-protection";
 import {
+  creditStatementPeriod,
   creditStatementState,
   discoverCreditExports,
   extractCreditMenuLinkId,
@@ -218,7 +219,7 @@ export async function collectCredit(
         "collect-credit-month-fetch",
         async () => detailCache.get(detailMonth) ?? (await fetchCreditDetail(client, detailMonth)),
       );
-      const { html, exports, ledger, state } = await collectionStage(
+      const { html, exports, ledger, state, period } = await collectionStage(
         "collect-credit-month-parse",
         async () => {
           const html = decodeMyJcbHtml(detail.body, detail.contentType);
@@ -245,12 +246,17 @@ export async function collectCredit(
           if (detailMonth === 0 && !ledger) {
             throw new Error("MyJCB unconfirmed detail page omitted .detail-list-01");
           }
-          return { html, exports, ledger, state };
+          // A statement keeps one period while its position moves.
+          const period = creditStatementPeriod({
+            html,
+            detailMonth,
+            state,
+            settlementYM: pastMonths.find((month) => month.detailMonth === detailMonth)
+              ?.settlementYM,
+          });
+          return { html, exports, ledger, state, period };
         },
       );
-      const period =
-        pastMonths.find((month) => month.detailMonth === detailMonth)?.settlementYM ??
-        `detailMonth-${detailMonth}`;
       artifacts.push({
         dataset: "credit-detail",
         filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,

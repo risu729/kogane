@@ -131,6 +131,7 @@ export type StopConditionCode =
   | "credit-ledger-item-cell"
   | "credit-ledger-cell-count"
   | "credit-statement-state"
+  | "credit-statement-period"
   | "collect-debit";
 
 export class StopConditionError extends Error {

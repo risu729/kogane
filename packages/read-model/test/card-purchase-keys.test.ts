@@ -378,3 +378,80 @@ describe("recognition keys against current card usage", () => {
       expect(() => staleCardPurchaseKeysSql(limit)).toThrow();
   });
 });
+
+describe("a MyJCB statement whose position moves keeps its keys", () => {
+  const ROW: UsageRow = {
+    date: "2026/08/20",
+    merchant: "架空店舗V",
+    amount: "1,500",
+    paymentType: "1回払",
+  };
+  /** One confirmed ledger of conn-a, identified. */
+  function closed(
+    store: CardStore,
+    input: { detailMonth: number; period: string; fetchedAt: string },
+  ): Parsed {
+    const parsed = store.myjcbLedger({
+      run: store.run("myjcb"),
+      connection: "conn-a",
+      state: "confirmed",
+      rows: [ROW],
+      ...input,
+    });
+    store.identify(parsed, myjcbRoot("conn-a", "acct-jcb"), { version: 1 });
+    return parsed;
+  }
+  /** The stale read alone: a relative slot is what changed from the shipped text. */
+  const staleNow = (db: Database): StaleCardPurchaseKeyRow[] => {
+    const page = staleCardPurchaseKeysSql(100);
+    return db
+      .query(page.sql)
+      .all(...(page.args as SQLQueryBindings[])) as StaleCardPurchaseKeyRow[];
+  };
+  const unrecognizedNow = (db: Database): number => {
+    const page = unrecognizedCardUsageCountSql();
+    return (
+      db.query(page.sql).get(...(page.args as SQLQueryBindings[])) as UnrecognizedCardUsageCountRow
+    ).unrecognized;
+  };
+
+  test("a statement named by its page is the same key at position 1 and at position 2", async () => {
+    const store = new CardStore();
+    const first = closed(store, {
+      detailMonth: 1,
+      period: "2026-10",
+      fetchedAt: "2026-09-26T00:00:00.000Z",
+    });
+    const drafts = await recognizeAll(store.db);
+    expect([...drafts.keys()]).toEqual(first.observations);
+    // A month later the statement is position 2: the row is the same key, so
+    // its live event still holds a current key and nothing is stale.
+    const moved = closed(store, {
+      detailMonth: 2,
+      period: "2026-10",
+      fetchedAt: "2026-10-26T00:00:00.000Z",
+    });
+    const [row] = usage(store.db);
+    expect(row!.observation_id).toBe(moved.observations[0]!);
+    expect(row!.recognition_key).toBe(drafts.get(first.observations[0]!)!.keys[0]!.key);
+    expect(stale(store.db)).toEqual([]);
+    expect(unrecognized(store.db)).toBe(0);
+  }, 30_000);
+
+  test("a relative position-1 capture's key goes stale once, when its statement is named", async () => {
+    const store = new CardStore();
+    const legacy = closed(store, {
+      detailMonth: 1,
+      period: "detailMonth-1",
+      fetchedAt: "2026-09-26T00:00:00.000Z",
+    });
+    const drafts = await recognizeAll(store.db);
+    closed(store, { detailMonth: 2, period: "2026-10", fetchedAt: "2026-10-26T00:00:00.000Z" });
+    // One slot (2026-10): the old key is stale and the new row unrecognised,
+    // never both current. The writer retires one event and recognises one.
+    expect(staleNow(store.db).map((entry) => entry.recognition_key)).toEqual([
+      drafts.get(legacy.observations[0]!)!.keys[0]!.key,
+    ]);
+    expect(unrecognizedNow(store.db)).toBe(1);
+  }, 30_000);
+});

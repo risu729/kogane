@@ -150,6 +150,100 @@ had, with 1.1.0 ids, so every `failed` count there needs a look.
 `packages/parsers/test/vpass-page-identity.test.ts` pins the unchanged
 first-page ids and the new later-page ids for both families.
 
+## MyJCB statements keep their identity when their position moves (collector, no parser release)
+
+The MyJCB collector recorded every credit month the past-months API does not
+label under its position, `detailMonth-N`. That period is the artifact's
+metadata, the snapshot slot the read model partitioned confirmed captures by,
+and an input of `myjcb-credit-ledger`'s row fingerprint, so of each row's
+external id and card purchase recognition key. When the next statement closes,
+the provider moves the newest closed one from position 1 to position 2. Its
+rows then got new keys: the purchase lane retired every event of the statement
+(`provider_status_absent`) and recognised the same purchases again, a monthly
+churn with no new information. Worse, one slot per position could keep a
+statement current twice: its position-1 capture stayed the newest of slot
+`detailMonth-1` until a newer run replaced it, beside its position-2 capture,
+and a position whose newest page later had no ledger artifact kept its last
+capture current for good.
+
+Three designs were compared.
+
+- **(a) A stable statement key in the read model only**, recognition keys
+  without the position. Recognition keys cannot leave the external id:
+  migration 0047's `card_purchase_recognition_keys_guard` requires each key to
+  equal the row's own
+  `json_array(source, producer, namespace, source_account, external_id)`, a
+  five-element array (`CHECK`). A new key shape needs a schema migration and
+  gives every existing MyJCB event a new key: every one of them retired and
+  recognised once. Keeping the keys and carrying an event over to its row's new
+  key instead needs a revision per row per month, a stale-key read that joins
+  every stale key to its successor, and, for positions 2 and later, the month
+  from a different artifact (the page's statement total), which publishes on its
+  own schedule: until it does, the moved capture has no statement and is either
+  hidden or current twice.
+- **(b) A parser release deriving the external id from a stable statement
+  key.** A parser sees one artifact, and `credit-ledger-NN.json` names no month:
+  it could resolve positions 0 and 1 from `fetched_at`
+  (`relative-statement-period-v1`), which fixes a versioned interpretation into
+  an identity, but not position 2, where the churn is. It would also give every
+  existing MyJCB event a new key.
+- **(c) The collector records the month a confirmed page names** (chosen). A
+  closed statement page carries the `(確定分)` heading and names its payment
+  month in `<h2>YYYY年M月お支払い分のカードご利用明細</h2>`, the heading
+  `myjcb-credit-statement-total` already reads. The collector now records that
+  month, `YYYY-MM`, as the period of the page, its ledger and its exports
+  (`creditStatementPeriod` in `services/collector-myjcb/src/parsers.ts`). The
+  ledger parser is unchanged, and a statement's rows hash to the same external
+  ids at every position, so from the first run after the deploy the lane writes
+  nothing when a statement moves. The position stays recorded beside it (the
+  artifact key and the ledger's `detailMonth`). This is not a relative label
+  resolved at collection time: the page states the month, as the past-months
+  API does for the months it labels (their `settlementYM` is kept verbatim and
+  must name the same month when the page names one). Unconfirmed and `unknown`
+  pages name no month and keep `detailMonth-N`. A confirmed page naming no
+  month, or more than one, stops the collection with `credit-statement-period`;
+  the statement parser rejects such a page as well.
+
+The read model completes (c) for captures stored before it. A confirmed
+capture's snapshot slot is now its statement, the payment month
+(`myjcbStatementMonth` in `packages/read-model/src/sql.ts`): an absolute
+period (`YYYY-MM`, `YYYYMM`, `YYYY年M月お支払い分`), or `detailMonth-0` and
+`detailMonth-1` resolved from the capture's `fetched_at` by
+`relative-statement-period-v1` (the SQL text is tested against
+`resolveRelativePeriod`). Every capture of one statement is one slot, whatever
+its position and label, so only its newest capture is current and no statement
+is counted twice. A confirmed `detailMonth-N` with N ≥ 2 names a position, not a
+statement, and is never current: no rule places it, and letting it be current
+beside the named capture of the same statement is exactly the double count
+above. Only captures from before this collector carry such a label, and in
+the production captures [the relative-label rule](#relative-period-labels-are-resolved-from-the-capture-time)
+was drawn from, menu months 2–8 carried no row. The unconfirmed slot is
+unchanged, and the stored labels are never rewritten.
+
+On deploy nothing is re-parsed and nothing stored changes. The read model's
+slot change moves no key. A statement recorded as confirmed under
+`detailMonth-1` (only captures since the fix in
+[the statement-state note below](#myjcb-statement-state-from-the-page-statement-parser-110))
+is superseded by its first capture under the month its page names: each of its
+recognised rows is retired once and recognised once under its new key, and the
+captured total counts it once throughout. That is one statement per connection
+(two if a month boundary passes between the deploys), not every MyJCB event:
+pending events, the months the past-months API labels and every later month
+keep their keys. A `detailMonth-N` (N ≥ 2) confirmed capture with rows that
+was current stops being current and its events retire; where the same
+statement is also current from its position-1 capture, that removes a double
+count. Deploy the read model (processor) with or before the collector: the
+collector alone would put a statement's named capture in a slot beside its
+`detailMonth-1` capture. Rollback of the collector restores the relative labels
+and the churn; the read model's slots hold either way.
+`services/collector-myjcb/test/credit-statement-state.test.ts` pins the period
+the collector records, `packages/read-model/test/card-usage.test.ts` and
+`card-purchase-keys.test.ts` the slot, and
+`services/processor/test/myjcb-statement-identity.test.ts` a statement moving
+from position 1 to 3 with no retire and no recognition, a pending row becoming
+authorized and then captured once, and the one-time move of a relative
+capture.
+
 ## MyJCB statement state from the page (statement parser 1.1.0)
 
 `services/collector-myjcb` decided a credit month's statement state from its
@@ -607,9 +701,13 @@ row beside the declared sign convention.
 
 Stable transaction identity hashes the normalized row together with period and
 statement state, then adds a deterministic same-artifact occurrence counter.
+The period of a confirmed page is the month the page names, so a row keeps its
+identity while its statement moves down the provider's list
+([release note](#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)).
 The row locator remains its exact JSON index. Current transactions select the
-newest successful artifact for each confirmed period and the newest successful
-unconfirmed snapshot overall. This both collapses repeated collection runs and
+newest successful artifact for each confirmed statement (its payment month,
+whatever position it was captured at) and the newest successful unconfirmed
+snapshot overall. This both collapses repeated collection runs and
 removes a pending row that disappears from a later complete snapshot, while
 the append-only observations remain available as evidence.
 
@@ -636,10 +734,14 @@ as production-validated Layer B routes.
 Some providers name a period only by its position on the day it is shown.
 MyJCB's credit menu links `detailMonth=0..8`, and its past-months API labels
 only months 9–17 with an absolute `settlementYM`, so the collector stores
-`detailMonth-N` as the period of every other month
-(`services/collector-myjcb/src/collector.ts`). On the connection surveyed in
-[the MyJCB notes](sources/myjcb.md) that is every pending row and every recent
-confirmed month.
+`detailMonth-N` as the period of every other month that does not name its own
+(`creditStatementPeriod` in `services/collector-myjcb/src/parsers.ts`). A
+confirmed page names its payment month in its heading, and since
+[the statement identity fix](#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)
+the collector records that month instead; that is the page's own statement,
+not a resolution of its position. On the connection surveyed in
+[the MyJCB notes](sources/myjcb.md) the relative label therefore remains on
+every pending row, and on the confirmed months captured before that fix.
 
 **A relative label is never resolved at collection time.** The collector keeps
 storing exactly what the provider showed, and the label stays raw evidence
@@ -686,19 +788,16 @@ a time), and no capture yet falls on days 12–30 to show on which day the
 provider's position 0 moves to the next cycle. A capture on those days that
 contradicts it is corrected by a new rule version, never by editing v1.
 
-What the surveyed connection shows today limits what a resolved
-`detailMonth-1` achieves there. Its `detailMonth=1` page carries no export
-link, so the collector records that month as `unconfirmed` (it treats month 0
-or 1 without an export as unconfirmed) although the page heading says 確定分
-([the MyJCB notes](sources/myjcb.md)). That ledger's rows are pending rows,
-the statement parser rejects that page, so it has no `card_statement_facts`
-row, and both unconfirmed ledgers of the connection share the one
-unconfirmed snapshot the current views keep (above), so only the newer of the
-two is current for recognition. The rule still gives those pending rows their
-payment month; the statement join and the confirmed-row pairing a resolved
-`detailMonth-1` enables ([card settlements](card-settlements.md),
-[economic events](economic-events.md#the-vertical-slice-that-runs)) apply
-where the collector records that month as confirmed.
+The read model applies the same rule to a confirmed capture's snapshot slot
+(`myjcbStatementMonth` in `packages/read-model/src/sql.ts`, tested against
+`resolveRelativePeriod`), so a statement captured under `detailMonth-1` and
+later under the month its page names is one slot. A confirmed `detailMonth-N`
+with N ≥ 2 names no statement and is never current
+([release note](#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)).
+Before the collector read the statement state from the page, it recorded
+`detailMonth=1` as `unconfirmed`
+([statement parser 1.1.0](#myjcb-statement-state-from-the-page-statement-parser-110));
+those stored rows stay pending rows in the one unconfirmed slot.
 
 Other relative labels surveyed (`services/collector-*`,
 `packages/parsers/src/parsers/*`, `docs/sources/*.md`):

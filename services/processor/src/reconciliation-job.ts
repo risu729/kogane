@@ -697,10 +697,11 @@ export async function reconciliationSweep(
  * purchase recognition uses.
  *
  * A MyJCB confirmed row must also carry a known payment month, read as
- * recognition reads it (`statementPeriodOf`). The collector writes the
- * relative fallback `detailMonth-N` for every month the past-months API does
- * not label (docs/sources/myjcb.md: the first connection's menu lists months
- * 0..8 and the API only 9..17). That label is a position in the provider's
+ * recognition reads it (`statementPeriodOf`). The collector records a
+ * confirmed page by the payment month the page names, and wrote the relative
+ * fallback `detailMonth-N` for every month the past-months API does not label
+ * before it did (docs/sources/myjcb.md, 明細の月: the first connection's menu
+ * lists months 0..8 and the API only 9..17). That label is a position in the provider's
  * month list on the capture day, so it names a month only together with its
  * capture time, and a position the rule does not place (`detailMonth-2` and
  * beyond) names none. This job pairs only inside a known payment month; the
