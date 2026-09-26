@@ -279,7 +279,9 @@ test("a missing or resized referenced object never seals and records why (G1-14)
     await registerCollectionRun(other.env, { source: SOURCE, runId: "run-001" }),
   ).toMatchObject({ outcome: "blocked", code: "object_size_mismatch" });
   expect(countOf(other, "SELECT count(*) AS n FROM fetch_run_seals")).toBe(0);
-});
+  // The only test here that builds two harnesses (two full CORE migrations):
+  // about 1.2 s alone, over bun's 5 s default under a loaded CI runner.
+}, 30_000);
 
 test("a corrupt terminal is blocked and the scan keeps going (G1-13)", async () => {
   const harness = collectionHarness();
