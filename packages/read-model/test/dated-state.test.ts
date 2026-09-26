@@ -236,6 +236,109 @@ describe("identity of a dated row", () => {
   });
 });
 
+describe("dated identity equals current_identity_observations", () => {
+  // The keyed identity CTEs restrict the view's candidate runs to the chosen
+  // parses; for those parses they must give the view's rows exactly: the
+  // latest sealed policy version, never an unsealed run.
+  const expected = (store: DatedStore, kind: "position" | "balance", ids: number[]) =>
+    all<{
+      id: number;
+      identity_recorded: number;
+      account_id: string | null;
+      instrument_id: string | null;
+    }>(
+      store,
+      `SELECT o.id,CASE WHEN io.id IS NULL THEN 0 ELSE 1 END AS identity_recorded,
+         am.account_id,im.instrument_id
+       FROM ${kind}_observations o
+       LEFT JOIN current_identity_observations io ON io.kind='${kind}' AND io.observation_id=o.id
+       LEFT JOIN current_account_mappings am ON am.source_account_id=io.source_account_id
+       LEFT JOIN identity_instrument_uses u ON u.identity_observation_id=io.id
+        AND u.role='${kind === "position" ? "security" : "unit"}'
+       LEFT JOIN current_instrument_mappings im ON im.identifier_id=u.identifier_id
+       WHERE o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id`,
+      JSON.stringify(ids),
+    );
+  const actual = (rows: (DatedPositionRow | DatedBalanceRow)[]) =>
+    [
+      ...new Map(
+        rows.map((row) => [
+          row.id,
+          {
+            id: row.id,
+            identity_recorded: row.identity_recorded,
+            account_id: row.account_id,
+            instrument_id: row.instrument_id,
+          },
+        ]),
+      ).values(),
+    ].sort((a, b) => a.id - b.id);
+
+  test("latest sealed policy version, unsealed and unidentified rows alike", () => {
+    const store = new DatedStore();
+    const older = store.capture({
+      ...SBI,
+      fetchedAt: "2026-09-08T01:00:00Z",
+      positions: [
+        { account: "sbi-a", code: "1001", quantity: "10" },
+        { account: "sbi-a", code: "1002", quantity: "5" },
+      ],
+    });
+    store.identify(older, SBI.source, "acct-v1", "identified", ["inst-1001"]);
+    store.identify(older, SBI.source, "acct-v2", "provider-local", [undefined, "inst-1002"], {
+      policyVersion: 2,
+    });
+    store.identify(older, SBI.source, "acct-v3", "identified", ["inst-1001"], {
+      policyVersion: 3,
+      sealed: false,
+    });
+    const newer = store.capture({
+      ...SBI,
+      fetchedAt: "2026-09-11T01:00:00Z",
+      positions: [{ account: "sbi-a", code: "1003", quantity: "1" }],
+    });
+    store.identify(newer, SBI.source, "acct-new", "identified", ["inst-1003"]);
+    const smbc = store.capture({
+      ...SMBC,
+      fetchedAt: "2026-09-08T01:00:00Z",
+      balances: [{ account: "smbc-a", metric: "account_balance", instrument: "JPY", minor: 500 }],
+    });
+    store.identify(smbc, SMBC.source, "acct-smbc", "identified", [], { policyVersion: 2 });
+    store.capture({
+      ...ST_GEORGE,
+      fetchedAt: "2026-09-08T01:00:00Z",
+      balances: [{ account: "sg-a", metric: "account_balance", instrument: "AUD", minor: 7 }],
+      claim: "complete",
+    });
+
+    for (const date of ["2026-09-10", "2026-09-30"]) {
+      const positionRows = positions(store, date);
+      const balanceRows = balances(store, date);
+      expect(positionRows.length).toBeGreaterThan(0);
+      expect(balanceRows).toHaveLength(2);
+      expect(actual(positionRows)).toEqual(
+        expected(
+          store,
+          "position",
+          positionRows.map((row) => row.id),
+        ),
+      );
+      expect(actual(balanceRows)).toEqual(
+        expected(
+          store,
+          "balance",
+          balanceRows.map((row) => row.id),
+        ),
+      );
+    }
+    // The earlier date reads the older capture under its latest sealed policy.
+    expect(actual(positions(store, "2026-09-10")).map((row) => row.account_id)).toEqual([
+      "acct-v2",
+      "acct-v2",
+    ]);
+  });
+});
+
 describe("statements as of the cutoff", () => {
   const statements = (store: DatedStore, date: string, from = "0000-00-00", undated = "") =>
     all<DatedStatementRow>(store, DATED_STATEMENTS_SQL, reportedStateCutoff(date), from, undated);

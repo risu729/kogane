@@ -169,7 +169,11 @@ run or identity table whole, and requires each answer under one second.
   earlier date's answer (and its `contextId`).
 - A settlement's debit date is the reviewed bank row's date, whenever that row
   was captured; the bank capture itself is not bounded by the cutoff.
-- Statements due before `D − 31` days are not listed, whatever their status.
+- Statements due before `D − 31` days, and statements without a readable due
+  date captured more than 45 days before the cutoff, are not listed, whatever
+  their status. The window is ADR 0019's choice (the plan named none); every
+  answer names the gap (`statements_before_window`) but does not count what it
+  leaves out.
 - Only the Vpass and MyJCB statement parsers supply payables; unbilled usage,
   installment remainders and loans are not shown (`liabilitiesMissing`).
 - Adoption and overlap across sources (`selectAdoptedSet`) are not applied:

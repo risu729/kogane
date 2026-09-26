@@ -34,6 +34,14 @@ export const DATED_STATE_ROW_BOUND = 5000;
 const EXCLUDED = DATED_STATE_EXCLUDED_PARSERS.map((name) => `'${name}'`).join(",");
 
 /**
+ * The run and parse condition `current_identity_observations` puts on a
+ * candidate identity run (migration 0026). Publication itself comes from the
+ * join on `published_parse_runs`; the status test is the view's own, kept so
+ * the dated identities equal the view's rows.
+ */
+const IDENTITY_ELIGIBLE = `CASE WHEN p.status='ok' AND f.status='success' AND f.failure_count=0 THEN 1 ELSE 0 END`;
+
+/**
  * `dated_parses`: one row per published parse of a chosen snapshot, with the
  * snapshot it belongs to (`snapshot_artifact_id`, its newest artifact, and
  * `captured_at`). A dataset snapshot is every artifact of the chosen fetch run
@@ -44,7 +52,7 @@ const EXCLUDED = DATED_STATE_EXCLUDED_PARSERS.map((name) => `'${name}'`).join(",
 export const DATED_SNAPSHOT_CTES = `${snapshotCtes(SNAPSHOT_RELATIONS, { prefix: "dated_", cutoffParam: "?1" })}, dated_parses AS MATERIALIZED (
  SELECT s.source_id,s.parser_name,s.dataset,s.artifact_id AS snapshot_artifact_id,s.fetched_at AS captured_at,
   p.id AS parse_run_id,
-  CASE WHEN p.status='ok' AND f.status='success' AND f.failure_count=0 THEN 1 ELSE 0 END AS identity_eligible
+  ${IDENTITY_ELIGIBLE} AS identity_eligible
  FROM dated_current_snapshots s
  CROSS JOIN observation_fetch_artifacts fa ON fa.fetch_run_id=s.fetch_run_id AND fa.source_id=s.source_id
   AND fa.dataset=s.dataset AND fa.fetch_unit_key IS s.fetch_unit_key
@@ -57,7 +65,7 @@ export const DATED_SNAPSHOT_CTES = `${snapshotCtes(SNAPSHOT_RELATIONS, { prefix:
  UNION ALL
  SELECT c.source_id,c.parser_name,policy.dataset,c.artifact_id,c.fetched_at,
   p.id,
-  CASE WHEN p.status='ok' AND f.status='success' AND f.failure_count=0 THEN 1 ELSE 0 END
+  ${IDENTITY_ELIGIBLE}
  FROM dated_current_artifact_containers c
  CROSS JOIN dated_artifact_container_policies policy ON policy.source_id=c.source_id
   AND policy.parser_name=c.parser_name AND policy.artifact_key=c.artifact_key

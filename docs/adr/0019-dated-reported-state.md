@@ -34,6 +34,18 @@ and valuation) belong to P2-2 and P2-3.
    `(D+1) 00:00` Asia/Tokyo, chosen by the existing snapshot rules through a
    `cutoffParam` option. Chosen.
 
+For the dated snapshot itself, bounding each artifact (`fa.fetched_at < cutoff`
+in the `WHERE`) was rejected: a run that crossed the cutoff would contribute
+only its earlier artifacts and look like a smaller complete snapshot. Bounding
+the snapshot's newest artifact (`HAVING MAX(fa.fetched_at) < cutoff`) keeps a
+run whole, and matches the capture time the ranking already uses.
+
+For which statements are payables on D, the plan named no window. Listing
+every statement ever captured was rejected (it grows without bound and turns
+years of paid bills into rows to read past); listing only statements due after
+D was rejected (it hides a bill due before D and not yet seen settled). Chosen:
+a fixed window, decision 2.
+
 ## Decision
 
 1. **Reported state on D** (4.1) is, per container partition, the latest
@@ -53,6 +65,12 @@ and valuation) belong to P2-2 and P2-3.
    come only from the Vpass and MyJCB statement parsers (`card_statement_facts`
    restated with the cutoff; the view is unchanged). A payable is settled on D
    only by an accepted settlement review whose bank debit is on or before D.
+   The payables of D are the statements due on or after `D − 31` days, and
+   those without a readable due date captured in the 45 days before the
+   cutoff (`PAYABLE_WINDOW_DAYS`, `UNDATED_STATEMENT_WINDOW_DAYS`). This window
+   is this ADR's choice, not the plan's: an older statement is not listed, and
+   every answer names that gap (`liabilitiesMissing` carries
+   `statements_before_window`, with `payablesFromPaymentDate`).
 3. **Reproducibility** (4.5): every answer carries a manifest (date, cutoff,
    policy ids, snapshot artifacts, statement observations, settlement reviews)
    and `contextId = canonicalDigest(manifest)`. Nothing is stored yet; fixed
@@ -69,6 +87,12 @@ and valuation) belong to P2-2 and P2-3.
 - Identity, mappings and settlement reviews are today's: correcting a mapping
   changes an earlier date's answer and its `contextId`. Dated identity is not
   modelled.
+- A settlement's debit date is the reviewed bank row's own date; the capture
+  of that bank row is not bounded by the cutoff, so a debit captured after D
+  but dated on or before D settles the statement on D.
+- A statement due before the window (or undated and captured before it) is
+  not listed even when no settlement was ever accepted for it; the answer
+  states the gap but does not count those statements.
 - Adoption across sources is not applied, so two providers reporting one
   holding both appear; P2-3 applies `selectAdoptedSet` before valuing anything.
 - No migration: measured without an index (below).

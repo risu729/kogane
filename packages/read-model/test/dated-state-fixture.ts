@@ -265,7 +265,9 @@ export class DatedStore {
   /**
    * A sealed identity run over every observation of a capture, each mapped to
    * `account` with `status`; the n-th position or balance (positions first)
-   * uses instrument `instruments[n]` when one is given.
+   * uses instrument `instruments[n]` when one is given. `policyVersion`
+   * (default 1) and `sealed` (default true) shape the run, so a later policy
+   * and an unsealed run can sit beside an earlier one.
    */
   identify(
     capture: Capture,
@@ -273,14 +275,20 @@ export class DatedStore {
     account: string,
     status: "identified" | "provider-local" | "aggregate" | "unresolved",
     instruments: readonly (string | undefined)[] = [],
+    options: { policyVersion?: number; sealed?: boolean } = {},
   ): void {
+    const version = options.policyVersion ?? 1;
     const ref = `sa-${account}-${source}`;
     const mapping = this.mapAccount(ref, source, account, status);
-    const run = `ir-${capture.parse}`;
-    this.db.run("INSERT INTO identity_runs VALUES(?,?,1,'2098-01-01')", [run, capture.parse]);
+    const run = version === 1 ? `ir-${capture.parse}` : `ir-${capture.parse}-v${version}`;
+    this.db.run("INSERT INTO identity_runs VALUES(?,?,?,'2098-01-01')", [
+      run,
+      capture.parse,
+      version,
+    ]);
     this.db.run(
       "INSERT INTO identity_run_policies VALUES(?,?,'identity-default','identity-default-v1',?,'[]')",
-      [run, capture.parse, "c".repeat(64)],
+      [run, capture.parse, version.toString(16).padStart(64, "c")],
     );
     const observations: [string, number][] = [
       ...capture.positions.map((id): [string, number] => ["position", id]),
@@ -331,6 +339,7 @@ export class DatedStore {
         ref,
         mapping,
       ]);
+    if (options.sealed === false) return;
     this.db.run("INSERT INTO identity_run_seals VALUES(?,?,'2098-01-01')", [
       run,
       observations.length + valuations.length,

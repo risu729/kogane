@@ -66,7 +66,8 @@ const LIABILITY_GAPS: Record<string, string> = {
   unbilled_card_usage: "まだ請求に載っていないカード利用",
   installment_remaining: "分割払いの残り",
   loan_balances: "ローン残高",
-  statements_before_window: "引落予定日が基準日の31日より前の請求",
+  statements_before_window:
+    "引落予定日が基準日の31日より前の請求と、引落予定日が不明で45日より前に取得した請求",
 };
 
 const label = (labels: Record<string, string>, code: string): string =>
@@ -82,6 +83,7 @@ function SnapshotLine({ snapshot }: { snapshot: ReportedSnapshot }): ReactNode {
   return (
     <li>
       取得日時 <time dateTime={snapshot.capturedAt}>{snapshot.capturedAt}</time>{" "}
+      <span className="dim">（日本時間 {snapshot.captureDate}）</span>{" "}
       <Badge tone={freshness.tone} title={`基準日の${snapshot.ageDays}日前`}>
         {freshness.label}
       </Badge>{" "}
