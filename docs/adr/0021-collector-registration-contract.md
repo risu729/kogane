@@ -134,7 +134,7 @@ registered before registers to the same descriptors.
   legacy shape, or corrected terminals as new revisions) is ADR 0022's
   decision, not this one's.
 - The 14 sbi-vc-trade runs keep catalogued, unsealed artifacts and are
-  retried on every tick, because a seal-trigger refusal is rethrown rather
+  tried again on every scan cycle, because a seal-trigger refusal is rethrown rather
   than recorded. Classifying it as a block is a Processor change left open.
 - Sony Bank's and Vpass's terminals change shape (the manifest names no unit,
   a Vpass card's `artifactCount` drops by one, Vpass pages change role). None
