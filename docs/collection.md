@@ -394,6 +394,17 @@ A card (or a session that failed before a card was selected, as unit `run`)
 that collected nothing persists a `failed` terminal with no artifact at all
 (G1-09).
 
+No card binding. The retired importer also wrote, per card run, a separate
+`card-identity-binding` run holding an HMAC token of the card's session
+identifiers ([Vpass card binding](vpass-card-identity.md)); card purchase
+recognition needs that binding. The collector writes no such artifact, the
+sanitizer redacts the session bean the token was derived from, and the Worker
+holds no fingerprint secret, so its runs have no trusted binding and their rows
+resolve to unresolved accounts
+([ADR 0023](adr/0023-vpass-collector-card-binding.md),
+[identity operations](identity-operations.md#collector-vpass-runs-have-no-trusted-binding)).
+`services/collector-vpass/test/shared-collection.test.ts` pins this ("ADR 0023").
+
 Registration of a card run: one unit, one range and one artifact per page plus
 the four fixed artifacts, registered by the Processor in process with no
 Service Binding call. Each page costs about 20 operations (D1 statements and
