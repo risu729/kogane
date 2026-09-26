@@ -311,7 +311,7 @@ container was shared with other jobs, so treat these as orders of magnitude):
 | one review (`proposalId`)                  | 6,581 ms  | 63 ms  |
 | settlement plan read                       | 6,257 ms  | 38 ms  |
 | settlement acceptance commit guard         | 120 ms    | 31 ms  |
-| ownership review commit guard              | 113 ms    | 33 ms  |
+| ownership review guard, candidate term     | 113 ms    | 33 ms  |
 
 The shipped guards were cheaper than the plan reads because SQLite evaluated
 the view's flags for the one row the guard names. The reads by id joined the
@@ -323,6 +323,11 @@ statement totals of its periods after reading every balance observation once
 `card_statement_facts`). The allocation check walks the debit account's SMBC
 rows through `idx_txn_obs_account` for each candidate. The list orders every
 candidate to choose its page (4 ms for 3,763 candidates here; no index).
+Not changed here, and not measured: the ownership review's account mapping
+reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
+and the two mapping terms of its commit guard) still read
+`current_identity_observations`, so the guard's row above times only its
+candidate term.
 `card-settlement-readiness.test.ts` compares the CTEs with the view on random
 stores whose reviews draw every flag both ways. It also shows that ten
 inexactness mutations (a cut partition, a reversed order, a dropped owner,
