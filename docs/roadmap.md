@@ -29,6 +29,29 @@ the relevant rollout records.
 
 Concrete limits in the current code:
 
+- **Shared-R2 registration, 2026-09-12 onwards.** From U09 (#184) until the
+  fixes below, no shared-R2 run of any source but Mizuho was catalogued into
+  sealed, parseable evidence. Four blockers were found on 2026-09-26: the
+  producer a collector names differs from its route's for eight terminal
+  sources (fixed by #259, [ADR 0014](adr/0014-collector-producer-ids.md)); derived artifacts without stated
+  lineage (`artifact_lineage_unstated`: sbi-securities, sbi-shinsei, MyJCB,
+  V Point, V Point Pay) and run manifests that named a unit without being
+  counted in it (`run_inventory_incomplete` at the seal: sbi-vc-trade, GLOBAL
+  PASS, SMBC Direct), both fixed in the collectors by
+  [ADR 0021](adr/0021-collector-registration-contract.md), which also fixed
+  Vpass statement pages (a provider role with a `redacted` step, refused at
+  the seal) and V Point Pay month ranges; and registered artifacts with no
+  `dataset` (a separate Processor PR). Only terminals written after each
+  collector's redeploy carry the fixed shapes. The terminals written before
+  it are immutable: the 14 sbi-securities and 14 sbi-shinsei runs blocked
+  since U09 (counted on 2026-09-26) stay blocked (a block is write-once), and
+  re-registering them under a new registration contract version would refuse
+  them again unless the Processor's derivation also accepts their shape — that
+  decision belongs to ADR 0022. The 14 sbi-vc-trade runs keep their catalogued
+  artifacts unsealed and are retried on every tick, because a seal-trigger
+  refusal is not classified as a block
+  ([processor §3](processor.md#3-idempotency-and-what-blocks)).
+
 - [Card settlement review](card-settlements.md) now connects authoritative
   Vpass/MyJCB statement totals to SMBC bank debits through explicit operator
   decisions. Unknown ownership, stale evidence and occupied allocations block
@@ -89,8 +112,9 @@ Concrete limits in the current code:
   carry a trusted card binding: a parsed capture of the Vpass collector would
   retire the importer-era purchases of its card-month and its rows would be
   skipped as `account_not_resolved`. The collector's captures are not parsed
-  today (their artifacts are registered without a parser dataset, and the
-  seal of a collector-vpass run is refused, below); they stay unparsed until
+  today (registration deliberately gives their artifacts no parser dataset,
+  [ADR 0022](adr/0022-registration-artifact-datasets.md), and the seal of a
+  collector-vpass run is refused, below); they stay unparsed until
   the collector writes a binding
   ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
@@ -107,15 +131,35 @@ Concrete limits in the current code:
   most once a day, where the refusal repeats
   ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences),
   [ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
-  Past the route check, registration still stops for three of them: a Vpass
-  run's seal is refused (`run_inventory_incomplete`, a statement page is a
-  `provider_response` with a `redacted` step), and MyJCB and V Point runs are
-  blocked `artifact_lineage_unstated`. No artifact of these sources is
-  catalogued with a parser dataset, so none is parsed and the importer's
+  Past the route check, registration still stopped for three of them — a
+  Vpass run's seal was refused (`run_inventory_incomplete`, a statement page
+  was a `provider_response` with a `redacted` step), and MyJCB and V Point
+  runs were blocked `artifact_lineage_unstated` — until the collectors
+  changed with [ADR 0021](adr/0021-collector-registration-contract.md), for
+  terminals written after that release. Vpass's datasets are withheld and
+  MyJCB's runs are not eligible for parsing (below), so none of these is
+  parsed yet and the importer's
   captures stay current
   ([ADR 0014, merge safety](adr/0014-collector-producer-ids.md#merge-safety)).
   Once MyJCB captures are parsed, its events are retired and recognised again
   once under the collector's key and a new provider-local account.
+- Shared-R2 registration gives an artifact the parser dataset it needs since
+  2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
+  every registered artifact had none, so only Mizuho's were parsed). The
+  registration contract moved to `terminal-registration-v2`: runs sealed
+  without a dataset (Mobile Suica since 2026-09-12) register again and are
+  parsed once, while a run v2 does not change (Mizuho) is carried over rather
+  than parsed a second time. Old terminals are reached only by the scan walk,
+  so they drain as the scan cycles through `runs/`. Blocked runs are tried
+  once more and block again where their terminal itself is refused. Vpass
+  captures are withheld (above). MyJCB's metadata extractor reads the
+  collector's shared manifest ([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)),
+  but a MyJCB run is still not parsed: the collector reports every unit's
+  coverage as `partial`, registration turns that into a `partial` unit
+  outcome, and a run with a non-success unit is `not_eligible` for parse jobs.
+  The collector cannot change terminals it has already written, so this needs
+  a registration-side decision, which is still open. The code shows GLOBAL
+  PASS's plan does the same; that has not been exercised.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.

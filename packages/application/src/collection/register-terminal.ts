@@ -89,6 +89,7 @@ import {
   createRunRequest,
   hasProviderArtifact,
   instantMs,
+  isRegistrationContractVersion,
   REGISTRATION_CONTRACT_VERSION,
   runRangeRequests,
   runReportRequest,
@@ -137,6 +138,13 @@ export interface RegisterTerminalInput {
    * invocation makes. A call without one gets a budget of its own.
    */
   budget?: RegistrationBudget;
+  /**
+   * The registration contract version the run is recorded and derived under
+   * (`REGISTRATION_CONTRACT_VERSIONS`). Production never sets it: it is
+   * `REGISTRATION_CONTRACT_VERSION`. A test sets an earlier one to reproduce a
+   * registration made before a bump (ADR 0022).
+   */
+  contractVersion?: string;
   /**
    * How long a `retryable` refusal stands before this caller attempts the run
    * again (ADR 0024). A run whose newest `registered` attempt was refused
@@ -216,6 +224,7 @@ interface Registration {
   port: RunRegistrationPort;
   budget: RegistrationBudget;
   now: () => Date;
+  contractVersion: string;
 }
 
 /**
@@ -227,6 +236,8 @@ export async function registerTerminal(
   input: RegisterTerminalInput,
 ): Promise<RegisterTerminalOutcome> {
   const budget = input.budget ?? new RegistrationBudget();
+  if (input.contractVersion !== undefined && !isRegistrationContractVersion(input.contractVersion))
+    throw new TerminalRegistrationError("registration_contract_unknown");
   // A run is started only when its preamble and its first step both fit, so
   // a started registration always makes progress or records why it did not.
   if (!budget.fits(PREAMBLE_RESERVE + STRUCTURE_STEP_RESERVE)) {
@@ -247,6 +258,7 @@ export async function registerTerminal(
     port: (input.port ?? ((metered) => directRegistrationPort(metered, input.clientId)))(env),
     budget,
     now: input.now ?? (() => new Date()),
+    contractVersion: input.contractVersion ?? REGISTRATION_CONTRACT_VERSION,
   };
   return registerWithin(context);
 }
@@ -262,7 +274,7 @@ async function registerWithin(context: Registration): Promise<RegisterTerminalOu
     source: manifest.source,
     runId: manifest.runId,
     terminalDigest: read.terminalDigest,
-    registrationContractVersion: REGISTRATION_CONTRACT_VERSION,
+    registrationContractVersion: context.contractVersion,
   };
   const seenAt = now().toISOString();
   const inserted = await insertCollectionRunIfAbsent(env.DB, {
@@ -316,6 +328,8 @@ async function registerWithin(context: Registration): Promise<RegisterTerminalOu
   if (refusal) return block(context, row, refusal, "registered", now());
 
   try {
+    const carried = await carryOver(context, manifest, row);
+    if (carried) return carried;
     return await register(context, manifest, row);
   } catch (error) {
     if (error instanceof TerminalRegistrationError) {
@@ -377,6 +391,90 @@ export function artifactStepReserve(request: ArtifactRequest): number {
     (request.transformSteps?.length ?? 0) +
     2 * (request.relations?.length ?? 0)
   );
+}
+
+/**
+ * A terminal an earlier contract version already registered, whose
+ * descriptors this version does not change, is not registered again
+ * (ADR 0022). Registering it again would make a second fetch run over the
+ * same objects, second artifacts and second parses of one capture, and a
+ * source whose rows have no provider identity in the read model (Mizuho's
+ * history) would list them twice. Instead this version's row is linked to the
+ * fetch run the terminal already is, with a completed `registered` stage
+ * naming it, and answers `already_registered`.
+ *
+ * "Does not change" is proven, not assumed: every artifact the manifest names
+ * is catalogued in that fetch run with the same sha256 and the same
+ * descriptor digest this version derives for it against that run, and the
+ * catalogue holds nothing else. Units, ranges, reports and the run request
+ * are the same derivation in every version so far; a version that changes
+ * one of them must extend this comparison. A terminal whose descriptors do
+ * change — an artifact that gains a dataset — registers again as a new
+ * revision, as before. Only a registered (sealed and linked) earlier row is
+ * carried over: a blocked or unfinished one is registered afresh, and so is
+ * a row of this version that already started registering.
+ */
+async function carryOver(
+  context: Registration,
+  manifest: TerminalManifest,
+  row: CollectionRunRow,
+): Promise<RegisterTerminalOutcome | null> {
+  const { env, budget } = context;
+  if (await readLatestCollectionStage(env.DB, row.id, "registered")) return null;
+  const previous = (await readCollectionRunsFor(env.DB, row.source, row.run_id)).find(
+    (other) =>
+      other.id !== row.id &&
+      other.terminal_digest === row.terminal_digest &&
+      other.registration_contract_version !== row.registration_contract_version &&
+      other.fetch_run_id !== null &&
+      other.registered_at !== null,
+  );
+  if (!previous || previous.fetch_run_id === null) return null;
+  if (!budget.fits(STRUCTURE_STEP_RESERVE)) {
+    budget.deferred += 1;
+    return { outcome: "deferred" };
+  }
+  const fetchRunId = previous.fetch_run_id;
+  const unitIds = new Map<string, number>();
+  for (const unit of await readRunUnits(env.DB, fetchRunId)) {
+    if (unit.parent_unit_id === null)
+      unitIds.set(`${unit.unit_kind}\u0000${unit.unit_key}`, unit.id);
+  }
+  const unitIdsByKey = new Map<string, number>();
+  for (const unit of manifest.units) {
+    const id = unitIds.get(`${unit.unitKind}\u0000${unit.unitKey}`);
+    if (id === undefined) return null;
+    unitIdsByKey.set(unit.unitKey, id);
+  }
+  const catalogue = new Map(
+    (await readRunCatalogue(env.DB, fetchRunId)).map((entry) => [entry.artifact_key, entry]),
+  );
+  if (catalogue.size !== manifest.artifacts.length) return null;
+  for (const artifact of manifest.artifacts) {
+    const held = catalogue.get(artifact.artifactKey);
+    if (!held || held.sha256 !== artifact.sha256) return null;
+    const request = artifactRequest(manifest, artifact, unitIdsByKey, context.contractVersion);
+    if ((await descriptorDigest(request, fetchRunId)) !== held.descriptor_sha256) return null;
+  }
+  const registeredAt = context.now().toISOString();
+  await linkRegisteredRun(env.DB, row.id, {
+    fetchRunId,
+    acquisitionSessionId: previous.acquisition_session_id,
+    registeredAt,
+  });
+  await appendCollectionStage(env.DB, {
+    collectionRunId: row.id,
+    stage: "registered",
+    state: "completed",
+    evidenceRef: String(fetchRunId),
+    recordedAt: registeredAt,
+  });
+  return {
+    outcome: "already_registered",
+    collectionRunId: row.id,
+    fetchRunId,
+    terminalDigest: row.terminal_digest,
+  };
 }
 
 /**
@@ -448,7 +546,7 @@ async function register(
     return { outcome: "deferred" };
   }
 
-  const fetchRunId = await port.createRun(createRunRequest(manifest));
+  const fetchRunId = await port.createRun(createRunRequest(manifest, context.contractVersion));
   // What earlier calls already catalogued for this run. Those artifacts are
   // skipped rather than re-adopted as no-ops, so the budget is spent on new
   // work and a run with more artifacts than one budget converges instead of
@@ -487,7 +585,7 @@ async function register(
   // half-way leaves the declaration and no seal. Deriving it is pure work.
   const descriptors = manifest.artifacts.map((artifact) => ({
     artifact,
-    request: artifactRequest(manifest, artifact, unitIdsByKey),
+    request: artifactRequest(manifest, artifact, unitIdsByKey, context.contractVersion),
   }));
   const items: InventoryItem[] = [];
   for (const entry of descriptors) {
@@ -587,7 +685,7 @@ async function register(
   if (!budget.fits(FINAL_STEP_RESERVE)) return pending("terminal");
   await port.addRunReport(fetchRunId, runReportRequest(manifest));
   const startedAtMs = instantMs(manifest.startedAt);
-  const attemptId = `${manifest.runId}:${REGISTRATION_CONTRACT_VERSION}`;
+  const attemptId = `${manifest.runId}:${context.contractVersion}`;
   if (staged) await port.sealStagedInventory(fetchRunId, inventoryId, attemptId, startedAtMs);
   else await port.seal(fetchRunId, items, attemptId, startedAtMs);
 
@@ -710,7 +808,7 @@ async function recordBlockedTerminal(
     source: input.source,
     runId: input.runId,
     terminalDigest: digest,
-    registrationContractVersion: REGISTRATION_CONTRACT_VERSION,
+    registrationContractVersion: context.contractVersion,
   };
   const seenAt = at.toISOString();
   const inserted = await insertCollectionRunIfAbsent(env.DB, {

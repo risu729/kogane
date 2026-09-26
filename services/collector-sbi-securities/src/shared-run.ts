@@ -24,12 +24,18 @@ import {
   type R2BucketLike,
   type TerminalRange,
   type TerminalRunFields,
+  type TerminalTransformation,
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 import type { Artifact, CollectionScope } from "./types";
 
 export const SBI_SECURITIES_SOURCE = "sbi-securities";
 export const SHARED_PRODUCER = "collector-sbi-securities";
+/**
+ * What re-encodes a provider response into a stored dataset: this collector,
+ * named by its own id (ADR 0021).
+ */
+const TRANSFORMER_ID = "collector-sbi-securities";
 const UNIT_KIND = "scope";
 const FALLBACK_ERROR_CODE = "collector_failed";
 /** The manifest's own machine-code charset; a code that fails it is replaced. */
@@ -163,7 +169,7 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
     units,
     ranges,
     reports: [],
-    transformations: [],
+    transformations: artifacts.map((artifact) => extraction(artifact, run.producerVersion)),
   };
   return { run: fields, artifacts };
 }
@@ -173,6 +179,25 @@ export async function persistSbiRun(
   run: SbiSharedRun,
 ): Promise<PersistRunResult> {
   return await persistRun(bucket, await sbiRunPlan(run));
+}
+
+/**
+ * The lineage a derived dataset states (ADR 0021). Each dataset is the
+ * collector's own envelope around what it read from provider responses — the
+ * MTS payload with its result codes, the GraphQL and main-site JSON, the trade
+ * history pages bundled into one object — and none of those responses is
+ * stored, so the step names no input artifact; the Processor records that as
+ * `source_bytes_not_available` rather than inventing a parent.
+ */
+function extraction(artifact: PersistArtifact, producerVersion: string): TerminalTransformation {
+  return {
+    transformationId: `${artifact.artifactKey}:extracted`,
+    stepKind: "extracted",
+    transformerId: TRANSFORMER_ID,
+    transformerVersion: producerVersion,
+    inputArtifactKeys: [],
+    outputArtifactKey: artifact.artifactKey,
+  };
 }
 
 function coverageFor(outcome: ProviderOutcome): CoverageStatus {
@@ -191,7 +216,8 @@ async function plannedArtifact(artifact: Artifact): Promise<PersistArtifact> {
     byteSize: bytes.byteLength,
     mediaType: artifact.mediaType,
     // Every dataset is the collector's re-encoded view of a provider response,
-    // which is the role the central descriptor gives them today.
+    // which is the role the central descriptor gave them; the terminal's
+    // `extracted` step says what it was derived from (ADR 0021).
     role: "collector_derived",
     unitKey: datasetScope(artifact.dataset),
     body: { kind: "bytes", bytes },
