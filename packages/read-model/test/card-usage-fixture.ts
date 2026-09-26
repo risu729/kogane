@@ -81,20 +81,7 @@ interface AccountSpec {
   status?: "identified" | "provider-local" | "aggregate" | "unresolved";
 }
 
-/**
- * The migrated schema, built once per test process and copied for each
- * store. Running the migrations is most of what building a world costs, and
- * a copy of the same bytes is the same schema, views and triggers, so every
- * store still starts from exactly what the migrations produce.
- */
-let migratedTemplate: Uint8Array | null = null;
-
 export function migrated(): Database {
-  migratedTemplate ??= migrate().serialize();
-  return Database.deserialize(migratedTemplate);
-}
-
-function migrate(): Database {
   const db = new Database(":memory:");
   db.exec(LAYER_A);
   for (const name of readdirSync(MIGRATIONS)
