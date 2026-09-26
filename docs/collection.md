@@ -603,11 +603,11 @@ Terminal: `source: mizuho-bank`, `producer: collector-mizuho-bank`,
 `producerVersion: COLLECTOR_SCHEMA_VERSION` (`mizuho-collector-v1`),
 `requestedScope: unspecified` over every unit key and no range; units are
 `container`s. `providerOutcome` is `failed` (with no artifact and
-`safeErrorCode: collection-failed`), `partial` when any unit failed, else
-`success`. `coverageStatus` is `partial` when the collector recorded any issue
-(for example a first history page that is not the whole history, which leaves
-the outcome `success`) and otherwise `unknown`: no date-range coverage is
-claimed. The run is written
+`safeErrorCode: collection-failed`), `partial` when any unit failed (with
+`safeErrorCode: collection-unit-failed`), else `success`. `coverageStatus` is
+`partial` when the collector recorded any issue (for example a first history
+page that is not the whole history, which leaves the outcome `success`) and
+otherwise `unknown`: no date-range coverage is claimed. The run is written
 through `persistRun`, all artifacts held in memory until the terminal is
 written, so nothing is staged.
 

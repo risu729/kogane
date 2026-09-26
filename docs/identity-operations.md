@@ -148,7 +148,10 @@ sweep therefore treats sealed policy-1 Mizuho parses as candidates again and
 appends a policy-2 run and rule mapping revision per source account; the
 current views select the newer sealed run. The source account and account
 entity are the same references as before, so balances and transactions are not
-counted twice. Policy-1 runs, their rows and Layer A/B stay as recorded, and a
+counted twice. Account entities are append-only, so a Mizuho entity first
+written under policy 1 keeps its `source-account` role (shown as the role in the
+identity browser); the `deposit` label, `provider-local` status and reason are
+on the policy-2 mapping revision, which is what the projections read. Policy-1 runs, their rows and Layer A/B stay as recorded, and a
 manual decision on a Mizuho reference is not replaced.
 
 After deployment the five-minute pipeline sweep picks the parses up on its own;
