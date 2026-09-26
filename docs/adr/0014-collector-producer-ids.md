@@ -156,13 +156,15 @@ is counted twice at any point.
   rows are excluded (`account_not_resolved`, or `card_identity_unstable` for
   a provider-local account), and the importer's events for every card-month
   the collector re-captures are retired without replacement. After the first
-  collector run, the Vpass purchases that are live today leave the captured
-  and authorized totals until a binding for collector runs exists (same test
-  file, Vpass). This is the largest consequence of the switch, and it was
-  deferred, not avoided: any registered collector-vpass run would have had
-  the same effect under any producer name. A separate PR admits the
-  collector's producer to the trusted binding, and it has to be deployed
-  before collector-vpass captures are parsed (_Merge safety_).
+  parsed collector run, the Vpass purchases that are live today leave the
+  captured and authorized totals until a binding for collector runs exists
+  (same test file, Vpass). This is the largest consequence of the switch, and
+  it was deferred, not avoided: any parsed collector-vpass run would have had
+  the same effect under any producer name.
+  [ADR 0023](0023-vpass-collector-card-binding.md) decided not to admit
+  collector runs to the trusted binding, because no collector run carries
+  the evidence the binding rests on, and to hold collector-vpass captures
+  unparsed until the collector writes a binding of its own (_Merge safety_).
 - Decisions taken on importer-era events stay on those events. A pending to
   posted link review or a merge names event ids, and a retired event keeps
   its decisions; the replacement events start without them, and the
@@ -242,13 +244,16 @@ emails from the deploy on are sealed with `dataset = NULL`. `fetch_artifacts`
 is append-only, so those emails are not parsed when the dataset is fixed
 unless that change also covers runs already registered without one.
 
-The Vpass retirement happens once all of these are deployed, in any order:
-the seal accepts the statement pages' lineage, the Processor gives Vpass
-artifacts their datasets, and the Vpass parser publishes a parse of a
-collector capture. The PR that admits `collector-vpass` to the trusted card
-binding must be deployed before the last of them. The MyJCB churn needs the
-same two fixes for MyJCB (lineage and dataset); it double counts nothing,
-but it moves the source's live events to new provider-local accounts.
+The Vpass retirement would happen only once all of these are deployed, in
+any order: the seal accepts the statement pages' lineage, the Processor
+gives Vpass artifacts their datasets, and the Vpass parser publishes a parse
+of a collector capture. [ADR 0023](0023-vpass-collector-card-binding.md)
+holds the second of them: the registration dataset change withholds the
+Vpass dataset until a change that makes the collector write its own card
+binding releases it, so the order in which this decision and that change
+merge does not matter for Vpass. The MyJCB churn needs the lineage and
+dataset fixes for MyJCB; it double counts nothing, but it moves the
+source's live events to new provider-local accounts.
 
 ## Verification
 

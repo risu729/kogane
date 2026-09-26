@@ -83,7 +83,14 @@ Concrete limits in the current code:
   reviewed decision (or by the rule for a pair the provider itself links, which
   no deployed source does yet); candidates are proposed, never merged by
   amount and date. Excluding a row by decision and allocating a refund to a
-  purchase are not available yet.
+  purchase are not available yet. Only the retired importer's Vpass runs
+  carry a trusted card binding: a parsed capture of the Vpass collector would
+  retire the importer-era purchases of its card-month and its rows would be
+  skipped as `account_not_resolved`. The collector's captures are not parsed
+  today (their artifacts are registered without a parser dataset, and the
+  seal of a collector-vpass run is refused, below); they stay unparsed until
+  the collector writes a binding
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
   email route), V Point Pay and GLOBAL PASS had no registered collector run
   between 2026-09-12 and the release that carries
@@ -103,12 +110,8 @@ Concrete limits in the current code:
   catalogued with a parser dataset, so none is parsed and the importer's
   captures stay current
   ([ADR 0014, merge safety](adr/0014-collector-producer-ids.md#merge-safety)).
-  Once collector-vpass captures are parsed, the importer's Vpass purchase
-  events of every re-captured card-month are retired and not recognised
-  again, because the trusted card binding exists only for the importer's
-  producer; once MyJCB captures are parsed, its events are retired and
-  recognised again once under the collector's key and a new provider-local
-  account.
+  Once MyJCB captures are parsed, its events are retired and recognised again
+  once under the collector's key and a new provider-local account.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
