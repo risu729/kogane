@@ -86,7 +86,7 @@ describe("G1-02/G1-15 the V Point Pay run is written to the shared bucket, termi
     if (read.outcome !== "found") throw new Error("terminal_missing");
     const manifest = read.manifest;
     expect(manifest.source).toBe("v-point-pay");
-    expect(manifest.producer).toBe("collector-vpoint-pay");
+    expect(manifest.producer).toBe("collector-v-point-pay");
     expect(manifest.producerVersion).toBe(PRODUCER_VERSION);
     expect(manifest.providerOutcome).toBe("success");
     expect(manifest.coverageStatus).toBe("complete");

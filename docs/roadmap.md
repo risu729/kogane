@@ -91,6 +91,23 @@ Concrete limits in the current code:
   artifacts are registered without a parser dataset); they must stay unparsed
   until the collector writes a binding
   ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
+- Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
+  email route), V Point Pay and GLOBAL PASS had no registered collector run
+  between 2026-09-12 and the release that carries
+  [ADR 0014](adr/0014-collector-producer-ids.md): their collectors named a
+  producer no route declares, so every terminal was refused as
+  `inactive_ingest_route`. Terminals written before that release keep the old
+  producer and stay unregistered in R2; for the snapshot sources the next
+  capture shows the provider's state again, but V Point Pay notification
+  emails of that period are registered only if a later decision registers
+  those runs. The `collection_scan` walk does not revisit them either: it
+  stops at a page holding more than five terminals that never register
+  ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences)).
+  Once collector-vpass runs register, the importer's Vpass purchase events of
+  every re-captured card-month are retired and not recognised again, because
+  the trusted card binding exists only for the importer's producer; MyJCB
+  events are retired and recognised again once under the collector's key and
+  a new provider-local account.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
