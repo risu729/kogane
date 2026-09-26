@@ -37,8 +37,9 @@ import {
   type TerminalTransformation,
 } from "../../../packages/collection/src/index";
 
-const SOURCE = "vpass";
-const PRODUCER = "vpass-json";
+export const SOURCE = "vpass";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-vpass";
 /** The schema version central storage records for a card-scoped Vpass run. */
 const VPASS_CARD_SCHEMA_VERSION = "vpass-worker-card-v1";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
