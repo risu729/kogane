@@ -102,7 +102,7 @@ class Builder {
 
   constructor(
     private readonly next: () => number,
-    private readonly drawn: Set<string>,
+    readonly drawn: Set<string>,
   ) {}
 
   run(sql: string, ...binds: Bind[]): number {
@@ -775,6 +775,262 @@ class Builder {
   }
 }
 
+/** A statement or bank row a review may cite, with its key and owner if it has them. */
+interface Cited {
+  id: number;
+  parse_run_id: number;
+  key: string;
+  source_id: string;
+  period: string | null;
+  account_id: string | null;
+  owner_ref: string | null;
+  evidence_refs_json: string | null;
+}
+
+/**
+ * The reviews `card_settlement_readiness` (migration 0044) judges, built on the
+ * rows of the store as the sweep builds them, then drawn away from it: every
+ * flag of the view both holds and fails. Candidates cite a current statement
+ * or an older capture, a current debit or another bank row, under their real
+ * keys or other ones, with the facts the owners give or other accounts,
+ * parties and evidence. Some are rejected, accepted with a settlement
+ * allocation of their debit, or accepted and withdrawn; other allocations cite
+ * bank rows directly, and some of those are superseded.
+ */
+class Reviews {
+  private accepted = 0;
+
+  constructor(private readonly builder: Builder) {}
+
+  private statements(): Cited[] {
+    const { db } = this.builder;
+    const current = db
+      .query(
+        `SELECT s.id,s.parse_run_id,s.statement_key AS key,s.source_id,s.period,o.account_id,o.owner_ref,o.evidence_refs_json
+         FROM card_statement_facts s LEFT JOIN card_settlement_fact_ownership o ON o.kind='balance' AND o.observation_id=s.id ORDER BY s.id`,
+      )
+      .all() as Cited[];
+    const older = db
+      .query(
+        `SELECT b.id,b.parse_run_id,json_array(fa.source_id,fr.producer_id,ses.external_id_namespace,b.source_account,'2026-07') AS key,
+          fa.source_id,'2026-07' AS period,NULL AS account_id,NULL AS owner_ref,NULL AS evidence_refs_json
+         FROM balance_observations b JOIN parse_runs p ON p.id=b.parse_run_id JOIN fetch_artifacts fa ON fa.id=p.fetch_artifact_id
+         JOIN fetch_runs fr ON fr.id=fa.fetch_run_id JOIN acquisition_sessions ses ON ses.id=fr.acquisition_session_id
+         WHERE b.id NOT IN (SELECT id FROM card_statement_facts) ORDER BY b.id`,
+      )
+      .all() as Cited[];
+    return [...current, ...current, ...older];
+  }
+
+  private debits(): Cited[] {
+    const { db } = this.builder;
+    const current = db
+      .query(
+        `SELECT b.id,b.parse_run_id,b.bank_key AS key,b.source_id,NULL AS period,o.account_id,o.owner_ref,o.evidence_refs_json
+         FROM card_bank_debit_facts b LEFT JOIN card_settlement_fact_ownership o ON o.kind='transaction' AND o.observation_id=b.id ORDER BY b.id`,
+      )
+      .all() as Cited[];
+    // Every bank row under the key of its provider id, current or not.
+    const rows = db
+      .query(
+        `SELECT t.id,t.parse_run_id,json_array(fa.source_id,fr.producer_id,ses.external_id_namespace,t.source_account,t.external_id) AS key,
+          fa.source_id,NULL AS period,o.account_id,o.owner_ref,o.evidence_refs_json
+         FROM transaction_observations t JOIN parse_runs p ON p.id=t.parse_run_id JOIN fetch_artifacts fa ON fa.id=p.fetch_artifact_id
+         JOIN fetch_runs fr ON fr.id=fa.fetch_run_id JOIN acquisition_sessions ses ON ses.id=fr.acquisition_session_id
+         LEFT JOIN card_settlement_fact_ownership o ON o.kind='transaction' AND o.observation_id=t.id ORDER BY t.id`,
+      )
+      .all() as Cited[];
+    return [...current, ...current, ...rows];
+  }
+
+  private decision(subject: string, revision: number, kind: string): string {
+    const id = `dr-${this.builder.id()}`;
+    this.builder.run(
+      `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+       VALUES(?,'relation',?,?,?,'manual','synthetic-operator',NULL,'synthetic','[]',NULL,NULL,'2026-09-01')`,
+      id,
+      subject,
+      revision,
+      kind,
+    );
+    return id;
+  }
+
+  /** One allocation citing a bank row; returns its id. */
+  allocation(bank: number, role: string, target: string): string {
+    const id = `alloc-${this.builder.id()}`;
+    const decision = this.decision(`allocation:${id}`, 1, "accept");
+    this.builder.run(
+      `INSERT INTO allocations(id,source_component_ref,target_effect_ref,role,unit_ref,coefficient,scale,decision_revision_id,superseded_by,created_at)
+       VALUES(?,?,?,?,'JPY','1000',0,?,NULL,'2026-09-01')`,
+      id,
+      `transaction:${bank}`,
+      target,
+      role,
+      decision,
+    );
+    return id;
+  }
+
+  private settle(id: string, bank: number, withdraw: boolean): void {
+    const b = this.builder;
+    const n = (this.accepted += 1);
+    const event = `event-review-${n}`;
+    const allocation = this.allocation(bank, "settlement", `event:${event}`);
+    b.run(
+      `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+       VALUES(?,1,'accepted',?,?,NULL,?,'2026-09-01')`,
+      id,
+      this.decision(`card-settlement:${id}`, 1, "accept"),
+      event,
+      allocation,
+    );
+    if (!withdraw) return;
+    b.run(
+      `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+       VALUES(?,2,'withdrawn',?,?,NULL,?,'2026-09-02')`,
+      id,
+      this.decision(`card-settlement:${id}`, 2, "supersede"),
+      event,
+      allocation,
+    );
+    b.run(
+      "INSERT INTO card_settlement_allocation_withdrawals(settlement_id,decision_revision_id,created_at) VALUES(?,?,'2026-09-02')",
+      allocation,
+      this.decision(`allocation:${allocation}`, 2, "supersede"),
+    );
+  }
+
+  write(): void {
+    const b = this.builder;
+    const statements = this.statements();
+    const debits = this.debits();
+    if (statements.length === 0 || debits.length === 0) return;
+    const owned = statements.filter((statement) => statement.owner_ref !== null);
+    const count = 8 + Math.floor(statements.length / 2);
+    for (let index = 0; index < count; index += 1) {
+      // Mostly a statement with an owner, whose review can be ready.
+      const statement =
+        owned.length > 0 && b.chance(0.5, "review: owned statement")
+          ? b.pick(owned)
+          : b.pick(statements);
+      // Mostly a debit of the statement's owner, as the sweep pairs them.
+      const same = debits.filter(
+        (debit) => debit.owner_ref !== null && debit.owner_ref === statement.owner_ref,
+      );
+      const debit =
+        same.length > 0 && b.chance(0.6, "review: same owner") ? b.pick(same) : b.pick(debits);
+      const n = b.id();
+      const id = `cs_review_${n}`;
+      const statementKey = b.chance(0.8) ? statement.key : `statement-review-${n}`;
+      const bankKey = b.chance(0.8, "review: debit key")
+        ? debit.key
+        : b.chance(0.5, "review: another debit's key")
+          ? b.pick(debits).key
+          : `bank-review-${n}`;
+      const evidence = [
+        ...new Set([
+          ...(JSON.parse(statement.evidence_refs_json ?? "[]") as string[]),
+          ...(JSON.parse(debit.evidence_refs_json ?? "[]") as string[]),
+        ]),
+      ];
+      // The facts the owners give, or with exactly one of them drawn otherwise.
+      const facts = {
+        statement: {
+          sourceId: statement.source_id,
+          accountId: statement.account_id as string | number | null,
+          ownerRef: statement.owner_ref,
+          period: statement.period,
+        },
+        bankDebit: { accountId: debit.account_id, ownerRef: debit.owner_ref },
+        ownershipEvidenceRefs: evidence,
+      };
+      if (b.chance(0.6)) {
+        const changed = b.pick([
+          "statement source",
+          "statement account",
+          "statement owner",
+          "statement period",
+          "debit account",
+          "debit owner",
+          "evidence missing a ref",
+          "evidence with another ref",
+        ] as const);
+        b.drawn.add(`review: ${changed}`);
+        switch (changed) {
+          case "statement source":
+            facts.statement.sourceId = statement.source_id === "vpass" ? "myjcb" : "vpass";
+            break;
+          case "statement account":
+            facts.statement.accountId = b.pick([...RANDOM_ACCOUNTS, null, 7]);
+            break;
+          case "statement owner":
+            facts.statement.ownerRef = b.pick([...PARTIES, null]);
+            break;
+          case "statement period":
+            facts.statement.period = b.pick(RANDOM_PERIODS);
+            break;
+          case "debit account":
+            facts.bankDebit.accountId = b.pick([...RANDOM_ACCOUNTS, null]);
+            break;
+          case "debit owner":
+            facts.bankDebit.ownerRef = b.pick([...PARTIES, null]);
+            break;
+          case "evidence missing a ref":
+            facts.ownershipEvidenceRefs = evidence.slice(1);
+            break;
+          case "evidence with another ref":
+            facts.ownershipEvidenceRefs = [...evidence, "relation:synthetic-extra"];
+            break;
+        }
+      }
+      b.run(
+        `INSERT INTO card_settlement_candidates(id,statement_key,bank_key,statement_observation_id,statement_parse_run_id,
+          bank_observation_id,bank_parse_run_id,policy_release,facts_json,proposal_digest,created_at)
+         VALUES(?,?,?,?,?,?,?,'card-statement-settlement-v1',?,?,?)`,
+        id,
+        statementKey,
+        bankKey,
+        statement.id,
+        statement.parse_run_id,
+        debit.id,
+        debit.parse_run_id,
+        JSON.stringify(facts),
+        n.toString(16).padStart(64, "0"),
+        `2026-09-${String(1 + Math.floor(b.pick([0, 5, 5, 10, 20]))).padStart(2, "0")}T00:00:00Z`,
+      );
+      // Mostly still proposed: an acceptance reserves its statement and debit for every other review.
+      const decision = b.pick([
+        "proposed",
+        "proposed",
+        "proposed",
+        "proposed",
+        "rejected",
+        "accepted",
+        "withdrawn",
+      ] as const);
+      b.drawn.add(`review: ${decision}`);
+      if (decision === "rejected")
+        b.run(
+          `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+           VALUES(?,1,'rejected',?,NULL,NULL,NULL,'2026-09-01')`,
+          id,
+          this.decision(`card-settlement:${id}`, 1, "reject"),
+        );
+      else if (decision !== "proposed") this.settle(id, debit.id, decision === "withdrawn");
+    }
+    // Allocations that are not a review's: a transfer of a bank row, some superseded.
+    for (let index = 0; index < 2; index += 1) {
+      const debit = b.pick(debits);
+      const first = this.allocation(debit.id, "transfer", `event:transfer-${b.id()}`);
+      if (b.chance(0.4, "review: superseded allocation")) {
+        const next = this.allocation(b.pick(debits).id, "transfer", `event:transfer-${b.id()}`);
+        b.run("UPDATE allocations SET superseded_by=? WHERE id=?", next, first);
+      } else b.drawn.add("review: other allocation");
+    }
+  }
+}
+
 /** One random store; `drawn` collects the states the seed drew. */
 export function randomSettlementStore(seed: number, drawn: Set<string>): RandomSettlementStore {
   const builder = new Builder(random(seed), drawn);
@@ -796,6 +1052,7 @@ export function randomSettlementStore(seed: number, drawn: Set<string>): RandomS
       }
     }
   builder.candidates();
+  new Reviews(builder).write();
   const triples: [string, string, string][] = [];
   for (const account of RANDOM_ACCOUNTS)
     for (const source of ["vpass", "myjcb"])
@@ -851,4 +1108,26 @@ export const RANDOM_STATES = [
   "candidate: numeric account",
   "candidate: no account",
   "rejected candidate",
+] as const;
+
+/** The review states the readiness checks require the seeds together to draw. */
+export const READINESS_STATES = [
+  "review: debit key",
+  "review: another debit's key",
+  "review: owned statement",
+  "review: same owner",
+  "review: statement source",
+  "review: statement account",
+  "review: statement owner",
+  "review: statement period",
+  "review: debit account",
+  "review: debit owner",
+  "review: evidence missing a ref",
+  "review: evidence with another ref",
+  "review: proposed",
+  "review: rejected",
+  "review: accepted",
+  "review: withdrawn",
+  "review: superseded allocation",
+  "review: other allocation",
 ] as const;

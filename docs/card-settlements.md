@@ -281,9 +281,64 @@ on the statement metric nor an index on `metric` changed the time), and
 page (51 ms here, so a full page of 100 is about 5 s of D1 time a tick).
 Candidates accrue one per recapture of a paid bill, reached by the index. The
 rest of the purchases page is the current card usage pass
-([read model](read-model.md#cost)). The review and commit reads of
-`card_settlement_readiness` still use the whole ownership view and are not
-changed here: on this store the first page of the `カード照合` list took 42 s.
+([read model](read-model.md#cost)).
+
+### Readiness
+
+Every read of `card_settlement_readiness` used to join the whole view: the
+`カード照合` list and one review (`queryCardSettlements`), the ownership
+review's candidate (`queryCardOwnership`), the settlement plan
+(`cardSettlementPlan`), the ownership review's plan read and commit guard
+(`prepareOwnershipReview`) and the settlement commit guard
+(`services/processor/src/card-settlement-commands.ts`). The view ranks every
+statement total and SMBC row and owns them through
+`card_settlement_fact_ownership`. Each read now chooses its candidates first
+(the page, or the one proposal) and judges only those through
+`packages/read-model/src/card-settlement-readiness.ts`. That file holds the
+view's own select over the facts of those candidates only: the statement
+totals of each candidate statement's source and period, the SMBC rows sharing
+each candidate debit's source account and provider id (whole ranking
+partitions, so the newest capture is the same), and their owners through the
+keyed ownership CTEs. The allocation check keeps the view's text and reaches the
+debit's rows by the account index. The view is unchanged, and so is each guard's
+place: the commit guards still run inside the statement that reserves the
+receipt, so a statement, debit, owner or allocation that changed after the plan
+still writes nothing. Median wall time on the store above (bun:sqlite; the
+container was shared with other jobs, so treat these as orders of magnitude):
+
+| Read                                       | Shipped   | Now    |
+| ------------------------------------------ | --------- | ------ |
+| `カード照合` list, first page (50 reviews) | 37,072 ms | 143 ms |
+| one review (`proposalId`)                  | 6,581 ms  | 63 ms  |
+| settlement plan read                       | 6,257 ms  | 38 ms  |
+| settlement acceptance commit guard         | 120 ms    | 31 ms  |
+| ownership review guard, candidate term     | 113 ms    | 33 ms  |
+
+The shipped guards were cheaper than the plan reads because SQLite evaluated
+the view's flags for the one row the guard names. The reads by id joined the
+view and evaluated them for every candidate. A rejection or withdrawal guard reads no flag.
+
+What still grows with history: each judged set of candidates ranks the
+statement totals of its periods after reading every balance observation once
+(the `b` scan the plan checks allow in `ready_statements`, as in
+`card_statement_facts`). The allocation check walks the debit account's SMBC
+rows through `idx_txn_obs_account` for each candidate. The list orders every
+candidate to choose its page (4 ms for 3,763 candidates here; no index).
+Not changed here, and not measured: the ownership review's account mapping
+reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
+and the two mapping terms of its commit guard) still read
+`current_identity_observations`, so the guard's row above times only its
+candidate term.
+`card-settlement-readiness.test.ts` compares the CTEs with the view on random
+stores whose reviews draw every flag both ways. It also shows that ten
+inexactness mutations (a cut partition, a reversed order, a dropped owner,
+evidence or reservation condition) each fail that comparison.
+`card-settlement-review-differential.test.ts`,
+`card-settlement-review-scale.test.ts` and the processor's
+`card-settlement-scale.test.ts` compare every reader and guard with the shipped
+text (`card-settlement-readiness-legacy-sql.ts`,
+`card-settlement-legacy-sql.ts`) and fail on a plan that reads the store's
+owners, scans a base table or builds an automatic index on one.
 
 `packages/application/test/card-statement-scale.test.ts` and
 `services/processor/test/card-settlement-scale.test.ts` compare the purchases

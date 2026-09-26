@@ -1,6 +1,11 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { queryCardSettlements } from "../src/query/card-settlements.ts";
+import {
+  CARD_SETTLEMENT_PAGE_SQL,
+  CARD_SETTLEMENT_REVIEW_SQL,
+  queryCardSettlements,
+} from "../src/query/card-settlements.ts";
+import { LEGACY_CARD_SETTLEMENT_REVIEWS_SQL } from "./card-settlement-readiness-legacy-sql.ts";
 import { settlementFacts } from "./card-settlement-fixture.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 
@@ -12,13 +17,20 @@ function store() {
     decision_revision_id TEXT,event_id TEXT,obligation_id TEXT,settlement_id TEXT,created_at TEXT);
     CREATE VIEW card_settlement_readiness AS SELECT id,1 AS statement_current,1 AS bank_current,1 AS ownership_current,1 AS allocation_available FROM card_settlement_reviews;
     CREATE TABLE card_settlement_decisions(proposal_id TEXT,revision INTEGER,status TEXT,decision_revision_id TEXT,created_at TEXT);`);
+  // The stub schema stands in for the readiness view, so the keyed reads run
+  // as the shipped text over it; card-settlement-review-differential.test.ts
+  // proves the two equal on the complete schema.
+  const text = (query: string): string =>
+    query === CARD_SETTLEMENT_PAGE_SQL || query === CARD_SETTLEMENT_REVIEW_SQL
+      ? LEGACY_CARD_SETTLEMENT_REVIEWS_SQL
+      : query;
   const sql: SqlExecutor = {
     async all<T>(query: string, args: readonly unknown[]): Promise<T[]> {
-      expect(query.trimStart().startsWith("SELECT")).toBe(true);
-      return db.prepare(query).all(...(args as (string | number | null)[])) as T[];
+      expect(query.trimStart()).toMatch(/^(?:SELECT|WITH)\b/);
+      return db.prepare(text(query)).all(...(args as (string | number | null)[])) as T[];
     },
     async first<T>(query: string, args: readonly unknown[]): Promise<T | null> {
-      return db.prepare(query).get(...(args as (string | number | null)[])) as T | null;
+      return db.prepare(text(query)).get(...(args as (string | number | null)[])) as T | null;
     },
   };
   return { db, sql };
