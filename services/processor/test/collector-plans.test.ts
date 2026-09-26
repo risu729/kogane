@@ -101,6 +101,8 @@ function routeProducer(source: string): string {
 interface Registered {
   roles: string[];
   units: { unit_key: string; artifacts: number; declared: number | null }[];
+  /** Distinct parser datasets the registration gave the run's artifacts. */
+  datasets: (string | null)[];
 }
 
 /**
@@ -172,7 +174,12 @@ async function registerPlan(plan: PersistRunPlan, expectedArtifacts: number): Pr
     )
     .all(result.fetchRunId) as Registered["units"];
   for (const unit of units) expect(unit.artifacts).toBe(unit.declared!);
-  return { roles, units };
+  const datasets = (
+    h.db
+      .query("SELECT DISTINCT dataset FROM fetch_artifacts WHERE fetch_run_id=? ORDER BY dataset")
+      .all(result.fetchRunId) as { dataset: string | null }[]
+  ).map((row) => row.dataset);
+  return { roles, units, datasets };
 }
 
 // --- Sources that registered before this change -------------------------------
@@ -338,7 +345,7 @@ test("smbc-direct: responses, their extractions and the run manifest register an
 
 // --- Sources blocked from 2026-09-12 until ADR 0021 ---------------------------
 
-test("sbi-securities: every re-encoded dataset states its extraction and registers", async () => {
+test("sbi-securities: every dataset states its extraction and registers", async () => {
   const dataset = (name: string) => ({
     dataset: name,
     mediaType: "application/json" as const,
@@ -475,7 +482,7 @@ test("prestia-globalpass: the run manifest belongs to the run and the account un
   expect(registered.units).toEqual([{ unit_key: "account", artifacts: 2, declared: 2 }]);
 });
 
-test("myjcb: the ledger links the page it was parsed from, discovery states its extraction", async () => {
+test("myjcb: the ledger and discovery state their extraction from pages nobody keeps", async () => {
   // Already in the redacted shape `assertRedactedHtml` accepts: no script, no
   // URL-bearing attribute, no unredacted value. (The collector's own
   // `redactedStatementHtml` is not imported: its module does not compile
@@ -538,7 +545,6 @@ test("myjcb: the ledger links the page it was parsed from, discovery states its 
   });
   const registered = await registerPlan(plan, 6);
   expect(registered.roles).toEqual([
-    "collector_derived/transformed/linked",
     "collector_derived/transformed/source_bytes_not_available",
     "collector_manifest/generated/not_applicable",
     "provider_response/exact/not_applicable",
@@ -760,4 +766,7 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
     "sanitized_provider_capture/transformed/source_not_retained_for_security",
   ]);
   expect(registered.units).toEqual([{ unit_key: "card-001", artifacts: 4, declared: 4 }]);
+  // ADR 0022/0023 withhold Vpass from a parser dataset until the collector
+  // derives the card binding. The pages' new role must not lift that hold.
+  expect(registered.datasets).toEqual([null]);
 });

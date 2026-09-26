@@ -41,16 +41,18 @@ Concrete limits in the current code:
   [ADR 0021](adr/0021-collector-registration-contract.md), which also fixed
   Vpass statement pages (a provider role with a `redacted` step, refused at
   the seal) and V Point Pay month ranges; and registered artifacts with no
-  `dataset` (a separate Processor PR). Only terminals written after each
+  `dataset` (fixed by #269, [ADR 0022](adr/0022-registration-artifact-datasets.md),
+  for the datasets a registered parser reads). Only terminals written after each
   collector's redeploy carry the fixed shapes. The terminals written before
   it are immutable: the 14 sbi-securities and 14 sbi-shinsei runs blocked
   since U09 (counted on 2026-09-26) stay blocked (a block is write-once), and
-  re-registering them under a new registration contract version would refuse
-  them again unless the Processor's derivation also accepts their shape — that
-  decision belongs to ADR 0022. The 14 sbi-vc-trade runs keep their catalogued
-  artifacts unsealed and are retried on every tick, because a seal-trigger
-  refusal is not classified as a block
-  ([processor §3](processor.md#3-idempotency-and-what-blocks)).
+  re-registering them under a new registration contract version refuses the
+  same bytes again: nothing makes them registrable. The 14 sbi-vc-trade runs
+  keep their catalogued artifacts unsealed and are tried again whenever the
+  scan reaches them, because a seal-trigger refusal is rethrown rather than
+  classified as a block
+  ([processor §3](processor.md#3-idempotency-and-what-blocks)); recording it as
+  a block is a Processor follow-up.
 
 - [Card settlement review](card-settlements.md) now connects authoritative
   Vpass/MyJCB statement totals to SMBC bank debits through explicit operator
@@ -113,8 +115,10 @@ Concrete limits in the current code:
   retire the importer-era purchases of its card-month and its rows would be
   skipped as `account_not_resolved`. The collector's captures are not parsed
   today (registration deliberately gives their artifacts no parser dataset,
-  [ADR 0022](adr/0022-registration-artifact-datasets.md), and the seal of a
-  collector-vpass run is refused, below); they stay unparsed until
+  [ADR 0022](adr/0022-registration-artifact-datasets.md); the seal of a
+  collector-vpass run written before
+  [ADR 0021](adr/0021-collector-registration-contract.md) is also refused,
+  below); they stay unparsed until
   the collector writes a binding
   ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
@@ -136,9 +140,10 @@ Concrete limits in the current code:
   was a `provider_response` with a `redacted` step), and MyJCB and V Point
   runs were blocked `artifact_lineage_unstated` — until the collectors
   changed with [ADR 0021](adr/0021-collector-registration-contract.md), for
-  terminals written after that release. Vpass's datasets are withheld and
-  MyJCB's runs are not eligible for parsing (below), so none of these is
-  parsed yet and the importer's
+  terminals written after that release. Those register with the parser
+  datasets of [ADR 0022](adr/0022-registration-artifact-datasets.md), except
+  that Vpass statement pages are withheld from one and MyJCB runs are not
+  eligible for parsing (below), so for those two sources the importer's
   captures stay current
   ([ADR 0014, merge safety](adr/0014-collector-producer-ids.md#merge-safety)).
   Once MyJCB captures are parsed, its events are retired and recognised again
