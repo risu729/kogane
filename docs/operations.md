@@ -301,7 +301,10 @@ registration budget leaves its cursor put. Reading `collection_scan_state`
 `cycles_completed` count finished pages and walks, not ticks, and
 `last_scan_at_ms` says when a tick last ran. A `last_scan_at_ms` that keeps
 moving while `pages_completed` does not is a page the scan keeps listing
-again; before ADR 0024 such a tick on the first page also counted a cycle. And a request the operations API accepted is never completed by having
+again. Before ADR 0024 both counters counted ticks, not pages, and a held tick
+on the first page (cursor null) also counted a cycle, so values read before
+that deploy (the stall of ADR 0024 showed the two equal, in the thousands) are
+not comparable with values after it. And a request the operations API accepted is never completed by having
 been handed over — a queued replay, a projection scheduled for the next tick
 and a collector call that does not exist yet all stay short of `completed`
 (`docs/processor.md` §7, `contracts/stages.json`).

@@ -71,8 +71,10 @@ one query each and the rest make progress. That cannot skip a run, which a
 remembered position inside a page could.
 
 **What spends one of the five** ([ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
-Only new work does: a registration, a continuation, a first verdict, a
-retry that is due, a missing terminal, a registration that threw. A terminal
+Only new work does: a registration, a pending run the listing reaches, a
+first verdict, a retry that is due, a missing terminal, a registration that
+threw. The continuations that run before the listing have their own bound of
+five and spend none of these. A terminal
 CORE has already judged under the current registration contract and the same
 terminal digest is answered from its `collection_runs` row and spends
 nothing:
@@ -84,11 +86,15 @@ nothing:
 | blocked                                                          | never again under this contract version      | no                     | no             |
 | newest `registered` stage `retryable`, recorded under 24 h ago   | no; its recorded code is counted             | no                     | no             |
 | newest `registered` stage `retryable`, recorded 24 h ago or more | yes, once; a repeat refusal appends a row    | yes                    | if over budget |
-| `pending`                                                        | yes (continued first, and again when listed) | yes                    | if over budget |
+| `pending`                                                        | yes (continued first, and again when listed) | yes, when listed       | if over budget |
 
-Such an answer costs about five operations of the invocation's budget (the
-terminal read, the conditional insert, the row read and one or two stage
-reads), so a page of 25 judged terminals finishes in one tick and the cursor
+Such an answer costs three operations of the invocation's budget (the
+terminal read, the conditional insert and the row read) for a registered or
+blocked run, four for an unreadable terminal already recorded (it reads the
+bytes twice), and five for a retryable run within its interval (two stage
+reads more); it writes nothing. A page of 25 such terminals costs at most 125
+of the 500, plus the scan's own four (the list, the pending read, the state
+read and the state write), so a page of 25 judged terminals finishes in one tick and the cursor
 moves on even when nothing registered. The retry interval is
 `RETRYABLE_RETRY_INTERVAL_MS` (24 hours); each attempt that is refused again
 appends one `registered` `retryable` row, whose `recorded_at` is what the

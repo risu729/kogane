@@ -17,6 +17,9 @@
 // observed, not their contents.
 import { expect, test } from "bun:test";
 import {
+  meterBucket,
+  meterD1,
+  OperationMeter,
   RETRYABLE_RETRY_INTERVAL_MS,
   RegistrationBudget,
 } from "../../../packages/application/src/collection/index.ts";
@@ -339,4 +342,84 @@ test("the queue consumer still attempts every delivery it is given", async () =>
       runId(4),
     )[0]!.n,
   ).toBe(1);
+});
+
+test("a judged terminal costs its terminal read and two to four statements", async () => {
+  const harness = await stalledPage(0);
+  const at = await settle(harness);
+  const cost = async (id: string) => {
+    const budget = new RegistrationBudget();
+    const result = await registerCollectionRun(
+      harness.env,
+      { source: SOURCE, runId: id },
+      { budget, retryAfterMs: RETRYABLE_RETRY_INTERVAL_MS, now: () => new Date(at) },
+    );
+    return { outcome: result.outcome, ...budget.meter };
+  };
+  // Terminal read, conditional insert, row read; a waiting retryable run
+  // also reads whether it registered and its newest stage. Nothing is written.
+  const none = { d1Batches: 0, r2Operations: 1 };
+  expect(await cost(runId(1))).toEqual({ outcome: "blocked", d1Statements: 2, ...none });
+  expect(await cost(runId(4))).toEqual({ outcome: "retryable", d1Statements: 4, ...none });
+  expect(await cost(runId(10))).toEqual({
+    outcome: "already_registered",
+    d1Statements: 2,
+    ...none,
+  });
+
+  // The whole tick, every binding metered as the invocation probe meters it:
+  // 3 x 3 + 3 x 5 + 19 x 3 = 81 inside the registration budget, plus the
+  // scan's own list, pending read, state read and state write.
+  const meter = new OperationMeter();
+  const budget = new RegistrationBudget();
+  const env = {
+    ...harness.env,
+    DB: meterD1(harness.env.DB, meter),
+    EVIDENCE: meterBucket(harness.env.EVIDENCE, meter),
+  };
+  const summary = await collectionScan(env, { budget, now: () => new Date(at) });
+  expect(summary).toMatchObject({ listed: 25, alreadyJudged: 6, cycleComplete: true });
+  expect(budget.used).toBe(81);
+  expect(meter.total).toBe(81 + 4);
+});
+
+test("a terminal re-persisted with other bytes is not judged: it is attempted", async () => {
+  const harness = await stalledPage(0);
+  const at = await settle(harness);
+  // Same run ids, different terminal bytes: a new digest, so a new identity.
+  for (const id of [runId(1), runId(4)]) {
+    const key = `runs/${SOURCE}/${id}/terminal.json`;
+    const stored = await harness.bucket.get(key);
+    const text = new TextDecoder().decode(await stored!.arrayBuffer());
+    await harness.bucket.put(key, `${text}\n`);
+  }
+  const summary = await tick(harness, at);
+  // Both are attempted, and blocked on what the new bytes are (a terminal
+  // that is not canonical); the four other refused terminals are answered
+  // from their rows.
+  expect(summary).toMatchObject({ blocked: 4, retryable: 2, alreadyJudged: 4 });
+  expect(countOf(harness, "SELECT count(*) AS n FROM collection_runs")).toBe(27);
+});
+
+test("a new registration contract version makes every judged terminal new work", async () => {
+  const harness = await stalledPage(0);
+  const at = await settle(harness);
+  // Stand-in for a bump of REGISTRATION_CONTRACT_VERSION: the rows the scan
+  // wrote are relabelled as an older contract's, in this synthetic store only
+  // (the trigger that forbids it in CORE is dropped first).
+  harness.db.exec(`
+    DROP TRIGGER collection_runs_progress_only;
+    UPDATE collection_runs SET registration_contract_version = 'terminal-registration-v0';
+  `);
+  // Minutes after the retryable refusals, well inside their interval: under
+  // the new contract they have no row, so they are attempted all the same.
+  const first = await tick(harness, at);
+  expect(first).toMatchObject({
+    blocked: 3,
+    retryable: 2,
+    alreadyJudged: 0,
+    budgetExhausted: true,
+  });
+  const second = await tick(harness, at + 5 * 60 * 1000);
+  expect(second).toMatchObject({ retryable: 3, alreadyJudged: 5 });
 });

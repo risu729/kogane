@@ -20,14 +20,15 @@ registration attempts per tick. Before this ADR, a `blocked` or `retryable`
 answer counted against those five exactly like a registration, and the cursor
 advanced only when the whole page had been dealt with.
 
-Since 2026-09-12 most sources' terminals are refused: a terminal whose
+Since the collectors changed their producer ids, most sources' terminals are
+refused: a terminal whose
 producer has no route is `retryable` `inactive_ingest_route`
 ([ADR 0014](0014-collector-producer-ids.md) records why), and others are
 blocked (`artifact_lineage_unstated`, `provider_run_failed`). A block is
 write-once, and a retryable run is refused again on every attempt. With more
 than five such terminals on one page, every tick spent its five attempts on
 them and listed the same page again next time. Production aggregates on
-2026-09-26 showed `pages_completed` = `cycles_completed` (4,371), cursor null,
+the date of this ADR showed `pages_completed` = `cycles_completed` (4,371), cursor null,
 `last_seen` 25: the scan had never left its first page, and only the R2
 notification path registered new terminals. The two counters were equal
 because every tick counted a page, and a held tick on the first page, whose
@@ -108,14 +109,25 @@ and none of the 24 routable runs sealed.
 
 ## Consequences
 
-- **Right after deploy.** The first page holds terminals from 2026-09-12 to
-  2026-09-26. Its blocked terminals already have rows and are answered from
-  them on the first tick. Its retryable terminals' newest `registered` rows
-  are older than 24 hours, so each is attempted once more, five per tick, and
-  refused again; each such attempt appends one row and starts its interval.
-  The page is finished within a few ticks and the scan moves on to the rest
-  of the prefix, registering the terminals with no row that it finds there,
-  five per tick.
+- **Right after deploy.** The first page is the one the scan has been
+  listing since the stall began. Its registered terminals (the R2
+  notification path registered them) and its blocked ones already have rows
+  and are answered from them on the first tick, spending nothing. Its
+  retryable terminals (the producer-mismatch runs) have one `registered`
+  `retryable` row each, written at their first refusal, because before this
+  ADR a repeat refusal appended nothing; every one of them first refused 24
+  hours or more before the deploy is due, and is attempted once more, five
+  per tick, and refused again, each attempt appending one row that starts its
+  interval. With R such due terminals on the page, the page is finished on
+  tick ⌊R/5⌋ + 1 at the latest: six ticks (half an hour) for a page of 25.
+  One refused within the last day before the deploy is answered from its row
+  and waits for a later walk. The scan then moves on to the rest of the
+  prefix and attempts the terminals with no row that it finds there, five per
+  tick.
+- **The R2 notification path is unchanged.** The queue consumer still
+  attempts every delivery with no interval, so a new terminal still registers
+  as soon as its notification arrives; the scan remains the path that finds a
+  terminal whose notification was lost.
 - **The producer-mismatch terminals never register.** A terminal is immutable
   and keeps the producer it was written with (ADR 0014), so those runs stay
   `retryable` `inactive_ingest_route` and are attempted about once a day each,
@@ -144,7 +156,15 @@ producer without a route for `inactive_ingest_route`):
   the cursor advances, the next page registers, and a second walk over the
   judged page appends nothing and moves on in one tick; held ticks count no
   page and no cycle;
-- a judged page costs at most five operations per terminal;
+- a judged terminal costs three operations (registered or blocked) or five
+  (retryable within its interval) and writes nothing; a judged page of 25
+  costs 81 inside the registration budget, 85 with the scan's own list and
+  state reads and write, measured with the invocation probe's meter;
+- a terminal re-persisted with other bytes (a new digest) is attempted, not
+  answered from the earlier row;
+- rows under another registration contract version do not count as judged:
+  every terminal is attempted again, including a retryable one minutes after
+  its last refusal;
 - new terminals on a judged page register five per tick until done;
 - a blocked run is never attempted again; a retryable run is not attempted
   within 24 hours however often it is listed, is attempted once after, and a

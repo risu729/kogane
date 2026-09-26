@@ -203,8 +203,9 @@ function count(summary: ScanSummary, result: RegisterTerminalOutcome): void {
  * cheaper than remembering a position inside a page, and it cannot skip one.
  *
  * Only new work spends one of the tick's `maxRegistrations`: a registration,
- * a continuation, a first verdict, a retry that was due, a missing terminal
- * or a failure. A terminal already registered, already blocked, or refused
+ * a pending run reached by the listing, a first verdict, a retry that was
+ * due, a missing terminal or a failure. The continuations before the listing
+ * are bounded by `maxContinuations` instead. A terminal already registered, already blocked, or refused
  * `retryable` less than `retryAfterMs` ago is answered from its CORE row and
  * spends none, so a page whose terminals are all judged is finished in one
  * tick and the cursor moves on even when nothing registered (ADR 0024). A
