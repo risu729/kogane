@@ -1,11 +1,10 @@
 # ADR 0007: Key MyJCB confirmed statements by the payment month the page names
 
-- Status: accepted (implementation in flight)
+- Status: accepted
 - Date: 2026-09-26
-- Implemented by: #255 (open at the time of writing, branch
-  `claude/myjcb-stable-statement-identity-wr8pj4`)
-- Carried by (in that PR): `docs/observations.md` ("MyJCB statements keep
-  their identity when their position moves"), `creditStatementPeriod` in
+- Implemented by: #255
+- Carried by:
+  [observations](../observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release), `creditStatementPeriod` in
   `services/collector-myjcb/src/parsers.ts`, `myjcbStatementMonth` in
   `packages/read-model/src/sql.ts`
 
@@ -71,7 +70,7 @@ once from its position-1 capture and once from its position-2 capture.
 
 ## Verification
 
-In the PR, on synthetic data: `services/collector-myjcb/test/credit-statement-state.test.ts`
+Synthetic data only: `services/collector-myjcb/test/credit-statement-state.test.ts`
 (the recorded period), `packages/read-model/test/card-usage.test.ts` and
 `card-purchase-keys.test.ts` (the slot), and
 `services/processor/test/myjcb-statement-identity.test.ts` (a closed statement's

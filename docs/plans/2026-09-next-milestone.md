@@ -8,8 +8,9 @@
   "Update 2026-09-26", which record facts that later merges superseded.
 - Linked from: [roadmap](../roadmap.md#delivery-order-and-the-next-milestone).
 
-> **Update 2026-09-26.** Since this plan was written, #242–#252 and #254
+> **Update 2026-09-26.** Since this plan was written, #242–#252, #254
 > (Mizuho identity policy 2, [ADR 0012](../adr/0012-mizuho-identity-policy-v2.md))
+> and #255 (MyJCB statement identity, [ADR 0007](../adr/0007-myjcb-statement-identity.md))
 > merged.
 > CORE migrations 0048 (`reconciliation_scan_cursor`, #243), 0049
 > (`processor_lane_ticks`, #249) and 0050 (`statement_fact_indexes`, #251)
@@ -19,7 +20,7 @@
 > "purchases agent intent" landed as the separate tool
 > `kogane.purchases.explain` (#245,
 > [ADR 0013](../adr/0013-agent-card-purchase-read.md)). Open at the time of
-> this note: #253, #255, #256 and #257 (this record).
+> this note: #253, #256, #257 (this record) and #258.
 
 ## 0. Facts (origin/main 9d51f23, 2026-09-24)
 
@@ -57,7 +58,7 @@
 - **SBI VC Trade holds nothing to value right now.** The live position summary body was empty when surveyed (`docs/sources/sbi-vc-trade.md:399`). Executions carry execution prices, which are for cost basis, not valuation.
 - **Nothing writes `price_observations`.** `report-job.ts:320-335` reads it only by provider-scoped ref, quoted directly in the base unit, with no as-of date, no freshness and no FX step. With `REPORTS_ENABLED="true"`, every production report cell is `missing-price` today.
 - **No open PRs besides #42 (research).** Issue #87 is a Vpass collector issue and is unrelated.
-  - _Update 2026-09-26:_ superseded; #254 (Mizuho identity) has merged, and #253 (St. George daily), #255 (MyJCB statement identity), #256 (settlement readiness cost) and #257 (these ADRs and this plan) are open.
+  - _Update 2026-09-26:_ superseded; #254 (Mizuho identity) and #255 (MyJCB statement identity) have merged, and #253 (St. George daily), #256 (settlement readiness cost), #257 (these ADRs and this plan) and #258 (reconciliation lane stage B retirement) are open.
 
 **Reuse these; do not duplicate them**
 
@@ -381,7 +382,7 @@ Record the findings in `docs/sources/myjcb.md` and the Vpass notes. Build synthe
 - Rolling the app back below P1-4 makes v2 rows fail closed on the purchases page.
 - Portion fees stay unknown unless stated.
 - `comparableCardPayment` in the reconciliation lane is deliberately unchanged, to avoid colliding with the in-flight reconciliation work.
-  _Update 2026-09-26:_ that work merged as #243; retiring the lane's Vpass/MyJCB stage B is still in flight ([ADR 0006](../adr/0006-reconciliation-lane-scope.md)).
+  _Update 2026-09-26:_ that work merged as #243; retiring the lane's Vpass/MyJCB stage B is still in flight as #258 ([ADR 0006](../adr/0006-reconciliation-lane-scope.md)).
 
 ### P1-5 — `feat(settlement): SBI Shinsei as a second bank adapter for card settlement review` (~1.8k lines; independent)
 
