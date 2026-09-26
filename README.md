@@ -21,6 +21,7 @@ different rules.
 - [ADR 0012: Mizuho identity policy version 2](docs/adr/0012-mizuho-identity-policy-v2.md)
 - [ADR 0013: agent read access to card purchases](docs/adr/0013-agent-card-purchase-read.md)
 - [ADR 0022: parser datasets for registered shared-R2 artifacts (proposed)](docs/adr/0022-registration-artifact-datasets.md)
+- [ADR 0023: no trusted card binding for collector-vpass runs](docs/adr/0023-vpass-collector-card-binding.md)
 - [Next-milestone plan (proposed)](docs/plans/2026-09-next-milestone.md)
 - [Domain contracts (`packages/domain`)](docs/domain-contracts.md)
 - [Package layout and import boundaries](docs/package-layout.md)

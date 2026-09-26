@@ -318,7 +318,8 @@ full list):
   are registered but never parsed. A parsed collector capture would become
   the current statement snapshot of its card-month and retire the importer-era
   purchases, because it cannot yet bind to the trusted card identity
-  (ADR 0023). It is applied when the collector derives the binding.
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). It is applied when
+  the collector derives the binding.
 
 `scripts/artifact-datasets.test.ts` checks the table against both sides:
 every mapped or withheld dataset is accepted by a registered parser, every

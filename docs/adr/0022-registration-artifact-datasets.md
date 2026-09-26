@@ -9,9 +9,9 @@
   `WITHHELD_ARTIFACT_DATASETS`), `scripts/artifact-datasets.test.ts`,
   `services/processor/test/registration-datasets.test.ts`
 - Related: [ADR 0010](0010-terminal-registration-budget.md) (registration
-  budget), ADR 0023 (Vpass binding for collector captures, branch
-  `claude/vpass-binding-collector-producer-wr8pj4`), ADR 0024 (terminal scan
-  cursor, in flight)
+  budget), [ADR 0023](0023-vpass-collector-card-binding.md) (no trusted card
+  binding for collector-vpass runs; #260), ADR 0024 (terminal scan cursor,
+  in flight)
 - Merge order: after #259 (collector producer ids). It does not wait for the
   collector registration-contract PR (lineage and unit counts), because it
   re-registers nothing (see "Contract version").
@@ -93,7 +93,8 @@ Deliberately not mapped:
 - **Vpass is withheld** (`WITHHELD_ARTIFACT_DATASETS`). The rule is known —
   `months/<yyyymm>/<top|answer>-NNN.json` (provider response, JSON) is
   `statement-page`, the dataset the importer registered for the same key —
-  but it is not applied. ADR 0023 established that a collector-vpass run
+  but it is not applied. [ADR 0023](0023-vpass-collector-card-binding.md)
+  established that a collector-vpass run
   cannot yet bind to the trusted card identity (the binding views accept only
   the importer's producer, the collector's sanitizer redacts the tuple, and no
   key is on the Worker). A parsed collector capture would become the current

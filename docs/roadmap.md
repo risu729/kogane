@@ -83,7 +83,15 @@ Concrete limits in the current code:
   reviewed decision (or by the rule for a pair the provider itself links, which
   no deployed source does yet); candidates are proposed, never merged by
   amount and date. Excluding a row by decision and allocating a refund to a
-  purchase are not available yet.
+  purchase are not available yet. Only the retired importer's Vpass runs
+  carry a trusted card binding: a parsed capture of the Vpass collector would
+  retire the importer-era purchases of its card-month and its rows would be
+  skipped as `account_not_resolved`. The collector's captures are not parsed
+  today (their terminals name the producer `vpass-json`, which has no ingest
+  route, and registration deliberately gives their artifacts no parser
+  dataset, [ADR 0022](adr/0022-registration-artifact-datasets.md)); they
+  stay unparsed until the collector writes a binding
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
 - Shared-R2 registration gives an artifact the parser dataset it needs since
   2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
   every registered artifact had none, so only Mizuho's were parsed). It
@@ -91,10 +99,8 @@ Concrete limits in the current code:
   version was not bumped, because re-registering an already parsed Mizuho
   capture would list its transactions twice, so the Mobile Suica runs
   registered before it stay unparsed and runs blocked before it stay blocked.
-  Vpass captures are withheld (registered, never parsed) until the collector
-  derives the trusted card binding (ADR 0023), and MyJCB captures fail at
-  metadata extraction until the extractor reads the collector's shared
-  manifest.
+  Vpass captures are withheld (above), and MyJCB captures fail at metadata
+  extraction until the extractor reads the collector's shared manifest.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
