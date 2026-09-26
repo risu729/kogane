@@ -196,3 +196,94 @@ test("a relative label at a position no rule places is never current, so a state
   expect(counts(await w.sweep())).toEqual(NOTHING);
   expect(await w.totals()).toMatchObject({ captured: "700" });
 }, 180_000);
+
+/** Closed on 2026-09-15, paid in 2026-10; unconfirmed until the provider confirms it. */
+const M = row("2026/09/05", "架空店舗M", "1,200");
+/** Accumulating from 2026-09-16, paid in 2026-11. */
+const N = row("2026/09/18", "架空店舗N", "400");
+const O = row("2026/09/21", "架空店舗O", "250");
+
+test("two pending statements on one day are both current, and each is recognised once through confirmation (ADR 0016)", async () => {
+  const w = await world();
+  const pending = async (day: string, zero: readonly UsageRow[], one?: readonly UsageRow[]) => {
+    await w.myjcb({
+      state: "unconfirmed",
+      period: "detailMonth-0",
+      detailMonth: 0,
+      fetchedAt: `${day}T00:00:00.000Z`,
+      rows: zero,
+    });
+    if (one)
+      await w.myjcb({
+        state: "unconfirmed",
+        period: "detailMonth-1",
+        detailMonth: 1,
+        fetchedAt: `${day}T00:00:01.000Z`,
+        rows: one,
+      });
+  };
+  // 2026-09-20 (JST, after the 15th): position 0 is the cycle paid in
+  // November, position 1 the closed cycle paid in October, not yet confirmed.
+  // With one pending slot per connection only position 1 was current, and N
+  // was neither listed nor recognised.
+  await pending("2026-09-20", [N], [M]);
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 2 });
+  expect((await events(w)).map((event) => event.state)).toEqual(["authorized", "authorized"]);
+  expect(await w.totals()).toMatchObject({ captured: "0", authorized: "1600" });
+  const before = await events(w);
+
+  // 2026-09-21: position 0 is captured again, first alone (as when its parse
+  // is published before position 1's). It replaces only position 0: M stays
+  // current, so nothing is retired, and O is recognised once. Position 1's
+  // capture then changes nothing.
+  await pending("2026-09-21", [N, O]);
+  expect(counts(await w.sweep())).toMatchObject({
+    recognized: 1,
+    retired: 0,
+    conflicts: 0,
+    failed: 0,
+  });
+  await pending("2026-09-21", [N, O], [M]);
+  expect(counts(await w.sweep())).toMatchObject({
+    recognized: 0,
+    retired: 0,
+    conflicts: 0,
+    failed: 0,
+  });
+  const live = await events(w);
+  expect(live.map((event) => event.state)).toEqual(["authorized", "authorized", "authorized"]);
+  for (const event of before) expect(live.map((entry) => entry.event_id)).toContain(event.event_id);
+  expect(await w.totals()).toMatchObject({ captured: "0", authorized: "1850" });
+
+  // 2026-09-25: the closed cycle is confirmed and its page names October.
+  // Its confirmed capture ends the pending one: M's pending event is retired
+  // and its posted row recognised as captured, counted once.
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-0",
+    detailMonth: 0,
+    fetchedAt: "2026-09-25T00:00:00.000Z",
+    rows: [N, O],
+  });
+  await w.myjcb({
+    state: "confirmed",
+    period: "2026-10",
+    detailMonth: 1,
+    fetchedAt: "2026-09-25T00:00:01.000Z",
+    rows: [M],
+  });
+  expect(counts(await w.sweep())).toMatchObject({
+    recognized: 1,
+    retired: 1,
+    conflicts: 0,
+    failed: 0,
+  });
+  expect(await w.totals()).toMatchObject({ captured: "1200", authorized: "650" });
+  expect((await events(w)).map((event) => event.state).sort()).toEqual([
+    "authorized",
+    "authorized",
+    "captured",
+    "unknown",
+  ]);
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+}, 180_000);

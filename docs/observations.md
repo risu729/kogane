@@ -217,8 +217,10 @@ statement, and is never current: no rule places it, and letting it be current
 beside the named capture of the same statement is exactly the double count
 above. Only captures from before this collector carry such a label, and in
 the production captures [the relative-label rule](#relative-period-labels-are-resolved-from-the-capture-time)
-was drawn from, menu months 2–8 carried no row. The unconfirmed slot is
-unchanged, and the stored labels are never rewritten.
+was drawn from, menu months 2–8 carried no row. The unconfirmed slot was
+left unchanged here; it is now keyed the same way
+([pending statements](#myjcb-pending-statements-are-one-slot-each)). The stored
+labels are never rewritten.
 
 On deploy nothing is re-parsed and nothing stored changes. The read model's
 slot change moves no key. A statement recorded as confirmed under
@@ -285,9 +287,10 @@ rows and no heading; their manifests say `confirmed`, and
 `myjcb-credit-statement-total@1.0.1` answered `statement_total_not_confirmed`
 for all 12 captures of each. Stopping on them would stop every daily run.
 Recording them as `unconfirmed` would be worse: they are recorded after
-position 0 in the same run, so an empty capture would become the newest in the
-connection's one unconfirmed snapshot slot and position 0's pending rows would
-stop being current. Every closed statement passes through position 1, where
+position 0 in the same run, so an empty capture would have become the newest in
+the connection's one unconfirmed snapshot slot (the read model before
+[the pending statement slots](#myjcb-pending-statements-are-one-slot-each)) and
+position 0's pending rows would have stopped being current. Every closed statement passes through position 1, where
 all 12 production captures show the heading, so position 1 keeps the stop for
 rows that claim a statement the page does not state. The stop log
 (`myjcb-credit-statement-state`) and the `unknown` log
@@ -343,14 +346,16 @@ There are three reasons:
 
 The stored rows therefore remain `unconfirmed` observations, the record of what
 the collector said at the time. They stop being current on the first successful
-run of the fixed collector. Every unconfirmed ledger capture of a connection
-shares one snapshot slot, `(connection, unconfirmed)`, and from then on its
-newest capture is position 0, unless position 1 shows unconfirmed rows without
-the heading, which no production capture has. The same statement is captured again at
-position 1 in its own slot, `(confirmed, detailMonth-1)`. Until then,
-position 0 and position 1 of one run competed for the unconfirmed slot, so only
-one of them was current. After the fix, position 0's pending rows are current
-beside the posted ones. On the next ticks the purchase lane's retire pass moves
+run of the fixed collector. At this release every unconfirmed ledger capture of
+a connection shared one snapshot slot, `(connection, unconfirmed)`, and from
+then on its newest capture was position 0, unless position 1 showed
+unconfirmed rows without the heading, which no production capture has. The
+same statement is captured again at position 1 as `confirmed`, in its own
+slot. Until then, position 0 and position 1 of one run competed for the
+unconfirmed slot, so only one of them was current. After the fix, position 0's
+pending rows are current beside the posted ones. (Pending captures now have a
+slot per statement and end when a newer capture of their position exists:
+[pending statements](#myjcb-pending-statements-are-one-slot-each).) On the next ticks the purchase lane's retire pass moves
 each `authorized` event whose row left the current view to `unknown`
 (`provider_status_absent`), a revision with no leg. The recognition pass then
 recognises the confirmed rows, under their `confirmed` external ids, as
@@ -706,8 +711,9 @@ identity while its statement moves down the provider's list
 ([release note](#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)).
 The row locator remains its exact JSON index. Current transactions select the
 newest successful artifact for each confirmed statement (its payment month,
-whatever position it was captured at) and the newest successful unconfirmed
-snapshot overall. This both collapses repeated collection runs and
+whatever position it was captured at) and, for each pending statement, the
+newest successful unconfirmed artifact while its position still shows it
+([pending statements](#myjcb-pending-statements-are-one-slot-each)). This both collapses repeated collection runs and
 removes a pending row that disappears from a later complete snapshot, while
 the append-only observations remain available as evidence.
 
@@ -797,19 +803,55 @@ with N ≥ 2 names no statement and is never current
 Before the collector read the statement state from the page, it recorded
 `detailMonth=1` as `unconfirmed`
 ([statement parser 1.1.0](#myjcb-statement-state-from-the-page-statement-parser-110));
-those stored rows stay pending rows in the one unconfirmed slot.
+those stored rows stay pending rows, current only until a newer capture of
+position 1 exists (below).
 
-**Known limit: one pending slot per connection.** Every unconfirmed ledger
-capture of a MyJCB connection shares one snapshot slot, `(connection,
-unconfirmed)`, whatever its period (`MYJCB_LEDGER_SNAPSHOT_CTES` in
-`packages/read-model/src/sql.ts`). When one run records two pending ledgers,
-`detailMonth-0` and `detailMonth-1` as the collector did before it read the
-state from the page ([above](#myjcb-statement-state-from-the-page-statement-parser-110)),
-only the newer capture is current, and the other's pending rows are neither
-listed nor recognised; the purchase lane retires their events to `unknown`.
-Captures stored before that fix keep this shape. It is not changed here: the
-slot belongs to the MyJCB stable statement identity work, which decides what
-identifies one statement across captures.
+#### MyJCB pending statements are one slot each
+
+From the 16th until the closed cycle is confirmed (around the 24th), the
+provider lists two unconfirmed statements: the cycle still accumulating at
+position 0 and the closed cycle at position 1, recorded as `unconfirmed` under
+`detailMonth-0` and `detailMonth-1`. Every unconfirmed ledger capture of a
+connection used to share one snapshot slot, so only the newer of the two was
+current: the other statement's pending rows were neither listed nor
+recognised, and when the order of the two captures' publication changed, the
+purchase lane retired one statement's events and recognised the other's again.
+
+The read model now keys a pending capture like a confirmed one
+([ADR 0016](adr/0016-myjcb-pending-statement-slots.md)). Its slot is the
+payment month it shows (`myjcbStatementSlot` in
+`packages/read-model/src/sql.ts`: `detailMonth-0` is `P0` and `detailMonth-1`
+is `P0 − 1` under this rule), in the partition of its state, so a statement's
+pending capture and its confirmed capture are one month in two partitions. A
+pending capture is current only while its position still shows it: it must be
+the newest pending capture of its month and also the newest published ledger
+capture of its position (the artifact key `<connection>/credit-ledger-NN.json`),
+whatever that capture's state. So:
+
+- two pending statements of one capture day are both current, and a later
+  capture of either replaces only that one;
+- a statement's confirmed capture at position 1 ends its pending capture in
+  the same read, so the two are never current together; their rows are two
+  keys (the state is in the external id), so the lane retires each pending
+  event once and recognises the posted row once as `captured`;
+- two captures of one position are never current together, whatever months
+  the rule gives them, so an error in the unverified switch on the 16th cannot
+  keep one statement current twice from its captures of the 15th and 16th;
+- across connections that one account resolves, a pending row must also come
+  from the account's newest capture of its position (card usage step 3), so a
+  replaced connection's pending capture is not current beside the new one's;
+- a pending relative label no rule places is never current; the
+  collector records none.
+
+Recognition keys do not change: the key is the row's external id. A pending
+statement that moves from position 0 to position 1 on the 16th still gets new
+keys, because the label is in its rows' fingerprint, so its events retire and
+are recognised again once per cycle; that is a known limit, not changed here.
+Nothing stored is rewritten and no migration is needed. On deploy, where the
+newest captures hold a pending position 1 beside position 0, position 0's rows
+become current and are recognised. `packages/read-model/test/card-usage.test.ts`
+("two pending MyJCB statements are two slots") and
+`services/processor/test/myjcb-statement-identity.test.ts` pin the rules.
 
 Other relative labels surveyed (`services/collector-*`,
 `packages/parsers/src/parsers/*`, `docs/sources/*.md`):

@@ -106,8 +106,10 @@ checks in `src/read.ts` are unchanged.
 
 Which Vpass and MyJCB capture is current is defined once in `src/sql.ts`:
 `MYJCB_LEDGER_SNAPSHOT_CTES` (`current_myjcb_snapshots`: the newest published
-credit-ledger capture per connection, statement state and period, where every
-unconfirmed capture of a connection shares one slot) and
+credit-ledger capture per connection, statement state and statement, the
+payment month `myjcbStatementSlot` reads, where a pending capture is current
+only while it is also the newest capture of its position,
+[ADR 0016](adr/0016-myjcb-pending-statement-slots.md)) and
 `VPASS_STATEMENT_SNAPSHOT_CTES` (`current_vpass_snapshots`: per card unit and
 statement month, the newest fetch run whose statement pages all have an active
 parse, whatever the family), with the membership predicates
@@ -119,8 +121,9 @@ same CTEs for purchase recognition: every current Vpass and MyJCB usage row with
 its recognition key (the `bank_key` shape of migration 0044), resolved account,
 identity policy family, provider state and decimal-v1 amount. On top of the
 snapshot it keeps the newest fetch run per (resolved account, source, slot),
-where the slot is the Vpass statement month or the MyJCB state and period, and
-then the latest observation per key. Ranking runs over the whole current set
+where the slot is the Vpass statement month or the MyJCB state and statement
+(a pending MyJCB row must also come from the account's newest run of its
+position), and then the latest observation per key. Ranking runs over the whole current set
 before the `observation_id > afterId` cursor and the `limit` (1 to 1,000)
 apply. Two identical Vpass rows on different pages of one capture are two keys
 and two rows: the parser numbers identical rows per page, and since
