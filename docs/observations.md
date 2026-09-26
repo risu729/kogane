@@ -700,6 +700,18 @@ payment month; the statement join and the confirmed-row pairing a resolved
 [economic events](economic-events.md#the-vertical-slice-that-runs)) apply
 where the collector records that month as confirmed.
 
+**Known limit: one pending slot per connection.** Every unconfirmed ledger
+capture of a MyJCB connection shares one snapshot slot, `(connection,
+unconfirmed)`, whatever its period (`MYJCB_LEDGER_SNAPSHOT_CTES` in
+`packages/read-model/src/sql.ts`). When one run records two pending ledgers,
+`detailMonth-0` and `detailMonth-1` as the collector did before it read the
+state from the page ([above](#myjcb-statement-state-from-the-page-statement-parser-110)),
+only the newer capture is current, and the other's pending rows are neither
+listed nor recognised; the purchase lane retires their events to `unknown`.
+Captures stored before that fix keep this shape. It is not changed here: the
+slot belongs to the MyJCB stable statement identity work, which decides what
+identifies one statement across captures.
+
 Other relative labels surveyed (`services/collector-*`,
 `packages/parsers/src/parsers/*`, `docs/sources/*.md`):
 

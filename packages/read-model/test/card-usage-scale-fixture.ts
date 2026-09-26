@@ -1315,7 +1315,7 @@ async function recogniseCurrent(db: Database, now: string): Promise<number> {
 /** A built store and what it holds. */
 export interface ScaledStore {
   store: ScaleStore;
-  /** Events the builder recognised before the last capture. */
+  /** Events the builder recognised before the last capture (with `afterCapture`: every event written). */
   recognised: number;
   counts: ScaleCounts;
 }
@@ -1325,10 +1325,29 @@ export interface ScaledStore {
  * the last capture, in which the two oldest pending Vpass rows of each card
  * and of the MyJCB ledger have disappeared, so their live events are stale;
  * with a statement history, the settlement reviews are decided last.
+ *
+ * With `afterCapture`, the store is built as the processor lanes see it over
+ * time instead: the hook runs after every capture day (the last one
+ * included), and nothing else recognises rows; `recognised` then counts the
+ * events the hook's lanes wrote.
  */
-export async function scaledStore(options: ScaleOptions): Promise<ScaledStore> {
+export async function scaledStore(
+  options: ScaleOptions,
+  afterCapture?: (db: Database, day: string) => Promise<void>,
+): Promise<ScaledStore> {
   const store = new ScaleStore(options);
   const days = captureDays(options);
+  if (afterCapture !== undefined) {
+    for (const [index, day] of days.entries()) {
+      await store.capture([day], index === days.length - 1 ? { cancelled: 2 } : {});
+      await afterCapture(store.db, day);
+    }
+    store.decide();
+    const events = store.db
+      .query("SELECT count(DISTINCT event_id) AS n FROM card_purchase_recognitions")
+      .get() as { n: number };
+    return { store, recognised: events.n, counts: store.counts() };
+  }
   await store.capture(days.slice(0, -1));
   const recognised = await recogniseCurrent(store.db, `${options.today}T00:00:00.000Z`);
   await store.capture(days.slice(-1), { cancelled: 2 });

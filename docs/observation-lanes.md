@@ -318,7 +318,7 @@ run…"):
 | 2   | `collection_scan`        | Always; lists and registers only when `SHARED_R2_INGEST_ENABLED` is `"1"` or `"true"`, otherwise logs `status: "skipped"` (U08, `docs/processor.md`).                                                                                                                                                                            |
 | 3   | `identity_sweep`         | Always (`docs/identity.md`).                                                                                                                                                                                                                                                                                                     |
 | 4   | `balance_projection`     | Always runs and reports itself `skipped` while `BALANCE_PROJECTION_ENABLED` is anything but `"1"` (`docs/balance-read-model.md`). With `READ_PROJECTION_ENABLED` on it writes the READ database instead of the CORE tables of migration 0030, and completes the CORE job only after READ is published (`docs/read-model-d1.md`). |
-| 5   | `reconciliation_sweep`   | Only when `RECONCILIATION_ENABLED` is `"1"` or `"true"`; otherwise the stage is not run and logs nothing (`docs/economic-events.md`).                                                                                                                                                                                            |
+| 5   | `reconciliation_sweep`   | Only when `RECONCILIATION_ENABLED` is `"1"` or `"true"`; otherwise the stage is not run and logs nothing. Runs stage A only for Vpass and MyJCB, whose pending-to-posted pairs are `purchase_recognition`'s candidate pass, so it reads its pages and proposes nothing (`docs/economic-events.md`).                              |
 | 6   | `card_settlement_sweep`  | Under the same flag as `reconciliation_sweep`, as its own lane: card statement totals and bank debits become settlement candidates (`docs/card-settlements.md`).                                                                                                                                                                 |
 | 7   | `purchase_recognition`   | Only when `PURCHASE_RECOGNITION_ENABLED` is `"1"` or `"true"`; otherwise the stage is not run and logs nothing. Turns adopted Vpass/MyJCB usage rows into purchase and refund events, then writes pending-to-posted candidates for the groups it read and merges only provider-linked pairs (`docs/economic-events.md`).         |
 | 8   | `reward_claims_sweep`    | Only when `REWARD_CLAIMS_ENABLED` is `"1"` or `"true"` (`docs/rewards.md`).                                                                                                                                                                                                                                                      |
@@ -331,7 +331,7 @@ Why those positions. `collection_scan` registers terminals the shared DATA
 bucket already holds, so it runs before `identity_sweep`: a run it finds this
 tick can reach identity and parsing on the same tick instead of waiting for the
 next one. `purchase_recognition` follows `reconciliation_sweep`, which reads
-the same card usage rows only as candidates, and runs after `identity_sweep`
+the same card usage rows only for provider-issued ids, and runs after `identity_sweep`
 so a row whose card was resolved this tick can be recognised on it.
 `reward_read_projection` builds from the claims
 `reward_claims_sweep` promotes, so it follows it. `operation_dispatch` hands
