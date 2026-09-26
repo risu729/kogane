@@ -160,6 +160,12 @@ describe("G1-01/G1-02 persisting a run", () => {
       "manifest.json",
       "raw-top-accounts-balance-and-activity.json",
     ]);
+    // The run manifest is the collector's own record, not a derivation of
+    // provider bytes: `collector_derived` with no step is refused at
+    // registration (`artifact_lineage_unstated`, ADR 0021).
+    expect(
+      read.manifest.artifacts.find((entry) => entry.artifactKey === "manifest.json")?.role,
+    ).toBe("collector_manifest");
     for (const artifact of read.manifest.artifacts) {
       const stored = await bucket.get(artifact.storageRef.key);
       expect(stored?.size).toBe(artifact.byteSize);

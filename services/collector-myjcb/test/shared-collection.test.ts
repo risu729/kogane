@@ -132,10 +132,21 @@ describe("G1-02/G1-16 shared mode persists each connection's pages and then the 
       ["manifest.json", "collector_manifest", undefined],
     ]);
     expect(manifest.transformations.map((entry) => entry.transformationId)).toEqual([
+      "extracted:account-one:discovery.json",
+      "extracted:account-two:discovery.json",
       "redacted:account-one:credit-menu.html",
       "redacted:account-two:credit-menu.html",
     ]);
+    // ADR 0021: a derived artifact states what it was derived from. Discovery
+    // is extracted from login and mypage responses nobody keeps.
     expect(manifest.transformations[0]).toMatchObject({
+      stepKind: "extracted",
+      transformerId: "collector-myjcb",
+      transformerVersion: schemaVersion,
+      inputArtifactKeys: [],
+      outputArtifactKey: "account-one/discovery.json",
+    });
+    expect(manifest.transformations[2]).toMatchObject({
       stepKind: "redacted",
       transformerId: "myjcb-sanitizer",
       transformerVersion: "v1",
@@ -395,6 +406,52 @@ describe("G1-15 shared mode writes once", () => {
       expect(JSON.stringify(records)).not.toContain("synthetic-password");
     } finally {
       spies.forEach((spy) => spy.mockRestore());
+    }
+  });
+});
+
+describe("ADR 0021: a derived artifact states its lineage", () => {
+  test("a ledger names no input: the page it was parsed from is not kept", async () => {
+    const ledger = (month: string) => ({
+      dataset: "credit-ledger",
+      filename: `credit-ledger-${month}.json`,
+      body: `{"schemaVersion":1,"detailMonth":${Number(month)}}`,
+      mediaType: "application/json",
+    });
+    const plan = await myJcbRunPlan(
+      input({
+        connections: [
+          {
+            summary: { ...connection("account-one").summary, artifactCount: 3 },
+            artifacts: [
+              {
+                dataset: "credit-detail",
+                filename: "credit-detail-00.html",
+                body: statementHtml,
+                mediaType: "text/html; charset=utf-8",
+              },
+              ledger("00"),
+              ledger("01"),
+            ],
+          },
+        ],
+      }),
+    );
+    const extracted = plan.run.transformations.filter((step) => step.stepKind === "extracted");
+    expect(
+      extracted.map((step) => [step.outputArtifactKey, step.inputArtifactKeys] as const),
+    ).toEqual([
+      // The ledger is parsed from the page before redaction. The redacted
+      // capture kept beside it is not that input, so it is not named, whether
+      // or not the run holds it.
+      ["account-one/credit-ledger-00.json", []],
+      ["account-one/credit-ledger-01.json", []],
+    ]);
+    // Every collector_derived artifact has exactly one step naming it.
+    for (const artifact of plan.artifacts.filter((entry) => entry.role === "collector_derived")) {
+      expect(
+        plan.run.transformations.filter((step) => step.outputArtifactKey === artifact.artifactKey),
+      ).toHaveLength(1);
     }
   });
 });
