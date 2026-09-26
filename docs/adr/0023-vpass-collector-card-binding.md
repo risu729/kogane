@@ -82,7 +82,7 @@ manual decisions would not carry over either.
 
 ## Options considered
 
-1. **Admit `collector-vpass` in the view (migration 0055).** Rejected: no
+1. **Admit `collector-vpass` in the view (a new migration).** Rejected: no
    collector run can meet the rest of the rule, so the view would return the
    same rows as today. Making it match would mean dropping the sidecar or the
    session and run-key joins, which is binding on weaker evidence.
@@ -105,6 +105,22 @@ manual decisions would not carry over either.
    entity (today it does not, see above). Each of these is a design change
    of its own.
 4. **Record the gap and hold the switch.** Chosen for now.
+5. **Map each collector account to the importer-era account by an explicit
+   identity decision.** The identity operations already let an operator
+   revise a source reference's mapping to an existing account
+   ([identity operations](../identity-operations.md)), and a row whose
+   mapping names a resolved account is not skipped as `account_not_resolved`.
+   Rejected: without a binding every collector run gets its own run-scoped
+   source reference, so the decisions would be one per card per run, forever
+   (the collector runs daily); and the collector stores nothing that could
+   support the claim, because the sanitizer replaces the card names and the
+   session bean, so each decision would rest on the card's ordinal and the
+   operator's memory. That is option 2 made by hand: the decision log would
+   record an assertion no stored evidence can audit. An explicit decision
+   stays the right tool for the one step option 3 leaves open, mapping a
+   collector token's durable source account to the importer-era account once
+   per card, where the evidence (the same HMAC token under the same key) is
+   stored and checkable.
 
 ## Decision
 
@@ -118,6 +134,13 @@ manual decisions would not carry over either.
   and implemented, unless the owner accepts that the importer-era Vpass
   purchases of every re-captured card-month leave the captured and authorized
   totals.
+- The hold is enforced, not only ordered: the registration dataset change
+  (ADR 0022) withholds the parser dataset from the Vpass collector's
+  artifacts, so they register with no dataset and are never parsed, whatever
+  order #259 and that change merge in. Only the change that implements
+  option 3 releases the Vpass dataset, and it amends this ADR when it does.
+  On `main` today the collector's artifacts carry no dataset either, and its
+  producer `vpass-json` has no ingest route.
 - `services/collector-vpass/test/shared-collection.test.ts` pins the facts
   this decision rests on, so a change to them fails a test and reopens it.
 
@@ -158,5 +181,7 @@ manual decisions would not carry over either.
   That test records the collector capture under the importer's session
   namespace; registration would record `shared-r2`, which does not change
   its result.
+- The enforcement of the hold is ADR 0022's, and is verified by that
+  change's tests, not here.
 - Not verified: whether the collector's current responses still carry the
   session bean, and whether the owner still holds the `collector-r2-v1` key.

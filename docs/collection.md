@@ -400,7 +400,8 @@ identifiers ([Vpass card binding](vpass-card-identity.md)); card purchase
 recognition needs that binding. The collector writes no such artifact, the
 sanitizer redacts the session bean the token was derived from, and the Worker
 holds no fingerprint secret, so its runs have no trusted binding and their rows
-resolve to unresolved accounts
+would resolve to unresolved accounts if parsed; its artifacts are registered
+without a parser dataset, so they are not
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md),
 [identity operations](identity-operations.md#collector-vpass-runs-have-no-trusted-binding)).
 `services/collector-vpass/test/shared-collection.test.ts` pins this ("ADR 0023").
