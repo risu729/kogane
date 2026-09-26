@@ -411,7 +411,7 @@ describe("G1-15 shared mode writes once", () => {
 });
 
 describe("ADR 0021: a derived artifact states its lineage", () => {
-  test("a ledger names the kept page it was parsed from, and only a kept one", async () => {
+  test("a ledger names no input: the page it was parsed from is not kept", async () => {
     const ledger = (month: string) => ({
       dataset: "credit-ledger",
       filename: `credit-ledger-${month}.json`,
@@ -431,8 +431,6 @@ describe("ADR 0021: a derived artifact states its lineage", () => {
                 mediaType: "text/html; charset=utf-8",
               },
               ledger("00"),
-              // No page for this month in the run: nothing to link, so the
-              // step names no input rather than a page that is not there.
               ledger("01"),
             ],
           },
@@ -443,7 +441,10 @@ describe("ADR 0021: a derived artifact states its lineage", () => {
     expect(
       extracted.map((step) => [step.outputArtifactKey, step.inputArtifactKeys] as const),
     ).toEqual([
-      ["account-one/credit-ledger-00.json", ["account-one/credit-detail-00.html"]],
+      // The ledger is parsed from the page before redaction. The redacted
+      // capture kept beside it is not that input, so it is not named, whether
+      // or not the run holds it.
+      ["account-one/credit-ledger-00.json", []],
       ["account-one/credit-ledger-01.json", []],
     ]);
     // Every collector_derived artifact has exactly one step naming it.

@@ -42,7 +42,6 @@ export const PRODUCER = "collector-myjcb";
  * collector, named by its collector id (ADR 0021).
  */
 const TRANSFORMER_ID = PRODUCER;
-const LEDGER_FILENAME = /^credit-ledger-(\d{2})\.json$/u;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 /**
  * Datasets the central path has never accepted: the importer refuses a run
@@ -203,28 +202,6 @@ function manifestBytes(
   return new TextEncoder().encode(JSON.stringify(manifest));
 }
 
-/**
- * The kept artifacts a collector-derived artifact was derived from (ADR 0021).
- *
- * `credit-ledger-NN.json` is parsed from the statement page of the same
- * `detailMonth`, and the redacted capture of that page is kept in the same
- * run as `credit-detail-NN.html`, so the ledger names it. (The parse reads the
- * page before redaction; the relation names the kept capture of that page,
- * which is the only form of it that exists after the run.) `discovery.json`
- * is extracted from the login and mypage responses, which are never kept, so
- * it names no input and is recorded as `source_bytes_not_available`.
- */
-function derivedFrom(
-  unitKey: string,
-  filename: string,
-  artifacts: readonly RawArtifact[],
-): string[] {
-  const month = LEDGER_FILENAME.exec(filename)?.[1];
-  if (month === undefined) return [];
-  const page = `credit-detail-${month}.html`;
-  return artifacts.some((artifact) => artifact.filename === page) ? [`${unitKey}/${page}`] : [];
-}
-
 /** Build the persist plan for a finished run. Pure apart from hashing. */
 export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPlan> {
   const outcome: ProviderOutcome = input.status;
@@ -283,12 +260,20 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         });
       }
       if (role === "collector_derived") {
+        // What a derived artifact was derived from (ADR 0021). A
+        // `credit-ledger-NN.json` is parsed from the statement page before
+        // redaction, and `discovery.json` from the login and mypage
+        // responses; none of those bytes is kept. The redacted capture of the
+        // statement page is not the ledger's input (the sanitizer rewrites
+        // text as well as attributes), so naming it would invent a parent:
+        // the step names no input and registers as
+        // `source_bytes_not_available`.
         transformations.push({
           transformationId: `extracted:${artifactKey.replaceAll("/", ":")}`,
           stepKind: "extracted",
           transformerId: TRANSFORMER_ID,
           transformerVersion: input.schemaVersion,
-          inputArtifactKeys: derivedFrom(unitKey, artifact.filename, connection.artifacts),
+          inputArtifactKeys: [],
           outputArtifactKey: artifactKey,
         });
       }

@@ -341,22 +341,24 @@ provider was contacted and no production bucket was read or written.
 
 ### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
 
-| Artifact key                                                                   | Role                         | Step (ADR 0021)                                                                       |
-| ------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------- |
-| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input                                             |
-| `<connectionId>/credit-past-months.json`                                       | `provider_response`          | none                                                                                  |
-| `<connectionId>/credit-{csv,pdf,ofx}` exports                                  | `provider_export`            | none                                                                                  |
-| `<connectionId>/credit-ledger-NN.json`                                         | `collector_derived`          | `extracted` by `collector-myjcb`, input `…/credit-detail-NN.html` when the run has it |
-| `<connectionId>/discovery.json`                                                | `collector_derived`          | `extracted` by `collector-myjcb`, no input                                            |
-| `manifest.json`                                                                | `collector_manifest`         | none; names no unit                                                                   |
+| Artifact key                                                                   | Role                         | Step (ADR 0021)                            |
+| ------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------ |
+| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input  |
+| `<connectionId>/credit-past-months.json`                                       | `provider_response`          | none                                       |
+| `<connectionId>/credit-{csv,pdf,ofx}` exports                                  | `provider_export`            | none                                       |
+| `<connectionId>/credit-ledger-NN.json`                                         | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `<connectionId>/discovery.json`                                                | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `manifest.json`                                                                | `collector_manifest`         | none; names no unit                        |
 
-A ledger is parsed from the statement page of the same `detailMonth`; the page
-is parsed before redaction, and the relation names the redacted capture of
-that page kept in the same run, the only form of it that exists afterwards. A
-ledger whose page is not in the run names no input. `discovery.json` is
-extracted from the login and mypage responses, which are never kept, so it
-registers as `source_bytes_not_available`. Before ADR 0021 neither stated a
-step, and the Processor refused the run (`artifact_lineage_unstated`).
+A ledger is parsed from the statement page of the same `detailMonth` before
+that page is redacted, and `discovery.json` from the login and mypage
+responses; none of those bytes is kept, so both register as
+`source_bytes_not_available`. The redacted `credit-detail-NN.html` kept in the
+same run is not named as the ledger's input: the ledger was not derived from
+it, and the sanitizer rewrites text (card-number-shaped digit runs) as well as
+attributes, so the capture need not reproduce the ledger. Before ADR 0021
+neither stated a step, and the Processor refused the run
+(`artifact_lineage_unstated`).
 
 Sanitizer: the collector's own `redactedStatementHtml` (parse5 tree: scripts,
 styles, textareas, embedding elements and every URL-bearing attribute removed,

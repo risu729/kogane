@@ -83,11 +83,13 @@ The registration contract a collector states in its terminal:
   stored the list is empty, which the Processor records as
   `source_bytes_not_available`, never as an invented parent.
   - sbi-securities: one `extracted` step per dataset, no input.
-  - MyJCB: `credit-ledger-NN.json` is `extracted` with input
-    `<connection>/credit-detail-NN.html` when the run holds it (the page is
-    parsed before redaction; the relation names the redacted capture of that
-    page, the only form of it kept), no input otherwise; `discovery.json` is
-    `extracted` with no input.
+  - MyJCB: `credit-ledger-NN.json` and `discovery.json` are `extracted` with
+    no input. A ledger is parsed from the statement page before redaction,
+    and that page is never kept. The redacted `credit-detail-NN.html` of the
+    same run is not named: the ledger was not derived from it, and the
+    sanitizer rewrites text (card-number-shaped digit runs) as well as
+    attributes, so a relation to it would claim a derivation that did not
+    happen.
   - V Point, V Point Pay: one `reencoded` step per stored response, no input.
 - **Roles.** A sanitizer's output is `sanitized_provider_capture` with a
   `redacted` step (Vpass statement pages move there). A provider role carries
@@ -127,19 +129,34 @@ registered before registers to the same descriptors.
   on any collector that breaks the contract again, whichever side changes.
 - Terminals are immutable, and the ones written before each redeploy keep the
   old shapes. The 14 sbi-securities and 14 sbi-shinsei runs blocked since U09
-  stay blocked: a block is write-once. Re-registering them under a bumped
-  `REGISTRATION_CONTRACT_VERSION` (the Processor PR's change) gives them a new
-  identity, but the same derivation would refuse the same terminals again;
-  whether and how they become registrable (a derivation that accepts a named
-  legacy shape, or corrected terminals as new revisions) is ADR 0022's
-  decision, not this one's.
+  stay blocked: a block is write-once. ADR 0022 bumps
+  `REGISTRATION_CONTRACT_VERSION`, which gives each of them a new identity and
+  one more attempt; the same derivation refuses the same bytes, so each
+  blocks again under the new version, once, with nothing sealed or parsed
+  (ADR 0022 calls this harmless). Neither ADR makes those terminals
+  registrable; that would need a derivation that accepts a named legacy
+  shape, or corrected terminals as new revisions, and is left open.
 - The 14 sbi-vc-trade runs keep catalogued, unsealed artifacts and are
-  tried again on every scan cycle, because a seal-trigger refusal is rethrown rather
-  than recorded. Classifying it as a block is a Processor change left open.
+  tried again whenever the scan reaches them, because a seal-trigger refusal
+  is not a verdict `register-terminal.ts` recognises: CORE's
+  `RAISE(ABORT, 'run_inventory_incomplete')` reaches it as a plain D1 error,
+  which is neither a `TerminalRegistrationError`, a `ContractError` nor an
+  `IngestError`, so it is rethrown and the scan counts it as `failed`
+  without recording a stage. The same holds for any GLOBAL PASS, SMBC Direct
+  or Vpass terminal written before its redeploy. A Processor follow-up
+  should record a seal-trigger refusal as a block (it is about the
+  terminal's own bytes and cannot change on retry); it is not done here.
+- The Vpass statement pages' new role interacts with ADR 0022's withheld
+  Vpass rule, which names `provider_response`: after this change that rule
+  matches nothing, which keeps the pages unparsed as ADR 0022 intends. The
+  change that lifts the hold (ADR 0023, option 3) must name
+  `sanitized_provider_capture`.
 - Sony Bank's and Vpass's terminals change shape (the manifest names no unit,
-  a Vpass card's `artifactCount` drops by one, Vpass pages change role). None
-  of their runs has registered yet (blocker 1), so no registered run is
-  reinterpreted.
+  a Vpass card's `artifactCount` drops by one, Vpass pages change role). Only
+  terminals written after the redeploy have the new shape; a run registered
+  before it (a Sony Bank run can have registered and sealed since #259, with
+  its manifest in the unit) keeps its registration, and nothing reads a
+  manifest's unit. No Vpass run could have sealed before this change.
 - V Point Pay's app collector is stopped; its fix applies when it is
   re-enabled.
 
@@ -149,11 +166,11 @@ registered before registers to the same descriptors.
   Mobile Suica, St.George, SMBC Direct, sbi-securities, sbi-shinsei,
   sbi-vc-trade, GLOBAL PASS, MyJCB, V Point, V Point Pay, V Point Pay email,
   Money Forward ME, Sony Bank and Vpass. Run against the collector sources of
-  the base commit (bd3f1a5, with the producer stubbed to the route's for the
-  eight sources #259 later fixed), 10 fail: `artifact_lineage_unstated`
+  `main` (925fdd6, after #259, so no producer is stubbed), 10 fail: `artifact_lineage_unstated`
   (sbi-securities, sbi-shinsei, MyJCB, V Point), `run_inventory_incomplete`
   (SMBC Direct, sbi-vc-trade, GLOBAL PASS, Vpass), `invalid_start_value`
-  (V Point Pay) and the manifest-unit rule (Sony Bank, which registered);
+  (V Point Pay) and the test's manifest-unit assertion (Sony Bank, whose run registers and
+  seals in the test but counts its manifest in its unit);
   Mizuho, Mobile Suica, St.George, V Point Pay email and Money Forward ME
   pass. With the collector changes all 15 pass.
 - Each changed collector's own suite asserts its new shape: the steps

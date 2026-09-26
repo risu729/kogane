@@ -150,8 +150,10 @@ The derivation does not re-check every seal rule. A manifest whose units'
 `artifactCount` disagrees with the artifacts that name them, or that puts a
 step other than `decrypted`/`extracted` on a provider role, is refused by
 CORE's seal trigger (`run_inventory_incomplete`), which is not a derivation
-refusal: registration rethrows it, records no stage row, and the run is
-tried again on every scan cycle (§2) with its artifacts catalogued and unsealed. The
+refusal: it reaches `register-terminal.ts` as a plain D1 error, which is
+rethrown; the scan counts it as `failed`, records no stage row, and tries the
+run again whenever it reaches it (§2), with its artifacts catalogued and
+unsealed. Recording it as a block instead is an open Processor follow-up. The
 collectors are what keeps that from happening
 ([ADR 0021](adr/0021-collector-registration-contract.md),
 [collection: the registration contract](collection.md#shared-data-bucket-per-source-u09)):

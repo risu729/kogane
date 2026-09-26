@@ -32,7 +32,7 @@ import type { Artifact, CollectionScope } from "./types";
 export const SBI_SECURITIES_SOURCE = "sbi-securities";
 export const SHARED_PRODUCER = "collector-sbi-securities";
 /**
- * What re-encodes a provider response into a stored dataset: this collector,
+ * What extracts a stored dataset from provider responses: this collector,
  * named by its own id (ADR 0021).
  */
 const TRANSFORMER_ID = "collector-sbi-securities";
@@ -215,9 +215,10 @@ async function plannedArtifact(artifact: Artifact): Promise<PersistArtifact> {
     sha256: await sha256Hex(bytes),
     byteSize: bytes.byteLength,
     mediaType: artifact.mediaType,
-    // Every dataset is the collector's re-encoded view of a provider response,
-    // which is the role the central descriptor gave them; the terminal's
-    // `extracted` step says what it was derived from (ADR 0021).
+    // Every dataset is the collector's own view of provider responses (the
+    // GraphQL `data`, the main-site JSON parsed and bundled, the MTS payload
+    // in an envelope), which is the role the central descriptor gave them; the
+    // terminal's `extracted` step says so (ADR 0021).
     role: "collector_derived",
     unitKey: datasetScope(artifact.dataset),
     body: { kind: "bytes", bytes },

@@ -45,12 +45,13 @@ Concrete limits in the current code:
   collector's redeploy carry the fixed shapes. The terminals written before
   it are immutable: the 14 sbi-securities and 14 sbi-shinsei runs blocked
   since U09 (counted on 2026-09-26) stay blocked (a block is write-once), and
-  re-registering them under a new registration contract version would refuse
-  them again unless the Processor's derivation also accepts their shape — that
-  decision belongs to ADR 0022. The 14 sbi-vc-trade runs keep their catalogued
-  artifacts unsealed and are tried again on every scan cycle, because a seal-trigger
-  refusal is not classified as a block
-  ([processor §3](processor.md#3-idempotency-and-what-blocks)).
+  re-registering them under a new registration contract version refuses the
+  same bytes again: nothing makes them registrable. The 14 sbi-vc-trade runs
+  keep their catalogued artifacts unsealed and are tried again whenever the
+  scan reaches them, because a seal-trigger refusal is rethrown rather than
+  classified as a block
+  ([processor §3](processor.md#3-idempotency-and-what-blocks)); recording it as
+  a block is a Processor follow-up.
 
 - [Card settlement review](card-settlements.md) now connects authoritative
   Vpass/MyJCB statement totals to SMBC bank debits through explicit operator
