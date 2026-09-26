@@ -198,6 +198,56 @@ describe("balance projection builder", () => {
     expect(sc06.expected.unresolved).toEqual({ "m-mf-line-1": "overlap_unknown" });
   });
 
+  test("a provider-local Mizuho account adopts as before and never sums with an aggregator line", () => {
+    // Identity policy 2 moved Mizuho ordinary deposits from `unresolved` to
+    // `provider-local`. Adoption and overlap must not change: two accounts the
+    // provider lists apart stay disjoint, and an aggregator line for the same
+    // bank stays a possible duplicate even when that line is identified.
+    const build = (mizuho: ProjectionCandidate["subjectStatus"], line: typeof mizuho) =>
+      buildBalanceProjection(
+        [
+          ...["001:1234567", "001:7654321"].map((account, index) =>
+            deposit(`m-mizuho-${String(index)}`, `source_account:mizuho:${account}`, "50000", {
+              subjectStatus: mizuho,
+              sourceId: "mizuho-bank",
+              sourceAccount: `mizuho-bank:ordinary:${account}`,
+              parser: "mizuho-account-list@1.0.0",
+              parserName: "mizuho-account-list",
+            }),
+          ),
+          // A second route restating one of them inside the same target, as in
+          // SC06. (MoneyForward's own rows resolve to no registered metric and
+          // never share the `deposit.balance` target at all.)
+          deposit("m-aggregator-line", "source_account:route:mizuho-line", "50000", {
+            subjectStatus: line,
+            sourceId: "sbi-shinsei-bank",
+            parser: "sbi-shinsei-top-balances-and-activity@1",
+            parserName: "sbi-shinsei-top-balances-and-activity",
+            sourceAccount: "synthetic:route-mizuho-line",
+            authorityRank: AUTHORITY_RANKS.aggregator,
+          }),
+        ],
+        [],
+      );
+    const outcome = (result: ReturnType<typeof buildBalanceProjection>) =>
+      result.rows.map((row) => [row.scopeKey, row.state, row.reasonCode]);
+    const before = build("unresolved", "unresolved");
+    for (const after of [
+      build("provider-local", "unresolved"),
+      build("provider-local", "identified"),
+    ])
+      expect(outcome(after)).toEqual(outcome(before));
+    expect(stateOf(before, "m-mizuho-0").state).toBe("adopted");
+    expect(stateOf(before, "m-mizuho-1").state).toBe("adopted");
+    expect(stateOf(before, "m-aggregator-line")).toMatchObject({
+      state: "unresolved",
+      reasonCode: "overlap_unknown",
+    });
+    expect(
+      before.rows.filter((row) => row.state === "adopted").map((row) => row.quantityCoefficient),
+    ).toEqual(["50000", "50000"]);
+  });
+
   test("SC15: the four meanings of an empty fetch stay four different answers", () => {
     const outcomes = sc15.cases.map((entry) => snapshotEligibility(entry.claim as CoverageClaim));
     expect(

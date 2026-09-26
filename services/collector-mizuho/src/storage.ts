@@ -85,7 +85,14 @@ export async function mizuhoRunPlan(input: MizuhoRun): Promise<PersistRunPlan> {
       providerOutcome,
       coverageStatus: input.partial ? "partial" : "unknown",
       persistenceComplete: true,
-      ...(input.failed ? { safeErrorCode: "collection-failed" } : {}),
+      // A run that is not a success must name why (the manifest refuses it
+      // otherwise); a partial run carries its failed units' code.
+      ...(providerOutcome === "success"
+        ? {}
+        : {
+            safeErrorCode:
+              providerOutcome === "failed" ? "collection-failed" : "collection-unit-failed",
+          }),
       units,
       ranges: [],
       reports: [
