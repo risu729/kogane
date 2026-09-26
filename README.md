@@ -25,6 +25,7 @@ different rules.
 - [ADR 0017: card purchase review command kinds](docs/adr/0017-card-purchase-review-commands.md)
 - [ADR 0018: SBI Shinsei as the second bank debit adapter (proposed)](docs/adr/0018-sbi-shinsei-bank-debit-adapter.md)
 - [ADR 0019: reported state on a date](docs/adr/0019-dated-reported-state.md)
+- [ADR 0020: prices are provider observations promoted by rule (proposed)](docs/adr/0020-price-promotion-by-rule.md)
 - [ADR 0021: collectors state the registration contract](docs/adr/0021-collector-registration-contract.md)
 - [ADR 0022: parser datasets for registered shared-R2 artifacts (proposed)](docs/adr/0022-registration-artifact-datasets.md)
 - [ADR 0023: no trusted card binding for collector-vpass runs](docs/adr/0023-vpass-collector-card-binding.md)

@@ -37,6 +37,7 @@ import {
   count,
   currentText,
   database,
+  EXPLICIT_COVERAGE,
   facts,
   position,
   snapshot,
@@ -140,7 +141,7 @@ describe("complete container snapshots", () => {
   });
 
   for (const [parser, dataset] of SNAPSHOT_DATASETS.filter(
-    ([name]) => name !== "st-george-balances",
+    ([name]) => !EXPLICIT_COVERAGE.has(name),
   )) {
     test(`${parser}: repeated, removed instrument/account, and empty snapshots replace old rows`, () => {
       const store = database();
@@ -169,6 +170,24 @@ describe("complete container snapshots", () => {
     snapshot(store, { ...base, observations: [], coverage: {} });
     expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
     expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({ n: 4 });
+  });
+
+  test("the SBI Shinsei exchange-rate board requires a claim and an empty board never replaces one", () => {
+    const store = database();
+    const base = {
+      parser: "sbi-shinsei-exchange-rate",
+      dataset: "exchange-rate",
+      source: "sbi-shinsei-bank",
+    };
+    snapshot(store, { ...base, observations: [valuation("CLAIMLESS")] });
+    expect(currentValuations(store)).toHaveLength(0);
+    snapshot(store, { ...base, observations: [valuation("OLD")], coverage: {} });
+    snapshot(store, { ...base, observations: [valuation("NEW")], coverage: {} });
+    expect(currentValuations(store).map((row) => row.subject)).toEqual(["NEW"]);
+    // The parser refuses an empty board; the policy keeps the last board even
+    // if an empty claimed one ever reached it.
+    snapshot(store, { ...base, observations: [], coverage: {} });
+    expect(currentValuations(store).map((row) => row.subject)).toEqual(["NEW"]);
   });
 
   test("a newer unit must finish every artifact parse before replacing the old complete snapshot", () => {
@@ -385,7 +404,7 @@ describe("coverage-v1 policy", () => {
   });
 
   for (const [parser, dataset] of SNAPSHOT_DATASETS.filter(
-    ([name]) => name !== "st-george-balances",
+    ([name]) => !EXPLICIT_COVERAGE.has(name),
   )) {
     test(`${parser}: repeated, removed and empty claimed snapshots replace old rows under coverage-v1`, () => {
       const store = database();

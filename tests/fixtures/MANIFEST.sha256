@@ -1,4 +1,5 @@
 b332f41d0232477a7e4902322669f22cd496ae119a7ed1db8d8a17af41466f5d  tests/fixtures/observation-pipeline/coverage-contract/expected.json
+3bf44df427d4e9e112c4a3b3d430da8d383c75287a79a750ee7da4715d3997ff  tests/fixtures/observation-pipeline/coverage-contract/sbi-shinsei-exchange-rate-expected.json
 84aab7387cf675cfe4c19683ae3c3cfc8861fc6be09bb41329bbbc1b3564123a  tests/fixtures/observation-pipeline/coverage-contract/st-george-expected.json
 4f6421c52e8819ea24d02e227e23d16542ef87a2a1516199fd39664c7cec97e7  tests/fixtures/observation-pipeline/global-pass/activity-2099-02.html
 edf9881f63bdaf552c645c287ac5f2e0856fc9c28b17ba47152d907e07d670f9  tests/fixtures/observation-pipeline/mobile-suica-parser-boundaries/sf-history-more-kinds.json
@@ -25,6 +26,7 @@ aba3ef263b4c8d06c49b6160655358b802c72e48e26df7da5f410d5336d94a96  tests/fixtures
 1390f34c52bce921024ba6face8b616a89018e9a06daec5b3375f42d12be1afe  tests/fixtures/observation-pipeline/sbi-securities/2026-08-20/run-20260820-210000-poc01/foreign-cash-positions.json
 2425a0d4cba3cbe99e85564249de241fa28ef72dd19e16d1224a83938e0b075e  tests/fixtures/observation-pipeline/sbi-securities/2026-08-20/run-20260820-210000-poc01/manifest.json
 9383e79b78f66e1cc4011589187b2915b8936c23346776c751feecf9ae65dfdd  tests/fixtures/observation-pipeline/sbi-securities/2026-08-20/run-20260820-210000-poc01/yen-detail-history.json
+0c0cba8a7103b031c33f04600f1fb97209a3f4f6a215de65f17c1dc5e6330c6b  tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/exchange-rate.json
 85984a1ee600c8373cce5719fb8a5962eb967f3a18160b84b36470c7df3a747f  tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/top-accounts-balance-and-activity.json
 011794e48885e886d526dc1038cd7150c32503a88a533258c53559f07d8fd672  tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/yen-deposit-account.json
 2c828b50ec7ef1fb4d0f44d0e77208c2a4903aa66212b4beee5a661dbb3c5978  tests/fixtures/observation-pipeline/sbi-vc-trade/2026-09-07/run-20260907-synthetic01/account-margin.json
