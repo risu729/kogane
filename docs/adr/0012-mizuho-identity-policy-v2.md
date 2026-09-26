@@ -1,11 +1,11 @@
 # ADR 0012: Map Mizuho ordinary deposits under identity policy version 2
 
-- Status: accepted (implementation in flight)
+- Status: accepted
 - Date: 2026-09-26
-- Implemented by: #254 (open at the time of writing, branch
-  `claude/mizuho-identity-mapping-wr8pj4`)
-- Carried by (in that PR): `docs/identity-operations.md` ("Policy 2: Mizuho
-  rule re-identification"), `packages/identity/src/other.ts`,
+- Implemented by: #254
+- Carried by:
+  [identity operations](../identity-operations.md#policy-2-mizuho-rule-re-identification),
+  `packages/identity/src/other.ts`,
   `packages/storage-d1/src/core/identity-policies/mizuho.ts`
 
 ## Context
@@ -54,6 +54,6 @@ for one parse needs a new numeric version: 0018 keeps
 
 ## Verification
 
-In the PR, on synthetic data: identity, processor and balance-projection
-tests, including that the move from unresolved to provider-local leaves
-adoption and overlap outcomes unchanged.
+Synthetic data only: identity, processor and balance-projection tests,
+including that the move from unresolved to provider-local leaves adoption and
+overlap outcomes unchanged.

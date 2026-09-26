@@ -2,8 +2,8 @@
 
 - Status: accepted; the review list follows in an in-flight PR
 - Date: 2026-09-25
-- Implemented by: #251; `card_settlement_readiness` in a follow-up PR that is
-  in flight (no PR number at the time of writing)
+- Implemented by: #251; the `card_settlement_readiness` reads in #256 (open at
+  the time of writing, branch `claude/settlement-readiness-cost-wr8pj4`)
 - Carried by: [card settlements](../card-settlements.md),
   `packages/read-model/src/card-settlement-ownership.ts`,
   `packages/storage-d1/migrations/core/0050_statement_fact_indexes.sql`
@@ -50,7 +50,7 @@ purchases page took 2,436 ms and the sweep's bank read 3,465 ms per statement.
   page 562 → 97 ms, sweep bank read 3,465 → 53 ms per statement.
 - The review and commit reads of `card_settlement_readiness` still use the
   whole view (42 s for the first page of the `カード照合` list on that store);
-  moving them is the in-flight follow-up.
+  moving them is #256, in flight.
 - `card_statement_facts` and `card_bank_debit_facts` still rank all of their
   rows per request.
 

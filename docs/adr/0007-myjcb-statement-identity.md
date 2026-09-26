@@ -74,5 +74,6 @@ once from its position-1 capture and once from its position-2 capture.
 In the PR, on synthetic data: `services/collector-myjcb/test/credit-statement-state.test.ts`
 (the recorded period), `packages/read-model/test/card-usage.test.ts` and
 `card-purchase-keys.test.ts` (the slot), and
-`services/processor/test/myjcb-statement-identity.test.ts` (a statement moving
-from position 1 to 3 with no retire and no recognition).
+`services/processor/test/myjcb-statement-identity.test.ts` (a closed statement's
+events untouched from position 1 to 3, and each pending row retired and
+recognised as captured once).

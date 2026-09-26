@@ -36,9 +36,12 @@ scheduled identity stage took `identitySweep`'s default of 8 runs a tick.
   page still lists. Whether that figure applies is not verified. The risk is
   accepted and documented rather than designed around, because a drain tick
   of production shape is estimated at about 640 calls.
-- **Fallback**: if production cron invocation metrics show ticks failing
-  partway, the budgets come down, repair first, to at most 12 jobs a tick.
-  (The measured tick of 12 repair + 4 replay jobs made 694 D1 calls.)
+- **Fallback** (agreed, not in code): if production cron invocation metrics
+  show ticks failing partway, the budgets come down, repair first, to at most
+  12 repair jobs a tick. The constants stay 28 and 40 until then;
+  [observation lanes](../observation-lanes.md#verified-locally--not-verified)
+  records only that the budgets would then have to come down. (The measured
+  tick of 12 repair + 4 replay jobs made 694 D1 calls.)
 
 ## Consequences
 

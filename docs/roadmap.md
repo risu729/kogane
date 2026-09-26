@@ -132,8 +132,9 @@ Securities executions, settlement, holdings and valuation follow that flow.
 
 The proposed plan for finishing this milestone and starting dated reported
 state and valuation is [the next-milestone plan](plans/2026-09-next-milestone.md),
-awaiting the owner's go-ahead. The design decisions behind the card slice so
-far are recorded as architecture decision records,
+awaiting the owner's go-ahead. The design decisions of 2026-09-24..26 behind
+the card slice and the processor and identity work around it are recorded as
+architecture decision records,
 [ADR 0002](adr/0002-card-purchase-recognition.md) to
 [ADR 0013](adr/0013-agent-card-purchase-read.md).
 

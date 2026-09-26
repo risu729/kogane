@@ -18,12 +18,18 @@ human-approved changes.
 
 ## Options considered
 
-1. A new `kogane.financial.query` intent. Rejected: intents answer inside a
-   grant's source and account perimeter and re-check each row against it,
-   while the purchases page cannot yet be recomputed inside a narrower
-   perimeter (its events and statements are keyed by resolved account, its
-   settlement cites a bank debit of another source, and its unrecognised-row
-   count spans every card source).
+No repository document records this comparison; option 1's reason is
+inferred for this record from what
+[agent API](../agent-api.md#card-purchase-explanation) states about scoped
+grants: "The page cannot yet be recomputed inside a narrower perimeter — its
+events and statements are keyed by resolved account rather than by the source
+accounts a scope lists, the settlement it shows cites a bank debit of another
+source, and its unrecognised-row count spans every card source — so a listed
+grant gets no page rather than a page computed outside it (SC18)."
+
+1. A new `kogane.financial.query` intent. Rejected (inferred): intents answer
+   inside a grant's source and account perimeter, which the purchases page
+   cannot yet be recomputed inside.
 2. A separate tool over the operator page's own query. Chosen.
 
 ## Decision
