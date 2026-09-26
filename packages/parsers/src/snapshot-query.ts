@@ -222,7 +222,19 @@ export interface SnapshotCteOptions {
   policy?: SnapshotPolicyId;
   /** Prefix for the CTE names, so two policy variants can share one query. */
   prefix?: string;
+  /**
+   * A bound parameter (`?N`) holding an exclusive upper bound on capture time,
+   * as `observation_fetch_artifacts.fetched_at` stores it (UTC
+   * `%Y-%m-%dT%H:%M:%fZ`, so text order is time order). With it, a container
+   * snapshot is chosen only among captures completed before the bound: a
+   * run-and-unit snapshot whose newest artifact is before it, and an artifact
+   * container captured before it (docs/reported-state.md). Without it the text
+   * is exactly the unbounded one.
+   */
+  cutoffParam?: string;
 }
+
+const CUTOFF_PARAM = /^\?[1-9][0-9]{0,2}$/u;
 
 export function snapshotCtes(
   relations: SnapshotRelations,
@@ -232,6 +244,14 @@ export function snapshotCtes(
   const policies = relations.snapshotPolicies ?? SNAPSHOT_POLICIES_TABLE;
   const units = relations.artifactUnits ?? ARTIFACT_UNITS_RELATION;
   const p = options.prefix ?? "";
+  const cutoff = options.cutoffParam;
+  // The bound is a parameter reference, never a value: a literal would put
+  // request input into the SQL text.
+  if (cutoff !== undefined && !CUTOFF_PARAM.test(cutoff)) throw new Error("invalid_cutoff_param");
+  // A snapshot is one fetch run's unit: it is before the cutoff only when its
+  // newest artifact is, so a run that crossed the bound is not cut in half.
+  const snapshotCutoff = cutoff === undefined ? "" : `\n     AND MAX(fa.fetched_at) < ${cutoff}`;
+  const containerCutoff = cutoff === undefined ? "" : `\n    AND fa.fetched_at < ${cutoff}`;
   // The policy id is a fixed code-owned identifier, never provider input.
   const activePolicy = options.policy === undefined ? "policy.policy_id" : `'${options.policy}'`;
   const artifactContainers = ARTIFACT_SNAPSHOT_CONTAINERS.map((container) =>
@@ -281,7 +301,7 @@ export function snapshotCtes(
         WHEN 'coverage-v1' THEN ${coverageV1Membership("complete_parse", "fa", "policy", claims)}
         ELSE ${legacyWarningCompatMembership("complete_parse", "policy")}
       END
-  ) THEN 1 ELSE 0 END)
+  ) THEN 1 ELSE 0 END)${snapshotCutoff}
 ), ${p}ranked_snapshots AS (
   SELECT *, ROW_NUMBER() OVER (
     PARTITION BY source_id, parser_name, dataset, fetch_unit_key
@@ -297,7 +317,7 @@ export function snapshotCtes(
   FROM ${relations.fetchArtifacts} fa
   JOIN ${relations.fetchRuns} f ON f.id = fa.fetch_run_id
   JOIN ${p}artifact_container_policies container_policy ON ${artifactContainerMatch("fa", "container_policy")}
-  WHERE ${runScopeSuccessSql("f")}
+  WHERE ${runScopeSuccessSql("f")}${containerCutoff}
     AND EXISTS (
       SELECT 1 FROM ${relations.parseRuns} complete_parse
       WHERE complete_parse.fetch_artifact_id = fa.id
