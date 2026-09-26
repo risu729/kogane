@@ -36,8 +36,18 @@ import {
 } from "../src/card-purchase-job.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
 import { reviseIdentity } from "../src/identity-store.ts";
-import { reconciliationSweep } from "../src/reconciliation-job.ts";
+import { RECONCILIATION_SLICES, reconciliationSweep } from "../src/reconciliation-job.ts";
 import { disposeWorlds, NOW, world, type UsageRow, type World } from "./card-purchase-world.ts";
+
+/**
+ * The reconciliation lane's Vpass and MyJCB slices with stage B named, as they
+ * ran until 2026-09-26. The deployed slices run stage A only, and their
+ * pending-to-posted pairs are the candidate pass's; the proposals the lane
+ * stored before then stay, and these tests keep proving that both lanes name a
+ * pair with one digest, so neither sends the other's again, and that a pair
+ * the lane accepted is merged once.
+ */
+const STAGE_B = RECONCILIATION_SLICES.map((slice) => ({ ...slice, stages: ["A", "B"] as const }));
 
 afterEach(disposeWorlds);
 
@@ -617,12 +627,16 @@ test("the reconciliation lane and the purchase lane propose one pair once, under
       const w = await world();
       await seed(w);
       if (order === "reconciliation first") {
-        expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 1 });
+        expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
+          written: 1,
+        });
         // The purchase lane pairs the same two rows and finds the pair stored.
         expect(counts(await w.sweep())).toEqual(lane);
       } else {
         expect(counts(await w.sweep())).toEqual({ ...lane, proposed: 1 });
-        expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 0 });
+        expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
+          written: 0,
+        });
       }
       const stored = await w.all<{
         id: string;
@@ -645,7 +659,9 @@ test("the reconciliation lane and the purchase lane propose one pair once, under
         })),
       );
       expect(counts(await w.sweep())).toEqual(NOTHING);
-      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 0 });
+      expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
+        written: 0,
+      });
       await disposeWorlds();
     }
 }, 300_000);
@@ -661,7 +677,7 @@ test("both lanes leave a posted row outside the matching window unproposed", asy
     const w = await world();
     const { capture } = await pendingThenPosted(w, [early, POSTED, late]);
     if (order === "reconciliation first") {
-      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({
+      expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
         proposed: 1,
         written: 1,
       });
@@ -673,7 +689,7 @@ test("both lanes leave a posted row outside the matching window unproposed", asy
         recognized: 3,
         proposed: 1,
       });
-      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({
+      expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
         proposed: 1,
         known: 1,
         written: 0,
@@ -701,7 +717,7 @@ test("both lanes leave a posted row outside the matching window unproposed", asy
 test("a provider-linked pair the reconciliation lane accepted is merged once, without a second acceptance", async () => {
   const w = await world();
   await pendingThenPosted(w, [POSTED], linked("provider-auth-4"));
-  expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({
+  expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
     written: 1,
     autoAccepted: 1,
   });

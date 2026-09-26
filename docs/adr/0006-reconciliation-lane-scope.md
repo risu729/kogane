@@ -1,12 +1,9 @@
 # ADR 0006: Keep the reconciliation lane to provider identifiers and the matching window
 
-- Status: accepted; stage A, the window and the cursor are merged; retiring
-  the lane's Vpass/MyJCB stage B is in flight
+- Status: accepted
 - Date: 2026-09-26
-- Implemented by: #243 (merged); #258 (retire the lane's Vpass/MyJCB stage
-  B, open at the time of writing, branch
-  `claude/reconciliation-current-rows-wr8pj4`); the purchase lane's candidate
-  pass is #241
+- Implemented by: #243 (stage A, the window, the cursor); #258 (retires the
+  lane's Vpass/MyJCB stage B); the purchase lane's candidate pass is #241
 - Carried by: [economic events](../economic-events.md#matching-stages),
   `services/processor/src/reconciliation-job.ts`,
   `packages/storage-d1/migrations/core/0048_reconciliation_scan_cursor.sql`,
@@ -52,7 +49,7 @@ pending-to-posted matcher over recognised events.
 - **Scan cursor**: each slice pages through its rows with one row in
   `reconciliation_scan_cursor` (CORE 0048, operational), and a stored
   proposal never takes the write budget again.
-- **Stage B for Vpass and MyJCB is retired from this lane** (in flight, #258):
+- **Stage B for Vpass and MyJCB is retired from this lane** (#258):
   each slice names the stages it runs (`RECONCILIATION_SLICES[].stages`, a
   closed set of `A` and `B`), and both the Vpass and the MyJCB slice name
   stage A only. A stage-A-only slice reads a group only for a page row with a
@@ -70,17 +67,26 @@ pending-to-posted matcher over recognised events.
 - A source whose parser records a provider-issued row id (SBI Shinsei,
   PayPay) pairs nothing in stage A until it records the origin and joins a
   slice.
-- Coverage gap once #258 merges: a row the purchase lane does not recognise
-  (an unsupported payment type, an amount that is not exact, an unresolved
-  account) gets no pending-to-posted candidate, and a MyJCB pending and
-  confirmed row whose usage days straddle a month end fall in two candidate
-  groups and are not paired.
-- Until #258 merges, the lane still proposes Vpass/MyJCB stage B
-  pairs as described in [the roadmap](../roadmap.md#current-position).
+- Coverage gap: a row the purchase lane does not recognise (an unsupported
+  payment type, an amount that is not exact, an unresolved account) gets no
+  pending-to-posted candidate; a MyJCB pending and confirmed row whose usage
+  days straddle a month end fall in two candidate groups and are not paired;
+  and a pending refund is never paired with a posted purchase, or the
+  reverse, because the candidate pass pairs only events of one kind. On the
+  CI-scale card store the lane's old stage B made 292 proposals: 26 the
+  candidate pass also makes, 151 other captures of those pairs, 21 refund
+  against purchase and 94 on a row the purchase lane does not recognise
+  (`payment_type_unsupported`).
+- Stage B proposals the lane stored before #258 stay as history, open or
+  decided.
 
 ## Verification
 
 `packages/domain/test/reconcile.test.ts` pins the window and the unchanged
-digests, and `services/processor/test/reconciliation.test.ts` the sweep and
-its cursor, on synthetic data. #258's tests were not read for this
-record; its diff to `reconciliation-job.ts` and `docs/economic-events.md` was.
+digests, and `services/processor/test/reconciliation.test.ts` the sweep, its
+cursor, the deployed stage-A-only slices (no group read, no lookup, no write,
+a stored proposal untouched) and a provider-issued id still pairing under
+stage A, on synthetic data.
+`services/processor/test/reconciliation-coverage.test.ts` sorts every stage B
+proposal the old lane made on the CI-scale card store into the four groups
+above, none unexplained.

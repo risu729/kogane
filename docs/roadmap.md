@@ -34,15 +34,26 @@ Concrete limits in the current code:
   decisions. Unknown ownership, stale evidence and occupied allocations block
   acceptance. Other bank adapters, partial payments, refunds and complete
   purchase recognition remain extensions; this is not complete event coverage.
-- [The pending/posted job](../services/processor/src/reconciliation-job.ts)
-  proposes Vpass pairs and MyJCB pairs whose confirmed row's usage and payment
-  amounts (`1,200円`) agree and whose ledgers name the same payment month;
-  every pair stays a candidate for review. Only a posted row dated on its
-  pending row's usage day or up to five days after it is proposed
-  ([matching window](economic-events.md#matching-stages)). An installment
-  payment amount is not silently compared with a purchase amount. The
-  collector records a confirmed MyJCB page by the payment month the page
-  names, so a statement keeps its rows' keys while its position moves
+- Vpass and MyJCB pending-to-posted candidates come from the purchase lane's
+  [candidate pass](economic-events.md#pending-to-posted-links), which pairs one
+  recognised pending event with one posted event per purchase; every pair
+  stays a candidate for review. Only a posted row dated on its pending row's
+  usage day or up to five days after it is proposed
+  ([matching window](economic-events.md#matching-stages)), and an installment
+  payment amount is never compared with a purchase amount. A row the purchase
+  lane does not recognise (an unsupported payment type, an amount that is not
+  exact, an unresolved account) gets no candidate, a MyJCB pending and
+  confirmed row whose usage days straddle a month end are not paired, and a
+  refund is never paired with a purchase.
+  [The reconciliation job](../services/processor/src/reconciliation-job.ts)
+  runs stage A only for both sources since 2026-09-26: its stage B read every
+  published capture, proposed one candidate per capture pair and skipped every
+  statement month with more than 200 published rows
+  ([where stage B runs](economic-events.md#matching-stages)). Stage A needs a
+  provider-issued row id, which neither source supplies, so the lane reads its
+  pages and proposes nothing until a source does. The collector records a
+  confirmed MyJCB page by the payment month the page names, so a statement
+  keeps its rows' keys while its position moves
   ([release note](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release));
   pending pages keep the relative `detailMonth-N`, resolved from their
   capture time
@@ -52,10 +63,7 @@ Concrete limits in the current code:
   stops (`credit-statement-period`) on a confirmed page that names no month;
   a pending row and its posted row are still two keys, paired by review; and
   when both position 0 and position 1 are unconfirmed (a closed cycle not
-  yet confirmed), they still share the one unconfirmed slot. The job pages
-  through every published row with a scan cursor, but a card's statement
-  month with more than 200 published rows (every capture of the month counts)
-  is counted and skipped, not paired.
+  yet confirmed), they still share the one unconfirmed slot.
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind
