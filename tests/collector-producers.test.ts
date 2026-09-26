@@ -203,14 +203,25 @@ function sourceFiles(workspace: string): string[] {
     .sort();
 }
 
-/** `producer: <expression>` properties, with the property written just before each. */
+/**
+ * `producer: <expression>` properties, with the property written just before
+ * each. A `producer` property in any other form (shorthand, or inline beside
+ * other properties) is reported as the whole line, so it cannot match a
+ * listed constant and fails the check below.
+ */
 function producerProperties(text: string): { producer: string; previous: string }[] {
   const lines = text.split("\n");
   const found: { producer: string; previous: string }[] = [];
   lines.forEach((line, index) => {
     const match = /^\s*producer\s*:\s*(?<value>.*?),?\s*$/u.exec(line);
-    if (match?.groups === undefined) return;
-    found.push({ producer: match.groups["value"]!, previous: (lines[index - 1] ?? "").trim() });
+    if (match?.groups !== undefined) {
+      found.push({ producer: match.groups["value"]!, previous: (lines[index - 1] ?? "").trim() });
+      return;
+    }
+    const code = line.replace(/\/\/.*$/u, "").trim();
+    if (code.startsWith("*") || code.startsWith("/*")) return;
+    if (/(?:^|[{,(\s])producer\s*(?:[:,}]|$)/u.test(code))
+      found.push({ producer: `<${code}>`, previous: (lines[index - 1] ?? "").trim() });
   });
   return found;
 }

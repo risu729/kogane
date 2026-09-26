@@ -97,18 +97,22 @@ retried at all:
   to the DLQ;
 - the `collection_scan` cron lane (every five minutes) lists one page of 25
   terminals from its stored cursor and attempts at most five registrations
-  per tick. A `blocked` or `retryable` answer counts against those five, and
+  per tick. A `blocked` or `retryable` answer, or a registration that
+  throws, counts against those five, and
   the cursor advances only when the whole page was dealt with. A page that
   holds more than five terminals that never register is therefore listed
   again on every tick and the walk never passes it. CORE's scan state shows
-  that pattern: the cursor is still at the start and every tick is counted
-  as a completed cycle. The scan lane therefore does not revisit these runs,
-  and fixing that is a change to the Processor, outside this decision.
+  that pattern: the cursor is still at the start, and because a cursor that
+  stays empty is counted as a finished walk (`advanceCollectionScan`), every
+  tick is counted as a completed cycle. The scan lane therefore does not revisit these runs.
+  That walk defect is the Processor's, not this decision's, and a separate
+  PR fixes it.
 
-New runs register through the R2 notification as they are written, within
-the `RegistrationBudget` of 500 operations per invocation (#250): a Vpass
-card of about twenty pages in one invocation, a longer one over consecutive
-ticks as a `pending` continuation.
+New terminals pass the route check and reach the rest of registration
+through the R2 notification as they are written, within the
+`RegistrationBudget` of 500 operations per invocation (#250). Passing the
+route check is not registering: for three of the eight sources the real run
+plans stop at a later check (see _Merge safety_ below).
 
 **Stranded runs.** The runs these sources persisted between 2026-09-12 and
 the deploy stay in R2 without a fetch run. For the snapshot-shaped sources
@@ -120,7 +124,10 @@ nobody captures again; they are recoverable only by registering those runs.
 Whether and how to register them (a re-persist under the new producer, or a
 reviewed temporary route) is left to a later decision.
 
-**Card usage currentness.** `current_vpass_snapshots` ranks by
+**Card usage currentness.** The consequences in this and the next two
+paragraphs follow once a collector capture of Vpass or MyJCB is registered,
+catalogued with its parser dataset and parsed; _Merge safety_ below says why
+this decision alone does not get there. `current_vpass_snapshots` ranks by
 (source, card unit, statement month) and `ranked_myjcb_snapshots` by
 (source, connection, statement state, statement slot); neither partitions by
 producer (`packages/read-model/src/sql.ts`). The first collector capture of a
@@ -153,7 +160,9 @@ is counted twice at any point.
   and authorized totals until a binding for collector runs exists (same test
   file, Vpass). This is the largest consequence of the switch, and it was
   deferred, not avoided: any registered collector-vpass run would have had
-  the same effect under any producer name.
+  the same effect under any producer name. A separate PR admits the
+  collector's producer to the trusted binding, and it has to be deployed
+  before collector-vpass captures are parsed (_Merge safety_).
 - Decisions taken on importer-era events stay on those events. A pending to
   posted link review or a merge names event ids, and a retired event keeps
   its decisions; the replacement events start without them, and the
@@ -185,6 +194,62 @@ them: of those sources only Mizuho and Mobile Suica have registered collector
 runs, and no source account under a collector producer exists for Mobile
 Suica yet.
 
+### Merge safety
+
+`main` deploys automatically, so what this decision changes in production on
+its own was checked against the code at the time of writing, by passing the
+collectors' real run plans (`vpassCardRunPlan`, `myJcbRunPlan`,
+`vPointRunPlan`, `vPointPayEmailRunPlan`, synthetic inputs) through
+`persistRun` and `registerCollectionRun` on the real CORE schema in
+Miniflare, then running the parse sweep:
+
+- **Vpass**: the route check passes, the fetch run and its artifacts are
+  catalogued, and the seal is refused by CORE's
+  `fetch_run_seal_requires_complete_inventory` trigger
+  (`run_inventory_incomplete`), because a statement page is a
+  `provider_response` with a `redacted` step, which the trigger allows only
+  as `decrypted` or `extracted`. Registration throws on every attempt; the
+  run is neither sealed nor blocked.
+- **MyJCB** and **V Point**: blocked `artifact_lineage_unstated`, because
+  their JSON artifacts are `collector_derived` with no stated lineage
+  (`descriptors.ts`). A block is write-once: those runs stay blocked after
+  the lineage is fixed, and the next capture after that fix is the first to
+  register.
+- **V Point Pay email**: registers and seals.
+- Sony Bank, Money Forward ME, V Point Pay and GLOBAL PASS were not run
+  through registration.
+
+Whatever the registration outcome, nothing is parsed: `artifactRequest`
+(`descriptors.ts`) gives a collector artifact a `dataset` only for
+St.George's `account-snapshot.json`, so every other artifact is catalogued
+with `dataset = NULL`, and the parsers of all eight sources accept only
+their named datasets (only the Mizuho parsers accept a NULL dataset). With no
+published parse, a capture is never current: `eligible_vpass_snapshots`
+requires an active `vpass-statement-page` parse of every
+`dataset = 'statement-page'` artifact of the card-month,
+`ranked_myjcb_snapshots` an active `myjcb-credit-ledger` parse of a
+`credit-ledger` artifact, and `eligible_snapshots` in
+`packages/parsers/src/snapshot-query.ts` joins the snapshot policies on
+`fa.dataset` and needs a published parse under the policy's parser. The
+importer's captures therefore stay current, `staleCardPurchaseKeysSql`
+reports no new stale key, and no live Vpass or MyJCB purchase event is
+retired by this decision alone. No identity run or source-account reference
+is created either, since those follow a parse.
+
+What changes on its own: collection runs of these sources are recorded
+(registered, blocked, or unsealed fetch runs for Vpass), and V Point Pay
+emails from the deploy on are sealed with `dataset = NULL`. `fetch_artifacts`
+is append-only, so those emails are not parsed when the dataset is fixed
+unless that change also covers runs already registered without one.
+
+The Vpass retirement happens once all of these are deployed, in any order:
+the seal accepts the statement pages' lineage, the Processor gives Vpass
+artifacts their datasets, and the Vpass parser publishes a parse of a
+collector capture. The PR that admits `collector-vpass` to the trusted card
+binding must be deployed before the last of them. The MyJCB churn needs the
+same two fixes for MyJCB (lineage and dataset); it double counts nothing,
+but it moves the source's live events to new provider-local accounts.
+
 ## Verification
 
 - `tests/collector-producers.test.ts`: fails with the old Vpass constant
@@ -196,6 +261,10 @@ Suica yet.
 - `services/processor/test/card-purchase-producer-switch.test.ts`: the MyJCB
   churn and the Vpass retirement without replacement, on the real CORE schema
   in Miniflare.
+- Merge safety: the four real run plans above were registered in a
+  reviewer's scratch test on the real CORE schema (not kept in the tree),
+  with the outcomes stated there and no parse run created.
 - Not verified: registration of a real collector terminal in production after
-  the deploy, and the counts of the churn, which depend on what the
-  collectors capture next.
+  the deploy, the registration outcome of the Sony Bank, Money Forward ME,
+  V Point Pay and GLOBAL PASS run plans, and the counts of the churn, which
+  depend on what the collectors capture next.

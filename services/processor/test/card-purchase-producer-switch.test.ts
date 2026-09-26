@@ -5,8 +5,11 @@
 // of a statement makes the importer's capture non-current; the recognition
 // key carries the producer, so the purchase lane retires every event held
 // under the importer's key and recognises the row again under the collector's.
-// Nothing is counted twice at any point. Every card, amount, merchant and
-// token here is synthetic.
+// Nothing is counted twice at any point. The captures below are seeded
+// parsed, with their datasets: a collector capture reaches this state only
+// once registration catalogues it with a dataset and the parser publishes it
+// (ADR 0014, "Merge safety"). Every card, amount, merchant and token here is
+// synthetic.
 import { afterEach, expect, test } from "bun:test";
 import type { CardPurchaseSweepResult } from "../src/card-purchase-job.ts";
 import { disposeWorlds, PRODUCER, world, type UsageRow } from "./card-purchase-world.ts";

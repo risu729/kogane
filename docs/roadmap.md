@@ -96,11 +96,19 @@ Concrete limits in the current code:
   those runs. The `collection_scan` walk does not revisit them either: it
   stops at a page holding more than five terminals that never register
   ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences)).
-  Once collector-vpass runs register, the importer's Vpass purchase events of
-  every re-captured card-month are retired and not recognised again, because
-  the trusted card binding exists only for the importer's producer; MyJCB
-  events are retired and recognised again once under the collector's key and
-  a new provider-local account.
+  Past the route check, registration still stops for three of them: a Vpass
+  run's seal is refused (`run_inventory_incomplete`, a statement page is a
+  `provider_response` with a `redacted` step), and MyJCB and V Point runs are
+  blocked `artifact_lineage_unstated`. No artifact of these sources is
+  catalogued with a parser dataset, so none is parsed and the importer's
+  captures stay current
+  ([ADR 0014, merge safety](adr/0014-collector-producer-ids.md#merge-safety)).
+  Once collector-vpass captures are parsed, the importer's Vpass purchase
+  events of every re-captured card-month are retired and not recognised
+  again, because the trusted card binding exists only for the importer's
+  producer; once MyJCB captures are parsed, its events are retired and
+  recognised again once under the collector's key and a new provider-local
+  account.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
