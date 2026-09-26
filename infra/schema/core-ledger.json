@@ -712,6 +712,12 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "49ffaf6193a075f2f7052dfb7a1bd67accabad51158e6528456520e1434cafef"
+    },
+    {
+      "file": "0052_sbi_shinsei_bank_debits.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "9747bb99624d14d40eebcb7b0904d879d754ca7368367ca887a827dd1a667c85"
     }
   ],
   "tables": [
@@ -12841,9 +12847,11 @@
         "coefficient",
         "scale",
         "bank_key",
-        "position"
+        "position",
+        "debit_date",
+        "adapter"
       ],
-      "sqlSha256": "1387875bba151f32"
+      "sqlSha256": "118b6e5e0c17473c"
     },
     {
       "name": "card_settlement_fact_ownership",
@@ -16935,6 +16943,6 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql"
     ],
-    "schemaSha256": "a8e14834690f62150ccd66ff5dfab6a81e70b3bc811dc0d7e62c841369b5d24e"
+    "schemaSha256": "a8865b48ad2e2ea0459f26f9953fb2062ecc211ab14ed6187584a74e8cc7d83a"
   }
 }

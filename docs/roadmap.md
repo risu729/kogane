@@ -30,10 +30,15 @@ the relevant rollout records.
 Concrete limits in the current code:
 
 - [Card settlement review](card-settlements.md) now connects authoritative
-  Vpass/MyJCB statement totals to SMBC bank debits through explicit operator
-  decisions. Unknown ownership, stale evidence and occupied allocations block
-  acceptance. Other bank adapters, partial payments, refunds and complete
-  purchase recognition remain extensions; this is not complete event coverage.
+  Vpass/MyJCB statement totals to SMBC and SBI Shinsei bank debits
+  ([bank adapters](card-settlements.md#bank-adapters)) through explicit
+  operator decisions. Unknown ownership, stale evidence and occupied
+  allocations block acceptance. Production holds no published SBI Shinsei
+  transaction yet (its parser rejected every stored activity capture), so that
+  adapter admits nothing today. A debit posted more than three days from the
+  due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
+  Sony Bank), partial payments, refunds and complete purchase recognition
+  remain extensions; this is not complete event coverage.
 - Vpass and MyJCB pending-to-posted candidates come from the purchase lane's
   [candidate pass](economic-events.md#pending-to-posted-links), which pairs one
   recognised pending event with one posted event per purchase; every pair

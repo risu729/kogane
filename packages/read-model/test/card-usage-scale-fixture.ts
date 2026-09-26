@@ -25,8 +25,10 @@
 // month's first page carries its bill total, each MyJCB capture reads the
 // confirmed statement pages and the past-month summary, the bank capture goes
 // through the deployed SMBC parsers (a daily balance, the day's rows and the
-// card debits on each due date), a second bank (St.George) records its daily
-// balances, the card and bank accounts carry accepted ownership claims, and
+// Vpass card debits on each due date), SBI Shinsei's activity page goes through
+// its deployed parser (the last three days' rows, so each row is re-observed
+// under its provider id, and the MyJCB debit on each due date), a further bank
+// (St.George) records its daily balances, the card and bank accounts carry accepted ownership claims, and
 // after each capture the settlement reviews the processor sweep would propose
 // are written; at the end most are decided.
 import { Database, type SQLQueryBindings } from "bun:sqlite";
@@ -49,6 +51,7 @@ import {
   smbcDirectBalance,
   smbcDirectTransactions,
 } from "../../../packages/parsers/src/parsers/smbc-direct";
+import { sbiShinseiTopBalancesAndActivity } from "../../../packages/parsers/src/parsers/sbi-shinsei-top-balances-and-activity";
 import { stGeorgeBalances } from "../../../packages/parsers/src/parsers/st-george";
 import { vpassStatementPage } from "../../../packages/parsers/src/parsers/vpass";
 import type { ArtifactMeta, Observation, Parser } from "../../../packages/parsers/src/types";
@@ -71,6 +74,9 @@ import {
   myjcbStatementHtml,
   ownershipRelation,
   paymentDate,
+  SBI_SHINSEI_ACCOUNT_NO,
+  sbiShinseiActivityPayload,
+  type SbiShinseiRow,
   type SettlementCounts,
   SettlementLedger,
   smbcBalancePayload,
@@ -88,6 +94,9 @@ const VPASS_NAMESPACE = "vpass-worker-card-v1";
 const MYJCB_NAMESPACE = "myjcb-connection-v1";
 const BANK_NAMESPACE = "smbc-direct-v1";
 const ST_GEORGE_NAMESPACE = "st-george-v1";
+const SBI_SHINSEI_NAMESPACE = "sbi-shinsei-v1";
+/** Days of activity each SBI Shinsei capture shows, ending on the capture day. */
+const SBI_SHINSEI_WINDOW = 3;
 const SHA = "a".repeat(64);
 const BYTES = 3;
 const DAY_MS = 86_400_000;
@@ -389,16 +398,25 @@ class ScaleStore {
     this.account("sa-bank", "smbc-bank", ["smbc-bank:ordinary-yen"], "acct-bank", "identified");
     this.ledger = options.statements === true ? new SettlementLedger(this.db) : null;
     if (this.ledger === null) return;
-    this.exec(
-      "INSERT INTO ingest_client_routes(ingest_client_id,producer_id,source_id) VALUES(?,?,'st-george')",
-      CLIENT,
-      PRODUCER,
-    );
+    for (const source of ["st-george", "sbi-shinsei-bank"])
+      this.exec(
+        "INSERT INTO ingest_client_routes(ingest_client_id,producer_id,source_id) VALUES(?,?,?)",
+        CLIENT,
+        PRODUCER,
+        source,
+      );
     this.account(
       "sa-st-george",
       "st-george",
       [`st-george:${ST_GEORGE_ACCOUNT_KEY}`],
       "acct-st-george",
+      "identified",
+    );
+    this.account(
+      "sa-sbi-shinsei",
+      "sbi-shinsei-bank",
+      [`sbi-shinsei:${SBI_SHINSEI_ACCOUNT_NO}`],
+      "acct-sbi-shinsei",
       "identified",
     );
     const owned: [string, string, "liable_party" | "beneficial_owner"][] = [
@@ -409,6 +427,7 @@ class ScaleStore {
       ]),
       ["sa-jcb", "acct-jcb", "liable_party"],
       ["sa-bank", "acct-bank", "beneficial_owner"],
+      ["sa-sbi-shinsei", "acct-sbi-shinsei", "beneficial_owner"],
     ];
     for (const [ref, account, kind] of owned) {
       const relation = ownershipRelation(this.db, kind, account);
@@ -1025,7 +1044,8 @@ class ScaleStore {
 
   /**
    * One SMBC capture through the deployed parsers: the day's closing balance,
-   * the day's rows and the debit of every bill due that day; then a St.George
+   * the day's rows and the debit of every Vpass bill due that day; then an SBI
+   * Shinsei activity capture, which debits the MyJCB bill; then a St.George
    * balance capture.
    */
   private statementBankCapture(day: string, at: number): void {
@@ -1053,12 +1073,14 @@ class ScaleStore {
     });
     const next = random(Date.parse(`${day}T00:00:00Z`) / DAY_MS);
     const rows: BankRow[] = [
-      ...this.dueOn(day).map(({ source, month, total }): BankRow => ({
-        id: `smbc-card-${source}-${month}`,
-        amount: total,
-        direction: "debit",
-        description: "カード引落",
-      })),
+      ...this.dueOn(day)
+        .filter(({ source }) => source !== "myjcb")
+        .map(({ source, month, total }): BankRow => ({
+          id: `smbc-card-${source}-${month}`,
+          amount: total,
+          direction: "debit",
+          description: "カード引落",
+        })),
       // Ordinary rows stay under 10,000 yen, below every bill.
       ...Array.from({ length: this.options.bankRows }, (_, index): BankRow => ({
         id: `smbc-${day}-${index}`,
@@ -1101,12 +1123,15 @@ class ScaleStore {
             observation.sourceAccount,
             observation.externalId,
           ]),
+          sourceId: "smbc-bank",
           sourceAccount: observation.sourceAccount,
           accountId: "acct-bank",
           date: day,
           amount: -observation.amountMinor!,
           evidence: this.evidence.get("acct-bank")!,
         });
+
+    this.sbiShinseiCapture(day, at + 2 * 60_000);
 
     const bankAt = at + 5 * 60_000;
     const snapshot = this.sealedRun({
@@ -1138,6 +1163,100 @@ class ScaleStore {
       this.parse(snapshot.artifacts[0]!, stGeorgeBalances, balances.observations),
       "sa-st-george",
     );
+  }
+
+  /** The SBI Shinsei rows posted on `day`: the MyJCB bill due that day and two ordinary rows. */
+  private sbiShinseiRows(day: string): SbiShinseiRow[] {
+    const next = random(Date.parse(`${day}T00:00:00Z`) / DAY_MS + 17);
+    return [
+      ...this.dueOn(day)
+        .filter(({ source }) => source === "myjcb")
+        .map(({ month, total }): SbiShinseiRow => ({
+          txnReferenceNo: `sbi-card-myjcb-${month}`,
+          date: day,
+          amount: total,
+          side: "debit",
+        })),
+      // Ordinary rows stay under 10,000 yen, below every bill.
+      ...(["debit", "credit"] as const).map((side, index): SbiShinseiRow => ({
+        txnReferenceNo: `sbi-${day}-${index}`,
+        date: day,
+        amount: 100 + Math.floor(next() * 9_800),
+        side,
+      })),
+    ];
+  }
+
+  /**
+   * One SBI Shinsei capture through the deployed parser: the activity of the
+   * last `SBI_SHINSEI_WINDOW` days, so every row is re-observed under its
+   * provider id by the next captures, which the bank debit view must rank as
+   * one payment.
+   */
+  private sbiShinseiCapture(day: string, at: number): void {
+    const key = "top-accounts-balance-and-activity.json";
+    const run = this.sealedRun({
+      session: this.session(SBI_SHINSEI_NAMESPACE, at),
+      source: "sbi-shinsei-bank",
+      runKey: "default",
+      at,
+      artifacts: [
+        {
+          key,
+          dataset: "top-accounts-balance-and-activity",
+          inUnit: false,
+          role: "provider_response",
+        },
+      ],
+    });
+    const days = Array.from({ length: SBI_SHINSEI_WINDOW }, (_, back) =>
+      new Date(Date.parse(`${day}T00:00:00Z`) - (SBI_SHINSEI_WINDOW - 1 - back) * DAY_MS)
+        .toISOString()
+        .slice(0, 10),
+    );
+    const closing = 500_000 + (((Date.parse(`${day}T00:00:00Z`) / DAY_MS) * 7) % 300_000);
+    const result = sbiShinseiTopBalancesAndActivity.parse(
+      sbiShinseiActivityPayload(
+        new Date(at + 9 * 3_600_000).toISOString(),
+        days[0]!,
+        day,
+        days.flatMap((shown) => this.sbiShinseiRows(shown)),
+        closing,
+      ),
+      this.meta(
+        run.artifacts[0]!,
+        "sbi-shinsei-bank",
+        "top-accounts-balance-and-activity",
+        key,
+        at,
+        {},
+      ),
+    );
+    const built = this.parse(
+      run.artifacts[0]!,
+      sbiShinseiTopBalancesAndActivity,
+      result.observations,
+    );
+    this.identify(built, "sa-sbi-shinsei");
+    for (const { id, observation } of built.observations)
+      if (observation.kind === "transaction" && observation.amountMinor! < 0)
+        this.ledger!.debit({
+          id,
+          parseRunId: built.parse,
+          sourceId: "sbi-shinsei-bank",
+          bankKey: JSON.stringify([
+            "sbi-shinsei-bank",
+            PRODUCER,
+            SBI_SHINSEI_NAMESPACE,
+            observation.sourceAccount,
+            observation.externalId,
+          ]),
+          sourceAccount: observation.sourceAccount,
+          accountId: "acct-sbi-shinsei",
+          date: observation.asOf!,
+          amount: -observation.amountMinor!,
+          evidence: this.evidence.get("acct-sbi-shinsei")!,
+        });
   }
 
   /** One bank capture: rows of a source no card read may touch. */

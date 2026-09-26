@@ -142,7 +142,15 @@ describe.if(runnable)("card purchase explanation", () => {
     expect(await href("銀行明細と原本")).toBe("/observations/transaction/41");
     expect(await href("カード照合で確認")).toBe("/reconciliation");
     const text = await chain.innerText();
-    for (const expected of ["利用", "請求", "引落", "2026-09 請求分", "1734 JPY", "採用済み"])
+    for (const expected of [
+      "利用",
+      "請求",
+      "引落",
+      "2026-09 請求分",
+      "1734 JPY",
+      "採用済み",
+      "三井住友銀行",
+    ])
       expect(text).toContain(expected);
     expect(text).toContain("引落は購入費用に加算しません");
     expect(requests.at(-1)?.searchParams.get("eventId")).toBe(item.eventId);

@@ -23,7 +23,12 @@ import type {
   RejectionConditionCode,
 } from "../../../packages/domain/src/reconcile.ts";
 import { useFeatures } from "./api.ts";
-import { DateValue, SETTLEMENT_STATUS, SettlementQuantity } from "./reconciliation-display.tsx";
+import {
+  bankSourceLabel,
+  DateValue,
+  SETTLEMENT_STATUS,
+  SettlementQuantity,
+} from "./reconciliation-display.tsx";
 import { Link } from "./router.tsx";
 import { Badge, ChainStep, Kv, KvRow, Notice, Nullable, ObservationLink } from "./ui.tsx";
 
@@ -300,7 +305,7 @@ export function PurchaseChain({ view }: { view: CardPurchaseView }): ReactNode {
             <KvRow label="照合の状態">{SETTLEMENT_STATUS[settlement.reviewStatus]}</KvRow>
             {settlement.bankDebit === null ? null : (
               <>
-                <KvRow label="銀行">{settlement.bankDebit.sourceId}</KvRow>
+                <KvRow label="銀行">{bankSourceLabel(settlement.bankDebit.sourceId)}</KvRow>
                 <KvRow label="出金額">
                   <SettlementQuantity value={settlement.bankDebit.amount} />
                 </KvRow>

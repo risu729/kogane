@@ -1,8 +1,8 @@
 // The statement history of the scaled card store (card-usage-scale-fixture.ts
 // with `statements: true`): the provider bill totals, the bank captures and the
-// settlement reviews that `card_statement_facts`, `card_bank_debit_facts`,
-// `card_settlement_fact_ownership` and `card_settlement_reviews` (migration
-// 0044) read. Every payload is shaped for a deployed parser; every review is
+// settlement reviews that `card_statement_facts`, `card_bank_debit_facts`
+// (both adapters, migration 0052), `card_settlement_fact_ownership` and
+// `card_settlement_reviews` (migration 0044) read. Every payload is shaped for a deployed parser; every review is
 // proposed as the processor sweep (services/processor/src/card-settlement-job.ts)
 // proposes it, the same facts, keys and digest, and then accepted or rejected
 // with the rows `card-settlement.accept` and `reject` write
@@ -133,6 +133,81 @@ export function smbcTransactionsPayload(
   );
 }
 
+/** The one SBI Shinsei account of the store: `sbi-shinsei:<accountNo>`. */
+export const SBI_SHINSEI_ACCOUNT_NO = "SYNTHETIC-SCALE-001";
+
+/** One SBI Shinsei activity row: the provider's own id, side and posting date. */
+export interface SbiShinseiRow {
+  txnReferenceNo: string;
+  /** `YYYY-MM-DD`. */
+  date: string;
+  amount: number;
+  side: "debit" | "credit";
+}
+
+/**
+ * One SBI Shinsei `top-accounts-balance-and-activity` capture, in the shape of
+ * tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries (without
+ * the optional yen equivalent, a valuation the store does not need): the JPY
+ * account's overview and its activity window `from`..`to` (the rows of those
+ * days, oldest first, so a row is re-stated by every capture whose window
+ * covers its day).
+ */
+export function sbiShinseiActivityPayload(
+  observedAt: string,
+  from: string,
+  to: string,
+  rows: readonly SbiShinseiRow[],
+  closing: number,
+): Uint8Array {
+  const compact = (date: string): string => date.replaceAll("-", "");
+  let balance = closing;
+  for (const row of rows) balance += row.side === "debit" ? row.amount : -row.amount;
+  const activityDetails = rows.map((row) => {
+    balance += row.side === "debit" ? -row.amount : row.amount;
+    return {
+      txnReferenceNo: row.txnReferenceNo,
+      description: "synthetic",
+      [row.side]: String(row.amount),
+      postingDate: compact(row.date),
+      balance: String(balance),
+      tradeTypeCode: "SYNTHETIC",
+    };
+  });
+  const time = observedAt.slice(0, 19).replace(/[-T:]/gu, "");
+  return new TextEncoder().encode(
+    JSON.stringify({
+      responseParam: {
+        overview: {
+          responseParam: {
+            savingsDetails: [
+              {
+                accountNo: SBI_SHINSEI_ACCOUNT_NO,
+                balance: String(closing),
+                currency: "JPY",
+                productCode: "601",
+              },
+            ],
+          },
+        },
+        activity: {
+          responseParam: {
+            fromDate: compact(from),
+            toDate: compact(to),
+            currentBalance: String(closing),
+            accountNo: SBI_SHINSEI_ACCOUNT_NO,
+            currency: "JPY",
+            activityDetails,
+          },
+        },
+        systemResponseTime: time,
+        sbiHyperYokinFlg: "0",
+      },
+      header: { adapterResultCode: "0" },
+    }),
+  );
+}
+
 /** The one St.George account of the store: `st-george:<accountKey>`. */
 export const ST_GEORGE_ACCOUNT_KEY = "b".repeat(64);
 
@@ -181,9 +256,11 @@ export interface StatementFact {
   evidence: readonly string[];
 }
 
-/** An SMBC debit as `card_bank_debit_facts` returns it, with its ownership. */
+/** A bank debit as `card_bank_debit_facts` returns it, with its ownership. */
 export interface BankDebit {
   id: number;
+  /** The adapter's source: `smbc-bank` or `sbi-shinsei-bank`. */
+  sourceId: string;
   parseRunId: number;
   /** `json_array(source, producer, namespace, source_account, external_id)`. */
   bankKey: string;
@@ -219,12 +296,16 @@ const quantity = (amount: number) => exactQuantity("JPY", normalizeDecimal(BigIn
 /**
  * The statements and debits a build has captured, and the reviews the sweep
  * proposed from them. A statement's newest capture replaces the older one, as
- * `card_statement_facts` keeps only the newest representation; each bank row is
- * captured once.
+ * `card_statement_facts` keeps only the newest representation, and so does a
+ * bank row's (an SMBC row is captured once; an SBI Shinsei row is re-stated by
+ * every capture whose activity window covers it, under the same provider id).
  */
 export class SettlementLedger {
   private readonly current = new Map<string, StatementFact>();
-  private readonly debits = new Map<number, BankDebit[]>();
+  /** The current debit of each bank key, by amount. */
+  private readonly debits = new Map<number, Map<string, BankDebit>>();
+  /** The amount each bank key's current debit is filed under. */
+  private readonly amounts = new Map<string, number>();
   private readonly examined = new Set<string>();
   private readonly digests = new Set<string>();
   private readonly groups = new Map<string, Candidate[]>();
@@ -242,8 +323,11 @@ export class SettlementLedger {
   }
 
   debit(fact: BankDebit): void {
-    const same = this.debits.get(fact.amount) ?? [];
-    same.push(fact);
+    const previous = this.amounts.get(fact.bankKey);
+    if (previous !== undefined) this.debits.get(previous)?.delete(fact.bankKey);
+    this.amounts.set(fact.bankKey, fact.amount);
+    const same = this.debits.get(fact.amount) ?? new Map<string, BankDebit>();
+    same.set(fact.bankKey, fact);
     this.debits.set(fact.amount, same);
   }
 
@@ -255,7 +339,7 @@ export class SettlementLedger {
   async propose(createdAt: string): Promise<number> {
     let written = 0;
     for (const statement of this.current.values())
-      for (const bank of this.debits.get(statement.total) ?? []) {
+      for (const bank of this.debits.get(statement.total)?.values() ?? []) {
         const pair = `${statement.id}:${bank.id}`;
         if (this.examined.has(pair)) continue;
         this.examined.add(pair);
@@ -286,7 +370,7 @@ export class SettlementLedger {
               id: `transaction:${bank.id}`,
               revision: `parse_run:${bank.parseRunId}`,
             },
-            sourceId: "smbc-bank",
+            sourceId: bank.sourceId,
             sourceAccount: bank.sourceAccount,
             accountId: bank.accountId,
             ownerRef: OWNER,

@@ -10,11 +10,11 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `a8e14834690f62150ccd66ff5dfab6a81e70b3bc811dc0d7e62c841369b5d24e`
+Schema digest: `a8865b48ad2e2ea0459f26f9953fb2062ecc211ab14ed6187584a74e8cc7d83a`
 
 ## Summary
 
-- Migrations applied: 50
+- Migrations applied: 51
 - Tables: 111 (all `STRICT`: yes)
 - Views: 39
 - Triggers: 400
@@ -159,7 +159,7 @@ Full column, foreign-key, index and trigger detail per table is in
 | `active_ingest_client_producers` | ingest_client_id, producer_id |
 | `active_ingest_routes` | ingest_client_id, producer_id, source_id |
 | `active_manual_overrides` | id, subject_kind, subject_ref, revision, decision_kind, method, actor_id, operation_id, reason, evidence_refs_json, previous_revision, superseded_by, created_at |
-| `card_bank_debit_facts` | id, parse_run_id, source_account, unit_ref, source_id, as_of, external_id, status, extra_json, value_status, coefficient, scale, bank_key, position |
+| `card_bank_debit_facts` | id, parse_run_id, source_account, unit_ref, source_id, as_of, external_id, status, extra_json, value_status, coefficient, scale, bank_key, position, debit_date, adapter |
 | `card_settlement_fact_ownership` | kind, observation_id, account_id, owner_ref, evidence_refs_json |
 | `card_settlement_readiness` | id, statement_current, bank_current, ownership_current, allocation_available |
 | `card_settlement_reviews` | id, statement_key, bank_key, statement_observation_id, statement_parse_run_id, bank_observation_id, bank_parse_run_id, policy_release, facts_json, proposal_digest, created_at, revision, status, decision_revision_id, event_id, obligation_id, settlement_id |
@@ -235,4 +235,4 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0046_st_george_balance_snapshot.sql` | 1 | dataset_snapshot_policies |
 | `0047_card_purchase_recognition.sql` | 20 | card_purchase_scan_cursor |
 
-Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql
+Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql

@@ -2,7 +2,7 @@
 //
 // The view reads `card_statement_facts`, `card_bank_debit_facts` and
 // `card_settlement_fact_ownership` whole: it ranks every captured statement
-// total and every SMBC row of the history, and resolves owners through
+// total and every bank adapter row of the history, and resolves owners through
 // `current_identity_observations`, which materializes the candidate identity
 // runs of every published parse. On D1, which never runs `ANALYZE`, the first
 // page of the review list took about 42 s on the two-year synthetic store and
@@ -15,7 +15,9 @@
 //   statement_partitions the (source, period) of each candidate's statement;
 //   ready_statements     `card_statement_facts`, for the statements of those (source, period);
 //   debit_partitions     the (source account, provider id) of each candidate's debit;
-//   ready_debits         `card_bank_debit_facts`, for the rows of those partitions;
+//   ready_debits         `card_bank_debit_facts`, for the rows of those partitions:
+//                        the union of its adapter branches (SMBC, SBI Shinsei;
+//                        migration 0052), each with the view's own predicate;
 //   statement_observed   the statements whose owner a flag reads;
 //   statement_owned_runs ... statement_ownership
 //                        card-settlement-ownership.ts, `balance`, over those;
@@ -47,6 +49,28 @@ import { cardSettlementOwnershipCtes } from "./card-settlement-ownership.ts";
 /** The 0044 period expression of a statement total, over `b.extra_json`. */
 const PERIOD = `coalesce(json_extract(b.extra_json,'$._kogane.period'),
   substr(json_extract(b.extra_json,'$._kogane.statementMonth'),1,4)||'-'||substr(json_extract(b.extra_json,'$._kogane.statementMonth'),5,2))`;
+
+/**
+ * One adapter branch of `card_bank_debit_facts` (migration 0052), ranked on
+ * its provider key, over the rows of the candidates' debit partitions only.
+ * `admits` is the branch's own source (and parser) predicate, applied before
+ * the ranking as the view applies it.
+ */
+function debitBranch(admits: string): string {
+  return `
+ SELECT t.id,t.parse_run_id,t.source_account,t.currency AS unit_ref,t.external_id,t.status,t.extra_json,d.coefficient,
+ row_number() OVER(PARTITION BY a.source_id,fr.producer_id,ses.external_id_namespace,t.source_account,t.external_id
+  ORDER BY a.fetched_at DESC,t.id DESC) AS position
+ FROM debit_partitions debit_partition
+ CROSS JOIN transaction_observations t ON t.source_account=debit_partition.source_account AND +t.external_id=debit_partition.external_id
+ JOIN published_parse_runs pub ON pub.parse_run_id=t.parse_run_id
+ JOIN parse_runs p ON p.id=t.parse_run_id
+ JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+ JOIN financial_fetch_runs fr ON fr.id=a.fetch_run_id
+ JOIN acquisition_sessions ses ON ses.id=fr.acquisition_session_id
+ LEFT JOIN observation_decimal_values d ON d.kind='transaction' AND d.observation_id=t.id AND d.policy_version='decimal-v1'
+ WHERE ${admits} AND t.external_id IS NOT NULL AND t.external_id<>''`;
+}
 
 export function cardSettlementReadinessCtes(): string {
   return `ready_candidates AS MATERIALIZED (
@@ -87,22 +111,15 @@ export function cardSettlementReadinessCtes(): string {
  CROSS JOIN transaction_observations t ON t.id=ready_candidate.bank_observation_id
  WHERE t.external_id IS NOT NULL AND t.external_id<>''
 ), ready_debits AS MATERIALIZED (
- SELECT * FROM (
- SELECT t.id,t.parse_run_id,t.source_account,t.external_id,t.status,t.extra_json,d.coefficient,
- row_number() OVER(PARTITION BY a.source_id,fr.producer_id,ses.external_id_namespace,t.source_account,t.external_id
-  ORDER BY a.fetched_at DESC,t.id DESC) AS position
- FROM debit_partitions debit_partition
- CROSS JOIN transaction_observations t ON t.source_account=debit_partition.source_account AND +t.external_id=debit_partition.external_id
- JOIN published_parse_runs pub ON pub.parse_run_id=t.parse_run_id
- JOIN parse_runs p ON p.id=t.parse_run_id
- JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
- JOIN financial_fetch_runs fr ON fr.id=a.fetch_run_id
- JOIN acquisition_sessions ses ON ses.id=fr.acquisition_session_id
- LEFT JOIN observation_decimal_values d ON d.kind='transaction' AND d.observation_id=t.id AND d.policy_version='decimal-v1'
- WHERE a.source_id='smbc-bank' AND t.external_id IS NOT NULL AND t.external_id<>''
+ SELECT * FROM (${debitBranch("a.source_id='smbc-bank'")}
  ) WHERE position=1 AND status='posted' AND json_valid(extra_json)
  AND json_extract(extra_json,'$._kogane.direction')='outflow'
  AND json_extract(extra_json,'$._kogane.amountSignSource')='direction'
+ AND coefficient LIKE '-%'
+ UNION ALL
+ SELECT * FROM (${debitBranch("a.source_id='sbi-shinsei-bank' AND p.parser_name='sbi-shinsei-top-balances-and-activity'")}
+ ) WHERE position=1 AND status IS NULL AND unit_ref='JPY' AND json_valid(extra_json)
+ AND json_extract(extra_json,'$._kogane.amountSignSource')='debit'
  AND coefficient LIKE '-%'
 ), statement_observed AS (
  SELECT id AS observation_id FROM ready_statements

@@ -90,9 +90,24 @@ function dueDates(store: Database): string[] {
 }
 
 /**
+ * Whether the sweep can date a bank row: before migration 0052 it skipped an
+ * SMBC row whose `as_of` failed this regex after reading it; the bank read now
+ * leaves such rows out by `debit_date`, and an SBI Shinsei row needs its
+ * posting date as `YYYY-MM-DD`.
+ */
+const SWEEP_DATE = {
+  "smbc-bank": /^([0-9]{4}-[0-9]{2}-[0-9]{2})T00:00:00[+]09:00$/u,
+  "sbi-shinsei-bank": /^([0-9]{4}-[0-9]{2}-[0-9]{2})$/u,
+} as Record<string, RegExp>;
+const datable = (row: { adapter: string; as_of: string | null }): boolean =>
+  SWEEP_DATE[row.adapter]?.test(row.as_of ?? "") ?? false;
+
+/**
  * Both texts' reads from every cursor, with each page size, and around every
  * due date, with the sweep's bank limit (and, around the first, a limit of
- * one); returns the rows seen.
+ * one); returns the rows seen. The bank read returns the shipped read's rows
+ * the sweep can date, in its order, up to the limit: the shipped read also
+ * returned rows the sweep then skipped, and counted them against the limit.
  */
 function sameReads(
   store: Database,
@@ -109,9 +124,13 @@ function sameReads(
   for (const [index, date] of dueDates(store).entries())
     for (const limit of index === 0 ? [1, BANK_LIMIT] : [BANK_LIMIT]) {
       const found = rows(store, CARD_SETTLEMENT_BANK_DEBITS_SQL, [date, date, limit]);
-      expect(found).toEqual(
-        rows(store, LEGACY_CARD_SETTLEMENT_BANK_DEBITS_SQL, [date, date, limit]),
-      );
+      const shipped = rows(store, LEGACY_CARD_SETTLEMENT_BANK_DEBITS_SQL, [date, date, -1]) as {
+        adapter: string;
+        as_of: string | null;
+      }[];
+      expect(found).toEqual(shipped.filter(datable).slice(0, limit));
+      for (const row of found as { adapter: string; as_of: string; debit_date: string }[])
+        expect(row.debit_date).toBe(SWEEP_DATE[row.adapter]!.exec(row.as_of)![1]!);
       banks += found.length;
     }
   return { statements, banks };

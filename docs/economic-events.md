@@ -1161,8 +1161,14 @@ arbiter; see the tests).
 
 ## Statement settlement review
 
-[Card statement settlement review](card-settlements.md) implements the first
-operator-approved Vpass/MyJCB-to-SMBC payment correspondence. Its append-only
+[Card statement settlement review](card-settlements.md) implements
+operator-approved Vpass/MyJCB-to-bank payment correspondence, with two bank
+adapters: SMBC and, since migration 0052, SBI Shinsei
+([bank adapters](card-settlements.md#bank-adapters),
+[ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md)). Each admits only
+rows with a provider row id and the provider's own debit direction, and one
+provider id is one payment however often it is re-observed; Mizuho and Sony
+Bank, whose ids are fingerprints, are not adapters. Its append-only
 candidate decisions pin published source revisions, ownership evidence and
 exclusive payment allocation, with an approved withdrawal path. Acceptance
 records the observed cash effect and keeps principal/fee decomposition unknown;
