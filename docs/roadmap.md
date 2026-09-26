@@ -125,6 +125,17 @@ Concrete limits in the current code:
   the fetch run partial), and identity reads no partial run, so the
   collector's MyJCB rows stay unresolved and are not recognised again until
   that is changed.
+- Shared-R2 registration gives an artifact the parser dataset it needs since
+  2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
+  every registered artifact had none, so only Mizuho's were parsed). The
+  registration contract moved to `terminal-registration-v2`: runs sealed
+  without a dataset (Mobile Suica since 2026-09-12) register again and are
+  parsed once, while a run v2 does not change (Mizuho) is carried over rather
+  than parsed a second time. Old terminals are reached only by the scan walk,
+  so they drain as the scan cycles through `runs/`. Blocked runs are tried
+  once more and block again where their terminal itself is refused. Vpass
+  captures are withheld (above), and MyJCB captures fail at metadata
+  extraction until the extractor reads the collector's shared manifest.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.

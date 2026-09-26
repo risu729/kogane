@@ -27,6 +27,7 @@ import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { vpassStatementPage } from "../../../packages/parsers/src/parsers/vpass.ts";
 import type { Observation } from "../../../packages/parsers/src/types.ts";
 import { registerCollectionRun, type CollectionEnv } from "../src/collection/index.ts";
+import { REGISTRATION_CONTRACT_VERSION } from "../../../packages/application/src/collection/descriptors.ts";
 import type { CardPurchaseSweepResult } from "../src/card-purchase-job.ts";
 import { identifyParse } from "../src/identity-store.ts";
 import {
@@ -244,7 +245,7 @@ describe("ADR 0023 a registered collector card run", () => {
     ).toEqual({
       namespace: "shared-r2",
       producer: COLLECTOR,
-      run_key: `${SESSION}-card-001:terminal-registration-v1`,
+      run_key: `${SESSION}-card-001:${REGISTRATION_CONTRACT_VERSION}`,
     });
     const binding = one<Record<string, unknown>>(
       `SELECT a.id,a.artifact_role,a.dataset,a.format_id,a.format_version,a.payload_fidelity,

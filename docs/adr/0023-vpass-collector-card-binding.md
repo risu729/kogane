@@ -292,7 +292,12 @@ For the card unit's coverage:
 - **Registration.** `VPASS_CARD_BINDING_DESCRIPTOR` names the dataset
   `card-identity-binding` and format `vpass-card-identity-binding-json`
   version `1` for exactly that source, key, role and media type. It is not a
-  parser dataset and is kept apart from ADR 0022's parser-dataset table.
+  parser dataset, so it is kept out of ADR 0022's `ARTIFACT_DATASETS`, whose
+  every entry is a dataset a registered parser accepts, and out of the Vpass
+  withholding: the binding registers from the first collector run that
+  carries one. No terminal registered before carries this artifact, so no
+  registered descriptor changes and the contract stays
+  `terminal-registration-v2`. `scripts/artifact-datasets.test.ts` pins it.
 - **View.** The specification is migration 0021's select, unchanged, `UNION
 ALL` a shared-R2 select with the same requirements: a visible artifact of a
   successful, sealed Vpass run; the
@@ -322,8 +327,12 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   `identityKey("sa", ["vpass", "collector-r2-importer", key])`; every other
   entity is derived from its own reference as before. The resolver gives
   collector bindings the reason `verified-collector-durable-card-binding`.
-- **The hold.** This change does not release the Vpass parser dataset; the
-  collector's statement pages still register without one. The earlier
+- **The hold.** This change does not release the Vpass parser dataset: `vpass`
+  stays the one entry of ADR 0022's `WITHHELD_ARTIFACT_DATASETS`, and the
+  collector's statement pages still register without a dataset. The withheld
+  rule is updated deliberately to the role the collector now writes
+  (`sanitized_provider_capture`), and its release condition to the one below;
+  `scripts/artifact-datasets.test.ts` pins both. The earlier
   decision that "only the change that implements option 3 releases the Vpass
   dataset" is narrowed: releasing it is a later change, made only after this
   change is deployed, the owner has set the secret, and the token check in
