@@ -231,6 +231,7 @@ no collector carries the CORE id.
 | `kogane-globalpass-collector-poc`  | `prestia-globalpass`                  | `global-pass`      |
 | `kogane-sbi-vc-session-poc`        | `sbi-vc-trade`                        | `sbi-vc-trade`     |
 | `kogane-smbc-direct-backfill-poc`  | `smbc-direct`                         | `smbc-bank`        |
+| `kogane-mizuho-collector`          | `mizuho-bank`                         | `mizuho-bank`      |
 
 ### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 
@@ -574,6 +575,41 @@ other scope's data look incomplete, and a scope that produced nothing is
 `unknown` rather than an observation of zero. `requestedScope` is a
 `date_range` with a matching `requested-window` range when the trigger named a
 window, and `full_snapshot` with no range when it did not.
+
+### `mizuho-bank` (`services/collector-mizuho`, `kogane-mizuho-collector`)
+
+| Artifact key                                           | Role                         | Unit                                           |
+| ------------------------------------------------------ | ---------------------------- | ---------------------------------------------- |
+| `account-list.html`                                    | `sanitized_provider_capture` | `account-list`                                 |
+| `ordinary/<branch>-<account>/history/<from>-<to>.html` | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:<from>:<to>` |
+
+One daily cron (`25 21 * * *` UTC, 06:25 JST) signs in once with the Worker
+secrets and reads the account list, then the first displayed history page of
+each ordinary JPY account, at most ten accounts: a run holds up to 11
+artifacts. Accounts past the limit, and accounts whose read failed, are
+units with no artifact, `coverageStatus: unknown` and
+`safeErrorCode: collection-unit-failed`, which make the run `partial`.
+Additional authentication stops the run, and scheduled retries are disabled.
+
+Sanitizer: `sanitizeMizuhoPage` (`packages/parsers/src/parsers/mizuho-html.ts`)
+reduces each page to its account/history DOM before anything is planned, and
+`mizuhoRunPlan` refuses an artifact that is not already its own sanitizer's
+output (`unsafe-collection-artifact`). The password, cookies and form tokens
+stay in Worker secrets or invocation memory; none of them is an artifact.
+Each artifact is recorded as a `redacted` transformation by
+`collector-mizuho-bank` with no retained input.
+
+Terminal: `source: mizuho-bank`, `producer: collector-mizuho-bank`,
+`producerVersion: COLLECTOR_SCHEMA_VERSION` (`mizuho-collector-v1`),
+`requestedScope: unspecified` over every unit key and no range; units are
+`container`s. `providerOutcome` is `failed` (with no artifact and
+`safeErrorCode: collection-failed`), `partial` when any unit failed (with
+`safeErrorCode: collection-unit-failed`), else `success`. `coverageStatus` is
+`partial` when the collector recorded any issue (for example a first history
+page that is not the whole history, which leaves the outcome `success`) and
+otherwise `unknown`: no date-range coverage is claimed. The run is written
+through `persistRun`, all artifacts held in memory until the terminal is
+written, so nothing is staged.
 
 ### sbi-shinsei (`kogane-sbi-shinsei-collector-poc`)
 

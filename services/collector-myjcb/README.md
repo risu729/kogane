@@ -148,6 +148,7 @@ collectorは、おまとめ設定追加・解除、初期表示変更、支払�
 - password login無効、規約同意、新規登録、端末登録
 - response size上限8 MiB、未知charset、seq範囲外、cookie domain/count/size異常
 - クレジット明細pageの`(確定分)` h1とledger headerの状態が矛盾する、または確定明細でないpageにexport linkがある（`credit-statement-state`、次節）
+- 確定明細pageが支払月を名乗らない、二つ以上名乗る、または過去月APIの`settlementYM`と違う月を名乗る（`credit-statement-period`、次節）
 - token/cookie/credentialを保存しそうな状態
 
 scheduled runは同じconnectionを自動再試行しない。次回の日次runは新規browser/loginで開始する。
@@ -172,6 +173,14 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 - page自身の矛盾は全positionで`credit-statement-state`停止: h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と`ご利用金額`。確定明細でないpageのexport linkも停止する。
 
 position 2以降を停止にしないのは、productionのposition 7と8がh1のない行0件のledgerを持つためである（`docs/sources/myjcb.md`の「明細状態の判定」）。停止時と`unknown`時のlog（`myjcb-credit-statement-state`／`myjcb-credit-statement-unstated`）にはh1の個数、ledger数、行数、label codeだけを出す。
+
+月のperiodは明細自身の名前にする（`src/parsers.ts`の`creditStatementPeriod`）。ledger parserはperiodを行のexternal idに入れるので、明細がposition 1から2へ移ってもperiodが変わらなければ行のidも変わらない。
+
+- 過去月APIがlabelする月: `settlementYM`をそのまま記録する。確定pageが月を名乗るなら同じ月でなければ停止する
+- それ以外の確定page: `<h2>YYYY年M月お支払い分のカードご利用明細</h2>`が名乗る月を`YYYY-MM`で記録する。名乗らない、または二つ以上なら`credit-statement-period`で停止する
+- 未確定と`unknown`のpage: `detailMonth-N`（月を名乗らないため）
+
+停止log（`myjcb-credit-statement-period`）には`detailMonth`、名乗った月の個数、API labelの有無だけを出す。詳細は`docs/sources/myjcb.md`の「明細の月」にある。
 
 行を持つledgerは、状態に対応するheader一式（`ご利用日`、`ご利用先など`、`支払区分`、`今回のお支払い金額`または`ご利用金額`）をheadに表示していなければならない（`credit-ledger-headers`）。これにより、ledger JSONの`headers`はpageで確認した事実になる。確定ledgerはexpandedの`ご利用金額`を、未確定ledgerは`今回のお支払い金額`を読む。
 
