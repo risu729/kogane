@@ -234,7 +234,7 @@ INV06, per case:
 - Merge order: after #259 (collector producer ids), so V Point Pay email runs
   sealed with NULL are among those made parseable. Either order with #265
   (collector registration contract, ADR 0021, which changes only collector
-  code and touches no file of this change) is safe:
+  code and shares only documentation files with this change) is safe:
   - **This change first:** terminals already in R2 that state refused lineage
     or unit counts (the SBI runs) block again under v2, once each. Runs the
     collectors write after #265 deploys register directly under v2 and are

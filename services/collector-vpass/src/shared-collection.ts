@@ -120,11 +120,12 @@ function pageArtifactKey(month: string, page: VpassPageCapture): string {
   return `months/${month}/${page.kind}-${String(page.index).padStart(3, "0")}.json`;
 }
 
+/** One planned artifact; the run's own manifest passes no unit (ADR 0021). */
 async function artifactOf(
   artifactKey: string,
   bytes: Uint8Array,
   role: string,
-  unitKey: string,
+  unitKey?: string,
 ): Promise<PersistArtifact> {
   return {
     artifactKey,
@@ -132,7 +133,7 @@ async function artifactOf(
     byteSize: bytes.byteLength,
     mediaType: "application/json",
     role,
-    unitKey,
+    ...(unitKey === undefined ? {} : { unitKey }),
     body: { kind: "bytes", bytes },
   };
 }
@@ -209,7 +210,11 @@ export async function vpassCardRunPlan(run: VpassCardRun): Promise<PersistRunPla
         await artifactOf(
           pageArtifactKey(month, page),
           sanitizedEnvelopeBytes(page.rawJson, "statement_page_json_invalid"),
-          "provider_response",
+          // A statement page is the sanitizer's output, like the three
+          // envelopes above: CORE seals a provider role only with `decrypted`
+          // or `extracted` steps, so a `provider_response` carrying this
+          // `redacted` step could never be sealed (ADR 0021).
+          "sanitized_provider_capture",
           unitKey,
         ),
       );
@@ -219,7 +224,9 @@ export async function vpassCardRunPlan(run: VpassCardRun): Promise<PersistRunPla
     redaction(artifact.artifactKey),
   );
   const summary = manifestBytes(run, months);
-  artifacts.push(await artifactOf("manifest.json", summary, "collector_manifest", unitKey));
+  // The card run's manifest belongs to the run and names no unit (ADR 0021).
+  const cardArtifactCount = artifacts.length;
+  artifacts.push(await artifactOf("manifest.json", summary, "collector_manifest"));
 
   // A card exposes a rolling window of statement months, so even a fully
   // successful run is not a claim about the card's whole history.
@@ -262,7 +269,7 @@ export async function vpassCardRunPlan(run: VpassCardRun): Promise<PersistRunPla
         {
           unitKey,
           unitKind: "card",
-          artifactCount: artifacts.length,
+          artifactCount: cardArtifactCount,
           coverageStatus: "partial",
         },
       ],
