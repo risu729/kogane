@@ -88,7 +88,11 @@ The identity is the tuple of plan 03 §4:
 `terminal-v1` → ingest-contract derivation in
 `packages/application/src/collection/descriptors.ts`. When that derivation
 changes what a terminal _means_ in CORE, the same run registers again as a new
-revision and the old registration is kept.
+revision and the old registration is kept. The one exception so far is the
+artifact dataset table (§3.4, ADR 0022): a bump would register every persisted
+run a second time and list a parsed Mizuho capture's transactions twice, so the
+table shipped under `terminal-registration-v1` and applies to terminals first
+registered after it.
 
 | Situation                                                                                                                | Outcome                                            | Recorded                                                                                        |
 | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -282,6 +286,62 @@ once by an `import` operation) and completes on its existing inventory. Both
 cases are tested. Queue messages are R2 notifications before and after, so
 none in flight changes meaning. The health route's `registration` counts
 (§13) show how many terminals are still short of registration.
+
+### 3.4 Artifact datasets (ADR 0022)
+
+`terminal-v1` has no dataset field, and every parser except Mizuho's selects
+its artifacts by dataset, so the derivation supplies one. `artifactRequest`
+looks the artifact up in the closed table `ARTIFACT_DATASETS` (in
+`descriptors.ts`), keyed by the terminal's `source`: a rule names an exact
+artifact key or a whole-key pattern, the role and the media types the
+collector declares, and the dataset. An artifact that matches no rule — or
+matches a key with another role or media type — is registered with no
+dataset, which no parser but Mizuho's reads. Nothing is guessed.
+
+What the table maps (from each collector's persist path and each parser's
+`accepts`; [ADR 0022](adr/0022-registration-artifact-datasets.md) has the
+full list):
+
+- Mobile Suica `sf-history.json` → `sf-history`; Money Forward's index,
+  detail and monthly pages; MyJCB's discovery, past-months, detail and ledger
+  artifacts; GlobalPass activity pages; the SBI Securities, SBI Shinsei and
+  SBI VC Trade datasets; SMBC's normalized balance and transactions; Sony
+  Bank's balance, history pages, history CSVs and wallet pages; St George's
+  account snapshot; V Point's balance, SMFG point and history pages; the V
+  Point Pay notification event.
+- Not mapped: evidence no parser reads (manifests, summaries, raw pages beside
+  their normalized form); Mizuho, whose parsers read artifacts without a
+  dataset; MyJCB `credit-menu.html`, whose parser requires a media type
+  parameter a terminal cannot carry.
+- **Withheld: Vpass.** The statement-page rule is kept in
+  `WITHHELD_ARTIFACT_DATASETS` and not applied, so collector-vpass captures
+  are registered but never parsed. A parsed collector capture would become
+  the current statement snapshot of its card-month and retire the importer-era
+  purchases, because it cannot yet bind to the trusted card identity
+  (ADR 0023). It is applied when the collector derives the binding.
+
+`scripts/artifact-datasets.test.ts` checks the table against both sides:
+every mapped or withheld dataset is accepted by a registered parser, every
+dataset a parser requires from a shared-R2 source is mapped, withheld or named
+unreachable, and the withheld list is pinned.
+
+**Contract version.** The table did not bump `REGISTRATION_CONTRACT_VERSION`.
+A bump registers every persisted terminal again (the version is part of the
+`collection_runs` key and of the fetch run's `sourceRunKey`): a second fetch
+run in the same session over the same objects, new artifacts, a new seal and
+new parse runs. For a capture already parsed that doubles what has no provider
+identity in the read model — a Mizuho terminal registered under two versions
+lists its transactions twice (`services/processor/test/registration-datasets.test.ts`).
+So the table applies to terminals first registered after it: the Mobile Suica
+runs registered before it keep `dataset = NULL` and stay unparsed, and runs
+blocked before it stay blocked. A registration left `pending` across the
+deploy may block with `inventory_mismatch` at its seal, because part of it was
+catalogued before the table.
+
+MyJCB artifacts are mapped but do not parse yet: the metadata extractor finds
+their manifest entry by `connectionId` and `filename`, which the shared
+collector's manifest does not carry, so each parse fails with
+`manifest_artifact_mismatch` and publishes nothing.
 
 ## 4. No byte is copied
 

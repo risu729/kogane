@@ -137,6 +137,13 @@ export interface RegisterTerminalInput {
    * invocation makes. A call without one gets a budget of its own.
    */
   budget?: RegistrationBudget;
+  /**
+   * The registration contract version the run is recorded under. Production
+   * never sets it: it is `REGISTRATION_CONTRACT_VERSION`. A test sets another
+   * value to show what a version bump would do to a terminal that is already
+   * registered (ADR 0022).
+   */
+  contractVersion?: string;
 }
 
 /** Where a staged registration stopped: what the next call starts with. */
@@ -196,6 +203,7 @@ interface Registration {
   port: RunRegistrationPort;
   budget: RegistrationBudget;
   now: () => Date;
+  contractVersion: string;
 }
 
 /**
@@ -227,6 +235,7 @@ export async function registerTerminal(
     port: (input.port ?? ((metered) => directRegistrationPort(metered, input.clientId)))(env),
     budget,
     now: input.now ?? (() => new Date()),
+    contractVersion: input.contractVersion ?? REGISTRATION_CONTRACT_VERSION,
   };
   return registerWithin(context);
 }
@@ -242,7 +251,7 @@ async function registerWithin(context: Registration): Promise<RegisterTerminalOu
     source: manifest.source,
     runId: manifest.runId,
     terminalDigest: read.terminalDigest,
-    registrationContractVersion: REGISTRATION_CONTRACT_VERSION,
+    registrationContractVersion: context.contractVersion,
   };
   const seenAt = now().toISOString();
   const inserted = await insertCollectionRunIfAbsent(env.DB, {
@@ -420,7 +429,7 @@ async function register(
     return { outcome: "deferred" };
   }
 
-  const fetchRunId = await port.createRun(createRunRequest(manifest));
+  const fetchRunId = await port.createRun(createRunRequest(manifest, context.contractVersion));
   // What earlier calls already catalogued for this run. Those artifacts are
   // skipped rather than re-adopted as no-ops, so the budget is spent on new
   // work and a run with more artifacts than one budget converges instead of
@@ -559,7 +568,7 @@ async function register(
   if (!budget.fits(FINAL_STEP_RESERVE)) return pending("terminal");
   await port.addRunReport(fetchRunId, runReportRequest(manifest));
   const startedAtMs = instantMs(manifest.startedAt);
-  const attemptId = `${manifest.runId}:${REGISTRATION_CONTRACT_VERSION}`;
+  const attemptId = `${manifest.runId}:${context.contractVersion}`;
   if (staged) await port.sealStagedInventory(fetchRunId, inventoryId, attemptId, startedAtMs);
   else await port.seal(fetchRunId, items, attemptId, startedAtMs);
 
@@ -682,7 +691,7 @@ async function recordBlockedTerminal(
     source: input.source,
     runId: input.runId,
     terminalDigest: digest,
-    registrationContractVersion: REGISTRATION_CONTRACT_VERSION,
+    registrationContractVersion: context.contractVersion,
   };
   const seenAt = at.toISOString();
   const inserted = await insertCollectionRunIfAbsent(env.DB, {

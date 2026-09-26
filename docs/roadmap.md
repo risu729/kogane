@@ -84,6 +84,17 @@ Concrete limits in the current code:
   no deployed source does yet); candidates are proposed, never merged by
   amount and date. Excluding a row by decision and allocating a refund to a
   purchase are not available yet.
+- Shared-R2 registration gives an artifact the parser dataset it needs since
+  2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
+  every registered artifact had none, so only Mizuho's were parsed). It
+  applies to terminals first registered after it: the registration contract
+  version was not bumped, because re-registering an already parsed Mizuho
+  capture would list its transactions twice, so the Mobile Suica runs
+  registered before it stay unparsed and runs blocked before it stay blocked.
+  Vpass captures are withheld (registered, never parsed) until the collector
+  derives the trusted card binding (ADR 0023), and MyJCB captures fail at
+  metadata extraction until the extractor reads the collector's shared
+  manifest.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
