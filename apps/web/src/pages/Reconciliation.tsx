@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useFeatures } from "../api.ts";
 import { useCardSettlements, type CardSettlementReview } from "../reconciliation-api.ts";
 import {
+  bankSourceLabel,
   CardSettlementDetails,
   DateValue,
   SETTLEMENT_STATUS,
@@ -137,7 +138,7 @@ function SettlementCard({ review }: { review: CardSettlementReview }): ReactNode
           <div>
             <dt>銀行 </dt>
             <dd>
-              {facts.bankDebit.sourceId} · {facts.bankDebit.sourceAccount}
+              {bankSourceLabel(facts.bankDebit.sourceId)} · {facts.bankDebit.sourceAccount}
             </dd>
           </div>
         </dl>
