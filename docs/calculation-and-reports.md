@@ -101,13 +101,21 @@ the contexts that used them. A price with a date-only effective time is never
 selected against an instant cutoff, and an instrument without a selectable
 price is absent from the result, never zero.
 
-**Limits.** The report job (§4) still reads the most recently recorded price
-per instrument quoted in its base unit, without the cutoff or the publication
-join; with promoted domestic JPY prices it can now value those holdings, and
-because it has no freshness rule, a holding whose latest price was refused is
-valued at the latest price that was promoted, however old.
-Moving it to `selectPrices`, adding freshness, and applying FX under
-`fx-sbi-shinsei-mid-v1` is the next step (the plan's P2-3). SBI Shinsei's
+**What the report job reads.** The report job (§4) values a holding only with
+a price claimed from the holding's own snapshot: a price whose claim names an
+observation of the same parse run as the position, under a rule of the closed
+list, whose parse run is currently published, quoted in the report's base unit
+and effective and recorded at or before the knowledge cutoff
+(`SNAPSHOT_PRICE_SQL` in `services/processor/src/report-job.ts`). A holding
+whose own row was refused by the basis check (the survey counted 31 domestic and
+14 foreign such rows) is therefore `missing-price`; it is never
+valued at an approximate price or at the price of an older snapshot, and a
+price row with no claim values nothing. Foreign holdings are quoted in their
+own currency, so a JPY report still leaves them `missing-price`: nothing is
+converted 1:1.
+
+**Limits.** Valuation on a date through `selectPrices`, with a freshness rule
+and FX under `fx-sbi-shinsei-mid-v1`, is the next step (the plan's P2-3). SBI Shinsei's
 board is a customer rate, possibly tiered by `customerCategory`, not a market
 reference. `price_observations` and `price_observation_claims` are outside the
 source-revision ledger: valuation reads CORE per request, and a READ

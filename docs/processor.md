@@ -391,8 +391,9 @@ valuation claims before position claims, one cursor per claim kind in
 with the cursor. The cursor never passes a row of a parse that is still
 `pending`, so a parse being written while the lane runs is read on a later
 tick; a parse left `pending` for good would hold that claim kind's cursor
-until the run is closed, which shows as `scanned: 0` tick after tick. It runs right before `report_job`, which reads the prices; its log line
-is counts only (§6.1, [calculation-and-reports.md](calculation-and-reports.md#1-a-price-is-an-observation-with-a-basis),
+until the run is closed, which shows as `scanned: 0` tick after tick. It runs
+right before `report_job`, which values a holding only with a price claimed
+from the holding's own parse run; its log line is counts only (§6.1, [calculation-and-reports.md](calculation-and-reports.md#1-a-price-is-an-observation-with-a-basis),
 [ADR 0020](adr/0020-price-promotion-by-rule.md)).
 
 `card_settlement_sweep` shares `RECONCILIATION_ENABLED` with

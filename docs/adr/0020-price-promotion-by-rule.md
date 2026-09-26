@@ -84,11 +84,20 @@ the FX policy.
 
 ## Consequences
 
-- The report job, which still reads the most recently recorded price per
-  instrument in its base unit, can value domestic holdings from the promoted
-  JPY prices. It has no cutoff, publication join or freshness rule, so a
-  holding whose latest price was refused is valued at an older promoted one.
-  Moving it to `selectPrices` with freshness and FX is P2-3.
+- **The report job values a holding only from its own snapshot.** Review
+  found that the report job (which runs in production with
+  `REPORTS_ENABLED="true"`) read the most recently recorded price per
+  instrument, with no claim, publication or cutoff check, so after this lane
+  promoted prices a holding whose current row was refused would have been
+  valued at an older snapshot's price in a fixed report. That is a wrong
+  figure, so this change widens the scope by one query instead of leaving it
+  to P2-3: `SNAPSHOT_PRICE_SQL` (`services/processor/src/report-job.ts`)
+  takes, per position, a price whose claim names an observation of the
+  position's own parse run under a rule of the closed list, whose parse run is
+  published, quoted in the base unit, and effective and recorded at or before
+  the knowledge cutoff. Anything else is `missing-price`; a price row without
+  a claim values nothing. Same-snapshot is the strictest freshness there is,
+  so no freshness window had to be invented here.
 - The SBI Shinsei `exchange-rate` artifacts are parsed and chosen as a
   complete container under `coverage-v1`; an empty board is refused and never
   replaces the previous one.
@@ -109,6 +118,10 @@ the FX policy.
 - `packages/domain`: each rule's mapping and refusal, the basis check
   promoting VT and AAPL from the synthetic fixture and refusing tampered rows,
   a per-100 basis refused, the price id and effective-time rules.
+- `services/processor` report tests: a holding is valued at a price claimed
+  from its own parse run; a holding of a newer snapshot whose own claim is
+  effective after the cutoff, or whose only candidate is an older snapshot's
+  price or an unclaimed price row, is `missing-price`.
 - `packages/read-model`: selection by instant across offsets, a re-parse
   moving selection once published, unpublished parses ignored, append-only
   triggers, and a query plan that reaches prices by instrument without table

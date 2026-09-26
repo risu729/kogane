@@ -92,7 +92,8 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   "experiments/observation-pipeline-local/src/store.ts": 5,
   // Price promotion writer (ADR 0020): promotes the claims of every successful
   // run, published or not, so a parse published later is not missed. Which
-  // price a reader uses is decided by price-selection.ts through the projection.
+  // price a reader uses is decided by joining published_parse_runs
+  // (price-selection.ts, and the report job's SNAPSHOT_PRICE_SQL).
   "services/processor/src/price-promotion-job.ts": 2,
 };
 
