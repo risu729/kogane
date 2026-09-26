@@ -928,3 +928,8 @@ is verified yet, so the price promotion lane promotes no FX row
 `SBI_SHINSEI_FX_QUOTE_BASIS` (`packages/domain/src/price-sources.ts`). The
 FX policy that will value with this board is named `fx-sbi-shinsei-mid-v1`
 so the caveat travels with every result that uses it.
+
+**What admits a currency.** The owner confirms each currency's quote basis
+(per 1 unit) from the live board, or grants read access to the stored boards
+in R2 for an aggregate survey; either is then recorded as the currency's
+`evidence` in `SBI_SHINSEI_FX_QUOTE_BASIS`, in a change that amends ADR 0020.
