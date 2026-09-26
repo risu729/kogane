@@ -878,3 +878,23 @@ staging bucket is not written in shared mode: the run is stored once, in
 Deploy order, rollback, the artifact/role table and what the terminal states
 are in [`docs/collection.md`](../collection.md#sbi-shinsei-kogane-sbi-shinsei-collector-poc).
 Merged is not enabled: the var ships as `legacy`.
+
+## Parse status in production (2026-09-26)
+
+Read-only aggregate counts of the production CORE store, taken while adding
+the SBI Shinsei bank debit adapter to card settlement review
+([bank adapters](../card-settlements.md#bank-adapters),
+[ADR 0018](../adr/0018-sbi-shinsei-bank-debit-adapter.md)):
+
+- `top-accounts-balance-and-activity`: 29 stored captures. Parser
+  `sbi-shinsei-top-balances-and-activity` 0.1.1 rejected all 29 (parse run
+  status `error`, job code `parser_rejected`); 25 of them had also been parsed
+  by 0.1.0, and all 25 of those runs ended in `error` too.
+- `yen-deposit-account`: 29 stored captures, all 29 parsed by
+  `sbi-shinsei-yen-deposit-account` 0.1.1 (`ok`); the 25 earlier 0.1.0 runs
+  ended in `error`.
+
+So no published SBI Shinsei transaction observation exists, and the card
+settlement adapter admits nothing until the activity parser accepts the stored
+captures. Why the parser rejects them is not investigated here; it is an open
+limit, and the parser's strict shapes are unchanged.

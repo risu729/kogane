@@ -18,6 +18,10 @@
 //   timeless one replaces, and a newer claim for the same owner;
 // - bank rows: repeated provider ids, missing ids, pending rows, credits,
 //   date-only times and other sign sources;
+// - SBI Shinsei rows (the second bank adapter, migration 0052): the provider's
+//   debit and credit sides, zero debits, foreign currencies, a status and a
+//   sign source the parser never sets, timed dates, and re-observed provider
+//   ids whose newer capture changes side or currency;
 // - settlement candidates keyed by string, missing and numeric facts.
 //
 // `drawn` records which of these a seed drew, so a test can check that the
@@ -33,7 +37,7 @@ const RANDOM_ACCOUNTS = ["acct-a", "acct-b", "acct-j", "acct-k", "acct-x"] as co
 const PARTIES = ["party:p1", "party:p2"] as const;
 const DAY_MS = 86_400_000;
 
-type Source = "vpass" | "myjcb" | "smbc-bank";
+type Source = "vpass" | "myjcb" | "smbc-bank" | "sbi-shinsei-bank";
 interface SourceAccount {
   ref: string;
   source: Source;
@@ -54,6 +58,18 @@ const SOURCE_ACCOUNTS: readonly SourceAccount[] = [
     ref: "sa-bank-2",
     source: "smbc-bank",
     raw: "smbc-bank:savings",
+    accounts: ["acct-k", "acct-x"],
+  },
+  {
+    ref: "sa-sbi-1",
+    source: "sbi-shinsei-bank",
+    raw: "sbi-shinsei:SYNTHETIC-001",
+    accounts: ["acct-k"],
+  },
+  {
+    ref: "sa-sbi-2",
+    source: "sbi-shinsei-bank",
+    raw: "sbi-shinsei:SYNTHETIC-002",
     accounts: ["acct-k", "acct-x"],
   },
 ];
@@ -134,7 +150,7 @@ class Builder {
       CLIENT,
       PRODUCER,
     );
-    for (const source of ["vpass", "myjcb", "smbc-bank"])
+    for (const source of ["vpass", "myjcb", "smbc-bank", "sbi-shinsei-bank"])
       this.run(
         "INSERT INTO ingest_client_routes(ingest_client_id,producer_id,source_id) VALUES(?,?,?)",
         CLIENT,
@@ -648,7 +664,8 @@ class Builder {
     this.identity(source, parse, observations, binding);
     this.maybeExclude(parse);
     if (facts["paymentDate"] !== undefined && this.chance(0.7))
-      this.debits(due, total, fetchedAtMs);
+      if (this.chance(0.4, "SBI Shinsei capture")) this.sbiShinseiDebits(due, total, fetchedAtMs);
+      else this.debits(due, total, fetchedAtMs);
   }
 
   /** The card unit of a capture's artifact. */
@@ -697,6 +714,73 @@ class Builder {
               _kogane: {
                 direction: credit ? "inflow" : "outflow",
                 amountSignSource: this.chance(0.05, "other sign source") ? "text" : "direction",
+              },
+            }),
+          );
+          this.transactions.push(id);
+          return { kind: "transaction" as const, id };
+        }),
+    });
+    this.identity(source, parse, observations);
+    this.maybeExclude(parse);
+  }
+
+  /**
+   * One SBI Shinsei activity capture of one to three rows around a due date,
+   * as `sbi-shinsei-top-balances-and-activity` stores them: the provider's
+   * side in `_kogane.amountSignSource`, a debit signed negative unless zero,
+   * the posting date as `YYYY-MM-DD` and no status; and the drawn departures
+   * from that shape the adapter must refuse.
+   */
+  private sbiShinseiDebits(due: string, total: number, fetchedAtMs: number): void {
+    const source = this.pick(
+      SOURCE_ACCOUNTS.filter((entry) => entry.source === "sbi-shinsei-bank"),
+    );
+    const count = 1 + Math.floor(this.next() * 3);
+    const { parse, observations } = this.capture({
+      source: "sbi-shinsei-bank",
+      namespace: "sbi-shinsei-v1",
+      key: "top-accounts-balance-and-activity.json",
+      dataset: "top-accounts-balance-and-activity",
+      parser: "sbi-shinsei-top-balances-and-activity",
+      fetchedAtMs: fetchedAtMs + 1_800_000,
+      insert: (parseRun) =>
+        Array.from({ length: count }, () => {
+          const date = shift(due, Math.floor(this.next() * 11) - 5);
+          const side = this.chance(0.15, "SBI Shinsei credit row") ? "credit" : "debit";
+          const zero = this.chance(0.08, "SBI Shinsei zero debit");
+          const foreign = this.chance(0.1, "SBI Shinsei foreign currency");
+          const magnitude = zero
+            ? 0
+            : this.chance(0.7)
+              ? total
+              : 1_000 + Math.floor(this.next() * 20) * 1_000;
+          const sign = side === "debit" && !zero ? "-" : "";
+          const text = `${sign}${foreign ? (magnitude / 100).toFixed(2) : String(magnitude)}`;
+          const externalId = this.chance(0.05, "SBI Shinsei row without provider id")
+            ? this.pick([null, ""])
+            : // A small id space, so later captures restate earlier rows.
+              `sbi-${due.slice(0, 7)}-${Math.floor(this.next() * 3)}`;
+          const id = this.run(
+            `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,
+              currency,description,as_of,raw_locator,extra_json)
+             VALUES(?,?,?,?,?,?,?,?,'synthetic',?,'json:$.responseParam.activity.responseParam.activityDetails[0]',?)`,
+            parseRun,
+            source.raw,
+            externalId,
+            this.chance(0.06, "SBI Shinsei row with a status") ? "posted" : null,
+            sign === "-" ? -magnitude : magnitude,
+            text,
+            foreign ? 2 : 0,
+            foreign ? "USD" : "JPY",
+            this.chance(0.06, "SBI Shinsei timed date") ? `${date}T00:00:00+09:00` : date,
+            JSON.stringify({
+              _kogane: {
+                sourceView: "top_activity",
+                // A negative row whose side is not the provider's own column.
+                amountSignSource: this.chance(0.06, "SBI Shinsei other sign source")
+                  ? "text"
+                  : side,
               },
             }),
           );
@@ -1038,7 +1122,9 @@ export function randomSettlementStore(seed: number, drawn: Set<string>): RandomS
   builder.ownership();
   const base = Date.parse("2026-06-01T03:00:00Z");
   for (const period of RANDOM_PERIODS)
-    for (const source of SOURCE_ACCOUNTS.filter((entry) => entry.source !== "smbc-bank")) {
+    for (const source of SOURCE_ACCOUNTS.filter(
+      (entry) => entry.source === "vpass" || entry.source === "myjcb",
+    )) {
       if (!builder.chance(0.75)) continue;
       const captures = builder.pick([1, 1, 2, 2, 3]);
       if (captures > 1) drawn.add("recaptured statement");
@@ -1104,6 +1190,14 @@ export const RANDOM_STATES = [
   "pending bank row",
   "date-only bank time",
   "other sign source",
+  "SBI Shinsei capture",
+  "SBI Shinsei credit row",
+  "SBI Shinsei zero debit",
+  "SBI Shinsei foreign currency",
+  "SBI Shinsei row without provider id",
+  "SBI Shinsei row with a status",
+  "SBI Shinsei timed date",
+  "SBI Shinsei other sign source",
   "candidate: keyed",
   "candidate: numeric account",
   "candidate: no account",

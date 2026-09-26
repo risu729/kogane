@@ -417,6 +417,17 @@ Each branch is ranked on its provider key, and both output `debit_date` and `ada
 
 **Risk.** Long Japanese holidays can push a debit past ±3 days; document it.
 
+> _Update 2026-09-26:_ implemented on branch
+> `claude/sbi-shinsei-settlement-adapter-wr8pj4` as CORE migration **0052**
+> (not 0055) with [ADR 0018](../adr/0018-sbi-shinsei-bank-debit-adapter.md);
+> every predicate above stands as written. The check before building counted
+> zero published SBI Shinsei transactions in production (every stored activity
+> capture was rejected by its parser), hence zero matches; it shipped anyway.
+> `card_settlement_readiness` kept its text, but its keyed form
+> (`card-settlement-readiness.ts`, #256) restates the view and gained the SBI
+> Shinsei branch. The holiday limit is written down in
+> [card settlements](../card-settlements.md#bank-adapters).
+
 ### P1-6 — `feat: explain one card statement row by row, beside its bank debit` (~3k lines; needs P1-2, P1-3, P1-4)
 
 **Scope.** Read-only. Closes the phase 6–7 "Done when": a user can identify the statement and bank payment, inspect the evidence, correct a decision while history is kept, and see the purchase and cash views reconciled.

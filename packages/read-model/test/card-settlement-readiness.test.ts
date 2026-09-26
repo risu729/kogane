@@ -1,5 +1,6 @@
 // The keyed readiness CTEs (src/card-settlement-readiness.ts) against the
-// migration 0044 view they stand in for, row for row, on small random stores
+// migration 0044 view they stand in for (reading the migration 0052 bank debit
+// view, both adapters), row for row, on small random stores
 // (card-settlement-random-store.ts) whose reviews cite current and older
 // statements and debits under their own and other keys, with owners, evidence
 // and decisions drawn around the ones the store holds. Each flag both holds and
@@ -16,8 +17,11 @@ import {
 } from "./card-settlement-random-store";
 import { statementPlanProblems } from "./card-statement-plan";
 
-/** CI draws seeds 1–12; KOGANE_CARD_SETTLEMENT_SEEDS=n draws seeds 1–n. */
-const SEED_COUNT = Number(process.env["KOGANE_CARD_SETTLEMENT_SEEDS"] ?? 12);
+/**
+ * CI draws seeds 1–16 (12 until the SBI Shinsei rows joined the stores and
+ * moved every draw after them); KOGANE_CARD_SETTLEMENT_SEEDS=n draws seeds 1–n.
+ */
+const SEED_COUNT = Number(process.env["KOGANE_CARD_SETTLEMENT_SEEDS"] ?? 16);
 if (!Number.isSafeInteger(SEED_COUNT) || SEED_COUNT < 1)
   throw new Error("KOGANE_CARD_SETTLEMENT_SEEDS must be a positive integer");
 const SEEDS = Array.from({ length: SEED_COUNT }, (_, index) => index + 1);
@@ -52,6 +56,23 @@ const MUTATIONS: [string, string, string][] = [
     "  ORDER BY a.fetched_at DESC,t.id DESC) AS position",
     "  ORDER BY a.fetched_at,t.id DESC) AS position",
   ],
+  [
+    "rank only the candidates' own SBI Shinsei debits",
+    " WHERE a.source_id='sbi-shinsei-bank'",
+    " WHERE t.id IN (SELECT bank_observation_id FROM ready_candidates) AND a.source_id='sbi-shinsei-bank'",
+  ],
+  [
+    "an SBI Shinsei row of another parser",
+    " AND p.parser_name='sbi-shinsei-top-balances-and-activity'",
+    "",
+  ],
+  ["an SBI Shinsei row in another currency", " AND unit_ref='JPY'", ""],
+  [
+    "an SBI Shinsei row whose side the provider did not state",
+    " AND json_extract(extra_json,'$._kogane.amountSignSource')='debit'",
+    "",
+  ],
+  ["an SBI Shinsei row with a status", "status IS NULL AND unit_ref", "unit_ref"],
   [
     "a newer statement of any account",
     "    AND newer_owner.account_id=json_extract(ready_candidate.facts_json,'$.statement.accountId')\n",
@@ -121,12 +142,25 @@ describe("keyed card settlement readiness on random stores", () => {
       [],
     ];
     const text = keyed(cardSettlementReadinessCtes());
+    // The bank adapter of each candidate's debit, so both adapters are seen
+    // current and not current.
+    const adapter = new Map(
+      db
+        .query(
+          `SELECT c.id,a.source_id FROM card_settlement_candidates c
+           JOIN transaction_observations t ON t.id=c.bank_observation_id
+           JOIN parse_runs p ON p.id=t.parse_run_id
+           JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id`,
+        )
+        .values() as [string, string][],
+    );
     for (const set of sets) {
       const args = [JSON.stringify(set)];
       const found = all(db, text, args) as Record<string, number | string>[];
       expect(found as unknown[]).toEqual(all(db, shipped, args));
       for (const row of found) {
         for (const flag of FLAGS) drawn.add(`${flag}=${row[flag]}`);
+        drawn.add(`${adapter.get(String(row["id"]))} debit: bank_current=${row["bank_current"]}`);
         if (FLAGS.every((flag) => row[flag] === 1)) drawn.add("ready");
       }
     }
@@ -137,6 +171,10 @@ describe("keyed card settlement readiness on random stores", () => {
     const required = [
       ...READINESS_STATES,
       ...FLAGS.flatMap((flag) => [`${flag}=0`, `${flag}=1`]),
+      ...["smbc-bank", "sbi-shinsei-bank"].flatMap((source) => [
+        `${source} debit: bank_current=0`,
+        `${source} debit: bank_current=1`,
+      ]),
       "ready",
     ];
     expect(required.filter((state) => !drawn.has(state))).toEqual([]);
