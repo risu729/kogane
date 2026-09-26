@@ -25,6 +25,10 @@ import {
 import { mobileSuicaRunPlan } from "../../collector-mobile-suica/src/shared-run.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { sweep } from "../src/worker.ts";
+import { runBalanceProjection } from "../src/balance-projection-job.ts";
+import { identitySweep } from "../src/identity-store.ts";
+import { resolveIdentity } from "../../../packages/identity/src/index.ts";
+import { terminalKey } from "../../../packages/collection/src/keys.ts";
 import { artifact, run } from "./collection-harness.ts";
 import {
   mizuhoAccountHtml,
@@ -189,6 +193,52 @@ test("a Mobile Suica run sealed under v1 without datasets registers again under 
   expect(listed).toHaveLength(2);
   expect(await rows(balances)).toHaveLength(1);
 
+  // Identity and the balance projection see the capture once, through the v2
+  // run: the v1 fetch run has no parse, so nothing of it is current anywhere.
+  expect(await identitySweep(env.DB, resolveIdentity, 40, "mobile-suica")).toMatchObject({
+    identifiedRuns: 1,
+  });
+  const identity = async () =>
+    await env.DB.prepare(
+      `SELECT COUNT(*) AS observations, COUNT(DISTINCT o.parse_run_id) AS parses,
+              COUNT(DISTINCT a.fetch_run_id) AS runs, MIN(a.fetch_run_id) AS fetch_run_id
+         FROM current_identity_observations o
+         JOIN parse_runs p ON p.id=o.parse_run_id
+         JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+        WHERE a.source_id='mobile-suica'`,
+    ).first<Record<string, number>>();
+  const observed = await env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM transaction_observations t JOIN parse_runs p ON p.id=t.parse_run_id
+               JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE a.source_id='mobile-suica')
+          + (SELECT COUNT(*) FROM balance_observations b JOIN parse_runs p ON p.id=b.parse_run_id
+               JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE a.source_id='mobile-suica') AS n`,
+  ).first<number>("n");
+  expect(observed).toBeGreaterThan(0);
+  const identified = await identity();
+  expect(identified).toEqual({
+    observations: observed,
+    parses: 1,
+    runs: 1,
+    fetch_run_id: v2Run,
+  });
+  const projectionEnv = { ...env, BALANCE_PROJECTION_ENABLED: "1" } as unknown as Env;
+  const projected = await runBalanceProjection(projectionEnv);
+  expect(projected.status).toBe("complete");
+  const projection = async () =>
+    (
+      await env.READ.prepare(
+        `SELECT metric, evidence_count FROM current_balance_projection
+          WHERE snapshot_id=?1 AND source_id='mobile-suica' ORDER BY row_seq`,
+      )
+        .bind((await runBalanceProjection(projectionEnv)).snapshotId)
+        .all()
+    ).results;
+  const balanceRows = await projection();
+  expect(balanceRows).toHaveLength((await rows(balances)).length);
+  expect(balanceRows.every((row) => (row as { evidence_count: number }).evidence_count === 1)).toBe(
+    true,
+  );
+
   // Delivered again, it is the same registration: nothing new, the same rows.
   expect(await registerCollectionRun(env, { source: "mobile-suica", runId })).toMatchObject({
     outcome: "already_registered",
@@ -196,6 +246,11 @@ test("a Mobile Suica run sealed under v1 without datasets registers again under 
   });
   expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
   expect(await rows(transactions)).toEqual(listed);
+  expect(await identitySweep(env.DB, resolveIdentity, 40, "mobile-suica")).toMatchObject({
+    processedRuns: 0,
+  });
+  expect(await identity()).toEqual(identified);
+  expect(await projection()).toEqual(balanceRows);
   expect(
     await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM fetch_runs WHERE source_id='mobile-suica'",
@@ -384,4 +439,78 @@ test("a Mizuho capture parsed under v1 is carried over by v2, not registered and
     outcome: "already_registered",
     fetchRunId: fetchRun,
   });
+}, 60000);
+
+test("a terminal overwritten after its v1 registration is a conflict under v2, not a second run", async () => {
+  // A terminal's digest does not depend on the contract version. Without the
+  // cross-version check the overwritten terminal would be the first v2 row of
+  // its digest, would not be carried over (the digests differ) and would
+  // register a second fetch run, and a second parse, for one run id.
+  const runId = "mizuho-synthetic-overwritten";
+  const persist = async (id: string, rows: string) =>
+    persistRun(env.EVIDENCE, {
+      run: run({
+        source: "mizuho-bank",
+        producer: "collector-mizuho-bank",
+        producerVersion: "1.0.0",
+        runId: id,
+        completedAt: "2026-09-02T00:01:00.000Z",
+        providerOutcome: "success",
+        coverageStatus: "partial",
+        units: [
+          {
+            unitKey: "ordinary:001:7654321:page:1:1",
+            unitKind: "page",
+            artifactCount: 1,
+            coverageStatus: "complete",
+          },
+        ],
+        transformations: [
+          {
+            transformationId: "redact-0",
+            stepKind: "redacted",
+            transformerId: "mizuho-bank-html-sanitizer",
+            transformerVersion: "1.0.0",
+            inputArtifactKeys: [],
+            outputArtifactKey: "ordinary/001-7654321/history/1-1.html",
+          },
+        ],
+      }),
+      artifacts: [
+        await artifact(
+          "ordinary/001-7654321/history/1-1.html",
+          mizuhoHistoryHtml(rows, "1&nbsp;-&nbsp;1&nbsp;件", "1"),
+          {
+            role: "sanitized_provider_capture",
+            mediaType: "text/html",
+            unitKey: "ordinary:001:7654321:page:1:1",
+          },
+        ),
+      ],
+    });
+  await persist(runId, mizuhoHistoryRow("000", "+ 7", "7"));
+  expect(await register("mizuho-bank", runId, V1)).toMatchObject({ outcome: "registered" });
+  const fetchRuns = () =>
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM fetch_runs WHERE source_id='mizuho-bank' AND source_run_key LIKE ?",
+    )
+      .bind(`${runId}:%`)
+      .first<number>("n");
+  expect(await fetchRuns()).toBe(1);
+
+  // Another writer puts a different manifest on the same terminal key.
+  const other = `${runId}-other`;
+  await persist(other, mizuhoHistoryRow("000", "+ 9", "9"));
+  const moved = await env.EVIDENCE.get(terminalKey("mizuho-bank", other));
+  const text = (await moved!.text()).replaceAll(other, runId);
+  await env.EVIDENCE.delete(terminalKey("mizuho-bank", runId));
+  await env.EVIDENCE.put(terminalKey("mizuho-bank", runId), text, {
+    httpMetadata: { contentType: "application/json" },
+  });
+
+  expect(await registerCollectionRun(env, { source: "mizuho-bank", runId })).toMatchObject({
+    outcome: "blocked",
+    code: "terminal_digest_conflict",
+  });
+  expect(await fetchRuns()).toBe(1);
 }, 60000);

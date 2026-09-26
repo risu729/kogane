@@ -155,6 +155,12 @@ So the bump comes with **carry-over** (`carryOver` in `register-terminal.ts`):
   shape.
 - A blocked, retryable or unfinished v1 row is not carried over: the terminal
   gets a fresh attempt under v2.
+- A terminal digest does not depend on the version, so the
+  `terminal_digest_conflict` check (G1-06) compares a v2 row with the rows of
+  every version: a terminal overwritten after its v1 registration is blocked
+  under v2 too, instead of being the first v2 row of its digest, not carried
+  over (the digests differ) and registered as a second fetch run. A v1 row
+  that was itself blocked as a conflict does not count as the earlier record.
 
 Migration 0039's comment says a changed contract "registers the run again as
 a new revision instead of silently reusing the old one". Carry-over does not
@@ -167,12 +173,19 @@ INV06, per case:
 - **Mobile Suica (13 runs sealed under v1) and V Point Pay email (sealed
   after #259).** Re-registered under v2: a second fetch run whose normalized
   artifact carries its dataset, parsed once. The v1 fetch run stays sealed and
-  unparsed. The capture appears twice in the recorded views (fetch runs,
-  artifacts), which list appearances and count nothing; transactions,
-  balances and snapshots come from the one parse. Tested with a synthetic
-  Mobile Suica terminal: sealed under v1 with no dataset and no parse, then
-  under v2 one parse, two listed transactions, one current balance, and a
-  redelivery changes nothing.
+  unparsed. Transactions, balances, snapshots, identity observations and the
+  balance projection come from the one parse; snapshot currentness ranks by
+  `fetched_at` over parsed artifacts only, so the unparsed v1 run is never a
+  candidate. The capture does appear twice in the recorded evidence views
+  (fetch runs, fetch artifacts), and the agent `coverage` intent counts those
+  rows: its `collectionRunCount` and `artifactCount` per source count a
+  re-registered capture once per fetch run. That is a count of recorded runs,
+  not of captures or amounts, and it is a limit of this change (see
+  Consequences). Tested with a synthetic Mobile Suica terminal: sealed under
+  v1 with no dataset and no parse, then under v2 one parse, two listed
+  transactions, one current balance, every identity observation current
+  through the v2 run only, one balance projection row with one piece of
+  evidence, and a redelivery changes none of them.
 - **Mizuho (registered and parsed under v1).** Carried over: one fetch run,
   one set of parses. Tested: after v2, 2 artifacts in 1 fetch run, no new
   parse, 2 transactions, 2 latest balances, 2 balance-history rows, and the
@@ -218,9 +231,28 @@ INV06, per case:
   reaches it. A v1 registration left `pending` at the deploy stays unsealed,
   and so invisible to every reader; its terminal registers afresh under v2.
 - Merge order: after #259 (collector producer ids), so V Point Pay email runs
-  sealed with NULL are among those made parseable. It does not need the
-  collector-side lineage fix first: the SBI runs block again either way
-  (above), which costs one attempt each.
+  sealed with NULL are among those made parseable. Either order with #265
+  (collector registration contract, ADR 0021, which changes only collector
+  code and touches no file of this change) is safe:
+  - **This change first:** terminals already in R2 that state refused lineage
+    or unit counts (the SBI runs) block again under v2, once each. Runs the
+    collectors write after #265 deploys register directly under v2 and are
+    parsed once.
+  - **#265 first:** runs written after it deploys register under v1 and seal
+    with no dataset (unparsed, as on `main` today); when this change deploys,
+    their descriptors change, so they register again under v2 and are parsed
+    once, like the Mobile Suica runs. The old SBI terminals block again as
+    above.
+  - Either way, collector-vpass runs stay unparsed. #265 changes the Vpass
+    statement page's role from `provider_response` to
+    `sanitized_provider_capture`, so after it the withheld rule, which names
+    `provider_response` (the importer's role), matches nothing. That only
+    strengthens the hold; the change that lifts it (ADR 0023, option 3) must
+    name the role the collector then writes.
+- The `coverage` intent's per-source `collectionRunCount` and `artifactCount`
+  count fetch run and fetch artifact rows, so each re-registered capture
+  (the Mobile Suica and V Point Pay email runs sealed under v1) is counted
+  twice there. No financial read counts it twice. Not fixed here.
 - MyJCB parses fail at metadata extraction until the extractor reads the
   terminal-era manifest (see above).
 - **Drain estimate** (from the constants and synthetic measurements, not a
@@ -253,7 +285,10 @@ INV06, per case:
   are read; v2 changes a descriptor only where v1 left an artifact no parser
   read.
 - `services/processor/test/registration-datasets.test.ts` (every real
-  migration, Miniflare): the three cases above — a Mobile Suica run sealed
-  under v1 without datasets re-registers under v2 and parses once; a Mizuho
+  migration, Miniflare): the cases above — a Mobile Suica run sealed
+  under v1 without datasets re-registers under v2 and parses once, with its
+  identity observations and balance projection row current once; a Mizuho
   run parsed under v1 is carried over by v2 and listed once; a collector-vpass
-  capture under v1 and v2 is never parsed and moves no card snapshot.
+  capture under v1 and v2 is never parsed and moves no card snapshot; a
+  terminal overwritten after its v1 registration is blocked
+  `terminal_digest_conflict` under v2 and adds no fetch run.

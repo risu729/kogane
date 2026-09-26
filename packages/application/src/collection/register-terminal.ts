@@ -811,14 +811,25 @@ async function recordBlockedTerminal(
   };
 }
 
-/** True when another manifest is already recorded for this run id. */
+/**
+ * True when another manifest is already recorded for this run id.
+ *
+ * A terminal's digest does not depend on the contract version, so a row of an
+ * earlier version with a different digest is the same disagreement: without
+ * it, a terminal overwritten after its v1 registration would be the first v2
+ * row of its digest, would not be carried over (the digests differ) and would
+ * register a second fetch run for one run id (ADR 0022). An earlier version's
+ * row that was itself refused as a conflict is not the earlier record, so it
+ * does not block the digest that was registered first.
+ */
 async function conflictingDigest(context: Registration, row: CollectionRunRow): Promise<boolean> {
   const rows = await readCollectionRunsFor(context.env.DB, row.source, row.run_id);
   return rows.some(
     (other) =>
       other.id !== row.id &&
-      other.registration_contract_version === row.registration_contract_version &&
-      other.terminal_digest !== row.terminal_digest,
+      other.terminal_digest !== row.terminal_digest &&
+      (other.registration_contract_version === row.registration_contract_version ||
+        other.blocked_code !== "terminal_digest_conflict"),
   );
 }
 

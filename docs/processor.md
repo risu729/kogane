@@ -97,7 +97,7 @@ the terminal already is, so one capture is never parsed twice (§3.4).
 | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | First sighting of a valid terminal                                                                                       | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                       |
 | Same terminal again                                                                                                      | no-op                                              | nothing new                                                                                     |
-| Different manifest, same run id                                                                                          | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                           |
+| Different manifest, same run id (under any contract version)                                                             | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                           |
 | Source not in the collector mapping (§3.1)                                                                               | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                     |
 | Source maps to an id CORE has no active row for                                                                          | blocked `source_undeclared`, no port call          | as above                                                                                        |
 | `providerOutcome: failed` with no provider artifact                                                                      | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)      |
@@ -351,7 +351,21 @@ a v2 row. Then, for a terminal v1 already registered:
   is catalogued in that run with the same sha256 and the descriptor digest v2
   derives for it there, and nothing else is;
 - **it was blocked, retryable or unfinished under v1**: it is attempted afresh
-  under v2. A refusal about the terminal's own bytes blocks again.
+  under v2. A refusal about the terminal's own bytes blocks again;
+- **its terminal was overwritten after v1 registered it** (a different
+  digest): blocked `terminal_digest_conflict`, because the conflict check
+  compares the rows of every version, not only v2's.
+
+This amends the design point migration 0039's comment states (a new version
+"registers the run again as a new revision instead of silently reusing the
+old one"): a migration comment cannot change, so this section is where the
+rule now lives. Only a terminal whose meaning changed registers again; one
+whose meaning did not is reused explicitly, by a linked row and a stage.
+
+A re-registered capture is parsed once, but its two fetch runs and their
+artifacts are both recorded evidence, so the agent `coverage` intent's
+per-source `collectionRunCount` and `artifactCount`, which count those rows,
+count it twice. No financial read does.
 
 `services/processor/test/registration-datasets.test.ts` shows each case on
 synthetic terminals, and the health route's `unregistered` count is per
