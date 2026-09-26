@@ -68,7 +68,7 @@ parser's `accepts` in `packages/parsers/src/parsers/*.ts`:
 | `myjcb`              | `<conn>/discovery.json`, `<conn>/credit-past-months.json`, `<conn>/credit-detail-NN.html`, `<conn>/credit-ledger-NN.json` | `discovery`, `credit-past-months`, `credit-detail`, `credit-ledger` |
 | `prestia-globalpass` | `activity-YYYY-MM.html` (sanitized, HTML)                                                                                 | `globalpass-activity`                                               |
 | `sbi-securities`     | `<dataset>.json` for its seven datasets (`collector_derived`, JSON)                                                       | the file name                                                       |
-| `sbi-shinsei`        | `raw-top-accounts-balance-and-activity.json`, `raw-yen-deposit-account.json` (sanitized, JSON)                            | the name after `raw-`                                               |
+| `sbi-shinsei`        | `raw-top-accounts-balance-and-activity.json`, `raw-yen-deposit-account.json`, `raw-exchange-rate.json` (sanitized, JSON)  | the name after `raw-`                                               |
 | `sbi-vc-trade`       | `<dataset>.json` for the static, execution and cash-flow pages (`collector_derived`, JSON)                                | the file name                                                       |
 | `smbc-direct`        | `balance.normalized.json`, `transactions/<from>-<to>.normalized.json` (`collector_derived`)                               | `balance-normalized`, `transactions-normalized`                     |
 | `sony-bank`          | gross balance, history pages, history CSVs, `wallet-history-YYYY-MM.html`                                                 | `gross-balance`, `…-page-NNNN`, `…-csv`, `wallet-history-YYYYMM`    |
@@ -309,3 +309,20 @@ INV06, per case:
   capture under v1 and v2 is never parsed and moves no card snapshot; a
   terminal overwritten after its v1 registration is blocked
   `terminal_digest_conflict` under v2 and adds no fetch run.
+
+## Amendment (2026-09-26, #268): SBI Shinsei `exchange-rate`
+
+[ADR 0020](0020-price-promotion-by-rule.md) adds the parser
+`sbi-shinsei-exchange-rate`, which reads SBI Shinsei's
+`raw-exchange-rate.json` under the dataset `exchange-rate` (the name after
+`raw-`, as for the two other SBI Shinsei datasets). The v2 table maps it, so a
+board the collector writes is parsed instead of staying without a dataset.
+The change is the same kind v2 already makes (it gives a dataset only where v1
+left one NULL, and no parser read that artifact before), so the carry-over
+argument above is unchanged: an SBI Shinsei terminal registered under v1 was
+already re-registered by v2 for its two other datasets. It changes v2 in place
+rather than bumping the contract: a terminal registered under v2 before this
+change was deployed keeps its board without a dataset and unparsed, and that
+v2 row reads differently from what the table now derives. Nothing is counted
+twice by that (the board is a complete container and the lane promotes no FX
+row yet), and the later boards of the same source are parsed.

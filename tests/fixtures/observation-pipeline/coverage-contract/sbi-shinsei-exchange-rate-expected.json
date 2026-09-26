@@ -1,0 +1,231 @@
+{
+  "sbi-shinsei-exchange-rate": {
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:fx-board",
+          "subject": "USD",
+          "metric": "bank_buy_rate",
+          "amountText": "145.00",
+          "amountScale": 2,
+          "currency": "JPY",
+          "asOf": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.exchangeRateInformation.responseParam.exchangeRates[0].buyRate",
+          "extra": {
+            "currency": "USD",
+            "customerCategory": "SYNTHETIC",
+            "buyRate": "145.00",
+            "sellRate": "147.00",
+            "midRate": "146.00",
+            "_kogane": {
+              "providerContext": {
+                "transactionTime": "20260907090100"
+              },
+              "quoteBasis": "not-stated",
+              "quoteCurrency": "JPY",
+              "rateField": "buyRate"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:fx-board",
+          "subject": "USD",
+          "metric": "bank_sell_rate",
+          "amountText": "147.00",
+          "amountScale": 2,
+          "currency": "JPY",
+          "asOf": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.exchangeRateInformation.responseParam.exchangeRates[0].sellRate",
+          "extra": {
+            "currency": "USD",
+            "customerCategory": "SYNTHETIC",
+            "buyRate": "145.00",
+            "sellRate": "147.00",
+            "midRate": "146.00",
+            "_kogane": {
+              "providerContext": {
+                "transactionTime": "20260907090100"
+              },
+              "quoteBasis": "not-stated",
+              "quoteCurrency": "JPY",
+              "rateField": "sellRate"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:fx-board",
+          "subject": "USD",
+          "metric": "bank_mid_rate",
+          "amountText": "146.00",
+          "amountScale": 2,
+          "currency": "JPY",
+          "asOf": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.exchangeRateInformation.responseParam.exchangeRates[0].midRate",
+          "extra": {
+            "currency": "USD",
+            "customerCategory": "SYNTHETIC",
+            "buyRate": "145.00",
+            "sellRate": "147.00",
+            "midRate": "146.00",
+            "_kogane": {
+              "providerContext": {
+                "transactionTime": "20260907090100"
+              },
+              "quoteBasis": "not-stated",
+              "quoteCurrency": "JPY",
+              "rateField": "midRate"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:fx-board",
+          "subject": "EUR",
+          "metric": "bank_buy_rate",
+          "amountText": "160.25",
+          "amountScale": 2,
+          "currency": "JPY",
+          "asOf": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.exchangeRateInformation.responseParam.exchangeRates[1].buyRate",
+          "extra": {
+            "currency": "EUR",
+            "customerCategory": "SYNTHETIC",
+            "buyRate": "160.25",
+            "sellRate": "162.75",
+            "midRate": "161.5",
+            "_kogane": {
+              "providerContext": {
+                "transactionTime": "20260907090100"
+              },
+              "quoteBasis": "not-stated",
+              "quoteCurrency": "JPY",
+              "rateField": "buyRate"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:fx-board",
+          "subject": "EUR",
+          "metric": "bank_sell_rate",
+          "amountText": "162.75",
+          "amountScale": 2,
+          "currency": "JPY",
+          "asOf": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.exchangeRateInformation.responseParam.exchangeRates[1].sellRate",
+          "extra": {
+            "currency": "EUR",
+            "customerCategory": "SYNTHETIC",
+            "buyRate": "160.25",
+            "sellRate": "162.75",
+            "midRate": "161.5",
+            "_kogane": {
+              "providerContext": {
+                "transactionTime": "20260907090100"
+              },
+              "quoteBasis": "not-stated",
+              "quoteCurrency": "JPY",
+              "rateField": "sellRate"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:fx-board",
+          "subject": "EUR",
+          "metric": "bank_mid_rate",
+          "amountText": "161.5",
+          "amountScale": 1,
+          "currency": "JPY",
+          "asOf": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.exchangeRateInformation.responseParam.exchangeRates[1].midRate",
+          "extra": {
+            "currency": "EUR",
+            "customerCategory": "SYNTHETIC",
+            "buyRate": "160.25",
+            "sellRate": "162.75",
+            "midRate": "161.5",
+            "_kogane": {
+              "providerContext": {
+                "transactionTime": "20260907090100"
+              },
+              "quoteBasis": "not-stated",
+              "quoteCurrency": "JPY",
+              "rateField": "midRate"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-rate": {
+      "observations": [
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:fx-board",
+          "subject": "USD",
+          "metric": "bank_buy_rate",
+          "amountText": "145.00",
+          "amountScale": 2,
+          "currency": "JPY",
+          "asOf": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.exchangeRateInformation.responseParam.exchangeRates[0].buyRate",
+          "extra": {
+            "currency": "USD",
+            "buyRate": "145.00",
+            "sellRate": "147.00",
+            "midRate": "-",
+            "_kogane": {
+              "providerContext": {
+                "transactionTime": "20260907090100"
+              },
+              "quoteBasis": "not-stated",
+              "quoteCurrency": "JPY",
+              "rateField": "buyRate"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:fx-board",
+          "subject": "USD",
+          "metric": "bank_sell_rate",
+          "amountText": "147.00",
+          "amountScale": 2,
+          "currency": "JPY",
+          "asOf": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.exchangeRateInformation.responseParam.exchangeRates[0].sellRate",
+          "extra": {
+            "currency": "USD",
+            "buyRate": "145.00",
+            "sellRate": "147.00",
+            "midRate": "-",
+            "_kogane": {
+              "providerContext": {
+                "transactionTime": "20260907090100"
+              },
+              "quoteBasis": "not-stated",
+              "quoteCurrency": "JPY",
+              "rateField": "sellRate"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.responseParam.exchangeRateInformation.responseParam.exchangeRates[0].midRate: not a positive exact decimal rate"
+      ]
+    },
+    "empty-not-representable": {
+      "error": true
+    },
+    "unknown-fields": {
+      "error": true
+    },
+    "unknown-row-field": {
+      "error": true
+    }
+  }
+}

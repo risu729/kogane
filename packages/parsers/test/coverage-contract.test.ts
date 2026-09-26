@@ -29,6 +29,12 @@ const FROZEN: Record<string, Record<string, Frozen>> = {
   ...JSON.parse(
     readFileSync(join(FIXTURES_ROOT, "coverage-contract", "st-george-expected.json"), "utf8"),
   ),
+  ...JSON.parse(
+    readFileSync(
+      join(FIXTURES_ROOT, "coverage-contract", "sbi-shinsei-exchange-rate-expected.json"),
+      "utf8",
+    ),
+  ),
 };
 
 interface Expectation {
@@ -112,6 +118,10 @@ const CLAIMS: Record<string, Record<string, Expectation>> = {
   "sbi-shinsei-yen-deposit-account": {
     "complete-empty": complete(0),
     "complete-rows": complete(2),
+  },
+  "sbi-shinsei-exchange-rate": {
+    "complete-rows": { ...complete(6), expected: 6 },
+    "unreadable-rate": { ...partial(2, "row_unreadable", ["row_unreadable"]), expected: 3 },
   },
   "sony-bank-gross-balance": { "complete-rows": { ...complete(17), expected: 17 } },
   "smbc-direct-balance": { "complete-rows": { ...complete(1), expected: 1 } },
