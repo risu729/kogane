@@ -167,30 +167,109 @@ const VPASS_STATEMENT_MONTH = (artifact: string): string =>
 // (card-usage.ts) compose these same CTEs, so the two can never disagree on
 // which Vpass or MyJCB rows are the latest complete capture.
 
+/** `value` with full-width digits as ASCII and every space removed, in SQL. */
+const asciiCompact = (value: string): string =>
+  [..."０１２３４５６７８９"].reduce(
+    (text, digit, index) => `replace(${text}, '${digit}', '${index}')`,
+    `replace(replace(${value}, ' ', ''), '　', '')`,
+  );
+
+/**
+ * The payment month `YYYY-MM` a MyJCB credit-ledger capture shows, from its
+ * `period` and `fetched_at` (SQL expressions), or NULL when the period does not
+ * place one:
+ *
+ * - an absolute period in a shape `statementPeriod` reads
+ *   (packages/domain/src/card-purchase.ts): the collector's `YYYY-MM` (the
+ *   month a confirmed page names), and the past-months API's `YYYYMM` and
+ *   `YYYY年M月お支払い分`, full-width digits and spaces allowed;
+ * - `detailMonth-0` and `detailMonth-1` resolved from the capture's
+ *   `fetched_at` by relative-statement-period-v1, the rule
+ *   `resolveRelativePeriod` states (packages/domain/src/relative-period.ts):
+ *   with d the capture's civil date in Asia/Tokyo, P0 is the month of d plus
+ *   1 on days 1–15 and plus 2 from the 16th, and `detailMonth-N` is P0 − N.
+ *   card-usage.test.ts checks this text against the domain rule;
+ * - every other label, `detailMonth-2` and beyond included, is NULL.
+ *
+ * The stored label is never rewritten; this is a reading of it. Every GLOB
+ * pattern stays within D1's 50-byte limit (SQLITE_MAX_LIKE_PATTERN_LENGTH), so
+ * the shapes are checked piece by piece.
+ */
+export function myjcbStatementMonth(period: string, fetchedAt: string): string {
+  const label = asciiCompact(period);
+  const tokyo = `datetime(${fetchedAt}, '+9 hours')`;
+  const year = `substr(${label}, 1, 4) GLOB '[0-9][0-9][0-9][0-9]'`;
+  const twoDigits = (start: number) =>
+    `substr(${label}, ${start}, 2) GLOB '[0-9][0-9]' AND substr(${label}, ${start}, 2) BETWEEN '01' AND '12'`;
+  const japanese = `${year} AND substr(${label}, 5, 1) = '年'`;
+  return `CASE
+             WHEN length(${label}) = 7 AND ${year} AND substr(${label}, 5, 1) = '-'
+               AND ${twoDigits(6)}
+               THEN ${label}
+             WHEN length(${label}) = 6 AND ${year} AND ${twoDigits(5)}
+               THEN substr(${label}, 1, 4) || '-' || substr(${label}, 5, 2)
+             WHEN ${japanese} AND substr(${label}, 6, 1) GLOB '[1-9]'
+               AND substr(${label}, 7) IN ('月', '月お支払い分')
+               THEN substr(${label}, 1, 4) || '-0' || substr(${label}, 6, 1)
+             WHEN ${japanese} AND ${twoDigits(6)}
+               AND substr(${label}, 8) IN ('月', '月お支払い分')
+               THEN substr(${label}, 1, 4) || '-' || substr(${label}, 6, 2)
+             WHEN ${period} IN ('detailMonth-0', 'detailMonth-1') AND ${tokyo} IS NOT NULL
+               THEN strftime('%Y-%m', ${tokyo}, 'start of month', printf('%+d months',
+                 CASE WHEN CAST(strftime('%d', ${tokyo}) AS INTEGER) <= 15 THEN 1 ELSE 2 END
+                 - CAST(substr(${period}, 13) AS INTEGER)))
+           END`;
+}
+
+/**
+ * The snapshot slot of a MyJCB credit-ledger capture `fa` within its
+ * connection: `''` for every unconfirmed capture (one slot, so a pending row
+ * that left the newest capture is not current), and for a confirmed capture
+ * the statement it shows, whatever position it was captured at. That is the
+ * payment month (`myjcbStatementMonth`), so a statement captured at position
+ * 1 and later at position 2 is one slot and its newest capture is current,
+ * never both. A confirmed relative label no rule places (`detailMonth-2` and
+ * beyond) is NULL: it names a position, not a statement, and a position shows
+ * a different statement every month, so such a capture is never current. The
+ * collector records such a page by the month the page names
+ * (docs/sources/myjcb.md, 明細の月); only captures from before it did carry one.
+ * Any other label the month reading does not place keeps itself as its slot,
+ * as before.
+ */
+export const myjcbStatementSlot = (fa: string): string =>
+  `CASE WHEN ${fa}.statement_state = 'unconfirmed' THEN ''
+            ELSE coalesce(${myjcbStatementMonth(`${fa}.period`, `${fa}.fetched_at`)},
+              CASE WHEN substr(${fa}.period, 1, 12) = 'detailMonth-' THEN NULL ELSE ${fa}.period END)
+          END`;
+
 /**
  * MyJCB credit ledger: the newest published capture per (source, connection,
- * statement state, period). Every unconfirmed capture of a connection shares
- * one partition, so a pending row that left the newest capture is not
- * current. Defines `current_myjcb_snapshots(fetch_artifact_id)`.
+ * statement state, statement slot), `myjcbStatementSlot`. Every unconfirmed
+ * capture of a connection shares one slot, so a pending row that left the
+ * newest capture is not current; each confirmed statement is one slot however
+ * its position moved. A capture without a slot is never current. Defines
+ * `current_myjcb_snapshots(fetch_artifact_id, statement_slot)`.
  */
 export const MYJCB_LEDGER_SNAPSHOT_CTES = `ranked_myjcb_snapshots AS (
-         SELECT p.fetch_artifact_id,
+         SELECT fetch_artifact_id, statement_slot,
                 ROW_NUMBER() OVER (
-                  PARTITION BY
-                    fa.source_id,
-                    substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1),
-                    fa.statement_state,
-                    CASE WHEN fa.statement_state = 'unconfirmed' THEN '' ELSE fa.period END
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
+                  PARTITION BY source_id, connection, statement_state, statement_slot
+                  ORDER BY fetched_at DESC, artifact_id DESC
                 ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'myjcb-credit-ledger'
-           AND fa.dataset = 'credit-ledger'
+         FROM (
+           SELECT p.fetch_artifact_id, fa.id AS artifact_id, fa.source_id, fa.fetched_at,
+                  substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1) AS connection,
+                  fa.statement_state,
+                  ${myjcbStatementSlot("fa")} AS statement_slot
+           FROM ${PARSE_CHAIN}
+           WHERE ${ACTIVE}
+             AND p.parser_name = 'myjcb-credit-ledger'
+             AND fa.dataset = 'credit-ledger'
+         ) captures
        ), current_myjcb_snapshots AS (
-         SELECT fetch_artifact_id
+         SELECT fetch_artifact_id, statement_slot
          FROM ranked_myjcb_snapshots
-         WHERE snapshot_rank = 1
+         WHERE snapshot_rank = 1 AND statement_slot IS NOT NULL
        )`;
 
 /**

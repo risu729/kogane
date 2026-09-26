@@ -41,16 +41,18 @@ Concrete limits in the current code:
   pending row's usage day or up to five days after it is proposed
   ([matching window](economic-events.md#matching-stages)). An installment
   payment amount is not silently compared with a purchase amount. The
-  collector's relative `detailMonth-N` labels are resolved from their capture
-  time
-  ([`relative-statement-period-v1`](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
-  but only positions 0 and 1 are placed: a confirmed MyJCB row at a later
-  relative position has no payment month, so this job leaves it unpaired and
-  the operator view shows it as `period_unrecognized`. The recognition lane's
-  candidate pass still pairs it by usage month. On the surveyed connection the
-  collector records `detailMonth=1` as `unconfirmed` (its page has no export
-  link), so that month's rows stay pending, its statement page is rejected,
-  and only one of its two unconfirmed ledgers is current. The job pages
+  collector records a confirmed MyJCB page by the payment month the page
+  names, so a statement keeps its rows' keys while its position moves
+  ([release note](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release));
+  pending pages keep the relative `detailMonth-N`, resolved from their
+  capture time
+  ([`relative-statement-period-v1`](observations.md#relative-period-labels-are-resolved-from-the-capture-time)).
+  Limits: a confirmed capture stored under `detailMonth-2` or later (only
+  before that fix) names no statement and is never current; the collector
+  stops (`credit-statement-period`) on a confirmed page that names no month;
+  a pending row and its posted row are still two keys, paired by review; and
+  when both position 0 and position 1 are unconfirmed (a closed cycle not
+  yet confirmed), they still share the one unconfirmed slot. The job pages
   through every published row with a scan cursor, but a card's statement
   month with more than 200 published rows (every capture of the month counts)
   is counted and skipped, not paired.

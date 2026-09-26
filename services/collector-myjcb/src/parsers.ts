@@ -356,6 +356,94 @@ export function creditStatementState(html: string, detailMonth: number): CreditS
   }
 }
 
+/**
+ * The heading a closed statement page names its payment month in, compared
+ * after whitespace removal. `myjcb-credit-statement-total` reads the same
+ * heading (packages/parsers/src/parsers/myjcb.ts), so the month the collector
+ * records and the month the statement total carries are one reading.
+ */
+const STATEMENT_MONTH_HEADING = /^(\d{4})年(\d{1,2})月お支払い分のカードご利用明細$/u;
+
+/** Every payment month (`YYYY-MM`) a page's `h2` headings state: normally none or one. */
+export function statedPaymentMonths(html: string): string[] {
+  return findElements(parse(html), (element) => element.tagName === "h2").flatMap((element) => {
+    const match = STATEMENT_MONTH_HEADING.exec(nodeText(element).replace(/\s+/gu, ""));
+    return match ? yearMonth(match[1]!, match[2]!) : [];
+  });
+}
+
+/**
+ * The payment month (`YYYY-MM`) of a past-months API `settlementYM`, in the
+ * shapes the past-month parser reads (`YYYYMM`, `YYYY-MM`, `YYYY年M月お支払い分`
+ * and their day and 度 variants), or null for any other text.
+ */
+export function settlementMonth(value: string): string | null {
+  const normalized = value.normalize("NFKC").replace(/\s+/gu, "");
+  const match =
+    /^(\d{4})年(\d{1,2})月(?:\d{1,2}日)?(?:度)?(?:お支払い分)?$/u.exec(normalized) ??
+    /^(\d{4})[/.-](\d{1,2})(?:[/.-]\d{1,2})?(?:度)?(?:お支払い分)?$/u.exec(normalized) ??
+    /^(\d{4})(\d{2})(?:\d{2})?(?:度)?(?:お支払い分)?$/u.exec(normalized);
+  return (match ? yearMonth(match[1]!, match[2]!) : [])[0] ?? null;
+}
+
+function yearMonth(year: string, month: string): string[] {
+  const number = Number(month);
+  return number >= 1 && number <= 12 ? [`${year}-${String(number).padStart(2, "0")}`] : [];
+}
+
+/**
+ * The period the collector records for one credit month: the statement's own
+ * name, so that a statement keeps one period, and each of its ledger rows one
+ * external id, while its position in the provider's list moves
+ * (docs/sources/myjcb.md, 明細の月). The ledger parser hashes the period into
+ * every row's fingerprint; the position stays recorded beside it, in the
+ * artifact key and the ledger's `detailMonth`.
+ *
+ * - A month the past-months API labels keeps its `settlementYM` verbatim, as
+ *   before. When the page is a confirmed statement that also states its
+ *   payment month, the two must name the same month.
+ * - Any other confirmed page records the payment month its heading states,
+ *   `YYYY-MM`. Only a page with the `(確定分)` heading is confirmed, and a
+ *   closed statement page names its payment month: a confirmed page that
+ *   names none, or more than one, stops the collection
+ *   (`credit-statement-period`), as the statement parser rejects it.
+ * - Every other page (`unconfirmed`, `unknown`) keeps the relative
+ *   `detailMonth-N`. It states no month; the label stays evidence and is
+ *   resolved afterwards from the capture time (docs/observations.md,
+ *   "Relative period labels are resolved from the capture time").
+ */
+export function creditStatementPeriod(input: {
+  readonly html: string;
+  readonly detailMonth: number;
+  readonly state: CreditStatementState;
+  readonly settlementYM: string | undefined;
+}): string {
+  const { html, detailMonth, state, settlementYM } = input;
+  if (state !== "confirmed") return settlementYM ?? `detailMonth-${detailMonth}`;
+  const stated = statedPaymentMonths(html);
+  const stop = (message: string): never => {
+    // Counts and codes only: the page's month never reaches the log.
+    console.warn(
+      JSON.stringify({
+        event: "myjcb-credit-statement-period",
+        detailMonth,
+        statedMonths: stated.length,
+        settlementLabelled: settlementYM !== undefined,
+      }),
+    );
+    throw new StopConditionError(message, "credit-statement-period");
+  };
+  if (stated.length > 1) return stop("MyJCB confirmed statement page names more than one month");
+  if (settlementYM !== undefined) {
+    const labelled = settlementMonth(settlementYM);
+    if (stated.length === 1 && labelled !== null && labelled !== stated[0])
+      return stop("MyJCB confirmed statement month disagrees with its past-months label");
+    return settlementYM;
+  }
+  if (stated.length === 0) return stop("MyJCB confirmed statement page names no payment month");
+  return stated[0]!;
+}
+
 function safeClassNames(element: HtmlElement): string[] {
   return (element.attrs.find((attribute) => attribute.name === "class")?.value ?? "")
     .split(/\s+/u)
