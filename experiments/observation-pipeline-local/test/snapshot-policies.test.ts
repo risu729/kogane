@@ -19,7 +19,14 @@ import {
   type SnapshotPolicyComparisonRow,
 } from "../../../packages/parsers/src/snapshot-query.ts";
 import { insertFetchRun, listArtifacts, upsertSource, type Store } from "../src/store.ts";
-import { balance, closeStores, database, facts, snapshot } from "./snapshot-fixture.ts";
+import {
+  balance,
+  closeStores,
+  database,
+  EXPLICIT_COVERAGE,
+  facts,
+  snapshot,
+} from "./snapshot-fixture.ts";
 
 afterEach(closeStores);
 
@@ -72,6 +79,13 @@ describe("dataset_snapshot_policies seed", () => {
           "../../../packages/storage-d1/migrations/core/0046_st_george_balance_snapshot.sql",
         ),
         "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0053_price_promotion.sql",
+        ),
+        "utf8",
       );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
@@ -79,23 +93,22 @@ describe("dataset_snapshot_policies seed", () => {
     }
   });
 
-  test("legacy datasets retain their policies and the new St.George balance parser uses explicit coverage", () => {
+  test("legacy datasets retain their policies and the St.George and FX board parsers use explicit coverage", () => {
     for (const row of policyRows(database())) {
       const stGeorge = row.parser_name === "st-george-balances";
-      expect(row.policy_id).toBe(stGeorge ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
+      const explicit = EXPLICIT_COVERAGE.has(row.parser_name);
+      expect(row.policy_id).toBe(explicit ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
       // D13/PR-14: every seeded dataset stays on the run scope and stays a
       // container-snapshot dataset. Enabling `unit-independent-v1` is an
       // operator write, never a deploy.
       expect(row.unit_scope).toBe("run");
       expect(row.snapshot_selection).toBe(1);
-      expect(row.replaces_previous_on_complete_empty).toBe(stGeorge ? 0 : 1);
+      expect(row.replaces_previous_on_complete_empty).toBe(explicit ? 0 : 1);
       expect(row.required_parser_version).toBe(
         row.parser_name === "sbi-foreign-cash-positions"
           ? FOREIGN_POSITION_SNAPSHOT_VERSION
-          : stGeorge
-            ? "1.0.0"
-            : null,
+          : (EXPLICIT_COVERAGE.get(row.parser_name) ?? null),
       );
       // The declared owner source is the one the parser accepts.
       const parser = PARSERS.find((candidate) => candidate.name === row.parser_name)!;
@@ -151,9 +164,9 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       snapshot(store, { parser, dataset, observations: facts(parser, "OLD"), coverage: {} });
       snapshot(store, { parser, dataset, observations: facts(parser, "NEW"), coverage: {} });
-      // St.George has no verified empty portfolio state and deliberately cannot
-      // replace membership from an empty synthetic projection.
-      if (parser !== "st-george-balances")
+      // St.George has no verified empty portfolio state and the FX board is
+      // never empty, so neither replaces membership from an empty projection.
+      if (!EXPLICIT_COVERAGE.has(parser))
         snapshot(store, { parser, dataset, unit: "u", observations: [], coverage: {} });
     }
     // Harmless warnings on the tolerant parsers: both policies keep the parse.
@@ -190,7 +203,7 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
       coverage: parsed.coverage![0]!,
     });
     const rows = compare(store);
-    expect(rows.length).toBe(SNAPSHOT_DATASETS.length * 2 - 1);
+    expect(rows.length).toBe(SNAPSHOT_DATASETS.length * 2 - EXPLICIT_COVERAGE.size);
     expect(differing(rows)).toEqual([]);
     expect(rows.every((row) => row.legacy_artifact_id !== null)).toBe(true);
   }, 30_000);

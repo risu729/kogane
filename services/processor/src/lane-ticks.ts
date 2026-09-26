@@ -26,6 +26,7 @@ import {
 import type { CardPurchaseSweepResult } from "./card-purchase-job.ts";
 import type { cardSettlementSweep } from "./card-settlement-job.ts";
 import type { DispatchSummary } from "./operations/dispatch.ts";
+import type { PricePromotionResult } from "./price-promotion-job.ts";
 import type { ReconciliationSweepResult } from "./reconciliation-job.ts";
 import type { RewardPromotionResult } from "./reward-claims-job.ts";
 
@@ -111,6 +112,13 @@ export const LANE_TICK_COUNTS = {
     { skipped: CARD_USAGE_EXCLUSIONS },
   ),
   reward_claims_sweep: countsOf<RewardPromotionResult>(["scanned", "promoted", "skipped"]),
+  price_promotion: countsOf<PricePromotionResult>([
+    "scanned",
+    "promoted",
+    "basis_unverified",
+    "unsupported_currency",
+    "written",
+  ]),
   operation_dispatch: countsOf<DispatchSummary>([
     "claimed",
     "dispatched",

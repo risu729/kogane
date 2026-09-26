@@ -735,6 +735,17 @@
         }
       ],
       "sha256": "39e131cf8e3f49e3caaef2e6300544592a350fcc08c488e08bf84a2d84fdb398"
+    },
+    {
+      "file": "0053_price_promotion.sql",
+      "statementCount": 8,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "11222c6b8cab1a441b026aed6e6bf316c94e90f58bcfb01eab959c932afe6762"
     }
   ],
   "tables": [
@@ -10204,6 +10215,115 @@
       "sqlSha256": "f48760140f1fcde0"
     },
     {
+      "name": "price_observation_claims",
+      "classification": "core-keep",
+      "planRow": "prices and calculation policies",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "price_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "rule_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "claim_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "json_path",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "price_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "parse_run_id",
+          "references": "parse_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "price_id",
+          "references": "price_observations(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "price_observation_claims_claim",
+          "unique": true,
+          "partial": false,
+          "columns": [
+            "rule_id",
+            "claim_kind",
+            "observation_id",
+            "json_path"
+          ]
+        },
+        {
+          "name": "price_observation_claims_parse",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "parse_run_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "price_observation_claims_no_delete",
+        "price_observation_claims_no_update",
+        "price_observation_claims_observation"
+      ],
+      "noUpdateTriggers": [
+        "price_observation_claims_no_update"
+      ],
+      "noDeleteTriggers": [
+        "price_observation_claims_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "6c5c44afd94dcdaf"
+    },
+    {
       "name": "price_observations",
       "classification": "core-keep",
       "planRow": "prices and calculation policies",
@@ -10330,6 +10450,39 @@
       ],
       "appendOnly": true,
       "sqlSha256": "1f1333e0c8661ba0"
+    },
+    {
+      "name": "price_promotion_cursor",
+      "classification": "operational-mutable",
+      "planRow": "bounded price promotion scan progress",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "claim_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "last_observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "claim_kind"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "4f8b8bb31c9bf923"
     },
     {
       "name": "processor_lane_ticks",
@@ -15647,6 +15800,27 @@
       "sqlSha256": "e9e390d9f1167e75"
     },
     {
+      "name": "price_observation_claims_no_delete",
+      "table": "price_observation_claims",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "95e1d50a527b7a87"
+    },
+    {
+      "name": "price_observation_claims_no_update",
+      "table": "price_observation_claims",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "ee2025ee8074c841"
+    },
+    {
+      "name": "price_observation_claims_observation",
+      "table": "price_observation_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "e1191677fe9baec4"
+    },
+    {
       "name": "price_observations_no_delete",
       "table": "price_observations",
       "timing": "BEFORE",
@@ -16643,6 +16817,16 @@
       "sqlSha256": "d111be8c3e7aa5c8"
     },
     {
+      "name": "price_observation_claims_claim",
+      "table": "price_observation_claims",
+      "sqlSha256": "732a041cff9f9d2c"
+    },
+    {
+      "name": "price_observation_claims_parse",
+      "table": "price_observation_claims",
+      "sqlSha256": "c28adb8ca6c37de5"
+    },
+    {
       "name": "price_observations_instrument",
       "table": "price_observations",
       "sqlSha256": "7a316700ff52f118"
@@ -16749,10 +16933,10 @@
     }
   ],
   "summary": {
-    "tableCount": 111,
+    "tableCount": 113,
     "viewCount": 39,
-    "triggerCount": 400,
-    "explicitIndexCount": 112,
+    "triggerCount": 403,
+    "explicitIndexCount": 114,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -16828,6 +17012,7 @@
         "parse_runs",
         "parser_releases",
         "position_observations",
+        "price_observation_claims",
         "price_observations",
         "producer_sources",
         "producers",
@@ -16862,6 +17047,7 @@
         "observation_parse_jobs",
         "observation_replay_plans",
         "observation_work_items",
+        "price_promotion_cursor",
         "processor_lane_ticks",
         "reconciliation_scan_cursor"
       ],
@@ -16903,6 +17089,7 @@
       "origin_template_policies",
       "parse_run_candidates",
       "parse_runs",
+      "price_promotion_cursor",
       "processor_lane_ticks",
       "producer_sources",
       "producers",
@@ -16957,8 +17144,9 @@
       "0045_expand_card_settlement_commands.sql",
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql",
-      "0051_card_purchase_review_commands.sql"
+      "0051_card_purchase_review_commands.sql",
+      "0053_price_promotion.sql"
     ],
-    "schemaSha256": "3841906bbd4de206c313e4a065dafa6e19f0e9a9278fb5a2835acc5b6e56e9bf"
+    "schemaSha256": "21ea7485b551a282b14af8bf2d7e9e9c6049ee7cfe06716c25e57eb308e3bca1"
   }
 }

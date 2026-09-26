@@ -55,6 +55,64 @@ contract nominals are different metrics; the default instrument policy marks
 them `unsupported`, so they show a quantity and whatever the provider reported
 rather than an invented value.
 
+### Price sources: provider claims promoted by rule
+
+Nothing fetches a price. Every row in `price_observations` is a provider claim
+that the Processor's `price_promotion` lane promoted by one rule of the closed
+list in `packages/domain/src/price-sources.ts`
+([ADR 0020](adr/0020-price-promotion-by-rule.md)), and
+`price_observation_claims` (migration 0053) records which rule read which
+observation, of which parse run, at which JSON path:
+
+| Rule                              | Claim                                                                        | Price                                                                                              | Basis check                                                                                                                                                  |
+| --------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `fx-sbi-shinsei-board-v1`         | an `sbi-shinsei-exchange-rate` valuation (`bank_mid/buy/sell_rate`)          | base the currency, quote JPY, per 1 unit; mid → `reference`, buy → `bid`, sell → `ask`             | the currency's quote basis is verified as per 1 unit in `SBI_SHINSEI_FX_QUOTE_BASIS`; **no currency is listed yet**, so no FX row is promoted today          |
+| `sbi-domestic-current-price-v1`   | an `sbi-domestic-cash-positions` `current_price` valuation                   | base `instrument:sbi-securities:<market>:<code>`, quote JPY, per 1 share, `reference`              | exactly one position and one `market_value` in the same MTS record (the `POSITION_VALUATIONS_SQL` locator rule), and quantity × price = market value exactly |
+| `sbi-foreign-stock-price-last-v1` | an `sbi-foreign-cash-positions` position, `$.stockPrice.last` in its element | base `instrument:sbi-securities:<market>:<code>`, quote the position's `currencyCode`, per 1 share | quantity × `stockPrice.last` = `evaluationProfitLoss.frnEvaluationAmount` of the same element exactly                                                        |
+
+The base instrument reference is the report job's
+(`instrument:<source>:<market>:<code>`). A claim whose check fails is counted
+as `basis_unverified`; a currency a rule does not admit, as
+`unsupported_currency`. Neither writes anything and neither is retried under
+the same rules; a price is never rescaled, rounded or defaulted. Execution
+prices are never valuation prices, so no rule reads one. The effective time is
+the provider's own instant when the claim states one (the board's
+`transactionTime`, basis `provider`), otherwise the artifact's fetch instant
+with basis `collector`. The price id is `price_<sha256(rule, claimRef)>`, where
+the claim reference (`source_claim_ref`) is
+`<kind>_observations/<id>#<json path>`, so a re-parse, which writes new
+observations, yields new price rows, and replaying the lane over the same
+claims writes nothing.
+
+Survey (2026-09-26, read-only aggregates over the currently published parses,
+no values): of 936 domestic positions, 666 carry a `current_price` and 635 of
+those reconcile with their `market_value`; of 290 foreign positions, all carry
+`stockPrice.last` and 276 reconcile with `frnEvaluationAmount`. The counts were
+taken with floating-point arithmetic in SQL to size the lane; the lane itself
+decides each row with exact decimals.
+
+**Selection** (`packages/read-model/src/price-selection.ts`, `selectPrices`):
+for each (base, quote, kind) asked for, the latest price whose effective
+instant is at or before the cutoff and whose claim's parse run is currently
+named by `published_parse_runs`. Instants are compared as instants, not as
+text; ties go to the later `recorded_at`, then the higher id. A re-parse moves
+selection to its own prices once it is published, and the old rows stay for
+the contexts that used them. A price with a date-only effective time is never
+selected against an instant cutoff, and an instrument without a selectable
+price is absent from the result, never zero.
+
+**Limits.** The report job (§4) still reads the most recently recorded price
+per instrument quoted in its base unit, without the cutoff or the publication
+join; with promoted domestic JPY prices it can now value those holdings, and
+because it has no freshness rule, a holding whose latest price was refused is
+valued at the latest price that was promoted, however old.
+Moving it to `selectPrices`, adding freshness, and applying FX under
+`fx-sbi-shinsei-mid-v1` is the next step (the plan's P2-3). SBI Shinsei's
+board is a customer rate, possibly tiered by `customerCategory`, not a market
+reference. `price_observations` and `price_observation_claims` are outside the
+source-revision ledger: valuation reads CORE per request, and a READ
+projection over prices would need bump triggers first.
+
 ## 2. The valuation order and typed unvalued reasons
 
 Addendum 09 section 3 fixes the order, and the order matters: a scope overlap

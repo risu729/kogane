@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { PARSERS } from "../src/parsers/registry.ts";
+import { sbiShinseiExchangeRate } from "../src/parsers/sbi-shinsei-exchange-rate.ts";
 import { sbiShinseiTopBalancesAndActivity } from "../src/parsers/sbi-shinsei-top-balances-and-activity.ts";
 import { sbiShinseiYenDepositAccount } from "../src/parsers/sbi-shinsei-yen-deposit-account.ts";
 import type { ArtifactMeta, Parser } from "../src/types.ts";
@@ -38,15 +39,11 @@ function parserFor(dataset: string): Parser {
 }
 
 describe("SBI Shinsei parser routing", () => {
-  test("routes only the two source artifacts with verified observation semantics", () => {
+  test("routes only the three source artifacts with verified observation semantics", () => {
     expect(parserFor("top-accounts-balance-and-activity")).toBe(sbiShinseiTopBalancesAndActivity);
     expect(parserFor("yen-deposit-account")).toBe(sbiShinseiYenDepositAccount);
-    for (const dataset of [
-      "balance-summary-and-stage",
-      "exchange-rate",
-      "normalized",
-      "collector-manifest",
-    ]) {
+    expect(parserFor("exchange-rate")).toBe(sbiShinseiExchangeRate);
+    for (const dataset of ["balance-summary-and-stage", "normalized", "collector-manifest"]) {
       expect(PARSERS.filter((parser) => parser.accepts(artifact(dataset)))).toEqual([]);
     }
     expect(
@@ -409,3 +406,119 @@ function topActivity(input: Record<string, unknown>): Record<string, unknown> {
   const activity = response["activity"] as Record<string, unknown>;
   return activity["responseParam"] as Record<string, unknown>;
 }
+
+describe("SBI Shinsei exchange-rate board", () => {
+  const board = () => value("exchange-rate");
+  const information = (input: Record<string, unknown>): Record<string, unknown> => {
+    const response = input["responseParam"] as Record<string, unknown>;
+    const wrapped = response["exchangeRateInformation"] as Record<string, unknown>;
+    return wrapped["responseParam"] as Record<string, unknown>;
+  };
+  const rows = (input: Record<string, unknown>) =>
+    information(input)["exchangeRates"] as Record<string, unknown>[];
+  const parse = (input: unknown) =>
+    sbiShinseiExchangeRate.parse(encode(input), artifact("exchange-rate"));
+  const at = "2026-09-07T09:01:00+09:00";
+
+  test("each row gives buy, sell and mid rates as exact JPY text at the provider's time", () => {
+    const result = sbiShinseiExchangeRate.parse(
+      fixture("exchange-rate"),
+      artifact("exchange-rate"),
+    );
+    expect(
+      result.observations.map((row) =>
+        row.kind === "valuation"
+          ? [row.sourceAccount, row.subject, row.metric, row.amountText, row.currency, row.asOf]
+          : null,
+      ),
+    ).toEqual([
+      ["sbi-shinsei:fx-board", "USD", "bank_buy_rate", "145.00", "JPY", at],
+      ["sbi-shinsei:fx-board", "USD", "bank_sell_rate", "147.00", "JPY", at],
+      ["sbi-shinsei:fx-board", "USD", "bank_mid_rate", "146.00", "JPY", at],
+      ["sbi-shinsei:fx-board", "EUR", "bank_buy_rate", "160.25", "JPY", at],
+      ["sbi-shinsei:fx-board", "EUR", "bank_sell_rate", "162.75", "JPY", at],
+      ["sbi-shinsei:fx-board", "EUR", "bank_mid_rate", "161.5", "JPY", at],
+    ]);
+    // A rate is a quote, not money: no minor-unit amount is written for it.
+    for (const row of result.observations) expect(row).not.toHaveProperty("amountMinor");
+    // The payload states no base quantity, and the parser never infers one.
+    expect(
+      result.observations.every(
+        (row) =>
+          (row.extra["_kogane"] as Record<string, unknown>)["quoteBasis"] === "not-stated" &&
+          row.extra["customerCategory"] === "SYNTHETIC",
+      ),
+    ).toBe(true);
+    expect(result.coverage).toEqual([
+      expect.objectContaining({
+        scopeKey: "sbi-shinsei-bank/exchange-rate",
+        completeness: "complete",
+        observedCount: 6,
+        expectedCount: 6,
+      }),
+    ]);
+  });
+
+  test("without transactionTime the observations carry no provider time", () => {
+    const input = board();
+    delete information(input)["transactionTime"];
+    const result = parse(input);
+    expect(result.observations).toHaveLength(6);
+    for (const row of result.observations) expect(row).not.toHaveProperty("asOf");
+  });
+
+  test("an unknown field at any level fails like the collector's validator", () => {
+    const top = board();
+    (top["responseParam"] as Record<string, unknown>)["extra"] = 1;
+    expect(() => parse(top)).toThrow(/unknown field extra/u);
+    const inner = board();
+    information(inner)["extra"] = 1;
+    expect(() => parse(inner)).toThrow(/unknown field extra/u);
+    const row = board();
+    rows(row)[0]!["extra"] = 1;
+    expect(() => parse(row)).toThrow(/unknown field extra/u);
+    const missing = board();
+    delete rows(missing)[0]!["midRate"];
+    expect(() => parse(missing)).toThrow(/missing field midRate/u);
+    const header = board();
+    header["header"] = { adapterResultCode: "1" };
+    expect(() => parse(header)).toThrow(/not successful/u);
+    // The collector admits a rotated token in the root header, and so does the parser.
+    const token = board();
+    token["header"] = { adapterResultCode: "0", newToken: "synthetic" };
+    expect(parse(token).observations).toHaveLength(6);
+  });
+
+  test("an empty board is refused rather than replacing the last one", () => {
+    const input = board();
+    information(input)["exchangeRates"] = [];
+    expect(() => parse(input)).toThrow(/board is empty/u);
+  });
+
+  test("a per-100 quote is refused: the board has no field that could state one", () => {
+    // A unit marker is a shape nobody has observed; it fails the artifact
+    // instead of being read as a basis, and no rate is ever rescaled.
+    for (const field of ["unit", "quoteUnit", "per"]) {
+      const input = board();
+      rows(input)[0]![field] = "100";
+      expect(() => parse(input)).toThrow(new RegExp(`unknown field ${field}`, "u"));
+    }
+  });
+
+  test("a duplicate currency, a JPY row or an unreadable cell is never guessed through", () => {
+    const duplicate = board();
+    rows(duplicate)[1]!["currency"] = "USD";
+    expect(() => parse(duplicate)).toThrow(/lists USD twice/u);
+    const yen = board();
+    rows(yen)[1]!["currency"] = "JPY";
+    expect(() => parse(yen)).toThrow(/JPY row is not a quote/u);
+    for (const cell of ["-", "", "0", "0.00", "-1", "1,234.5", "1e2", 146]) {
+      const input = board();
+      rows(input)[0]!["midRate"] = cell;
+      const result = parse(input);
+      expect(result.observations).toHaveLength(5);
+      expect(result.issues?.map((issue) => issue.code)).toEqual(["row_unreadable"]);
+      expect(result.coverage?.[0]).toMatchObject({ completeness: "partial" });
+    }
+  });
+});

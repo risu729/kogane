@@ -378,9 +378,22 @@ contract in `packages/collection/src/stages.ts`, before this table is reached.
 ```text
 observation_sweep → collection_scan → identity_sweep → balance_projection
   → reconciliation_sweep → card_settlement_sweep → purchase_recognition
-  → reward_claims_sweep → reward_read_projection → report_job
-  → operation_dispatch → decision_outbox
+  → reward_claims_sweep → reward_read_projection → price_promotion
+  → report_job → operation_dispatch → decision_outbox
 ```
+
+`price_promotion` has no flag. It promotes provider prices already stored as
+observations to `price_observations` by the closed rule list of
+`packages/domain/src/price-sources.ts`, each with its claim in
+`price_observation_claims` (migration 0053): at most 500 claims a tick,
+valuation claims before position claims, one cursor per claim kind in
+`price_promotion_cursor`, every write `INSERT … WHERE NOT EXISTS` in one batch
+with the cursor. The cursor never passes a row of a parse that is still
+`pending`, so a parse being written while the lane runs is read on a later
+tick; a parse left `pending` for good would hold that claim kind's cursor
+until the run is closed, which shows as `scanned: 0` tick after tick. It runs right before `report_job`, which reads the prices; its log line
+is counts only (§6.1, [calculation-and-reports.md](calculation-and-reports.md#1-a-price-is-an-observation-with-a-basis),
+[ADR 0020](adr/0020-price-promotion-by-rule.md)).
 
 `card_settlement_sweep` shares `RECONCILIATION_ENABLED` with
 `reconciliation_sweep` and used to run inside it, its counts nested in that
@@ -432,6 +445,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `card_settlement_sweep` | `scanned`, `proposed`, `written`                                                                                                                                                                 |
 | `purchase_recognition`  | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped` |
 | `reward_claims_sweep`   | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                            |
+| `price_promotion`       | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `written` (ADR 0020); its scan position is `price_promotion_cursor`, which the tick does not copy                             |
 | `operation_dispatch`    | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                         |
 | `decision_outbox`       | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                          |
 

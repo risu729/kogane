@@ -878,3 +878,53 @@ staging bucket is not written in shared mode: the run is stored once, in
 Deploy order, rollback, the artifact/role table and what the terminal states
 are in [`docs/collection.md`](../collection.md#sbi-shinsei-kogane-sbi-shinsei-collector-poc).
 Merged is not enabled: the var ships as `legacy`.
+
+## Exchange-rate board (parser `sbi-shinsei-exchange-rate`, 2026-09-26)
+
+The collector reads `IFCM_CommonAdapter/getExchangeRate` on every run and
+stores the body as the `exchange-rate` artifact (schema
+`sbi-shinsei-exchange-rate-v1`: an optional `transactionTime` and
+`exchangeRates[]` of `currency`, optional `customerCategory`, `buyRate`,
+`sellRate`, `midRate`). Until this parser nothing read it; the earlier
+no-parser decision (a quote needs numerator/denominator semantics the money
+observation kinds lack) is superseded by `price_observations`, which stores the
+base quantity beside the amount ([ADR 0020](../adr/0020-price-promotion-by-rule.md)).
+
+**Survey of the stored artifacts (read-only aggregates, 2026-09-26).** In CORE,
+source `sbi-shinsei-bank` has 29 `exchange-rate` artifacts, all with
+`artifact_key` `raw-exchange-rate.json`, role `sanitized_provider_capture`,
+declared media type `application/json` and a fetch unit, over 17 distinct
+payloads of nearly constant size (a 5-byte spread). The same 29 runs carry the
+yen-deposit artifact that `sbi-shinsei-yen-deposit-account` 0.1.1 parses
+successfully, so the runs are successful and failure-free. **Not surveyed:**
+the currency list, the `customerCategory` values and whether `transactionTime`
+is present. Those live only in the payload bytes, which are in R2, and D1
+holds none of them; no aggregate over them was possible from CORE.
+
+**Parser 1.0.0** (`packages/parsers/src/parsers/sbi-shinsei-exchange-rate.ts`,
+`coverage-v1` from migration 0053):
+
+- The accepted shape is exactly the collector's validator; an unknown field
+  at any level fails the artifact. The root header may carry a rotated
+  `newToken`, as the collector allows. The wrapper's `errorInfo` must not name
+  an error, as in the other SBI Shinsei parsers.
+- Each row gives three valuation observations of `sbi-shinsei:fx-board`,
+  subject the currency, metrics `bank_buy_rate`, `bank_sell_rate` and
+  `bank_mid_rate`, in JPY, as exact decimal text without a minor-unit amount.
+  `asOf` is `transactionTime` read as Japan time when present; otherwise the
+  observation has no provider time.
+- `extra` keeps the row verbatim (the `customerCategory` included) and
+  `_kogane.quoteBasis: "not-stated"`: the payload never says whether a rate is
+  per 1 or per 100 units, and the parser does not infer it.
+- A rate that is not a plain positive decimal string is a `row_unreadable`
+  issue and the board is partial; an empty board, a duplicate currency and a
+  JPY row fail the artifact.
+
+**Limits.** The board is a customer rate, possibly tiered by
+`customerCategory`, not a market reference; a board that lists one currency
+twice is refused rather than one tier being picked. No currency's quote basis
+is verified yet, so the price promotion lane promotes no FX row
+(`unsupported_currency`) until a currency is admitted with evidence in
+`SBI_SHINSEI_FX_QUOTE_BASIS` (`packages/domain/src/price-sources.ts`). The
+FX policy that will value with this board is named `fx-sbi-shinsei-mid-v1`
+so the caveat travels with every result that uses it.
