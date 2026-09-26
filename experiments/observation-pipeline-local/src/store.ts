@@ -156,6 +156,24 @@ export function openStore(stateDir?: string): Store {
       ),
     )();
   }
+  // The SBI Shinsei exchange-rate board policy (0053). Only the policy row is
+  // applied: the price tables of that migration are not modelled here.
+  if (
+    !db
+      .query(
+        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name = 'sbi-shinsei-exchange-rate' AND dataset = 'exchange-rate'",
+      )
+      .get()
+  ) {
+    const policy = readFileSync(
+      join(EXPERIMENT_ROOT, "../../packages/storage-d1/migrations/core/0053_price_promotion.sql"),
+      "utf8",
+    )
+      .split(";")
+      .find((statement) => statement.includes("INSERT INTO dataset_snapshot_policies"));
+    if (policy === undefined) throw new Error("0053 names no snapshot policy row");
+    db.transaction(() => db.exec(policy))();
+  }
   if (found === 0) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   return { db, blobDir };
 }

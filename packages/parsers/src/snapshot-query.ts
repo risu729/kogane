@@ -19,6 +19,7 @@ export const SNAPSHOT_DATASETS = [
   ["sbi-vc-account-margin", "account-margin"],
   ["sbi-shinsei-top-balances-and-activity", "top-accounts-balance-and-activity"],
   ["sbi-shinsei-yen-deposit-account", "yen-deposit-account"],
+  ["sbi-shinsei-exchange-rate", "exchange-rate"],
   ["sony-bank-gross-balance", "gross-balance"],
   ["smbc-direct-balance", "balance-normalized"],
   ["st-george-balances", "account-snapshot"],

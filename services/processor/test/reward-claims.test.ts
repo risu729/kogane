@@ -355,6 +355,8 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "collection_scan",
     "identity_sweep",
     "balance_projection",
+    // Unflagged (ADR 0020).
+    "price_promotion",
     "operation_dispatch",
     "decision_outbox",
   ]);
@@ -370,6 +372,7 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "identity_sweep",
     "balance_projection",
     "reward_claims_sweep",
+    "price_promotion",
     "operation_dispatch",
     "decision_outbox",
   ]);

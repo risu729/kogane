@@ -96,6 +96,7 @@ const RESULTS = {
     release: "reward-promotion-v1",
   },
   rewardReadProjection: { enabled: true, status: "unchanged" },
+  prices: { scanned: 6, promoted: 3, basis_unverified: 2, unsupported_currency: 1, written: 3 },
   reports: { generated: 0, reused: 1, reportId: "report-synthetic" },
   operations: {
     enabled: true,
@@ -140,6 +141,7 @@ const RECORDED = [
   "card_settlement_sweep",
   "purchase_recognition",
   "reward_claims_sweep",
+  "price_promotion",
   "operation_dispatch",
   "decision_outbox",
 ];
@@ -176,6 +178,7 @@ test("a tick records one row per recorded lane with exactly the counts its log l
     "purchase_recognition",
     "reward_claims_sweep",
     "reward_read_projection",
+    "price_promotion",
     "report_job",
     "operation_dispatch",
     "decision_outbox",
@@ -200,6 +203,7 @@ test("a tick records one row per recorded lane with exactly the counts its log l
   // Identifiers, cursors, release names and open-ended outcome keys stay in
   // the log line only.
   expect(counts["reward_claims_sweep"]).toEqual({ scanned: 4, promoted: 2, skipped: 1 });
+  expect(counts["price_promotion"]).toEqual(RESULTS.prices);
   expect(counts["operation_dispatch"]).toEqual({
     claimed: 1,
     dispatched: 1,
@@ -290,6 +294,8 @@ test("a lane whose flag is off records `skipped-by-flag`, is not run and still l
     "collection_scan",
     "identity_sweep",
     "balance_projection",
+    // No flag: price promotion runs whatever the other flags say.
+    "price_promotion",
     "operation_dispatch",
     "decision_outbox",
   ]);
@@ -302,6 +308,7 @@ test("a lane whose flag is off records `skipped-by-flag`, is not run and still l
     ["card_settlement_sweep", "skipped-by-flag"],
     ["purchase_recognition", "skipped-by-flag"],
     ["reward_claims_sweep", "skipped-by-flag"],
+    ["price_promotion", "ran"],
     ["operation_dispatch", "skipped-by-flag"],
     ["decision_outbox", "ran"],
   ]);

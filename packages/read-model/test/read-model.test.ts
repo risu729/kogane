@@ -297,7 +297,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name <> 'st-george-balances'",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -308,6 +308,17 @@ describe("named concepts in the final SQL", () => {
         )
         .get(),
     ).toEqual({ policy_id: "coverage-v1" });
+    expect(
+      db
+        .query(
+          "SELECT policy_id,required_parser_version,replaces_previous_on_complete_empty FROM dataset_snapshot_policies WHERE parser_name = 'sbi-shinsei-exchange-rate' AND dataset = 'exchange-rate'",
+        )
+        .get(),
+    ).toEqual({
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.0",
+      replaces_previous_on_complete_empty: 0,
+    });
     // The shadow comparison compiles on the production schema and reads the views.
     expect(db.query(snapshotPolicyComparison.sql).all()).toEqual([]);
     expect(snapshotPolicyComparison.sql).toContain("FROM observation_fetch_artifacts fa");
