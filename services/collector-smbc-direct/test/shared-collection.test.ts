@@ -207,6 +207,17 @@ describe("G1-01/G1-02 one backfill run produces one terminal", () => {
     expect(read.manifest.artifacts.every((entry) => entry.mediaType === "application/json")).toBe(
       true,
     );
+    // The account unit counts the four stored responses; the run manifest
+    // belongs to the run (ADR 0021; CORE refuses the seal with
+    // `run_inventory_incomplete` otherwise).
+    expect(read.manifest.units.map((unit) => [unit.unitKey, unit.artifactCount])).toEqual([
+      ["account", 4],
+    ]);
+    expect(
+      read.manifest.artifacts
+        .filter((entry) => entry.unitKey === undefined)
+        .map((e) => e.artifactKey),
+    ).toEqual(["manifest.json"]);
     // One declared range per month, plus the requested range; the raw and
     // normalized artifacts of a month share it.
     expect(read.manifest.ranges.map((range) => range.rangeKey)).toEqual([

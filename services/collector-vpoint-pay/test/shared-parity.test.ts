@@ -142,11 +142,40 @@ describe("v-point-pay: the shared target persists the legacy bytes (U09 parity, 
       expect(persisted).toEqual(legacyBytes);
       assertAbsent(persisted, secrets, entry.artifactKey);
     }
+    // The terminal states months as `YYYY-MM`, the only month form the ingest
+    // range contract accepts (ADR 0021); the collector's own `yyyyMM` stays in
+    // its artifact keys.
     expect(result.manifest.requestedScope).toMatchObject({
       scopeKind: "month_range",
-      startValue: "202607",
-      endValue: "202608",
+      startValue: "2026-07",
+      endValue: "2026-08",
     });
+    expect(result.manifest.ranges).toEqual([
+      expect.objectContaining({
+        rangeKey: "requested-months",
+        precision: "month",
+        startValue: "2026-07",
+        endValue: "2026-08",
+      }),
+    ]);
+    // Each stored response states its re-encoding, with no retained input.
+    const reencoded = result.manifest.artifacts.filter(
+      (entry) => entry.role === "collector_derived",
+    );
+    expect(reencoded.length).toBeGreaterThan(0);
+    for (const entry of reencoded) {
+      expect(
+        result.manifest.transformations.filter(
+          (step) => step.outputArtifactKey === entry.artifactKey,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          stepKind: "reencoded",
+          transformerId: "collector-v-point-pay",
+          inputArtifactKeys: [],
+        }),
+      ]);
+    }
     assertAbsent(
       await sharedBytes(shared, terminalKey("v-point-pay", runId)),
       secrets,

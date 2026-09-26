@@ -197,6 +197,28 @@ Rules that hold for every collector below:
 - A failed put returns `incomplete` with a checkpoint and no terminal: the
   run is not reported as complete, and only codes and counts are logged
   (G1-01, G3-08).
+- **The registration contract** ([ADR 0021](adr/0021-collector-registration-contract.md)).
+  A terminal states what the Processor needs to register and seal it, and
+  nothing more:
+  - every `collector_derived` artifact has a transformation whose output it
+    is: `extracted` or `reencoded` by the collector (named `collector-<id>`
+    or by its own transformer id) at the producer version, whose
+    `inputArtifactKeys` name the kept artifacts it was derived from, or are
+    empty when the input was never stored — which registers as
+    `source_bytes_not_available`, never as an invented parent;
+  - bytes a sanitizer produced are a `sanitized_provider_capture` with a
+    `redacted` step; a provider role (`provider_*`) carries the provider's
+    bytes with no step at all (CORE seals a provider role only with
+    `decrypted` or `extracted` steps);
+  - the collector's own run manifest is `collector_manifest` and names no
+    unit; a unit's `artifactCount` is exactly the number of artifacts whose
+    `unitKey` is that unit;
+  - a range at `month` precision states `YYYY-MM`.
+
+  `services/processor/test/collector-plans.test.ts` runs every collector's
+  real `*RunPlan` function through registration against the whole CORE schema
+  and the operator bootstrap, and fails when any of these is broken.
+
 - `operationId`/`attemptId` are carried when an operation requested the run.
   U08 dispatches collection operations; today the cron and the admin trigger
   leave them unset.
@@ -264,7 +286,10 @@ field (`loginPwd`, `password`, `csrf`, …), throws a stable code and the run
 writes no terminal instead of publishing the value (G3-08).
 
 Terminal fields: `producer: collector-sony-bank`; one unit `account`
-(`unitKind: account`); ranges `request-window` (the requested `from`/`to`) and, when wallet statements were
+(`unitKind: account`) whose `artifactCount` counts every artifact but
+`manifest.json`, which belongs to the run and names no unit (ADR 0021; until
+then the manifest named the unit and was counted in it); ranges
+`request-window` (the requested `from`/`to`) and, when wallet statements were
 collected, `wallet-months`; one `terminal` report carrying the outcome;
 `requestedScope.scopeKind = date_range` over the same window;
 `coverageStatus` `complete` for a successful window, `partial` for a partial
@@ -316,13 +341,22 @@ provider was contacted and no production bucket was read or written.
 
 ### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
 
-| Artifact key                                                                   | Role                         |
-| ------------------------------------------------------------------------------ | ---------------------------- |
-| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` |
-| `<connectionId>/credit-past-months.json`                                       | `provider_response`          |
-| `<connectionId>/credit-csv                                                     | pdf                          | ofx` | `provider_export` |
-| `<connectionId>/credit-ledger-*.json`, `…/discovery.json`                      | `collector_derived`          |
-| `manifest.json`                                                                | `collector_manifest`         |
+| Artifact key                                                                   | Role                         | Step (ADR 0021)                                                                       |
+| ------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------- |
+| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input                                             |
+| `<connectionId>/credit-past-months.json`                                       | `provider_response`          | none                                                                                  |
+| `<connectionId>/credit-{csv,pdf,ofx}` exports                                  | `provider_export`            | none                                                                                  |
+| `<connectionId>/credit-ledger-NN.json`                                         | `collector_derived`          | `extracted` by `collector-myjcb`, input `…/credit-detail-NN.html` when the run has it |
+| `<connectionId>/discovery.json`                                                | `collector_derived`          | `extracted` by `collector-myjcb`, no input                                            |
+| `manifest.json`                                                                | `collector_manifest`         | none; names no unit                                                                   |
+
+A ledger is parsed from the statement page of the same `detailMonth`; the page
+is parsed before redaction, and the relation names the redacted capture of
+that page kept in the same run, the only form of it that exists afterwards. A
+ledger whose page is not in the run names no input. `discovery.json` is
+extracted from the login and mypage responses, which are never kept, so it
+registers as `source_bytes_not_available`. Before ADR 0021 neither stated a
+step, and the Processor refused the run (`artifact_lineage_unstated`).
 
 Sanitizer: the collector's own `redactedStatementHtml` (parse5 tree: scripts,
 styles, textareas, embedding elements and every URL-bearing attribute removed,
@@ -372,8 +406,15 @@ provider was contacted and no production bucket was read or written.
 | `card-list.json`                         | `sanitized_provider_capture` |
 | `select-card.json`                       | `sanitized_provider_capture` |
 | `web-meisai-top.json`                    | `sanitized_provider_capture` |
-| `months/<yyyymm>/<top\|answer>-NNN.json` | `provider_response`          |
+| `months/<yyyymm>/<top\|answer>-NNN.json` | `sanitized_provider_capture` |
 | `manifest.json`                          | `collector_manifest`         |
+
+The statement pages were `provider_response` until ADR 0021. They are the
+sanitizer's output like the other three envelopes and carry the same
+`redacted` step, and CORE seals a provider role only with `decrypted` or
+`extracted` steps, so a card run with a page could never be sealed
+(`run_inventory_incomplete`). `manifest.json` names no unit, so the card's
+`artifactCount` counts its envelopes only.
 
 Sanitizer: `vpass-json-sanitizer` v1 (`src/sanitize.ts`). Unlike the other
 collectors, the retired legacy Vpass path stored the raw response envelopes in
@@ -446,6 +487,13 @@ provider was contacted and no production bucket was read or written.
 | `vmoney-history-page-*.json` | `collector_derived` | one V Money history page each                           |
 | `collection-summary.json`    | `collector_summary` | the collector's own page/total counts                   |
 
+Each `collector_derived` artifact states one `reencoded` step by
+`collector-v-point` at the producer version with no input (ADR 0021): the
+bytes are `Response.text()` encoded again as UTF-8, the same content but not
+provably the provider's bytes, and the response is not stored, so it
+registers as `source_bytes_not_available`. Before ADR 0021 the terminal stated
+no step and the Processor refused the run (`artifact_lineage_unstated`).
+
 Sanitizer: the collector never stores a request, a header or a cookie — it
 stores the decoded JSON response text, the same bytes the retired legacy path
 wrote to its bucket and the importer forwarded to the central store. The
@@ -461,7 +509,8 @@ unit `account`, one unit (`account`/`collection`) whose `artifactCount` is the
 stored artifact count, `providerOutcome` from the run status, `coverageStatus`
 `complete`/`partial`/`unknown` for `success`/`partial`/`failed`, and
 `safeErrorCode` from the run's first safe failure code (`collector_failed` when
-a failure carried none). `ranges`, `reports` and `transformations` are empty.
+a failure carried none). `ranges` and `reports` are empty; `transformations`
+holds the `reencoded` steps above.
 
 Not carried over: the V Point Pay email reconciliation report. It was built by
 listing the legacy `raw/v-point-pay-email/` prefix, and those notifications
@@ -509,6 +558,9 @@ neither merged into the other (G1-16, 03 §3).
 | `transactions-yyyyMM.json` | `collector_derived` | one statement month each, in month order         |
 | `collection-summary.json`  | `collector_summary` | the collector's own month and transaction counts |
 
+As for `v-point`, each `collector_derived` artifact states one `reencoded`
+step by `collector-v-point-pay` with no input (ADR 0021).
+
 Sanitizer: the refresh token, the device UUID and the access token live in the
 Durable Object and in the request headers `collectVPointPay` builds. None of
 them is an artifact, and a failure becomes a machine code
@@ -521,6 +573,8 @@ Terminal: `source: v-point-pay`, `producer: collector-v-point-pay`,
 `producerVersion: COLLECTOR_SCHEMA_VERSION` (`vpoint-pay-worker-poc-v1`),
 `requestedScope: month_range` from the provider's own `inquiry_period` to the
 current JST month, one matching `requested-months` range with basis `source`,
+both stated as `YYYY-MM` (the collector's `yyyyMM` was refused by the ingest
+range contract, `invalid_start_value`, until ADR 0021),
 one unit (`account`/`collection`), and `providerOutcome` from the run status.
 When the month window is unknown — a run that failed before the balance
 response — the scope is `unspecified` and no range is stated rather than a
@@ -580,6 +634,14 @@ The bytes are `JSON.stringify(artifact.body)` — the collector's re-encoded vie
 of each response, exactly what the retired legacy path wrote to the per-source
 bucket and the importer forwarded centrally. A dataset is attributed to a unit
 by the same rule the importer used (`foreign-` prefix → `foreign`).
+
+Every dataset states one `extracted` step by `collector-sbi-securities` at the
+producer version with no input (ADR 0021): each is the collector's own
+envelope around what it read from provider responses (the MTS payload with its
+result codes, the GraphQL and main-site JSON, the foreign trade history pages
+bundled into one object), and none of those responses is stored, so it
+registers as `source_bytes_not_available`. Before ADR 0021 the terminal stated
+no step and the Processor refused every run (`artifact_lineage_unstated`).
 
 Sanitizer: the passkey credential, the handshake key and the MTS/GraphQL
 session ids stay in the secrets and in `src/sbi.ts`; none of them is an
@@ -644,7 +706,11 @@ source `sbi-shinsei-bank`).
 | ----------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
 | `raw-<dataset>.json` (four CORE datasets) | `sanitized_provider_capture` | the provider response with `header.newToken` removed              |
 | `normalized.json`                         | `collector_derived`          | the collector's own normalized snapshot                           |
-| `manifest.json`                           | `collector_derived`          | the collector manifest with failures reduced to allowlisted codes |
+| `manifest.json`                           | `collector_manifest`         | the collector manifest with failures reduced to allowlisted codes |
+
+`manifest.json` was declared `collector_derived` with no step until ADR 0021,
+and the Processor refused every run on it (`artifact_lineage_unstated`); it is
+the collector's own record, so it is `collector_manifest` now.
 
 - `requestedScope`: `full_snapshot` — this source is a current snapshot and the
   trigger accepts no date range. No units, ranges or reports.
@@ -687,8 +753,10 @@ Processor maps it to the CORE source `global-pass`), producer
   `unitKeys: ["account"]`. A run whose container never reported its month list
   states `unspecified` rather than inventing a range.
 - `units`: one `account` unit of kind `collection`, the same unit the central
-  descriptors use. `ranges`: one `requested` range plus one `declared_coverage`
-  month range per stored page.
+  descriptors use, counting the stored pages; `manifest.json` names no unit
+  (ADR 0021 — it named the unit without being counted, which CORE refuses at
+  the seal with `run_inventory_incomplete`). `ranges`: one `requested` range
+  plus one `declared_coverage` month range per stored page.
 - **Coverage is `partial` even on success.** The provider exposes a rolling
   window of statement months and `paginationStatus` is `unproven`, so a
   finished run is a claim about persistence, never about the account's history.
@@ -731,7 +799,10 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 | `manifest.json`  | `collector_manifest` | the collector manifest, the bytes legacy mode staged        |
 
 - `requestedScope`: `full_snapshot`, `unitKeys: ["account"]`; one `account` unit
-  of kind `collection`, the same unit the central descriptors use. No ranges.
+  of kind `collection`, the same unit the central descriptors use, counting the
+  datasets; `manifest.json` names no unit (ADR 0021 — it named the unit
+  without being counted, so every run failed its seal with
+  `run_inventory_incomplete` and was retried each tick). No ranges.
 - A successful run declares `coverageStatus: complete`: the collector walks
   every historical execution and cash-flow page to exhaustion and verifies the
   provider's own pagination totals before finishing.
@@ -784,6 +855,11 @@ Terminal source id `smbc-direct` (the Processor maps it to the CORE source
 | `balance.raw.json.sjis`, `transactions/*.raw.json.sjis`     | `provider_response`  | the provider's own response bytes, verbatim |
 | `balance.normalized.json`, `transactions/*.normalized.json` | `collector_derived`  | the collector's normalized counterparts     |
 | `manifest.json`                                             | `collector_manifest` | the exact manifest bytes written to staging |
+
+One `account` unit counts the stored responses and their normalized
+counterparts; `manifest.json` names no unit (ADR 0021). Until then it named
+the unit without being counted, so a finished backfill would have failed its
+seal with `run_inventory_incomplete`; the run-plan registration test found it.
 
 **Bounded exception to one-copy.** This is the only source that still stages a
 run before its terminal, and the reason is structural, not convenience: the
