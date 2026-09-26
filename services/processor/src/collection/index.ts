@@ -22,8 +22,14 @@
 // and the operations dispatch of one cron tick together. A registration that
 // reaches the budget yields `pending` with its progress in CORE, and the scan
 // continues pending runs first on every tick, before it lists new terminals.
+//
+// A terminal CORE has already judged — blocked, or refused `retryable` within
+// the retry interval — is answered from its row and neither spends one of the
+// tick's registrations nor holds the page, so a page of refused terminals no
+// longer pins the cursor (ADR 0024).
 import {
   REGISTRATION_CONTRACT_VERSION,
+  RETRYABLE_RETRY_INTERVAL_MS,
   RegistrationBudget,
   registerTerminal,
   type RegisterTerminalOutcome,
@@ -84,6 +90,10 @@ export interface RegistrationOptions {
   inventoryChunk?: number;
   /** The invocation's shared budget; a registration without one gets its own. */
   budget?: RegistrationBudget;
+  /** How long a `retryable` refusal stands before it is attempted again. */
+  retryAfterMs?: number;
+  /** The registration's clock; the scan passes its own. */
+  now?: () => Date;
 }
 
 /**
@@ -116,6 +126,12 @@ export interface ScanSummary {
   pending: number;
   blocked: number;
   retryable: number;
+  /**
+   * Of `blocked` and `retryable`, the terminals answered from CORE: judged on
+   * an earlier tick under this contract and digest, and not attempted again.
+   * They spend none of the tick's registrations (ADR 0024).
+   */
+  alreadyJudged: number;
   missing: number;
   /**
    * Registrations that threw — a CORE or R2 failure rather than a verdict
@@ -141,6 +157,11 @@ export interface ScanOptions {
   artifactBudget?: number;
   /** The invocation's shared registration budget; the scan gets its own when absent. */
   budget?: RegistrationBudget;
+  /**
+   * How long a `retryable` refusal stands before the scan attempts that run
+   * again; `RETRYABLE_RETRY_INTERVAL_MS` (24 hours) when absent.
+   */
+  retryAfterMs?: number;
   now?: () => Date;
   /** Told the safe code of each registration that threw. */
   onFailure?: (code: string) => void;
@@ -152,7 +173,11 @@ function safeFailureCode(error: unknown): string {
 }
 
 /** Adds one registration's outcome to the tick's counts. */
-function count(summary: ScanSummary, outcome: RegisterTerminalOutcome["outcome"]): void {
+function count(summary: ScanSummary, result: RegisterTerminalOutcome): void {
+  const outcome = result.outcome;
+  if ((outcome === "blocked" || outcome === "retryable") && result.recorded) {
+    summary.alreadyJudged += 1;
+  }
   if (outcome === "registered") summary.registered += 1;
   else if (outcome === "already_registered") summary.alreadyRegistered += 1;
   else if (outcome === "pending") summary.pending += 1;
@@ -176,6 +201,14 @@ function count(summary: ScanSummary, outcome: RegisterTerminalOutcome["outcome"]
  * next tick lists the same page again; the runs it already registered answer
  * `already_registered` in one query each, and the rest make progress. That is
  * cheaper than remembering a position inside a page, and it cannot skip one.
+ *
+ * Only new work spends one of the tick's `maxRegistrations`: a registration,
+ * a continuation, a first verdict, a retry that was due, a missing terminal
+ * or a failure. A terminal already registered, already blocked, or refused
+ * `retryable` less than `retryAfterMs` ago is answered from its CORE row and
+ * spends none, so a page whose terminals are all judged is finished in one
+ * tick and the cursor moves on even when nothing registered (ADR 0024). A
+ * terminal with no row yet is always attempted.
  */
 export async function collectionScan(
   env: CollectionEnv,
@@ -191,6 +224,7 @@ export async function collectionScan(
     pending: 0,
     blocked: 0,
     retryable: 0,
+    alreadyJudged: 0,
     missing: 0,
     failed: 0,
     continued: 0,
@@ -209,6 +243,8 @@ export async function collectionScan(
   const budget = options.budget ?? new RegistrationBudget();
   const registration: RegistrationOptions = {
     budget,
+    retryAfterMs: Math.max(0, options.retryAfterMs ?? RETRYABLE_RETRY_INTERVAL_MS),
+    now,
     ...(options.artifactBudget === undefined ? {} : { artifactBudget: options.artifactBudget }),
   };
   const summary: ScanSummary = { ...empty, status: "scanned" };
@@ -229,7 +265,7 @@ export async function collectionScan(
     }
     // One poisonous terminal is its own blocked run and does not end the page
     // (15 §2, G1-13); this simply counts what happened.
-    count(summary, outcome.outcome);
+    count(summary, outcome);
     return outcome.outcome !== "deferred";
   };
 
@@ -261,14 +297,15 @@ export async function collectionScan(
         budgetExhausted = true;
         break;
       }
-      const before = summary.alreadyRegistered;
+      const before = summary.alreadyRegistered + summary.alreadyJudged;
       if (!(await attempt(terminal))) {
         budgetExhausted = true;
         break;
       }
-      // A run that was already registered cost one query, not a
-      // registration, so it does not consume the tick's count.
-      if (summary.alreadyRegistered === before) worked += 1;
+      // A run that was already registered or already judged cost a few
+      // queries, not a registration, so it does not consume the tick's count
+      // (ADR 0024).
+      if (summary.alreadyRegistered + summary.alreadyJudged === before) worked += 1;
     }
     if (!budgetExhausted) {
       cursor = page.cursor;
@@ -278,6 +315,7 @@ export async function collectionScan(
 
   await advanceCollectionScan(env.DB, {
     cursor,
+    pageFinished: !budgetExhausted,
     nowMs: now().valueOf(),
     seen: summary.listed,
     registered: summary.registered,

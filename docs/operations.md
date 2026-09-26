@@ -286,6 +286,7 @@ point.
 | Terminal written, notification lost | A run persists into the shared DATA bucket, the Queue message never arrives | The `collection_scan` lane finds the run on a later tick and registers it with no provider call and no write to the bucket (U08, G1-04). The queue is a wake-up, never the record.                                 |
 | Notification delivered twice        | The same terminal is delivered again after it was registered                | One fetch run, one seal, one completed `registered` stage. The notification id is never the idempotency key; the run identity and terminal digest are (G1-05, G1-11).                                              |
 | Poisonous terminal                  | One run's terminal is corrupt or names an object that is gone               | That run alone is blocked with its reason code and the rest of the page registers; no seal, and no `registered` stage claims completion (G1-13, G1-14). A block is write-once, so it is never quietly relabelled.  |
+| Page of refused terminals           | More than five terminals on one scan page are blocked or refused retryable  | Each is judged once; afterwards it is answered from its row without spending a registration, so the page finishes and the cursor moves on (ADR 0024). A retryable run is tried again at most once per 24 hours.    |
 
 The last drill is the one most easily got wrong: restoring a backup taken before
 a use prohibition would otherwise resurrect cached explanations of evidence that
@@ -295,7 +296,12 @@ Two operational rules come with the shared-R2 lanes (plan 15 §2). A budget that
 runs out yields with progress recorded rather than failing or looping: a
 registration that reaches the invocation's operation budget stays unsealed and
 is continued on the next scan tick, and a scan page that spends its
-registration budget leaves its cursor put. And a request the operations API accepted is never completed by having
+registration budget leaves its cursor put. Reading `collection_scan_state`
+(or `collectionScan` on the health route): `pages_completed` and
+`cycles_completed` count finished pages and walks, not ticks, and
+`last_scan_at_ms` says when a tick last ran. A `last_scan_at_ms` that keeps
+moving while `pages_completed` does not is a page the scan keeps listing
+again; before ADR 0024 such a tick on the first page also counted a cycle. And a request the operations API accepted is never completed by having
 been handed over — a queued replay, a projection scheduled for the next tick
 and a collector call that does not exist yet all stay short of `completed`
 (`docs/processor.md` §7, `contracts/stages.json`).
