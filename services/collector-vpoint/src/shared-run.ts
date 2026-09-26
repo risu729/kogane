@@ -21,6 +21,7 @@ import {
   type ProviderOutcome,
   type R2BucketLike,
   type TerminalRunFields,
+  type TerminalTransformation,
   sha256Hex,
 } from "../../../packages/collection/src/index";
 import type { RawArtifact } from "./types";
@@ -35,6 +36,12 @@ const VPOINT_UNIT_KIND = "collection";
 const EMAIL_UNIT_KEY = "notification";
 const EMAIL_UNIT_KIND = "message";
 const EMAIL_PARSER_ID = "vpoint-pay-email-parser";
+/**
+ * What turns a V Point API response into a stored ledger artifact: this
+ * collector, named by its collector id (ADR 0021). It is not the producer
+ * constant above, so the terminal's lineage does not move with it.
+ */
+const VPOINT_TRANSFORMER_ID = "collector-v-point";
 const FALLBACK_ERROR_CODE = "collector_failed";
 /** The manifest's own machine-code charset; a code that fails it is replaced. */
 const SAFE_CODE = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
@@ -112,9 +119,30 @@ export async function vPointRunPlan(run: VPointSharedRun): Promise<PersistRunPla
     ],
     ranges: [],
     reports: [],
-    transformations: [],
+    transformations: artifacts
+      .filter((artifact) => artifact.role === "collector_derived")
+      .map((artifact) => reencoding(artifact.artifactKey, run.producerVersion)),
   };
   return { run: fields, artifacts };
+}
+
+/**
+ * The lineage a ledger artifact states (ADR 0021). Its bytes are the API
+ * response text as `fetch` decoded it (`Response.text()`), encoded again as
+ * UTF-8: the same content, but not provably the provider's bytes, so it is a
+ * `reencoded` derivation and not a provider capture. The response itself is
+ * not stored, so the step names no input and the Processor records
+ * `source_bytes_not_available`.
+ */
+function reencoding(artifactKey: string, producerVersion: string): TerminalTransformation {
+  return {
+    transformationId: `${artifactKey}:reencoded`,
+    stepKind: "reencoded",
+    transformerId: VPOINT_TRANSFORMER_ID,
+    transformerVersion: producerVersion,
+    inputArtifactKeys: [],
+    outputArtifactKey: artifactKey,
+  };
 }
 
 export async function persistVPointRun(

@@ -106,6 +106,22 @@ describe("sbi-securities: the shared target persists the legacy bytes (U09 parit
       expect(stored.sha256).toBe(entry.sha256);
       expect(stored.bytes).toBe(entry.byteSize);
       expect(await sharedBytes(shared, entry.storageRef.key)).toEqual(legacyBytes);
+      // ADR 0021: every derived dataset states one `extracted` step with no
+      // retained input, which registers as `source_bytes_not_available`.
+      expect(
+        result.manifest.transformations.filter(
+          (step) => step.outputArtifactKey === entry.artifactKey,
+        ),
+      ).toEqual([
+        {
+          transformationId: `${entry.artifactKey}:extracted`,
+          stepKind: "extracted",
+          transformerId: "collector-sbi-securities",
+          transformerVersion: result.manifest.producerVersion,
+          inputArtifactKeys: [],
+          outputArtifactKey: entry.artifactKey,
+        },
+      ]);
     }
   });
 

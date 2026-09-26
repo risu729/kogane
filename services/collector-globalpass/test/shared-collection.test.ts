@@ -172,6 +172,16 @@ describe("G1-01/G1-02 persisting a run", () => {
         coverageStatus: "partial",
       },
     ]);
+    // The unit's count is exactly the artifacts that name it: the pages. The
+    // run manifest belongs to the run (ADR 0021; CORE refuses the seal with
+    // `run_inventory_incomplete` otherwise).
+    expect(
+      read.manifest.artifacts.map((entry) => [entry.artifactKey, entry.unitKey ?? null]),
+    ).toEqual([
+      ["activity-2099-01.html", "account"],
+      ["activity-2099-02.html", "account"],
+      ["manifest.json", null],
+    ]);
     // Two identical pages share one content-addressed object.
     expect(new Set(read.manifest.artifacts.map((entry) => entry.storageRef.key)).size).toBe(2);
   });

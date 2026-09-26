@@ -190,6 +190,16 @@ describe("G1-01/G1-02 persisting a run", () => {
         coverageStatus: "complete",
       },
     ]);
+    // The unit's count is exactly the artifacts that name it; the run
+    // manifest belongs to the run (ADR 0021; CORE refuses the seal with
+    // `run_inventory_incomplete` otherwise).
+    expect(
+      read.manifest.artifacts.map((entry) => [entry.artifactKey, entry.unitKey ?? null]),
+    ).toEqual([
+      ["account-margin.json", "account"],
+      ["cash-balances.json", "account"],
+      ["manifest.json", null],
+    ]);
   });
 
   test("nothing stored in DATA carries session or credential material", async () => {

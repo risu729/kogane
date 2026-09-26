@@ -36,6 +36,13 @@ import {
 
 const SOURCE = "myjcb";
 const PRODUCER = "myjcb-worker";
+/**
+ * What derives a ledger or the discovery record from provider pages: this
+ * collector, named by its collector id (ADR 0021). It is not the producer
+ * constant above, so the terminal's lineage does not move with it.
+ */
+const TRANSFORMER_ID = "collector-myjcb";
+const LEDGER_FILENAME = /^credit-ledger-(\d{2})\.json$/u;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 /**
  * Datasets the central path has never accepted: the importer refuses a run
@@ -196,6 +203,28 @@ function manifestBytes(
   return new TextEncoder().encode(JSON.stringify(manifest));
 }
 
+/**
+ * The kept artifacts a collector-derived artifact was derived from (ADR 0021).
+ *
+ * `credit-ledger-NN.json` is parsed from the statement page of the same
+ * `detailMonth`, and the redacted capture of that page is kept in the same
+ * run as `credit-detail-NN.html`, so the ledger names it. (The parse reads the
+ * page before redaction; the relation names the kept capture of that page,
+ * which is the only form of it that exists after the run.) `discovery.json`
+ * is extracted from the login and mypage responses, which are never kept, so
+ * it names no input and is recorded as `source_bytes_not_available`.
+ */
+function derivedFrom(
+  unitKey: string,
+  filename: string,
+  artifacts: readonly RawArtifact[],
+): string[] {
+  const month = LEDGER_FILENAME.exec(filename)?.[1];
+  if (month === undefined) return [];
+  const page = `credit-detail-${month}.html`;
+  return artifacts.some((artifact) => artifact.filename === page) ? [`${unitKey}/${page}`] : [];
+}
+
 /** Build the persist plan for a finished run. Pure apart from hashing. */
 export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPlan> {
   const outcome: ProviderOutcome = input.status;
@@ -250,6 +279,16 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
           transformerVersion: "v1",
           // The provider HTML was deliberately not retained.
           inputArtifactKeys: [],
+          outputArtifactKey: artifactKey,
+        });
+      }
+      if (role === "collector_derived") {
+        transformations.push({
+          transformationId: `extracted:${artifactKey.replaceAll("/", ":")}`,
+          stepKind: "extracted",
+          transformerId: TRANSFORMER_ID,
+          transformerVersion: input.schemaVersion,
+          inputArtifactKeys: derivedFrom(unitKey, artifact.filename, connection.artifacts),
           outputArtifactKey: artifactKey,
         });
       }

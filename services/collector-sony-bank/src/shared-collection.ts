@@ -268,7 +268,7 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
       byteSize: bytes.byteLength,
       mediaType: "application/json",
       role: "collector_manifest",
-      unitKey: UNIT_KEY,
+      // The run's manifest belongs to the run and names no unit (ADR 0021).
       body: { kind: "bytes", bytes },
     });
   }
@@ -277,7 +277,9 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
     {
       unitKey: UNIT_KEY,
       unitKind: "account",
-      artifactCount: artifacts.length,
+      // Exactly the artifacts that name this unit: every provider artifact,
+      // not the run manifest.
+      artifactCount: artifacts.filter((artifact) => artifact.unitKey === UNIT_KEY).length,
       coverageStatus,
       ...(errorCode === undefined ? {} : { safeErrorCode: errorCode }),
     },
