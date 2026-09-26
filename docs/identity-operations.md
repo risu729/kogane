@@ -186,8 +186,9 @@ event is retired and the collector's is recognised on the same account, and
 nothing is counted twice.
 
 **Owner action and check.** Set the Worker secret on `kogane-vpass-collector-poc`:
-`wrangler secret put VPASS_CARD_BINDING_KEY` with the value of the retired
-importer's `ORIGIN_FINGERPRINT_KEY` (64 lowercase hex characters). No
+`wrangler secret put VPASS_CARD_BINDING_KEY --name kogane-vpass-collector-poc`,
+entering the value of the retired importer's `ORIGIN_FINGERPRINT_KEY` (64
+lowercase hex characters) at the prompt. No
 repository check can prove it is the same key. After the next collection,
 compare token counts (read-only, counts only):
 

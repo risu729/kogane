@@ -356,6 +356,22 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
     expect(diagnostic).not.toContain("vpass-card-v1-");
   });
 
+  test("a known-answer vector: the token the retired importer's code derives for the same tuple and key", async () => {
+    // Computed once from the retired importer's `deriveVpassCardBinding`
+    // (`services/collector-r2-importer/src/vpass-identity.ts` before #206)
+    // and independently with another HMAC-SHA-256 implementation, on the
+    // synthetic tuple and key above. A change to the construction (the
+    // contract string, the JSON array, the key decoding, the prefix) fails
+    // here even if the module and `importerToken` change together.
+    const expected =
+      "vpass-card-v1-dc5fb987a505ef03e5dc9a50592655903f9048487ea9b3e5bb7bcb15896d10a9";
+    expect(await importerToken(bindingKey, [externalId, globalid, cardCode])).toBe(expected);
+    expect(await deriveVpassCardBinding(bound(), bindingKey)).toEqual({
+      status: "derived",
+      token: expected,
+    });
+  });
+
   test("the token depends on the card tuple and the key, not on the session or ordinal", async () => {
     const plan = async (overrides: Partial<VpassCardRun>, key = bindingKey) =>
       (await vpassCardRunPlan(bound(overrides), key)).run.units.at(-1)?.unitKey;

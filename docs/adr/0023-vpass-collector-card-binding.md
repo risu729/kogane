@@ -273,7 +273,14 @@ For the card unit's coverage:
    statement month the provider listed for the card (any failure fails the
    run), which is what the importer reported. The gap that is real, the
    rolling window of months, stays on the run's `coverageStatus: partial` and
-   on the `statement-months` declared-coverage range.
+   on the `statement-months` declared-coverage range. Limit: inside a month,
+   the walk (`collectMonth` in `src/worker.ts`) also ends on the first empty
+   page without checking that the provider's stated row count (`allCnt`,
+   `total`) was reached, so `complete` means "every listed month, each walked
+   until the provider returned an empty or last page", not a proven whole
+   month. ADR 0026 (#272, proposed) keeps the Vpass unit `partial` for exactly
+   this reason; whichever of the two merges second reconciles them, and the
+   Vpass pages are not released (below) until it is.
 
 ### Decision
 
@@ -335,12 +342,16 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   `scripts/artifact-datasets.test.ts` pins both. The earlier
   decision that "only the change that implements option 3 releases the Vpass
   dataset" is narrowed: releasing it is a later change, made only after this
-  change is deployed, the owner has set the secret, and the token check in
+  change is deployed, the owner has set the secret, the token check in
   [identity operations](../identity-operations.md#collector-vpass-runs-bind-in-their-own-run)
-  shows the collector's tokens are the importer's.
+  shows the collector's tokens are the importer's, and the card unit's
+  coverage claim is settled with ADR 0026 (option 7's limit).
 - **The owner's one action** is to set `VPASS_CARD_BINDING_KEY` on
   `kogane-vpass-collector-poc` to the retired importer's
-  `ORIGIN_FINGERPRINT_KEY`.
+  `ORIGIN_FINGERPRINT_KEY`
+  (`wrangler secret put VPASS_CARD_BINDING_KEY --name kogane-vpass-collector-poc`,
+  entering the 64 lowercase hex characters at the prompt), then to run the
+  read-only token check after the next collection.
 
 ### Consequences
 
@@ -368,15 +379,16 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
 - Collector card runs register as `success` instead of `partial` from this
   release on; terminals written before keep `partial` and stay unreadable to
   identity. None of them has been parsed.
-- The same unit-coverage mechanism applies to other collectors. MyJCB's
-  collector declares every connection unit `partial` on success, so its runs
-  register as `partial` and its rows have no current identity; that is not
-  changed here.
+- The same unit-coverage mechanism applies to other collectors; what each
+  collector's successful unit declares is ADR 0026's decision (#272), not
+  this one's.
 
 ### Verification
 
 - `services/collector-vpass/test/shared-collection.test.ts` ("ADR 0023"): the
-  token equals the importer's construction written out independently; the
+  token equals the importer's construction written out independently, and a
+  known-answer vector computed from the retired importer's own code (from git
+  history) and a second HMAC implementation on a synthetic tuple and key; the
   run's units, the artifact's role, unit and step, and its payload; no tuple
   value in any stored byte and the token only in the terminal and the binding
   object; the token is the same across sessions and ordinals and differs by
@@ -401,7 +413,8 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   and keys, token shapes, reports, artifact fields, extra units, extra
   bindings, failed and hidden runs and artifacts) the shipped view returns
   exactly the specification's rows, and its importer rows are exactly
-  migration 0021's; eight mutations of the shipped select are each caught.
+  migration 0021's; so it does on three scaled stores of 600 sessions each;
+  eight mutations of the shipped select are each caught.
 - `services/processor/test/binding-query-plan.test.ts`: after 0055 the lookup
   by artifact, the correlated lookup, the policy loader's lookup and the two
   identity views take 0021's plan steps, except that the identity views reach
@@ -412,7 +425,9 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
 - `packages/identity/test/identity-other.test.ts`: the collector's token keys
   the same account reference as the importer's.
 - Not verified: whether the provider's current responses still carry the
-  session bean (no provider was contacted), and whether the owner's key is the
-  importer's (the token check after deploy answers it). The MyJCB statement is
+  session bean (no provider was contacted), whether the owner's key is the
+  importer's (the token check after deploy answers it), and whether a month
+  walk that ends on an empty page has every row of the month (option 7's
+  limit). The MyJCB statement is
   read from its collector's plan output and the registration code, not from a
   registered MyJCB run.

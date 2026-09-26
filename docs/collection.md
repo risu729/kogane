@@ -466,6 +466,10 @@ itself is `complete`: it collected every month the provider listed, and a
 `partial` unit would make registration record the whole fetch run as
 `partial`, which neither identity nor the trusted card binding reads
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
+Limit: a month's walk ends on the first empty page without checking the
+provider's stated row count, so `complete` is not a proof that each month is
+whole; ADR 0026 (#272, proposed) keeps this unit `partial` for that reason,
+and the two are reconciled before the Vpass pages are released.
 `producerVersion` is `vpass-worker-card-v1`, the schema version central
 storage recorded for a card-scoped Vpass run, and `manifest.json` holds exactly
 the summary central storage held for one.

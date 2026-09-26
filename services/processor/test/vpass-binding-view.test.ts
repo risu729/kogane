@@ -61,7 +61,7 @@ function random(seed: number): () => number {
   };
 }
 
-function store(seed: number): Database {
+function store(seed: number, sessions = 12): Database {
   const next = random(seed);
   const chance = (p: number) => next() < p;
   const pick = <T>(values: readonly T[]): T => values[Math.floor(next() * values.length)]!;
@@ -130,7 +130,7 @@ function store(seed: number): Database {
     }
   };
 
-  for (let session = 1; session <= 12; session += 1) {
+  for (let session = 1; session <= sessions; session += 1) {
     const sessionId = newId();
     const producer = pick([IMPORTER, IMPORTER, COLLECTOR, COLLECTOR, "vpass-json"]);
     const namespace =
@@ -252,6 +252,22 @@ test("the shipped view returns exactly the specified rows on random stores", () 
   expect(importer).toBeGreaterThan(20);
   expect(collector).toBeGreaterThan(20);
   expect(rejected).toBeGreaterThan(40);
+});
+
+test("the shipped view returns exactly the specified rows on scaled stores", () => {
+  // The same generator at 50 times the sessions: many sessions share tokens,
+  // so equal tokens across cards, sessions and producers are common, and the
+  // correlated guards run against crowded tables.
+  let rowsSeen = 0;
+  for (const seed of [101, 102, 103]) {
+    const db = store(seed, 600);
+    db.exec(`CREATE VIEW shipped AS ${SHIPPED}`);
+    const spec = rows(db, "spec");
+    expect([seed, rows(db, "shipped")]).toEqual([seed, spec]);
+    rowsSeen += spec.length;
+    db.close();
+  }
+  expect(rowsSeen).toBeGreaterThan(200);
 });
 
 const MUTATIONS: [string, string, string][] = [

@@ -363,6 +363,9 @@ async function planFor(run: VpassCardRun, binding: VpassCardBinding): Promise<Pe
           // partial run, so every row would stay unresolved (ADR 0023). The
           // gap that is real, the rolling window, stays on the run's
           // `coverageStatus` and on the `statement-months` range.
+          // Limit: `collectMonth` ends a month on the first empty page
+          // without checking the stated row count, so this is not a proof
+          // that each month is whole (ADR 0023, option 7; ADR 0026).
           coverageStatus: "complete",
         },
         ...bindingUnits,

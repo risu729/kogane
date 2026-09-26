@@ -154,12 +154,11 @@ Concrete limits in the current code:
   Once collector-vpass runs register and are parsed, the importer's Vpass
   purchase events of every re-captured card-month are retired and recognised
   again once, on the same account, where the collector's run carries a card
-  binding, and not recognised again where it does not (ADR 0023). MyJCB
-  events are retired, but the collector's MyJCB runs register as `partial`
-  (every connection unit reports `partial` coverage, and a partial unit makes
-  the fetch run partial), and identity reads no partial run, so the
-  collector's MyJCB rows stay unresolved and are not recognised again until
-  that is changed.
+  binding, and not recognised again where it does not (ADR 0023). What a
+  collector's successful unit declares decides whether its run registers as
+  `success` or `partial`, and identity reads no partial run; the Vpass card
+  unit declares `complete` (ADR 0023), and MyJCB's connection units are
+  decided by ADR 0026 (#272).
 - Shared-R2 registration gives an artifact the parser dataset it needs since
   2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
   every registered artifact had none, so only Mizuho's were parsed). The
