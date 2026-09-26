@@ -2,7 +2,7 @@
 
 - Status: proposed
 - Date: 2026-09-26
-- Implemented by: this ADR's pull request
+- Implemented by: #266
 - Carried by:
   [observations](../observations.md#myjcb-pending-statements-are-one-slot-each),
   `myjcbStatementSlot` and `MYJCB_LEDGER_SNAPSHOT_CTES` in
