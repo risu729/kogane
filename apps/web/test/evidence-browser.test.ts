@@ -292,6 +292,9 @@ describe.if(runnable)("production evidence navigation", () => {
     runStatus = metadataStatus = 200;
     const page = await browser.newPage();
     await page.goto(origin, { waitUntil: "networkidle" });
+    // `networkidle` does not guarantee the records request has rendered; the
+    // refresh warning is only shown once records were loaded.
+    await page.locator("tbody").getByText("一部取得", { exact: true }).waitFor();
     runStatus = 503;
     await page.getByRole("button", { name: "表示を更新", exact: true }).click();
     await page.getByRole("alert").waitFor();
