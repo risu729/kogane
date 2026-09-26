@@ -30,6 +30,7 @@ import {
   type ReportRow,
   type ValuationCell,
 } from "../../../packages/domain/src/index.ts";
+import { PRICE_RULE_IDS } from "../../../packages/domain/src/price-sources.ts";
 import { quantityFromNormalizedDecimal } from "../../../packages/domain/src/values.ts";
 import {
   validNormalizedDecimal,
@@ -215,6 +216,64 @@ async function decimals(
 }
 
 /**
+ * ?1 JSON array of `[instrument ref, position observation id]`, ?2 the quote
+ * unit, ?3 the knowledge cutoff instant, ?4 JSON array of the closed rule ids.
+ * Per position, the price promoted from a claim of the position's own parse
+ * run; ties go to the latest effective instant, then the later recorded row,
+ * then the higher id. Instants are compared through `julianday`, never as text.
+ */
+export const SNAPSHOT_PRICE_SQL = `WITH wanted AS (
+ SELECT DISTINCT json_extract(value,'$[0]') AS base, json_extract(value,'$[1]') AS position_id
+ FROM json_each(?1)
+), ranked AS (
+ SELECT wanted.position_id, po.id, po.base_instrument_ref, po.base_quantity_coefficient,
+  po.base_quantity_scale, po.quote_unit_ref, po.quote_amount_coefficient, po.quote_amount_scale,
+  po.price_kind, po.effective_time, po.source_claim_ref, po.market_ref, po.adjustment_policy_ref,
+  ROW_NUMBER() OVER (
+   PARTITION BY wanted.position_id
+   ORDER BY julianday(json_extract(po.effective_time,'$.value')) DESC, po.recorded_at DESC, po.id DESC
+  ) AS rank_in_key
+ FROM wanted
+ JOIN position_observations held ON held.id=wanted.position_id
+ JOIN price_observations po ON po.base_instrument_ref=wanted.base AND po.quote_unit_ref=?2
+ JOIN price_observation_claims c ON c.price_id=po.id AND c.parse_run_id=held.parse_run_id
+ JOIN published_parse_runs pub ON pub.parse_run_id=c.parse_run_id
+ WHERE c.rule_id IN (SELECT value FROM json_each(?4))
+   AND json_extract(po.effective_time,'$.kind')='instant'
+   AND julianday(json_extract(po.effective_time,'$.value'))<=julianday(?3)
+   AND julianday(po.recorded_at)<=julianday(?3)
+)
+SELECT position_id, id, base_instrument_ref, base_quantity_coefficient, base_quantity_scale,
+ quote_unit_ref, quote_amount_coefficient, quote_amount_scale, price_kind, effective_time,
+ source_claim_ref, market_ref, adjustment_policy_ref
+FROM ranked WHERE rank_in_key=1`;
+
+/** The snapshot price of each position, keyed by position observation id. */
+async function snapshotPrices(
+  db: D1Database,
+  wanted: readonly { ref: string; positionId: number }[],
+  unitRef: string,
+  cutoff: string,
+): Promise<Map<number, PriceObservation>> {
+  const prices = new Map<number, PriceObservation>();
+  if (wanted.length === 0) return prices;
+  const rows = await db
+    .prepare(SNAPSHOT_PRICE_SQL)
+    .bind(
+      JSON.stringify(wanted.map((entry) => [entry.ref, entry.positionId])),
+      unitRef,
+      cutoff,
+      JSON.stringify(PRICE_RULE_IDS),
+    )
+    .all<PriceRow & { position_id: number }>();
+  for (const row of rows.results) {
+    const price = priceObservation(row);
+    if (price) prices.set(row.position_id, price);
+  }
+  return prices;
+}
+
+/**
  * Every version this run used, as the set itself rather than as a latest id or
  * a timestamp (AR12). The digest of this object is the context id, so adding a
  * corrected price or a later observation produces a new context instead of
@@ -315,25 +374,23 @@ export async function runReportJob(
     options.decimalPolicyRelease,
   );
 
-  // One price per instrument: the most recently recorded observation quoted in
-  // the report's base unit. The chosen id goes into the manifest, so a later
+  // One price per holding, from the holding's own provider snapshot (ADR 0020):
+  // a promoted price whose claim was read from the same parse run as the
+  // position, under a rule of the closed list, whose parse is currently
+  // published, quoted in the report's base unit, effective and recorded at or
+  // before the knowledge cutoff. A holding whose own row was refused by the
+  // basis check therefore stays `missing-price`; it is never valued at an
+  // older snapshot's price. The chosen id goes into the manifest, so a later
   // correction changes the context rather than the stored report (UC36/AT36).
-  const prices = new Map<string, PriceObservation>();
-  for (const entry of positions) {
-    const ref = instrumentRef(entry.position);
-    if (prices.has(ref)) continue;
-    const row = await env.DB.prepare(
-      `SELECT id,base_instrument_ref,base_quantity_coefficient,base_quantity_scale,quote_unit_ref,
-        quote_amount_coefficient,quote_amount_scale,price_kind,effective_time,source_claim_ref,
-        market_ref,adjustment_policy_ref
-       FROM price_observations WHERE base_instrument_ref=? AND quote_unit_ref=?
-       ORDER BY recorded_at DESC, id DESC LIMIT 1`,
-    )
-      .bind(ref, options.unitRef)
-      .first<PriceRow>();
-    const price = row ? priceObservation(row) : null;
-    if (price) prices.set(ref, price);
-  }
+  const prices = await snapshotPrices(
+    env.DB,
+    positions.map((entry) => ({
+      ref: instrumentRef(entry.position),
+      positionId: entry.position.id,
+    })),
+    options.unitRef,
+    options.knowledgeCutoff,
+  );
 
   const manifest: ReportInputManifest = {
     schemaVersion: INPUT_MANIFEST_VERSION,
@@ -344,7 +401,7 @@ export async function runReportJob(
     instrumentValuationPolicyId: DEFAULT_INSTRUMENT_VALUATION_POLICY.policyId,
     positionObservationIds: [...positionIds].sort((a, b) => a - b),
     valuationObservationIds: [...valuationIds].sort((a, b) => a - b),
-    priceObservationIds: [...prices.values()].map((price) => price.id).sort(),
+    priceObservationIds: [...new Set([...prices.values()].map((price) => price.id))].sort(),
   };
   const manifestDigest = await canonicalDigest(manifest);
   const contextId = `ctx-${manifestDigest}`;
@@ -383,7 +440,7 @@ export async function runReportJob(
     const quantity = normalized
       ? quantityFromNormalizedDecimal(ref, normalized)
       : { unitRef: ref, value: { status: "missing" as const, reasonCode: "decimal_row_missing" } };
-    const outcome = valueHolding(quantity, prices.get(ref) ?? null, {
+    const outcome = valueHolding(quantity, prices.get(entry.position.id) ?? null, {
       instrumentClass: "listed-equity",
     });
     cells.push({
@@ -432,7 +489,7 @@ export async function runReportJob(
   const restrictions = await restrictionsFor(env.DB, [
     contextId,
     ...manifest.priceObservationIds,
-    ...[...prices.values()].map((price) => price.sourceClaimRef),
+    ...new Set([...prices.values()].map((price) => price.sourceClaimRef)),
   ]);
   const replayability = replayabilityFor({
     inputsPresent: true,
@@ -542,7 +599,7 @@ export async function runReportJob(
         calculationRunId: runId,
         inputManifest: manifest,
         policyRefs: body.policyRefs,
-        prices: [...prices.values()]
+        prices: [...new Map([...prices.values()].map((price) => [price.id, price])).values()]
           .map((price) => ({
             id: price.id,
             baseInstrumentRef: price.baseInstrumentRef,

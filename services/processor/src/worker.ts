@@ -79,6 +79,7 @@ import {
   rewardReadProjectionEnabled,
   rewardReadProjectionStage,
 } from "./reward-read-projection.ts";
+import { pricePromotionSweep } from "./price-promotion-job.ts";
 import { reportsEnabled, runReportJob } from "./report-job.ts";
 import {
   IDENTITY_RUNS_PER_TICK,
@@ -1711,6 +1712,13 @@ export interface ScheduledStages {
    * written to READ (docs/rewards.md).
    */
   rewardReadProjection?: (env: Env) => Promise<object>;
+  /**
+   * Provider prices promoted to `price_observations` by the closed rule list
+   * (ADR 0020, docs/calculation-and-reports.md §1). No flag: it writes only
+   * append-only prices and their claims, which no reader uses until it selects
+   * them, and it records its tick like the other stateless lanes.
+   */
+  prices?: (env: Env) => Promise<object>;
   /** A12 report job. Absent stage, or the flag off, means the lane never runs. */
   reports?: (env: Env) => Promise<object>;
   /**
@@ -1745,6 +1753,7 @@ const defaultStages: ScheduledStages = {
   purchases: (env) => cardPurchaseSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
   rewardReadProjection: (env) => rewardReadProjectionStage(env),
+  prices: (env) => pricePromotionSweep(env.DB),
   reports: (env) => {
     // One clock reading for both fields: the run records when it ran, and the
     // cutoff admits everything recorded up to that same instant.
@@ -1840,6 +1849,11 @@ export async function runScheduled(
       stages.rewardReadProjection,
       rewardReadProjectionEnabled(env.REWARD_READ_PROJECTION_ENABLED),
     ],
+    // After identity and before the report job, which reads the prices it
+    // promotes: provider prices become `price_observations` rows by the closed
+    // rule list, at most 500 claims a tick (docs/calculation-and-reports.md §1).
+    // Always on; it writes append-only prices and claims only.
+    ["price_promotion", stages.prices, true],
     // Off unless REPORTS_ENABLED is set, for the same reason
     // (docs/calculation-and-reports.md).
     ["report_job", stages.reports, reportsEnabled(env.REPORTS_ENABLED)],

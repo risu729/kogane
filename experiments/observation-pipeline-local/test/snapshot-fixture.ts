@@ -34,6 +34,17 @@ import type {
   ValuationObservation,
 } from "../../../packages/parsers/src/types.ts";
 
+/**
+ * Datasets seeded on `coverage-v1` with `replaces_previous_on_complete_empty = 0`
+ * (0046 St.George, 0053 SBI Shinsei exchange rates), and the parser version
+ * their policy requires. They need a claim, and an empty claimed snapshot never
+ * replaces the previous one.
+ */
+export const EXPLICIT_COVERAGE: ReadonlyMap<string, string> = new Map([
+  ["st-george-balances", "1.0.0"],
+  ["sbi-shinsei-exchange-rate", "1.0.0"],
+]);
+
 const cleanup: (() => void)[] = [];
 /** Call from afterEach: closes and deletes every store opened by `database`. */
 export function closeStores(): void {
@@ -124,9 +135,7 @@ export function snapshot(store: Store, options: Snapshot) {
       options.parserVersion ??
       (options.parser === "sbi-foreign-cash-positions"
         ? FOREIGN_POSITION_SNAPSHOT_VERSION
-        : options.parser === "st-george-balances"
-          ? "1.0.0"
-          : "0.1.0"),
+        : (EXPLICIT_COVERAGE.get(options.parser) ?? "0.1.0")),
     parsedAt: time,
     status: options.parseStatus ?? "ok",
     warnings: options.warnings ?? [],
@@ -214,7 +223,8 @@ export const balance = (instrument = "JPY", account = "synthetic-account"): Bala
 export function facts(parser: string, label: string): Observation[] {
   if (parser.includes("positions")) return [position(label), valuation(label)];
   if (parser === "sbi-vc-position-summary") return [position(label)];
-  if (parser === "sbi-account-assets-current") return [valuation(label)];
+  if (parser === "sbi-account-assets-current" || parser === "sbi-shinsei-exchange-rate")
+    return [valuation(label)];
   if (parser === "sony-bank-gross-balance" || parser.endsWith("top-balances-and-activity")) {
     return [balance(label), valuation(label)];
   }
