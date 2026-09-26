@@ -302,7 +302,7 @@ test("two posted rows of the same amount are two candidates and never merge by t
   expect(await w.totals()).toMatchObject({ captured: "1800", authorized: "0", unresolved: 1 });
 }, 90_000);
 
-test("MyJCB rows with only relative period labels (detailMonth-N) meet by usage month", async () => {
+test("MyJCB rows whose relative labels resolve to different periods meet by usage month", async () => {
   const w = await world();
   const matching: UsageRow = {
     date: "2026/05/10",
@@ -319,21 +319,22 @@ test("MyJCB rows with only relative period labels (detailMonth-N) meet by usage 
   });
   await w.myjcb({
     state: "confirmed",
-    period: "detailMonth-2",
+    period: "detailMonth-1",
     fetchedAt: "2026-06-12T00:00:00.000Z",
     rows: [matching, { ...matching, date: "2026/05/01", amount: "300" }],
   });
   expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 4, proposed: 1 });
   // The pending side's position 0 resolves from its capture time (2026-06-12
-  // JST: the cycle paid in 2026-07); the confirmed side's position 2 is one
-  // relative-statement-period-v1 does not place, so it has no period. MyJCB
-  // events are paired by usage month, so the two still meet.
+  // JST: the cycle paid in 2026-07) and the confirmed side's position 1 to
+  // 2026-06: their periods disagree (a confirmed row at a position the rule
+  // does not place is not current at all). MyJCB events are paired by usage
+  // month, so the two still meet.
   expect(
     await w.all(
       "SELECT DISTINCT source_id,json_extract(facts_json,'$.providerStatus') AS status,statement_period FROM card_purchase_recognitions ORDER BY status",
     ),
   ).toEqual([
-    { source_id: "myjcb", status: "confirmed", statement_period: null },
+    { source_id: "myjcb", status: "confirmed", statement_period: "2026-06" },
     { source_id: "myjcb", status: "unconfirmed", statement_period: "2026-07" },
   ]);
   // Exactly the matching pair is proposed: same usage day, same amount.
@@ -376,7 +377,7 @@ test("MyJCB twins of one amount and day under relative labels are both candidate
   });
   await w.myjcb({
     state: "confirmed",
-    period: "detailMonth-2",
+    period: "detailMonth-1",
     fetchedAt: "2026-06-12T00:00:00.000Z",
     rows: [matching, matching],
   });

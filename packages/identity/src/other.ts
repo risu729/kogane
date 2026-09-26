@@ -12,6 +12,7 @@ const LABELS: Record<string, string> = {
   "global-pass": "GLOBAL PASSデビット明細",
   myjcb: "MyJCB請求口座",
   "smbc-bank": "三井住友銀行 円普通預金",
+  "mizuho-bank": "みずほ銀行 普通預金",
   "st-george": "St.George",
   "sony-bank": "ソニー銀行",
   "sbi-shinsei-bank": "SBI新生銀行 預金口座",
@@ -79,6 +80,12 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
       break;
     case "smbc-bank":
       if (a === "smbc-bank:ordinary-yen") account("deposit", "audited-ordinary-yen-scope");
+      break;
+    case "mizuho-bank":
+      // The parser's reference: yen ordinary deposit, 3-digit branch code and
+      // 7-digit account number exactly as the provider displays them.
+      if (/^mizuho-bank:ordinary:\d{3}:\d{7}$/u.test(a))
+        account("deposit", "provider-branch-and-account");
       break;
     case "st-george":
       if (/^st-george:[a-f0-9]{64}$/u.test(a)) account("deposit", "sha256-provider-bsb-account");

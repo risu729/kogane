@@ -12,6 +12,7 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 | GLOBAL PASS  | `global-pass:card`                                 | Debit activity, separate from PRESTIA bank deposits                                                                          |
 | MyJCB        | `myjcb:{connection}:root`                          | Statement aggregate without physical/subcard assignment                                                                      |
 | SMBC         | `smbc-bank:ordinary-yen`                           | Audited ordinary JPY deposit only; not Olive credit liability or AUD deposit                                                 |
+| Mizuho       | `mizuho-bank:ordinary:{branch 3}:{account 7}`      | Provider branch and account number of an ordinary JPY deposit; balance and history rows share it (policy 2)                  |
 | Sony         | `sony-bank:deposit:{currency}`                     | Currency-specific deposit scope                                                                                              |
 | Sony         | `sony-bank:wallet`                                 | Debit-card activity; not another stored-value deposit                                                                        |
 | Sony         | `sony-bank:gross`, asset 001–011, loan 012–015     | Provider totals/categories, not established product holdings                                                                 |

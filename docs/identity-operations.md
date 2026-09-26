@@ -117,7 +117,7 @@ the new automatic token mapping; the binding is still pinned for review.
 
 Verify baseline versus policy-2 counts and pin provenance separately from
 global identity status. Other sources remain on policy 1 because their rules did
-not change; explicit future policies of 3 or higher retain numeric upgrade
+not change, except Mizuho (below); explicit future policies of 3 or higher retain numeric upgrade
 behavior. Audits use the exported `requiredIdentityPolicySql` helper, the same
 eligibility expression as the projector. Rollback must preserve migration 0020 and all pins/seals;
 older policy-1 workers cannot replace a newer sealed decision.
@@ -130,3 +130,33 @@ the prior valid sealed policy; a valid sealed empty result still supersedes an
 older result. The writer's keyed eligibility view stays unchanged. This avoids
 the old plan that multiplied acquisition terminal reports by all successful
 parses, even for a direct read of the core identity view without UI joins.
+
+## Policy 2: Mizuho rule re-identification
+
+The resolver had no `mizuho-bank` rule when the Mizuho collector started, so
+every policy-1 run mapped its accounts as `unresolved` /
+`unrecognized-source-account`. The rule now accepts the parser's exact
+reference `mizuho-bank:ordinary:{3-digit branch}:{7-digit account}` as a
+provider-local `deposit` (`provider-branch-and-account`, label
+`みずほ銀行 普通預金`); any other Mizuho shape stays unresolved.
+
+A new run for one parse needs a new numeric version, so the `mizuho-bank`
+policy module (`identity-policies/mizuho.ts`) requires version 2 for every
+Mizuho parse. It needs no evidence: the family stays `identity-default`, the
+release is `identity-default-v2` and the dependency set is empty. The bounded
+sweep therefore treats sealed policy-1 Mizuho parses as candidates again and
+appends a policy-2 run and rule mapping revision per source account; the
+current views select the newer sealed run. The source account and account
+entity are the same references as before, so balances and transactions are not
+counted twice. Account entities are append-only, so a Mizuho entity first
+written under policy 1 keeps its `source-account` role (shown as the role in the
+identity browser); the `deposit` label, `provider-local` status and reason are
+on the policy-2 mapping revision, which is what the projections read. Policy-1 runs, their rows and Layer A/B stay as recorded, and a
+manual decision on a Mizuho reference is not replaced.
+
+After deployment the five-minute pipeline sweep picks the parses up on its own;
+to finish sooner run `node scripts/identity-ops.ts catchup 100 mizuho-bank` and
+continue only if the bounded run reports more candidates. Verify that the
+current Mizuho account mappings read `provider-local` at policy 2. No reimport
+or B reparse is needed. Rolling back the code leaves the policy-2 runs current:
+an older build cannot replace a newer sealed decision.

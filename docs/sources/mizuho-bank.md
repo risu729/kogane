@@ -79,9 +79,10 @@ request remains supported. Customer number and login password are provisioned
 as Worker secrets out of band; neither enters CI/CD, evidence or response logs.
 Each invocation attempts login once and stops on additional authentication;
 scheduled retries are disabled. The normal production release includes the
-Worker and health postcheck. A successful health check does not establish
-authenticated bank access: password login and cloud collection require separate
-live validation. Pagination still requires its own observed-transition validation.
+Worker and health postcheck. A successful health check alone does not establish
+authenticated bank access; that is established by the daily cron runs, which
+have registered in production since 2026-09-24. Pagination still requires its
+own observed-transition validation.
 
 The bank app was renamed to みずほ銀行アプリ on 2026-09-03; historical app names
 below describe the original research. The

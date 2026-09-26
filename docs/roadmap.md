@@ -51,14 +51,19 @@ Concrete limits in the current code:
   statement month with more than 200 published rows
   ([where stage B runs](economic-events.md#matching-stages)). Stage A needs a
   provider-issued row id, which neither source supplies, so the lane reads its
-  pages and proposes nothing until a source does. The collector's relative
-  `detailMonth-N` labels are resolved from their capture time
-  ([`relative-statement-period-v1`](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
-  but only positions 0 and 1 are placed, so the operator view shows a
-  confirmed MyJCB row at a later position as `period_unrecognized`. Every
-  pending MyJCB capture of a connection shares one snapshot slot, so two
-  pending ledgers of one run leave only one current
-  ([known limit](observations.md#relative-period-labels-are-resolved-from-the-capture-time)).
+  pages and proposes nothing until a source does. The collector records a
+  confirmed MyJCB page by the payment month the page names, so a statement
+  keeps its rows' keys while its position moves
+  ([release note](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release));
+  pending pages keep the relative `detailMonth-N`, resolved from their
+  capture time
+  ([`relative-statement-period-v1`](observations.md#relative-period-labels-are-resolved-from-the-capture-time)).
+  Limits: a confirmed capture stored under `detailMonth-2` or later (only
+  before that fix) names no statement and is never current; the collector
+  stops (`credit-statement-period`) on a confirmed page that names no month;
+  a pending row and its posted row are still two keys, paired by review; and
+  when both position 0 and position 1 are unconfirmed (a closed cycle not
+  yet confirmed), they still share the one unconfirmed slot.
 - [Card purchase recognition](economic-events.md#card-purchase-recognition)
   turns adopted Vpass/MyJCB single-payment rows with an exact JPY amount and a
   trusted card identity into `purchase` and `refund` events, behind

@@ -296,11 +296,10 @@ carry a provider link id) pairs them as follows:
   `detailMonth-0` row therefore pairs with the `detailMonth-1` confirmed row
   the next cycle moves it to when both resolve to one month (and the posted
   day is inside the [matching window](#matching-stages)), and the same label
-  captured in another cycle groups apart. That needs the collector to
-  record `detailMonth=1` as confirmed; on the surveyed connection it records
-  it as `unconfirmed` (no export link,
-  [observations](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
-  so its rows are pending rows there. A confirmed row whose month
+  captured in another cycle groups apart. The collector now records a
+  confirmed page by the month the page names
+  ([observations](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)),
+  which groups with the pending rows its month resolves. A confirmed row whose month
   neither the label nor the rule places (`detailMonth-2` and beyond) stays out
   of this job; the recognition lane's candidate pass, which groups MyJCB by
   usage month, still pairs it.
@@ -1133,10 +1132,15 @@ migration 0026.
   reads its pages and nothing else),
   `test/card-purchase-relative-period.test.ts` (a `detailMonth-1` row's stored
   period is its statement's from the same capture and the explanation links
-  them; `detailMonth-0` stores its resolved month and `detailMonth-2` stays
-  `period_unrecognized`; a recognition stored without a period is revised with
-  the resolved one, append-only; a pending row pairs with its posted row by
-  usage month and claims one statement only when both resolve to it) and
+  them; `detailMonth-0` stores its resolved month and a confirmed
+  `detailMonth-2` capture is not current, while the same page recorded by its
+  month is; a recognition stored without a period is revised with the resolved
+  one, append-only; a pending row pairs with its posted row by usage month and
+  claims one statement only when both resolve to it),
+  `test/myjcb-statement-identity.test.ts` (a statement moving from position 1
+  to 3 keeps its events with no retire or recognition, a pending row becomes
+  authorized and then captured once, and a statement captured under
+  `detailMonth-1` moves to its named key once, never counted twice) and
   `test/card-purchase-parser-shapes.test.ts` (recognition and the matching
   guard never disagree on a parsed MyJCB row).
 - `services/app`: `test/events-api.test.ts` (capability gate, Access
