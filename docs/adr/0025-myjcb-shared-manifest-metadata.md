@@ -168,8 +168,9 @@ unreachable), which is a separate decision and is not taken here.
   - The same plan, with only the unit's coverage set to `complete`,
     registers and parses: four jobs, no error. `observation_fetch_artifacts`
     carries the manifest's state and period, both ledgers are in
-    `current_myjcb_snapshots` (the unconfirmed slot and the named payment
-    month), the statement total is published once, and purchase recognition
+    `current_myjcb_snapshots` (each in its own statement slot:
+    [ADR 0016](0016-myjcb-pending-statement-slots.md) for the pending
+    ledger, the named payment month for the confirmed one), the statement total is published once, and purchase recognition
     recognises three rows (one `authorized`, two `captured`). A second pass
     changes nothing.
   - With the extractor from before this change, the same test ends with four

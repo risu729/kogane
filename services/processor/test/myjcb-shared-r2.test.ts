@@ -299,8 +299,9 @@ test("a shared-R2 MyJCB run parses with the statement state and period its manif
     ).first<number>("n"),
   ).toBe(4);
 
-  // Both ledgers are current: the pending one in the connection's single
-  // unconfirmed slot, the confirmed one in its named payment month.
+  // Both ledgers are current, each in the statement it belongs to (ADR 0016):
+  // the pending `detailMonth-0` capture fetched on the 20th resolves to the
+  // payment month after next, the confirmed one to the month its page names.
   expect(
     (
       await env.DB.prepare(
@@ -308,7 +309,7 @@ test("a shared-R2 MyJCB run parses with the statement state and period its manif
       ).all()
     ).results,
   ).toEqual([
-    { artifact_key: `${CONNECTION}/credit-ledger-00.json`, statement_slot: "" },
+    { artifact_key: `${CONNECTION}/credit-ledger-00.json`, statement_slot: "2026-11" },
     { artifact_key: `${CONNECTION}/credit-ledger-01.json`, statement_slot: "2026-10" },
   ]);
   // The confirmed page's statement total is published once.
