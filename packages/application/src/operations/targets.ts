@@ -5,9 +5,11 @@
 // Counts and identifiers only. No amount, no provider text, and no count of
 // anything outside the subject the caller named.
 import {
+  type CardReviewKind,
   type ChangeKind,
   type ChangePayload,
   type CommandStore,
+  isCardReviewKind,
   type ExpectedRevisions,
   type OutboxTarget,
   type PlanTarget,
@@ -100,11 +102,30 @@ export interface ResolvedPlan {
   simulation: Simulation;
 }
 
+/** Resolves one review kind's targets and simulates it, as `resolveAndSimulate` does. */
+export type ReviewPlanner = (
+  store: CommandStore,
+  kind: CardReviewKind,
+  payload: ChangePayload,
+) => Promise<CommandResult<{ resolved: ResolvedPlan }>>;
+
+/**
+ * The card purchase review planners (ADR 0017). The kinds exist in the schema
+ * (CORE 0051) and the payload contract; each becomes plannable when a later
+ * change registers its planner here. An unregistered kind is refused with
+ * `unsupported_semantics` before the plan is stored, so no row is written.
+ */
+export const REVIEW_PLANNERS: Readonly<Partial<Record<CardReviewKind, ReviewPlanner>>> = {};
+
 export async function resolveAndSimulate(
   store: CommandStore,
   kind: ChangeKind,
   payload: ChangePayload,
 ): Promise<CommandResult<{ resolved: ResolvedPlan }>> {
+  if (isCardReviewKind(kind)) {
+    const planner = REVIEW_PLANNERS[kind];
+    return planner ? planner(store, kind, payload) : commandError("unsupported_semantics", [kind]);
+  }
   if (kind.startsWith("card-settlement.")) return cardSettlementPlan(store, kind, payload);
   if (kind === "relation.accept" || kind === "relation.reject") {
     const relation = relationPayload(payload);

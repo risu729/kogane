@@ -712,6 +712,29 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "49ffaf6193a075f2f7052dfb7a1bd67accabad51158e6528456520e1434cafef"
+    },
+    {
+      "file": "0051_card_purchase_review_commands.sql",
+      "statementCount": 34,
+      "insertStatements": [
+        {
+          "table": "change_plans_expanded",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "approvals_expanded",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "operation_receipts_expanded",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "decision_outbox_expanded",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "39e131cf8e3f49e3caaef2e6300544592a350fcc08c488e08bf84a2d84fdb398"
     }
   ],
   "tables": [
@@ -3433,7 +3456,7 @@
         "change_plans_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "18f26f845a6d8bed"
+      "sqlSha256": "b5743863b77a8a25"
     },
     {
       "name": "collection_run_stages",
@@ -9042,7 +9065,7 @@
         "operation_receipts_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "d254a61c3269acbb"
+      "sqlSha256": "7f835188bb1019aa"
     },
     {
       "name": "ops_request_stages",
@@ -16933,8 +16956,9 @@
       "0044_card_statement_settlements.sql",
       "0045_expand_card_settlement_commands.sql",
       "0046_st_george_balance_snapshot.sql",
-      "0047_card_purchase_recognition.sql"
+      "0047_card_purchase_recognition.sql",
+      "0051_card_purchase_review_commands.sql"
     ],
-    "schemaSha256": "a8e14834690f62150ccd66ff5dfab6a81e70b3bc811dc0d7e62c841369b5d24e"
+    "schemaSha256": "3841906bbd4de206c313e4a065dafa6e19f0e9a9278fb5a2835acc5b6e56e9bf"
   }
 }
