@@ -145,7 +145,22 @@ export interface RegisterTerminalInput {
    * registration made before a bump (ADR 0022).
    */
   contractVersion?: string;
+  /**
+   * How long a `retryable` refusal stands before this caller attempts the run
+   * again (ADR 0024). A run whose newest `registered` attempt was refused
+   * retryable more recently than this is answered from CORE, with
+   * `recorded: true`, and nothing is attempted. Absent, every call attempts,
+   * which is what the queue consumer does with a delivery.
+   */
+  retryAfterMs?: number;
 }
+
+/**
+ * The retry interval of a `retryable` refusal (ADR 0024): the scan attempts
+ * such a run at most once per interval, and each attempt that is refused
+ * again appends one stage row, so the newest row says when it was last tried.
+ */
+export const RETRYABLE_RETRY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** Where a staged registration stopped: what the next call starts with. */
 export type RegistrationPhase = "structure" | "catalogue" | "inventory" | "terminal";
@@ -174,9 +189,14 @@ export type RegisterTerminalOutcome =
       artifacts: number;
       phase: RegistrationPhase;
     }
-  | { outcome: "blocked"; collectionRunId: number | null; code: string }
+  /**
+   * `recorded` is true when the verdict was read back from CORE rather than
+   * made by this call: the run was judged before, under this contract and
+   * this terminal digest, and nothing was attempted (ADR 0024).
+   */
+  | { outcome: "blocked"; collectionRunId: number | null; code: string; recorded: boolean }
   /** Refused for a reason that is not about this evidence; try again later. */
-  | { outcome: "retryable"; collectionRunId: number; code: string }
+  | { outcome: "retryable"; collectionRunId: number; code: string; recorded: boolean }
   /** No terminal at this key. Nothing is recorded: the run never finished. */
   | { outcome: "missing" }
   /**
@@ -281,7 +301,9 @@ async function registerWithin(context: Registration): Promise<RegisterTerminalOu
     });
   }
   if (row.blocked_code !== null) {
-    return { outcome: "blocked", collectionRunId: row.id, code: row.blocked_code };
+    // A block is write-once: the verdict stands until the registration
+    // contract changes, which is a new identity and so a new row.
+    return { outcome: "blocked", collectionRunId: row.id, code: row.blocked_code, recorded: true };
   }
   if (row.registered_at !== null || (await collectionRunRegistered(env.DB, row.id))) {
     return {
@@ -290,6 +312,12 @@ async function registerWithin(context: Registration): Promise<RegisterTerminalOu
       fetchRunId: row.fetch_run_id,
       terminalDigest: row.terminal_digest,
     };
+  }
+  // A retryable refusal the caller does not want re-tried yet (ADR 0024).
+  // Only a row this call did not create can have one.
+  if (inserted === 0 && input.retryAfterMs !== undefined) {
+    const waiting = await retryWaiting(context, row, input.retryAfterMs);
+    if (waiting) return waiting;
   }
   // A second manifest under the same run id is a disagreement about what that
   // run was, and the earlier record stays. Nothing is overwritten and nothing
@@ -807,7 +835,9 @@ async function recordBlockedTerminal(
   return {
     outcome: "blocked",
     collectionRunId: row?.id ?? null,
-    code: safeCode(read.reasonCode),
+    code: row?.blocked_code ?? safeCode(read.reasonCode),
+    // The same bytes were recorded as blocked before: nothing new was judged.
+    recorded: row !== null && inserted === 0,
   };
 }
 
@@ -822,6 +852,29 @@ async function conflictingDigest(context: Registration, row: CollectionRunRow): 
   );
 }
 
+/**
+ * The recorded refusal of a run whose newest `registered` attempt was refused
+ * retryable less than `retryAfterMs` ago, or null when it is due (or was
+ * never refused). Answering it costs one query and attempts nothing.
+ */
+async function retryWaiting(
+  context: Registration,
+  row: CollectionRunRow,
+  retryAfterMs: number,
+): Promise<RegisterTerminalOutcome | null> {
+  const latest = await readLatestCollectionStage(context.env.DB, row.id, "registered");
+  if (latest?.state !== "retryable" || latest.failure_code === null) return null;
+  const lastAttemptMs = Date.parse(latest.recorded_at);
+  if (!Number.isFinite(lastAttemptMs)) return null;
+  if (context.now().valueOf() - lastAttemptMs >= retryAfterMs) return null;
+  return {
+    outcome: "retryable",
+    collectionRunId: row.id,
+    code: latest.failure_code,
+    recorded: true,
+  };
+}
+
 async function retryable(
   context: Registration,
   row: CollectionRunRow,
@@ -829,11 +882,18 @@ async function retryable(
   at: Date,
 ): Promise<RegisterTerminalOutcome> {
   const safe = safeCode(code);
-  // The stage table is append-only, and a configuration problem repeats every
-  // tick. One row per *change* of state keeps the history readable instead of
-  // filling it with the same sentence.
+  // The stage table is append-only, and a configuration problem repeats on
+  // every attempt. A row is appended when the state changes, and otherwise at
+  // most once per retry interval, so the newest row says when the run was
+  // last tried (which is what `retryWaiting` reads) without filling the
+  // history with the same sentence on every queue redelivery (ADR 0024).
+  const interval = context.input.retryAfterMs ?? RETRYABLE_RETRY_INTERVAL_MS;
   const latest = await readLatestCollectionStage(context.env.DB, row.id, "registered");
-  if (latest?.state !== "retryable" || latest.failure_code !== safe) {
+  if (
+    latest?.state !== "retryable" ||
+    latest.failure_code !== safe ||
+    !(at.valueOf() - Date.parse(latest.recorded_at) < interval)
+  ) {
     await appendCollectionStage(context.env.DB, {
       collectionRunId: row.id,
       stage: "registered",
@@ -842,7 +902,7 @@ async function retryable(
       recordedAt: at.toISOString(),
     });
   }
-  return { outcome: "retryable", collectionRunId: row.id, code: safe };
+  return { outcome: "retryable", collectionRunId: row.id, code: safe, recorded: false };
 }
 
 async function block(
@@ -862,7 +922,7 @@ async function block(
     recordedAt,
   });
   await blockCollectionRun(context.env.DB, row.id, safe);
-  return { outcome: "blocked", collectionRunId: row.id, code: safe };
+  return { outcome: "blocked", collectionRunId: row.id, code: safe, recorded: false };
 }
 
 /** The stored codes are machine codes; anything else becomes one generic code. */

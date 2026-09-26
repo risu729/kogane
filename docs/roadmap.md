@@ -124,9 +124,11 @@ Concrete limits in the current code:
   producer and stay unregistered in R2; for the snapshot sources the next
   capture shows the provider's state again, but V Point Pay notification
   emails of that period are registered only if a later decision registers
-  those runs. The `collection_scan` walk does not revisit them either: it
-  stops at a page holding more than five terminals that never register
-  ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences)).
+  those runs. The `collection_scan` walk no longer stops at a page of such
+  terminals: it answers them from their recorded refusal and retries each at
+  most once a day, where the refusal repeats
+  ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences),
+  [ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
   Past the route check, registration still stopped for three of them — a
   Vpass run's seal was refused (`run_inventory_incomplete`, a statement page
   was a `provider_response` with a `redacted` step), and MyJCB and V Point

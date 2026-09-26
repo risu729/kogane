@@ -106,7 +106,10 @@ retried at all:
   stays empty is counted as a finished walk (`advanceCollectionScan`), every
   tick is counted as a completed cycle. The scan lane therefore does not revisit these runs.
   That walk defect is the Processor's, not this decision's, and a separate
-  PR fixes it.
+  PR fixes it. [ADR 0024](0024-collection-scan-judged-terminals.md)
+  does: a terminal already judged no longer spends one of the five, a
+  retryable run is retried at most once a day when the walk reaches it, and
+  the counters count finished pages and walks.
 
 New terminals pass the route check and reach the rest of registration
 through the R2 notification as they are written, within the
