@@ -215,7 +215,10 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
       bytes: encoder.encode(input.manifestJson),
       mediaType: JSON_MEDIA_TYPE,
       role: COLLECTOR_MANIFEST_ROLE,
-      unitKey: UNIT_KEY,
+      // The run's manifest belongs to the run, not to the account unit, whose
+      // `artifactCount` counts the activity pages only (ADR 0021). Naming the
+      // unit here without counting it made CORE refuse the seal
+      // (`run_inventory_incomplete`).
     }),
   );
 

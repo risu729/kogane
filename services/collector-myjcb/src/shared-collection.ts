@@ -37,6 +37,11 @@ import {
 export const SOURCE = "myjcb";
 /** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
 export const PRODUCER = "collector-myjcb";
+/**
+ * What derives a ledger or the discovery record from provider pages: this
+ * collector, named by its collector id (ADR 0021).
+ */
+const TRANSFORMER_ID = PRODUCER;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 /**
  * Datasets the central path has never accepted: the importer refuses a run
@@ -250,6 +255,24 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
           transformerId: "myjcb-sanitizer",
           transformerVersion: "v1",
           // The provider HTML was deliberately not retained.
+          inputArtifactKeys: [],
+          outputArtifactKey: artifactKey,
+        });
+      }
+      if (role === "collector_derived") {
+        // What a derived artifact was derived from (ADR 0021). A
+        // `credit-ledger-NN.json` is parsed from the statement page before
+        // redaction, and `discovery.json` from the login and mypage
+        // responses; none of those bytes is kept. The redacted capture of the
+        // statement page is not the ledger's input (the sanitizer rewrites
+        // text as well as attributes), so naming it would invent a parent:
+        // the step names no input and registers as
+        // `source_bytes_not_available`.
+        transformations.push({
+          transformationId: `extracted:${artifactKey.replaceAll("/", ":")}`,
+          stepKind: "extracted",
+          transformerId: TRANSFORMER_ID,
+          transformerVersion: input.schemaVersion,
           inputArtifactKeys: [],
           outputArtifactKey: artifactKey,
         });

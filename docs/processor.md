@@ -154,16 +154,30 @@ the terminal already is, so one capture is never parsed twice (§3.4).
 | Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
 | Registered under an earlier contract version, descriptors unchanged (§3.4)                                               | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it             |
 
-Of the errors the seal itself raises, only a trigger refusal whose code is in
-the closed list `SEAL_REFUSAL_CODES`
+The derivation does not re-check every seal rule. A manifest whose units'
+`artifactCount` disagrees with the artifacts that name them, or that puts a
+step other than `decrypted`/`extracted` on a provider role, is refused by
+CORE's seal trigger (`run_inventory_incomplete`), which is not a derivation
+refusal: it reaches `register-terminal.ts` as a D1 trigger error at the seal.
+Since the ADR 0024 amendment of 2026-09-26 it is a verdict: the run is blocked
+`run_inventory_incomplete`, once, and the scan answers it from its row
+afterwards. Of the errors the seal itself raises, only a trigger refusal whose
+code is in the closed list `SEAL_REFUSAL_CODES`
 (`packages/application/src/collection/seal-refusal.ts`; today
-`run_inventory_incomplete` alone) is a verdict. The fetch run the attempt
-made stays in CORE, catalogued and unsealed, so invisible to normal readers,
-and the blocked stage's `evidence_ref` names it (`collection_runs.fetch_run_id`
-stays null: a blocked run is not registered). A later contract version
-attempts the terminal once under its own run key and blocks again, so each
-version leaves at most one such fetch run per run id. Any other trigger code,
-constraint or D1 error from the seal still throws.
+`run_inventory_incomplete` alone) is classified this way. The fetch run the
+attempt made stays in CORE, catalogued and unsealed, so invisible to normal
+readers, and the blocked stage's `evidence_ref` names it
+(`collection_runs.fetch_run_id` stays null: a blocked run is not registered).
+A later contract version attempts the terminal once under its own run key and
+blocks again, so each version leaves at most one such fetch run per run id.
+Any other trigger code, constraint or D1 error from the seal still throws. The
+collectors are what keeps a seal refusal from happening at all
+([ADR 0021](adr/0021-collector-registration-contract.md),
+[collection: the registration contract](collection.md#shared-data-bucket-per-source-u09)):
+`services/processor/test/collector-plans.test.ts` registers every collector's
+real `*RunPlan` output against the whole CORE schema and the operator
+bootstrap (`infra/bootstrap/ingest-clients.sql`), and fails on any block, any
+retryable stage or any unsealed run.
 
 A resumed registration reads what the run already has — its units, ranges,
 catalogued artifacts, staged inventory items and unit reports, one statement
