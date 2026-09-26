@@ -158,7 +158,12 @@ Concrete limits in the current code:
   [ADR 0024 amendment](adr/0024-collection-scan-judged-terminals.md#amendment-2026-09-26-a-seal-core-refuses-is-a-verdict)
   each is blocked `run_inventory_incomplete` once, its fetch run stays
   unsealed and is named by the blocked stage, and the walk answers it from
-  its row. Those terminals never register.
+  its row. Those terminals never register. Two limits remain: a row of an
+  earlier contract version whose seal was refused before the amendment keeps
+  no verdict (that version is never worked again), and the refusal is
+  recognised by the D1 message Miniflare produces; production D1's message
+  for it has not been observed, and another shape is rethrown and retried
+  every walk as before.
   Once MyJCB captures are parsed, its events are retired and recognised again
   once under the collector's key and a new provider-local account.
 - Shared-R2 registration gives an artifact the parser dataset it needs since

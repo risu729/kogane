@@ -21,7 +21,7 @@ test("a D1 trigger refusal of the completeness trigger is the closed code", () =
   const message =
     "D1_ERROR: run_inventory_incomplete: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)";
   expect(sealRefusalCode(new Error(message))).toBe("run_inventory_incomplete");
-  // The cause carries the same text without the prefix; the short form too.
+  // The cause carries the same text without the prefix.
   expect(
     sealRefusalCode(
       new Error(
@@ -29,9 +29,18 @@ test("a D1 trigger refusal of the completeness trigger is the closed code", () =
       ),
     ),
   ).toBe("run_inventory_incomplete");
-  expect(sealRefusalCode(new Error("run_inventory_incomplete: SQLITE_CONSTRAINT_TRIGGER"))).toBe(
-    "run_inventory_incomplete",
-  );
+});
+
+test("a message shape nobody observed is not a verdict", () => {
+  for (const message of [
+    // A shortened form, a bare constraint class, and a changed prefix.
+    "run_inventory_incomplete: SQLITE_CONSTRAINT_TRIGGER",
+    "D1_ERROR: run_inventory_incomplete: SQLITE_CONSTRAINT",
+    "D1_EXEC_ERROR: run_inventory_incomplete: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)",
+    "D1_ERROR: run_inventory_incomplete: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER) ",
+  ]) {
+    expect(sealRefusalCode(new Error(message))).toBeNull();
+  }
 });
 
 test("SQLite's own trigger error is classified the same way", () => {

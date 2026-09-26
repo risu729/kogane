@@ -188,9 +188,9 @@ The existing collection and registration-budget suites pass unchanged.
 a `blocked` or `retryable` row: a `TerminalRegistrationError`, a
 `ContractError`, an `IngestError`. A refusal by CORE's own seal trigger was not
 one of them. When `fetch_run_seal_requires_complete_inventory` refused the
-seal (`RAISE(ABORT, 'run_inventory_incomplete')`, which D1 reports as
-`D1_ERROR: run_inventory_incomplete: SQLITE_CONSTRAINT (extended:
-SQLITE_CONSTRAINT_TRIGGER)`), the error was rethrown. The run's structure,
+seal (`RAISE(ABORT, 'run_inventory_incomplete')`, which workerd's D1 in
+Miniflare reports as `D1_ERROR: run_inventory_incomplete: SQLITE_CONSTRAINT
+(extended: SQLITE_CONSTRAINT_TRIGGER)`), the error was rethrown. The run's structure,
 catalogue and reports were in CORE, unsealed; no `registered` stage and no
 `blocked_code` were written; the scan counted the terminal in `failed`; and,
 because its row was neither registered nor blocked, the next walk attempted
@@ -232,8 +232,9 @@ terminals the [roadmap](../roadmap.md) lists, hit this on every walk.
 
 - **What is classified.** Only an error from the seal call itself
   (`seal` or `sealStagedInventory`), only when it is a trigger refusal
-  (`SQLITE_CONSTRAINT_TRIGGER`: the D1 message above, or SQLite's own error
-  with that extended code), and only when its code is in
+  (`SQLITE_CONSTRAINT_TRIGGER`: exactly the D1 message above, with or
+  without its `D1_ERROR: ` prefix, or SQLite's own error with that extended
+  code), and only when its code is in
   `SEAL_REFUSAL_CODES`, which today holds `run_inventory_incomplete` alone
   (`packages/application/src/collection/seal-refusal.ts`). Everything else the
   seal raises is rethrown exactly as before.
@@ -279,13 +280,20 @@ terminals the [roadmap](../roadmap.md) lists, hit this on every walk.
   derivation seals them; this amendment decides neither.
 - The seal's other trigger codes stay unclassified; one that turns out to be
   a verdict is added to `SEAL_REFUSAL_CODES` by a later amendment.
+- **The message shape is Miniflare's.** The D1 message is matched as
+  Miniflare's workerd produces it (inside the Worker and through its Node
+  proxy alike); production D1's message for a trigger refusal has not been
+  observed. A production message of another shape is not classified: the
+  seal error is rethrown and the run is attempted on every walk as before
+  this amendment, which is a limit, not a guess.
 
 ### Verification
 
 - `packages/application/test/seal-refusal.test.ts`: the D1 message (with and
   without the `D1_ERROR:` prefix) and a real SQLite trigger error classify as
   `run_inventory_incomplete`; another trigger code, a CHECK constraint, a
-  schema error and a platform limit do not.
+  schema error, a platform limit and a message shape nobody observed (a
+  shortened or re-prefixed form) do not.
 - `services/processor/test/collection-scan-convergence.test.ts`, on a
   synthetic run whose unit declares two artifacts and holds one: the first
   tick blocks it with the code and one `registered` `blocked` stage naming

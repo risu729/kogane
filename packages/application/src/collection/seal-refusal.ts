@@ -33,12 +33,13 @@ type SealRefusalCode = (typeof SEAL_REFUSAL_CODES)[number];
 /**
  * D1's message for a trigger refusal, as workerd formats it
  * (`D1_ERROR: <code>: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)`,
- * measured against Miniflare's D1), with or without the `D1_ERROR: ` prefix
- * (the error's `cause` carries it without), and the short
- * `<code>: SQLITE_CONSTRAINT_TRIGGER` form.
+ * measured against Miniflare's D1, inside workerd and through its Node proxy
+ * alike), with or without the `D1_ERROR: ` prefix (the error's `cause`
+ * carries it without). No other shape is accepted: one that was never
+ * observed is not a verdict, so it is rethrown as before.
  */
 const D1_TRIGGER_MESSAGE =
-  /^(?:D1_ERROR: )?([a-z0-9_]{1,64}): SQLITE_CONSTRAINT(?:_TRIGGER| \(extended: SQLITE_CONSTRAINT_TRIGGER\))$/u;
+  /^(?:D1_ERROR: )?([a-z0-9_]{1,64}): SQLITE_CONSTRAINT \(extended: SQLITE_CONSTRAINT_TRIGGER\)$/u;
 
 function isSealRefusalCode(value: string): value is SealRefusalCode {
   return (SEAL_REFUSAL_CODES as readonly string[]).includes(value);
