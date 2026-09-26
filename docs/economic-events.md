@@ -237,9 +237,10 @@ returned side by side with `cross_unit_requires_fx_model`; signed amounts in
   capture, so it proposed each purchase once per pair of captures, and a month
   captured daily outgrew its 200-row group bound and was skipped. Reading only
   current rows would not have fixed it: a Vpass card-month is one snapshot
-  whatever its family, and every MyJCB pending capture of a connection shares
-  one slot, so a pending row and the posted row it became are never current
-  together. `services/processor/test/reconciliation-coverage.test.ts` builds
+  whatever its family, and a MyJCB pending capture ends when its position is
+  captured again, the statement confirmed included
+  ([ADR 0016](adr/0016-myjcb-pending-statement-slots.md)), so a pending row and
+  the posted row it became are never current together. `services/processor/test/reconciliation-coverage.test.ts` builds
   the scaled card store capture by capture, runs both lanes after each capture
   day, and sorts the 292 stage B proposals the lane made on it: 26 are the
   candidate pass's own proposals (same digest), 151 are the same purchase

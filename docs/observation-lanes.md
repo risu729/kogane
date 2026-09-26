@@ -343,9 +343,14 @@ accepted this tick can still reach it — while `decision_outbox` keeps its
 place at the end.
 
 Neither is a parse lane: they create no `observation_parse_jobs` rows and have
-no job budget. `collection_scan` is bounded by one R2 list page and a
-registration count per tick; its cursor lives in `collection_scan_state`, not
-in `observation_lane_state`.
+no job budget. `collection_scan` is bounded by one R2 list page (25 keys), at
+most five continuations and five registration attempts per tick, and the
+invocation's operation budget of 500 (ADR 0010); a terminal already
+registered, already blocked or refused `retryable` within the last 24 hours
+is answered from its row and spends none of the five, so a page of judged
+terminals is finished in one tick
+([ADR 0024](adr/0024-collection-scan-judged-terminals.md)). Its cursor lives in
+`collection_scan_state`, not in `observation_lane_state`.
 
 Each stage is isolated: a failure is logged as its own `<event>_failed` line
 and never stops the stages after it, so a parse-sweep failure does not prevent
