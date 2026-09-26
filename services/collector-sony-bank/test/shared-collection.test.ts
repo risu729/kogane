@@ -104,9 +104,14 @@ describe("G1-02 shared mode persists every artifact and then the terminal", () =
       endValue: "2026-09-11",
       unitKeys: ["account"],
     });
+    // The unit counts the five provider artifacts; the run manifest belongs to
+    // the run and names no unit (ADR 0021).
     expect(manifest.units).toEqual([
-      { unitKey: "account", unitKind: "account", artifactCount: 6, coverageStatus: "complete" },
+      { unitKey: "account", unitKind: "account", artifactCount: 5, coverageStatus: "complete" },
     ]);
+    expect(
+      manifest.artifacts.find((artifact) => artifact.artifactKey === "manifest.json")?.unitKey,
+    ).toBeUndefined();
     expect(manifest.ranges.map((range) => range.rangeKey)).toEqual([
       "request-window",
       "wallet-months",

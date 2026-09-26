@@ -368,7 +368,7 @@ export const WITHHELD_ARTIFACT_DATASETS: Readonly<
     until: "the collector's binding key is set and its tokens match the importer's (ADR 0023)",
     rules: [
       {
-        // The collector writes its pages as sanitized captures (ADR 0023).
+        // The collector writes its pages as sanitized captures (ADR 0021).
         key: /^months\/\d{6}\/(?:top|answer)-\d{3}\.json$/u,
         role: "sanitized_provider_capture",
         mediaTypes: JSON_TYPE,

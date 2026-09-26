@@ -29,6 +29,31 @@ the relevant rollout records.
 
 Concrete limits in the current code:
 
+- **Shared-R2 registration, 2026-09-12 onwards.** From U09 (#184) until the
+  fixes below, no shared-R2 run of any source but Mizuho was catalogued into
+  sealed, parseable evidence. Four blockers were found on 2026-09-26: the
+  producer a collector names differs from its route's for eight terminal
+  sources (fixed by #259, [ADR 0014](adr/0014-collector-producer-ids.md)); derived artifacts without stated
+  lineage (`artifact_lineage_unstated`: sbi-securities, sbi-shinsei, MyJCB,
+  V Point, V Point Pay) and run manifests that named a unit without being
+  counted in it (`run_inventory_incomplete` at the seal: sbi-vc-trade, GLOBAL
+  PASS, SMBC Direct), both fixed in the collectors by
+  [ADR 0021](adr/0021-collector-registration-contract.md), which also fixed
+  Vpass statement pages (a provider role with a `redacted` step, refused at
+  the seal) and V Point Pay month ranges; and registered artifacts with no
+  `dataset` (fixed by #269, [ADR 0022](adr/0022-registration-artifact-datasets.md),
+  for the datasets a registered parser reads). Only terminals written after each
+  collector's redeploy carry the fixed shapes. The terminals written before
+  it are immutable: the 14 sbi-securities and 14 sbi-shinsei runs blocked
+  since U09 (counted on 2026-09-26) stay blocked (a block is write-once), and
+  re-registering them under a new registration contract version refuses the
+  same bytes again: nothing makes them registrable. The 14 sbi-vc-trade runs
+  keep their catalogued artifacts unsealed and are tried again whenever the
+  scan reaches them, because a seal-trigger refusal is rethrown rather than
+  classified as a block
+  ([processor §3](processor.md#3-idempotency-and-what-blocks)); recording it as
+  a block is a Processor follow-up.
+
 - [Card settlement review](card-settlements.md) now connects authoritative
   Vpass/MyJCB statement totals to SMBC bank debits through explicit operator
   decisions. Unknown ownership, stale evidence and occupied allocations block
@@ -110,12 +135,17 @@ Concrete limits in the current code:
   most once a day, where the refusal repeats
   ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences),
   [ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
-  Past the route check, registration still stops for two of them: MyJCB and
-  V Point runs are blocked `artifact_lineage_unstated`
+  Past the route check, registration still stopped for three of them — a
+  Vpass run's seal was refused (`run_inventory_incomplete`, a statement page
+  was a `provider_response` with a `redacted` step), and MyJCB and V Point
+  runs were blocked `artifact_lineage_unstated` — until the collectors
+  changed with [ADR 0021](adr/0021-collector-registration-contract.md), for
+  terminals written after that release. Those register with the parser
+  datasets of [ADR 0022](adr/0022-registration-artifact-datasets.md), except
+  that Vpass statement pages are withheld from one and MyJCB parses fail at
+  metadata extraction (below), so for those two sources the importer's
+  captures stay current
   ([ADR 0014, merge safety](adr/0014-collector-producer-ids.md#merge-safety)).
-  Vpass runs register and seal (their statement pages are sanitized captures,
-  ADR 0023), but no Vpass collector artifact is catalogued with a parser
-  dataset, so none is parsed and the importer's captures stay current.
   Once collector-vpass runs register and are parsed, the importer's Vpass
   purchase events of every re-captured card-month are retired and recognised
   again once, on the same account, where the collector's run carries a card
