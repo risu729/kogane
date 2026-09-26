@@ -130,6 +130,13 @@ lifecycle. Source ownership, supported bank coverage, partial payments and
 refund handling still need completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
+The proposed plan for finishing this milestone and starting dated reported
+state and valuation is [the next-milestone plan](plans/2026-09-next-milestone.md),
+awaiting the owner's go-ahead. The design decisions behind the card slice so
+far are recorded as architecture decision records,
+[ADR 0002](adr/0002-card-purchase-recognition.md) to
+[ADR 0013](adr/0013-agent-card-purchase-read.md).
+
 The numbered phases below retain the original layer identifiers. They describe
 the remaining work and its acceptance criteria, not a requirement to finish
 each phase everywhere before starting the next.
