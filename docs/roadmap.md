@@ -87,11 +87,33 @@ Concrete limits in the current code:
   carry a trusted card binding: a parsed capture of the Vpass collector would
   retire the importer-era purchases of its card-month and its rows would be
   skipped as `account_not_resolved`. The collector's captures are not parsed
-  today (their terminals name the producer `vpass-json`, which has no ingest
-  route, and registration deliberately gives their artifacts no parser
-  dataset, [ADR 0022](adr/0022-registration-artifact-datasets.md)); they
-  stay unparsed until the collector writes a binding
+  today (registration deliberately gives their artifacts no parser dataset,
+  [ADR 0022](adr/0022-registration-artifact-datasets.md), and the seal of a
+  collector-vpass run is refused, below); they stay unparsed until
+  the collector writes a binding
   ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
+- Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
+  email route), V Point Pay and GLOBAL PASS had no registered collector run
+  between 2026-09-12 and the release that carries
+  [ADR 0014](adr/0014-collector-producer-ids.md): their collectors named a
+  producer no route declares, so every terminal was refused as
+  `inactive_ingest_route`. Terminals written before that release keep the old
+  producer and stay unregistered in R2; for the snapshot sources the next
+  capture shows the provider's state again, but V Point Pay notification
+  emails of that period are registered only if a later decision registers
+  those runs. The `collection_scan` walk does not revisit them either: it
+  stops at a page holding more than five terminals that never register
+  ([ADR 0014, registration](adr/0014-collector-producer-ids.md#consequences)).
+  Past the route check, registration still stops for three of them: a Vpass
+  run's seal is refused (`run_inventory_incomplete`, a statement page is a
+  `provider_response` with a `redacted` step), and MyJCB and V Point runs are
+  blocked `artifact_lineage_unstated`. No artifact of these sources is
+  catalogued with a parser dataset (Vpass's is withheld, the others are
+  refused before cataloguing), so none is parsed and the importer's
+  captures stay current
+  ([ADR 0014, merge safety](adr/0014-collector-producer-ids.md#merge-safety)).
+  Once MyJCB captures are parsed, its events are retired and recognised again
+  once under the collector's key and a new provider-local account.
 - Shared-R2 registration gives an artifact the parser dataset it needs since
   2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
   every registered artifact had none, so only Mizuho's were parsed). The

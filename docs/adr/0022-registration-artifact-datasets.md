@@ -12,7 +12,7 @@
   budget), [ADR 0023](0023-vpass-collector-card-binding.md) (no trusted card
   binding for collector-vpass runs; #260), ADR 0024 (terminal scan cursor,
   in flight)
-- Merge order: after #259 (collector producer ids); see Consequences.
+- Merge order: after #259 ([ADR 0014](0014-collector-producer-ids.md), collector producer ids, merged); see Consequences.
 
 ## Context
 
@@ -201,6 +201,10 @@ INV06, per case:
   each, nothing sealed); only a refusal about CORE's configuration (a missing
   ingest route, which is `retryable`, not blocked) can succeed on the new
   attempt. Nothing is doubled: a blocked run has no seal and no parse.
+  Terminals written before [ADR 0014](0014-collector-producer-ids.md) keep
+  the producer no route declares, so under v2 they are refused as
+  `inactive_ingest_route` again and stay `retryable` and unregistered, as
+  ADR 0014 records; the bump does not register them.
 
 ## Consequences
 

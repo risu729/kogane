@@ -1646,8 +1646,8 @@ the append-only evidence or observations. Pending customized and posted web
 rows remain separate; matching them belongs to the reconciler, not Layer B.
 
 The latest snapshot is chosen per card and statement month regardless of the
-producer, so a parsed capture of the Vpass collector (producer `vpass-json`,
-`collector-vpass` after #259) would replace the importer's capture of the same
+producer, so a parsed capture of the Vpass collector (producer
+`collector-vpass`) would replace the importer's capture of the same
 card-month. Its rows carry the
 same `vpass:card-NNN` source account, but no trusted card binding exists for
 collector runs, so identity would map them to run-scoped unresolved accounts
