@@ -28,8 +28,12 @@ import type { PreparedVPointPayEmail } from "./vpoint-pay-email";
 
 export const VPOINT_SOURCE = "v-point";
 export const VPOINT_PAY_EMAIL_SOURCE = "v-point-pay-email";
-/** Same producer for both sources: one Worker acquires them. */
-export const SHARED_PRODUCER = "collector-vpoint";
+/**
+ * One producer per source, `collector-<collector id>`, as the Processor's
+ * routes name them (ADR 0014); one Worker acquires both.
+ */
+export const VPOINT_PRODUCER = "collector-v-point";
+export const VPOINT_PAY_EMAIL_PRODUCER = "collector-v-point-pay-email";
 const VPOINT_UNIT_KEY = "account";
 const VPOINT_UNIT_KIND = "collection";
 const EMAIL_UNIT_KEY = "notification";
@@ -79,7 +83,7 @@ export async function vPointRunPlan(run: VPointSharedRun): Promise<PersistRunPla
   const safeErrorCode = providerOutcome === "success" ? undefined : failureCode(run.failureCodes);
   const fields: TerminalRunFields = {
     source: VPOINT_SOURCE,
-    producer: SHARED_PRODUCER,
+    producer: VPOINT_PRODUCER,
     producerVersion: run.producerVersion,
     runId: run.runId,
     attemptId: run.attemptId,
@@ -161,7 +165,7 @@ export async function vPointPayEmailRunPlan(
   };
   const fields: TerminalRunFields = {
     source: VPOINT_PAY_EMAIL_SOURCE,
-    producer: SHARED_PRODUCER,
+    producer: VPOINT_PAY_EMAIL_PRODUCER,
     producerVersion,
     runId: prepared.event.id,
     attemptId: `message-${prepared.event.id}`,
