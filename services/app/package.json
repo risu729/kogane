@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "hono": "4.13.7",
+    "hono": "4.13.9",
     "jose": "6.2.11",
     "zod": "4.6.2"
   },
