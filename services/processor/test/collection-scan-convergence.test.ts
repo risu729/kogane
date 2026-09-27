@@ -22,7 +22,10 @@ import {
   OperationMeter,
   RETRYABLE_RETRY_INTERVAL_MS,
   RegistrationBudget,
+  registerTerminal,
 } from "../../../packages/application/src/collection/index.ts";
+import { directRegistrationPort } from "../../../packages/application/src/ingest/port.ts";
+import { terminalKey } from "../../../packages/collection/src/keys.ts";
 import {
   collectionScan,
   handleTerminalNotification,
@@ -422,4 +425,275 @@ test("a new registration contract version makes every judged terminal new work",
   });
   const second = await tick(harness, at + 5 * 60 * 1000);
   expect(second).toMatchObject({ retryable: 3, alreadyJudged: 5 });
+});
+
+// ── a seal CORE refuses (ADR 0024, amendment of 2026-09-26) ──────────────
+//
+// A terminal whose unit declares more artifacts than the run attributes to it
+// is registered up to its seal, and the completeness trigger
+// (`fetch_run_seal_requires_complete_inventory`) refuses the seal with
+// `run_inventory_incomplete`. The terminal is immutable, so that refusal is a
+// verdict: the run is blocked with the trigger's code, once, and the scan
+// answers it from its row afterwards. The mismatch is synthetic: one unit that
+// declares two artifacts and is given one.
+
+/** A run whose seal CORE refuses: its unit declares two artifacts, it has one. */
+async function persistSealRefused(harness: CollectionHarness, id: string): Promise<void> {
+  await persistSyntheticRun(harness, {
+    run: {
+      runId: id,
+      units: [
+        { unitKey: "account-1", unitKind: "account", artifactCount: 2, coverageStatus: "complete" },
+      ],
+    },
+    artifacts: [await artifact("balance.json", '{"synthetic":true}', { unitKey: "account-1" })],
+  });
+}
+
+interface RunTrace {
+  blocked_code: string | null;
+  registered_at: string | null;
+  fetch_run_id: number | null;
+  stages: string | null;
+}
+
+/** Every row of one run id, oldest first, with its `registered` stages in order. */
+const traceOf = (h: CollectionHarness, id: string): RunTrace[] =>
+  rows<RunTrace>(
+    h.db,
+    `SELECT r.blocked_code, r.registered_at, r.fetch_run_id,
+            (SELECT group_concat(s.stage || ':' || s.state || ':' ||
+                                 coalesce(s.failure_code, '-') || ':' ||
+                                 coalesce(s.evidence_ref, '-'), ' ')
+               FROM (SELECT * FROM collection_run_stages
+                      WHERE collection_run_id = r.id AND stage = 'registered'
+                      ORDER BY id) s) AS stages
+       FROM collection_runs r WHERE r.run_id = ? ORDER BY r.id`,
+    id,
+  );
+
+/** The fetch runs registration made for one run id, with whether each is sealed. */
+const fetchRunsOf = (h: CollectionHarness, id: string) =>
+  rows<{ id: number; source_run_key: string; sealed: number; artifacts: number }>(
+    h.db,
+    `SELECT f.id, f.source_run_key,
+            EXISTS (SELECT 1 FROM fetch_run_seals s WHERE s.fetch_run_id = f.id) AS sealed,
+            (SELECT count(*) FROM fetch_artifacts a WHERE a.fetch_run_id = f.id) AS artifacts
+       FROM fetch_runs f WHERE f.source_run_key LIKE ? ORDER BY f.id`,
+    `${id}:%`,
+  );
+
+test("a run CORE refuses to seal is blocked with the trigger's code, once, and then judged", async () => {
+  const harness = collectionHarness();
+  await persistSealRefused(harness, "run-001");
+  await persistSyntheticRun(harness, { run: { runId: "run-002" } });
+  await persistSyntheticRun(harness, { run: { runId: "run-003" } });
+
+  const first = await tick(harness, START_MS);
+  expect(first).toMatchObject({
+    listed: 3,
+    registered: 2,
+    blocked: 1,
+    alreadyJudged: 0,
+    failed: 0,
+    cycleComplete: true,
+  });
+  // The fetch run the attempt made stays behind unsealed, with its catalogue;
+  // the blocked stage names it, and the row itself is not registered.
+  const [left] = fetchRunsOf(harness, "run-001");
+  expect(fetchRunsOf(harness, "run-001")).toEqual([
+    {
+      id: left!.id,
+      source_run_key: "run-001:terminal-registration-v2",
+      sealed: 0,
+      artifacts: 1,
+    },
+  ]);
+  expect(traceOf(harness, "run-001")).toEqual([
+    {
+      blocked_code: "run_inventory_incomplete",
+      registered_at: null,
+      fetch_run_id: null,
+      stages: `registered:blocked:run_inventory_incomplete:${left!.id}`,
+    },
+  ]);
+
+  // Every later tick answers it from its row: no attempt, no stage, no
+  // second fetch run, and the page is finished.
+  const stagesBefore = stageRows(harness);
+  for (const offset of [5 * 60 * 1000, HOUR_MS, 2 * RETRYABLE_RETRY_INTERVAL_MS]) {
+    const again = await tick(harness, START_MS + offset);
+    expect(again).toMatchObject({
+      listed: 3,
+      blocked: 1,
+      alreadyJudged: 1,
+      alreadyRegistered: 2,
+      failed: 0,
+      cycleComplete: true,
+    });
+  }
+  expect(stageRows(harness)).toBe(stagesBefore);
+  expect(fetchRunsOf(harness, "run-001")).toHaveLength(1);
+  expect(countOf(harness, "SELECT count(*) AS n FROM collection_runs")).toBe(3);
+  // The queue path reads the same verdict back.
+  expect(
+    await registerCollectionRun(harness.env, { source: SOURCE, runId: "run-001" }),
+  ).toMatchObject({ outcome: "blocked", code: "run_inventory_incomplete", recorded: true });
+});
+
+test("a staged run whose seal CORE refuses blocks the same way", async () => {
+  const harness = collectionHarness();
+  // Above the direct-seal size, so the inventory is staged and the refusal
+  // comes from `sealStagedInventory`; the scan continues it over ticks.
+  const artifacts = [];
+  for (let n = 0; n < 51; n += 1) {
+    artifacts.push(
+      await artifact(`page-${String(n).padStart(3, "0")}.json`, `{"page":${n}}`, {
+        unitKey: "account-1",
+      }),
+    );
+  }
+  await persistSyntheticRun(harness, {
+    run: {
+      runId: "run-001",
+      units: [
+        {
+          unitKey: "account-1",
+          unitKind: "account",
+          artifactCount: 52,
+          coverageStatus: "complete",
+        },
+      ],
+    },
+    artifacts,
+  });
+  let at = START_MS;
+  let summary: ScanSummary | undefined;
+  for (let i = 0; i < 10; i += 1) {
+    summary = await tick(harness, at);
+    at += 5 * 60 * 1000;
+    if (summary.blocked > 0) break;
+  }
+  // The refusal comes on a continuation; the same tick's listing then meets
+  // the run again and answers it from the row it just blocked.
+  expect(summary).toMatchObject({ continued: 1, blocked: 2, alreadyJudged: 1, failed: 0 });
+  const [left] = fetchRunsOf(harness, "run-001");
+  expect(left).toMatchObject({ sealed: 0, artifacts: 51 });
+  expect(traceOf(harness, "run-001")[0]).toMatchObject({
+    blocked_code: "run_inventory_incomplete",
+  });
+  expect(traceOf(harness, "run-001")[0]!.stages).toEndWith(
+    `registered:blocked:run_inventory_incomplete:${left!.id}`,
+  );
+  expect(await tick(harness, at)).toMatchObject({ blocked: 1, alreadyJudged: 1, pending: 0 });
+});
+
+test("under a later contract version a seal-refused run gets one fresh attempt and blocks again", async () => {
+  const harness = collectionHarness();
+  await persistSealRefused(harness, "run-001");
+  // The earlier version's registration, as production made it before a bump.
+  const earlier = await registerTerminal({
+    env: { DB: harness.env.DB, EVIDENCE: harness.env.EVIDENCE },
+    bucket: harness.bucket,
+    clientId: CLIENT,
+    source: SOURCE,
+    runId: "run-001",
+    contractVersion: "terminal-registration-v1",
+  });
+  expect(earlier).toMatchObject({ outcome: "blocked", code: "run_inventory_incomplete" });
+
+  // The current version has no row for it: one fresh attempt, under its own
+  // run key, refused by the same trigger.
+  const fresh = await tick(harness, START_MS);
+  expect(fresh).toMatchObject({ blocked: 1, alreadyJudged: 0, failed: 0 });
+  const left = fetchRunsOf(harness, "run-001");
+  expect(left.map((run) => [run.source_run_key, run.sealed])).toEqual([
+    ["run-001:terminal-registration-v1", 0],
+    ["run-001:terminal-registration-v2", 0],
+  ]);
+  // Each version's blocked stage names the fetch run that version left.
+  expect(traceOf(harness, "run-001").map((row) => [row.blocked_code, row.stages])).toEqual([
+    ["run_inventory_incomplete", `registered:blocked:run_inventory_incomplete:${left[0]!.id}`],
+    ["run_inventory_incomplete", `registered:blocked:run_inventory_incomplete:${left[1]!.id}`],
+  ]);
+  expect(await tick(harness, START_MS + HOUR_MS)).toMatchObject({ blocked: 1, alreadyJudged: 1 });
+  expect(fetchRunsOf(harness, "run-001")).toHaveLength(2);
+
+  // A different manifest under the same run id meets both blocked rows in the
+  // conflict check: it is refused before any fetch run is made for it.
+  await persistSyntheticRun(harness, { run: { runId: "run-002", attemptId: "attempt-002" } });
+  const second = await harness.bucket.get(terminalKey(SOURCE, "run-002"));
+  const text = new TextDecoder()
+    .decode(new Uint8Array(await second!.arrayBuffer()))
+    .replaceAll("run-002", "run-001");
+  harness.bucket.entries.delete(terminalKey(SOURCE, "run-001"));
+  await harness.bucket.seed(terminalKey(SOURCE, "run-001"), new TextEncoder().encode(text), {
+    contentType: "application/json",
+  });
+  expect(
+    await registerCollectionRun(harness.env, { source: SOURCE, runId: "run-001" }),
+  ).toMatchObject({ outcome: "blocked", code: "terminal_digest_conflict" });
+  expect(fetchRunsOf(harness, "run-001")).toHaveLength(2);
+});
+
+test("a seal error that is not a listed trigger refusal still throws and records nothing", async () => {
+  const harness = collectionHarness();
+  await persistSyntheticRun(harness, { run: { runId: "run-001" } });
+  const failures: string[] = [];
+  const register = (message: string) =>
+    registerTerminal({
+      env: { DB: harness.env.DB, EVIDENCE: harness.env.EVIDENCE },
+      bucket: harness.bucket,
+      clientId: CLIENT,
+      source: SOURCE,
+      runId: "run-001",
+      port: (env) => ({
+        ...directRegistrationPort(env, CLIENT),
+        seal: () => Promise.reject(new Error(message)),
+      }),
+    });
+  // A D1 error from the seal that is not a trigger refusal.
+  await expect(register("D1_ERROR: no such table: fetch_run_seals: SQLITE_ERROR")).rejects.toThrow(
+    "no such table",
+  );
+  // A trigger refusal whose code is not in the closed list.
+  await expect(
+    register(
+      "D1_ERROR: inactive_ingest_route: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)",
+    ),
+  ).rejects.toThrow("inactive_ingest_route");
+  // The same through real SQLite: a seal trigger with an unlisted code.
+  harness.db.exec(`CREATE TRIGGER synthetic_seal_refusal BEFORE INSERT ON fetch_run_seals
+    BEGIN SELECT RAISE(ABORT, 'synthetic_unlisted_refusal'); END`);
+  const summary = await tick(harness, START_MS, { onFailure: (code) => failures.push(code) });
+  expect(summary).toMatchObject({ failed: 1, blocked: 0, registered: 0 });
+  expect(failures).toHaveLength(1);
+  // Nothing was judged: the row is open and has no `registered` verdict.
+  expect(traceOf(harness, "run-001")).toEqual([
+    {
+      blocked_code: null,
+      registered_at: null,
+      fetch_run_id: null,
+      stages: null,
+    },
+  ]);
+  // Once the cause is gone the run registers as usual.
+  harness.db.exec("DROP TRIGGER synthetic_seal_refusal");
+  expect(await tick(harness, START_MS + HOUR_MS)).toMatchObject({ registered: 1, failed: 0 });
+  expect(sealed(harness)).toBe(1);
+});
+
+test("a normal registration spends exactly what it spent before seal refusals were classified", async () => {
+  const harness = collectionHarness();
+  await persistSyntheticRun(harness, { run: { runId: "run-001" } });
+  const budget = new RegistrationBudget();
+  const result = await registerCollectionRun(
+    harness.env,
+    { source: SOURCE, runId: "run-001" },
+    { budget, now: () => new Date(START_MS) },
+  );
+  expect(result.outcome).toBe("registered");
+  // Measured on main before this change, with the same run: classifying the
+  // seal's refusal adds no operation to the path that seals.
+  expect({ ...budget.meter }).toEqual({ d1Statements: 74, d1Batches: 3, r2Operations: 5 });
 });

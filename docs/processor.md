@@ -116,7 +116,10 @@ A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
 made that the derivation did not foresee — is counted in the lane's `failed`
 and logged by its error class only; nothing is recorded for that run, the
 page still advances and the next cycle tries it again. One failing run never
-stops the page and never pins the cursor (G1-13).
+stops the page and never pins the cursor (G1-13). A seal CORE's completeness
+trigger refuses (`run_inventory_incomplete`) is not in this class: it is a
+verdict about the terminal and blocks the run (§3; ADR 0024, amendment of
+2026-09-26).
 
 ## 3. Idempotency and what blocks
 
@@ -145,6 +148,7 @@ the terminal already is, so one capture is never parsed twice (§3.4).
 | `providerOutcome: failed` with no provider artifact                                                                      | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)        |
 | Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage) | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                     |
 | Referenced object missing or resized                                                                                     | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                      |
+| Seal refused by CORE's completeness trigger (a unit or the run declares another artifact count than it holds)            | blocked `run_inventory_incomplete`, **unsealed**   | `registered` blocked naming the fetch run left unsealed (ADR 0024, amendment of 2026-09-26)       |
 | Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
 | Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state or per attempt 24 h after the last (ADR 0024) |
 | Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
@@ -154,11 +158,20 @@ The derivation does not re-check every seal rule. A manifest whose units'
 `artifactCount` disagrees with the artifacts that name them, or that puts a
 step other than `decrypted`/`extracted` on a provider role, is refused by
 CORE's seal trigger (`run_inventory_incomplete`), which is not a derivation
-refusal: it reaches `register-terminal.ts` as a plain D1 error, which is
-rethrown; the scan counts it as `failed`, records no stage row, and tries the
-run again whenever it reaches it (§2), with its artifacts catalogued and
-unsealed. Recording it as a block instead is an open Processor follow-up. The
-collectors are what keeps that from happening
+refusal: it reaches `register-terminal.ts` as a D1 trigger error at the seal.
+Since the ADR 0024 amendment of 2026-09-26 it is a verdict: the run is blocked
+`run_inventory_incomplete`, once, and the scan answers it from its row
+afterwards. Of the errors the seal itself raises, only a trigger refusal whose
+code is in the closed list `SEAL_REFUSAL_CODES`
+(`packages/application/src/collection/seal-refusal.ts`; today
+`run_inventory_incomplete` alone) is classified this way. The fetch run the
+attempt made stays in CORE, catalogued and unsealed, so invisible to normal
+readers, and the blocked stage's `evidence_ref` names it
+(`collection_runs.fetch_run_id` stays null: a blocked run is not registered).
+A later contract version attempts the terminal once under its own run key and
+blocks again, so each version leaves at most one such fetch run per run id.
+Any other trigger code, constraint or D1 error from the seal still throws. The
+collectors are what keeps a seal refusal from happening at all
 ([ADR 0021](adr/0021-collector-registration-contract.md),
 [collection: the registration contract](collection.md#shared-data-bucket-per-source-u09)):
 `services/processor/test/collector-plans.test.ts` registers every collector's
