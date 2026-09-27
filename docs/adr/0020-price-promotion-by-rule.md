@@ -12,7 +12,9 @@
   `services/processor/src/price-promotion-job.ts`,
   `packages/read-model/src/price-selection.ts`
 - Amended by: [ADR 0028](0028-sbi-shinsei-observed-capture-shapes.md) (the
-  board is tiered; an admission names its tier; see the amendment below)
+  board is tiered; an admission names its tier; see the amendment below);
+  amended 2026-09-27 (the quote basis from the provider's public pages; no
+  admission yet)
 
 ## Context
 
@@ -160,3 +162,45 @@ unobserved, as is every currency's basis, so a board with several tiers per
 currency promotes nothing. The board's own time is not stated in a
 recognised form on the stored boards, so a price admitted later takes the
 fetch instant with basis `collector` until the provider's form is understood.
+
+## Amendment (2026-09-27): the quote basis from the provider's public pages
+
+**Context.** The owner was asked to confirm each currency's quote basis and
+asked instead that it be taken from the provider's general information. The
+owner's agent surveyed the screens and pages (report of 2026-09-27; structure
+only):
+
+- The provider's public rate page
+  (<https://www.sbishinseibank.co.jp/retail/gaika/exchange_rate_fx.html>)
+  lists 13 currencies (USD, EUR, CAD, AUD, GBP, NZD, SGD, HKD, ZAR, NOK, CNY,
+  TRY, BRL) with TTS, TTB and a mid rate, states the unit as yen, and states
+  its exchange fee per 1 base currency unit, one way. Its beginners' page
+  (<https://www.sbishinseibank.co.jp/retail/gaika/feature/beginner/>) works
+  its fee example per 1 USD. The logged-in FX savings page lists the same 13
+  and states its fee per base currency unit; the logged-in top labels its 5
+  rows by a number and the currency's name.
+- No page or screen shows a per-100 currency. By Japanese bank convention a
+  quote per 100 units is used for currencies such as IDR and KRW, none of
+  which is listed.
+- **CHF and JPY rows appear on no screen or page**, though the stored boards
+  carry one CHF row and one JPY row.
+
+**Decision.** This is recorded as the **provider's public documentation**,
+not as the owner's confirmation per currency: per those pages, all 13 listed
+currencies are quoted in yen per 1 unit. CHF has no such statement (it is on
+no page), and a JPY row is not a quote (parser 1.0.1 skips it). Admission
+still waits on the owner's `customerCategory` tier: an admission names
+`(currency, customerCategory, basis)` (amendment above), and which tier is the
+owner's is unknown. `SBI_SHINSEI_FX_QUOTE_BASIS` stays empty, so no FX row is
+promoted and every one is `unsupported_currency`.
+
+**Consequences.** Once the owner's tier is known, a change can admit any of
+the 13 currencies with basis 1 and cite these pages as its `evidence`, in a
+change that amends this ADR again. CHF stays out until a page or screen
+states its basis. The pages describe today's convention; a later change of
+convention is not detected by the parser, which records
+`quoteBasis: "not-stated"` on every row as before.
+
+**Verification.** Documentation only; no code or test changes for this
+amendment. The domain tests that every tier is `unsupported_currency` with the
+production table still hold.
