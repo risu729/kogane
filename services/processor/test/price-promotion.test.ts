@@ -90,13 +90,17 @@ test("the lane promotes VT, AAPL, the domestic price and the admitted FX rows, a
   ).toBe(3);
 
   const result = await pricePromotionSweep(env.DB, { now: NOW, fxQuoteBasis: USD_PER_ONE });
-  // Valuation claims: 6 FX cells (USD admitted, EUR not) and one domestic
+  // Valuation claims: 6 FX cells (USD admitted by the synthetic table; EUR
+  // left to the stage path, and this run states no stage) and one domestic
   // `current_price`. Position claims: VT and AAPL.
   expect(result).toEqual({
     scanned: 9,
     promoted: 6,
     basis_unverified: 0,
-    unsupported_currency: 3,
+    unsupported_currency: 0,
+    tier_unmatched: 0,
+    stage_unstated: 3,
+    stage_pending: 0,
     written: 6,
   });
   const prices = (
@@ -192,13 +196,17 @@ test("the lane promotes VT, AAPL, the domestic price and the admitted FX rows, a
   expect(await cursor("valuation")).toBeGreaterThan(0);
   expect(await cursor("position")).toBeGreaterThan(0);
 
-  // Without the synthetic table, the production rule list admits no FX row.
+  // Without the synthetic table, the production rule list admits no FX row of
+  // a run that states no stage category (ADR 0031).
   await env.DB.prepare("DELETE FROM price_promotion_cursor").run();
   expect(await pricePromotionSweep(env.DB, { now: NOW })).toEqual({
     scanned: 9,
     promoted: 3,
     basis_unverified: 0,
-    unsupported_currency: 6,
+    unsupported_currency: 0,
+    tier_unmatched: 0,
+    stage_unstated: 6,
+    stage_pending: 0,
     written: 0,
   });
 }, 60000);
@@ -210,6 +218,9 @@ test("replay writes nothing: the same tick, or the same claims from a reset curs
     promoted: 0,
     basis_unverified: 0,
     unsupported_currency: 0,
+    tier_unmatched: 0,
+    stage_unstated: 0,
+    stage_pending: 0,
     written: 0,
   });
   await env.DB.prepare("DELETE FROM price_promotion_cursor").run();
@@ -368,13 +379,18 @@ test("a tiered board with an unrecognised time: nothing promotes until an admiss
     ),
   ).toBe(198);
 
-  // Production admits nothing: every cell of every tier is unsupported.
+  // Production admits nothing without a stage stated by the same run
+  // (ADR 0031): the 11 per-1-unit currencies of this synthetic board are
+  // `stage_unstated` in every tier; MXN, SEK and CHF are not on the list.
   const before = (await cursor("valuation"))!;
   expect(await pricePromotionSweep(env.DB, { now: NOW })).toEqual({
     scanned: 198,
     promoted: 0,
     basis_unverified: 0,
-    unsupported_currency: 198,
+    unsupported_currency: 33,
+    tier_unmatched: 0,
+    stage_unstated: 165,
+    stage_pending: 0,
     written: 0,
   });
 
@@ -388,11 +404,16 @@ test("a tiered board with an unrecognised time: nothing promotes until an admiss
   const tier2: FxQuoteBasisTable = {
     USD: { customerCategory: "SYNTHETIC-TIER-2", baseQuantity: "1", evidence: "synthetic" },
   };
+  // The manual entry decides USD alone (its other 4 tiers are unsupported);
+  // the other per-1-unit currencies still wait for a stage.
   expect(await pricePromotionSweep(env.DB, { now: NOW, fxQuoteBasis: tier2 })).toEqual({
     scanned: 198,
     promoted: 3,
     basis_unverified: 0,
-    unsupported_currency: 195,
+    unsupported_currency: 45,
+    tier_unmatched: 0,
+    stage_unstated: 150,
+    stage_pending: 0,
     written: 3,
   });
   const written = (
@@ -468,7 +489,9 @@ test("a numeric tier promotes only under an admission of the same number, never 
   expect(await pricePromotionSweep(env.DB, { now: NOW, fxQuoteBasis: asNumber })).toMatchObject({
     scanned: 198,
     promoted: 3,
-    unsupported_currency: 195,
+    unsupported_currency: 45,
+    stage_unstated: 150,
+    stage_pending: 0,
     written: 3,
   });
   const tiers = (

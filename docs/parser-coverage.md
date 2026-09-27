@@ -99,6 +99,13 @@ and, for the observed shapes of 2026-09-27,
 `coverage-contract/sbi-shinsei-observed-shapes-expected.json`, beside the
 historical `expected.json`.
 
+`sbi-shinsei-balance-summary-and-stage` (0.1.0,
+[ADR 0031](adr/0031-sbi-shinsei-stage-category-fx-tier.md)) emits contract v2
+too: one stage-category observation and a complete-container claim with
+`expectedCount: 1`, or a throw. It has no snapshot policy row, because nothing
+selects its observation as a container snapshot; the price promotion lane
+reads it by fetch run.
+
 **Parser versions are unchanged.** The output contract gained fields, but
 `tests/fixtures/observation-pipeline/coverage-contract/expected.json` freezes the observations and
 warning strings every synthetic case produced before the change, and

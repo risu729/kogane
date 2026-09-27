@@ -326,3 +326,14 @@ change was deployed keeps its board without a dataset and unparsed, and that
 v2 row reads differently from what the table now derives. Nothing is counted
 twice by that (the board is a complete container and the lane promotes no FX
 row yet), and the later boards of the same source are parsed.
+
+## Amendment (2026-09-27, ADR 0031): SBI Shinsei `balance-summary-and-stage`
+
+[ADR 0031](0031-sbi-shinsei-stage-category-fx-tier.md) adds the parser
+`sbi-shinsei-balance-summary-and-stage`, which reads
+`raw-balance-summary-and-stage.json` under the dataset
+`balance-summary-and-stage` (the name after `raw-`, the dataset the retired
+importer registered). The v2 table maps it in place, for the same reasons as
+the `exchange-rate` amendment above, with the same window: a terminal
+registered under v2 before this change deploys keeps that artifact without a
+dataset and unparsed, so its board finds no stage and promotes nothing.

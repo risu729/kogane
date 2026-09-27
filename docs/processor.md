@@ -586,17 +586,17 @@ answered from Workers Logs. `runScheduled` now also writes one row per tick of
 each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 `packages/storage-d1/src/core/lane-ticks.ts`):
 
-| Lane                       | Counts recorded                                                                                                                                                                                  |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `identity_sweep`           | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                      |
-| `reconciliation_sweep`     | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                       |
-| `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                          |
-| `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`                                                                                                                                         |
-| `purchase_recognition`     | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped` |
-| `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                            |
-| `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `written` (ADR 0020); its scan position is `price_promotion_cursor`, which the tick does not copy                             |
-| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                         |
-| `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                          |
+| Lane                       | Counts recorded                                                                                                                                                                                                                     |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity_sweep`           | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                                                         |
+| `reconciliation_sweep`     | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                                                          |
+| `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                                                             |
+| `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`                                                                                                                                                                            |
+| `purchase_recognition`     | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped`                                    |
+| `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
+| `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
+| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                                                            |
+| `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 
 Not recorded, because they already keep their own record: `observation_sweep`
 (`observation_lane_state`), `collection_scan` (`collection_scan_state`),

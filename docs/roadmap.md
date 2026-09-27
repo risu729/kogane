@@ -75,10 +75,14 @@ Concrete limits in the current code:
   repair lane has re-parsed the stored captures after deploy, the adapter
   admits nothing. The SBI Shinsei exchange-rate board is parsed from 1.0.2
   (1.0.1 assumed digits where the stored time ends in two letters and matched
-  no board; migration 0059), every `customerCategory` tier kept, while no FX
-  row is promoted to a price until the owner's tier is known and a currency
-  is admitted (the provider's public pages quote the 13 listed currencies per
-  1 unit). A debit posted more than three days from the
+  no board; migration 0059), every `customerCategory` tier kept. A board
+  row of the 13 currencies the provider's public pages quote per 1 unit is
+  promoted only in the stage category the same run's balance summary states
+  ([ADR 0031](adr/0031-sbi-shinsei-stage-category-fx-tier.md); the two were
+  observed on 2026-09-27 to use one scheme). A board waits while its run's
+  balance-summary parse can still run, and promotes nothing when that page is
+  missing, refused or its job failed. A
+  debit posted more than three days from the
   due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
   Sony Bank), partial payments, refunds and complete purchase recognition
   remain extensions; this is not complete event coverage. Which bank account

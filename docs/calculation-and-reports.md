@@ -64,17 +64,24 @@ list in `packages/domain/src/price-sources.ts`
 `price_observation_claims` (migration 0053) records which rule read which
 observation, of which parse run, at which JSON path:
 
-| Rule                              | Claim                                                                        | Price                                                                                              | Basis check                                                                                                                                                                                                              |
-| --------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `fx-sbi-shinsei-board-v1`         | an `sbi-shinsei-exchange-rate` valuation (`bank_mid/buy/sell_rate`)          | base the currency, quote JPY, per 1 unit; mid → `reference`, buy → `bid`, sell → `ask`             | the currency is admitted in `SBI_SHINSEI_FX_QUOTE_BASIS` with its `customerCategory` tier and a basis verified as per 1 unit, and the row is of that tier; **no currency is listed yet**, so no FX row is promoted today |
-| `sbi-domestic-current-price-v1`   | an `sbi-domestic-cash-positions` `current_price` valuation                   | base `instrument:sbi-securities:<market>:<code>`, quote JPY, per 1 share, `reference`              | exactly one position and one `market_value` in the same MTS record (the `POSITION_VALUATIONS_SQL` locator rule), and quantity × price = market value exactly                                                             |
-| `sbi-foreign-stock-price-last-v1` | an `sbi-foreign-cash-positions` position, `$.stockPrice.last` in its element | base `instrument:sbi-securities:<market>:<code>`, quote the position's `currencyCode`, per 1 share | quantity × `stockPrice.last` = `evaluationProfitLoss.frnEvaluationAmount` of the same element exactly                                                                                                                    |
+| Rule                              | Claim                                                                        | Price                                                                                              | Basis check                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fx-sbi-shinsei-board-v1`         | an `sbi-shinsei-exchange-rate` valuation (`bank_mid/buy/sell_rate`)          | base the currency, quote JPY, per 1 unit; mid → `reference`, buy → `bid`, sell → `ask`             | the currency is one of the 13 the provider's public pages quote per 1 unit (`SBI_SHINSEI_FX_PER_UNIT_CURRENCIES`; never CHF or JPY) and the row's `customerCategory` is strictly equal to the one stage category the same collection run's balance summary states ([ADR 0031](adr/0031-sbi-shinsei-stage-category-fx-tier.md)); or the manual table `SBI_SHINSEI_FX_QUOTE_BASIS` admits the currency in that tier (empty) |
+| `sbi-domestic-current-price-v1`   | an `sbi-domestic-cash-positions` `current_price` valuation                   | base `instrument:sbi-securities:<market>:<code>`, quote JPY, per 1 share, `reference`              | exactly one position and one `market_value` in the same MTS record (the `POSITION_VALUATIONS_SQL` locator rule), and quantity × price = market value exactly                                                                                                                                                                                                                                                              |
+| `sbi-foreign-stock-price-last-v1` | an `sbi-foreign-cash-positions` position, `$.stockPrice.last` in its element | base `instrument:sbi-securities:<market>:<code>`, quote the position's `currencyCode`, per 1 share | quantity × `stockPrice.last` = `evaluationProfitLoss.frnEvaluationAmount` of the same element exactly                                                                                                                                                                                                                                                                                                                     |
 
 The base instrument reference is the report job's
 (`instrument:<source>:<market>:<code>`). A claim whose check fails is counted
 as `basis_unverified`; a currency a rule does not admit, as
-`unsupported_currency`. Neither writes anything and neither is retried under
-the same rules; a price is never rescaled, rounded or defaulted. Execution
+`unsupported_currency`; a board row of a per-1-unit currency of another code
+than the stage its run states, as `tier_unmatched`, and one whose run states
+no stage or more than one, as `stage_unstated`. None writes anything and none
+is retried under
+the same rules. A board row whose run still has its balance summary to parse
+(a job of the deployed stage parser that can still run, and no published
+parse of that page) is not judged yet: the tick stops before it, counts the
+rest of its page as `stage_pending`, and the cursor waits there until that
+job publishes, fails or runs out of attempts; a price is never rescaled, rounded or defaulted. Execution
 prices are never valuation prices, so no rule reads one. The effective time is
 the provider's own instant when the claim states one (the board's
 `transactionTime`, basis `provider`), otherwise the artifact's fetch instant
@@ -118,8 +125,10 @@ converted 1:1.
 and FX under `fx-sbi-shinsei-mid-v1`, is the next step (the plan's P2-3). SBI Shinsei's
 board is a customer rate tiered by `customerCategory` (5 tiers for most
 currencies on the stored boards, [ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)),
-not a market reference; which tier is the owner's is unobserved, and the rule
-reads a tier only once an admission names it. `price_observations` and `price_observation_claims` are outside the
+not a market reference. The rule reads the tier the same run's balance
+summary names as the owner's stage (ADR 0031); the two were observed on
+2026-09-27 to use one scheme, and the matching row is the one the logged-in
+FX page shows. `price_observations` and `price_observation_claims` are outside the
 source-revision ledger: valuation reads CORE per request, and a READ
 projection over prices would need bump triggers first.
 

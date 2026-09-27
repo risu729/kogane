@@ -15,6 +15,7 @@ export const SBI_SHINSEI_PARSERS = [
   "sbi-shinsei-top-balances-and-activity",
   "sbi-shinsei-yen-deposit-account",
   "sbi-shinsei-exchange-rate",
+  "sbi-shinsei-balance-summary-and-stage",
 ] as const;
 
 export interface RejectionCategory {
@@ -66,6 +67,9 @@ const LABELLED = [
   "outside declared activity window",
   "the exchange-rate board is empty",
   "the exchange-rate board has no quote row",
+  // sbi-shinsei-balance-summary-and-stage (ADR 0031)
+  "schema is not known",
+  "expected a non-empty string or a finite number",
 ] as const;
 const FIELD_PREFIXES = ["unknown field ", "missing field "] as const;
 /** Continuations that carry a payload value: the value is dropped. */

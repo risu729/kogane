@@ -170,9 +170,13 @@ What the releases do, and what they leave unknown:
   instant, marked as the collector's.
 - **Unknown, kept as reasons:** the window's end, the meaning of the two
   trailing characters (so the board's own time), which tier applies to the
-  owner, and each currency's quote basis. The price rule promotes no board row
-  until an admission names the currency, its tier and its basis (ADR 0020
-  amendment).
+  owner, and each currency's quote basis. The price rule promoted no board row
+  until an admission named the currency, its tier and its basis (ADR 0020
+  amendment); since ADR 0031 the tier is the stage category the same run's
+  balance summary states, for the 13 currencies the provider's pages quote
+  per 1 unit, and the stage is kept as a valuation-kind observation with no
+  amount (account `sbi-shinsei:customer`, metric
+  `provider_customer_category`, currency `XXX`).
 
 Deploying the parsers is enough to re-parse: the repair lane's cyclic scan
 creates a job per stored artifact for the new (parser, version) pair and

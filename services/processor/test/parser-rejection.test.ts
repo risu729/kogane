@@ -519,6 +519,7 @@ describe("classifier closure", () => {
     "sbi-shinsei-top-balances-and-activity.ts",
     "sbi-shinsei-yen-deposit-account.ts",
     "sbi-shinsei-exchange-rate.ts",
+    "sbi-shinsei-balance-summary-and-stage.ts",
     // The shared helpers they import; its one throw is `decodeUtf8`.
     "util.ts",
   ].map((name) =>
@@ -529,8 +530,9 @@ describe("classifier closure", () => {
   );
   test("the parser sources have the throw sites the PR table lists", () => {
     // 19 in common, 8 in the activity parser, 2 in yen deposit, 5 in the
-    // board, 1 in the shared UTF-8 decoder.
-    expect(templates).toHaveLength(35);
+    // board, 2 in the balance summary (ADR 0031), 1 in the shared UTF-8
+    // decoder.
+    expect(templates).toHaveLength(37);
   });
   test("each throw site maps to a named category, never unclassified", () => {
     for (const template of templates) {
