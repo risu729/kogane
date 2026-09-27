@@ -15,12 +15,15 @@
 import { assertRedactedHtml } from "./redaction";
 import {
   CONNECTION_STOP_CODES,
+  UNREAD_MONTH_CODES,
   type CollectionFailure,
   type CollectionManifest,
   type ConnectionStopCode,
   type ConnectionSummary,
+  type ExportOffer,
   type RawArtifact,
   type StoredArtifact,
+  type UnreadMonth,
 } from "./types";
 import {
   objectKey,
@@ -132,10 +135,12 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 /**
  * A connection's coverage of what the run set out to collect (ADR 0026). A
  * `success` connection enumerated its credit months from the menu and the
- * past-months response and kept every one of them: the page, the ledger the
- * collector derives from a page that states its state, and every export the
- * page offers. `collectConnection` reports `partial` when a month's page
- * shows rows but no stated state (the rows were kept as HTML only), and when
+ * past-months response and kept every one of them: the page and the ledger
+ * the collector derives from a page that states its state. Export links are
+ * recorded as offers and not fetched (ADR 0005's second amendment).
+ * `collectConnection` reports `partial` when a month is kept unread: its page
+ * shows rows but no stated state, or rows under the observed third ledger
+ * header (the rows were kept as HTML only), and when
  * a month's fetch, state, period, ledger or export failed: the connection
  * stopped there and kept the months before it (ADR 0005's amendment). Either
  * unit stays `partial`. A connection that stopped before its first credit
@@ -158,13 +163,19 @@ function runCoverage(status: CollectionManifest["status"]): CoverageStatus {
 
 /** A blocked connection is a state to report, never a reason to retry a login
  * (source policy, G3-10/G3-11). A stopped connection's unit carries the stage
- * it stopped at; one that ran to the end but withheld a month's rows carries
- * `collector_partial`. */
-function connectionErrorCode(summary: ConnectionSummary): string | undefined {
+ * it stopped at. One that ran to the end but kept months unread carries
+ * `scheduled_payments_page` when every unread month is under the observed third
+ * ledger header (ADR 0005's second amendment), and `collector_partial`
+ * otherwise, as before. */
+export function connectionErrorCode(summary: ConnectionSummary): string | undefined {
   if (summary.status === "success") return undefined;
   if (summary.stopCode !== undefined) return stopCode(summary.stopCode);
   if (summary.status === "human-required") return "human_required";
-  return summary.status === "partial" ? "collector_partial" : "collector_failed";
+  if (summary.status !== "partial") return "collector_failed";
+  const unread = new Set((summary.unreadMonths ?? []).map((month) => month.code));
+  return unread.size === 1 && unread.has("scheduled_payments_page")
+    ? "scheduled_payments_page"
+    : "collector_partial";
 }
 
 function runErrorCode(input: SharedRunInput): string | undefined {
@@ -178,7 +189,12 @@ function runErrorCode(input: SharedRunInput): string | undefined {
       .map((connection) => connectionErrorCode(connection.summary)),
   );
   const [only] = codes;
-  if (codes.size === 1 && only !== undefined && STOP_CODES.has(only)) return only;
+  if (
+    codes.size === 1 &&
+    only !== undefined &&
+    (STOP_CODES.has(only) || only === "scheduled_payments_page")
+  )
+    return only;
   return input.status === "partial" ? "collector_partial" : "collector_failed";
 }
 
@@ -202,6 +218,26 @@ function position(value: number): number {
     throw new Error("manifest_stop_position_invalid");
   }
   return value;
+}
+
+const UNREAD_CODES: ReadonlySet<string> = new Set(UNREAD_MONTH_CODES);
+const EXPORT_KINDS: ReadonlySet<string> = new Set(["csv", "pdf", "ofx"]);
+
+/** Each unread month as a position and a code from `UNREAD_MONTH_CODES`, or a refused plan. */
+function unreadMonths(months: readonly UnreadMonth[]): UnreadMonth[] {
+  return months.map((month) => {
+    if (!UNREAD_CODES.has(month.code)) throw new Error("manifest_unread_code_invalid");
+    return { position: position(month.position), code: month.code };
+  });
+}
+
+/** Each export offer as a position and closed kinds, or a refused plan. */
+function exportOffers(offers: readonly ExportOffer[]): ExportOffer[] {
+  return offers.map((offer) => {
+    if (offer.kinds.length === 0 || offer.kinds.some((kind) => !EXPORT_KINDS.has(kind)))
+      throw new Error("manifest_export_kind_invalid");
+    return { position: position(offer.position), kinds: [...new Set(offer.kinds)] };
+  });
 }
 
 /**
@@ -241,6 +277,12 @@ function manifestBytes(
               : { stopPosition: position(connection.stopPosition) }),
             capturedMonthCount: connection.capturedMonthCount ?? 0,
           }),
+      ...(connection.unreadMonths === undefined || connection.unreadMonths.length === 0
+        ? {}
+        : { unreadMonths: unreadMonths(connection.unreadMonths) }),
+      ...(connection.exportOffers === undefined || connection.exportOffers.length === 0
+        ? {}
+        : { exportOffers: exportOffers(connection.exportOffers) }),
     })),
     artifacts: stored,
     failures: input.failures.map((failure) => ({

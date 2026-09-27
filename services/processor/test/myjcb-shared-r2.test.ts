@@ -503,3 +503,100 @@ test("ADR 0005 amendment: a failed run's stopped units carry their codes and the
   ).toBe(1);
   expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
 }, 60000);
+
+test("ADR 0005 second amendment: a month under the third ledger header registers unread, the run stays not_eligible", async () => {
+  // The collector's real plan for a connection that read positions 0 and 1
+  // and kept position 2 unread: its page shows rows under
+  // `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` (three cells, as the
+  // ショッピングスキップ払い schedule page shows it), so it is stored
+  // as `unknown` evidence with no ledger, and the connection went on. The unit
+  // is `partial` with `scheduled_payments_page`: registration turns it into a
+  // `failed` unit report, the run is `partial`, and nothing of it is parsed,
+  // so no parser reads the unread month (ADR 0026's eligibility, unchanged).
+  const runId = "00000000-0000-4000-8000-00000000a007";
+  const scheduledPage =
+    '<!doctype html><html><body><h1>MyJCB</h1><div class="detail-list-01"><div class="head"><div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div></div><div class="content"><div class="item-cell"><div class="cell">2026/03/10</div><div class="cell">架空分割店</div><div class="cell">2026/04/10</div><div class="cell">3,000円</div></div></div></div></body></html>';
+  const kept: RawArtifact[] = [
+    ...artifacts,
+    {
+      dataset: "credit-detail",
+      filename: "credit-detail-02.html",
+      body: scheduledPage,
+      mediaType: HTML,
+      statementState: "unknown",
+      period: "detailMonth-2",
+    },
+  ];
+  const plan = await myJcbRunPlan({
+    schemaVersion: "myjcb-worker-poc-v1",
+    runId,
+    startedAt: "2026-09-23T00:00:00.000Z",
+    completedAt: "2026-09-23T00:05:00.000Z",
+    status: "partial",
+    trigger: "scheduled",
+    connections: [
+      {
+        summary: {
+          connectionId: CONNECTION,
+          bootstrapMode: "password",
+          status: "partial",
+          cardCount: 1,
+          periodCount: 3,
+          artifactCount: kept.length,
+          unreadMonths: [{ position: 2, code: "scheduled_payments_page" }],
+          exportOffers: [{ position: 1, kinds: ["pdf", "csv", "ofx"] }],
+        },
+        artifacts: kept,
+      },
+    ],
+    failures: [],
+  });
+  expect(plan.run.units).toEqual([
+    {
+      unitKey: CONNECTION,
+      unitKind: "connection",
+      artifactCount: 5,
+      coverageStatus: "partial",
+      safeErrorCode: "scheduled_payments_page",
+    },
+  ]);
+  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+  expect(await registerCollectionRun(env, { source: "myjcb", runId })).toMatchObject({
+    outcome: "registered",
+    artifacts: 6,
+  });
+  const fetchRunId = await fetchRun(runId);
+  expect(
+    await env.DB.prepare("SELECT COUNT(*) AS n FROM fetch_run_seals WHERE fetch_run_id=?")
+      .bind(fetchRunId)
+      .first<number>("n"),
+  ).toBe(1);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT r.status,ur.normalized_outcome AS unit_outcome,ur.safe_failure_code AS code FROM observation_fetch_runs r JOIN fetch_units u ON u.fetch_run_id=r.id JOIN fetch_unit_reports ur ON ur.fetch_unit_id=u.id WHERE r.external_run_id=?",
+      )
+        .bind(runId)
+        .all()
+    ).results,
+  ).toEqual([{ status: "partial", unit_outcome: "failed", code: "scheduled_payments_page" }]);
+  // The unread month is catalogued as evidence, with no ledger beside it.
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT artifact_key FROM fetch_artifacts WHERE fetch_run_id=? AND artifact_key LIKE ? ORDER BY artifact_key",
+      )
+        .bind(fetchRunId, `${CONNECTION}/credit-%-02.%`)
+        .all()
+    ).results,
+  ).toEqual([{ artifact_key: `${CONNECTION}/credit-detail-02.html` }]);
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  expect(await workItem(runId)).toEqual({ outcome: "not_eligible", jobs_created: 0 });
+  expect(
+    await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM observation_parse_jobs j JOIN fetch_artifacts a ON a.id=j.fetch_artifact_id WHERE a.fetch_run_id=?",
+    )
+      .bind(fetchRunId)
+      .first<number>("n"),
+  ).toBe(0);
+}, 60000);

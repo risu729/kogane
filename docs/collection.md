@@ -414,7 +414,9 @@ let through. The collector manifest rebuilds each connection and each failure
 from closed fields: a status, counts, and for a connection that stopped, a
 stop code from `CONNECTION_STOP_CODES`, the month position it stopped at and
 the number of months it kept (failure entries are
-`{ connectionId, operation: "collect", code, position }`). A code outside the
+`{ connectionId, operation: "collect", code, position }`), plus the months it
+kept unread (a position and a code from `UNREAD_MONTH_CODES`) and the export
+kinds each month offered (`csv`, `pdf`, `ofx`). A code or kind outside its
 list or a position that is not a `detailMonth` refuses the plan, so upstream
 free text never reaches the shared bucket either. (As for Money Forward, the
 importer's central bytes also carried its parsed `connectionId`, `filename`
@@ -436,21 +438,39 @@ periods, so a finished run is not a claim about the card's whole history —
 and registration only records it. Each unit states its own coverage
 ([ADR 0026](adr/0026-collector-unit-coverage.md)): `complete` for a
 successful connection, which enumerated its credit months from the menu and
-the past-months response and kept every month's page, the ledger of every page
-that states its state, and every export a page offers. A page kept as
-`unknown` that shows ledger rows (no heading, position 2 or later) gets no
-ledger, so its rows reach no parser: the connection is then `partial`, its
-unit `partial` with `collector_partial`, and the run `partial` although no
-failure was recorded. The credit months are read one at a time in ascending
+the past-months response and kept every month's page and the ledger of every
+page that states its state. Export links a page offers for its own month are
+recorded in the manifest (`exportOffers: [{ position, kinds }]`) and not
+fetched: the datasets are refused here (above), so a fetched export would fail
+the run's plan
+([ADR 0005's amendment (b)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page)).
+A month can be kept unread: a page kept as `unknown` that shows ledger rows
+(no heading, position 2 or later; `rows_unstated`), or a page whose ledger
+shows rows under the observed third header
+`ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`, seen on the
+ショッピングスキップ払い schedule page (`scheduled_payments_page`, at any
+position; the collector counts `detailMonth` positions and does not tell a
+month from a schedule page). Such a page gets no ledger, so
+its rows reach no parser, and the connection goes on to the next month. The
+manifest lists these months (`unreadMonths: [{ position, code }]`), the
+connection is `partial`, its unit `partial` with `scheduled_payments_page`
+when every unread month is under the third header and `collector_partial`
+otherwise, and the run `partial` although no failure was recorded. The credit
+menu (`detailMenu.html`) is read once, before any detail page, in the same
+session. The credit months are read one at a time in ascending
 `detailMonth` order, and a month is kept whole or not at all. When a month's
 fetch, statement state, period, ledger parse or export fails, the connection
 stops at that month ([ADR 0005's amendment](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months)):
 it keeps the credit menu, the past-months response, the months before it and
 `discovery.json`, reads nothing further, and is `partial`. Its unit is
 `partial` with the stage's stop code (`month_fetch`, `month_parse`,
-`credit_statement_state`, `credit_statement_period`, `ledger_parse`,
-`export_fetch`), and its manifest entry records the code, the position and the
-count of months kept. A connection that stops before its first month (`login`,
+`credit_statement_state`, `credit_statement_period`, `ledger_parse`, and
+`export_fetch` only on the fetch path the Worker does not use), and its
+manifest entry records the code, the position and the count of months kept.
+On `credit_statement_state`, `credit_statement_period` and `ledger_parse` the
+page it stopped on is also kept, redacted, as an `unknown` `credit-detail`
+with no ledger, so the stop can be diagnosed; it is not counted as a kept
+month. A connection that stops before its first month (`login`,
 `human_required`, `discovery`, `credit_menu`, `credit_first_detail`,
 `credit_past_months`, `no_route`, or `unclassified` for an error that names no
 stage) keeps nothing and has an `unknown` unit with that code, and so does a
