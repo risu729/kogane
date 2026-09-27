@@ -261,6 +261,8 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
     expect(
       read(`<h2>最新のご利用明細</h2>${link(0)}<h2>${MENU_SCHEDULE_HEADING}</h2>${link(0)}`).code,
     ).toBe("credit-menu-group");
+    // A link inside an unobserved heading is not skipped: it stops too.
+    expect(read(`<h2>架空の見出し${link(3)}</h2>`).code).toBe("credit-menu-group");
     // A link that opens no detail page is not grouped and stops nothing.
     expect(
       readCreditMenuGroups(

@@ -157,10 +157,8 @@ export function readCreditMenuGroups(html: string): CreditMenuPositions {
   let outside = 0;
   let heading: string | undefined;
   const visit = (node: HtmlNode): void => {
-    if (isElement(node) && node.tagName === "h2") {
-      heading = nodeText(node).replace(/\s+/gu, "");
-      return;
-    }
+    // A link inside a heading belongs to that heading.
+    if (isElement(node) && node.tagName === "h2") heading = nodeText(node).replace(/\s+/gu, "");
     if (isElement(node) && node.tagName === "a") {
       const position = creditDetailLinkPosition(node);
       if (position !== undefined) {
