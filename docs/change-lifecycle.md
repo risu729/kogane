@@ -569,7 +569,10 @@ already recorded is never undone by a DELETE — an undo is a new revision
   a flag that is off and a build that has not finished both leave the row open
   and the receipt `accepted`; the completion after the read model finished
   converges without a second build and records the snapshot as its evidence; a
-  redelivery claims nothing; an unregistered processor blocks the row.
+  redelivery claims nothing; an unregistered processor blocks the row; a build
+  step that throws, or finds the build leased by another writer, is retryable
+  and the row is claimed again after its backoff. Each delivery is asserted by
+  its `outcomes` first, so a failure names its cause.
 
 Not verified: production data; behaviour under more than two concurrent Workers (the receipt reservation and
 the in-batch revision guard are the arbiters, and the tests exercise two).
