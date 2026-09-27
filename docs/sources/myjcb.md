@@ -311,7 +311,7 @@ Workers内でdownloadした任意JavaScriptを`eval`せず、保護scriptを手�
 
 ### Kuebikoで確認したクレジットread/export
 
-- 初期menuは`detailMenu.html?link_id=...`、明細は`detail.html?detailMonth=N&output=web`。第一IDの初期HTMLは`0..8`を列挙した。
+- 初期menuは`detailMenu.html?link_id=...`、明細は`detail.html?detailMonth=N&output=web`。第一IDの初期HTMLは`0..8`を列挙した。このうち 7 と 8 は月ではなく支払予定 page である（下の「credit menu の group と支払予定 page」）。
 - `detailAPI.js`はdetail pageの`input:hidden[name=generalJsonShikibetuId]`を読み、`detailPastJson.json`へ`application/json`でJSON-RPC POSTする。request fieldsは`jsonrpc`、`method`、`params`、`id`、contractは`method=execute`、`params=[{generalJsonShikibetuId}]`、IDは`0301006`＋2桁counter（初回`030100601`）。responseは`result.errId`、`errMessage`、`detailPastJsonInfo[]`を持ち、item fieldsは`detailAvailableFlag`、`detailMonth`、`payAmount`、`payAmountDispFlag`、`settlementYM`だった。hidden欠落／API failureでは停止し、推測値や`0..17`をblind scanしない。
 - 第一IDの過去月responseは9候補（`detailMonth=9..17`）のうち2件（`10`、`13`）だけがavailableだった。collectorは`detailAvailableFlag=true`だけを初期menu月へ追加する。
 - 別の`detailReplaceJson.json`はrequest parameterに`generalJsonShikibetuId`、`simeYmd`、`payAmount`、response itemに`changeOperationLimitDate`、`detailInquiryURL`、`fixFlag`、`newestFlag`、`payAmount`、`payAmountDispFlag`、`payHowChangeEnableFlag`、`settlementDate`を持つUI/payment-display metadataだった。ledger取得には不要なのでallowlistしない。
@@ -465,6 +465,7 @@ unit の coverage は「この run が集めようとしたものを、この un
 | `login`                                                    | login、passkey、session 復元                       | なし                                      |
 | `discovery`                                                | mypage の card 列挙                                | なし                                      |
 | `credit_menu`、`credit_first_detail`、`credit_past_months` | credit menu、最初の明細 page（識別子）、過去月 API | なし                                      |
+| `credit_menu_group_unrecognized`                           | credit menu の見出しが観測した三つのどれでもない   | なし                                      |
 | `month_fetch`、`month_parse`                               | 月の page の取得、page の読み取り                  | 止まった月より前の月（unit は `partial`） |
 | `credit_statement_state`、`credit_statement_period`        | 状態の矛盾、明細の月                               | 同上                                      |
 | `ledger_parse`                                             | ledger header、行の cell                           | 同上                                      |
@@ -497,7 +498,7 @@ registration と eligibility は変えない。停止 code 付きの `partial` u
 
 同じ日の二度目の構造調査（round 4）で、position 7 と 8 が月ではないと分かった。menu の 9 link はすべて文言 「明細を見る」 で、DOM 順は 0、1、7、8、2、3、4、5、6。月名は link ではなく同じ box の見出しにある。0 と 1 は h2 「最新のご利用明細」、2〜6 は 「過去の明細」 の下にあり、これが月である。7 と 8 は h2 「ボーナス#回払い・ショッピングスキップ払い」 の下にあり、7 は ボーナス払い、8 は ショッピングスキップ払い（box に月名なし）の支払予定 page である。position 8 の page は h1 「ショッピングスキップ払いご利用明細(未確定分)」 を持つ。ledger はどの page でも `div.detail-list-01` の grid で、`<table>` ではない（collector も `<table>` に依存しない）。三つ目の header の live の `div.head` は 3 cell で、2 番目の cell が 「ご利用先など」 と 「お支払日」 を二行で持つ。最初の調査はこれを 4 label と書いた。
 
-collector は `detailMonth` の position を数え、月と支払予定 page を区別しない。7 と 8 も取得、保存され、`periodCount` と `capturedMonthCount` に数えられ、読まなければ `unreadMonths` に入る。period は `detailMonth-7`／`detailMonth-8` の相対 label で、どの reader も暦月に解決しない（解決するのは `detailMonth-0` と `-1` だけ）。
+amendment (b) の時点の collector は `detailMonth` の position を数え、月と支払予定 page を区別しなかった。7 と 8 も月として取得、保存され、`periodCount` と `capturedMonthCount` に数えられ、読まなければ `unreadMonths` に入った。現在は menu の見出しで区別する（下の「credit menu の group と支払予定 page」、amendment (c)）。period は `detailMonth-7`／`detailMonth-8` の相対 label で、どの reader も暦月に解決しない（解決するのは `detailMonth-0` と `-1` だけ）。
 
 **export link。** 確定月は `detailDbPdf.html?output=pdf`、`detail.html?output=csv`、`detail.html?output=money` を、`detailMonth` を名乗らない相対 href で持つ（月はその link がある page の月である）。以前の `discoverCreditExports` は href を origin だけに対して解決したので `/detail.html` になり、一度も一致しなかった。保存済みのどの run も export を 0 件と記録したのはこの bug で、「調べた connection はどの月にも export link を持たない」（上の明細状態の判定）は誤りだった。現在は detail page 自身の URL（`https://my.jcb.co.jp/iss-pc/member/details_inquiry/detail.html`）に対して解決するので、相対、`./`、root 相対、絶対の href が同じく読める。MyJCB の origin にあり、export の path（`/iss-pc/member/details_inquiry/` の `detail.html` か `detailDbPdf.html`）と `output`（`csv`、`money`、`pdf`）を持つ link を数える。観測どおり `detailMonth` を名乗らない link は、その link がある page の月の export とする。`detailMonth` を名乗る link は、その月をちょうど名乗る場合だけ数える（以前は `Number(null)` により、月のない link を month 0 のものとし、他の月では数えなかった）。
 
@@ -509,7 +510,7 @@ Worker は見つけた export を取得しない。共通 bucket は `credit-csv
 - 同じ page に別の ledger があっても、月全体を読まない。
 - 空なら何も欠けないので、従来どおり読む（position 8 の観測どおり）。
 - 三種のどれでもない header で行があれば、従来どおり停止する。
-- ショッピングスキップ払いの page に行があるかぎり、connection は `partial` で、run は parse されない。行が月の明細にも現れるかは観測されていないので、欠落として扱う（INV05）。支払予定 page を月と分けて扱う規則は、menu の見出しの読み取りと別の決定が要る。
+- 月の position の page にこの header の行があれば、connection は `partial` で、run は parse されない。行が月の明細にも現れるかは観測されていないので、欠落として扱う（INV05）。menu が支払予定 page として示す position は月ではなく、この規則の対象外である（下の amendment (c)）。
 
 読まない月は manifest の connection に `unreadMonths: [{ position, code }]` として書く。code は閉じた一覧（`UNREAD_MONTH_CODES`）で、`scheduled_payments_page`（三つ目の header）と `rows_unstated`（position 2 以降で状態を示さない page の行。以前から数えていたが名前がなかった）である。読まない月のある connection は `partial` になる。読まない月がすべて `scheduled_payments_page` で、connection が止まっていなければ unit の `safeErrorCode` は `scheduled_payments_page`、それ以外は従来どおり `collector_partial` である。manifest の `failures` には書かない（停止ではない）。log は `myjcb-credit-month-unread` に position と code だけを出す。registration と eligibility は変えない。unit report は `failed`、run は `partial`、`not_eligible` で、読まない page は catalogue と seal はされるが、どの parser も読まない。
 
@@ -523,6 +524,25 @@ Worker は見つけた export を取得しない。共通 bucket は `credit-csv
 
 - 2026-09-25 と 09-26 の run は position 1 で `credit-ledger-headers` により止まり、artifact を残さなかった（最初の amendment の前）。09-27 の live の position 1 は確定の形で、通るはずである。position 1 の page の形は時刻か session によって変わる。その夜の page は保存されていないので、原因は確かめられない。以前の run が保存した position 1 の page（round 4 で label の数だけを数えた）は `(確定分)` の見出しを持つが `今回のお支払い金額` をどこにも持たず、`ご利用金額` だけを持つ。この ADR の規則は、行のあるこの形の page で停止する（確定の ledger は確定 header 一式を表示しなければならない、`ledger_parse`）ので、これが最も考えられる原因だが、確認はされていない。次に同じ停止が起きれば、停止した page が保存される。
 - 三つ目の header の行の意味、export の中身（2026-08-31 に確認、保存はしない）、menu を月ごとに読み直す必要があるかは未確認である。
+
+### credit menu の group と支払予定 page（2026-09-27、ADR 0005 の amendment (c)）
+
+round 4 の構造調査で、credit menu（`detailMenu.html`）の 9 link は三つの `h2` の下の card box にあることが分かった。link の文言はすべて 「明細を見る」 で月名を持たないので、月か支払予定 page かは見出しだけが示す。
+
+| 見出し（空白を除いて比較）                    | position（観測） | collector の扱い                                                                     |
+| --------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------ |
+| 「最新のご利用明細」                          | 0、1             | 月。unit の coverage に入る                                                          |
+| 「過去の明細」                                | 2–6              | 月。unit の coverage に入る                                                          |
+| 「ボーナス#回払い・ショッピングスキップ払い」 | 7、8             | 支払予定 page。`credit-schedule-NN.html` として保存し、読まない。coverage に入らない |
+| 上のどれでもない見出し、見出しの前の link     | —                | `credit_menu_group_unrecognized` で最初の月の前に停止する                            |
+
+`#` は数字で、調査は値を記録していない。collector は 1 桁以上の数字（半角か全角）を受け入れ、それ以外の文字は完全一致で比べる。link は文書順でその前にある最後の `h2` に属する。`/iss-pc/member/details_inquiry/detail.html` への `detailMonth`（1–2 桁）付きの link だけを数え、menu の URL に対して解決する（相対、root 相対、絶対の href を同じく読む）。同じ position が両方の group にある場合も停止する。停止 log（`myjcb-credit-menu-groups`）は link の数だけを出し、見出しの文字列は出さない。
+
+- **月**：月の group の position と、過去月 API が available とした position を従来どおり読む。`periodCount` と `capturedMonthCount` は月だけを数える。過去月 API が支払予定 page の position を available とした場合は（観測されていない）、どちらとも決めず `credit_past_months` で停止する。
+- **支払予定 page**：最後の月の後に昇順で一度ずつ取得し、何を表示していても redact して丸ごと `credit-schedule-NN.html`（dataset `credit-schedule`、状態 `unknown`、period `detailMonth-N`）として保存する。行、状態、link は読まない。`credit-detail-NN.html` ではないので registration はどの parser dataset も与えず、catalogue と seal だけされ、parse job は作られない。collector manifest の connection には `schedulePages: [{ position, code }]`（code は `scheduled_payments_page`＝保存した、`schedule_page_fetch`＝取得か decode に失敗し何も保存しなかった）と `schedulePageCount`（保存した数）を書く。取得の失敗は停止ではなく、`failures` にも `unreadMonths` にも入らない。log は `myjcb-credit-schedule-page-failed` に position と code だけを出す。月で停止した connection は支払予定 page を読まない。
+- **coverage**：月をすべて丸ごと読めば connection は `success`、unit は `complete` で、支払予定 page に行があっても、取得に失敗しても変わらない。以前は position 8 に行があるかぎり unit が `partial` になり、MyJCB の run は一つも parse されなかった。
+
+制限：支払予定 page の行の意味は未確認で、どの parser も読まない（ショッピングスキップ払いの page を独自の dataset として読むのは後の PR で、行のある page が観測された場合だけ）。position 7（ボーナス払い）は行のある状態では観測されていない。保存される menu は redact で `href` を除くので、保存された menu からはどの link がどの position かは読めない。見出しが変われば、新しい見出しを観測して記録するまで connection は最初の月の前で止まり、何も保存しない。
 
 ### 確定分の見出しとご利用金額のheader（2026-09-27、ADR 0005 の amendment (d)）
 

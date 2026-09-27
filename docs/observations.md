@@ -44,6 +44,37 @@ holder name and card name are never read. **Kept as limits:** Vpass has no
 reader; branch names are not compared; the relation between the mask length
 and a bank's account-number length is not checked.
 
+## MyJCB menu groups: schedule pages are not months (collector, no parser release)
+
+2026-09-27. The second structure-only survey of the day (round 4, counts and
+shapes only) read the credit menu: nine 「明細を見る」 links, all
+`detail.html?detailMonth=N`, in DOM order 0, 1, 7, 8, 2, 3, 4, 5, 6, each in
+a card box under an `h2`. Positions 0 and 1 are under 「最新のご利用明細」,
+2 to 6 under 「過去の明細」, and 7 and 8 under
+「ボーナス#回払い・ショッピングスキップ払い」 (`#` a digit the survey did not
+record). Position 8 is the ショッピングスキップ払い schedule (h1
+「ショッピングスキップ払いご利用明細(未確定分)」, the third ledger header over
+two rows); position 7, the bonus schedule, has not been seen with rows.
+
+With the previous collector a skip page with rows was stored unread and kept
+the unit `partial`, so the run registered `partial`, was `not_eligible`, and
+no MyJCB month was parsed while a skip payment was outstanding. The collector
+now reads the menu's headings
+([ADR 0005's amendment (c)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months),
+[source note](sources/myjcb.md)): the months are the positions under the two
+month headings (and the past-months response's), and the schedule positions
+are stored as `credit-schedule-NN.html` evidence, recorded in the manifest
+(`schedulePages`, `schedulePageCount`), outside the unit's coverage and read
+by no parser. A menu heading that is not one of the three observed ones stops
+the connection before its first month (`credit_menu_group_unrecognized`).
+
+No parser changes and nothing stored is rewritten. What the schedule rows mean
+is not confirmed; reading the ショッピングスキップ払い page as its own dataset
+is left for a later change, for pages observed with rows. Tests:
+`services/collector-myjcb/test/parsers.test.ts`,
+`credit-statement-state.test.ts`, `shared-collection.test.ts`, and
+`services/processor/test/myjcb-shared-r2.test.ts`.
+
 ## MyJCB: a confirmed page under the usage header (ledger and statement parsers 1.2.0)
 
 2026-09-27. A position-1 page an earlier run stored carries the `(確定分)`
@@ -406,7 +437,8 @@ collector read wrongly or not at all
   whose ledger has rows under it is now kept unread
   (`scheduled_payments_page`): its page is stored as `unknown` evidence, no
   ledger is derived, and the next position is read. Its run is `partial` and
-  not parsed; the collector still counts positions, not months.
+  not parsed; the collector still counted positions, not months (until the
+  menu groups entry above).
 - A detail page fetched without the credit menu first is a different page;
   the collector already reads the menu first. A 「通信エラーが発生しました」
   page followed many consecutive fetches; the collector does not recognise

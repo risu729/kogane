@@ -103,6 +103,7 @@ const SAFE_CODES = new Set([
   "collect-discovery",
   "collect-credit",
   "collect-credit-menu",
+  "credit-menu-group",
   "collect-credit-first-detail",
   "collect-credit-past-months",
   "collect-credit-month-fetch",

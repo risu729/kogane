@@ -101,6 +101,15 @@ export interface ConnectionSummary {
    * amendment). Absent when no page offered one.
    */
   readonly exportOffers?: readonly ExportOffer[];
+  /**
+   * The menu positions grouped under 「ボーナス#回払い・ショッピングスキップ払い」
+   * (payment schedule pages, not statement months), each with its closed
+   * outcome (ADR 0005's amendment (c)). They never count in `periodCount`,
+   * `capturedMonthCount` or `unreadMonths`. Absent when the menu listed none.
+   */
+  readonly schedulePages?: readonly SchedulePage[];
+  /** The schedule pages stored (entries coded `scheduled_payments_page`); set with `schedulePages`. */
+  readonly schedulePageCount?: number;
 }
 
 /** An export a credit month's page links to. */
@@ -115,7 +124,10 @@ export type CreditExportKind = "csv" | "pdf" | "ofx";
  *   `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` and has rows. That
  *   header was observed on the ショッピングスキップ払い schedule page, a menu
  *   position that is a payment schedule and not a statement month; what its
- *   rows mean has not been confirmed, so they are not read (ADR 0004).
+ *   rows mean has not been confirmed, so they are not read (ADR 0004). Since
+ *   amendment (c) the menu's schedule positions are `schedulePages`, never
+ *   months; this code is left for a MONTH position showing that header with
+ *   rows, which has not been observed.
  *
  * Entries are `detailMonth` positions, not calendar months.
  */
@@ -127,6 +139,27 @@ export interface UnreadMonth {
   /** The month's `detailMonth`. */
   readonly position: number;
   readonly code: UnreadMonthCode;
+}
+
+/**
+ * What became of one schedule page the credit menu listed (ADR 0005's
+ * amendment (c)):
+ *
+ * - `scheduled_payments_page`: fetched and stored, redacted, as
+ *   `credit-schedule-NN.html` with state `unknown`; no parser reads it yet;
+ * - `schedule_page_fetch`: the fetch or the decoding failed and nothing was
+ *   stored. It is not a stop and does not make the connection `partial`,
+ *   because a schedule page is not part of the months the unit covers; the
+ *   reason is recorded here instead (INV05).
+ */
+export const SCHEDULE_PAGE_CODES = ["scheduled_payments_page", "schedule_page_fetch"] as const;
+
+export type SchedulePageCode = (typeof SCHEDULE_PAGE_CODES)[number];
+
+export interface SchedulePage {
+  /** The page's `detailMonth` position in the menu, not a calendar month. */
+  readonly position: number;
+  readonly code: SchedulePageCode;
 }
 
 export interface ExportOffer {
@@ -145,6 +178,7 @@ export const CONNECTION_STOP_CODES = [
   "login",
   "discovery",
   "credit_menu",
+  "credit_menu_group_unrecognized",
   "credit_first_detail",
   "credit_past_months",
   "month_fetch",
@@ -205,6 +239,7 @@ export type StopConditionCode =
   | "collect-discovery"
   | "collect-credit"
   | "collect-credit-menu"
+  | "credit-menu-group"
   | "collect-credit-first-detail"
   | "collect-credit-past-months"
   | "collect-credit-month-fetch"

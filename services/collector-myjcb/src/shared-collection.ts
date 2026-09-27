@@ -16,6 +16,7 @@ import { assertRedactedHtml } from "./redaction";
 import { nameRedactionCount } from "./name-redaction";
 import {
   CONNECTION_STOP_CODES,
+  SCHEDULE_PAGE_CODES,
   UNREAD_MONTH_CODES,
   type CollectionFailure,
   type CollectionManifest,
@@ -23,6 +24,7 @@ import {
   type ConnectionSummary,
   type ExportOffer,
   type RawArtifact,
+  type SchedulePage,
   type StoredArtifact,
   type UnreadMonth,
 } from "./types";
@@ -146,6 +148,12 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * stopped there and kept the months before it (ADR 0005's amendment). Either
  * unit stays `partial`. A connection that stopped before its first credit
  * month keeps nothing and is `unknown`.
+ *
+ * The months are the menu positions under 「最新のご利用明細」 and 「過去の明細」
+ * and the past-months response's; the positions under
+ * 「ボーナス#回払い・ショッピングスキップ払い」 are payment schedule pages, stored
+ * as `credit-schedule-NN.html` and never part of the coverage, whether they
+ * show rows or failed to fetch (ADR 0005's amendment (c)).
  */
 function coverage(status: ConnectionSummary["status"]): CoverageStatus {
   if (status === "success") return "complete";
@@ -222,6 +230,7 @@ function position(value: number): number {
 }
 
 const UNREAD_CODES: ReadonlySet<string> = new Set(UNREAD_MONTH_CODES);
+const SCHEDULE_CODES: ReadonlySet<string> = new Set(SCHEDULE_PAGE_CODES);
 const EXPORT_KINDS: ReadonlySet<string> = new Set(["csv", "pdf", "ofx"]);
 
 /** Each unread month as a position and a code from `UNREAD_MONTH_CODES`, or a refused plan. */
@@ -230,6 +239,33 @@ function unreadMonths(months: readonly UnreadMonth[]): UnreadMonth[] {
     if (!UNREAD_CODES.has(month.code)) throw new Error("manifest_unread_code_invalid");
     return { position: position(month.position), code: month.code };
   });
+}
+
+/** Each schedule page as a position and a code from `SCHEDULE_PAGE_CODES`, or a refused plan. */
+function schedulePages(pages: readonly SchedulePage[]): SchedulePage[] {
+  return pages.map((page) => {
+    if (!SCHEDULE_CODES.has(page.code)) throw new Error("manifest_schedule_code_invalid");
+    return { position: position(page.position), code: page.code };
+  });
+}
+
+/**
+ * The count of stored schedule pages: it must be the number of entries coded
+ * `scheduled_payments_page`, or the plan is refused.
+ */
+function schedulePageCount(pages: readonly SchedulePage[], count: number | undefined): number {
+  const stored = pages.filter((page) => page.code === "scheduled_payments_page").length;
+  if (count !== stored) throw new Error("manifest_schedule_count_invalid");
+  return stored;
+}
+
+/**
+ * A connection that lists no schedule page states no count either: a count
+ * without its entries is refused rather than dropped.
+ */
+function noSchedulePages(count: number | undefined): Record<string, never> {
+  if (count !== undefined) throw new Error("manifest_schedule_count_invalid");
+  return {};
 }
 
 /** Each export offer as a position and closed kinds, or a refused plan. */
@@ -284,6 +320,15 @@ function manifestBytes(
       ...(connection.exportOffers === undefined || connection.exportOffers.length === 0
         ? {}
         : { exportOffers: exportOffers(connection.exportOffers) }),
+      ...(connection.schedulePages === undefined || connection.schedulePages.length === 0
+        ? noSchedulePages(connection.schedulePageCount)
+        : {
+            schedulePages: schedulePages(connection.schedulePages),
+            schedulePageCount: schedulePageCount(
+              connection.schedulePages,
+              connection.schedulePageCount,
+            ),
+          }),
     })),
     artifacts: stored,
     failures: input.failures.map((failure) => ({
