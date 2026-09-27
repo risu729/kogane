@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "iconv-lite": "0.7.0"
+    "iconv-lite": "0.7.3"
   },
   "devDependencies": {
     "@cloudflare/puppeteer": "1.1.0",
