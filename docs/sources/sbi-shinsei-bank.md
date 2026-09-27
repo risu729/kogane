@@ -891,14 +891,17 @@ The collector now replaces each of the three values with `[redacted:name]`
 when it parses the handoff, before any artifact exists
 (`src/name-redaction.ts`, [ADR 0029's
 amendment](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)).
-The redacted object is validated against `sbi-shinsei-balance-summary-v1`
-before it is serialized; every other value, including `branchName`, is kept.
-A response holding a JSON number that serializing again would write as
-different text (trailing zeros, an exponent, more digits than a double holds)
-is refused as an unknown shape instead of being stored altered.
+The marker is written into the provider's own text as the string value of
+each of the three keys; the response is never serialized again, so every
+other byte, including `branchName` and the balances as the provider wrote
+them, is kept. The result must parse, validate against
+`sbi-shinsei-balance-summary-v1` and equal the original with exactly those
+three fields replaced; otherwise (a name key elsewhere, a name that is not a
+string) the response is refused as an unknown shape rather than stored.
 The collector manifest records `redactedFieldCount` for each provider capture
 (3 for a balance summary with all three names, 0 for the other datasets,
-whose bytes stay the provider's text), and the terminal's redaction step is
+which the redaction leaves as the provider's text; the shared path's token
+sanitizer serializes every capture again afterwards, as it did before), and the terminal's redaction step is
 `sbi-shinsei-token-sanitizer` v2. The local diagnostic collector applies the
 same redaction.
 

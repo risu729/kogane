@@ -42,14 +42,14 @@ export interface RedactedResponse {
 /**
  * Replaces every listed name field that holds a value with the marker. An
  * absent, `null` or empty field has nothing to remove and is left as it is.
- * The provider's text is kept byte for byte when no field was replaced;
- * otherwise the response is serialized again from the redacted object, and
- * that object is validated against the same schema before it is returned, so
- * a redaction can never store a shape the schema would refuse. Serializing
- * again must not change how any number is written (a balance given as a JSON
- * number with trailing zeros, an exponent or more digits than a double holds
- * would be stored as a different text): such a response is refused with a
- * stable message rather than stored altered.
+ * The provider object is never serialized again: the marker is written into
+ * the provider's own text, as the string value of each redacted key, so every
+ * other byte (numbers, whitespace, escapes, key order) stays as the provider
+ * wrote it. The result must then parse, pass the same schema, and equal the
+ * original object with exactly the listed fields redacted; a key found
+ * anywhere else, or a name field that is not a JSON string, makes that
+ * comparison fail and the response is refused with a stable message rather
+ * than stored altered.
  */
 export function redactPersonNames(
   schema: ResponseSchemaId,
@@ -58,37 +58,47 @@ export function redactPersonNames(
 ): RedactedResponse {
   const targets = PERSON_NAME_FIELDS[schema] ?? [];
   if (targets.length === 0) return { body: raw, redactedFieldCount: 0 };
-  const copy = structuredClone(parsed);
+  const expected = structuredClone(parsed);
+  const redactedFields = new Set<string>();
   let redactedFieldCount = 0;
   for (const target of targets) {
-    const holder = objectAt(copy, target.path);
+    const holder = objectAt(expected, target.path);
     if (holder === undefined) continue;
     for (const field of target.fields) {
       const value = holder[field];
       if (value === undefined || value === null || value === "") continue;
       if (value === NAME_REDACTION_MARKER) continue;
       holder[field] = NAME_REDACTION_MARKER;
+      redactedFields.add(field);
       redactedFieldCount += 1;
     }
   }
   if (redactedFieldCount === 0) return { body: raw, redactedFieldCount: 0 };
-  if (!numbersSurviveSerialization(raw)) {
-    throw new UnknownResponseShapeError("name redaction would rewrite a number");
+  let body = raw;
+  for (const field of redactedFields) body = replaceStringValue(body, field);
+  let stored: unknown;
+  try {
+    stored = JSON.parse(body);
+  } catch {
+    throw new UnknownResponseShapeError("name redaction did not match the response");
   }
-  validateKnownResponse(schema, copy);
-  return { body: JSON.stringify(copy), redactedFieldCount };
+  validateKnownResponse(schema, stored);
+  if (JSON.stringify(stored) !== JSON.stringify(expected)) {
+    throw new UnknownResponseShapeError("name redaction did not match the response");
+  }
+  return { body, redactedFieldCount };
 }
 
-// Strings are matched first, so a digit inside a string is never read as a
-// number token; `raw` has already parsed as JSON.
-const JSON_STRING_OR_NUMBER = /"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/gu;
-
-function numbersSurviveSerialization(raw: string): boolean {
-  for (const [token] of raw.matchAll(JSON_STRING_OR_NUMBER)) {
-    if (token.startsWith('"')) continue;
-    if (JSON.stringify(Number(token)) !== token) return false;
-  }
-  return true;
+/**
+ * Writes the marker as the string value of every `"<field>": "…"` pair in the
+ * text. The value pattern is escaping-aware; a key must be spelled exactly
+ * (field names are plain identifiers, so they need no escaping in the
+ * pattern), and a key written with escapes is not matched, which the caller's
+ * comparison then refuses.
+ */
+function replaceStringValue(text: string, field: string): string {
+  const pair = new RegExp(`("${field}"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`, "gu");
+  return text.replace(pair, (_match, prefix: string) => `${prefix}"${NAME_REDACTION_MARKER}"`);
 }
 
 function objectAt(root: JsonObject, path: readonly string[]): JsonObject | undefined {

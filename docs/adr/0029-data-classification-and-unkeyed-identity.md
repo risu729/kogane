@@ -319,15 +319,19 @@ exactly the four responses of its plan, so that object is not stored.
 
 ### Consequences
 
-- An SBI Shinsei capture with a name is serialized again from the redacted
-  object (validated against the same schema first), so its bytes are not the
-  provider's text; captures of the other datasets keep the provider's text
-  byte for byte, as before. Serializing again must not change how a number is
-  written: a response with a JSON number that would come out as different
-  text (trailing zeros, an exponent, more digits than a double holds) is
-  refused as an unknown shape rather than stored altered. The survey did not
-  record the JSON type of the balance fields, so whether a live response
-  ever hits this refusal is not known. In memory the collector still holds the
+- An SBI Shinsei capture with a name is not serialized again: the marker is
+  written into the provider's own text as the string value of each redacted
+  key, so every other byte (numbers as written, spacing, escapes, key order)
+  stays the provider's. The result must parse, pass the same schema and equal
+  the original object with exactly the listed fields redacted; a listed key
+  that also appears elsewhere, or a name value that is not a JSON string, is
+  refused as an unknown shape (the closed `provider_response_invalid`)
+  rather than stored altered. Captures of the other datasets leave the
+  redaction as the provider's text byte for byte. Unchanged by this
+  amendment: on the shared path the token sanitizer (`sanitizeProviderCapture`
+  in `src/shared-collection.ts`, like the retired importer) parses every
+  provider capture and serializes it again to drop `header.newToken`, so what
+  reaches DATA there was never the provider's exact text. In memory the collector still holds the
   provider's values for the length of the run.
 - **Objects already stored keep their names.** They are append-only and this
   change does not rewrite them. Deleting or replacing them is the owner's
@@ -360,9 +364,11 @@ exactly the four responses of its plan, so that object is not stored.
 - `services/collector-sbi-shinsei/test/name-redaction.test.ts`: the three
   fields of a synthetic balance summary become the marker and every other
   value is unchanged; the redacted object passes the schema; absent, null and
-  empty fields are not counted and keep the provider bytes; a number that
-  would be written differently is refused; the other datasets are stored
-  byte for byte; every `name` field in the schemas (any case) is classified; the Chrome handoff and the local diagnostic collector both
+  empty fields are not counted and keep the provider bytes; with balances
+  written as `1.50`, `1e3` and a 20-digit integer, indentation and an escaped
+  name, the stored text differs from the input only in the three values; a
+  name key found elsewhere or a non-string name is refused (also through the
+  handoff, as a closed failure); the redaction returns the other datasets byte for byte; every `name` field in the schemas (any case) is classified; the Chrome handoff and the local diagnostic collector both
   produce redacted captures with their counts.
 - `services/collector-sbi-shinsei/test/shared-collection.test.ts` (Worker end
   to end, synthetic container handoff): nothing in DATA and nothing logged

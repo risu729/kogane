@@ -84,27 +84,51 @@ describe("person names are replaced before a response is stored", () => {
     });
   });
 
-  test("numbers written as the provider wrote them survive; any other number is refused", async () => {
+  test("only the three values change: numbers, spacing and escapes keep the provider's text", async () => {
     const loaded = await fixtures();
     const summary = summaryOf(loaded.balanceSummary!);
-    // Integers and short decimals serialize to the same text: stored as is.
-    summary.savingsBalance = 300000;
-    summary.odLimit = -1.5;
-    const raw = JSON.stringify(loaded.balanceSummary);
+    summary.customerName = 'PLACEHOLDER "QUOTED" \\ HOLDER';
+    // Indented, with placeholders for number texts JSON.stringify would rewrite.
+    const raw = JSON.stringify(loaded.balanceSummary, null, 2)
+      .replace('"savingsBalance": "300000"', '"savingsBalance": 1.50')
+      .replace('"odLimit": "0"', '"odLimit": 1e3')
+      .replace('"totalCredit": "300000"', '"totalCredit": 12345678901234567890');
     const parsed = validateKnownResponse("sbi-shinsei-balance-summary-v1", JSON.parse(raw));
     const result = redactPersonNames("sbi-shinsei-balance-summary-v1", raw, parsed);
     expect(result.redactedFieldCount).toBe(3);
-    expect(result.body).toContain('"savingsBalance":300000');
-    expect(result.body).toContain('"odLimit":-1.5');
-    // A digit run inside a string is not a number token.
-    expect(result.body).toContain('"totalCredit":"300000"');
-    // Trailing zeros, an exponent or more digits than a double holds would be
-    // stored as different text: refused with a stable message, not rewritten.
-    for (const written of ["1.50", "1e3", "12345678901234567890"]) {
-      const altered = raw.replace('"savingsBalance":300000', `"savingsBalance":${written}`);
-      const reparsed = validateKnownResponse("sbi-shinsei-balance-summary-v1", JSON.parse(altered));
-      expect(() => redactPersonNames("sbi-shinsei-balance-summary-v1", altered, reparsed)).toThrow(
-        "name redaction would rewrite a number",
+    // The stored text is the input with exactly the three values replaced.
+    let expected = raw;
+    for (const [field, value] of [
+      ["customerName", summary.customerName],
+      ["customerNameKanji", PLACEHOLDER_NAMES.customerNameKanji],
+      ["customerNameKana", PLACEHOLDER_NAMES.customerNameKana],
+    ] as const) {
+      const before = `"${field}": ${JSON.stringify(value)}`;
+      expect(expected).toContain(before);
+      expected = expected.replace(before, `"${field}": "${NAME_REDACTION_MARKER}"`);
+    }
+    expect(result.body).toBe(expected);
+    expect(result.body).toContain('"savingsBalance": 1.50');
+    expect(result.body).toContain('"odLimit": 1e3');
+    expect(result.body).toContain('"totalCredit": 12345678901234567890');
+    expectNoPlaceholderName(result.body);
+  });
+
+  test("a name key elsewhere or a name that is not a string is refused, not altered", async () => {
+    const loaded = await fixtures();
+    // The same key in an open request echo would also be rewritten by a text
+    // match: the result no longer equals the expected object, so it is refused.
+    const echoed = structuredClone(loaded.balanceSummary!) as {
+      responseParam: Record<string, { requestParam: Record<string, unknown> }>;
+    };
+    echoed.responseParam.branchFetch!.requestParam.customerName = "PLACEHOLDER ECHO";
+    const notString = structuredClone(loaded.balanceSummary!);
+    summaryOf(notString).customerName = 12345;
+    for (const value of [echoed, notString]) {
+      const raw = JSON.stringify(value);
+      const parsed = validateKnownResponse("sbi-shinsei-balance-summary-v1", JSON.parse(raw));
+      expect(() => redactPersonNames("sbi-shinsei-balance-summary-v1", raw, parsed)).toThrow(
+        "name redaction did not match the response",
       );
     }
   });
@@ -179,18 +203,15 @@ describe("the collectors write only redacted captures", () => {
     for (const artifact of result.artifacts) expectNoPlaceholderName(String(artifact.body));
   });
 
-  test("a balance summary that could not be redacted without rewriting a number is not stored", async () => {
+  test("a balance summary the redaction cannot match is a closed failure, not a stored capture", async () => {
     const loaded = await fixtures();
-    const balanceSummary = JSON.stringify(loaded.balanceSummary).replace(
-      '"savingsBalance":"300000"',
-      '"savingsBalance":300000.00',
-    );
+    summaryOf(loaded.balanceSummary!).customerName = 12345;
     const result = parseCollectionResult(
       JSON.stringify({
         ok: true,
         responses: {
           topBalances: JSON.stringify(loaded.topBalances),
-          balanceSummary,
+          balanceSummary: JSON.stringify(loaded.balanceSummary),
           exchangeRate: JSON.stringify(loaded.exchangeRate),
           yenDeposit: JSON.stringify(loaded.yenDeposit),
         },
