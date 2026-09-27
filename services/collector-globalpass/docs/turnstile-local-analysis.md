@@ -17,6 +17,9 @@ Checked in WSL on 2026-08-30:
 The analyzer uses the TypeScript parser and printer because TypeScript is a
 direct dependency of this PoC. It does not depend on incidental packages in the
 Wrangler dependency tree.
+TypeScript 7 no longer exports that in-process parser, so this workspace stays
+on `typescript@5.9.3`, like the root manifest, while the other workspaces use 7.0.2
+([tooling](../../../docs/tooling.md)); a Renovate rule keeps it below 7.
 
 ## Safe report
 
