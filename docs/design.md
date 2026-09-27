@@ -93,6 +93,11 @@ Layer transitions have different rules:
 | Versioned / corrigible | identity mappings, observation links, event interpretation, classification     | May be corrected; corrections are tracked. |
 | Derived / disposable   | current balances, positions, P&L, net worth, tax calculations, dashboards      | Freely regenerated from the layers above.  |
 
+What a collector may write in the first place is narrower than what it
+reads: person names are replaced before an object is stored, and objects
+stored earlier are not rewritten
+([ADR 0029's amendment](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)).
+
 Evidence is not "the truth" — providers correct their own data. Evidence is a
 record of _what a source claimed at a point in time_. That is why nothing
 overwrites it, and why multiple conflicting claims can coexist.
