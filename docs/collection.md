@@ -442,13 +442,17 @@ provider was contacted and no production bucket was read or written.
 
 ### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
 
-| Artifact key                             | Role                         |
-| ---------------------------------------- | ---------------------------- |
-| `card-list.json`                         | `sanitized_provider_capture` |
-| `select-card.json`                       | `sanitized_provider_capture` |
-| `web-meisai-top.json`                    | `sanitized_provider_capture` |
-| `months/<yyyymm>/<top\|answer>-NNN.json` | `sanitized_provider_capture` |
-| `manifest.json`                          | `collector_manifest`         |
+| Artifact key                             | Role                         | Unit                  |
+| ---------------------------------------- | ---------------------------- | --------------------- |
+| `card-list.json`                         | `sanitized_provider_capture` | `card-NNN`            |
+| `select-card.json`                       | `sanitized_provider_capture` | `card-NNN`            |
+| `web-meisai-top.json`                    | `sanitized_provider_capture` | `card-NNN`            |
+| `months/<yyyymm>/<top\|answer>-NNN.json` | `sanitized_provider_capture` | `card-NNN`            |
+| `manifest.json`                          | `collector_manifest`         | none (the run's)      |
+| `card-identity-binding.json`             | `collector_derived`          | `vpass-card-v1-<hex>` |
+
+The binding artifact is written only when the Worker holds the binding key
+(below).
 
 The statement pages were `provider_response` until ADR 0021. They are the
 sanitizer's output like the other three envelopes and carry the same
@@ -473,16 +477,22 @@ uses, so the same run registers the same way.
 Terminal fields: `producer: collector-vpass`; one run **per card**, `runId = <session run id>-card-NNN`,
 all cards of one session carrying that session id as `acquisitionSessionRef`,
 so several cards stay distinguishable instead of collapsing into one run
-(G1-16). One unit per card (`unitKind: card`), a `statement-months`
-declared-coverage range over the months that were captured, one `terminal`
-report, `requestedScope.scopeKind = full_snapshot`. `coverageStatus` is
+(G1-16). One unit per card (`unitKind: card`), plus the binding unit below
+when there is a binding, a `statement-months` declared-coverage range over the
+months that were captured, one `terminal` report,
+`requestedScope.scopeKind = full_snapshot`. The run's `coverageStatus` is
 `partial` even on success: a card exposes a rolling window of statement months,
-so a finished run is not a claim about the card's whole history. The card's
-unit is `partial` too, because the month walk stops at an empty page without
-checking that the provider's stated total was reached; a successful card run
-therefore registers as `partial` and would be `not_eligible` for parse jobs
-once its captures get a parser dataset (an open limit,
-[ADR 0026](adr/0026-collector-unit-coverage.md#consequences)).
+so a finished run is not a claim about the card's whole history. The card unit
+is `complete` only when every month's captured rows (the pages' `meisaiList`
+entries) equal the total the provider states for it (`webMeisaiTopK3Vo.allCnt`
+on a finalized statement page, `total` on a customized one); otherwise it is
+`partial`, which makes registration record the whole fetch run as `partial`,
+which neither identity nor the trusted card binding reads
+([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented),
+[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each month's `capturedRows`, `statedTotal`
+and closed `coverage` code (`complete`, `stated_total_unverified`,
+`stated_total_mismatch`) and the card's code, which the persist diagnostic
+also logs (`statement_months_absent` when no month was walked).
 `producerVersion` is `vpass-worker-card-v1`, the schema version central
 storage recorded for a card-scoped Vpass run, and `manifest.json` holds exactly
 the summary central storage held for one.
@@ -491,29 +501,53 @@ A card (or a session that failed before a card was selected, as unit `run`)
 that collected nothing persists a `failed` terminal with no artifact at all
 (G1-09).
 
-No card binding. The retired importer also wrote, per card run, a separate
-`card-identity-binding` run holding an HMAC token of the card's session
-identifiers ([Vpass card binding](vpass-card-identity.md)); card purchase
-recognition needs that binding. The collector writes no such artifact, the
-sanitizer redacts the session bean the token was derived from, and the Worker
-holds no fingerprint secret, so its runs have no trusted binding and their rows
-would resolve to unresolved accounts if parsed; its artifacts are registered
-without a parser dataset — [ADR 0022](adr/0022-registration-artifact-datasets.md)
-withholds it — so they are not
-([ADR 0023](adr/0023-vpass-collector-card-binding.md),
-[identity operations](identity-operations.md#collector-vpass-runs-have-no-trusted-binding)).
-`services/collector-vpass/test/shared-collection.test.ts` pins this ("ADR 0023").
+Card binding. Card purchase recognition needs a durable card identity, which
+the card ordinal is not ([Vpass card binding](vpass-card-identity.md)). The
+retired importer wrote it as a separate run; the collector writes it into the
+card's own run (`src/card-binding.ts`). Before the responses are sanitized, the
+Worker takes `externalId`, `globalid` and `cardCode` from the selection and
+discovery `header.vpSessionBean`, applies the importer's checks (a
+successful envelope, a unique card inventory, descriptors of 32, 32 and 13
+characters, the same card code and card name in selection and discovery, and
+that name at the card's ordinal in the inventory) and computes
+`vpass-card-v1-` + HMAC-SHA-256 of
+`["vpass-card-binding-v1", externalId, globalid, cardCode]` under the key
+version `collector-r2-v1`. Only that token is stored: as the key of a second
+`card` unit (`coverageStatus: complete`, one artifact) and inside
+`card-identity-binding.json` (the token, the key version, the session, the
+ordinal and the checks; never the tuple or a name). The artifact states one
+`extracted` step (`vpass-card-binding` v1) with no input artifact, because the
+responses it was read from are stored only redacted, so it registers as
+`source_bytes_not_available`; registration gives it the dataset
+`card-identity-binding` and format `vpass-card-identity-binding-json` version
+`1`, which the trusted view requires.
 
-Registration of a card run: one unit, one range and one artifact per page plus
-the four fixed artifacts, registered by the Processor in process with no
+The key is the Worker secret `VPASS_CARD_BINDING_KEY`: 64 lowercase hex
+characters, the value of the retired importer's `ORIGIN_FINGERPRINT_KEY`, so
+the same card gets the same token under both producers. It is optional. Without
+it, with a malformed key, without the tuple or when a check fails, the card
+run is stored exactly as before with no binding, and the persist diagnostic
+carries a closed `binding` code (`bound`, `binding_key_absent`,
+`binding_key_invalid`, `binding_tuple_absent`, `binding_tuple_invalid`,
+`binding_selection_mismatch`, `binding_inventory_invalid`,
+`binding_envelope_invalid`), never a value. Whether the current provider
+responses still carry the session bean has not been observed; if they do not,
+every run logs `binding_tuple_absent` and nothing binds
+([identity operations](identity-operations.md#collector-vpass-runs-bind-in-their-own-run)).
+`services/collector-vpass/test/shared-collection.test.ts` ("ADR 0023") pins
+the derivation, the fail-closed codes and that no tuple value and no token
+outside the binding unit and artifact reaches a stored byte.
+
+Registration of a card run: one unit (two with a binding), one range and one
+artifact per page plus the four fixed artifacts (five with a binding), registered by the Processor in process with no
 Service Binding call. Each page costs about 20 operations (D1 statements and
 R2 calls) against a per-invocation budget of 500, so a card of about twenty
 pages registers in one invocation and a longer card is continued on the next
 cron tick with its progress in CORE (issue #87,
 [processor.md §3.3](processor.md#33-operation-budget-and-staged-registration-issue-87)).
 
-Every stored object carries a `redacted` transformation with no
-retained input, because the provider envelope that held the session was
+Every stored object except the binding carries a `redacted` transformation
+with no retained input, because the provider envelope that held the session was
 deliberately not kept; note that this differs from the legacy central
 descriptors, which recorded a statement page as `extracted` from the stored
 snapshot — the collector keeps no snapshot to extract from.

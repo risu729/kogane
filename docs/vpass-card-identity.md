@@ -50,6 +50,25 @@ Existing observations retain their original Layer B source account, amounts and
 provenance. Re-identification attaches the HMAC account key in Layer C. There is
 no financial reimport or financial reparse requirement.
 
+## The collector's binding (ADR 0023)
+
+The importer and its private source bucket are retired. The Vpass collector
+(`services/collector-vpass/src/card-binding.ts`) derives the same token from
+the same tuple with the same checks and HMAC while the responses are still in
+the Worker's memory, before the sanitizer redacts `vpSessionBean`, keyed by
+the Worker secret `VPASS_CARD_BINDING_KEY`, which must hold the importer's
+`ORIGIN_FINGERPRINT_KEY` (key version `collector-r2-v1`). It stores the token
+as a second `card` unit of the card's own shared-R2 run with one
+`card-identity-binding.json` of the same dataset, format and version. That
+payload has no snapshot or manifest digest and no storage-key fingerprint,
+because the collector keeps no private source object to name. The trusted
+lookup accepts it through the view as migration 0055 recreates it: the
+same evidence, with the binding inside the financial run (producer
+`collector-vpass`, session namespace `shared-r2`, a run key naming the card
+ordinal) instead of a sibling run. A token under either producer maps to one
+account entity ([identity operations](identity-operations.md#collector-vpass-runs-bind-in-their-own-run)).
+The operations below describe the retired importer.
+
 ## Operations
 
 Normal Vpass imports, including scheduled/outbox reconciliation, attempt the

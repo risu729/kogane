@@ -115,17 +115,17 @@ Concrete limits in the current code:
   reviewed decision (or by the rule for a pair the provider itself links, which
   no deployed source does yet); candidates are proposed, never merged by
   amount and date. Excluding a row by decision and allocating a refund to a
-  purchase are not available yet. Only the retired importer's Vpass runs
-  carry a trusted card binding: a parsed capture of the Vpass collector would
-  retire the importer-era purchases of its card-month and its rows would be
-  skipped as `account_not_resolved`. The collector's captures are not parsed
-  today (registration deliberately gives their artifacts no parser dataset,
-  [ADR 0022](adr/0022-registration-artifact-datasets.md); the seal of a
-  collector-vpass run written before
-  [ADR 0021](adr/0021-collector-registration-contract.md) is also refused,
-  below); they stay unparsed until
-  the collector writes a binding
-  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)).
+  purchase are not available yet. The Vpass collector writes a trusted card
+  binding only once the owner sets its `VPASS_CARD_BINDING_KEY` secret to the
+  retired importer's key, and only if the provider's responses still carry the
+  card tuple, which has not been observed since the importer was retired;
+  without one, a parsed collector capture would retire the importer-era
+  purchases of its card-month and its rows would be skipped as
+  `account_not_resolved`. The collector's statement pages are registered
+  without a parser dataset, so none is parsed today; releasing them is a
+  later change, made after the owner has set the key and checked that the
+  collector's tokens match the importer's
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
   email route), V Point Pay and GLOBAL PASS had no registered collector run
   between 2026-09-12 and the release that carries
@@ -165,8 +165,17 @@ Concrete limits in the current code:
   recognised by the D1 message Miniflare produces; production D1's message
   for it has not been observed, and another shape is rethrown and retried
   every walk as before.
-  Once MyJCB captures are parsed, its events are retired and recognised again
-  once under the collector's key and a new provider-local account.
+  Once collector-vpass runs register and are parsed, the importer's Vpass
+  purchase events of every re-captured card-month are retired and recognised
+  again once, on the same account, where the collector's run carries a card
+  binding, and not recognised again where it does not (ADR 0023). What a
+  collector's successful unit declares decides whether its run registers as
+  `success` or `partial`, and identity reads no partial run. The Vpass card
+  unit is `complete` only when every month's captured rows equal the total
+  the provider states for it, otherwise `partial` with a closed code, so a
+  card binds only from such a run (ADR 0023); whether production finalized
+  pages state that total has not been observed. The other collectors' units
+  are ADR 0026's.
 - Shared-R2 registration gives an artifact the parser dataset it needs since
   2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
   every registered artifact had none, so only Mizuho's were parsed). The
@@ -186,9 +195,9 @@ Concrete limits in the current code:
   those days come back with the next successful run, while pending-only rows
   that disappeared before it are lost. GLOBAL PASS's successful runs are
   `partial` the same way and are not parsed: whether an activity page holds a
-  whole month has not been observed. Vpass card runs also declare a
-  `partial` unit, which will keep them from parsing once their captures get a
-  parser dataset. A MyJCB connection's `complete` unit rests on the same
+  whole month has not been observed. A Vpass card run is `partial` the same
+  way unless every month's captured rows equal the provider's stated total
+  (ADR 0026's amendment). A MyJCB connection's `complete` unit rests on the same
   unobserved premise (one detail page holds its whole month), and a
   connection whose older month shows rows without a stated state is
   `partial` and its run is not parsed.

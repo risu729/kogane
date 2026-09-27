@@ -241,8 +241,9 @@ of what the run set out to collect
 unit report `success`, `partial` becomes `partial`, and a unit with a safe
 error code is `failed`. A run is `success` in `observation_fetch_runs` only
 when every unit report is `success`, so a `success` run with a `partial` unit
-(GLOBAL PASS and Vpass, whose collectors have not shown a month is whole) is
-`partial` there and gets no parse job.
+(GLOBAL PASS, whose collector has not shown a month is whole, and a Vpass
+card with a month short of or without its stated total) is `partial` there
+and gets no parse job.
 
 The collector's normalized `manifest.json` is one artifact among the others;
 registration never reads it. The terminal's own `artifacts[]` is the

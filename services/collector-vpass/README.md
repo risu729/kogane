@@ -52,6 +52,22 @@ Processor registers each terminal in process
 [collection.md](../../docs/collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc)
 for the artifact keys and terminal fields.
 
+Card binding (ADR 0023): before sanitizing, the Worker derives each card's
+durable binding token from the selection and discovery responses
+(`src/card-binding.ts`, the retired importer's construction) and stores only
+the token, as `card-identity-binding.json` on a second unit of the card's run.
+It needs the optional Worker secret `VPASS_CARD_BINDING_KEY` (64 lowercase hex
+characters, the retired importer's `ORIGIN_FINGERPRINT_KEY`):
+
+```sh
+wrangler secret put VPASS_CARD_BINDING_KEY
+```
+
+Without it, or when the responses carry no card tuple, the run is stored with
+no binding, its rows stay unresolved, and the persist log line carries a
+closed `binding` code. See
+[collection.md](../../docs/collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc).
+
 The per-source bucket, the import Queue and its dead-letter queue, the private
 importer Service Binding and `scripts/backfill-raw-evidence.sh` were retired on
 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). No GitHub

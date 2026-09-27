@@ -352,24 +352,26 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
  * Moving a source from here into `ARTIFACT_DATASETS` is a decision, recorded
  * in an ADR; `scripts/artifact-datasets.test.ts` pins this list.
  *
- * `vpass` (ADR 0022, ADR 0023): a collector-vpass capture cannot yet be bound
- * to the trusted card identity (the card binding views accept only the
- * importer's producer, and the collector does not derive the binding). A
- * parsed collector capture would become the current statement snapshot of its
- * card-month and retire the importer-era Vpass purchases with nothing to
- * replace them. Unparsed, it is never eligible as a snapshot, so the
- * importer-era snapshots stay current. The rule becomes live when the
- * collector derives the binding (ADR 0023, option 3).
+ * `vpass` (ADR 0022, ADR 0023): the collector derives the trusted card binding
+ * (ADR 0023's amendment), but only once the owner sets its binding key, which
+ * must be the retired importer's. Until then a parsed collector capture would
+ * become the current statement snapshot of its card-month and retire the
+ * importer-era Vpass purchases with nothing to replace them. Unparsed, it is
+ * never eligible as a snapshot, so the importer-era snapshots stay current.
+ * The rule becomes live in a later change, after the binding code is
+ * deployed, the key is set and the collector's tokens are shown to be the
+ * importer's (docs/identity-operations.md).
  */
 export const WITHHELD_ARTIFACT_DATASETS: Readonly<
   Record<string, { readonly until: string; readonly rules: readonly ArtifactDatasetRule[] }>
 > = {
   vpass: {
-    until: "the collector derives the trusted card binding (ADR 0023)",
+    until: "the collector's binding key is set and its tokens match the importer's (ADR 0023)",
     rules: [
       {
+        // The collector writes its pages as sanitized captures (ADR 0021).
         key: /^months\/\d{6}\/(?:top|answer)-\d{3}\.json$/u,
-        role: "provider_response",
+        role: "sanitized_provider_capture",
         mediaTypes: JSON_TYPE,
         dataset: "statement-page",
       },
@@ -717,6 +719,45 @@ function fidelityAndLineage(
 }
 
 /**
+ * The Vpass card binding a collector derives (ADR 0023): the one
+ * `collector_derived` artifact the trusted binding view reads
+ * (`trusted_vpass_card_bindings`, migrations 0020, 0021 and 0055). The view
+ * requires this dataset and format, which `terminal-v1` cannot state, so the
+ * derivation names them for exactly this key, role and media type and for
+ * nothing else. It is not a parser dataset: no parser reads it, and the view
+ * checks the rest of the binding (the unit, the token shape, the run). So it
+ * is kept out of `ARTIFACT_DATASETS`, whose every entry is a dataset a
+ * registered parser accepts, and out of the Vpass withholding: the binding
+ * registers from the first collector run that carries one, while the
+ * statement pages stay unparsed. No terminal registered before carries this
+ * artifact, so no registered descriptor changes and the contract version
+ * stays (`scripts/artifact-datasets.test.ts`).
+ */
+export const VPASS_CARD_BINDING_DESCRIPTOR = {
+  source: "vpass",
+  artifactKey: "card-identity-binding.json",
+  role: "collector_derived",
+  mediaType: "application/json",
+  dataset: "card-identity-binding",
+  formatId: "vpass-card-identity-binding-json",
+  formatVersion: "1",
+} as const;
+
+function vpassCardBinding(
+  manifest: TerminalManifest,
+  artifact: TerminalArtifact,
+  role: ArtifactRole,
+): Pick<ArtifactRequest, "dataset" | "formatId" | "formatVersion"> {
+  const rule = VPASS_CARD_BINDING_DESCRIPTOR;
+  return manifest.source === rule.source &&
+    artifact.artifactKey === rule.artifactKey &&
+    role === rule.role &&
+    artifact.mediaType === rule.mediaType
+    ? { dataset: rule.dataset, formatId: rule.formatId, formatVersion: rule.formatVersion }
+    : {};
+}
+
+/**
  * One artifact descriptor.
  *
  * No origin block is recorded. The manifest states the object's key in the
@@ -748,6 +789,7 @@ export function artifactRequest(
   return {
     artifactKey: artifact.artifactKey,
     ...(dataset === null ? {} : { dataset }),
+    ...vpassCardBinding(manifest, artifact, role),
     artifactRole: role,
     payloadFidelity,
     containerKind: "single",

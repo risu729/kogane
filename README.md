@@ -28,7 +28,7 @@ different rules.
 - [ADR 0020: prices are provider observations promoted by rule (proposed)](docs/adr/0020-price-promotion-by-rule.md)
 - [ADR 0021: collectors state the registration contract](docs/adr/0021-collector-registration-contract.md)
 - [ADR 0022: parser datasets for registered shared-R2 artifacts (proposed)](docs/adr/0022-registration-artifact-datasets.md)
-- [ADR 0023: no trusted card binding for collector-vpass runs](docs/adr/0023-vpass-collector-card-binding.md)
+- [ADR 0023: the Vpass collector writes its own trusted card binding](docs/adr/0023-vpass-collector-card-binding.md)
 - [ADR 0024: the collection scan does not spend registrations on judged terminals](docs/adr/0024-collection-scan-judged-terminals.md)
 - [ADR 0025: the MyJCB metadata extractor reads both manifest shapes (proposed)](docs/adr/0025-myjcb-shared-manifest-metadata.md)
 - [ADR 0026: a collector's unit coverage is a claim about what the run set out to collect (proposed)](docs/adr/0026-collector-unit-coverage.md)

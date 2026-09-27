@@ -54,15 +54,15 @@ previous snapshot, a `partial` one may not.
 Checked against each collector's persist path and registered with
 `collector-plans.test.ts` (the run status each successful plan gets):
 
-| Collector                                                                                                 | Unit on success                                                                               | Why that is what the collector captured                                                                               |
-| --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| MyJCB                                                                                                     | `complete` (this ADR; was `partial`)                                                          | see below                                                                                                             |
-| GLOBAL PASS                                                                                               | `partial` (unchanged)                                                                         | one page per selected month; whether a month's page is paginated has not been observed (`paginationStatus: unproven`) |
-| Vpass                                                                                                     | `partial` (unchanged)                                                                         | the month walk stops at an empty page without checking that the provider's stated total was reached                   |
-| Mizuho                                                                                                    | `partial` when the page shows more history (`history-pagination-unverified`), else `complete` | per page                                                                                                              |
-| Mobile Suica                                                                                              | `complete` only when the collector proved it reached the end of the history                   | per run                                                                                                               |
-| Money Forward ME, Sony Bank, SBI Securities, SBI Shinsei, SBI VC Trade, SMBC Direct, V Point, V Point Pay | `complete`                                                                                    | the collector's own run status                                                                                        |
-| St. George                                                                                                | no units                                                                                      | the run status alone                                                                                                  |
+| Collector                                                                                                 | Unit on success                                                                                                   | Why that is what the collector captured                                                                               |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| MyJCB                                                                                                     | `complete` (this ADR; was `partial`)                                                                              | see below                                                                                                             |
+| GLOBAL PASS                                                                                               | `partial` (unchanged)                                                                                             | one page per selected month; whether a month's page is paginated has not been observed (`paginationStatus: unproven`) |
+| Vpass                                                                                                     | `complete` only when each month's captured rows equal the provider's stated total; otherwise `partial` (ADR 0023) | see the amendment below                                                                                               |
+| Mizuho                                                                                                    | `partial` when the page shows more history (`history-pagination-unverified`), else `complete`                     | per page                                                                                                              |
+| Mobile Suica                                                                                              | `complete` only when the collector proved it reached the end of the history                                       | per run                                                                                                               |
+| Money Forward ME, Sony Bank, SBI Securities, SBI Shinsei, SBI VC Trade, SMBC Direct, V Point, V Point Pay | `complete`                                                                                                        | the collector's own run status                                                                                        |
+| St. George                                                                                                | no units                                                                                                          | the run status alone                                                                                                  |
 
 For MyJCB, a connection's `success` means the collector enumerated the
 credit months from the credit menu and the past-months response and kept,
@@ -122,9 +122,11 @@ reports itself partial (a month whose rows the collector withheld),
 run's `coverageStatus` stays `partial` on success (a claim about the cards'
 history, recorded only) and `unknown` on failure.
 
-GLOBAL PASS and Vpass keep `partial`: neither has shown that its capture of a
-month is whole, and claiming it would guess provider semantics nobody has
-observed. Their consequences are written below as limits. The Processor's
+GLOBAL PASS keeps `partial`: it has not shown that its capture of a month is
+whole, and claiming it would guess provider semantics nobody has observed.
+Vpass was decided the same way here and is amended below: its unit is
+`complete` only for a run whose every month proves it reached the provider's
+stated total. Their consequences are written below as limits. The Processor's
 eligibility rules and registration are unchanged.
 
 ## Consequences
@@ -162,10 +164,10 @@ eligibility rules and registration are unchanged.
   never there, or the owner's confirmation), recorded in the source note,
   and then the collector's declaration can change. This ADR does not guess
   it.
-- **Vpass shared runs would stay `not_eligible` once their datasets are
-  admitted.** Today registration withholds a parser dataset from Vpass
-  captures (ADR 0022, ADR 0023), so nothing changes yet. Declaring `complete`
-  needs the month walk to prove it reached the provider's stated count.
+- **Vpass (amended below).** A card run whose months all meet their stated
+  totals registers `success`; any other stays `partial` and `not_eligible`.
+  Registration still withholds a parser dataset from Vpass captures (ADR
+  0022, ADR 0023), so nothing is parsed yet.
 - A collector that declares a unit `partial` on success now has to say why in
   its collection section. `collector-plans.test.ts` lists the run status each
   source's successful plan registers as, so a change shows up there.
@@ -189,6 +191,37 @@ eligibility rules and registration are unchanged.
   `partial`/`partial` and ends `not_eligible`.
 - `services/processor/test/collector-plans.test.ts`: every collector's real
   successful plan registers and seals as before; the last case lists the run
-  status each registers as (`partial` only for `prestia-globalpass` and
-  `vpass`).
+  status each registers as (`partial` only for `prestia-globalpass`; `vpass`
+  is `success` for a fixture whose month meets its stated total, and a
+  second case shows a month short of it registers `partial`).
 - No production data was read for this ADR.
+
+## Amendment: Vpass proves each month against its stated total (#273)
+
+- Status: proposed; accepted when #273 merges
+- Date: 2026-09-27
+- Carried by: `services/collector-vpass/src/shared-collection.ts`
+  (`monthCheck`, `cardCoverage`),
+  [ADR 0023's amendment](0023-vpass-collector-card-binding.md#amendment-option-3-implemented),
+  [collection: Vpass](../collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc),
+  `services/collector-vpass/test/shared-collection.test.ts`,
+  `services/processor/test/collector-plans.test.ts`,
+  `services/processor/test/vpass-collector-binding.test.ts`
+
+The Vpass collector now does what this ADR said declaring `complete` needs.
+Its plan reads each month's stored pages, counts the `meisaiList` rows and
+compares them with the total the provider states: `webMeisaiTopK3Vo.allCnt` on
+a finalized statement page, `total` on a customized one (the last value the
+pages carry, which is the one the walk stopped on). The card unit is
+`complete` only when every walked month's count equals its stated total. A
+missing or unparsable total is `stated_total_unverified`, a different count
+`stated_total_mismatch`, and a card with no month `statement_months_absent`;
+each makes the unit `partial`, so the run registers `partial` and the trusted
+card binding does not read it. The codes are recorded per month in the run's
+`manifest.json` and logged for the card. Nothing is rescaled or inferred from
+the count. The run's own `coverageStatus` stays `partial` (the rolling window).
+
+Limit: no fixture in this repository shows whether production finalized
+statement pages carry `allCnt`. If they do not, every such month is
+`stated_total_unverified` and no Vpass run registers `success`; the logged
+code shows it after deploy.

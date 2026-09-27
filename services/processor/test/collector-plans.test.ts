@@ -746,10 +746,11 @@ test("sony-bank: responses, exports, redacted statements and the summary registe
   expect(registered.units).toEqual([{ unit_key: "account", artifacts: 4, declared: 4 }]);
 });
 
-test("vpass: one card's sanitized envelopes and the run manifest register and seal", async () => {
+/** A synthetic Vpass card run with one month of `rows` rows whose summary states `allCnt`. */
+function vpassPlan(rows: number, allCnt: number) {
   const envelope = (content: Record<string, unknown>) =>
     JSON.stringify({ header: { resultCode: 0 }, body: { content } });
-  const plan = await vpassCardRunPlan({
+  return vpassCardRunPlan({
     sessionRunId: "2099-01-01T00-00-00-000Z",
     cardLabel: "card-001",
     startedAt: STARTED_AT,
@@ -767,21 +768,43 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
           {
             kind: "top",
             index: 0,
-            rawJson: envelope({ WebMeisaiTopDisplayServiceBean: { meisaiList: [] } }),
+            rawJson: envelope({
+              WebMeisaiTopDisplayServiceBean: {
+                meisaiList: Array.from({ length: rows }, () => ({ data: [] })),
+                webMeisaiTopK3Vo: { allCnt },
+              },
+            }),
           },
         ],
-        transactionCount: 0,
+        transactionCount: rows,
       },
     },
   });
+}
+
+// Runs before the successful case below, which then records the status Vpass
+// registers as for the last test.
+test("vpass: a month short of its stated total makes the card unit and the run partial (ADR 0026)", async () => {
+  const plan = await vpassPlan(1, 2);
+  expect(plan.run.units[0]?.coverageStatus).toBe("partial");
   const registered = await registerPlan(plan, 5);
+  expect(registered.runStatus).toBe("partial");
+});
+
+test("vpass: one card's sanitized envelopes and the run manifest register and seal", async () => {
+  // Every month's captured rows equal its stated total, so the card unit is
+  // complete (ADR 0023 option 8, ADR 0026).
+  const plan = await vpassPlan(1, 1);
+  const registered = await registerPlan(plan, 5);
+  expect(registered.runStatus).toBe("success");
   expect(registered.roles).toEqual([
     "collector_manifest/generated/not_applicable",
     "sanitized_provider_capture/transformed/source_not_retained_for_security",
   ]);
   expect(registered.units).toEqual([{ unit_key: "card-001", artifacts: 4, declared: 4 }]);
-  // ADR 0022/0023 withhold Vpass from a parser dataset until the collector
-  // derives the card binding. The pages' new role must not lift that hold.
+  // ADR 0022/0023 withhold Vpass from a parser dataset until the collector's
+  // binding key is set and its tokens match the importer's. The pages' role
+  // must not lift that hold.
   expect(registered.datasets).toEqual([null]);
 });
 
@@ -791,8 +814,9 @@ test("ADR 0026: a successful plan's units state what the parse gate reads", () =
   // coverage `complete`. Neither the run scope nor `unit-independent-v1`
   // admits a `partial` run, so a source listed `partial` here is never parsed
   // from its successful runs. GLOBAL PASS keeps `partial` because nobody has
-  // observed whether a month page paginates; Vpass keeps it until its month
-  // walk proves each month whole (ADR 0026, Consequences).
+  // observed whether a month page paginates. Vpass is `success` here because
+  // the fixture's month meets its stated total; a month that does not is
+  // `partial` (the case above; ADR 0026, ADR 0023).
   expect(Object.fromEntries([...registeredStatus].sort(([a], [b]) => a.localeCompare(b)))).toEqual({
     "mizuho-bank": "success",
     "mobile-suica": "success",
@@ -808,6 +832,6 @@ test("ADR 0026: a successful plan's units state what the parse gate reads", () =
     "v-point": "success",
     "v-point-pay": "success",
     "v-point-pay-email": "success",
-    vpass: "partial",
+    vpass: "success",
   });
 });

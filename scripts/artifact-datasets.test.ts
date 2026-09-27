@@ -24,11 +24,13 @@ import { describe, expect, test } from "bun:test";
 import {
   ARTIFACT_DATASETS,
   artifactDataset,
+  artifactRequest,
   COLLECTOR_SOURCE_IDS,
   coreSourceId,
   datasetByRules,
   REGISTRATION_CONTRACT_VERSION,
   REGISTRATION_CONTRACT_VERSIONS,
+  VPASS_CARD_BINDING_DESCRIPTOR,
   WITHHELD_ARTIFACT_DATASETS,
 } from "../packages/application/src/collection/descriptors.ts";
 import { PARSERS } from "../packages/parsers/src/parsers/registry.ts";
@@ -433,7 +435,7 @@ const SAMPLES: readonly Sample[] = [
   {
     source: "vpass",
     artifactKey: "months/202601/top-001.json",
-    role: "provider_response",
+    role: "sanitized_provider_capture",
     mediaType: json,
     dataset: null,
     withheld: "statement-page",
@@ -442,7 +444,7 @@ const SAMPLES: readonly Sample[] = [
   {
     source: "vpass",
     artifactKey: "months/202601/answer-002.json",
-    role: "provider_response",
+    role: "sanitized_provider_capture",
     mediaType: json,
     dataset: null,
     withheld: "statement-page",
@@ -454,7 +456,16 @@ const SAMPLES: readonly Sample[] = [
     role: "collector_manifest",
     mediaType: json,
     dataset: null,
-    unitKey: "card-001",
+  },
+  // The card binding (ADR 0023): named by `VPASS_CARD_BINDING_DESCRIPTOR`, not
+  // by this parser-dataset table, so the table leaves it without a dataset.
+  {
+    source: "vpass",
+    artifactKey: "card-identity-binding.json",
+    role: "collector_derived",
+    mediaType: json,
+    dataset: null,
+    unitKey: `vpass-card-v1-${"a".repeat(64)}`,
   },
   // docs/collection.md `mizuho-bank`: its parsers read the artifact without a dataset.
   {
@@ -634,8 +645,9 @@ describe("the registration dataset table (ADR 0022)", () => {
   });
 
   test("Vpass is withheld: every artifact a collector-vpass run writes stays without a dataset", async () => {
-    // Lifting this is a decision (ADR 0022, ADR 0023): change the pin below
-    // together with an ADR that says the collector now derives the binding.
+    // Lifting this is a decision (ADR 0022, ADR 0023): the collector derives
+    // the binding now, but the pages stay withheld until its key is set and
+    // its tokens are shown to be the importer's (ADR 0023's amendment).
     expect(Object.keys(WITHHELD_ARTIFACT_DATASETS)).toEqual(["vpass"]);
     expect(Object.hasOwn(ARTIFACT_DATASETS, "vpass")).toBe(false);
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
@@ -647,6 +659,50 @@ describe("the registration dataset table (ADR 0022)", () => {
       expect(datasetByRules(WITHHELD_ARTIFACT_DATASETS.vpass!.rules, sample)).toBe(
         sample.withheld ?? null,
       );
+    }
+  });
+
+  test("the Vpass card binding carries its evidence dataset and format, and no parser reads it (ADR 0023)", async () => {
+    // Deliberately outside both tables: the binding is evidence the trusted
+    // binding view reads, not a parser input, and it registers while the
+    // statement pages stay withheld.
+    const binding = SAMPLES.find((sample) => sample.artifactKey === "card-identity-binding.json")!;
+    const derive = (artifact: Sample) =>
+      artifactRequest(
+        {
+          source: "vpass",
+          completedAt: "2026-01-02T00:01:00.000Z",
+          artifacts: [artifact],
+          transformations: [
+            {
+              transformationId: `extracted:${artifact.artifactKey}`,
+              stepKind: "extracted",
+              transformerId: "vpass-card-binding",
+              transformerVersion: "v1",
+              inputArtifactKeys: [],
+              outputArtifactKey: artifact.artifactKey,
+            },
+          ],
+        } as never,
+        { ...artifact, sha256: "0".repeat(64), byteSize: 1 } as never,
+        new Map([[binding.unitKey!, 1]]),
+      );
+    expect(derive(binding)).toMatchObject({
+      dataset: VPASS_CARD_BINDING_DESCRIPTOR.dataset,
+      formatId: "vpass-card-identity-binding-json",
+      formatVersion: "1",
+      lineageDisposition: "source_bytes_not_available",
+    });
+    expect(accepting(meta(binding, VPASS_CARD_BINDING_DESCRIPTOR.dataset))).toEqual([]);
+    // Any other key, source, role or media type gets nothing.
+    for (const other of [
+      { ...binding, artifactKey: "other.json" },
+      { ...binding, role: "user_capture" },
+      { ...binding, mediaType: "text/plain" },
+    ]) {
+      const derived = derive(other);
+      expect(derived.dataset ?? null).toBeNull();
+      expect(derived.formatId ?? null).toBeNull();
     }
   });
 

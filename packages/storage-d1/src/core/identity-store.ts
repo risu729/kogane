@@ -50,6 +50,47 @@ async function mappingIdBindings(prefix: "am" | "im", ref: string, version: numb
   return [base, base] as const;
 }
 
+/**
+ * The producer whose source-account reference names the account entity of a
+ * trusted Vpass card token: the retired importer's, which bound every Vpass
+ * card first (ADR 0023).
+ */
+export const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
+
+/**
+ * The account entity an automatic mapping points at.
+ *
+ * Every entity is derived from its source-account reference, which includes
+ * the producer, so the same provider account read by two producers is two
+ * entities. A trusted Vpass card token (`["vpass:card", token]`) is the one
+ * exception (ADR 0023): the token is the card's identity whichever producer
+ * derived it under the same key, so the entity is derived from the reference
+ * the importer's producer gives the token. The importer-era entity ids are
+ * therefore unchanged, and a collector's source account for the same token
+ * maps to that same entity. Nothing else is shared: the collector's source
+ * account is its own subject, with its own mapping revisions and manual
+ * decisions.
+ */
+async function accountEntityId(
+  input: IdentityInput,
+  account: AccountIdentity,
+  ref: string,
+): Promise<string> {
+  const key = account.key;
+  if (
+    input.sourceId === "vpass" &&
+    input.trustedVpassBinding !== undefined &&
+    key.length === 2 &&
+    key[0] === "vpass:card" &&
+    key[1] === input.trustedVpassBinding.cardToken
+  ) {
+    return identityKey("account", [
+      await identityKey("sa", [input.sourceId, VPASS_TOKEN_ENTITY_PRODUCER, key]),
+    ]);
+  }
+  return identityKey("account", [ref]);
+}
+
 /** Appends an automatic decision only when no effective manual decision
  * protects the subject and no current automatic decision of an equal or newer
  * policy exists. Version comparison is numeric; old workers cannot undo newer rules. */
@@ -60,7 +101,7 @@ async function accountMapping(
   version: number,
 ) {
   const ref = await identityKey("sa", [input.sourceId, input.producerId, account.key]);
-  const entity = await identityKey("account", [ref]);
+  const entity = await accountEntityId(input, account, ref);
   await db.batch([
     db
       .prepare(

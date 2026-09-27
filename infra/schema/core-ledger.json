@@ -752,6 +752,12 @@
         }
       ],
       "sha256": "11222c6b8cab1a441b026aed6e6bf316c94e90f58bcfb01eab959c932afe6762"
+    },
+    {
+      "file": "0055_vpass_collector_card_binding.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "6405637a42ccda557e0a3708f57fe07ca38267846dbcb297c56ed20700a8fd36"
     }
   ],
   "tables": [
@@ -13542,7 +13548,7 @@
         "binding_artifact_id",
         "card_token"
       ],
-      "sqlSha256": "d035700de928c047"
+      "sqlSha256": "c96fed249670a526"
     }
   ],
   "triggers": [
@@ -17155,6 +17161,6 @@
       "0051_card_purchase_review_commands.sql",
       "0053_price_promotion.sql"
     ],
-    "schemaSha256": "c5811be682f124e8234e3cd602ffc3c73aed8ea14f011e7239e79c792376a073"
+    "schemaSha256": "d65145c8d90bcaac99e40f66cfdbabe242eb4ce8fa357ac087aff7d942c0f759"
   }
 }
