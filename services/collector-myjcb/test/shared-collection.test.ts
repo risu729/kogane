@@ -752,3 +752,132 @@ describe("ADR 0021: a derived artifact states its lineage", () => {
     }
   });
 });
+
+describe("ADR 0005 second amendment: unread months and export offers in the manifest", () => {
+  /** A connection that ran to the end with the given unread months and offers. */
+  function unreadConnection(
+    connectionId: string,
+    unreadMonths: readonly { position: number; code: string }[],
+    exportOffers: readonly { position: number; kinds: readonly string[] }[] = [],
+  ) {
+    const base = connection(connectionId);
+    return {
+      ...base,
+      summary: {
+        ...base.summary,
+        status: "partial" as const,
+        unreadMonths: unreadMonths as never,
+        ...(exportOffers.length === 0 ? {} : { exportOffers: exportOffers as never }),
+      },
+    };
+  }
+
+  async function storedManifest(plan: Awaited<ReturnType<typeof myJcbRunPlan>>) {
+    const entry = plan.artifacts.find((artifact) => artifact.artifactKey === "manifest.json")!;
+    return JSON.parse(new TextDecoder().decode((entry.body as { bytes: Uint8Array }).bytes)) as {
+      connections: Record<string, unknown>[];
+      failures: unknown[];
+    };
+  }
+
+  test("a connection whose only unread months are third-header months carries scheduled_payments_page", async () => {
+    const plan = await myJcbRunPlan(
+      input({
+        status: "partial",
+        connections: [
+          unreadConnection(
+            "account-one",
+            [{ position: 2, code: "scheduled_payments_page" }],
+            [{ position: 1, kinds: ["pdf", "csv", "ofx"] }],
+          ),
+        ],
+      }),
+    );
+    expect(plan.run.units).toEqual([
+      {
+        unitKey: "account-one",
+        unitKind: "connection",
+        artifactCount: 3,
+        coverageStatus: "partial",
+        safeErrorCode: "scheduled_payments_page",
+      },
+    ]);
+    expect(plan.run.safeErrorCode).toBe("scheduled_payments_page");
+    const manifest = await storedManifest(plan);
+    expect(manifest.connections[0]).toEqual({
+      connectionId: "account-one",
+      bootstrapMode: "password",
+      status: "partial",
+      cardCount: 1,
+      periodCount: 2,
+      artifactCount: 3,
+      unreadMonths: [{ position: 2, code: "scheduled_payments_page" }],
+      exportOffers: [{ position: 1, kinds: ["pdf", "csv", "ofx"] }],
+    });
+    // Not a stop: nothing is recorded as a failure.
+    expect(manifest.failures).toEqual([]);
+  });
+
+  test("unread months of another reason, or mixed, stay collector_partial", async () => {
+    const plan = await myJcbRunPlan(
+      input({
+        status: "partial",
+        connections: [
+          unreadConnection("account-one", [{ position: 7, code: "rows_unstated" }]),
+          unreadConnection("account-two", [
+            { position: 2, code: "scheduled_payments_page" },
+            { position: 7, code: "rows_unstated" },
+          ]),
+          unreadConnection("account-three", [{ position: 2, code: "scheduled_payments_page" }]),
+        ],
+      }),
+    );
+    expect(plan.run.units.map((unit) => [unit.unitKey, unit.safeErrorCode])).toEqual([
+      ["account-one", "collector_partial"],
+      ["account-two", "collector_partial"],
+      ["account-three", "scheduled_payments_page"],
+    ]);
+    // The connections do not agree, so the run keeps the coarse code.
+    expect(plan.run.safeErrorCode).toBe("collector_partial");
+  });
+
+  test("an unread code, a position or an export kind outside the closed values refuses the plan", async () => {
+    const plan = (connections: SharedRunInput["connections"]) =>
+      myJcbRunPlan(input({ status: "partial", connections }));
+    await expect(
+      plan([unreadConnection("account-one", [{ position: 2, code: "upstream said no" }])]),
+    ).rejects.toThrow("manifest_unread_code_invalid");
+    await expect(
+      plan([unreadConnection("account-one", [{ position: 18, code: "scheduled_payments_page" }])]),
+    ).rejects.toThrow("manifest_stop_position_invalid");
+    await expect(
+      plan([
+        unreadConnection(
+          "account-one",
+          [{ position: 2, code: "scheduled_payments_page" }],
+          [{ position: 1, kinds: ["xlsx"] }],
+        ),
+      ]),
+    ).rejects.toThrow("manifest_export_kind_invalid");
+  });
+
+  test("an export offer on a whole connection is recorded and the unit stays complete", async () => {
+    const base = connection("account-one");
+    const plan = await myJcbRunPlan(
+      input({
+        connections: [
+          {
+            ...base,
+            summary: { ...base.summary, exportOffers: [{ position: 1, kinds: ["csv"] }] },
+          },
+        ],
+      }),
+    );
+    expect(plan.run.units[0]).toMatchObject({ coverageStatus: "complete" });
+    expect(plan.run.units[0]).not.toHaveProperty("safeErrorCode");
+    expect((await storedManifest(plan)).connections[0]).toMatchObject({
+      status: "success",
+      exportOffers: [{ position: 1, kinds: ["csv"] }],
+    });
+  });
+});

@@ -8,6 +8,7 @@ import {
   creditStatementPeriod,
   creditStatementState,
   parseCreditLedger,
+  scheduledLedgerRowCount,
   settlementMonth,
 } from "../src/parsers";
 import { HumanRequiredError, StopConditionError } from "../src/types";
@@ -36,6 +37,8 @@ function page(options: {
   readonly head?: string | null;
   readonly rows?: readonly string[];
   readonly exportMonth?: number;
+  /** The export links as observed on a confirmed month: relative, no month. */
+  readonly observedExports?: boolean;
 }): string {
   const headings = [
     ...(options.headings ?? []).map((heading) => `<h1>${heading}</h1>`),
@@ -45,11 +48,14 @@ function page(options: {
     options.exportMonth === undefined
       ? ""
       : `<a href="/iss-pc/member/details_inquiry/detail.html?detailMonth=${options.exportMonth}&amp;output=csv">CSV</a>`;
+  const observedExports = options.observedExports
+    ? '<a href="detailDbPdf.html?output=pdf">PDF</a><a href="detail.html?output=csv">CSV</a><a href="detail.html?output=money">OFX</a>'
+    : "";
   const ledger =
     options.head === null
       ? ""
       : `<div class="detail-list-01"><div class="head">${options.head ?? CONFIRMED_HEAD}</div>${(options.rows ?? []).join("")}</div>`;
-  return `<!doctype html><html lang="ja"><body><h1>MyJCB</h1>${headings}<input type="hidden" name="generalJsonShikibetuId" value="synthetic-discriminator">${exports}${ledger}</body></html>`;
+  return `<!doctype html><html lang="ja"><body><h1>MyJCB</h1>${headings}<input type="hidden" name="generalJsonShikibetuId" value="synthetic-discriminator">${exports}${observedExports}${ledger}</body></html>`;
 }
 
 const confirmedRow = row(
@@ -289,7 +295,7 @@ describe("collectCredit", () => {
       client({ 0: mutable, 1: closedWithoutExports, 7: olderEmpty }),
       "x",
     );
-    expect(whole.withheldMonthCount).toBe(0);
+    expect(whole.unreadMonths).toEqual([]);
     // Rows at an older position without the heading: the page is kept as
     // `unknown` evidence with no ledger, so its rows reach no parser and the
     // month is not captured whole.
@@ -302,7 +308,10 @@ describe("collectCredit", () => {
       }),
       "x",
     );
-    expect(withheld.withheldMonthCount).toBe(2);
+    expect(withheld.unreadMonths).toEqual([
+      { position: 7, code: "rows_unstated" },
+      { position: 8, code: "rows_unstated" },
+    ]);
     expect(
       withheld.artifacts
         .filter((artifact) => artifact.statementState === "unknown")
@@ -314,7 +323,8 @@ describe("collectCredit", () => {
     const conflicting = page({ headings: [CONFIRMED_STATEMENT_HEADING], head: UNCONFIRMED_HEAD });
     const run = await collectCredit(client({ 0: mutable, 1: conflicting }), "x");
     // ADR 0005's amendment: the connection stops at position 1 and keeps
-    // position 0.
+    // position 0. The second amendment keeps the page it stopped on as
+    // `unknown` evidence with no ledger.
     expect(run.stop).toEqual({
       code: "credit_statement_state",
       position: 1,
@@ -325,7 +335,12 @@ describe("collectCredit", () => {
       "credit-past-months.json",
       "credit-detail-00.html",
       "credit-ledger-00.json",
+      "credit-detail-01.html",
     ]);
+    expect(run.artifacts.at(-1)).toMatchObject({
+      statementState: "unknown",
+      period: "detailMonth-1",
+    });
   });
 
   test("export links on a page that is not a confirmed statement stop the collection", async () => {
@@ -381,7 +396,7 @@ describe("ADR 0005 amendment: a stopped connection keeps the months before the s
     ]);
   });
 
-  test("a failed export drops its whole month: the page and ledger read before it too", async () => {
+  test("in fetch mode a failed export drops its whole month: the page and ledger read before it too", async () => {
     const exporting = page({
       headings: [CONFIRMED_STATEMENT_HEADING],
       months: ["2026年2月"],
@@ -396,9 +411,56 @@ describe("ADR 0005 amendment: a stopped connection keeps the months before the s
           op === "credit-csv" ? response("not a statement export") : await inner.get(op, query),
       },
       "x",
+      { exports: "fetch" },
     );
     expect(run.stop).toEqual({ code: "export_fetch", position: 2, capturedMonthCount: 2 });
+    // The page itself was read: an export stop keeps no stop page.
     expect(filenames(run.artifacts).filter((name) => /-0[23]\./u.test(name))).toEqual([]);
+  });
+
+  test("by default an offered export is recorded and not fetched (ADR 0005's second amendment)", async () => {
+    const exporting = page({
+      headings: [CONFIRMED_STATEMENT_HEADING],
+      months: ["2026年2月"],
+      rows: [confirmedRow],
+      exportMonth: 2,
+    });
+    const inner = client({ ...pages, 2: exporting });
+    const reads: string[] = [];
+    const run = await collectCredit(
+      {
+        ...inner,
+        get: async (op, query) => {
+          reads.push(op);
+          return await inner.get(op, query);
+        },
+      },
+      "x",
+    );
+    expect(run.stop).toBeUndefined();
+    expect(run.exportOffers).toEqual([{ position: 2, kinds: ["csv"] }]);
+    expect(reads.filter((op) => op.startsWith("credit-") && op !== "credit-detail")).toEqual([
+      "credit-menu",
+    ]);
+    expect(filenames(run.artifacts).filter((name) => !/\.(?:html|json)$/u.test(name))).toEqual([]);
+  });
+
+  test("the observed month-less relative export links are recorded for their page's month", async () => {
+    const exporting = page({
+      headings: [CONFIRMED_STATEMENT_HEADING],
+      months: ["2026年2月"],
+      rows: [confirmedRow],
+      observedExports: true,
+    });
+    const run = await collectCredit(client({ ...pages, 2: exporting }), "x");
+    expect(run.stop).toBeUndefined();
+    expect(run.exportOffers).toEqual([{ position: 2, kinds: ["pdf", "csv", "ofx"] }]);
+    // The same links on a page that is not a confirmed statement still stop it.
+    const unconfirmed = page({ head: UNCONFIRMED_HEAD, rows: [pendingRow], observedExports: true });
+    expect((await collectCredit(client({ 0: unconfirmed }), "x")).stop).toMatchObject({
+      code: "credit_statement_state",
+      position: 0,
+    });
   });
 
   test("a period or ledger failure names its own stage", async () => {
@@ -438,6 +500,7 @@ describe("ADR 0005 amendment: a stopped connection keeps the months before the s
         code: "collect-credit-month-fetch",
         stopCode: "month_fetch",
         capturedMonthCount: 2,
+        stopPageKept: false,
       },
     ]);
     expect(warnings.join("")).not.toContain("synthetic upstream failure");
@@ -848,6 +911,35 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
     expectNoLeak(unparsable);
   });
 
+  test("a month under the third ledger header is kept unread and the Worker persists the rest (ADR 0005's second amendment)", async () => {
+    const scheduled = page({
+      head: '<div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div>',
+      rows: [row("お支払日", ["2026/03/10", LEAK_WORD, "2026/04/10", `${LEAK_DIGITS}円`], "1円")],
+    });
+    const result = await run((url) => (detail(2)(url) ? html(scheduled) : undefined));
+    expect(result.status).toBe(200);
+    expect(blockers(result)).toEqual([
+      { connectionId: "account-one", code: "scheduled_payments_page" },
+    ]);
+    // The terminal's unit and the manifest carry the closed code and the
+    // position; no failure is recorded, because the connection did not stop.
+    expect(result.stored).toContain('"safeErrorCode":"scheduled_payments_page"');
+    expect(result.stored).toContain(
+      '"unreadMonths":[{"position":2,"code":"scheduled_payments_page"}]',
+    );
+    expect(result.stored).toContain('"failures":[]');
+    expect(result.stored).toContain('"coverageStatus":"partial"');
+    // The unread month's page is stored as evidence (it carries the synthetic
+    // row text, as every stored page carries its rows); no ledger is derived.
+    expect(result.stored).not.toContain('"detailMonth":2');
+    expect(result.logs).toContain(
+      '{"event":"myjcb-credit-month-unread","detailMonth":2,"code":"scheduled_payments_page"}',
+    );
+    expect(result.logs).not.toContain(LEAK_DIGITS);
+    expect(result.logs).not.toContain(LEAK_WORD);
+    expect(result.response).not.toContain(LEAK_DIGITS);
+  });
+
   test("a stop before the first month or at login leaves codes only", async () => {
     const menuStop = await run((url) =>
       url.pathname.endsWith("/detailMenu.html") ? "throw" : undefined,
@@ -868,5 +960,226 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
       { connectionId: "account-one", code: "credit_past_months" },
     ]);
     expectNoLeak(pastStop);
+  });
+});
+
+describe("ADR 0005 second amendment: the three observed ledger headers", () => {
+  // The third header as the live DOM shows it on the ショッピングスキップ払い
+  // page (observed 2026-09-27, position 8): three cells, the second holding
+  // 「ご利用先など」 and 「お支払日」 on two lines. Every value below is synthetic.
+  const SCHEDULED_HEAD =
+    '<div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div>';
+  // The same labels as four cells, as the first survey wrote them down.
+  const FOUR_CELL_SCHEDULED_HEAD = "ご利用日 ご利用先など お支払日 今後のお支払い金額";
+  const emptyRow =
+    '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はありません</div></div></div>';
+  const scheduledRow = row(
+    "お支払日",
+    ["2026/03/10", "架空分割店", "2026/04/10", "3,000円"],
+    "2026/04/10",
+  );
+  const closed = (month: string) =>
+    page({ headings: [CONFIRMED_STATEMENT_HEADING], months: [month], rows: [confirmedRow] });
+
+  test("only the third header's ledgers are counted as scheduled", () => {
+    expect(scheduledLedgerRowCount(closed("2026年2月"))).toBeUndefined();
+    expect(scheduledLedgerRowCount(mutable)).toBeUndefined();
+    expect(scheduledLedgerRowCount(page({ head: null }))).toBeUndefined();
+    expect(scheduledLedgerRowCount(page({ head: SCHEDULED_HEAD, rows: [emptyRow] }))).toBe(0);
+    expect(scheduledLedgerRowCount(page({ head: SCHEDULED_HEAD, rows: [scheduledRow] }))).toBe(1);
+    // The four-cell form is the same header: its rows are counted as
+    // scheduled, so they are kept unread, never read as a statement.
+    expect(
+      scheduledLedgerRowCount(page({ head: FOUR_CELL_SCHEDULED_HEAD, rows: [scheduledRow] })),
+    ).toBe(1);
+    // Whitespace and markup inside the header are not part of it.
+    expect(
+      scheduledLedgerRowCount(
+        page({
+          head: "<span>ご利用日</span>\n<span>ご利用先 など</span><span>お支払日</span><span>今後の お支払い金額</span>",
+          rows: [scheduledRow],
+        }),
+      ),
+    ).toBe(1);
+    // A header that also shows a label of a read header set, or lacks one of
+    // the third header's labels, is not the third header.
+    expect(
+      scheduledLedgerRowCount(page({ head: `${SCHEDULED_HEAD} 支払区分`, rows: [scheduledRow] })),
+    ).toBeUndefined();
+    expect(
+      scheduledLedgerRowCount(
+        page({ head: "ご利用日 ご利用先など 今後のお支払い金額", rows: [scheduledRow] }),
+      ),
+    ).toBeUndefined();
+  });
+
+  test("the page reading alone would stop on third-header rows, which is why they are read first", () => {
+    // Without the heading at position 1: rows under no read amount label.
+    expect(
+      stopCode(() => creditStatementState(page({ head: SCHEDULED_HEAD, rows: [scheduledRow] }), 1)),
+    ).toBe("credit-statement-state");
+    // Under the heading: confirmed, and then the ledger's header set is missing.
+    const headed = page({
+      headings: [CONFIRMED_STATEMENT_HEADING],
+      months: ["2026年2月"],
+      head: SCHEDULED_HEAD,
+      rows: [scheduledRow],
+    });
+    expect(creditStatementState(headed, 1)).toBe("confirmed");
+    expect(stopCode(() => parseCreditLedger(headed, "confirmed"))).toBe("credit-ledger-headers");
+  });
+
+  test("all three headers in one connection: the third is kept unread and the connection goes on", async () => {
+    const run = await collectCredit(
+      client({
+        // The unconfirmed header, rows.
+        0: mutable,
+        // The confirmed header, rows.
+        1: closed("2026年3月"),
+        // The third header with rows, under the heading: captured unread.
+        2: page({
+          headings: [CONFIRMED_STATEMENT_HEADING],
+          months: ["2026年2月"],
+          head: SCHEDULED_HEAD,
+          rows: [scheduledRow],
+        }),
+        // A later month is still read.
+        3: closed("2026年1月"),
+        // No ledger at all, as months 3 to 6 of the surveyed connection.
+        5: page({ head: null }),
+        // The unconfirmed header, empty, as position 7 was observed.
+        7: page({ head: UNCONFIRMED_HEAD, rows: [emptyRow] }),
+        // The third header, empty, as position 8 was observed: nothing withheld.
+        8: page({ head: SCHEDULED_HEAD, rows: [emptyRow] }),
+      }),
+      "x",
+    );
+    expect(run.stop).toBeUndefined();
+    expect(run.unreadMonths).toEqual([{ position: 2, code: "scheduled_payments_page" }]);
+    const states = Object.fromEntries(
+      run.artifacts.map((artifact) => [artifact.filename, artifact.statementState ?? null]),
+    );
+    expect(states).toEqual({
+      "credit-menu.html": null,
+      "credit-past-months.json": null,
+      "credit-detail-00.html": "unconfirmed",
+      "credit-ledger-00.json": "unconfirmed",
+      "credit-detail-01.html": "confirmed",
+      "credit-ledger-01.json": "confirmed",
+      // The page is kept; no ledger is derived from its rows.
+      "credit-detail-02.html": "unknown",
+      "credit-detail-03.html": "confirmed",
+      "credit-ledger-03.json": "confirmed",
+      "credit-detail-05.html": "unknown",
+      "credit-detail-07.html": "unknown",
+      "credit-detail-08.html": "unknown",
+    });
+    // The unread month states no statement month: it keeps its relative label.
+    expect(
+      run.artifacts.find((artifact) => artifact.filename === "credit-detail-02.html"),
+    ).toMatchObject({ period: "detailMonth-2" });
+  });
+
+  test("third-header rows in the four-cell form are kept unread, never read", async () => {
+    const run = await collectCredit(
+      client({
+        0: mutable,
+        1: closed("2026年3月"),
+        8: page({ head: FOUR_CELL_SCHEDULED_HEAD, rows: [scheduledRow] }),
+      }),
+      "x",
+    );
+    expect(run.stop).toBeUndefined();
+    expect(run.unreadMonths).toEqual([{ position: 8, code: "scheduled_payments_page" }]);
+    expect(filenames(run.artifacts).filter((name) => name.endsWith("-08.json"))).toEqual([]);
+  });
+
+  test("third-header rows at positions 0 and 1 are kept unread too", async () => {
+    const scheduled = page({ head: SCHEDULED_HEAD, rows: [scheduledRow] });
+    const run = await collectCredit(
+      client({ 0: scheduled, 1: scheduled, 2: closed("2026年2月") }),
+      "x",
+    );
+    expect(run.stop).toBeUndefined();
+    expect(run.unreadMonths).toEqual([
+      { position: 0, code: "scheduled_payments_page" },
+      { position: 1, code: "scheduled_payments_page" },
+    ]);
+    expect(filenames(run.artifacts).filter((name) => name.startsWith("credit-ledger"))).toEqual([
+      "credit-ledger-02.json",
+    ]);
+  });
+
+  test("an unobserved header with rows still stops, and the page it stopped on is kept", async () => {
+    const warnings: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((value) => {
+      warnings.push(String(value));
+    });
+    let run: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      run = await collectCredit(
+        client({
+          0: mutable,
+          1: page({
+            headings: [CONFIRMED_STATEMENT_HEADING],
+            months: ["2026年3月"],
+            head: "ご利用日 ご利用先など 架空の見出し",
+            rows: [confirmedRow],
+          }),
+          2: closed("2026年2月"),
+        }),
+        "x",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(run.stop).toEqual({ code: "ledger_parse", position: 1, capturedMonthCount: 1 });
+    expect(filenames(run.artifacts)).toEqual([
+      "credit-menu.html",
+      "credit-past-months.json",
+      "credit-detail-00.html",
+      "credit-ledger-00.json",
+      "credit-detail-01.html",
+    ]);
+    expect(run.artifacts.at(-1)).toMatchObject({
+      dataset: "credit-detail",
+      statementState: "unknown",
+      period: "detailMonth-1",
+    });
+    expect(warnings.map((line) => JSON.parse(line))).toEqual([
+      {
+        event: "myjcb-credit-month-failed",
+        detailMonth: 1,
+        code: "credit-ledger-headers",
+        stopCode: "ledger_parse",
+        capturedMonthCount: 1,
+        stopPageKept: true,
+      },
+    ]);
+  });
+
+  test("the credit menu is read before any detail page, once", async () => {
+    const inner = client({ 0: mutable, 1: closed("2026年3月"), 2: closed("2026年2月") });
+    const reads: string[] = [];
+    await collectCredit(
+      {
+        get: async (op, query) => {
+          reads.push(op);
+          return await inner.get(op, query);
+        },
+        postCreditPastJson: async (input) => {
+          reads.push("credit-past-json");
+          return await inner.postCreditPastJson(input);
+        },
+      },
+      "x",
+    );
+    expect(reads).toEqual([
+      "credit-menu",
+      "credit-detail",
+      "credit-past-json",
+      "credit-detail",
+      "credit-detail",
+    ]);
   });
 });

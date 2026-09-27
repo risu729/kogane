@@ -1,4 +1,5 @@
-import type { DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
+import { MYJCB_ORIGIN } from "./policy";
+import type { CreditExportKind, DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
 import { StopConditionError } from "./types";
 import { parse, serialize, type DefaultTreeAdapterMap } from "parse5";
 import { redactPersonNameCells } from "./name-redaction";
@@ -171,14 +172,40 @@ export function parsePastMonthAvailability(json: string): PastMonthAvailability[
     .sort((left, right) => left.detailMonth - right.detailMonth);
 }
 
+/**
+ * The URL a credit detail page is served at, which its relative links resolve
+ * against. Confirmed months link their exports relatively and without a
+ * month (`detailDbPdf.html?output=pdf`, `detail.html?output=csv`,
+ * `detail.html?output=money`), observed 2026-09-27: resolved against the
+ * origin alone they named `/detail.html` and never matched, so no run found an
+ * export (ADR 0005's second amendment).
+ */
+const CREDIT_DETAIL_PAGE_URL = `${MYJCB_ORIGIN}/iss-pc/member/details_inquiry/detail.html`;
+
+/**
+ * The exports a credit detail page links to for its own month. A link is
+ * resolved against the page's URL, so relative, root-relative and absolute
+ * hrefs are read alike; it must stay on the MyJCB origin. The observed links
+ * name no `detailMonth`: a link found on this month's page is this month's
+ * export. A link that does name a `detailMonth` counts only when it names
+ * exactly this one (another month's link, or a malformed month, is not this
+ * month's export).
+ */
 export function discoverCreditExports(
   html: string,
   detailMonth: number,
-): readonly ("csv" | "pdf" | "ofx")[] {
-  const found = new Set<"csv" | "pdf" | "ofx">();
+): readonly CreditExportKind[] {
+  const found = new Set<CreditExportKind>();
   for (const match of html.matchAll(/\bhref=["']([^"']+)["']/giu)) {
-    const url = new URL(decodeHtml(match[1] ?? ""), "https://my.jcb.co.jp");
-    if (Number(url.searchParams.get("detailMonth")) !== detailMonth) continue;
+    let url: URL;
+    try {
+      url = new URL(decodeHtml(match[1] ?? ""), CREDIT_DETAIL_PAGE_URL);
+    } catch {
+      continue;
+    }
+    if (url.origin !== MYJCB_ORIGIN) continue;
+    const month = url.searchParams.get("detailMonth");
+    if (month !== null && (!/^\d{1,2}$/u.test(month) || Number(month) !== detailMonth)) continue;
     if (
       url.pathname === "/iss-pc/member/details_inquiry/detail.html" &&
       url.searchParams.get("output") === "csv"
@@ -365,6 +392,43 @@ export function creditStatementState(html: string, detailMonth: number): CreditS
  */
 export function creditPageRowCount(html: string): number {
   return readMyJcbStatementPage(parse(html)).rowCount;
+}
+
+/**
+ * The third ledger header, observed 2026-09-27 on the ショッピングスキップ払い
+ * page (menu position 8 of the surveyed connection, a payment schedule under
+ * the menu's 「ボーナス#回払い・ショッピングスキップ払い」 box, not a statement
+ * month): the payment date and a future payment amount in place of the payment
+ * type and this statement's or the usage amount. The live `div.head` has three
+ * cells, 「ご利用日」 / 「ご利用先など」 and 「お支払日」 on two lines of one
+ * cell / 「今後のお支払い金額」, so the labels are matched in the head's text
+ * with whitespace removed, never by cell. What its rows mean is not
+ * confirmed, so they are never read as a statement (ADR 0004).
+ */
+const SCHEDULED_LEDGER_LABELS = ["ご利用日", "ご利用先など", "お支払日", "今後のお支払い金額"];
+/** Labels of the two read header sets; a header carrying one is not the third variant. */
+const READ_LEDGER_LABELS = ["支払区分", "今回のお支払い金額", "ご利用金額"];
+
+/**
+ * The rows under ledgers that carry the third (scheduled) header, counted by
+ * the same row rule as the statement reading (the known empty-ledger row does
+ * not count), or `undefined` when no ledger carries that header. A header is
+ * the third variant when it displays every one of its labels and none of the
+ * labels only the read header sets show.
+ */
+export function scheduledLedgerRowCount(html: string): number | undefined {
+  const scheduled = findElements(parse(html), (element) =>
+    hasClass(element, "detail-list-01"),
+  ).filter((ledger) => {
+    const head = findElements(ledger, (element) => hasClass(element, "head"))[0];
+    const label = head ? nodeText(head).replace(/\s+/gu, "") : "";
+    return (
+      SCHEDULED_LEDGER_LABELS.every((part) => label.includes(part)) &&
+      !READ_LEDGER_LABELS.some((part) => label.includes(part))
+    );
+  });
+  if (scheduled.length === 0) return undefined;
+  return scheduled.reduce((count, ledger) => count + readMyJcbStatementPage(ledger).rowCount, 0);
 }
 
 /**
