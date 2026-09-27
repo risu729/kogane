@@ -270,4 +270,29 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
       ),
     ).toEqual({ months: [0], schedules: [] });
   });
+
+  test("other headings inside a card box never move a link to another group", () => {
+    // Each box names its month in a heading of its own; only `h2` decides the
+    // group, so an `h3` in a box leaves the link under its section's `h2`.
+    const box = (position: number) =>
+      `<div class="box"><h3>お支払い分</h3><p>明細</p>${link(position)}</div>`;
+    expect(
+      readCreditMenuGroups(
+        `<h1>カードご利用明細</h1><h2>最新のご利用明細</h2>${box(0)}${box(1)}<h2>${MENU_SCHEDULE_HEADING}</h2>${box(7)}${box(8)}<h2>過去の明細</h2>${box(2)}${box(3)}`,
+      ),
+    ).toEqual({ months: [0, 1, 2, 3], schedules: [7, 8] });
+    // An `h2` inside a box that is not one of the observed three is not taken
+    // as a sub-heading of the section: the link under it stops the reading.
+    expect(
+      read(`<h2>${MENU_SCHEDULE_HEADING}</h2><div class="box"><h2>お支払い分</h2>${link(8)}</div>`)
+        .code,
+    ).toBe("credit-menu-group");
+  });
+
+  test("the bonus count accepts half- and full-width digits only", () => {
+    for (const count of ["二", "Ⅱ", "2.5", "x", "２回"])
+      expect(read(`<h2>ボーナス${count}回払い・ショッピングスキップ払い</h2>${link(8)}`).code).toBe(
+        "credit-menu-group",
+      );
+  });
 });

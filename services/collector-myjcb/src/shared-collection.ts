@@ -258,6 +258,15 @@ function schedulePageCount(pages: readonly SchedulePage[], count: number | undef
   return stored;
 }
 
+/**
+ * A connection that lists no schedule page states no count either: a count
+ * without its entries is refused rather than dropped.
+ */
+function noSchedulePages(count: number | undefined): Record<string, never> {
+  if (count !== undefined) throw new Error("manifest_schedule_count_invalid");
+  return {};
+}
+
 /** Each export offer as a position and closed kinds, or a refused plan. */
 function exportOffers(offers: readonly ExportOffer[]): ExportOffer[] {
   return offers.map((offer) => {
@@ -311,7 +320,7 @@ function manifestBytes(
         ? {}
         : { exportOffers: exportOffers(connection.exportOffers) }),
       ...(connection.schedulePages === undefined || connection.schedulePages.length === 0
-        ? {}
+        ? noSchedulePages(connection.schedulePageCount)
         : {
             schedulePages: schedulePages(connection.schedulePages),
             schedulePageCount: schedulePageCount(

@@ -981,5 +981,7 @@ describe("ADR 0005 amendment (c): schedule pages beside the months", () => {
     await expect(plan([{ position: 8, code: "scheduled_payments_page" }])).rejects.toThrow(
       "manifest_schedule_count_invalid",
     );
+    // A count with no entries is refused, not dropped.
+    await expect(plan([], 1)).rejects.toThrow("manifest_schedule_count_invalid");
   });
 });

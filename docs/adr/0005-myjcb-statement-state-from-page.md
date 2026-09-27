@@ -596,8 +596,10 @@ code }]` with a code from `SCHEDULE_PAGE_CODES`:
 - `services/collector-myjcb/test/parsers.test.ts`: the synthetic menu
   fixture has the nine links in the observed DOM order under the three
   headings and reads as months 0–6 and schedule pages 7 and 8; headings
-  match across whitespace and markup and with any digits; an unrecognised
-  heading, near misses of the observed texts, a link before any heading
+  match across whitespace and markup and with any half- or full-width
+  digits (a kanji numeral or other character in the count stops); an `h3`
+  inside a card box leaves its link under the section's `h2`; an
+  unrecognised heading, an unobserved `h2` inside a card box, near misses of the observed texts, a link before any heading
   and a position in both groups stop with `credit-menu-group`, and the
   log carries counts only.
 - `services/collector-myjcb/test/credit-statement-state.test.ts`: schedule
@@ -614,7 +616,8 @@ code }]` with a code from `SCHEDULE_PAGE_CODES`:
   text reaches nothing.
 - `services/collector-myjcb/test/shared-collection.test.ts`: stored and
   failed schedule pages keep the unit `complete` and are named in the
-  manifest; an unknown code, position or count refuses the plan.
+  manifest; an unknown code, position or count, or a count with no
+  entries, refuses the plan.
 - `services/processor/test/myjcb-shared-r2.test.ts`: the collector's plan
   for a whole connection with a stored schedule page registers and seals,
   has run status `success` and unit report `success`, catalogues the

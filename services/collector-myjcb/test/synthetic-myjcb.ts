@@ -144,8 +144,8 @@ export function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 /** The three `h2` headings the credit menu was observed with; the digit is synthetic. */
-export const MENU_LATEST_HEADING = "最新のご利用明細";
-export const MENU_PAST_HEADING = "過去の明細";
+const MENU_LATEST_HEADING = "最新のご利用明細";
+const MENU_PAST_HEADING = "過去の明細";
 export const MENU_SCHEDULE_HEADING = "ボーナス2回払い・ショッピングスキップ払い";
 
 /**
