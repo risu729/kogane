@@ -4,7 +4,9 @@
   [Amendment](#amendment-option-3-implemented)), accepted when the amending PR
   merges; amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
   (the token is derived without a key; see
-  [Amendment: ADR 0029](#amendment-adr-0029-the-token-needs-no-key))
+  [Amendment: ADR 0029](#amendment-adr-0029-the-token-needs-no-key)); noted
+  on 2026-09-27 that both stated-total fields are on the live site (see
+  [Note](#note-2026-09-27-both-stated-total-fields-are-on-the-live-site))
 - Date: 2026-09-26
 - Carried by:
   [identity operations](../identity-operations.md#collector-vpass-runs-bind-in-their-own-run),
@@ -469,3 +471,110 @@ view and rebuilds `identity_vpass_bindings` so both admit `vpass-card-v1-` and
 `vpass-card-v2-` tokens and nothing else. A card's v1 and v2 tokens are
 different values and so different account entities; joining them is a
 separate, reviewed crosswalk. The text above is left as it was decided.
+
+## Note (2026-09-27): both stated-total fields are on the live site
+
+- Status: proposed; accepted when the PR that adds it merges
+- Date: 2026-09-27
+- Carried by: `services/collector-vpass/src/provider-count.ts`,
+  `services/collector-vpass/src/statement-walk.ts`,
+  `services/collector-vpass/src/shared-collection.ts` (`monthCheck`),
+  `services/collector-vpass/test/statement-walk.test.ts`,
+  `services/collector-vpass/test/shared-collection.test.ts`,
+  [Vpass Android API: statement response fields](../vpass-android-api.md#statement-response-fields-live-2026-09-27),
+  [collection: Vpass](../collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc)
+
+### Context
+
+The owner's agent opened the statement page of the live site for all seven
+cards and reported field names and JSON types only, no values. The page calls
+`multicard/dropdownlist_init/v1`, `web_meisai/web_meisai_top/v1`,
+`meisai/meisai_ans/v1` and `multicard/operation_card_update/v1`. Five cards
+answer with `WebMeisaiCommonDisplayServiceBean` and
+`WebMeisaiTopDisplayServiceBean`; the latter's `webMeisaiTopK3Vo` carries
+`allCnt` as a **string**, beside `rowCnt`, `limitCnt`, `dispCnt`, `pageNo`,
+`lastPage`, `nextPageRow`, `prevPageRow` and `payTotal`. Two cards answer with
+`CustomizedMeisaiAnsDisplayServiceBean`, whose `total` is a **number**, beside
+`responseCnt`, `pageSize` and `pageFlg`. Option 8's open question ("whether
+production finalized statement pages carry `allCnt`") is answered: both
+stated totals are present. If a card still logs `stated_total_unverified`,
+the cause is how the value is read, which this note checks.
+
+### Options considered
+
+1. **Read `lastPage` and `pageNo` to stop the finalized walk and to require
+   "last page reached" for `complete`.** Rejected: only the fields' presence
+   was reported, not their types or what their values mean (a page number, a
+   flag, a row index), so using them would guess provider semantics
+   (ADR 0004).
+2. **Stop the finalized walk once the captured rows reach `allCnt`.**
+   Rejected: the walk would then stop on the same number the month check
+   compares with, and the check could no longer catch a walk that stopped
+   early.
+3. **Keep the walk's stops and the coverage rule; read every stated count
+   through one exact reader and prove it on the observed types.** Chosen.
+
+### Decision
+
+- The month check already read `allCnt` as a digit string or a number (since
+  #273), so a string `allCnt` is not a cause of `stated_total_unverified`.
+  The check, the Worker's walk and both Node clients now share one reader,
+  `providerCount`: a non-negative safe integer number, or a string of ASCII
+  digits only whose value is a safe integer; a sign, a space, a separator, a
+  decimal point, full-width digits or an unsafe value is no count (the walk
+  treats it as absent, the check reports `stated_total_unverified`). Before
+  this, the walk and the clients accepted any digit string, however long, and
+  any integer number, negative or unsafe.
+- The Worker's month walk moves unchanged from `src/worker.ts` to
+  `src/statement-walk.ts` so it can be driven by a synthetic provider. What
+  it does, stated precisely (option 7 above described only its fallback): a
+  finalized month stops after a page whose `allCnt` is less than its
+  `nextPageRow`, or on an empty page after the first, and asks for the next
+  page with `nextPageRow` as the cursor; a customized month stops once its
+  rows reach `total` and `pageFlg` is `1` or `3`, or on an empty answer page.
+- The coverage rule is unchanged: a month is `complete` only when its captured
+  rows equal the stated total the last page carries. The walk ends only on a
+  stated-total stop, on an empty page, or by failing the card, and an empty
+  page that ends a short walk leaves the rows below the total, so equality
+  already implies the walk passed the month's last row; "the last page was
+  reached" adds no independent signal that the observed fields give.
+
+### Consequences
+
+- Nothing a stored terminal says changes, and no run registered before
+  changes. A `stated_total_unverified` month now means the stated value is
+  absent or not an exact count; with both fields observed present, the next
+  collection's persist diagnostic (`coverage`) shows whether any month still
+  reports it.
+- Limit: the walk still ends on the first empty page when the finalized
+  page's `allCnt` or `nextPageRow` is unreadable, and it does not use
+  `pageNo`, `lastPage`, `rowCnt`, `limitCnt`, `dispCnt`, `prevPageRow` or
+  `responseCnt`. A finalized page where the stated-total stop does not fire
+  and whose `nextPageRow` is missing, empty or repeats an earlier cursor, and
+  that is not an empty page after the first, fails the card (`invalid page
+cursor`). The meaning of `nextPageRow` (read as the next
+  page's first row) and the type of every field except `allCnt` and `total`
+  have not been observed.
+
+### Verification
+
+- `services/collector-vpass/test/statement-walk.test.ts`: `providerCount`
+  reads numbers and digit strings as the same value and reads signs, spaces,
+  separators, decimals, exponents, hex, full-width digits, empty strings and
+  unsafe values as no count. The finalized walk, on synthetic pages in the
+  observed shape with `allCnt` a string and `nextPageRow` a string or a
+  number, sends no request past the last page and the month is `complete`;
+  a month short of its total is `stated_total_mismatch`, and one whose
+  `allCnt` is not a count ends on its first empty page as
+  `stated_total_unverified`. The customized walk, with a numeric `total`,
+  stops at the total without another request, and an empty answer page short
+  of it is `stated_total_mismatch`.
+- `services/collector-vpass/test/shared-collection.test.ts`: the fixtures'
+  `allCnt` is a string; a stated total reads the same as a number or a digit
+  string; nine malformed strings are `stated_total_unverified`.
+- `services/processor/test/vpass-collector-binding.test.ts` and
+  `services/processor/test/collector-plans.test.ts`: the registered plans
+  state `allCnt` as a string and still seal, bind and register as before.
+- Not verified: no production diagnostic or stored page was read for this
+  note; whether any live month logs `stated_total_unverified` or
+  `stated_total_mismatch` is answered by the next collection's diagnostics.

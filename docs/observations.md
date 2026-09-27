@@ -17,6 +17,29 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Vpass stated-total fields on the live site (collector, no parser release)
+
+Observed on 2026-09-27 by the owner's agent on the live web statement page
+for all seven cards, reporting field names and JSON types only
+([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site),
+[field table](vpass-android-api.md#statement-response-fields-live-2026-09-27)):
+
+- Five cards answer with `WebMeisaiCommonDisplayServiceBean` and
+  `WebMeisaiTopDisplayServiceBean`; `webMeisaiTopK3Vo.allCnt` is present and
+  a JSON string.
+- Two cards answer with `CustomizedMeisaiAnsDisplayServiceBean`; `total` is
+  present and a JSON number.
+
+What changes: nothing in any parser. The collector's month check already read
+a digit-string `allCnt`; it, the Worker's walk and both Node clients now share
+one exact reader, and the synthetic fixtures state `allCnt` as a string and
+`total` as a number. **Unknown, kept as limits:** the meaning and type of
+`pageNo`, `lastPage`, `rowCnt`, `limitCnt`, `dispCnt`, `prevPageRow` and
+`responseCnt`, which the walk therefore does not read; the type and meaning
+of `nextPageRow`, which the walk compares with `allCnt` and sends back as the
+next page's cursor, as it did before; and whether any live month logs `stated_total_unverified` or
+`stated_total_mismatch`, which the next collection's persist diagnostic shows.
+
 ## SBI Shinsei stored-capture shapes (activity parser 0.1.2, board parser 1.0.1)
 
 Observed on 2026-09-27 by the owner's local agent replaying stored captures

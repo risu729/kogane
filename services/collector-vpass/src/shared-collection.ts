@@ -50,6 +50,7 @@ import {
   type VpassBindingUnavailable,
   type VpassCardBinding,
 } from "./card-binding";
+import { providerCount } from "./provider-count";
 
 export const SOURCE = "vpass";
 /** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
@@ -185,12 +186,6 @@ interface MonthCheck {
   readonly coverage: VpassMonthCoverage;
 }
 
-function statedInteger(value: unknown): number | null {
-  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
-  if (typeof value === "string" && /^\d{1,15}$/u.test(value)) return Number(value);
-  return null;
-}
-
 function objectField(value: unknown, key: string): unknown {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)[key]
@@ -230,7 +225,7 @@ function monthCheck(capture: VpassMonthCapture): MonthCheck {
         ? objectField(objectField(finalized, "webMeisaiTopK3Vo"), "allCnt")
         : objectField(customized, "total");
     if (stated !== undefined && stated !== null) {
-      statedTotal = statedInteger(stated);
+      statedTotal = providerCount(stated);
       if (statedTotal === null) readable = false;
     }
   }

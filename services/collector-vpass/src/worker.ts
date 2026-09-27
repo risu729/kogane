@@ -14,15 +14,14 @@ import {
   sharedRunPersisted,
   type VpassMonthCapture,
 } from "./shared-collection";
+import { collectMonth } from "./statement-walk";
 const AUTH_URL = "https://spap.smbc-card.com/api/v3/Fauth";
 const CONFIG_URL = "https://spap.smbc-card.com/api/v3/common/Config";
 const MEMBER_BASE_URL = "https://www.smbc-card.com";
 const CARD_LIST_PATH = "/memapi/jaxrs/multicard/dropdownlist_init/v1";
 const CARD_SELECT_PATH = "/memapi/jaxrs/multicard/operation_card_update/v1";
 const MEISAI_TOP_PATH = "/memapi/jaxrs/web_meisai/web_meisai_top/v1";
-const MEISAI_ANSWER_PATH = "/memapi/jaxrs/meisai/meisai_ans/v1";
 const APP_VERSION = "5.12.0";
-const MAX_PAGES_PER_MONTH = 100;
 const MOBILE_UA =
   `com.smbc_card.vpass.android_v${APP_VERSION} ` +
   "Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP3A.241105.008; wv) " +
@@ -70,14 +69,6 @@ interface VpassSession {
   cardList: RawJsonResponse;
   cards: string[];
 }
-interface MonthCapture {
-  pages: Array<{
-    kind: "top" | "answer";
-    index: number;
-    rawJson: string;
-  }>;
-  transactionCount: number;
-}
 /** The captures a card collected, in the shape the shared plan reads. */
 type SharedMonths = Record<string, VpassMonthCapture>;
 class CookieBag {
@@ -118,14 +109,6 @@ function objectAt(value: unknown, ...path: string[]): JsonObject | null {
   }
   return isObject(current) ? current : null;
 }
-function arrayAt(value: unknown, ...path: string[]): unknown[] {
-  let current: unknown = value;
-  for (const key of path) {
-    if (!isObject(current)) return [];
-    current = current[key];
-  }
-  return Array.isArray(current) ? current : [];
-}
 function pairMonths(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -154,11 +137,6 @@ function availableMonths(response: unknown): string[] {
     objectAt(content, "CustomizedMeisaiAnsDisplayServiceBean")?.["seikyuYMList"],
   ];
   return [...new Set(sources.flatMap(pairMonths))].sort().reverse();
-}
-function integer(value: unknown): number | null {
-  if (typeof value === "number" && Number.isInteger(value)) return value;
-  if (typeof value === "string" && /^\d+$/.test(value)) return Number.parseInt(value, 10);
-  return null;
 }
 function adler32(value: string): number {
   let a = 1;
@@ -296,76 +274,6 @@ async function openSession(env: Env): Promise<VpassSession> {
   if (cards.length === 0) throw new Error("Vpass returned no selectable cards");
   return { cookies, cardList, cards };
 }
-async function collectMonth(cookies: CookieBag, month: string): Promise<MonthCapture> {
-  // The Android app always supplies p03=1 for the first finalized-statement
-  // page. Omitting p03 returns only the display/header bean with zero rows.
-  let current = await memberPost(cookies, MEISAI_TOP_PATH, { p01: month, p03: "1" });
-  const content = objectAt(current.json, "body", "content");
-  if (!content) throw new Error(`${month} response has no content`);
-  if (objectAt(content, "WebMeisaiTopDisplayServiceBean")) {
-    let transactions = 0;
-    const seen = new Set<string>();
-    const pages: MonthCapture["pages"] = [];
-    for (let page = 0; page < MAX_PAGES_PER_MONTH; page += 1) {
-      pages.push({ kind: "top", index: page, rawJson: current.rawText });
-      const bean = objectAt(current.json, "body", "content", "WebMeisaiTopDisplayServiceBean");
-      const rowCount = arrayAt(bean, "meisaiList").length;
-      transactions += rowCount;
-      const detail = objectAt(bean, "webMeisaiTopK3Vo");
-      const allCount = integer(detail?.["allCnt"]);
-      const nextPageRow = integer(detail?.["nextPageRow"]);
-      if (
-        (allCount !== null && nextPageRow !== null && allCount < nextPageRow) ||
-        (rowCount === 0 && page > 0)
-      ) {
-        return { pages, transactionCount: transactions };
-      }
-      const candidate = detail?.["nextPageRow"];
-      const cursor =
-        typeof candidate === "string" || typeof candidate === "number" ? String(candidate) : "";
-      if (!cursor || seen.has(cursor)) throw new Error(`${month} returned an invalid page cursor`);
-      seen.add(cursor);
-      current = await memberPost(cookies, MEISAI_TOP_PATH, { p01: month, p03: cursor });
-    }
-    throw new Error(`${month} exceeded ${MAX_PAGES_PER_MONTH} pages`);
-  }
-  const customized = objectAt(content, "CustomizedMeisaiAnsDisplayServiceBean");
-  if (!customized) throw new Error(`${month} returned an unknown statement shape`);
-  let transactions = arrayAt(customized, "meisaiList").length;
-  const pages: MonthCapture["pages"] = [{ kind: "top", index: 0, rawJson: current.rawText }];
-  let total = integer(customized["total"]) ?? transactions;
-  const pageSize = Math.max(1, integer(customized["pageSize"]) ?? 100);
-  let page = 1;
-  // Current/unsettled statements are fetched by a different app method. A
-  // top response may merely signal that route with an empty customized bean,
-  // so always make the first meisai_ans request when no rows were returned.
-  let shouldFetch = transactions === 0 || transactions < total;
-  while (shouldFetch && page < MAX_PAGES_PER_MONTH) {
-    current = await memberPost(cookies, MEISAI_ANSWER_PATH, {
-      seikyuYM: month,
-      start: String(transactions),
-      end: String(transactions + pageSize - 1),
-    });
-    const responseBean = objectAt(
-      current.json,
-      "body",
-      "content",
-      "CustomizedMeisaiAnsDisplayServiceBean",
-    );
-    const rows = arrayAt(responseBean, "meisaiList");
-    pages.push({ kind: "answer", index: page, rawJson: current.rawText });
-    if (rows.length === 0) break;
-    transactions += rows.length;
-    total = integer(responseBean?.["total"]) ?? total;
-    const pageFlag = responseBean?.["pageFlg"];
-    shouldFetch = transactions < total || (pageFlag !== "1" && pageFlag !== "3");
-    page += 1;
-  }
-  if (shouldFetch && page >= MAX_PAGES_PER_MONTH) {
-    throw new Error(`${month} exceeded ${MAX_PAGES_PER_MONTH} pages`);
-  }
-  return { pages, transactionCount: transactions };
-}
 async function captureCard(
   env: Env,
   session: VpassSession,
@@ -401,10 +309,13 @@ async function captureCard(
         transactions: number;
       }
     > = {};
-    const captures: Record<string, MonthCapture> = {};
+    const captures: SharedMonths = {};
     for (const month of months) {
       stage = "statement-collection";
-      const result = await collectMonth(cookies, month);
+      const result = await collectMonth(
+        (path, content) => memberPost(cookies, path, content),
+        month,
+      );
       captures[month] = result;
       monthResults[month] = {
         pages: result.pages.length,
@@ -437,7 +348,7 @@ async function captureCard(
         cardListRawJson: cardList.rawText,
         selectCardRawJson: selection.rawText,
         webMeisaiTopRawJson: top.rawText,
-        months: captures as SharedMonths,
+        months: captures,
       });
       console.log(JSON.stringify(sharedRunDiagnostic(runId, cardLabel, outcome)));
       // A run whose terminal was not written is not a finished run (G1-01).

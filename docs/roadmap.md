@@ -232,7 +232,13 @@ Concrete limits in the current code:
   `partial` the same way and are not parsed: whether an activity page holds a
   whole month has not been observed. A Vpass card run is `partial` the same
   way unless every month's captured rows equal the provider's stated total
-  (ADR 0026's amendment). A MyJCB connection's `complete` unit rests on the same
+  (ADR 0026's amendment). Both stated totals were seen on the live site
+  (`allCnt` a string, `total` a number) and are read as exact counts, but the
+  finalized walk still ends on its first empty page when `allCnt` or
+  `nextPageRow` is unreadable, and the page-number fields (`pageNo`,
+  `lastPage`) are not read because their meaning is unobserved
+  ([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site)).
+  A MyJCB connection's `complete` unit rests on the same
   unobserved premise (one detail page holds its whole month), and a
   connection whose older month shows rows without a stated state is
   `partial` and its run is not parsed. A MyJCB connection that stops at a
