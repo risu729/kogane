@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { myJcbCreditStatement } from "../src/parsers/myjcb.ts";
+import { myJcbCreditLedger, myJcbCreditStatement } from "../src/parsers/myjcb.ts";
 import type { ArtifactMeta } from "../src/types.ts";
 
 const artifact: ArtifactMeta = {
@@ -214,5 +214,129 @@ describe("the statement state is the page's own (1.1.0)", () => {
         artifactKey: "connection-a/credit-detail-00.html",
       }),
     ).toThrow(/cannot be finalized/u);
+  });
+});
+
+describe("a confirmed page under the usage header, proven by the page (1.2.0, ADR 0005 amendment d)", () => {
+  // Synthetic rows in the production shape: the payment type inside the
+  // combined ご利用先など／支払区分 cell, a two-character label, the amount.
+  const USAGE_HEAD = "ご利用日 ご利用先など 支払区分 ご利用金額";
+  const usageRow = (merchantCell: string, amount: string) =>
+    `<div class="content"><div class="item-cell"><div class="cell">2026/05/20</div><div class="cell">${merchantCell}</div><div class="cell">架空</div><div class="cell">${amount}</div></div></div>`;
+  const rows = [usageRow("架空商店A 1回払", "1,000円"), usageRow("架空商店B 1回払", "234円")];
+  const usagePage = (ledgerRows: readonly string[], body = total) =>
+    `<!doctype html><html><body><h1>MyJCB</h1><h1>カードご利用代金明細(確定分)</h1><h2>2026年6月お支払い分のカードご利用明細</h2><div class="detail-list-01"><div class="head">${USAGE_HEAD}</div>${ledgerRows.join("")}</div>${body}</body></html>`;
+
+  test("yields the page total, recording how the page was proven and the label its ledger shows", () => {
+    const result = parse(usagePage(rows));
+    expect(result.warnings).toEqual([]);
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations[0]).toMatchObject({
+      metric: "credit_statement_payment_amount",
+      amountText: "1234",
+      asOf: "2026-06-15",
+      extra: {
+        _kogane: {
+          statementState: "confirmed",
+          statementStateBasis: "page-heading-usage-total-proof",
+          ledgerAmountLabel: "ご利用金額",
+        },
+      },
+    });
+  });
+
+  test("a page under the confirmed header is recorded exactly as in 1.1.0", () => {
+    const confirmed = usagePage([]).replace(USAGE_HEAD, "ご利用日 ご利用先など 支払区分 今回のお支払い金額");
+    const kogane = (parse(confirmed).observations[0]?.extra as { _kogane: Record<string, unknown> })
+      ._kogane;
+    expect(kogane["statementStateBasis"]).toBe("page-heading");
+    expect(Object.keys(kogane)).not.toContain("ledgerAmountLabel");
+  });
+
+  test("an unproven page still fails as a conflict", () => {
+    for (const content of [
+      // An installment row, even though the sum matches.
+      usagePage([usageRow("架空商店A 分割払い", "1,000円"), rows[1]!]),
+      // No payment type in the cell.
+      usagePage([usageRow("架空商店A", "1,000円"), rows[1]!]),
+      // Sum and total differ.
+      usagePage(rows, total.replace("1,234", "1,235")),
+      // No total.
+      usagePage(rows, ""),
+      // No rows: nothing proves a non-zero total.
+      usagePage([]),
+    ])
+      expect(() => parse(content)).toThrow(/confirmation conflicts/u);
+  });
+});
+
+describe("the credit ledger under the usage header (1.2.0)", () => {
+  const USAGE_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"];
+  const PAYMENT_HEADERS = ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
+  const ledgerArtifact = (state: "confirmed" | "unconfirmed"): ArtifactMeta => ({
+    ...artifact,
+    dataset: "credit-ledger",
+    artifactKey: "connection-a/credit-ledger-01.json",
+    statementState: state,
+    period: "2026-06",
+    mime: "application/json",
+  });
+  const ledger = (
+    state: "confirmed" | "unconfirmed",
+    headers: readonly string[],
+    expanded: Record<string, string> = { ご利用金額: "1,000円", 摘要: "架空摘要" },
+  ) =>
+    new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 1,
+        detailMonth: 1,
+        period: "2026-06",
+        state,
+        headers,
+        rows: [{ summaryCells: ["2026/05/20", "架空商店A 1回払", "架空", "1,000円"], expanded }],
+      }),
+    );
+
+  test("a confirmed ledger under the usage header records the amount as the usage amount only", () => {
+    const [row] = myJcbCreditLedger.parse(ledger("confirmed", USAGE_HEADERS), ledgerArtifact("confirmed"))
+      .observations;
+    expect(row).toMatchObject({ status: "confirmed", amountText: "-1000" });
+    const kogane = (row?.extra as { _kogane: Record<string, unknown> })._kogane;
+    expect(kogane["amountBasis"]).toBe("confirmed-usage");
+    expect(kogane["usageAmountText"]).toBe("1,000円");
+    // Nothing on the row states this statement's payment for it.
+    expect(Object.keys(kogane)).not.toContain("paymentAmountText");
+  });
+
+  test("the other header pairs are read as in 1.1.2", () => {
+    const [confirmed] = myJcbCreditLedger.parse(
+      ledger("confirmed", PAYMENT_HEADERS),
+      ledgerArtifact("confirmed"),
+    ).observations;
+    expect((confirmed?.extra as { _kogane: Record<string, unknown> })._kogane).toMatchObject({
+      amountBasis: "current-statement-payment",
+      usageAmountText: "1,000円",
+      paymentAmountText: "1,000円",
+    });
+    const [pending] = myJcbCreditLedger.parse(
+      ledger("unconfirmed", USAGE_HEADERS, { 今回のお支払い金額: "1,000円" }),
+      ledgerArtifact("unconfirmed"),
+    ).observations;
+    expect((pending?.extra as { _kogane: Record<string, unknown> })._kogane).toMatchObject({
+      amountBasis: "unconfirmed-usage",
+      usageAmountText: "1,000円",
+      paymentAmountText: "1,000円",
+    });
+    // An unconfirmed ledger under the confirmed header is still refused, and a
+    // confirmed ledger's expanded labels are a confirmed page's whatever its header.
+    expect(() =>
+      myJcbCreditLedger.parse(ledger("unconfirmed", PAYMENT_HEADERS), ledgerArtifact("unconfirmed")),
+    ).toThrow(/provider contract/u);
+    expect(() =>
+      myJcbCreditLedger.parse(
+        ledger("confirmed", USAGE_HEADERS, { 今回のお支払い金額: "1,000円" }),
+        ledgerArtifact("confirmed"),
+      ),
+    ).toThrow(/expanded is invalid/u);
   });
 });

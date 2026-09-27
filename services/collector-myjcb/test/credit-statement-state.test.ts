@@ -1183,3 +1183,176 @@ describe("ADR 0005 second amendment: the three observed ledger headers", () => {
     ]);
   });
 });
+
+describe("ADR 0005 amendment (d): a confirmed page under the usage header", () => {
+  // The production row shape: the payment type inside the combined
+  // ご利用先など／支払区分 cell (`1回払`), a two-character label, the amount.
+  // Every value is synthetic.
+  const usageRow = (merchantCell: string, amount: string) =>
+    row("ご利用金額", ["2026/01/05", merchantCell, "架空", amount], amount);
+  const total = (amount: string) =>
+    `<div class="detail-box-price-01"><dl><dt>2026年2月10日(火)お支払い金額合計</dt><dd>${amount}</dd></dl></div>`;
+  /** A closed page whose ledger shows 「ご利用金額」, with the given rows and total blocks. */
+  const usagePage = (rows: readonly string[], totals: readonly string[] = [total("3,500円")]) =>
+    page({
+      headings: [CONFIRMED_STATEMENT_HEADING],
+      months: ["2026年2月"],
+      head: UNCONFIRMED_HEAD,
+      rows,
+    }).replace("</body>", `${totals.join("")}</body>`);
+  const provenRows = [
+    usageRow("架空商店A 1回払", "1,000円"),
+    usageRow("架空商店B 1回払い", "3,000円"),
+    // A refund row counts with its sign.
+    usageRow("架空商店C 1回払", "-500円"),
+  ];
+  const proven = usagePage(provenRows);
+
+  /** The stop code and the logged usage-header reason of one reading. */
+  function refusal(html: string, detailMonth = 1): { code?: string; logs: unknown[] } {
+    const lines: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((value) => {
+      lines.push(String(value));
+    });
+    try {
+      return { code: stopCode(() => creditStatementState(html, detailMonth)), logs: lines.map((line) => JSON.parse(line)) };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  test("accepted when every row is one single payment and the exact sum is the page total", () => {
+    for (const detailMonth of [1, 2, 5]) {
+      expect(creditStatementState(proven, detailMonth)).toBe("confirmed");
+    }
+    // Whitespace and full-width digits in the total read as the ledger parser reads them.
+    expect(creditStatementState(usagePage(provenRows, [total(" ３，５００ 円 ")]), 1)).toBe(
+      "confirmed",
+    );
+    // The stored ledger carries the header the page shows, and the expanded
+    // labels of a confirmed page; nothing records a row's 今回のお支払い金額.
+    expect(parseCreditLedger(proven, "confirmed")).toEqual({
+      state: "confirmed",
+      headers: ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"],
+      rows: [
+        {
+          summaryCells: ["2026/01/05", "架空商店A 1回払", "架空", "1,000円"],
+          expanded: { ご利用金額: "1,000円", 摘要: "架空摘要", 今回回数: "1" },
+        },
+        {
+          summaryCells: ["2026/01/05", "架空商店B 1回払い", "架空", "3,000円"],
+          expanded: { ご利用金額: "3,000円", 摘要: "架空摘要", 今回回数: "1" },
+        },
+        {
+          summaryCells: ["2026/01/05", "架空商店C 1回払", "架空", "-500円"],
+          expanded: { ご利用金額: "-500円", 摘要: "架空摘要", 今回回数: "1" },
+        },
+      ],
+    });
+  });
+
+  test("refused, and stopped as before, unless the page proves it; the log names the closed reason", () => {
+    for (const [html, reason] of [
+      // One installment row, even when the sum still matches.
+      [
+        usagePage([
+          usageRow("架空商店A 分割払い", "1,000円"),
+          ...provenRows.slice(1),
+        ]),
+        "usage_header_payment_type_unproven",
+      ],
+      [usagePage([usageRow("架空商店A 2回払", "1,000円"), ...provenRows.slice(1)]), "usage_header_payment_type_unproven"],
+      [usagePage([usageRow("架空商店A リボ払", "1,000円"), ...provenRows.slice(1)]), "usage_header_payment_type_unproven"],
+      // A cell with no payment type at all, or an empty one.
+      [usagePage([usageRow("架空商店A", "1,000円"), ...provenRows.slice(1)]), "usage_header_payment_type_unproven"],
+      [usagePage([usageRow("", "1,000円"), ...provenRows.slice(1)]), "usage_header_payment_type_unproven"],
+      // A row whose cells cannot be read.
+      [
+        usagePage([
+          row("ご利用金額", ["2026/01/05", "架空商店A 1回払", "1,000円"], "1,000円"),
+          ...provenRows.slice(1),
+        ]),
+        "usage_header_payment_type_unproven",
+      ],
+      // No total, two totals, an unreadable total.
+      [usagePage(provenRows, []), "usage_header_total_missing"],
+      [usagePage(provenRows, [total("3,500円"), total("3,500円")]), "usage_header_total_missing"],
+      [usagePage(provenRows, [total("3,50円")]), "usage_header_total_missing"],
+      [usagePage(provenRows, [total("")]), "usage_header_total_missing"],
+      // A sum that is not the total, by one yen.
+      [usagePage(provenRows, [total("3,501円")]), "usage_header_total_mismatch"],
+      // A row amount that does not read.
+      [usagePage([usageRow("架空商店A 1回払", "1,0円"), ...provenRows.slice(1)]), "usage_header_total_mismatch"],
+      // An empty usage-header ledger proves only a zero total.
+      [usagePage([]), "usage_header_total_mismatch"],
+    ] as const) {
+      const { code, logs } = refusal(html);
+      expect(code).toBe("credit-statement-state");
+      expect(logs).toEqual([
+        expect.objectContaining({ event: "myjcb-credit-statement-state", usageHeader: reason }),
+      ]);
+      // Codes and counts only: no amount and no provider text reaches the log.
+      expect(JSON.stringify(logs)).not.toMatch(/円|架空|[0-9],[0-9]/u);
+      // Called directly, the ledger reader still refuses the unproven page.
+      expect(stopCode(() => parseCreditLedger(html, "confirmed"))).toBe("credit-ledger-headers");
+    }
+  });
+
+  test("the rules outside the proof are unchanged", () => {
+    // Position 0 never states a closed statement, proven or not.
+    expect(refusal(proven, 0).code).toBe("credit-statement-state");
+    // Without the heading the same rows are the mutable statement.
+    const withoutHeading = proven.replace(`<h1>${CONFIRMED_STATEMENT_HEADING}</h1>`, "");
+    expect(creditStatementState(withoutHeading, 0)).toBe("unconfirmed");
+    expect(creditStatementState(withoutHeading, 1)).toBe("unconfirmed");
+    expect(parseCreditLedger(withoutHeading, "unconfirmed")?.headers).toEqual([
+      "ご利用日",
+      "ご利用先など",
+      "支払区分",
+      "ご利用金額",
+    ]);
+    // The confirmed header needs no proof, and is stored as before.
+    expect(parseCreditLedger(closedWithoutExports, "confirmed")?.headers).toEqual([
+      "ご利用日",
+      "ご利用先など",
+      "支払区分",
+      "今回のお支払い金額",
+    ]);
+    // A second heading or a second ledger header is a conflict whatever the rows prove.
+    expect(
+      refusal(proven.replace("<h2>", `<h1>${CONFIRMED_STATEMENT_HEADING}</h1><h2>`)).code,
+    ).toBe("credit-statement-state");
+    expect(
+      refusal(
+        proven.replace(
+          "</body>",
+          `<div class="detail-list-01"><div class="head">${CONFIRMED_HEAD}</div></div></body>`,
+        ),
+      ).logs,
+    ).toEqual([expect.objectContaining({ usageHeader: null })]);
+  });
+
+  test("collectCredit stores the proven month as confirmed under the header it shows", async () => {
+    const { artifacts, stop } = await collectCredit(client({ 0: mutable, 1: proven }), "x");
+    expect(stop).toBeUndefined();
+    const states = Object.fromEntries(
+      artifacts.map((artifact) => [artifact.filename, artifact.statementState ?? null]),
+    );
+    expect(states).toMatchObject({
+      "credit-detail-01.html": "confirmed",
+      "credit-ledger-01.json": "confirmed",
+    });
+    const ledger = artifacts.find((artifact) => artifact.filename === "credit-ledger-01.json");
+    expect(JSON.parse(String(ledger?.body))).toMatchObject({
+      period: "2026-02",
+      state: "confirmed",
+      headers: ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"],
+    });
+    // Unproven, the month stops the connection as before and keeps its page.
+    const refused = await collectCredit(
+      client({ 0: mutable, 1: usagePage(provenRows, [total("3,501円")]) }),
+      "x",
+    );
+    expect(refused.stop).toMatchObject({ code: "credit_statement_state", position: 1 });
+  });
+});
