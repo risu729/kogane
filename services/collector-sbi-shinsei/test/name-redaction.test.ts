@@ -84,6 +84,31 @@ describe("person names are replaced before a response is stored", () => {
     });
   });
 
+  test("numbers written as the provider wrote them survive; any other number is refused", async () => {
+    const loaded = await fixtures();
+    const summary = summaryOf(loaded.balanceSummary!);
+    // Integers and short decimals serialize to the same text: stored as is.
+    summary.savingsBalance = 300000;
+    summary.odLimit = -1.5;
+    const raw = JSON.stringify(loaded.balanceSummary);
+    const parsed = validateKnownResponse("sbi-shinsei-balance-summary-v1", JSON.parse(raw));
+    const result = redactPersonNames("sbi-shinsei-balance-summary-v1", raw, parsed);
+    expect(result.redactedFieldCount).toBe(3);
+    expect(result.body).toContain('"savingsBalance":300000');
+    expect(result.body).toContain('"odLimit":-1.5');
+    // A digit run inside a string is not a number token.
+    expect(result.body).toContain('"totalCredit":"300000"');
+    // Trailing zeros, an exponent or more digits than a double holds would be
+    // stored as different text: refused with a stable message, not rewritten.
+    for (const written of ["1.50", "1e3", "12345678901234567890"]) {
+      const altered = raw.replace('"savingsBalance":300000', `"savingsBalance":${written}`);
+      const reparsed = validateKnownResponse("sbi-shinsei-balance-summary-v1", JSON.parse(altered));
+      expect(() => redactPersonNames("sbi-shinsei-balance-summary-v1", altered, reparsed)).toThrow(
+        "name redaction would rewrite a number",
+      );
+    }
+  });
+
   test("a response whose schema names no person is stored byte for byte", async () => {
     const loaded = await fixtures();
     const cases = [
@@ -101,9 +126,14 @@ describe("person names are replaced before a response is stored", () => {
 
   test("every Name field a response schema admits is either redacted or not a person", async () => {
     // A new name-like field in a schema must be classified here before it can
-    // be stored: the schemas are exact, so the provider cannot add one unseen.
+    // be stored: the response objects are exact, so the provider cannot add
+    // one unseen. (`requestParam` echoes are open objects and are not covered;
+    // ADR 0029's amendment lists that as a limit.) Case-insensitive, so a
+    // `name`, `holderName` or `NAME` key is caught as well as `customerName`.
     const source = await Bun.file(schemaSource).text();
-    const named = new Set([...source.matchAll(/"([A-Za-z]*Name[A-Za-z]*)"/gu)].map((m) => m[1]!));
+    const named = new Set(
+      [...source.matchAll(/"([A-Za-z_]*name[A-Za-z_]*)"/giu)].map((m) => m[1]!),
+    );
     const redacted = new Set(
       Object.values(PERSON_NAME_FIELDS).flatMap((targets) =>
         (targets ?? []).flatMap((target) => [...target.fields]),
@@ -146,6 +176,37 @@ describe("the collectors write only redacted captures", () => {
       (artifact) => artifact.dataset === "balance-summary-and-stage",
     )!;
     expect(summary.body).toContain(NAME_REDACTION_MARKER);
+    for (const artifact of result.artifacts) expectNoPlaceholderName(String(artifact.body));
+  });
+
+  test("a balance summary that could not be redacted without rewriting a number is not stored", async () => {
+    const loaded = await fixtures();
+    const balanceSummary = JSON.stringify(loaded.balanceSummary).replace(
+      '"savingsBalance":"300000"',
+      '"savingsBalance":300000.00',
+    );
+    const result = parseCollectionResult(
+      JSON.stringify({
+        ok: true,
+        responses: {
+          topBalances: JSON.stringify(loaded.topBalances),
+          balanceSummary,
+          exchangeRate: JSON.stringify(loaded.exchangeRate),
+          yenDeposit: JSON.stringify(loaded.yenDeposit),
+        },
+      }),
+      new Date("2026-08-31T00:00:00.000Z"),
+    );
+    expect(result.failures).toEqual([
+      {
+        operation: "read:balance-summary-and-stage",
+        errorType: "ResponseSchemaError",
+        message: "provider_response_invalid",
+      },
+    ]);
+    expect(result.artifacts.map((artifact) => artifact.dataset)).not.toContain(
+      "balance-summary-and-stage",
+    );
     for (const artifact of result.artifacts) expectNoPlaceholderName(String(artifact.body));
   });
 

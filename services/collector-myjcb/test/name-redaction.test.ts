@@ -84,6 +84,26 @@ describe("the 口座名義 cell is replaced before a MyJCB page is stored", () =
     expect(() => assertRedactedHtml(sanitizedOnly)).toThrow("artifact_html_redaction_invalid");
   });
 
+  test("the shared check finds the header in any markup the redaction would", () => {
+    // Each row is one the redaction replaces; unredacted, the check refuses it.
+    for (const row of [
+      `<tr><th><span>口座名義</span></th><td>${HOLDER}</td></tr>`,
+      `<tr><th class="x">\n 口座 名義 </th>\n<td>${HOLDER}</td></tr>`,
+      `<tr><th>口座名義</th><td>${NAME_REDACTION_MARKER}<span>${HOLDER}</span></td></tr>`,
+      "<tr><th>口座名義</th></tr>",
+    ]) {
+      expect(() => assertRedactedHtml(cardInformationPage(row))).toThrow(
+        "artifact_html_redaction_invalid",
+      );
+    }
+    const redacted = redactedStatementHtml(
+      cardInformationPage(`<tr><th><span>口座名義</span></th><td>${HOLDER}</td></tr>`),
+    );
+    expect(() => assertRedactedHtml(redacted)).not.toThrow();
+    // A page without the カード情報 table has nothing to check.
+    expect(() => assertRedactedHtml("<html><body><h1>見本</h1></body></html>")).not.toThrow();
+  });
+
   test("DATA holds the marker, the manifest its count, and nothing logs a page value", async () => {
     const detail = redactedStatementHtml(cardInformationPage());
     const menu = redactedStatementHtml("<html><body><h1>見本メニュー</h1></body></html>");

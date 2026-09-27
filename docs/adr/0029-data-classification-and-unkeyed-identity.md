@@ -238,6 +238,7 @@ confirmed the field shapes.
   `services/collector-sbi-shinsei/src/local/windows-chrome-collector.ts`,
   `services/collector-sbi-shinsei/src/local/collector.ts`,
   `services/collector-sbi-shinsei/src/storage.ts`,
+  `services/collector-sbi-shinsei/src/shared-collection.ts`,
   `services/collector-myjcb/src/name-redaction.ts`,
   `services/collector-myjcb/src/parsers.ts` (`redactedStatementHtml`),
   `services/collector-myjcb/src/redaction.ts`,
@@ -312,7 +313,7 @@ exactly the four responses of its plan, so that object is not stored.
     following `td` is a layout nobody has observed; the page is refused with
     `artifact_name_redaction_invalid` rather than stored, and the shared
     path's `assertRedactedHtml` refuses any page whose 口座名義 cell is not the
-    marker.
+    marker alone.
 - The sanitizing steps are recorded under new versions:
   `sbi-shinsei-token-sanitizer` v2 and `myjcb-sanitizer` v2.
 
@@ -321,7 +322,12 @@ exactly the four responses of its plan, so that object is not stored.
 - An SBI Shinsei capture with a name is serialized again from the redacted
   object (validated against the same schema first), so its bytes are not the
   provider's text; captures of the other datasets keep the provider's text
-  byte for byte, as before. In memory the collector still holds the
+  byte for byte, as before. Serializing again must not change how a number is
+  written: a response with a JSON number that would come out as different
+  text (trailing zeros, an exponent, more digits than a double holds) is
+  refused as an unknown shape rather than stored altered. The survey did not
+  record the JSON type of the balance fields, so whether a live response
+  ever hits this refusal is not known. In memory the collector still holds the
   provider's values for the length of the run.
 - **Objects already stored keep their names.** They are append-only and this
   change does not rewrite them. Deleting or replacing them is the owner's
@@ -343,16 +349,20 @@ exactly the four responses of its plan, so that object is not stored.
   fields of the account holder and are kept, unexamined. MyJCB exports
   (CSV, PDF, OFX), which the surveyed connection does not offer, are not
   redacted by this change. The national-id and branch/account request echoes
-  (`requestParam.nationalid`) are class (c) and are kept.
+  (`requestParam.nationalid`) are class (c) and are kept. The `requestParam`
+  echoes are the one part of the SBI Shinsei response schemas that is an open
+  object, so the test that every `Name` field is classified covers the exact
+  response objects only; a name in a request echo has not been observed and
+  would not be caught.
 
 ### Verification
 
 - `services/collector-sbi-shinsei/test/name-redaction.test.ts`: the three
   fields of a synthetic balance summary become the marker and every other
   value is unchanged; the redacted object passes the schema; absent, null and
-  empty fields are not counted and keep the provider bytes; the other
-  datasets are stored byte for byte; every `Name` field in the schemas is
-  classified; the Chrome handoff and the local diagnostic collector both
+  empty fields are not counted and keep the provider bytes; a number that
+  would be written differently is refused; the other datasets are stored
+  byte for byte; every `name` field in the schemas (any case) is classified; the Chrome handoff and the local diagnostic collector both
   produce redacted captures with their counts.
 - `services/collector-sbi-shinsei/test/shared-collection.test.ts` (Worker end
   to end, synthetic container handoff): nothing in DATA and nothing logged
@@ -363,9 +373,12 @@ exactly the four responses of its plan, so that object is not stored.
   with the observed table structure, the 口座名義 cell becomes the marker and
   金融機関名, 支店名, 科目・口座番号, カード名称 and カード発行会社 are kept;
   the label must be the whole header text; a header with no value cell is
-  refused; `assertRedactedHtml` refuses an unredacted cell; the shared run
+  refused; `assertRedactedHtml` finds the header on the parsed tree the way
+  the redaction does and refuses an unredacted cell in any markup; the shared run
   stores the marker, records the count on the page's manifest entry, and
   nothing logged contains any page value.
+- `services/processor/test/account-connection-proof.test.ts`: a balance
+  summary carrying the marker still proves the account connection.
 - Not verified: the live pages were not fetched by this change; the list of
   stored objects above counts registered artifacts, not objects whose bytes
   were read.

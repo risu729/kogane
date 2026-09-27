@@ -4,6 +4,7 @@
 // makes them hold; this is the assertion that a regression in it fails the
 // run instead of publishing the page. It lives apart from the parsers so the
 // shared-target module depends on the check alone, not on the page parsers.
+import { hasUnredactedNameCell } from "./name-redaction";
 
 /**
  * Throws a stable code, never the offending text, when a page still carries
@@ -23,8 +24,9 @@ export function assertRedactedHtml(html: string): void {
     ) ||
     /\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b/u.test(html) ||
     // A 口座名義 header whose value cell is anything but the name marker
-    // (ADR 0029, amendment 2026-09-27).
-    /<th\b[^>]*>\s*口座名義\s*<\/th>(?!\s*<td\b[^>]*>\[redacted:name\]<\/td>)/u.test(html)
+    // (ADR 0029, amendment 2026-09-27), recognised on the parsed tree the
+    // same way the redaction finds it.
+    hasUnredactedNameCell(html)
   ) {
     throw new Error("artifact_html_redaction_invalid");
   }

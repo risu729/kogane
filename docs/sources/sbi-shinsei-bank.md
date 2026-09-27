@@ -893,6 +893,9 @@ when it parses the handoff, before any artifact exists
 amendment](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)).
 The redacted object is validated against `sbi-shinsei-balance-summary-v1`
 before it is serialized; every other value, including `branchName`, is kept.
+A response holding a JSON number that serializing again would write as
+different text (trailing zeros, an exponent, more digits than a double holds)
+is refused as an unknown shape instead of being stored altered.
 The collector manifest records `redactedFieldCount` for each provider capture
 (3 for a balance summary with all three names, 0 for the other datasets,
 whose bytes stay the provider's text), and the terminal's redaction step is

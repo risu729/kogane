@@ -6,6 +6,7 @@
 // The value is replaced with a fixed marker rather than deleted, so the
 // stored object keeps the shape its response schema and every parser
 // accept. The number of replaced fields is recorded; the value never is.
+import { UnknownResponseShapeError } from "./errors";
 import { validateKnownResponse } from "./response-schemas";
 import type { JsonObject, ResponseSchemaId } from "./types";
 
@@ -44,7 +45,11 @@ export interface RedactedResponse {
  * The provider's text is kept byte for byte when no field was replaced;
  * otherwise the response is serialized again from the redacted object, and
  * that object is validated against the same schema before it is returned, so
- * a redaction can never store a shape the schema would refuse.
+ * a redaction can never store a shape the schema would refuse. Serializing
+ * again must not change how any number is written (a balance given as a JSON
+ * number with trailing zeros, an exponent or more digits than a double holds
+ * would be stored as a different text): such a response is refused with a
+ * stable message rather than stored altered.
  */
 export function redactPersonNames(
   schema: ResponseSchemaId,
@@ -67,8 +72,23 @@ export function redactPersonNames(
     }
   }
   if (redactedFieldCount === 0) return { body: raw, redactedFieldCount: 0 };
+  if (!numbersSurviveSerialization(raw)) {
+    throw new UnknownResponseShapeError("name redaction would rewrite a number");
+  }
   validateKnownResponse(schema, copy);
   return { body: JSON.stringify(copy), redactedFieldCount };
+}
+
+// Strings are matched first, so a digit inside a string is never read as a
+// number token; `raw` has already parsed as JSON.
+const JSON_STRING_OR_NUMBER = /"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/gu;
+
+function numbersSurviveSerialization(raw: string): boolean {
+  for (const [token] of raw.matchAll(JSON_STRING_OR_NUMBER)) {
+    if (token.startsWith('"')) continue;
+    if (JSON.stringify(Number(token)) !== token) return false;
+  }
+  return true;
 }
 
 function objectAt(root: JsonObject, path: readonly string[]): JsonObject | undefined {

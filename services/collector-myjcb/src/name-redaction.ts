@@ -9,7 +9,7 @@
 // value cell keeps its element and receives a fixed marker, so the table's
 // shape — and every other row of it (カード名称, カード発行会社, 金融機関名,
 // 支店名, 科目・口座番号, which are not names) — stays as the page had it.
-import type { DefaultTreeAdapterMap } from "parse5";
+import { parse, type DefaultTreeAdapterMap } from "parse5";
 
 type HtmlNode = DefaultTreeAdapterMap["node"];
 type HtmlElement = DefaultTreeAdapterMap["element"];
@@ -41,6 +41,29 @@ export function redactPersonNameCells(root: HtmlNode): void {
       } as DefaultTreeAdapterMap["textNode"],
     ];
   }
+}
+
+/**
+ * Whether a page about to be stored still has a listed header whose value
+ * cell is anything but the marker alone. It recognises the header exactly as
+ * `redactPersonNameCells` does (whole text of the `th`, whitespace aside, in
+ * any markup), so the check cannot be passed by markup the redaction would
+ * have caught.
+ */
+export function hasUnredactedNameCell(html: string): boolean {
+  for (const header of elements(parse(html), "th")) {
+    if (!PERSON_NAME_ROW_LABELS.includes(normalizedText(header))) continue;
+    const value = nextElementSibling(header);
+    if (
+      value === undefined ||
+      value.tagName !== "td" ||
+      value.childNodes.some((child) => child.nodeName !== "#text") ||
+      normalizedText(value) !== NAME_REDACTION_MARKER
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** How many name cells a redacted page carries the marker in: a count only. */
