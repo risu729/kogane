@@ -235,8 +235,14 @@ Concrete limits in the current code:
   and the eligibility rule is not loosened, so the confirmed statements of
   those days come back with the next successful run, while pending-only rows
   that disappeared before it are lost. GLOBAL PASS's successful runs are
-  `partial` the same way and are not parsed: whether an activity page holds a
-  whole month has not been observed. A Vpass card run is `partial` the same
+  `partial` the same way and are not parsed: its collector stores only the
+  first page of a month and follows no Next link, while a month with more
+  than ten statements is observed to have a second page; such a month is
+  marked `activity_pages_unwalked`. Walking the pages is not implemented. No
+  GLOBAL PASS run has stored a page since at least the week before
+  2026-09-27: the sanitizer refused every page, and which check refuses them
+  is recorded as a closed code only from this release on
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes)). A Vpass card run is `partial` the same
   way unless every month's captured rows equal the provider's stated total
   (ADR 0026's amendment). Both stated totals were seen on the live site
   (`allCnt` a string, `total` a number) and are read as exact counts, but the
