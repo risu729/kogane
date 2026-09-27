@@ -705,6 +705,42 @@ test("moneyforward-me: pages and the run manifest register and seal", async () =
   await registerPlan(plan, 4);
 });
 
+test("moneyforward-me: with the identity key the account unit is the identity and seals (ADR 0027)", async () => {
+  const page = (dataset: string, filename: string, body: string) => ({
+    dataset,
+    filename,
+    mediaType: "text/html; charset=utf-8",
+    body,
+  });
+  const plan = await moneyForwardRunPlan(
+    {
+      schemaVersion: "moneyforward-worker-poc-v1",
+      runId: RUN_ID,
+      startedAt: STARTED_AT,
+      completedAt: COMPLETED_AT,
+      status: "success",
+      accountDetailCount: 1,
+      monthlyFragmentCount: 1,
+      artifacts: [
+        page("accounts-index", "accounts.html", `<a href="/accounts/show/synthetic-a">x</a>`),
+        page(
+          "account-detail",
+          "account-detail-01.html",
+          `<input name="account[id_hash]" value="synthetic-a"><input name="service[id]" value="synthetic-s">`,
+        ),
+        page("monthly-transactions", "account-01-month-2099-01.html", "<div>synthetic</div>"),
+      ],
+      failures: [],
+    },
+    "5a".repeat(32),
+  );
+  const registered = await registerPlan(plan, 4);
+  expect(registered.units).toHaveLength(1);
+  expect(registered.units[0]!.unit_key).toMatch(/^moneyforward-account-v1-[0-9a-f]{64}$/u);
+  expect(registered.units[0]!.artifacts).toBe(2);
+  expect(registered.runStatus).toBe("success");
+});
+
 test("sony-bank: responses, exports, redacted statements and the summary register and seal", async () => {
   const plan = await sonyBankRunPlan({
     schemaVersion: "sony-bank-worker-poc-v2",

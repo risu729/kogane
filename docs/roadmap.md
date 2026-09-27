@@ -126,6 +126,19 @@ Concrete limits in the current code:
   later change, made after the owner has set the key and checked that the
   collector's tokens match the importer's
   ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
+- Money Forward ME collector runs parse only once the owner sets the
+  collector's `MONEYFORWARD_ACCOUNT_IDENTITY_KEY` secret: without it the
+  account units stay positional and every account page is `parser_rejected`,
+  as all 52 account pages of the first shared-R2 run were. Under the retired
+  importer's key the identities are the importer's and each captured month
+  replaces the importer's snapshot of that month; the collector's rows still
+  get their own account entity (the source-account reference includes the
+  producer), and no rule or decision joins it to the importer-era entity.
+  Under a new key every account is new, and the months both producers
+  captured show the same rows under two source accounts until a decision
+  says otherwise. Whether the provider's detail pages still carry the tuple
+  has not been observed since the importer was retired
+  ([ADR 0027](adr/0027-moneyforward-collector-account-identity.md)).
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
   email route), V Point Pay and GLOBAL PASS had no registered collector run
   between 2026-09-12 and the release that carries
