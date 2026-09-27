@@ -27,10 +27,10 @@ export const ROOTS = ["services", "packages", "apps", "experiments"] as const;
 
 /**
  * Floor for the cruised module count. It exists to catch the quiet failure
- * above: with no TypeScript < 7 transpiler the run cruises ~44 modules and
- * exits 0. A healthy run cruised about a thousand modules as of 2026-09, so a
- * floor far above ~44 but well below the real count fails that regression
- * without failing every deletion.
+ * above: with no TypeScript < 7 transpiler the run cruises a few dozen modules
+ * (55 as of 2026-09) and exits 0. A healthy run cruised about a thousand
+ * modules as of 2026-09, so a floor far above a few dozen but well below the
+ * real count fails that regression without failing every deletion.
  */
 export const MINIMUM_MODULES = 400;
 
