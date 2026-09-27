@@ -84,7 +84,7 @@ describe("G4-07 resolved-import guard", () => {
       }),
     );
     expect(problems).toEqual([
-      "no TypeScript transpiler is resolvable: dependency-cruiser would silently cruise almost nothing; keep typescript 5.x in the root manifest",
+      "no TypeScript transpiler is resolvable: dependency-cruiser would silently cruise almost nothing; keep typescript below 7 in the root manifest",
     ]);
   });
 
