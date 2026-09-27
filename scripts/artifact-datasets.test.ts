@@ -127,6 +127,25 @@ const SAMPLES: readonly Sample[] = [
     dataset: "credit-ledger",
     unitKey: "conn-a",
   },
+  // ADR 0005 amendment e: only the ショッピングスキップ払い page, which the
+  // collector names by its h1, gets the schedule dataset; every other schedule
+  // page is catalogued with none.
+  {
+    source: "myjcb",
+    artifactKey: "conn-a/credit-skip-payment-08.html",
+    role: "sanitized_provider_capture",
+    mediaType: html,
+    dataset: "credit-schedule",
+    unitKey: "conn-a",
+  },
+  {
+    source: "myjcb",
+    artifactKey: "conn-a/credit-schedule-07.html",
+    role: "sanitized_provider_capture",
+    mediaType: html,
+    dataset: null,
+    unitKey: "conn-a",
+  },
   {
     source: "myjcb",
     artifactKey: "manifest.json",
@@ -552,7 +571,14 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
   "global-pass": ["globalpass-activity"],
   "mobile-suica": ["sf-history"],
   "moneyforward-me": ["accounts-index", "account-detail", "monthly-transactions"],
-  myjcb: ["credit-ledger", "credit-past-months", "credit-detail", "credit-menu", "discovery"],
+  myjcb: [
+    "credit-ledger",
+    "credit-past-months",
+    "credit-detail",
+    "credit-menu",
+    "discovery",
+    "credit-schedule",
+  ],
   "sbi-securities": [
     "domestic-cash-positions",
     "account-assets-current",

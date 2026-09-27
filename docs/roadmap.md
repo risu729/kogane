@@ -287,13 +287,17 @@ Concrete limits in the current code:
   The collector reads the credit menu's headings: the two schedule pages
   (positions 7 and 8 of the surveyed connection, under
   「ボーナス#回払い・ショッピングスキップ払い」) are not months. They are
-  stored as `credit-schedule-NN.html` and recorded in the manifest, but not
-  read, and they do not make the unit `partial`, so a night with an
-  outstanding skip payment parses its months. The bonus schedule page has
-  not been observed with rows, and reading the skip schedule as a dataset
-  is not implemented; an unobserved menu heading stops the connection
-  before its first month
+  stored and recorded in the manifest, and they do not make the unit
+  `partial`, so a night with an outstanding skip payment parses its months;
+  an unobserved menu heading stops the connection before its first month
   ([ADR 0005's amendment (c)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months)).
+  The ショッピングスキップ払い page, known by its h1, is stored as
+  `credit-skip-payment-NN.html` and read by `myjcb-skip-payment-schedule`
+  into `scheduled_payment_observations` (a payment still due, not a
+  purchase); no read model, API or UI shows those rows yet, and they are not
+  matched against statements or settlements. The bonus schedule page stays
+  `credit-schedule-NN.html` and unread until it is observed with rows
+  ([ADR 0005's amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
   The MyJCB runs of 2026-09-25 and 09-26 stopped at position 1 on its ledger
   header (`credit-ledger-headers`) and kept nothing; the live position-1 page
   was the confirmed form on 09-27, so its shape varies by time or session. The

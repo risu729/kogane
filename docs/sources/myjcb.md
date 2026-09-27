@@ -529,20 +529,20 @@ Worker は見つけた export を取得しない。共通 bucket は `credit-csv
 
 round 4 の構造調査で、credit menu（`detailMenu.html`）の 9 link は三つの `h2` の下の card box にあることが分かった。link の文言はすべて 「明細を見る」 で月名を持たないので、月か支払予定 page かは見出しだけが示す。
 
-| 見出し（空白を除いて比較）                    | position（観測） | collector の扱い                                                                     |
-| --------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------ |
-| 「最新のご利用明細」                          | 0、1             | 月。unit の coverage に入る                                                          |
-| 「過去の明細」                                | 2–6              | 月。unit の coverage に入る                                                          |
-| 「ボーナス#回払い・ショッピングスキップ払い」 | 7、8             | 支払予定 page。`credit-schedule-NN.html` として保存し、読まない。coverage に入らない |
-| 上のどれでもない見出し、見出しの前の link     | —                | `credit_menu_group_unrecognized` で最初の月の前に停止する                            |
+| 見出し（空白を除いて比較）                    | position（観測） | collector の扱い                                                                                          |
+| --------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------- |
+| 「最新のご利用明細」                          | 0、1             | 月。unit の coverage に入る                                                                               |
+| 「過去の明細」                                | 2–6              | 月。unit の coverage に入る                                                                               |
+| 「ボーナス#回払い・ショッピングスキップ払い」 | 7、8             | 支払予定 page。保存する。ショッピングスキップ払いの page だけを読む（amendment (e)）。coverage に入らない |
+| 上のどれでもない見出し、見出しの前の link     | —                | `credit_menu_group_unrecognized` で最初の月の前に停止する                                                 |
 
 `#` は数字で、調査は値を記録していない。collector は 1 桁以上の数字（半角か全角）を受け入れ、それ以外の文字は完全一致で比べる。link は文書順でその前にある最後の `h2` に属する。`/iss-pc/member/details_inquiry/detail.html` への `detailMonth`（1–2 桁）付きの link だけを数え、menu の URL に対して解決する（相対、root 相対、絶対の href を同じく読む）。同じ position が両方の group にある場合も停止する。停止 log（`myjcb-credit-menu-groups`）は link の数だけを出し、見出しの文字列は出さない。
 
 - **月**：月の group の position と、過去月 API が available とした position を従来どおり読む。`periodCount` と `capturedMonthCount` は月だけを数える。過去月 API が支払予定 page の position を available とした場合は（観測されていない）、どちらとも決めず `credit_past_months` で停止する。
-- **支払予定 page**：最後の月の後に昇順で一度ずつ取得し、何を表示していても redact して丸ごと `credit-schedule-NN.html`（dataset `credit-schedule`、状態 `unknown`、period `detailMonth-N`）として保存する。行、状態、link は読まない。`credit-detail-NN.html` ではないので registration はどの parser dataset も与えず、catalogue と seal だけされ、parse job は作られない。collector manifest の connection には `schedulePages: [{ position, code }]`（code は `scheduled_payments_page`＝保存した、`schedule_page_fetch`＝取得か decode に失敗し何も保存しなかった）と `schedulePageCount`（保存した数）を書く。取得の失敗は停止ではなく、`failures` にも `unreadMonths` にも入らない。log は `myjcb-credit-schedule-page-failed` に position と code だけを出す。月で停止した connection は支払予定 page を読まない。
+- **支払予定 page**：最後の月の後に昇順で一度ずつ取得し、何を表示していても redact して丸ごと `credit-schedule-NN.html`（dataset `credit-schedule`、状態 `unknown`、period `detailMonth-N`）として保存する。行、状態、link は読まない。`credit-detail-NN.html` ではないので registration はどの parser dataset も与えず、catalogue と seal だけされ、parse job は作られない。（amendment (e) から、h1 がショッピングスキップ払いの page だけは `credit-skip-payment-NN.html` として保存し、parser が読む。下の節を参照。）collector manifest の connection には `schedulePages: [{ position, code }]`（code は `scheduled_payments_page`＝保存した、`schedule_page_fetch`＝取得か decode に失敗し何も保存しなかった）と `schedulePageCount`（保存した数）を書く。取得の失敗は停止ではなく、`failures` にも `unreadMonths` にも入らない。log は `myjcb-credit-schedule-page-failed` に position と code だけを出す。月で停止した connection は支払予定 page を読まない。
 - **coverage**：月をすべて丸ごと読めば connection は `success`、unit は `complete` で、支払予定 page に行があっても、取得に失敗しても変わらない。以前は position 8 に行があるかぎり unit が `partial` になり、MyJCB の run は一つも parse されなかった。
 
-制限：支払予定 page の行の意味は未確認で、どの parser も読まない（ショッピングスキップ払いの page を独自の dataset として読むのは後の PR で、行のある page が観測された場合だけ）。position 7（ボーナス払い）は行のある状態では観測されていない。保存される menu は redact で `href` を除くので、保存された menu からはどの link がどの position かは読めない。見出しが変われば、新しい見出しを観測して記録するまで connection は最初の月の前で止まり、何も保存しない。
+制限：支払予定 page の行の意味は未確認で、amendment (c) の時点ではどの parser も読まなかった（ショッピングスキップ払いの page は amendment (e) で独自の dataset として読む）。position 7（ボーナス払い）は行のある状態では観測されていない。保存される menu は redact で `href` を除くので、保存された menu からはどの link がどの position かは読めない。見出しが変われば、新しい見出しを観測して記録するまで connection は最初の月の前で止まり、何も保存しない。
 
 ### 確定分の見出しとご利用金額のheader（2026-09-27、ADR 0005 の amendment (d)）
 
@@ -563,6 +563,18 @@ round 4 の構造調査（label の数だけ、値は記録しない）で、以
 - 拒否の理由は閉じた code（`USAGE_HEADER_REFUSALS`）で、停止 log に `usageHeader` として出す。金額や provider の文字列は log に出さない。
 - `myjcb-credit-ledger@1.2.0` はこの ledger の金額を利用額として読み（`usageAmountText`）、`paymentAmountText` を記録しない。card purchase recognition は利用額と支払額の一致を必要とするので、この行は `payment_split_unknown` で除外され、pending-to-posted の照合にも使われない。明細の支払額は page の合計で、`myjcb-credit-statement-total@1.2.0` が `statementStateBasis: "page-heading-usage-total-proof"` と `ledgerAmountLabel: "ご利用金額"` を付けて公開する。確定の header の page は 1.1.0 と同じに記録する。
 - 制限：保存した page の二つ目の `detail-list-01` が明細の一部かは分からない。ledger artifact は従来どおり最初の ledger だけを保存するので、二つ目に行があればその page は証明されず、従来どおり停止する。行ごとの支払額を利用額とみなさない理由は ADR 0005 の amendment (d) にある。この page の展開 label は数えただけで、行ごとには読んでいない。2026-09-25/26 の停止の原因がこの形であることは、可能性が高いが確認されていない。
+
+### ショッピングスキップ払いの支払予定（2026-09-27、ADR 0005 の amendment (e)）
+
+round 4 の構造調査で、position 8 の page は h1 「ショッピングスキップ払いご利用明細(未確定分)」、見出し 「YYYY年M月D日(曜)時点のショッピングスキップ払いご利用明細(YYYY年M月以降のお支払い分)」、`div.detail-list-01` 一つ（`div.head` は 3 cell：「ご利用日」 / 「ご利用先など」と「お支払日」を 2 行で持つ 1 cell / 「今後のお支払い金額」）と本文 2 行を持っていた。本文の cell の中身と数は記録されていない。owner は、行のある状態で観測されたこの page だけを独自の dataset として読むと決めた。
+
+- **保存名。** collector は支払予定 page の h1 だけを見る（`schedulePageKind`）。空白を除いて 「ショッピングスキップ払いご利用明細(未確定分)」 に一致する h1 がちょうど一つなら `credit-skip-payment-NN.html`、それ以外（ボーナス払いの page、見出しがない・二つある・全角括弧など）は従来どおり `credit-schedule-NN.html` として保存する。manifest、code、coverage は変わらない。
+- **registration。** `credit-skip-payment-NN.html` だけが dataset `credit-schedule` を得る。`credit-schedule-NN.html` は dataset なしで、parse job は作られない。
+- **parser。** `myjcb-skip-payment-schedule@0.1.0` は観測された形だけを読む。h1、行がある場合の as-of 見出し（一つ、暦上の日付と月）、行のある ledger が一つ以下、head が観測どおりの 3 cell、ledger の子要素が head とそれに続く `content` 行だけ（ほかの入れ子の行は空の ledger と読まずに拒否する）、各行が 3 cell の `item-cell` 一つで中央の cell がちょうど 2 行（1 行目がご利用先など、2 行目がお支払日）、日付が `YYYY/MM/DD`、金額が exact な円。本文の配置は記録されていないので、head と同じ配置だけを読む。それ以外は閉じた code（`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`）で拒否し、message はその code だけである。行のない ledger は 0 行で、失敗ではない。kind が `types.ts` の外で宣言されているので、processor が書き込む前に `scheduled_payment` の行を検査する（`scheduledPaymentRows`: このパーサー以外からの行、宣言外の key、暦上でない日付、正準でない整数の金額などは `parse_contract_invalid`）。
+- **観測。** 各行は `scheduled_payment` の観測として `scheduled_payment_observations`（migration 0061、append-only）に入る：ご利用日、お支払日（`due_date`）、今後のお支払い金額（exact な整数の decimal 文字列、表示の符号）、ご利用先など（`counterparty`）、page の as-of 日付、`extra_json` に表示 cell と 「YYYY年M月以降のお支払い分」 の月。external id は表示 cell の fingerprint と出現順で、as-of 日付を含まない。
+- **読むもの。** 取引でも残高でもないので、read path、card purchase recognition、settlement の候補、identity はこの table を読まない。二重計上はない（INV06）。
+
+制限：行の金額が何を表すか（一回分か残額か）、行の支払いが後の明細月に現れるかは未確認で、明細や支払いと突き合わせない。read model、API、UI はまだ表示しない。この変更の前に保存された skip page は `credit-schedule-NN.html` のままで読まれない。本文の配置が違えば（行ごとの展開 list、4 cell、お支払日が別 cell など）最初の production の parse が `schedule_row_shape_unobserved` で失敗し、構造だけの調査の後に新しい release を出す。position 7（ボーナス払い）は行のある状態で観測されるまで読まない（ADR 0004）。
 
 ## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
 

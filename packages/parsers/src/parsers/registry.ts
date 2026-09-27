@@ -15,6 +15,7 @@ import {
   myJcbEvidenceOnly,
   myJcbPastMonthBalances,
 } from "./myjcb.ts";
+import { myJcbSkipPaymentSchedule } from "./myjcb-skip-payment-schedule.ts";
 import {
   sonyBankGrossBalance,
   sonyBankHistoryCsv,
@@ -55,6 +56,7 @@ export const PARSERS: readonly Parser[] = [
   myJcbCreditStatement,
   myJcbPastMonthBalances,
   myJcbEvidenceOnly,
+  myJcbSkipPaymentSchedule,
   sonyBankGrossBalance,
   sonyBankHistoryJson,
   sonyBankHistoryCsv,

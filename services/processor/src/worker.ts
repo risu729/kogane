@@ -1,4 +1,5 @@
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import type { PersistedObservation } from "../../../packages/parsers/src/scheduled-payment.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import {
   snapshotPolicyComparisonSql,
@@ -94,7 +95,6 @@ import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identit
 import type {
   ArtifactMeta,
   CoverageClaim,
-  Observation,
   Parser,
   ParseIssue,
   ParseResult,
@@ -295,6 +295,24 @@ const fields = {
     "rawLocator",
     "extra",
   ],
+  // A payment still to come (ADR 0005 amendment e, migration 0061). Declared
+  // outside the parser contract's `Observation` union so that no deployed
+  // parser's digest changes (`packages/parsers/src/scheduled-payment.ts`).
+  scheduled_payment: [
+    "sourceAccount",
+    "externalId",
+    "scheduleKind",
+    "usageDate",
+    "dueDate",
+    "amountText",
+    "amountScale",
+    "currency",
+    "counterparty",
+    "asOf",
+    "observedAt",
+    "rawLocator",
+    "extra",
+  ],
 } as const;
 const snake = (field: string) =>
   field === "extra" ? "extra_json" : field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
@@ -302,8 +320,8 @@ const snake = (field: string) =>
 export function observationInsert(
   db: D1Database,
   id: number,
-  kind: Observation["kind"],
-  rows: Observation[],
+  kind: PersistedObservation["kind"],
+  rows: PersistedObservation[],
 ): D1PreparedStatement {
   const names = fields[kind];
   return db
@@ -335,6 +353,49 @@ export function contractRows(result: ParseResult): {
   if (new Set(coverage.map((claim) => claim.claimId)).size !== coverage.length)
     throw new PipelineError("parse_contract_invalid");
   return { issues, coverage };
+}
+
+/** The parsers that may emit `scheduled_payment` rows (ADR 0005 amendment e). */
+const SCHEDULED_PAYMENT_PARSERS: readonly string[] = ["myjcb-skip-payment-schedule"];
+const ISO_DATE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
+const CANONICAL_INTEGER = /^(?:0|-?[1-9]\d{0,17})$/u;
+
+/**
+ * `scheduled_payment` is declared outside the parser contract's `Observation`
+ * union (`packages/parsers/src/scheduled-payment.ts`), so the type system
+ * does not check what reaches `fields.scheduled_payment`. This is the
+ * boundary instead: a row of that kind from any other parser, or with any
+ * key, type or shape other than the declared one, fails the parse with
+ * `parse_contract_invalid` before anything is written. The table's CHECKKs
+ * (migration 0061) stay the last line.
+ */
+export function scheduledPaymentRows(parserName: string, observations: readonly unknown[]): void {
+  const keys = ["kind", ...fields.scheduled_payment].sort().join(",");
+  for (const observation of observations) {
+    const row = observation as Record<string, unknown> | null;
+    if (row?.["kind"] !== "scheduled_payment") continue;
+    const text = (name: string) => typeof row[name] === "string" && row[name] !== "";
+    const date = (name: string) =>
+      typeof row[name] === "string" &&
+      ISO_DATE.test(row[name]) &&
+      new Date(`${row[name]}T00:00:00Z`).toISOString().startsWith(row[name]);
+    const extra = row["extra"];
+    if (
+      !SCHEDULED_PAYMENT_PARSERS.includes(parserName) ||
+      Object.keys(row).sort().join(",") !== keys ||
+      !["sourceAccount", "externalId", "counterparty", "observedAt", "rawLocator"].every(text) ||
+      row["scheduleKind"] !== "card-skip-payment" ||
+      !["usageDate", "dueDate", "asOf"].every(date) ||
+      typeof row["amountText"] !== "string" ||
+      !CANONICAL_INTEGER.test(row["amountText"]) ||
+      row["amountScale"] !== 0 ||
+      row["currency"] !== "JPY" ||
+      typeof extra !== "object" ||
+      extra === null ||
+      Array.isArray(extra)
+    )
+      throw new PipelineError("parse_contract_invalid");
+  }
 }
 
 function issueInsert(db: D1Database, id: number, rows: ParseIssue[]): D1PreparedStatement {
@@ -555,6 +616,7 @@ async function executeParseJob(
     if (new TextEncoder().encode(JSON.stringify(result.observations)).length > 2 * 1024 * 1024)
       throw new PipelineError("observation_payload_too_large");
     const contract = contractRows(result);
+    scheduledPaymentRows(parser.name, result.observations);
     failureStage = "persistence_failed";
     const inserted = await env.DB.prepare(
       `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,?,'pending',?) RETURNING id`,
@@ -585,10 +647,13 @@ async function executeParseJob(
         }),
       )
       .run();
-    for (const kind of Object.keys(fields) as Observation["kind"][]) {
-      let chunk: Observation[] = [];
+    // A parse result's rows are persisted by their own `kind`; the kinds
+    // `fields` names are every kind a registered parser emits.
+    const persisted = result.observations as PersistedObservation[];
+    for (const kind of Object.keys(fields) as PersistedObservation["kind"][]) {
+      let chunk: PersistedObservation[] = [];
       let bytes = 0;
-      for (const observation of result.observations) {
+      for (const observation of persisted) {
         if (observation.kind !== kind) continue;
         const size = new TextEncoder().encode(JSON.stringify(observation)).length;
         if (size > 500_000) throw new PipelineError("observation_row_too_large");

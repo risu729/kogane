@@ -17,6 +17,44 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MyJCB: the skip-payment schedule page is read as scheduled payments (schedule parser 0.1.0)
+
+2026-09-27. The owner chose to read the ショッピングスキップ払い schedule
+page as a dataset of its own, and only that page, because it is the only
+schedule page observed with rows
+([ADR 0005's amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
+The collector stores a schedule page whose one h1 is
+「ショッピングスキップ払いご利用明細(未確定分)」 as
+`credit-skip-payment-NN.html`; registration gives only that name the dataset
+`credit-schedule`; every other schedule page, the ボーナス払い page included,
+is still `credit-schedule-NN.html`, with no dataset and read by nothing.
+
+`myjcb-skip-payment-schedule@0.1.0` reads the shape the round-4 survey
+recorded: the page's as-of heading, and one `detail-list-01` ledger whose head
+is exactly the three cells 「ご利用日」 / 「ご利用先など」+「お支払日」 on two
+lines / 「今後のお支払い金額」. The survey did not record the body cells, so a
+row is read only when it mirrors the head (three cells, the middle one two
+lines: merchant text, then payment date). Each row becomes a
+`scheduled_payment` observation in `scheduled_payment_observations`
+(migration 0061): usage date, payment date (`due_date`), the future payment
+amount as exact decimal text, the merchant text, the page's as-of date and,
+in `extra_json`, the first payment month the page names. Every other shape
+refuses the page with one closed code from
+`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`; an empty ledger is zero rows.
+
+The kind is not a transaction or a balance, and nothing reads the new table:
+no read path, purchase recognition or settlement matching sees a scheduled
+payment, so nothing is counted twice. It is declared outside the parser
+contract's `types.ts` so that no deployed parser's digest changes. Limits:
+the rows' meaning beyond "a payment still due" is not confirmed; no read
+model shows them; skip pages stored before this change keep the old name and
+stay unread; release adoption does not compare this table. Tests:
+`packages/parsers/test/myjcb-skip-payment-schedule.test.ts`,
+`services/collector-myjcb/test/parsers.test.ts`,
+`credit-statement-state.test.ts`, `scripts/artifact-datasets.test.ts`,
+`services/processor/test/myjcb-shared-r2.test.ts`,
+`parser-rejection.test.ts`.
+
 ## MyJCB 「カード情報」 and Vpass debit accounts (no parser release)
 
 Observed on 2026-09-27 (round 4) by the owner's agent, structure and counts
@@ -1631,7 +1669,12 @@ CREATE INDEX IF NOT EXISTS idx_val_obs_parse_run
   ON valuation_observations (parse_run_id);
 ```
 
-Two notes for anyone applying this DDL.
+Two notes for anyone applying this DDL, and one about what it lacks: the
+production CORE schema has a fifth observation table,
+`scheduled_payment_observations` (migration 0061), for payments a provider
+says are still due (the MyJCB ショッピングスキップ払い page,
+[ADR 0005 amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
+It is append-only like the four above and is read by nothing yet.
 
 The `source_account` comment is reproduced from `schema.sql` as it stands
 and is, as described above, not what the parsers do. The

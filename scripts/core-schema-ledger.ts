@@ -98,6 +98,10 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   position_observations: { classification: "core-keep", planRow: "parse runs and observations" },
   transaction_observations: { classification: "core-keep", planRow: "parse runs and observations" },
   valuation_observations: { classification: "core-keep", planRow: "parse runs and observations" },
+  scheduled_payment_observations: {
+    classification: "core-keep",
+    planRow: "parse runs and observations",
+  },
   // metadata_projections/inputs, parse_input_references → CORE
   metadata_projection_inputs: { classification: "core-keep", planRow: "metadata projections" },
   metadata_projections: { classification: "core-keep", planRow: "metadata projections" },

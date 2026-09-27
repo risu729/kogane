@@ -11,6 +11,7 @@ import {
   parseStatementPeriods,
   readCreditMenuGroups,
   redactedStatementHtml,
+  schedulePageKind,
 } from "../src/parsers";
 import { StopConditionError } from "../src/types";
 import { creditMenu, MENU_SCHEDULE_HEADING } from "./synthetic-myjcb";
@@ -294,5 +295,29 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
       expect(read(`<h2>ボーナス${count}回払い・ショッピングスキップ払い</h2>${link(8)}`).code).toBe(
         "credit-menu-group",
       );
+  });
+});
+
+describe("schedulePageKind (ADR 0005 amendment e)", () => {
+  const doc = (body: string) => `<!doctype html><html><body><h1>MyJCB</h1>${body}</body></html>`;
+  test("only exactly one h1 with the observed skip heading is the skip-payment page", () => {
+    expect(schedulePageKind(doc("<h1>ショッピングスキップ払いご利用明細(未確定分)</h1>"))).toBe(
+      "skip-payment",
+    );
+    // Whitespace and inline markup inside the heading do not matter.
+    expect(
+      schedulePageKind(doc("<h1> ショッピングスキップ払い<span>ご利用明細</span>(未確定分) </h1>")),
+    ).toBe("skip-payment");
+  });
+  test("any other page is unobserved: a bonus heading, none, two, a near miss, or not an h1", () => {
+    for (const body of [
+      "<h1>ボーナス払いご利用明細(未確定分)</h1>",
+      "",
+      "<h1>ショッピングスキップ払いご利用明細(未確定分)</h1><h1>ショッピングスキップ払いご利用明細(未確定分)</h1>",
+      "<h1>ショッピングスキップ払いご利用明細（未確定分）</h1>",
+      "<h1>ショッピングスキップ払いご利用明細</h1>",
+      "<h2>ショッピングスキップ払いご利用明細(未確定分)</h2>",
+    ])
+      expect(schedulePageKind(doc(body)), body).toBe("unobserved");
   });
 });

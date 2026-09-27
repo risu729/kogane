@@ -16,6 +16,7 @@ import {
   parseStatementPeriods,
   redactedStatementHtml,
   scheduledLedgerRowCount,
+  schedulePageKind,
 } from "./parsers";
 import { allowedUrl, MYJCB_ORIGIN } from "./policy";
 import type {
@@ -305,9 +306,11 @@ export type CreditExportMode = "record" | "fetch";
  * The menu's headings say which positions are months and which are payment
  * schedule pages (`readCreditMenuGroups`, ADR 0005's amendment (c)). Only
  * the months are the connection's coverage. The schedule pages are read after
- * every month, each stored whole as `credit-schedule-NN.html` evidence that
- * no parser reads; a schedule page that cannot be fetched is recorded with a
- * closed code and is not a stop.
+ * every month, each stored whole: the ショッピングスキップ払い page, known by
+ * its h1, as `credit-skip-payment-NN.html`, which
+ * `myjcb-skip-payment-schedule` reads (amendment (e)), and every other one as
+ * `credit-schedule-NN.html` evidence that no parser reads; a schedule page
+ * that cannot be fetched is recorded with a closed code and is not a stop.
  */
 export async function collectCredit(
   client: CreditReadClient,
@@ -578,11 +581,16 @@ export async function collectCredit(
     try {
       const detail = await fetchCreditDetail(client, position);
       const html = decodeMyJcbHtml(detail.body, detail.contentType);
-      // Kept whole and unread: its rows are neither a month nor withheld from
-      // one, and what they mean is not confirmed (ADR 0004).
+      // Kept whole: its rows are neither a month nor withheld from one. Only
+      // the page whose h1 is the observed ショッピングスキップ払い heading is
+      // named `credit-skip-payment-NN.html`, the one name registration gives
+      // the parser dataset (ADR 0005 amendment e); every other schedule page
+      // (the ボーナス払い page, never observed with rows) stays
+      // `credit-schedule-NN.html` and unread (ADR 0004).
+      const kind = schedulePageKind(html);
       artifacts.push({
         dataset: "credit-schedule",
-        filename: `credit-schedule-${String(position).padStart(2, "0")}.html`,
+        filename: `${kind === "skip-payment" ? "credit-skip-payment" : "credit-schedule"}-${String(position).padStart(2, "0")}.html`,
         body: redactedStatementHtml(html),
         mediaType: "text/html; charset=utf-8",
         statementState: "unknown",
