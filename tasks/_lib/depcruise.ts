@@ -10,8 +10,9 @@
 // and dependency-cruiser fails *quietly* in exactly that way: with no
 // TypeScript < 7 resolvable it prints `missing-typescript-transpiler`, cruises
 // a few dozen modules and still exits 0. Every workspace that deploys a Worker
-// pins `typescript@7`, so the root manifest deliberately keeps `5.9.3` for this
-// step. The assertions below make a regression loud instead of silent:
+// pins `typescript@7`, so the root manifest deliberately keeps TypeScript below 7
+// (`6.0.3` today; 6 is the last release with the in-process compiler API) for
+// this step. The assertions below make a regression loud instead of silent:
 //
 //   * zero error-severity violations;
 //   * a TypeScript transpiler is available and is the < 7 one;
@@ -107,7 +108,7 @@ export function cruiseProblems(result: CruiseResult): string[] {
   );
   if (typescript === undefined || !typescript.available)
     problems.push(
-      "no TypeScript transpiler is resolvable: dependency-cruiser would silently cruise almost nothing; keep typescript 5.x in the root manifest",
+      "no TypeScript transpiler is resolvable: dependency-cruiser would silently cruise almost nothing; keep typescript below 7 in the root manifest",
     );
   if (result.summary.totalCruised < MINIMUM_MODULES)
     problems.push(

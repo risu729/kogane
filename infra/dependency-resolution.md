@@ -109,7 +109,7 @@ each consumer is the requirement; where that is impossible the change must be ca
 
 | dependency | resolved versions | by package (declared range → resolved) |
 | --- | --- | --- |
-| `typescript` | 5.9.3, 7.0.2 | apps/web: `7.0.2` → 7.0.2<br>experiments/cloudflare-browser-run: `7.0.2` → 7.0.2<br>experiments/cloudflare-runtime-probe: `7.0.2` → 7.0.2<br>experiments/observation-pipeline-local: `7.0.2` → 7.0.2<br>experiments/st-george-automation: `7.0.2` → 7.0.2<br>experiments/tamia-tcp-bridge: `7.0.2` → 7.0.2<br>packages/application: `7.0.2` → 7.0.2<br>packages/collection: `7.0.2` → 7.0.2<br>packages/collector-diagnostics: `7.0.2` → 7.0.2<br>packages/domain: `7.0.2` → 7.0.2<br>packages/evidence-contract: `7.0.2` → 7.0.2<br>packages/identity: `7.0.2` → 7.0.2<br>packages/observation-shared: `7.0.2` → 7.0.2<br>packages/parsers: `7.0.2` → 7.0.2<br>packages/read-model: `7.0.2` → 7.0.2<br>packages/sbi-vc-trade-client: `7.0.2` → 7.0.2<br>packages/storage-d1: `7.0.2` → 7.0.2<br>services/app: `7.0.2` → 7.0.2<br>services/collector-globalpass: `5.9.3` → 5.9.3<br>services/collector-mizuho: `7.0.2` → 7.0.2<br>services/collector-mobile-suica: `7.0.2` → 7.0.2<br>services/collector-moneyforward: `7.0.2` → 7.0.2<br>services/collector-myjcb: `7.0.2` → 7.0.2<br>services/collector-sbi-securities: `7.0.2` → 7.0.2<br>services/collector-sbi-shinsei: `7.0.2` → 7.0.2<br>services/collector-sbi-vc-trade: `7.0.2` → 7.0.2<br>services/collector-smbc-direct: `7.0.2` → 7.0.2<br>services/collector-sony-bank: `7.0.2` → 7.0.2<br>services/collector-st-george: `7.0.2` → 7.0.2<br>services/collector-vpass: `7.0.2` → 7.0.2<br>services/collector-vpoint: `7.0.2` → 7.0.2<br>services/collector-vpoint-pay: `7.0.2` → 7.0.2<br>services/processor: `7.0.2` → 7.0.2 |
+| `typescript` | 6.0.3, 7.0.2 | apps/web: `7.0.2` → 7.0.2<br>experiments/cloudflare-browser-run: `7.0.2` → 7.0.2<br>experiments/cloudflare-runtime-probe: `7.0.2` → 7.0.2<br>experiments/observation-pipeline-local: `7.0.2` → 7.0.2<br>experiments/st-george-automation: `7.0.2` → 7.0.2<br>experiments/tamia-tcp-bridge: `7.0.2` → 7.0.2<br>packages/application: `7.0.2` → 7.0.2<br>packages/collection: `7.0.2` → 7.0.2<br>packages/collector-diagnostics: `7.0.2` → 7.0.2<br>packages/domain: `7.0.2` → 7.0.2<br>packages/evidence-contract: `7.0.2` → 7.0.2<br>packages/identity: `7.0.2` → 7.0.2<br>packages/observation-shared: `7.0.2` → 7.0.2<br>packages/parsers: `7.0.2` → 7.0.2<br>packages/read-model: `7.0.2` → 7.0.2<br>packages/sbi-vc-trade-client: `7.0.2` → 7.0.2<br>packages/storage-d1: `7.0.2` → 7.0.2<br>services/app: `7.0.2` → 7.0.2<br>services/collector-globalpass: `6.0.3` → 6.0.3<br>services/collector-mizuho: `7.0.2` → 7.0.2<br>services/collector-mobile-suica: `7.0.2` → 7.0.2<br>services/collector-moneyforward: `7.0.2` → 7.0.2<br>services/collector-myjcb: `7.0.2` → 7.0.2<br>services/collector-sbi-securities: `7.0.2` → 7.0.2<br>services/collector-sbi-shinsei: `7.0.2` → 7.0.2<br>services/collector-sbi-vc-trade: `7.0.2` → 7.0.2<br>services/collector-smbc-direct: `7.0.2` → 7.0.2<br>services/collector-sony-bank: `7.0.2` → 7.0.2<br>services/collector-st-george: `7.0.2` → 7.0.2<br>services/collector-vpass: `7.0.2` → 7.0.2<br>services/collector-vpoint: `7.0.2` → 7.0.2<br>services/collector-vpoint-pay: `7.0.2` → 7.0.2<br>services/processor: `7.0.2` → 7.0.2 |
 
 ## Declared dependencies and resolved versions
 
@@ -323,7 +323,7 @@ Lockfile: `bun.lock`.
 | `@cloudflare/vitest-plugin` | devDependencies | `1.2.5` | 1.2.5 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
 | `@types/node` | devDependencies | `26.6.2` | 26.6.2 |
-| `typescript` | devDependencies | `5.9.3` | 5.9.3 |
+| `typescript` | devDependencies | `6.0.3` | 6.0.3 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
 | `wrangler` | devDependencies | `4.138.0` | 4.138.0 |
 | `ws` | devDependencies | `8.21.3` | 8.21.3 |
@@ -585,7 +585,7 @@ a changed digest has to be explained dependency by dependency.
 | `packages/sbi-vc-trade-client` | bun.lock | 25 | `e75293dc3eb123a6d74a3c133475ebb7fa52ba067d2ecb4d3f50d9273ff4d69a` |
 | `packages/storage-d1` | bun.lock | 26 | `a61e635611d8a06900de603bf1b831e73f2991b4578036ec2b160400b07be2b7` |
 | `services/app` | bun.lock | 184 | `6e64cd9993395ce03304c3e8c945531c7dd08154f8847a760ecd8b0af9177e41` |
-| `services/collector-globalpass` | bun.lock | 240 | `2e2ca529a78190486ea59425064e53866706026f78b88c3fbeebba5ec93e99bc` |
+| `services/collector-globalpass` | bun.lock | 240 | `0b33028f49f57399a3356996cbf24a64466559eb033f258b50e0b5ff5e733d69` |
 | `services/collector-globalpass/container` | package-lock.json | 5 | `b2c62ee8397ead9ede8d0c4724082444e9f5a0831b23eafc2293a4efb47ce9f1` |
 | `services/collector-mizuho` | bun.lock | 188 | `b625e95cdf0c0aa6c3d7fef0eb565af157201ac5672f39bbae6cf3e2b1af4c4d` |
 | `services/collector-mobile-suica` | bun.lock | 261 | `bd555b7b4cab58efb38af7f9da8babbf42d533bd5d680652c74d3d1c1a561e44` |
