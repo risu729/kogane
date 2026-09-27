@@ -9,6 +9,7 @@
 // G3-07/G3-08 (no cookie, auth blob, card reference or provider text is
 // stored or logged).
 import { describe, expect, spyOn, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import {
   objectKey,
@@ -247,15 +248,13 @@ describe("G1-02/G1-08/G1-16 a card run persists its sanitized set and then the t
   });
 });
 
-describe("ADR 0023 the collector derives the card binding before it sanitizes", () => {
-  // The retired importer derived the card binding token from the selection
-  // and discovery headers' session bean (external id, global id, card code).
-  // Synthetic values of the lengths the importer required (32, 32 and 13),
-  // and a synthetic key: the real one is a Worker secret.
+describe("ADR 0023 and ADR 0029 the collector derives the card binding before it sanitizes", () => {
+  // The card binding token is derived from the selection and discovery
+  // headers' session bean (external id, global id, card code), with no key.
+  // Synthetic values of the lengths the importer required (32, 32 and 13).
   const externalId = "E".repeat(32);
   const globalid = "G".repeat(32);
   const cardCode = "C".repeat(13);
-  const bindingKey = "5e".repeat(32);
   const bean = (overrides: Record<string, unknown> = {}) => ({
     externalId,
     globalid,
@@ -275,21 +274,12 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
       ...overrides,
     });
 
-  /** The importer's construction, written out independently of the module. */
-  async function importerToken(key: string, tuple: readonly string[]): Promise<string> {
-    const cryptoKey = await crypto.subtle.importKey(
-      "raw",
-      Uint8Array.from(key.match(/../gu)!, (pair) => Number.parseInt(pair, 16)),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
-    const mac = await crypto.subtle.sign(
-      "HMAC",
-      cryptoKey,
-      new TextEncoder().encode(JSON.stringify(["vpass-card-binding-v1", ...tuple])),
-    );
-    return `vpass-card-v1-${Buffer.from(mac).toString("hex")}`;
+  /** The v2 construction, written out independently of the module. */
+  function independentToken(domain: string, tuple: readonly string[]): string {
+    const digest = createHash("sha256")
+      .update(JSON.stringify([domain, ...tuple]))
+      .digest("hex");
+    return `vpass-card-v2-${digest}`;
   }
 
   function texts(bucket: FakeR2Bucket): Map<string, string> {
@@ -298,10 +288,10 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
     );
   }
 
-  test("with the key, the run holds one binding unit and artifact carrying the importer's token", async () => {
-    const token = await importerToken(bindingKey, [externalId, globalid, cardCode]);
+  test("the run holds one binding unit and artifact carrying the v2 token", async () => {
+    const token = independentToken("vpass-card-binding-v2", [externalId, globalid, cardCode]);
     const bucket = new FakeR2Bucket();
-    const outcome = await persistCardRun(bucket, bound(), bindingKey);
+    const outcome = await persistCardRun(bucket, bound());
     expect(outcome.result.outcome).toBe("persisted");
     expect(outcome.binding).toBe("bound");
     const read = await readTerminal(bucket, "vpass", `${sessionRunId}-card-001`);
@@ -330,17 +320,18 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
         transformationId: "extracted:card-identity-binding.json",
         stepKind: "extracted",
         transformerId: "vpass-card-binding",
-        transformerVersion: "v1",
+        transformerVersion: "v2",
         inputArtifactKeys: [],
         outputArtifactKey: "card-identity-binding.json",
       },
     ]);
     const body = await bucket.get(binding.storageRef.key);
+    // The token and the derivation that made it; no key version, since the
+    // v2 derivation has no key, and never the tuple.
     expect(JSON.parse(new TextDecoder().decode(new Uint8Array(await body!.arrayBuffer())))).toEqual(
       {
-        schemaVersion: "vpass-card-binding-v1",
+        schemaVersion: "vpass-card-binding-v2",
         accountIdentity: token,
-        fingerprintKeyVersion: "collector-r2-v1",
         sourceSession: sessionRunId,
         sourceNamespace: "vpass-worker-card-v1",
         sourceCardOrdinal: "card-001",
@@ -358,39 +349,48 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
         expect(text).not.toContain(value);
       }
       if (key === bindingObject || key === terminal) {
-        expect(text.replaceAll(token, "")).not.toContain("vpass-card-v1-");
+        expect(text.replaceAll(token, "")).not.toContain("vpass-card-v");
       } else {
-        expect(text).not.toContain("vpass-card-v1-");
+        expect(text).not.toContain("vpass-card-v");
       }
     }
     // The diagnostic carries a closed code, not the token.
     const diagnostic = JSON.stringify(sharedRunDiagnostic(manifest.runId, "card-001", outcome));
     expect(diagnostic).toContain('"binding":"bound"');
-    expect(diagnostic).not.toContain("vpass-card-v1-");
+    expect(diagnostic).not.toContain("vpass-card-v");
   });
 
-  test("a known-answer vector: the token the retired importer's code derives for the same tuple and key", async () => {
-    // Computed once from the retired importer's `deriveVpassCardBinding`
-    // (`services/collector-r2-importer/src/vpass-identity.ts` before #206)
-    // and independently with another HMAC-SHA-256 implementation, on the
-    // synthetic tuple and key above. A change to the construction (the
-    // contract string, the JSON array, the key decoding, the prefix) fails
-    // here even if the module and `importerToken` change together.
+  test("a known-answer vector: the v2 token of the synthetic tuple is pinned", async () => {
+    // Computed outside this code with
+    //   printf '["vpass-card-binding-v2","E…E","G…G","C…C"]' | sha256sum
+    // (32, 32 and 13 characters) and independently here with node:crypto. A
+    // change to the construction (the domain string, the tuple order, the
+    // JSON array, the prefix) fails here even if the module and
+    // `independentToken` change together.
     const expected =
-      "vpass-card-v1-dc5fb987a505ef03e5dc9a50592655903f9048487ea9b3e5bb7bcb15896d10a9";
-    expect(await importerToken(bindingKey, [externalId, globalid, cardCode])).toBe(expected);
-    expect(await deriveVpassCardBinding(bound(), bindingKey)).toEqual({
-      status: "derived",
-      token: expected,
-    });
+      "vpass-card-v2-22266091efe6bc3b708aef8f2063065035a8768d476ec4d2ba1558f5fa456821";
+    expect(independentToken("vpass-card-binding-v2", [externalId, globalid, cardCode])).toBe(
+      expected,
+    );
+    expect(await deriveVpassCardBinding(bound())).toEqual({ status: "derived", token: expected });
+    // The domain string separates the derivation: the v1 domain, or the tuple
+    // in another order, is another digest.
+    expect(independentToken("vpass-card-binding-v1", [externalId, globalid, cardCode])).not.toBe(
+      expected,
+    );
+    expect(independentToken("vpass-card-binding-v2", [globalid, externalId, cardCode])).not.toBe(
+      expected,
+    );
+    // No key parameter exists any more.
+    expect(deriveVpassCardBinding.length).toBe(1);
+    expect(vpassCardRunPlan.length).toBe(1);
   });
 
-  test("the token depends on the card tuple and the key, not on the session or ordinal", async () => {
-    const plan = async (overrides: Partial<VpassCardRun>, key = bindingKey) =>
-      (await vpassCardRunPlan(bound(overrides), key)).run.units.at(-1)?.unitKey;
+  test("the token depends on the card tuple, not on the session or ordinal", async () => {
+    const plan = async (overrides: Partial<VpassCardRun>) =>
+      (await vpassCardRunPlan(bound(overrides))).run.units.at(-1)?.unitKey;
     const token = await plan({});
     expect(await plan({ sessionRunId: "2026-09-12T21-00-00-000Z" })).toBe(token);
-    expect(await plan({}, "a1".repeat(32))).not.toBe(token);
     // The same card at another position in a later inventory keeps its token.
     const reordered = envelope({
       DropdownListInitDisplayServiceBean: {
@@ -409,12 +409,12 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
     ).not.toBe(token);
   });
 
-  test("without the key nothing is bound, and the tuple is still redacted", async () => {
-    for (const key of [undefined, ""]) {
+  test("without a tuple nothing is bound, and the responses are still redacted", async () => {
+    {
       const bucket = new FakeR2Bucket();
-      const outcome = await persistCardRun(bucket, bound(), key);
+      const outcome = await persistCardRun(bucket, run());
       expect(outcome.result.outcome).toBe("persisted");
-      expect(outcome.binding).toBe("binding_key_absent");
+      expect(outcome.binding).toBe("binding_tuple_absent");
       const read = await readTerminal(bucket, "vpass", `${sessionRunId}-card-001`);
       if (read.outcome !== "found") throw new Error("unreachable");
       expect(read.manifest.artifacts.map((artifact) => artifact.artifactKey)).not.toContain(
@@ -425,7 +425,7 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
       );
       expect(read.manifest.units.map((unit) => unit.unitKey)).toEqual(["card-001"]);
       for (const text of texts(bucket).values()) {
-        for (const value of [externalId, globalid, cardCode, "vpass-card-v1-"]) {
+        for (const value of [externalId, globalid, cardCode, "vpass-card-v"]) {
           expect(text).not.toContain(value);
         }
       }
@@ -433,9 +433,7 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
   });
 
   test("every doubtful input fails closed with a closed code and stores no binding", async () => {
-    const cases: [string, Partial<VpassCardRun>, string?][] = [
-      ["binding_key_invalid", {}, "5E".repeat(32)],
-      ["binding_key_invalid", {}, "5e".repeat(31)],
+    const cases: [string, Partial<VpassCardRun>][] = [
       ["binding_tuple_absent", { selectCardRawJson, webMeisaiTopRawJson }],
       ["binding_tuple_invalid", { webMeisaiTopRawJson }],
       [
@@ -474,12 +472,12 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
         },
       ],
     ];
-    for (const [code, overrides, key] of cases) {
+    for (const [code, overrides] of cases) {
       const bucket = new FakeR2Bucket();
-      const outcome = await persistCardRun(bucket, bound(overrides), key ?? bindingKey);
+      const outcome = await persistCardRun(bucket, bound(overrides));
       expect([code, outcome.result.outcome, outcome.binding]).toEqual([code, "persisted", code]);
       for (const text of texts(bucket).values()) {
-        for (const value of [externalId, globalid, cardCode, "vpass-card-v1-"]) {
+        for (const value of [externalId, globalid, cardCode, "vpass-card-v"]) {
           expect(text).not.toContain(value);
         }
       }
@@ -487,10 +485,10 @@ describe("ADR 0023 the collector derives the card binding before it sanitizes", 
     // A response that is not a successful envelope is not a binding either;
     // the sanitizer then refuses the run as before.
     expect(
-      await deriveVpassCardBinding(
-        { ...bound(), selectCardRawJson: JSON.stringify({ header: { resultCode: "9" } }) },
-        bindingKey,
-      ),
+      await deriveVpassCardBinding({
+        ...bound(),
+        selectCardRawJson: JSON.stringify({ header: { resultCode: "9" } }),
+      }),
     ).toEqual({ status: "unavailable", code: "binding_envelope_invalid" });
   });
 });
@@ -592,7 +590,7 @@ describe("ADR 0023 option 8 / ADR 0026 the card unit is complete only when every
     for (const [months, code] of cases) {
       expect([code, await cardUnit(months)]).toEqual([code, "partial"]);
       const bucket = new FakeR2Bucket();
-      const outcome = await persistCardRun(bucket, run({ months }), "5e".repeat(32));
+      const outcome = await persistCardRun(bucket, run({ months }));
       expect([code, outcome.result.outcome, outcome.coverage]).toEqual([code, "persisted", code]);
       expect(sharedRunDiagnostic("r", "card-001", outcome)).toMatchObject({ coverage: code });
     }
@@ -620,7 +618,7 @@ describe("G1-01 a failed put leaves no terminal", () => {
       unitKey: "card-001",
       persistence: "incomplete",
       artifactCount: plan.artifacts.length,
-      binding: "binding_key_absent",
+      binding: "binding_tuple_absent",
       coverage: "complete",
       reasonCode: "object_put_failed",
       persistedCount: outcome.result.checkpoint.persistedArtifactKeys.length,

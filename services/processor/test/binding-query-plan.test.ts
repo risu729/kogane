@@ -13,9 +13,10 @@ test("trusted binding lookup flattens to artifact primary key with the complete 
     for (const file of readdirSync(dir)
       .filter((f) => f.endsWith(".sql"))
       .sort()) {
-      // 0021 is applied below; 0055 recreates the view again and is checked
-      // after it (ADR 0023).
-      if (file.startsWith("0021_") || file.startsWith("0055_")) continue;
+      // 0021 is applied below; 0055 and 0057 recreate the view again and are
+      // checked after it (ADR 0023, ADR 0029).
+      if (file.startsWith("0021_") || file.startsWith("0055_") || file.startsWith("0057_"))
+        continue;
       db.exec(readFileSync(new URL(file, dir), "utf8"));
     }
     const before = db
@@ -107,6 +108,30 @@ test("trusted binding lookup flattens to artifact primary key with the complete 
         false,
       );
       expect(plan.some((s) => /^SCAN (?:fa|b|binding|bu|ba)\b/u.test(s))).toBe(false);
+    }
+
+    // Migration 0057 widens the token prefix to v1 and v2 and rebuilds the
+    // identity pin table with the same columns and key (ADR 0029). Every read
+    // keeps 0055's plan exactly, step for step, without table statistics. It
+    // is applied to a fresh database in migration order, because this one
+    // still holds prepared statements on the table 0057 rebuilds.
+    const migrated = new Database(":memory:");
+    try {
+      for (const file of readdirSync(dir)
+        .filter((f) => f.endsWith(".sql"))
+        .sort())
+        migrated.exec(readFileSync(new URL(file, dir), "utf8"));
+      const with0057 = reads.map((sql) => {
+        const statement = migrated.prepare<{ detail: string }, []>(sql);
+        try {
+          return statement.all().map((r) => r.detail);
+        } finally {
+          statement.finalize();
+        }
+      });
+      expect(with0057).toEqual(with0055);
+    } finally {
+      migrated.close();
     }
   } finally {
     db.close();

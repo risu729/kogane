@@ -146,6 +146,22 @@ describe("non-SBI account identification", () => {
     expect(unbound.account.status).toBe("unresolved");
     expect(unbound.account.key).toEqual(["vpass:card-001", "fetch-run", "99"]);
   });
+  test("ADR 0029: a v2 token keys its own account; v1 and v2 of one card stay apart", () => {
+    const bound = (cardToken: string) =>
+      otherIdentity(
+        input("vpass", "vpass:card-001", {
+          producerId: "collector-vpass",
+          trustedVpassBinding: { cardToken, bindingArtifactId: 10, financialUnitId: 20 },
+        }),
+      ).account;
+    const v2 = bound(`vpass-card-v2-${"a".repeat(64)}`);
+    expect(v2.status).toBe("provider-local");
+    expect(v2.key).toEqual(["vpass:card", `vpass-card-v2-${"a".repeat(64)}`]);
+    expect(v2.key).not.toEqual(bound(`vpass-card-v1-${"a".repeat(64)}`).key);
+    for (const token of [`vpass-card-v3-${"a".repeat(64)}`, `vpass-card-v2-${"A".repeat(64)}`]) {
+      expect(bound(token).status).toBe("unresolved");
+    }
+  });
   test("V Point common semantic buckets survive ordinal and run changes", () => {
     const extra = {
       point_type: 0,
@@ -223,6 +239,12 @@ describe("non-SBI account identification", () => {
       "aggregator-mirror",
       "provider-local",
     ],
+    [
+      "moneyforward-me",
+      `moneyforward-me:moneyforward-account-v2-${"a".repeat(64)}`,
+      "aggregator-mirror",
+      "provider-local",
+    ],
     ["paypay", "paypay", "wallet-export", "provider-local"],
   ] as const)("%s %s recognizes the audited account scope", (source, account, role, status) => {
     const plan = otherIdentity(input(source, account));
@@ -250,6 +272,8 @@ describe("non-SBI account identification", () => {
     ["smbc-bank", "smbc-bank:ordinary-aud"],
     ["sbi-shinsei", "sbi-shinsei:synthetic-ref"],
     ["moneyforward-me", "moneyforward-me:account-001"],
+    ["moneyforward-me", `moneyforward-me:moneyforward-account-v3-${"a".repeat(64)}`],
+    ["moneyforward-me", `moneyforward-me:moneyforward-account-v2-${"A".repeat(64)}`],
     ["sony-bank", "sony-bank:gross:asset:012"],
     ["sony-bank", "sony-bank:deposit:XYZ"],
     ["myjcb", "myjcb:synthetic-connection:subcard"],

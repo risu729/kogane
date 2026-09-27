@@ -197,12 +197,14 @@ per-source bucket + importer 経由。`shared` にすると run は `packages/co
 unit と取得できた月の range を terminal に持つ。artifact と role の対応、deploy 順
 と rollback は `docs/collection.md` の該当節を参照。
 
-account unit の key は、旧 importer と同じ account/service tuple の HMAC
-`moneyforward-account-v1-<64 hex>` である（[ADR 0027](../adr/0027-moneyforward-collector-account-identity.md)）。
-Collector は保存前の account detail HTML から importer と同じ検証で tuple を読み、
-optional Worker secret `MONEYFORWARD_ACCOUNT_IDENTITY_KEY` で HMAC 化する。
-secret が無い、または tuple が欠落・検証失敗のときは run 全体が positional unit
+account unit の key は、account/service tuple の key なし・domain 分離の SHA-256
+`moneyforward-account-v2-<64 hex>` である（[ADR 0027](../adr/0027-moneyforward-collector-account-identity.md)、
+[ADR 0029](../adr/0029-data-classification-and-unkeyed-identity.md)）。
+Collector は保存前の account detail HTML から旧 importer と同じ検証で tuple を読み、
+`["moneyforward-account-v2", account[id_hash], service[id]]` を hash する。secret は
+使わない。tuple が欠落・検証失敗のときは run 全体が positional unit
 （`account-NN`）のまま保存され、parser は account を名指す artifact を
-`parser_rejected` にする。ログは固定 code（`identity`）だけを持ち、識別値と key は
-出力しない。旧 importer の key と同じ secret のときだけ identity は importer 時代と
-一致し、別 key では別 account になる（対応付けは追加しない）。
+`parser_rejected` にする。ログは固定 code（`identity`）だけを持ち、識別値は
+出力しない。旧 importer の HMAC identity（`moneyforward-account-v1-`）も parser は
+受け付けるが、その key は失われており、同じ account の v1 と v2 は別 account になる
+（対応付けは別途レビューされる crosswalk が決めるまで追加しない）。

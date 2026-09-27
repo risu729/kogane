@@ -1,20 +1,23 @@
-// The MoneyForward account identity, derived in the Worker (ADR 0027).
+// The MoneyForward account identity, derived in the Worker (ADR 0027, ADR 0029).
 //
 // An account's position in the accounts index (`account-NN`) is not identity:
 // adding or removing a linked service moves every later account. The parser
 // (`moneyforward-monthly-transactions`, `moneyforward-canonical-evidence-boundary`)
-// therefore requires the unit key `moneyforward-account-v1-<64 hex>`, which the
-// retired importer derived
+// therefore requires a unit key `moneyforward-account-v1-<64 hex>` or
+// `moneyforward-account-v2-<64 hex>`. This module derives
+//
+//   moneyforward-account-v2- + SHA-256(JSON(["moneyforward-account-v2", account[id_hash], service[id]]))
+//
+// from the two hidden inputs of each account-detail page: an unkeyed,
+// domain-separated digest (ADR 0029). The retired importer
 // (`services/collector-r2-importer/src/moneyforward-account-identity.ts`,
-// removed in #206) as
+// removed in #206) derived `moneyforward-account-v1-` identities from the same
+// tuple as an HMAC under a key that was retired with it. v1 identities stay
+// readable as historical evidence, but nothing derives them any more, and the
+// v1 and the v2 identity of one account are different values.
 //
-//   moneyforward-account-v1- + HMAC-SHA-256(key, JSON(["moneyforward-account-v1", account[id_hash], service[id]]))
-//
-// from the two hidden inputs of each account-detail page, under the
-// fingerprint key version `collector-r2-v1`.
-//
-// This module is that derivation with the importer's checks, over the same
-// page bytes the run stores: parse5 finds every `<input>` named
+// The checks are the importer's, over the same page bytes the run stores:
+// parse5 finds every `<input>` named
 // `account[id_hash]` or `service[id]` (template contents included); each must
 // occur exactly once with a value of 1-4096 characters from `[A-Za-z0-9_-]`;
 // the account's ordinal comes from its `account-detail-NN.html` filename
@@ -25,18 +28,15 @@
 // The identifiers never leave this module: the only output is the identity of
 // each ordinal, or one closed code saying why there is none. It fails closed,
 // for the whole run: any failed check returns `unavailable` and the run keeps
-// its positional units, which the parser rejects.
-//
-// The identity equals the importer's for the same account only when the key is
-// the importer's `collector-r2-v1` key (its `ORIGIN_FINGERPRINT_KEY`). Under any
-// other key it is a different identity, and nothing here or elsewhere maps one
-// to the other.
+// its positional units, which the parser rejects. No secret is involved: ADR
+// 0029 classifies `account[id_hash]` and `service[id]` as provider-local
+// identifiers that central storage may hold, so the digest only fixes the
+// identity's shape and separates it from every other derivation.
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import type { RawArtifact } from "./types";
 
-export const MONEYFORWARD_IDENTITY_CONTRACT = "moneyforward-account-v1";
-export const MONEYFORWARD_IDENTITY_KEY_VERSION = "collector-r2-v1";
-const KEY = /^[0-9a-f]{64}$/u;
+/** The domain string hashed with the tuple, and the identity's prefix (ADR 0029). */
+export const MONEYFORWARD_IDENTITY_CONTRACT = "moneyforward-account-v2";
 const OPAQUE = /^[A-Za-z0-9_-]{1,4096}$/u;
 const DETAIL = /^account-detail-(\d{2})\.html$/u;
 const SHOW_PATH = /^\/accounts\/show\/([A-Za-z0-9_-]+)(?:[?#].*)?$/u;
@@ -44,8 +44,6 @@ const INPUTS = ["account[id_hash]", "service[id]"] as const;
 
 /** Why a run carries no account identity. Closed codes; safe to log. */
 export type MoneyForwardIdentityUnavailable =
-  | "identity_key_absent"
-  | "identity_key_invalid"
   | "identity_tuple_absent"
   | "identity_tuple_invalid"
   | "identity_duplicate"
@@ -124,34 +122,19 @@ function hex(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function hmacKey(keyHex: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "raw",
-    Uint8Array.from(keyHex.match(/../gu)!, (pair) => Number.parseInt(pair, 16)),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-}
-
 /**
- * The identity of every account the run's pages name. `keyHex` is the Worker
- * secret `MONEYFORWARD_ACCOUNT_IDENTITY_KEY`, or undefined. `accountUnits` are
- * the two-digit ordinals the run's filenames name (details and monthly
+ * The identity of every account the run's pages name. `accountUnits` are the
+ * two-digit ordinals the run's filenames name (details and monthly
  * fragments); every one of them must receive an identity. A successful run
  * passes its `accountDetailCount`, which the identities must number, as the
  * importer required.
  */
 export async function moneyForwardAccountIdentities(
   artifacts: readonly RawArtifact[],
-  keyHex: string | undefined,
   accountUnits: ReadonlySet<string>,
   successfulAccountCount?: number,
 ): Promise<MoneyForwardAccountIdentities> {
   try {
-    if (keyHex === undefined || keyHex === "") throw new Unavailable("identity_key_absent");
-    if (!KEY.test(keyHex)) throw new Unavailable("identity_key_invalid");
-    const key = await hmacKey(keyHex);
     const index = artifacts.find(
       (artifact) => artifact.dataset === "accounts-index" && artifact.filename === "accounts.html",
     );
@@ -163,12 +146,11 @@ export async function moneyForwardAccountIdentities(
       const ordinalText = DETAIL.exec(artifact.filename)?.[1];
       const ordinal = ordinalText === undefined ? Number.NaN : Number(ordinalText);
       const values = tuple(artifact.body);
-      const signature = await crypto.subtle.sign(
-        "HMAC",
-        key,
+      const digest = await crypto.subtle.digest(
+        "SHA-256",
         new TextEncoder().encode(JSON.stringify([MONEYFORWARD_IDENTITY_CONTRACT, ...values])),
       );
-      const identity = `${MONEYFORWARD_IDENTITY_CONTRACT}-${hex(signature)}`;
+      const identity = `${MONEYFORWARD_IDENTITY_CONTRACT}-${hex(digest)}`;
       if (
         ordinalText === undefined ||
         ordinal < 1 ||

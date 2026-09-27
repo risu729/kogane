@@ -24,7 +24,8 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 | V Point      | `v-point:member`                                   | Member history scope                                                                                                         |
 | V Point Pay  | notification-events / prepaid-yen                  | Separate notification and historical event-balance roles, denominated in yen                                                 |
 | Mobile Suica | `mobile-suica:sf`                                  | SF scope, no physical card binding inferred                                                                                  |
-| MoneyForward | `moneyforward-me:moneyforward-account-v1-{64 hex}` | Verified account/service HMAC, aggregator mirror, never mapped by name                                                       |
+| MoneyForward | `moneyforward-me:moneyforward-account-v1-{64 hex}` | Verified account/service HMAC (retired importer), aggregator mirror, never mapped by name                                    |
+| MoneyForward | `moneyforward-me:moneyforward-account-v2-{64 hex}` | Verified account/service unkeyed digest (ADR 0029), aggregator mirror, a different account from its v1 identity              |
 | PayPay CSV   | `paypay`                                           | Export scope; does not distinguish money, money-lite or reward buckets                                                       |
 
 The classifier accepts exact patterns from the checked-in parser registry.

@@ -146,23 +146,18 @@ function manifestBytes(input: SharedRunInput, stored: readonly StoredArtifact[])
 /**
  * Build the persist plan for a finished run. Pure apart from hashing.
  *
- * `identityKey` is the Worker secret `MONEYFORWARD_ACCOUNT_IDENTITY_KEY`, or
- * undefined. With it, and a tuple on every account-detail page that passes the
- * importer's checks, each account's unit key is its
- * `moneyforward-account-v1-<64 hex>` identity (ADR 0027); otherwise the units
- * stay positional (`account-NN`), which the parser rejects.
+ * With a tuple on every account-detail page that passes the importer's checks,
+ * each account's unit key is its `moneyforward-account-v2-<64 hex>` identity
+ * (ADR 0027, ADR 0029); otherwise the units stay positional (`account-NN`),
+ * which the parser rejects.
  */
-export async function moneyForwardRunPlan(
-  input: SharedRunInput,
-  identityKey?: string,
-): Promise<PersistRunPlan> {
-  return (await moneyForwardRunPlanWithIdentity(input, identityKey)).plan;
+export async function moneyForwardRunPlan(input: SharedRunInput): Promise<PersistRunPlan> {
+  return (await moneyForwardRunPlanWithIdentity(input)).plan;
 }
 
 /** The plan and the identity state it was built with (for the diagnostic). */
 export async function moneyForwardRunPlanWithIdentity(
   input: SharedRunInput,
-  identityKey?: string,
 ): Promise<{ plan: PersistRunPlan; identity: MoneyForwardIdentityState }> {
   const outcome: ProviderOutcome = input.status;
   const coverageStatus = coverage(input.status);
@@ -178,7 +173,6 @@ export async function moneyForwardRunPlanWithIdentity(
   }
   const identities = await moneyForwardAccountIdentities(
     sources,
-    identityKey,
     positionalUnits,
     input.status === "success" ? input.accountDetailCount : undefined,
   );
@@ -314,9 +308,8 @@ export async function moneyForwardRunPlanWithIdentity(
 export async function persistSharedRun(
   bucket: R2BucketLike,
   input: SharedRunInput,
-  identityKey?: string,
 ): Promise<SharedRunOutcome> {
-  const { plan, identity } = await moneyForwardRunPlanWithIdentity(input, identityKey);
+  const { plan, identity } = await moneyForwardRunPlanWithIdentity(input);
   const result = await persistRun(bucket, plan);
   return { result, artifactCount: plan.artifacts.length, identity };
 }

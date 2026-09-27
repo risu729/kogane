@@ -54,40 +54,46 @@ async function mappingIdBindings(prefix: "am" | "im", ref: string, version: numb
 /**
  * The producer whose source-account reference names the account entity of a
  * trusted Vpass card token: the retired importer's, which bound every Vpass
- * card first (ADR 0023).
+ * card first (ADR 0023). A v2 token (ADR 0029) is anchored to the same
+ * producer name, so it too names one entity whichever producer reads it.
  */
 export const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
 
 /**
  * The producer whose source-account reference names the account entity of a
  * MoneyForward account identity: the retired importer's, which registered
- * every MoneyForward account before the collector (ADR 0027).
+ * every MoneyForward account before the collector (ADR 0027). A v2 identity
+ * (ADR 0029) is anchored to the same producer name.
  */
 export const MONEYFORWARD_IDENTITY_ENTITY_PRODUCER = "collector-r2-importer";
-const MONEYFORWARD_ACCOUNT_REFERENCE = /^moneyforward-me:moneyforward-account-v1-[0-9a-f]{64}$/u;
+const MONEYFORWARD_ACCOUNT_REFERENCE = /^moneyforward-me:moneyforward-account-v[12]-[0-9a-f]{64}$/u;
 
 /**
  * The account entity an automatic mapping points at.
  *
  * Every entity is derived from its source-account reference, which includes
  * the producer, so the same provider account read by two producers is two
- * entities. Two identities are the exceptions, because each is an HMAC of the
- * provider's own account tuple under a secret key, so an equal value means the
- * same key and the same account whichever producer derived it:
+ * entities. Two identities are the exceptions, because each is a digest of
+ * the provider's own account tuple under a fixed derivation, so an equal
+ * value means the same account whichever producer derived it:
  *
- * - a trusted Vpass card token (`["vpass:card", token]`, ADR 0023);
+ * - a trusted Vpass card token (`["vpass:card", token]`; `vpass-card-v1-`,
+ *   the importer's HMAC, ADR 0023, or `vpass-card-v2-`, the unkeyed digest,
+ *   ADR 0029);
  * - a MoneyForward account identity
- *   (`["moneyforward-me:moneyforward-account-v1-<64 hex>"]`, ADR 0027), which
- *   the parser takes only from the unit key of a registered run.
+ *   (`["moneyforward-me:moneyforward-account-v1-<64 hex>"]`, ADR 0027, or its
+ *   `-v2-` form, ADR 0029), which the parser takes only from the unit key of a
+ *   registered run.
  *
  * For those the entity is derived from the reference the importer's producer
  * gives the same value. The importer-era entity ids are therefore unchanged,
  * and a collector's source account for the same value maps to that same
- * entity. A value the importer never registered (a new account, or a value
- * derived under another key) gets an entity no importer reference names, so
- * nothing is merged by it. Nothing else is shared: the collector's source
- * account is its own subject, with its own mapping revisions and manual
- * decisions.
+ * entity. A value the importer never registered (a new account, or any v2
+ * value) gets an entity no importer reference names, and every producer that
+ * reads that value reaches the same one. The v1 and the v2 value of one
+ * account are different values and so different entities; nothing here joins
+ * them by rule. Nothing else is shared: the collector's source account is its
+ * own subject, with its own mapping revisions and manual decisions.
  *
  * One more exception is an operator's decision, not a rule of the value: an
  * accepted crosswalk (ADR 0030, `account_identity_crosswalk`) says that a

@@ -766,6 +766,21 @@
       "sha256": "754decfb005229b96c6cc95770dc68c361ad335ce5b96ec5b326f60c756f4dd9"
     },
     {
+      "file": "0057_vpass_card_token_v2.sql",
+      "statementCount": 12,
+      "insertStatements": [
+        {
+          "table": "identity_vpass_bindings_0057_copy",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "identity_vpass_bindings",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "9fb9e6d950bcdad9ffb72b44a1d2c0b89a6d2c68d459dd5727f7958dd9b4f4b7"
+    },
+    {
       "file": "0058_identity_crosswalk.sql",
       "statementCount": 37,
       "insertStatements": [
@@ -7365,7 +7380,7 @@
         "identity_vpass_bindings_no_delete"
       ],
       "appendOnly": true,
-      "sqlSha256": "799c2219dd995924"
+      "sqlSha256": "33112c269ecd499f"
     },
     {
       "name": "ingest_client_producers",
@@ -13685,7 +13700,7 @@
         "binding_artifact_id",
         "card_token"
       ],
-      "sqlSha256": "c96fed249670a526"
+      "sqlSha256": "7d814d910f132061"
     }
   ],
   "triggers": [
@@ -17312,8 +17327,9 @@
       "0047_card_purchase_recognition.sql",
       "0051_card_purchase_review_commands.sql",
       "0053_price_promotion.sql",
+      "0057_vpass_card_token_v2.sql",
       "0058_identity_crosswalk.sql"
     ],
-    "schemaSha256": "5fc6d2090534e7f6bb6af56efc247f72185a5e1909f63e58f9e76eae27100321"
+    "schemaSha256": "a4ea1a7b0e9979d403a17c5b7a375d676c403b44dcdc3d40b30be4e84e976901"
   }
 }

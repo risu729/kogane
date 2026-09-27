@@ -2,7 +2,9 @@
 
 - Status: proposed; amended to implement option 3 (see
   [Amendment](#amendment-option-3-implemented)), accepted when the amending PR
-  merges
+  merges; amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
+  (the token is derived without a key; see
+  [Amendment: ADR 0029](#amendment-adr-0029-the-token-needs-no-key))
 - Date: 2026-09-26
 - Carried by:
   [identity operations](../identity-operations.md#collector-vpass-runs-bind-in-their-own-run),
@@ -450,3 +452,20 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   diagnostics answer it). The MyJCB statement is
   read from its collector's plan output and the registration code, not from a
   registered MyJCB run.
+
+## Amendment (ADR 0029): the token needs no key
+
+2026-09-27. [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
+classifies the Vpass card tuple as a provider-local opaque identifier that
+central storage may hold, so the HMAC above, justified only by the old policy
+line that provider identifiers were not copied into central storage, is no
+longer needed, and the importer's key is lost. The collector now derives
+`vpass-card-v2-` + SHA-256 of
+`JSON(["vpass-card-binding-v2", externalId, globalid, cardCode])` with the same
+checks and closed codes, minus `binding_key_absent` and
+`binding_key_invalid`, which can no longer occur. `VPASS_CARD_BINDING_KEY`
+and the owner action above are removed. Migration 0057 recreates the trusted
+view and rebuilds `identity_vpass_bindings` so both admit `vpass-card-v1-` and
+`vpass-card-v2-` tokens and nothing else. A card's v1 and v2 tokens are
+different values and so different account entities; joining them is a
+separate, reviewed crosswalk. The text above is left as it was decided.
