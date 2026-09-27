@@ -58,16 +58,33 @@ async function mappingIdBindings(prefix: "am" | "im", ref: string, version: numb
 export const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
 
 /**
+ * The producer whose source-account reference names the account entity of a
+ * MoneyForward account identity: the retired importer's, which registered
+ * every MoneyForward account before the collector (ADR 0027).
+ */
+export const MONEYFORWARD_IDENTITY_ENTITY_PRODUCER = "collector-r2-importer";
+const MONEYFORWARD_ACCOUNT_REFERENCE = /^moneyforward-me:moneyforward-account-v1-[0-9a-f]{64}$/u;
+
+/**
  * The account entity an automatic mapping points at.
  *
  * Every entity is derived from its source-account reference, which includes
  * the producer, so the same provider account read by two producers is two
- * entities. A trusted Vpass card token (`["vpass:card", token]`) is the one
- * exception (ADR 0023): the token is the card's identity whichever producer
- * derived it under the same key, so the entity is derived from the reference
- * the importer's producer gives the token. The importer-era entity ids are
- * therefore unchanged, and a collector's source account for the same token
- * maps to that same entity. Nothing else is shared: the collector's source
+ * entities. Two identities are the exceptions, because each is an HMAC of the
+ * provider's own account tuple under a secret key, so an equal value means the
+ * same key and the same account whichever producer derived it:
+ *
+ * - a trusted Vpass card token (`["vpass:card", token]`, ADR 0023);
+ * - a MoneyForward account identity
+ *   (`["moneyforward-me:moneyforward-account-v1-<64 hex>"]`, ADR 0027), which
+ *   the parser takes only from the unit key of a registered run.
+ *
+ * For those the entity is derived from the reference the importer's producer
+ * gives the same value. The importer-era entity ids are therefore unchanged,
+ * and a collector's source account for the same value maps to that same
+ * entity. A value the importer never registered (a new account, or a value
+ * derived under another key) gets an entity no importer reference names, so
+ * nothing is merged by it. Nothing else is shared: the collector's source
  * account is its own subject, with its own mapping revisions and manual
  * decisions.
  */
@@ -86,6 +103,15 @@ async function accountEntityId(
   ) {
     return identityKey("account", [
       await identityKey("sa", [input.sourceId, VPASS_TOKEN_ENTITY_PRODUCER, key]),
+    ]);
+  }
+  if (
+    input.sourceId === "moneyforward-me" &&
+    key.length === 1 &&
+    MONEYFORWARD_ACCOUNT_REFERENCE.test(key[0]!)
+  ) {
+    return identityKey("account", [
+      await identityKey("sa", [input.sourceId, MONEYFORWARD_IDENTITY_ENTITY_PRODUCER, key]),
     ]);
   }
   return identityKey("account", [ref]);

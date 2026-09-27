@@ -196,3 +196,13 @@ per-source bucket + importer 経由。`shared` にすると run は `packages/co
 書く。保存する HTML は現在中央へ送っているものと同じ bytes で、account ごとの
 unit と取得できた月の range を terminal に持つ。artifact と role の対応、deploy 順
 と rollback は `docs/collection.md` の該当節を参照。
+
+account unit の key は、旧 importer と同じ account/service tuple の HMAC
+`moneyforward-account-v1-<64 hex>` である（[ADR 0027](../adr/0027-moneyforward-collector-account-identity.md)）。
+Collector は保存前の account detail HTML から importer と同じ検証で tuple を読み、
+optional Worker secret `MONEYFORWARD_ACCOUNT_IDENTITY_KEY` で HMAC 化する。
+secret が無い、または tuple が欠落・検証失敗のときは run 全体が positional unit
+（`account-NN`）のまま保存され、parser は account を名指す artifact を
+`parser_rejected` にする。ログは固定 code（`identity`）だけを持ち、識別値と key は
+出力しない。旧 importer の key と同じ secret のときだけ identity は importer 時代と
+一致し、別 key では別 account になる（対応付けは追加しない）。

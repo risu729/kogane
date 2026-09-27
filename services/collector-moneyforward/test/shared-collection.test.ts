@@ -233,6 +233,8 @@ describe("G1-01 a failed put leaves no terminal", () => {
       status: "success",
       persistence: "incomplete",
       artifactCount: plan.artifacts.length,
+      // No key: the units stay positional (ADR 0027).
+      identity: "identity_key_absent",
       reasonCode: "object_put_failed",
       persistedCount: outcome.result.checkpoint.persistedArtifactKeys.length,
       pendingCount: outcome.result.checkpoint.pendingArtifactKeys.length,
