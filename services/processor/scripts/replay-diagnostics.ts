@@ -15,6 +15,7 @@ import { decimalText } from "../../../packages/parsers/src/parsers/util.ts";
 import {
   classifyParserRejection,
   replaySelectionSql,
+  throwSites,
   topActivityShape,
 } from "./parser-rejection.ts";
 const cli = new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url).pathname;
@@ -241,10 +242,7 @@ for (const row of result[0].results) {
     const category = classifyParserRejection(parser.name, error);
     const key = JSON.stringify([parser.name, category]);
     summary[key] = (summary[key] ?? 0) + 1;
-    const sites =
-      error instanceof Error
-        ? [...(error.stack ?? "").matchAll(/parsers\/([a-z0-9-]+\.ts:\d+:\d+)/g)].map((m) => m[1])
-        : [];
+    const sites = throwSites(error);
     console.log(
       JSON.stringify({
         artifact: row.id,

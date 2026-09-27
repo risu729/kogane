@@ -217,15 +217,16 @@ services/processor/node_modules/wrangler/bin/wrangler.js login`, or a
 mise exec -- bun services/processor/scripts/replay-diagnostics.ts sbi-shinsei-top-balances-and-activity 50
 ```
 
-The arguments are the parser, the most artifacts to replay (1 to 50, default
-
-1. and optionally one internal artifact id. An exact registered parser name is
-   filtered in SQL before the 50-row limit; any other text keeps the older
-   substring match. Selection takes the newest failed parse of each distinct raw
-   object that no parse of the same parser has published since, and the parent
-   run's status as the processor reads it (`observation_fetch_runs`), so the
-   replay meets the same precondition the lane did. The bytes are checked against
-   the stored SHA-256 and size before parsing.
+The arguments are the parser, the most artifacts to replay (from 1 to 50; one
+when omitted) and optionally one internal artifact id among the selected rows.
+An exact registered parser name is filtered in SQL before the 50-row limit; any
+other text keeps the older substring match, and text other than lower-case
+letters, digits and hyphens is refused before any SQL is built. Selection
+takes the newest failed parse of each distinct raw object that no parse of the
+same parser has published since, and the parent run's status as the processor
+reads it (`observation_fetch_runs`), so the replay meets the same precondition
+the lane did. The bytes are checked against the stored SHA-256 and size before
+parsing.
 
 What it prints is JSON lines, one or two per replayed artifact and a summary
 last:
@@ -244,8 +245,14 @@ representable in the currency`), `label` is the schema path the parser named
 with row positions folded to `[]`, and `field` is the schema field for
 `unknown field`, `missing field` and `expected a scalar`. A label that is not
 a plain schema path is refused whole (`label_unrecognized`), and a message no
-site produces is `unclassified`. Other parsers keep the coarser reasons the
-scripts printed before. The mapping and the proof that no value reaches it are
+site produces is `unclassified`. The key named by `unknown field` is the one
+thing the provider chooses, so a key with a digit or one made only of capital
+letters (a date, an account number, a hash, a currency code) is not printed
+(`unknown field (field name unrecognized)`); a key made only of letters is
+printed as it is, because it cannot be told apart from a schema key. Other
+parsers keep the coarser reasons the scripts printed before, with the same
+rule for the field they name. `sites` are read from the stack frames with
+the message cut out. The mapping and the proof that no value reaches it are
 `services/processor/scripts/parser-rejection.ts` and
 `services/processor/test/parser-rejection.test.ts`, which also runs the
 selection against the migrated CORE schema.

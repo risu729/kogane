@@ -13,6 +13,7 @@ import {
   classifyParserRejection,
   classifySbiShinseiMessage,
   replaySelectionSql,
+  throwSites,
   topActivityShape,
   type RejectionCategory,
 } from "../scripts/parser-rejection.ts";
@@ -59,7 +60,8 @@ function refusal(
   // No value reaches a category: not the sentinels, not a digit of an
   // amount or date. (A reason that dropped a currency code is proved by the
   // cases' exact expectations.)
-  expect(JSON.stringify(category)).not.toMatch(/SENTINEL|\d/u);
+  // `UTF-8` is the one fixed reason text with a digit.
+  expect(JSON.stringify(category).replaceAll("UTF-8", "")).not.toMatch(/SENTINEL|\d/u);
   return category;
 }
 
@@ -417,6 +419,16 @@ describe("SBI Shinsei top balances and activity: one closed category per throw s
     expect(
       refusal(sbiShinseiTopBalancesAndActivity, TOP, new TextEncoder().encode("{SENTINEL")),
     ).toEqual({ reason: "invalid JSON", label: T });
+    // The shared UTF-8 decoder (parsers/util.ts) runs before the parser's own
+    // checks, so its refusal is a site of every SBI Shinsei parser.
+    for (const [parser, dataset] of [
+      [sbiShinseiTopBalancesAndActivity, TOP],
+      [sbiShinseiYenDepositAccount, "yen-deposit-account"],
+      [sbiShinseiExchangeRate, "exchange-rate"],
+    ] as const)
+      expect(refusal(parser, dataset, new Uint8Array([0x7b, 0xff, 0x7d]))).toEqual({
+        reason: "artifact bytes are not valid UTF-8",
+      });
   });
 });
 
@@ -498,6 +510,8 @@ describe("classifier closure", () => {
     "sbi-shinsei-top-balances-and-activity.ts",
     "sbi-shinsei-yen-deposit-account.ts",
     "sbi-shinsei-exchange-rate.ts",
+    // The shared helpers they import; its one throw is `decodeUtf8`.
+    "util.ts",
   ].map((name) =>
     readFileSync(new URL(`../../../packages/parsers/src/parsers/${name}`, import.meta.url), "utf8"),
   );
@@ -505,8 +519,9 @@ describe("classifier closure", () => {
     [...source.matchAll(/throw new Error\(\s*(`[^`]*`|"[^"]*")/gu)].map((match) => match[1]!),
   );
   test("the parser sources have the throw sites the PR table lists", () => {
-    // 19 in common, 8 in the activity parser, 2 in yen deposit, 5 in the board.
-    expect(templates).toHaveLength(34);
+    // 19 in common, 8 in the activity parser, 2 in yen deposit, 5 in the
+    // board, 1 in the shared UTF-8 decoder.
+    expect(templates).toHaveLength(35);
   });
   test("each throw site maps to a named category, never unclassified", () => {
     for (const template of templates) {
@@ -532,6 +547,23 @@ describe("classifier closure", () => {
       reason: "unknown field (field name unrecognized)",
       label: "abc",
     });
+    // A provider-chosen key that could carry a value never becomes a field or
+    // a label segment: a digit (date, account number, hash) or a currency code.
+    for (const key of ["USD", "a20260901", "acct1234567", `k${"0f".repeat(32)}`])
+      expect(classifySbiShinseiMessage(`${T}: unknown field ${key}`)).toEqual({
+        reason: "unknown field (field name unrecognized)",
+        label: T,
+      });
+    for (const label of [`${T}.USD`, "json:$.a.b1234567", "json:$.rows[1234567].x", "2026-09-01"])
+      expect(classifySbiShinseiMessage(`${label}: invalid date`)).toEqual({
+        reason: "label_unrecognized",
+      });
+    expect(
+      classifyParserRejection(
+        "sony-bank-gross-balance",
+        new Error("12,345 JPY: unknown field acct20260901"),
+      ),
+    ).toEqual({ reason: "unknown field" });
     expect(
       classifyParserRejection("sbi-shinsei-top-balances-and-activity", new TypeError("x")),
     ).toEqual({
@@ -547,6 +579,25 @@ describe("classifier closure", () => {
       reason: "unknown field",
       field: "y",
     });
+  });
+});
+
+describe("throw sites", () => {
+  test("stack frames only: a frame-shaped provider key in the message is not printed", () => {
+    const root = fixture(TOP);
+    root["parsers/k.ts:12345:678"] = 1;
+    let thrown: unknown;
+    try {
+      sbiShinseiTopBalancesAndActivity.parse(encode(root), artifact(TOP));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const sites = throwSites(thrown);
+    expect(sites.length).toBeGreaterThan(0);
+    for (const site of sites) expect(site).toMatch(/^sbi-shinsei-[a-z-]+\.ts:\d+:\d+$/u);
+    expect(sites.join()).not.toContain("12345");
+    expect(throwSites("SENTINEL")).toEqual([]);
   });
 });
 

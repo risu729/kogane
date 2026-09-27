@@ -26,7 +26,13 @@ export interface RejectionCategory {
   field?: string;
 }
 
-/** Messages the SBI Shinsei parsers throw with no label. */
+/**
+ * Messages the SBI Shinsei parsers throw with no label. `UTF8_REFUSAL` is the
+ * shared `decodeUtf8` of `packages/parsers/src/parsers/util.ts`, which every
+ * SBI Shinsei parser calls before its own checks.
+ */
+const UTF8_REFUSAL =
+  "artifact bytes are not valid UTF-8; the artifact's encoding is not recorded, so no decoder can be selected";
 const STANDALONE = [
   "SBI Shinsei observations require a successful failure-free parent run",
   "provider timestamp must be a string",
@@ -68,29 +74,42 @@ const VALUE_SUFFIXED: readonly (readonly [RegExp, string])[] = [
   [/^the board lists \S+ twice$/u, "the board lists a currency twice"],
 ];
 
-const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+/**
+ * A schema key: letters and underscores. An `unknown field` key is chosen by
+ * the provider, not the parser, so a key that could carry a value is refused:
+ * any digit (a date, an account number, a hash) or an all-capital word (a
+ * currency code). No key any SBI Shinsei parser accepts has either.
+ */
+const SCHEMA_KEY = /^[A-Za-z][A-Za-z_]{0,63}$/u;
+function isSchemaKey(name: string): boolean {
+  return SCHEMA_KEY.test(name) && !/^[A-Z]+$/u.test(name);
+}
 /**
  * A dataset name or a `json:$.` locator, then dot-separated schema keys and
  * folded positions. Anything else (a label that would carry text the parser
  * did not build from schema) is refused as a whole.
  */
-const SAFE_LABEL = /^(?:json:\$|[a-z][a-z0-9-]{0,63})(?:\.[A-Za-z][A-Za-z0-9_]{0,63}|\[\]){0,24}$/u;
+const SAFE_LABEL = /^(?:json:\$|[a-z][a-z-]{0,63})((?:\.[A-Za-z][A-Za-z_]{0,63}|\[\]){0,24})$/u;
 
 function foldLabel(label: string): string | undefined {
   const folded = label.replace(/\[\d{1,6}\]/gu, "[]");
-  return SAFE_LABEL.test(folded) ? folded : undefined;
+  const keys = SAFE_LABEL.exec(folded)?.[1];
+  if (keys === undefined) return undefined;
+  for (const key of keys.split(/\.|\[\]/u)) if (key !== "" && !isSchemaKey(key)) return undefined;
+  return folded;
 }
 
 function labelled(reason: string, rawLabel: string, field?: string): RejectionCategory {
   const label = foldLabel(rawLabel);
   if (label === undefined) return { reason: "label_unrecognized" };
-  if (field !== undefined && !FIELD_NAME.test(field))
+  if (field !== undefined && !isSchemaKey(field))
     return { reason: `${reason} (field name unrecognized)`, label };
   return field === undefined ? { reason, label } : { reason, label, field };
 }
 
 /** The category of one SBI Shinsei parser message. */
 export function classifySbiShinseiMessage(message: string): RejectionCategory {
+  if (message === UTF8_REFUSAL) return { reason: "artifact bytes are not valid UTF-8" };
   for (const text of STANDALONE) if (message === text) return { reason: text };
   const separator = message.indexOf(": ");
   if (separator <= 0) return { reason: "unclassified" };
@@ -128,9 +147,21 @@ export function classifyParserRejection(parserName: string, error: unknown): Rej
     return classifySbiShinseiMessage(error.message);
   const reason = legacySafeReason(error.message);
   const field = error.message.match(
-    /(?:unknown|missing) field ([A-Za-z][A-Za-z0-9_]{0,60})$/u,
+    /(?:unknown|missing) field ([A-Za-z][A-Za-z0-9_]{0,63})$/u,
   )?.[1];
-  return field === undefined ? { reason } : { reason, field };
+  return field === undefined || !isSchemaKey(field) ? { reason } : { reason, field };
+}
+
+/**
+ * Parser source positions (`file.ts:line:column`) from an error's stack
+ * frames. The message is cut out first: a provider key in an `unknown field`
+ * message could itself be shaped like a frame and would otherwise be printed.
+ */
+export function throwSites(error: unknown): string[] {
+  if (!(error instanceof Error)) return [];
+  const stack = error.stack ?? "";
+  const frames = error.message === "" ? stack : stack.replace(error.message, "");
+  return [...frames.matchAll(/parsers\/([a-z0-9-]+\.ts:\d+:\d+)/gu)].map((match) => match[1]!);
 }
 
 /** The coarse reasons `diagnose.ts` printed before throw sites were closed. */

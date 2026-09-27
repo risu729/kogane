@@ -958,10 +958,12 @@ limit, and the parser's strict shapes are unchanged.
 keeps only `parser_rejected` and no `parse_issues` row. Reading the code
 narrows it: the collector validator admits exactly the key sets the parser
 demands, and the sibling yen-deposit capture of the same runs passes the
-shared root, header and run checks, so the refusal is one of the parser's
-semantic checks on the overview or activity block (timestamp format, decimal
-and currency-scale checks, dates and the activity window, one debit or credit
-per row, duplicate identities, a wrapper `errorInfo` that is not an explicit
+shared root, header and run checks, so the refusal is one of the checks the
+parser makes beyond key sets and scalar types on the overview or activity
+block (timestamp format, row-count bounds the collector does not apply,
+non-empty identifiers, currency format, decimal and currency-scale checks,
+unsigned side amounts, dates and the activity window, one debit or credit per
+row, duplicate identities, a wrapper `errorInfo` that is not an explicit
 success). Which one is found by replaying the stored captures with
 `replay-diagnostics.ts` ([operations: replaying a parser
 rejection](../operations.md#replaying-a-parser-rejection)), which prints a
