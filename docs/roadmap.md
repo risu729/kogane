@@ -239,7 +239,20 @@ Concrete limits in the current code:
   month keeps the months before it as a `partial` unit with a closed stop
   code ([ADR 0005's amendment](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months));
   those months are catalogued but not parsed, and no rule yet makes a
-  stopped connection's months eligible.
+  stopped connection's months eligible. A MyJCB month whose ledger shows rows
+  under the observed third header (`お支払日 / 今後のお支払い金額`) is kept
+  unread (`scheduled_unrecognized`): the connection goes on, but its run is
+  `partial` and not parsed, because what those rows mean is unconfirmed
+  ([ADR 0005's amendment (b)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page)).
+  The MyJCB runs of 2026-09-25 and 09-26 stopped at position 1 on its ledger
+  header (`credit-ledger-headers`) and kept nothing; the live position-1 page
+  was the confirmed form on 09-27, so its shape varies by time or session, and
+  the cause is not known because the page was not stored. A later stop on a
+  page's own shape now stores that page. The site's 「通信エラーが発生しました」
+  page, served after many consecutive fetches, is not recognised; after the
+  first month it would be kept as a month with no ledger. MyJCB export links
+  are recorded, not fetched, because the shared bucket refuses the export
+  datasets.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.

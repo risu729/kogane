@@ -216,6 +216,39 @@ had, with 1.1.0 ids, so every `failed` count there needs a look.
 `packages/parsers/test/vpass-page-identity.test.ts` pins the unchanged
 first-page ids and the new later-page ids for both families.
 
+## MyJCB export links and the third ledger header (collector, no parser release)
+
+2026-09-27. A structure-only survey of one connection's live credit pages
+(counts, header labels and link shapes, no values) found three things the
+collector read wrongly or not at all
+([ADR 0005's amendment (b)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page),
+[source note](sources/myjcb.md)).
+
+- Confirmed months link their PDF, CSV and OFX exports with relative hrefs.
+  The collector resolved them against the origin alone and never matched one,
+  so every stored run recorded no export; "the surveyed connection offers no
+  export links" in the entry below was that bug. The collector now resolves
+  links against the detail page's URL and records the offered kinds in the
+  manifest. It does not fetch them: the shared bucket refuses the export
+  datasets.
+- The oldest listed month shows a third ledger header,
+  `ご利用日 / ご利用先など / お支払日 / 今後のお支払い金額`, over an empty
+  ledger. With rows it would have stopped the connection. A month whose
+  ledger has rows under it is now kept unread (`scheduled_unrecognized`): its
+  page is stored as `unknown` evidence, no ledger is derived, and the next
+  month is read. Its run is `partial` and not parsed.
+- A detail page fetched without the credit menu first is a different page;
+  the collector already reads the menu first. A 「通信エラーが発生しました」
+  page followed many consecutive fetches; the collector does not recognise
+  it (a limit).
+
+No parser changes and nothing stored is rewritten. The position-1 stops of
+2026-09-25 and 09-26 (`credit-ledger-headers`, no artifact kept) remain
+unexplained; a later stop on a page's own shape stores the page. Tests:
+`services/collector-myjcb/test/parsers.test.ts`,
+`credit-statement-state.test.ts`, `shared-collection.test.ts`, and
+`services/processor/test/myjcb-shared-r2.test.ts`.
+
 ## MyJCB statements keep their identity when their position moves (collector, no parser release)
 
 The MyJCB collector recorded every credit month the past-months API does not

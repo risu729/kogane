@@ -83,6 +83,53 @@ describe("MyJCB synthetic parsers", () => {
     expect(discoverCreditExports(html, 10)).toEqual(["csv", "pdf", "ofx"]);
   });
 
+  test("resolves export links against the detail page's own URL (ADR 0005's second amendment)", () => {
+    const links = (...hrefs: readonly string[]) =>
+      `<html><body>${hrefs.map((href) => `<a href="${href}">export</a>`).join("")}</body></html>`;
+    // Relative, as confirmed months link them (observed 2026-09-27).
+    expect(
+      discoverCreditExports(
+        links(
+          "detailDbPdf.html?output=pdf&amp;detailMonth=1",
+          "detail.html?output=csv&amp;detailMonth=1",
+          "detail.html?output=money&amp;detailMonth=1",
+        ),
+        1,
+      ),
+    ).toEqual(["pdf", "csv", "ofx"]);
+    // `./` and root-relative forms name the same URLs.
+    expect(
+      discoverCreditExports(
+        links(
+          "./detail.html?detailMonth=2&amp;output=csv",
+          "/iss-pc/member/details_inquiry/detailDbPdf.html?detailMonth=2&amp;output=pdf",
+        ),
+        2,
+      ),
+    ).toEqual(["csv", "pdf"]);
+    // Absolute on the MyJCB origin still works; another origin does not.
+    expect(
+      discoverCreditExports(
+        links(
+          "https://my.jcb.co.jp/iss-pc/member/details_inquiry/detail.html?detailMonth=2&amp;output=money",
+          "https://example.invalid/iss-pc/member/details_inquiry/detail.html?detailMonth=2&amp;output=csv",
+        ),
+        2,
+      ),
+    ).toEqual(["ofx"]);
+    // Another month's link, a link that names no month (not even at month 0),
+    // a link one directory away, and the notice PDF are not this month's exports.
+    const others = links(
+      "detail.html?output=csv&amp;detailMonth=2",
+      "detail.html?output=csv",
+      "../detail.html?output=csv&amp;detailMonth=1",
+      "detailNewspdf.html?detailMonth=1",
+      "detailDbPdf.html?output=pdf&amp;detailMonth=01x",
+    );
+    expect(discoverCreditExports(others, 1)).toEqual([]);
+    expect(discoverCreditExports(others, 0)).toEqual([]);
+  });
+
   test("parses confirmed and mutable unconfirmed ledger components", () => {
     const confirmed = parseCreditLedger(fixture("credit-detail.html"), "confirmed");
     expect(confirmed?.rows).toHaveLength(1);

@@ -15,14 +15,19 @@ import {
   parsePastMonthAvailability,
   parseStatementPeriods,
   redactedStatementHtml,
+  scheduledLedgerRowCount,
 } from "./parsers";
 import { allowedUrl, MYJCB_ORIGIN } from "./policy";
 import type {
   ConnectionStopCode,
   ConnectionSummary,
+  CreditExportKind,
+  ExportOffer,
   MyJcbCredential,
   RawArtifact,
   SessionCredential,
+  UnreadMonth,
+  UnreadMonthCode,
 } from "./types";
 import { HumanRequiredError, StopConditionError, type StopConditionCode } from "./types";
 
@@ -66,6 +71,16 @@ const STOP_CODE_BY_CONDITION: Readonly<Record<StopConditionCode, ConnectionStopC
   "collect-route": "no_route",
 };
 
+/**
+ * The stops a statement page causes by its own shape: the page at the stop is
+ * kept as evidence (ADR 0005's second amendment).
+ */
+const STOP_PAGE_CODES: ReadonlySet<ConnectionStopCode> = new Set([
+  "credit_statement_state",
+  "credit_statement_period",
+  "ledger_parse",
+]);
+
 /** The closed stop code for whatever stopped a connection. */
 export function connectionStopCode(error: unknown): ConnectionStopCode {
   if (error instanceof HumanRequiredError) return "human_required";
@@ -94,7 +109,8 @@ export async function collectConnection(options: {
     const client = new MyJcbReadClient(login.jar, login.userAgent);
     const artifacts: RawArtifact[] = [];
     let periodCount = 0;
-    let withheldMonthCount = 0;
+    let unreadMonths: readonly UnreadMonth[] = [];
+    let exportOffers: readonly ExportOffer[] = [];
     let stop: CreditStop | undefined;
 
     const creditLinkId = extractCreditMenuLinkId(login.mypageHtml);
@@ -105,7 +121,8 @@ export async function collectConnection(options: {
       );
       artifacts.push(...credit.artifacts);
       periodCount += credit.periodCount;
-      withheldMonthCount += credit.withheldMonthCount;
+      unreadMonths = credit.unreadMonths;
+      exportOffers = credit.exportOffers;
       stop = credit.stop;
     }
     // A connection stops where its credit months stopped: nothing further is
@@ -148,10 +165,10 @@ export async function collectConnection(options: {
       summary: {
         connectionId: options.credential.connectionId,
         bootstrapMode: options.credential.bootstrapMode,
-        // A month whose rows were withheld, or a stop that left months
+        // A month whose rows are kept unread, or a stop that left months
         // unread, is missing from what this connection set out to collect,
         // so it is `partial`, never `success` (ADR 0026, INV05).
-        status: withheldMonthCount === 0 && stop === undefined ? "success" : "partial",
+        status: unreadMonths.length === 0 && stop === undefined ? "success" : "partial",
         cardCount: Math.max(cards.length, 1),
         periodCount,
         artifactCount: artifacts.length,
@@ -162,6 +179,8 @@ export async function collectConnection(options: {
               stopPosition: stop.position,
               capturedMonthCount: stop.capturedMonthCount,
             }),
+        ...(unreadMonths.length === 0 ? {} : { unreadMonths }),
+        ...(exportOffers.length === 0 ? {} : { exportOffers }),
       },
       artifacts,
     };
@@ -252,26 +271,51 @@ async function collectDebit(client: MyJcbReadClient): Promise<{
 /** The reads the credit collection makes; the Worker passes a `MyJcbReadClient`. */
 export type CreditReadClient = Pick<MyJcbReadClient, "get" | "postCreditPastJson">;
 
+/**
+ * What becomes of the exports a confirmed month's page links to. `record`
+ * (the Worker's mode) records the kinds offered and fetches nothing: the
+ * shared bucket refuses the export datasets (`artifact_dataset_unobserved`),
+ * so a fetched export would fail the whole run's plan. `fetch` reads and
+ * validates each one as part of its month; no caller passes it until those
+ * datasets are accepted end to end (ADR 0005's second amendment).
+ */
+export type CreditExportMode = "record" | "fetch";
+
+/**
+ * The credit months of one connection. The credit menu (`detailMenu.html`)
+ * is always read first, in the same session and before any detail page: a
+ * detail page fetched without it was observed to be a different page (h1
+ * `カードご利用明細一覧`, no ledger; docs/sources/myjcb.md). It is read once;
+ * the months follow it in ascending order.
+ */
 export async function collectCredit(
   client: CreditReadClient,
   linkId: string,
+  options: { readonly exports?: CreditExportMode } = {},
 ): Promise<{
   readonly periodCount: number;
   readonly artifacts: RawArtifact[];
   /**
-   * Months whose page shows ledger rows but does not state its statement
-   * state: the page is kept as `unknown` evidence and no ledger is derived,
-   * so its rows reach no parser and the connection is not whole (ADR 0026).
+   * Months whose page is kept but whose rows no parser reads, with the
+   * closed reason: a page with rows that does not state its statement state
+   * (`rows_unstated`, kept as `unknown` evidence without a ledger), or a
+   * ledger under the observed third header (`scheduled_unrecognized`). The
+   * connection is then not whole (ADR 0026).
    */
-  readonly withheldMonthCount: number;
+  readonly unreadMonths: readonly UnreadMonth[];
+  /** The export kinds each month's page offered for its own month. */
+  readonly exportOffers: readonly ExportOffer[];
   /**
    * Set when a month's fetch, statement state, period, ledger or export
-   * failed: the months before it are kept, that month and every later one
-   * are not (ADR 0005's amendment). A failure before the month loop (menu,
-   * first detail, past months) is thrown instead and keeps nothing.
+   * failed: the months before it are kept whole, that month keeps only its
+   * redacted page when the page's own shape (state, period, ledger) stopped
+   * it, and no later month is read (ADR 0005's
+   * amendments). A failure before the month loop (menu, first detail, past
+   * months) is thrown instead and keeps nothing.
    */
   readonly stop?: CreditStop;
 }> {
+  const exportMode = options.exports ?? "record";
   const { menuHtml, initialMonths } = await collectionStage("collect-credit-menu", async () => {
     const menu = await client.get("credit-menu", new URLSearchParams({ link_id: linkId }));
     const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
@@ -327,57 +371,83 @@ export async function collectCredit(
     ]),
   ].sort((left, right) => left - right);
 
-  let withheldMonthCount = 0;
+  const unreadMonths: UnreadMonth[] = [];
+  const exportOffers: ExportOffer[] = [];
   let capturedMonthCount = 0;
   for (const detailMonth of availableMonths) {
     // A month is kept whole or not at all: its page, ledger and exports join
     // the connection's artifacts only once every one of them was read.
     const monthArtifacts: RawArtifact[] = [];
-    let withheld = false;
+    const settlementYM = pastMonths.find(
+      (month) => month.detailMonth === detailMonth,
+    )?.settlementYM;
+    // The decoded page, kept so that a stop at this month can store it.
+    let pageHtml: string | undefined;
+    let unread: UnreadMonthCode | undefined;
+    let offered: readonly CreditExportKind[] = [];
     try {
       const detail = await collectionStage(
         "collect-credit-month-fetch",
         async () => detailCache.get(detailMonth) ?? (await fetchCreditDetail(client, detailMonth)),
       );
-      const { html, exports, ledger, state, period } = await collectionStage(
-        "collect-credit-month-parse",
-        async () => {
-          const html = decodeMyJcbHtml(detail.body, detail.contentType);
-          const exports = discoverCreditExports(html, detailMonth);
-          const hasLedgerContainer = /\bdetail-list-01\b/u.test(html);
-          const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u.test(
-            html,
-          );
-          if (!hasLedgerContainer && hasEmptyMarker) {
-            throw new Error("MyJCB credit detail exposed an inconsistent empty state");
-          }
-          // The page states whether it is a closed statement; export links are
-          // not that statement (the surveyed connection offers none at all).
-          const state = creditStatementState(html, detailMonth);
-          if (exports.length > 0 && state !== "confirmed") {
-            // Exports are recorded as confirmed statements, so a page that
-            // offers them must itself state that it is one.
-            throw new StopConditionError(
-              "MyJCB offered statement exports on a page that is not a confirmed statement",
-              "credit-statement-state",
-            );
-          }
-          const ledger = state === "unknown" ? undefined : parseCreditLedger(html, state);
-          if (detailMonth === 0 && !ledger) {
-            throw new Error("MyJCB unconfirmed detail page omitted .detail-list-01");
-          }
-          // A statement keeps one period while its position moves.
-          const period = creditStatementPeriod({
-            html,
-            detailMonth,
-            state,
-            settlementYM: pastMonths.find((month) => month.detailMonth === detailMonth)
-              ?.settlementYM,
-          });
-          return { html, exports, ledger, state, period };
-        },
+      const html = await collectionStage("collect-credit-month-parse", async () =>
+        decodeMyJcbHtml(detail.body, detail.contentType),
       );
-      withheld = state === "unknown" && creditPageRowCount(html) > 0;
+      pageHtml = html;
+      const month = await collectionStage("collect-credit-month-parse", async () => {
+        const exports = discoverCreditExports(html, detailMonth);
+        const hasLedgerContainer = /\bdetail-list-01\b/u.test(html);
+        const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u.test(html);
+        if (!hasLedgerContainer && hasEmptyMarker) {
+          throw new Error("MyJCB credit detail exposed an inconsistent empty state");
+        }
+        // The observed third ledger header (ADR 0005's second amendment):
+        // its rows are not read as any statement. The page is kept as
+        // `unknown` evidence without a ledger, the month is captured unread,
+        // and the connection goes on to the next month. An empty ledger under
+        // it withholds nothing and is read as before.
+        if ((scheduledLedgerRowCount(html) ?? 0) > 0) {
+          const state = "unknown" as const;
+          const period = creditStatementPeriod({ html, detailMonth, state, settlementYM });
+          return {
+            exports,
+            ledger: undefined,
+            state,
+            period,
+            unread: "scheduled_unrecognized" as const,
+          };
+        }
+        // The page states whether it is a closed statement; export links are
+        // not that statement.
+        const state = creditStatementState(html, detailMonth);
+        if (exports.length > 0 && state !== "confirmed") {
+          // Exports belong to confirmed statements, so a page that offers
+          // them must itself state that it is one.
+          throw new StopConditionError(
+            "MyJCB offered statement exports on a page that is not a confirmed statement",
+            "credit-statement-state",
+          );
+        }
+        const ledger = state === "unknown" ? undefined : parseCreditLedger(html, state);
+        if (detailMonth === 0 && !ledger) {
+          throw new Error("MyJCB unconfirmed detail page omitted .detail-list-01");
+        }
+        // A statement keeps one period while its position moves.
+        const period = creditStatementPeriod({ html, detailMonth, state, settlementYM });
+        return {
+          exports,
+          ledger,
+          state,
+          period,
+          unread:
+            state === "unknown" && creditPageRowCount(html) > 0
+              ? ("rows_unstated" as const)
+              : undefined,
+        };
+      });
+      const { ledger, state, period } = month;
+      unread = month.unread;
+      offered = month.exports;
       monthArtifacts.push({
         dataset: "credit-detail",
         filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,
@@ -396,16 +466,38 @@ export async function collectCredit(
           period,
         });
       }
-      for (const exportKind of exports) {
-        monthArtifacts.push(
-          await collectionStage(
-            "collect-credit-export",
-            async () => await fetchCreditExport(client, detailMonth, period, exportKind),
-          ),
-        );
+      // An unread month's exports are recorded, never fetched: they would be
+      // read as the confirmed statement the month is not read as.
+      if (exportMode === "fetch" && unread === undefined) {
+        for (const exportKind of offered) {
+          monthArtifacts.push(
+            await collectionStage(
+              "collect-credit-export",
+              async () => await fetchCreditExport(client, detailMonth, period, exportKind),
+            ),
+          );
+        }
       }
     } catch (error) {
       const code = connectionStopCode(error);
+      // A statement page that stopped the connection by its own shape (its
+      // state, its month or its ledger) is kept, redacted like every page,
+      // as `unknown` evidence with no ledger and no export, so the stop can
+      // be diagnosed from the stored run (ADR 0005's second amendment). It is
+      // not a captured month: `capturedMonthCount` stays the months before
+      // it, and `stopPosition` names it. A page that could not be read as a
+      // statement page at all (`month_parse`) is not kept.
+      const keepStopPage = pageHtml !== undefined && STOP_PAGE_CODES.has(code);
+      if (keepStopPage && pageHtml !== undefined) {
+        artifacts.push({
+          dataset: "credit-detail",
+          filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,
+          body: redactedStatementHtml(pageHtml),
+          mediaType: "text/html; charset=utf-8",
+          statementState: "unknown",
+          period: settlementYM ?? `detailMonth-${detailMonth}`,
+        });
+      }
       console.warn(
         JSON.stringify({
           event: "myjcb-credit-month-failed",
@@ -413,21 +505,36 @@ export async function collectCredit(
           code: error instanceof StopConditionError ? error.code : "collector-operation-failed",
           stopCode: code,
           capturedMonthCount,
+          stopPageKept: keepStopPage,
         }),
       );
       // The connection stops at this month and keeps the months before it.
       return {
         periodCount: availableMonths.length,
         artifacts,
-        withheldMonthCount,
+        unreadMonths,
+        exportOffers,
         stop: { code, position: detailMonth, capturedMonthCount },
       };
     }
     artifacts.push(...monthArtifacts);
-    if (withheld) withheldMonthCount += 1;
+    if (unread !== undefined) {
+      unreadMonths.push({ position: detailMonth, code: unread });
+      if (unread === "scheduled_unrecognized") {
+        // Counts and codes only: the page's text never reaches the log.
+        console.warn(
+          JSON.stringify({
+            event: "myjcb-credit-month-unread",
+            detailMonth,
+            code: unread,
+          }),
+        );
+      }
+    }
+    if (offered.length > 0) exportOffers.push({ position: detailMonth, kinds: [...offered] });
     capturedMonthCount += 1;
   }
-  return { periodCount: availableMonths.length, artifacts, withheldMonthCount };
+  return { periodCount: availableMonths.length, artifacts, unreadMonths, exportOffers };
 }
 
 async function fetchCreditDetail(

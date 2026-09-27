@@ -237,3 +237,25 @@ Limit: no fixture in this repository shows whether production finalized
 statement pages carry `allCnt`. If they do not, every such month is
 `stated_total_unverified` and no Vpass run registers `success`; the logged
 code shows it after deploy.
+
+## Amendment: MyJCB unread months and export offers (2026-09-27)
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-27
+- Carried by: [ADR 0005's amendment (b)](0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page),
+  `connectionErrorCode` in `services/collector-myjcb/src/shared-collection.ts`
+
+Two sentences of the MyJCB section above change.
+
+- "and every export the page offers": export links are now discovered (they
+  never were, through a link-resolution bug) and recorded as offers in the
+  manifest, not fetched, because the shared bucket refuses the export
+  datasets. A MyJCB connection's `complete` covers each month's page and the
+  ledger derived from it; an offered export is recorded, and does not make
+  the unit `partial`.
+- "whose unit is `partial` with `collector_partial`": a month whose rows are
+  kept unread is now named in the manifest (`unreadMonths`, codes
+  `rows_unstated` and `scheduled_unrecognized`). A connection whose unread
+  months are all under the observed third ledger header carries
+  `scheduled_unrecognized`; any other unread month keeps `collector_partial`.
+  The unit is `partial` either way, so eligibility is unchanged.
