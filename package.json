@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "devDependencies": {
-    "dependency-cruiser": "18.2.0",
+    "dependency-cruiser": "18.4.0",
     "knip": "6.38.0",
     "typescript": "5.9.3",
     "vitest": "4.1.11",
