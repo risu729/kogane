@@ -33,7 +33,7 @@ function healthy(overrides: Partial<CruiseResult["summary"]> = {}): CruiseResult
       violations: [],
       environment: {
         transpilersFound: [
-          { name: "typescript", available: true, currentVersion: "typescript@5.9.3" },
+          { name: "typescript", available: true, currentVersion: "typescript@6.0.3" },
         ],
       },
       ...overrides,
