@@ -764,6 +764,21 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "754decfb005229b96c6cc95770dc68c361ad335ce5b96ec5b326f60c756f4dd9"
+    },
+    {
+      "file": "0057_vpass_card_token_v2.sql",
+      "statementCount": 12,
+      "insertStatements": [
+        {
+          "table": "identity_vpass_bindings_0057_copy",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "identity_vpass_bindings",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "9fb9e6d950bcdad9ffb72b44a1d2c0b89a6d2c68d459dd5727f7958dd9b4f4b7"
     }
   ],
   "tables": [
@@ -7234,7 +7249,7 @@
         "identity_vpass_bindings_no_delete"
       ],
       "appendOnly": true,
-      "sqlSha256": "799c2219dd995924"
+      "sqlSha256": "33112c269ecd499f"
     },
     {
       "name": "ingest_client_producers",
@@ -13554,7 +13569,7 @@
         "binding_artifact_id",
         "card_token"
       ],
-      "sqlSha256": "c96fed249670a526"
+      "sqlSha256": "7d814d910f132061"
     }
   ],
   "triggers": [
@@ -17165,8 +17180,9 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql",
       "0051_card_purchase_review_commands.sql",
-      "0053_price_promotion.sql"
+      "0053_price_promotion.sql",
+      "0057_vpass_card_token_v2.sql"
     ],
-    "schemaSha256": "d65145c8d90bcaac99e40f66cfdbabe242eb4ce8fa357ac087aff7d942c0f759"
+    "schemaSha256": "5cfd3f6b2a4c0b971ba92d2bec75819fe24d100fd85bbe6cfd6a32faf05c6ff2"
   }
 }

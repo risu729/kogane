@@ -1,0 +1,227 @@
+# ADR 0029: Data classification for central storage; Vpass and MoneyForward identities derived without a secret
+
+- Status: proposed
+- Date: 2026-09-27
+- Decided by: the owner (the only user of this deployment), 2026-09-27
+- Carried by:
+  `services/collector-vpass/src/card-binding.ts`,
+  `services/collector-moneyforward/src/account-identity.ts`,
+  `packages/storage-d1/migrations/core/0057_vpass_card_token_v2.sql`,
+  `packages/storage-d1/src/core/identity-store.ts` (`accountEntityId`),
+  `packages/identity/src/other.ts`,
+  `packages/parsers/src/parsers/moneyforward.ts`,
+  `packages/read-model/src/sql.ts`,
+  [Vpass card binding](../vpass-card-identity.md),
+  [identity operations](../identity-operations.md),
+  [collection](../collection.md), [roadmap](../roadmap.md)
+- Amends: [ADR 0023](0023-vpass-collector-card-binding.md) and
+  [ADR 0027](0027-moneyforward-collector-account-identity.md) (each carries a
+  dated amendment note)
+- Related: the one-time crosswalk that joins each account's v1 and v2
+  identity is a separate, later decision and is not made here
+
+## Context
+
+**The policy line the HMACs rested on.** The Vpass card binding
+([ADR 0023](0023-vpass-collector-card-binding.md)) and the MoneyForward
+account identity ([ADR 0027](0027-moneyforward-collector-account-identity.md))
+are each an HMAC-SHA-256 of a provider-local tuple, under the retired
+importer's `ORIGIN_FINGERPRINT_KEY` (key version `collector-r2-v1`): the Vpass
+card reference `externalId`, `globalid`, `cardCode`, and the MoneyForward
+`account[id_hash]`, `service[id]`. The only reason given for keying them was a
+line in `docs/vpass-card-identity.md`: "Raw keys, names and provider
+identifiers are not logged or copied into central storage." ADR 0023 and ADR
+0027 therefore had the collectors read a Worker secret
+(`VPASS_CARD_BINDING_KEY`, `MONEYFORWARD_ACCOUNT_IDENTITY_KEY`) that had to
+hold the importer's key, and fail closed without it.
+
+**The key is lost.** The importer that held the key is retired (#203, #206)
+and the owner does not hold its value. Under the old line the collectors can
+therefore never produce the importer's values, and the roadmap carried two
+open "owner sets the key" items that cannot be completed as written.
+
+**What CORE already stores.** The old line was never the rule elsewhere.
+SBI Shinsei observations carry the provider account number in their source
+account (`sbi-shinsei:<accountNo>`,
+`packages/parsers/src/parsers/sbi-shinsei-common.ts`), and Mizuho
+observations carry branch and account number
+(`mizuho-bank:ordinary:<branch>:<account>`, accepted by
+`packages/identity/src/other.ts`). Both are provider-local identifiers held
+raw in CORE, and both were reviewed and merged. Stored provider pages in R2
+(`kogane-raw-evidence`) hold provider identifiers under the existing
+redaction templates.
+
+**The deployment has one owner.** Kogane holds one person's evidence. There
+is one perimeter: the processor generates reports against
+`perimeter:all-visible-evidence` (`services/processor/src/worker.ts`) and no
+other perimeter exists in production. No CORE or READ table has a tenant or
+owner column (neither schema ledger names one). Cloudflare Access subjects
+(`services/app/src/auth.ts`) distinguish the human operator from agents and
+service tokens, never one owner from another. In a single-owner store a
+provider-local account identifier cannot be confused with anyone else's
+account, and it grants no access: it is not a credential.
+
+## Options considered
+
+1. **Keep the HMAC under a new key.** The owner creates a new secret, sets it
+   on both collectors, and every value is a new key version. This keeps a
+   secret whose only purpose is to hide identifiers the store may hold, adds
+   an owner action and a rotation problem (a lost key again strands every
+   identity), and still cannot reproduce the importer's values. Rejected.
+2. **Store the raw identifiers.** Allowed by the classification below and the
+   simplest identity, but the owner wants the field shapes confirmed first (a
+   separate agent is checking them against captured pages), and storing them
+   changes the binding payload and the unit keys' shape. Deferred, not
+   rejected: it is permitted, and a later change may make it.
+3. **Unkeyed, domain-separated SHA-256 of the same canonical tuple.** No
+   secret, no owner action, a fixed-length value of the shape every consumer
+   already checks (`<prefix>-<64 lowercase hex>`), deterministic across
+   producers, and separated from every other derivation by its domain string.
+   It hides nothing that needs hiding, and it does not have to: it only fixes
+   the shape until option 2 is decided. Chosen now.
+
+## Decision
+
+**Single-owner premise.** Kogane holds one person's evidence, under one
+perimeter. Multi-user is a non-goal. If it ever becomes a goal, a separate ADR
+decides perimeters and tenant isolation first, before anything below is
+relied on across owners.
+
+**Data classification for central storage** (CORE, READ, the R2 bucket
+`kogane-raw-evidence`, and logs):
+
+- (a) **Credentials and keys** (passwords, session cookies, OTP seeds, HMAC
+  keys, API tokens): never stored centrally, never logged. Unchanged.
+- (b) **Payment-instrument numbers** (a full card PAN, a full bank card
+  number, CVV, expiry paired with a PAN): never stored raw. A masked form the
+  provider itself renders (last 4 digits as the page shows them) is provider
+  content and follows the raw-evidence rules like any other page text.
+- (c) **Provider-local opaque identifiers** (Vpass
+  `externalId`/`globalid`/`cardCode`, MoneyForward `id_hash`/`service_id`,
+  SBI Shinsei `accountNo`, Mizuho branch and account as already stored, MyJCB
+  card ordinals): may be stored in CORE when identity needs them, raw or
+  hashed. They identify an account inside one provider, they are not
+  credentials, and in a single-owner store they cannot be confused with
+  anyone else's. This is what the code already does for SBI Shinsei and
+  Mizuho.
+- (d) **Personal names** (account holder names, cardholder names): avoided in
+  CORE. Consistency checks may compare them in memory but do not persist them.
+  Provider pages that contain names stay in R2 under the existing redaction
+  templates.
+- Logs and stored operational records keep the existing rule: counts and
+  closed codes only.
+
+**Identity derivation.** Both identities are an unkeyed, domain-separated
+SHA-256 of the canonical JSON tuple the v1 derivation used, with a new version
+in the prefix and the domain string:
+
+- Vpass: `vpass-card-v2-` + SHA-256(`JSON(["vpass-card-binding-v2", externalId, globalid, cardCode])`),
+  with the importer's tuple checks and closed codes; `binding_key_absent` and
+  `binding_key_invalid` are removed (nothing can produce them).
+- MoneyForward: `moneyforward-account-v2-` + SHA-256(`JSON(["moneyforward-account-v2", account[id_hash], service[id]])`),
+  with the importer's checks and closed codes; `identity_key_absent` and
+  `identity_key_invalid` are removed, and every run derives.
+
+`VPASS_CARD_BINDING_KEY` and `MONEYFORWARD_ACCOUNT_IDENTITY_KEY` are removed
+from the code and the docs. The v1 values stay valid historical evidence and
+every reader accepts both versions: the trusted Vpass binding view and the
+identity pin (migration 0057), the identity rules, the MoneyForward parsers
+(`moneyforward-monthly-transactions` 2.0.3,
+`moneyforward-canonical-evidence-boundary` 1.0.2), the transactions read and
+the account-entity continuity rule. One value, v1 or v2, names one account
+entity whichever producer read it. A v1 and a v2 value of the same account are
+different values and different entities.
+
+**The raw tuple is not stored in this change.** The classification permits it
+(class c); the binding payload and the unit keys still carry only the digest
+and closed fields. Storing the tuple is a later change, once the owner has
+confirmed the field shapes.
+
+## Consequences
+
+- **No secret and no owner action.** The two "owner sets the key" items leave
+  the roadmap. A secret set earlier is no longer read; the collectors'
+  READMEs say how to delete it.
+- **v1 and v2 are separate entities until a crosswalk.** The importer's key
+  is lost, so no equal value links a v1 identity to its v2 successor. Until
+  the separate, reviewed crosswalk decision joins them:
+  - MoneyForward: collector runs parse as soon as they register, and the
+    transactions read ranks snapshots per unit key and month, so a month both
+    the importer and the collector captured is listed under two source
+    accounts and two account entities. `services/processor/test/moneyforward-producer-switch.test.ts`
+    pins this limit.
+  - Vpass: the collector's statement pages are still registered without a
+    parser dataset (ADR 0022), so none is parsed; when one is, purchase
+    recognition retires the importer-era event of the card-month and
+    recognises the collector's on the new entity, so the captured total is
+    not doubled, but nothing carries over from the importer-era entity.
+- **Migration 0057 rebuilds one identity table.** SQLite cannot alter a
+  CHECK, so `identity_vpass_bindings` is rebuilt under the same name with the
+  token CHECK widened, copying every row with explicit columns and recreating
+  its triggers verbatim, as migrations 0045 and 0051 rebuilt the command
+  tables. No row changes. The view text changes in the prefix condition only.
+  The migration adds no table, so nothing new is classified.
+- **Parser releases.** The two MoneyForward parsers change only their unit-key
+  pattern and take new versions, so the repair lane re-parses stored
+  MoneyForward artifacts under them; v1 artifacts parse as before, and
+  positional ones stay rejected.
+- **What a multi-user ADR would have to add.** A tenant or owner column (or
+  one database per owner) in every CORE and READ table, perimeters per owner,
+  Access subjects bound to owners, and a re-examination of class (c): an
+  unkeyed digest of a provider-local identifier is not a secret, so two
+  owners' identical provider identifiers would collide, and a keyed or
+  owner-scoped derivation, or owner-scoped entity ids, would be needed.
+
+## Verification
+
+- `services/collector-vpass/test/shared-collection.test.ts` ("ADR 0023 and
+  ADR 0029"): the v2 token of a synthetic tuple equals a literal computed
+  outside the code with `sha256sum` and an independent `node:crypto`
+  computation; the v1 domain string or a reordered tuple gives another digest;
+  `deriveVpassCardBinding` and `vpassCardRunPlan` take no key argument; the
+  binding payload names `vpass-card-binding-v2` and carries no key version and
+  no tuple value; every doubtful input still fails closed with its closed
+  code.
+- `services/collector-moneyforward/test/account-identity.test.ts`: the same
+  for the MoneyForward identity (two pinned literals, the domain and field
+  order separation, no key argument), every failure code, and a Worker run
+  that derives with no secret set and ignores a retired one.
+- `packages/storage-d1/test/vpass-token-v2-migration.test.ts`: on a store
+  migrated through 0056 with synthetic pins, 0057 keeps every pin, every
+  trigger byte for byte and the column, key and foreign-key shape, with
+  foreign keys on at every statement; the table SQL differs only in the
+  CHECK; afterwards the table admits v1 and v2 tokens and refuses v3,
+  uppercase, short, long and non-hex ones, and the provenance, replacement,
+  update and delete guards still hold.
+- `services/processor/test/vpass-binding-view.test.ts`: 0057's view text is
+  0055's with the prefix condition replaced and nothing else; on random and
+  scaled stores that draw v1, v2 and malformed tokens, the shipped view equals
+  the frozen specification with the same prefix widened; its v1 rows are
+  exactly 0055's, and its v2 rows are exactly 0055's once every v2 token is
+  read as v1; mutations that refuse v2 or admit any version are caught.
+- `services/processor/test/binding-query-plan.test.ts`: after 0057 every
+  binding and identity read keeps 0055's plan step for step, without table
+  statistics.
+- `services/processor/test/vpass-collector-binding.test.ts`: on every CORE
+  migration, the collector's v2 binding registers, the view admits it, and
+  identity policy 2 pins it in the rebuilt table and binds the rows; tokens
+  of the wrong shape are refused; one v1 or v2 token read by the importer's
+  and the collector's producer is one account entity; the importer's v1 token
+  and the collector's v2 token with the same hex are two entities, and the
+  captured purchase total is not doubled.
+- `services/processor/test/moneyforward-producer-switch.test.ts`: one v1 or v2
+  identity read by two producers is read once per month and maps to one
+  entity; the importer's v1 and the collector's v2 identity of one account
+  list the months both captured under two source accounts and two entities
+  (the stated limit).
+- `services/processor/test/moneyforward-shared-r2.test.ts` and
+  `collector-plans.test.ts`: a collector run with no secret registers, seals
+  and parses under the v2 identity with the new parser versions; without a
+  tuple its account pages are `parser_rejected`.
+- `packages/identity/test/identity-other.test.ts`: v1 and v2 Vpass tokens and
+  MoneyForward identities are recognised, other versions and shapes are not,
+  and a v1 and a v2 token with the same hex key different accounts.
+- Not verified: whether the provider's current responses still carry the
+  Vpass session bean and the MoneyForward hidden inputs (no provider was
+  contacted, production was not read); the field shapes that storing the raw
+  tuple would need (being checked separately).

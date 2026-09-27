@@ -351,21 +351,21 @@ actually captured; one `terminal` report carrying the outcome;
 aggregator currently shows) listing the accounts as `unitKeys`.
 
 The unit key is the account identity the parser requires,
-`moneyforward-account-v1-<64 hex>`
-([ADR 0027](adr/0027-moneyforward-collector-account-identity.md)): the retired
-importer's HMAC-SHA-256 of `["moneyforward-account-v1", account[id_hash],
-service[id]]`, read from each account-detail page with the importer's checks
-(`src/account-identity.ts`) and keyed by the optional Worker secret
-`MONEYFORWARD_ACCOUNT_IDENTITY_KEY` (64 lowercase hex). The artifact keys stay
-positional. Without the secret, or when any account's tuple is absent or fails
+`moneyforward-account-v2-<64 hex>`
+([ADR 0027](adr/0027-moneyforward-collector-account-identity.md),
+[ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md)): the
+unkeyed, domain-separated SHA-256 of `["moneyforward-account-v2",
+account[id_hash], service[id]]`, read from each account-detail page with the
+retired importer's checks (`src/account-identity.ts`). No secret is involved.
+The artifact keys stay positional. When any account's tuple is absent or fails
 a check, the whole run keeps positional units (`account-NN`, from the filename
 grammar), which the parsers reject (`parser_rejected`); the persist diagnostic
-carries `identity: derived` or one closed code (`identity_key_absent`,
-`identity_key_invalid`, `identity_tuple_absent`, `identity_tuple_invalid`,
-`identity_duplicate`, `identity_index_mismatch`, `identity_incomplete`). No
-identifier or key is logged or written outside the pages themselves. The
-owner action and the check that the identities are the importer's are in
-[identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity).
+carries `identity: derived` or one closed code (`identity_tuple_absent`,
+`identity_tuple_invalid`, `identity_duplicate`, `identity_index_mismatch`,
+`identity_incomplete`). No identifier is logged or written outside the pages
+themselves. The parsers also accept the importer's `moneyforward-account-v1-`
+identities, which are a different account from the v2 identity of the same
+service ([identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity)).
 
 Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
@@ -491,9 +491,9 @@ provider was contacted and no production bucket was read or written.
 | `web-meisai-top.json`                    | `sanitized_provider_capture` | `card-NNN`            |
 | `months/<yyyymm>/<top\|answer>-NNN.json` | `sanitized_provider_capture` | `card-NNN`            |
 | `manifest.json`                          | `collector_manifest`         | none (the run's)      |
-| `card-identity-binding.json`             | `collector_derived`          | `vpass-card-v1-<hex>` |
+| `card-identity-binding.json`             | `collector_derived`          | `vpass-card-v2-<hex>` |
 
-The binding artifact is written only when the Worker holds the binding key
+The binding artifact is written only when the card tuple passes its checks
 (below).
 
 The statement pages were `provider_response` until ADR 0021. They are the
@@ -552,31 +552,31 @@ discovery `header.vpSessionBean`, applies the importer's checks (a
 successful envelope, a unique card inventory, descriptors of 32, 32 and 13
 characters, the same card code and card name in selection and discovery, and
 that name at the card's ordinal in the inventory) and computes
-`vpass-card-v1-` + HMAC-SHA-256 of
-`["vpass-card-binding-v1", externalId, globalid, cardCode]` under the key
-version `collector-r2-v1`. Only that token is stored: as the key of a second
-`card` unit (`coverageStatus: complete`, one artifact) and inside
-`card-identity-binding.json` (the token, the key version, the session, the
+`vpass-card-v2-` + SHA-256 of
+`["vpass-card-binding-v2", externalId, globalid, cardCode]`, with no key
+([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md)). Only that
+token is stored: as the key of a second `card` unit (`coverageStatus:
+complete`, one artifact) and inside `card-identity-binding.json` (the token,
+the derivation `schemaVersion: vpass-card-binding-v2`, the session, the
 ordinal and the checks; never the tuple or a name). The artifact states one
-`extracted` step (`vpass-card-binding` v1) with no input artifact, because the
+`extracted` step (`vpass-card-binding` v2) with no input artifact, because the
 responses it was read from are stored only redacted, so it registers as
 `source_bytes_not_available`; registration gives it the dataset
 `card-identity-binding` and format `vpass-card-identity-binding-json` version
 `1`, which the trusted view requires.
 
-The key is the Worker secret `VPASS_CARD_BINDING_KEY`: 64 lowercase hex
-characters, the value of the retired importer's `ORIGIN_FINGERPRINT_KEY`, so
-the same card gets the same token under both producers. It is optional. Without
-it, with a malformed key, without the tuple or when a check fails, the card
-run is stored exactly as before with no binding, and the persist diagnostic
-carries a closed `binding` code (`bound`, `binding_key_absent`,
-`binding_key_invalid`, `binding_tuple_absent`, `binding_tuple_invalid`,
-`binding_selection_mismatch`, `binding_inventory_invalid`,
-`binding_envelope_invalid`), never a value. Whether the current provider
+No secret is needed. The retired importer's tokens are `vpass-card-v1-` HMACs
+under a key that is lost, so a card's collector token is never equal to its
+importer token: the two are different account entities until a reviewed
+crosswalk joins them. Without the tuple or when a check fails, the card run is
+stored exactly as before with no binding, and the persist diagnostic carries a
+closed `binding` code (`bound`, `binding_tuple_absent`,
+`binding_tuple_invalid`, `binding_selection_mismatch`,
+`binding_inventory_invalid`, `binding_envelope_invalid`), never a value. Whether the current provider
 responses still carry the session bean has not been observed; if they do not,
 every run logs `binding_tuple_absent` and nothing binds
 ([identity operations](identity-operations.md#collector-vpass-runs-bind-in-their-own-run)).
-`services/collector-vpass/test/shared-collection.test.ts` ("ADR 0023") pins
+`services/collector-vpass/test/shared-collection.test.ts` ("ADR 0023 and ADR 0029") pins
 the derivation, the fail-closed codes and that no tuple value and no token
 outside the binding unit and artifact reaches a stored byte.
 

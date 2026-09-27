@@ -12,12 +12,12 @@
 //   months/<yyyymm>/<top|answer>-NNN.json   each statement page
 //   manifest.json           the run summary, in its central shape
 //   card-identity-binding.json   the card's durable binding token, when the
-//                                Worker holds the binding key (ADR 0023)
+//                                card tuple passes its checks (ADR 0023, 0029)
 //
 // No raw envelope, cookie, auth blob or card identify key is written: the
 // sanitizer replaces them and refuses output that still carries one. The card
 // binding is derived from the raw selection and discovery responses before
-// they are sanitized (`./card-binding`); only its keyed token is stored.
+// they are sanitized (`./card-binding`); only its token is stored.
 //
 // One Vpass session visits several cards under one run timestamp. Each card is
 // its own run (`<runId>-card-NNN`) and all of them carry the session timestamp
@@ -45,7 +45,6 @@ import {
   deriveVpassCardBinding,
   VPASS_BINDING_ARTIFACT_KEY,
   VPASS_BINDING_CONTRACT,
-  VPASS_BINDING_KEY_VERSION,
   VPASS_BINDING_TRANSFORMER_ID,
   VPASS_BINDING_TRANSFORMER_VERSION,
   type VpassBindingUnavailable,
@@ -294,17 +293,17 @@ function manifestBytes(
 }
 
 /**
- * The binding artifact (ADR 0023): the token and what it was derived under,
- * never the tuple. The format is the importer's
- * `vpass-card-identity-binding-json` version 1 without the fields that named
- * the importer's private source objects (snapshot and manifest digests, the
- * storage-key fingerprint): this collector keeps no raw object to name.
+ * The binding artifact (ADR 0023): the token and the derivation that made it,
+ * never the tuple (ADR 0029 permits storing the tuple; that is a later change).
+ * The format is the importer's `vpass-card-identity-binding-json` version 1
+ * without the fields that named the importer's private source objects
+ * (snapshot and manifest digests, the storage-key fingerprint) and without a
+ * key version, since the v2 derivation has no key: `schemaVersion` names it.
  */
 function bindingBytes(run: VpassCardRun, token: string): Uint8Array {
   return encodeCanonical({
     schemaVersion: VPASS_BINDING_CONTRACT,
     accountIdentity: token,
-    fingerprintKeyVersion: VPASS_BINDING_KEY_VERSION,
     sourceSession: run.sessionRunId,
     sourceNamespace: VPASS_CARD_SCHEMA_VERSION,
     sourceCardOrdinal: run.cardLabel,
@@ -329,17 +328,13 @@ function bindingExtraction(): TerminalTransformation {
 /**
  * Build the persist plan for one finished card. Pure apart from hashing.
  *
- * `bindingKey` is the Worker secret `VPASS_CARD_BINDING_KEY`. With it, and
- * with a selection and discovery that carry a consistent card tuple, the run
+ * With a selection and discovery that carry a consistent card tuple, the run
  * also holds the card's durable binding: a second `card` unit keyed by the
- * token with exactly one `card-identity-binding.json` (ADR 0023). Without it
- * the run is the same card run with no binding.
+ * token with exactly one `card-identity-binding.json` (ADR 0023, ADR 0029).
+ * Otherwise the run is the same card run with no binding.
  */
-export async function vpassCardRunPlan(
-  run: VpassCardRun,
-  bindingKey?: string,
-): Promise<PersistRunPlan> {
-  return planFor(run, await deriveVpassCardBinding(run, bindingKey));
+export async function vpassCardRunPlan(run: VpassCardRun): Promise<PersistRunPlan> {
+  return planFor(run, await deriveVpassCardBinding(run));
 }
 
 async function planFor(run: VpassCardRun, binding: VpassCardBinding): Promise<PersistRunPlan> {
@@ -543,14 +538,12 @@ async function persist(bucket: R2BucketLike, plan: PersistRunPlan): Promise<Shar
  * Persist one finished card into the shared bucket. The terminal is written
  * last by the helper; a failed put returns `incomplete` with a checkpoint and
  * no terminal, which the caller must not report as a completed run (G1-01).
- * `bindingKey` is the Worker secret `VPASS_CARD_BINDING_KEY`, or undefined.
  */
 export async function persistCardRun(
   bucket: R2BucketLike,
   run: VpassCardRun,
-  bindingKey?: string,
 ): Promise<SharedRunOutcome> {
-  const binding = await deriveVpassCardBinding(run, bindingKey);
+  const binding = await deriveVpassCardBinding(run);
   const outcome = await persist(bucket, await planFor(run, binding));
   const months = Object.keys(run.months).sort();
   return {

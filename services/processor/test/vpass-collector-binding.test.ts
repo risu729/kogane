@@ -13,10 +13,16 @@
 //  * the Miniflare card world for the purchase lane, with the collector's
 //    binding in the shape the first part registers.
 //
-// Everything is synthetic: the card tuple, the keys, the card names, the
-// merchants and the amounts are placeholders in the observed shapes.
+// ADR 0029: the collector's token is the unkeyed `vpass-card-v2-` digest of
+// the card tuple. Migration 0057 admits it in the view and the identity pin;
+// the importer's `vpass-card-v1-` tokens stay valid, and a v1 and a v2 token
+// are different account entities until a reviewed crosswalk joins them.
+//
+// Everything is synthetic: the card tuple, the card names, the merchants and
+// the amounts are placeholders in the observed shapes.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fullCoreDatabase, sqliteD1 } from "../../../packages/storage-d1/test/sqlite.ts";
 import { splitSqlStatements } from "../../../packages/storage-d1/src/migrations.ts";
@@ -51,7 +57,8 @@ afterEach(disposeWorlds);
 const CLIENT = "processor-shared-r2";
 const COLLECTOR = "collector-vpass";
 const SESSION = "2026-09-01T00-00-00-000Z";
-const KEY = "5e".repeat(32);
+/** A v2 token with the same hex as the world's v1 `TOKEN_A`: only the version differs. */
+const TOKEN_A_V2 = `vpass-card-v2-${TOKEN_A.slice(-64)}`;
 const TUPLE = { externalId: "E".repeat(32), globalid: "G".repeat(32), cardCode: "C".repeat(13) };
 const ROWS: UsageRow[] = [
   { date: "26/08/03", merchant: "架空店舗C", amount: "1,234", paymentType: "1" },
@@ -127,28 +134,19 @@ function collectorCardRun(overrides: Partial<VpassCardRun> = {}): VpassCardRun {
   };
 }
 
-/** The importer's token construction, written out independently of the collector. */
-async function importerToken(key: string): Promise<string> {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    Uint8Array.from(key.match(/../gu)!, (pair) => Number.parseInt(pair, 16)),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const mac = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    new TextEncoder().encode(
-      JSON.stringify(["vpass-card-binding-v1", TUPLE.externalId, TUPLE.globalid, TUPLE.cardCode]),
-    ),
-  );
-  return `vpass-card-v1-${Buffer.from(mac).toString("hex")}`;
+/** The v2 token construction (ADR 0029), written out independently of the collector. */
+function v2Token(): string {
+  const digest = createHash("sha256")
+    .update(
+      JSON.stringify(["vpass-card-binding-v2", TUPLE.externalId, TUPLE.globalid, TUPLE.cardCode]),
+    )
+    .digest("hex");
+  return `vpass-card-v2-${digest}`;
 }
 
-async function registered(key: string | undefined, overrides: Partial<VpassCardRun> = {}) {
+async function registered(overrides: Partial<VpassCardRun> = {}) {
   const h = harness();
-  const plan = await vpassCardRunPlan(collectorCardRun(overrides), key);
+  const plan = await vpassCardRunPlan(collectorCardRun(overrides));
   expect(plan.run.producer).toBe(COLLECTOR);
   expect((await persistRun(h.bucket, plan)).outcome).toBe("persisted");
   const result = await registerCollectionRun(h.env, { source: "vpass", runId: plan.run.runId });
@@ -229,9 +227,10 @@ async function registered(key: string | undefined, overrides: Partial<VpassCardR
 }
 
 describe("ADR 0023 a registered collector card run", () => {
-  test("with the key: the binding registers, the view admits it, and identity policy 2 binds the rows to the importer's token", async () => {
-    const token = await importerToken(KEY);
-    const { plan, run, all, one, parsePage } = await registered(KEY);
+  test("the v2 binding registers, the view admits it, and identity policy 2 pins and binds the rows to the v2 token", async () => {
+    const token = v2Token();
+    expect(token).toMatch(/^vpass-card-v2-[0-9a-f]{64}$/u);
+    const { plan, run, all, one, parsePage } = await registered();
     expect(plan.run.units.map((unit) => unit.unitKey)).toEqual(["card-001", token]);
 
     // Registration wrote the run shape the view's shared-R2 branch reads.
@@ -327,9 +326,9 @@ describe("ADR 0023 a registered collector card run", () => {
     ]);
   }, 30_000);
 
-  test("with the key but a month short of its stated total: the unit and run are partial and the view reads no binding", async () => {
-    const token = await importerToken(KEY);
-    const { plan, run, all, one } = await registered(KEY, {
+  test("a month short of its stated total: the unit and run are partial and the view reads no binding", async () => {
+    const token = v2Token();
+    const { plan, run, all, one } = await registered({
       months: {
         "202608": {
           pages: [{ kind: "top", index: 0, rawJson: statementPage(ROWS.length + 1) }],
@@ -348,8 +347,11 @@ describe("ADR 0023 a registered collector card run", () => {
     expect(all("SELECT * FROM trusted_vpass_card_bindings")).toEqual([]);
   }, 30_000);
 
-  test("without the key: no binding, the view is empty, and the rows stay run-scoped and unresolved", async () => {
-    const { plan, run, all, one, parsePage } = await registered(undefined);
+  test("without a card tuple: no binding, the view is empty, and the rows stay run-scoped and unresolved", async () => {
+    const { plan, run, all, one, parsePage } = await registered({
+      selectCardRawJson: envelope({ MultiCardUpdateBean: {} }),
+      webMeisaiTopRawJson: envelope({ WebMeisaiTopDisplayServiceBean: {} }),
+    });
     expect(plan.run.units.map((unit) => unit.unitKey)).toEqual(["card-001"]);
     expect(
       one<{ n: number }>(
@@ -499,9 +501,20 @@ describe("ADR 0023 the view's shared-R2 branch keeps the importer's evidence req
       .run();
     expect(await w.count(TRUSTED, partial.artifact)).toBe(0);
 
-    // A token of the wrong shape.
-    const shape = await capture({ token: `vpass-card-v1-${"A".repeat(64)}` });
-    expect(await w.count(TRUSTED, shape.artifact)).toBe(0);
+    // Tokens of the wrong shape (migration 0057 admits exactly v1 and v2).
+    for (const token of [
+      `vpass-card-v1-${"A".repeat(64)}`,
+      `vpass-card-v2-${"A".repeat(64)}`,
+      `vpass-card-v3-${"a".repeat(64)}`,
+      `vpass-card-v2-${"a".repeat(63)}`,
+    ]) {
+      const shape = await capture({ token });
+      expect([token, await w.count(TRUSTED, shape.artifact)]).toEqual([token, 0]);
+    }
+
+    // A v2 token is admitted under the same evidence rules as a v1 token.
+    const v2 = await capture({ token: TOKEN_A_V2 });
+    expect(await w.count(TRUSTED, v2.artifact)).toBe(1);
 
     // No binding at all.
     const none = await capture({ token: null });
@@ -510,59 +523,68 @@ describe("ADR 0023 the view's shared-R2 branch keeps the importer's evidence req
 });
 
 describe("ADR 0023 purchase recognition moves to the collector's binding", () => {
-  test("the importer's event of the card-month retires and is recognised again once, on the same account entity", async () => {
-    const w = await world();
-    await w.vpass({
-      family: "web",
-      card: "card-001",
-      month: "202608",
-      fetchedAt: "2026-08-10T00:00:00.000Z",
-      rows: ROWS,
-    });
-    expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
-    const before = await w.all<{ producer: string; account_id: string }>(LIVE);
-    expect(before.map((row) => row.producer)).toEqual([PRODUCER]);
-    expect(await w.totals()).toMatchObject({ captured: "1234", unresolved: 0 });
-    const snapshot = await w.snapshot();
+  test.each([
+    ["v1", TOKEN_A],
+    // ADR 0029: a v2 token is one entity whichever producer reads it.
+    ["v2", TOKEN_A_V2],
+  ])(
+    "the importer's event of the card-month under a %s token retires and is recognised again once, on the same account entity",
+    async (_, token) => {
+      const w = await world();
+      await w.vpass({
+        family: "web",
+        card: "card-001",
+        month: "202608",
+        fetchedAt: "2026-08-10T00:00:00.000Z",
+        rows: ROWS,
+        token,
+      });
+      expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
+      const before = await w.all<{ producer: string; account_id: string }>(LIVE);
+      expect(before.map((row) => row.producer)).toEqual([PRODUCER]);
+      expect(await w.totals()).toMatchObject({ captured: "1234", unresolved: 0 });
+      const snapshot = await w.snapshot();
 
-    // The collector's capture of the same card-month, bound in its own run to
-    // the same token (the same key derives the same token).
-    await w.vpass({
-      family: "web",
-      card: "card-001",
-      month: "202608",
-      fetchedAt: "2026-09-27T00:00:00.000Z",
-      rows: ROWS,
-      producer: COLLECTOR,
-      binding: "collector",
-      token: TOKEN_A,
-    });
-    const usage = await w.usage();
-    expect(usage.map((row) => [row.producer_id, row.policy_family, row.account_status])).toEqual([
-      [COLLECTOR, "vpass-card-binding", "provider-local"],
-    ]);
+      // The collector's capture of the same card-month, bound in its own run to
+      // the same token (one value is one account, whichever producer read it).
+      await w.vpass({
+        family: "web",
+        card: "card-001",
+        month: "202608",
+        fetchedAt: "2026-09-27T00:00:00.000Z",
+        rows: ROWS,
+        producer: COLLECTOR,
+        binding: "collector",
+        token,
+      });
+      const usage = await w.usage();
+      expect(usage.map((row) => [row.producer_id, row.policy_family, row.account_status])).toEqual([
+        [COLLECTOR, "vpass-card-binding", "provider-local"],
+      ]);
 
-    expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1, retired: 1 });
-    const after = await w.all<{ producer: string; account_id: string }>(LIVE);
-    expect(after.map((row) => row.producer)).toEqual([COLLECTOR]);
-    // Two source accounts, one per producer, and one account entity.
-    expect(after.map((row) => row.account_id)).toEqual(before.map((row) => row.account_id));
-    expect(
-      await w.all(
-        `SELECT a.producer_id, m.account_id FROM source_accounts a
+      expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1, retired: 1 });
+      const after = await w.all<{ producer: string; account_id: string }>(LIVE);
+      expect(after.map((row) => row.producer)).toEqual([COLLECTOR]);
+      // Two source accounts, one per producer, and one account entity.
+      expect(after.map((row) => row.account_id)).toEqual(before.map((row) => row.account_id));
+      expect(
+        await w.all(
+          `SELECT a.producer_id, m.account_id FROM source_accounts a
            JOIN current_account_mappings m ON m.source_account_id=a.id
           WHERE a.source_id='vpass' ORDER BY a.producer_id`,
-      ),
-    ).toEqual([
-      { producer_id: PRODUCER, account_id: before[0]!.account_id },
-      { producer_id: COLLECTOR, account_id: before[0]!.account_id },
-    ]);
-    // Nothing counted twice: the retired importer event is an `unknown`
-    // revision the summary counts as unresolved, the captured total is kept.
-    expect(await w.totals()).toMatchObject({ captured: "1234", unresolved: 1 });
-    appendOnly(snapshot, await w.snapshot());
-    expect(counts(await w.sweep())).toEqual(NOTHING);
-  }, 60_000);
+        ),
+      ).toEqual([
+        { producer_id: PRODUCER, account_id: before[0]!.account_id },
+        { producer_id: COLLECTOR, account_id: before[0]!.account_id },
+      ]);
+      // Nothing counted twice: the retired importer event is an `unknown`
+      // revision the summary counts as unresolved, the captured total is kept.
+      expect(await w.totals()).toMatchObject({ captured: "1234", unresolved: 1 });
+      appendOnly(snapshot, await w.snapshot());
+      expect(counts(await w.sweep())).toEqual(NOTHING);
+    },
+    60_000,
+  );
 
   test("without the collector's binding its rows are skipped as account_not_resolved", async () => {
     const w = await world();
@@ -594,31 +616,40 @@ describe("ADR 0023 purchase recognition moves to the collector's binding", () =>
     expect(await w.all(LIVE)).toEqual([]);
   }, 60_000);
 
-  test("a token derived under another key is another account entity: nothing carries over, nothing is counted twice", async () => {
-    const w = await world();
-    await w.vpass({
-      family: "web",
-      card: "card-001",
-      month: "202608",
-      fetchedAt: "2026-08-10T00:00:00.000Z",
-      rows: ROWS,
-    });
-    expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
-    const before = await w.all<{ account_id: string }>(LIVE);
-    await w.vpass({
-      family: "web",
-      card: "card-001",
-      month: "202608",
-      fetchedAt: "2026-09-27T00:00:00.000Z",
-      rows: ROWS,
-      producer: COLLECTOR,
-      binding: "collector",
-      token: TOKEN_B,
-    });
-    expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1, retired: 1 });
-    const after = await w.all<{ producer: string; account_id: string }>(LIVE);
-    expect(after.map((row) => row.producer)).toEqual([COLLECTOR]);
-    expect(after[0]!.account_id).not.toBe(before[0]!.account_id);
-    expect(await w.totals()).toMatchObject({ captured: "1234", unresolved: 1 });
-  }, 60_000);
+  test.each([
+    ["a v1 token derived under another key", TOKEN_B],
+    // ADR 0029: the collector's v2 token of the importer's v1 card, even with
+    // the same hex, is another entity until a reviewed crosswalk joins them.
+    ["the v2 token of the importer's v1 card", TOKEN_A_V2],
+  ])(
+    "%s is another account entity: nothing carries over, nothing is counted twice",
+    async (_, token) => {
+      const w = await world();
+      await w.vpass({
+        family: "web",
+        card: "card-001",
+        month: "202608",
+        fetchedAt: "2026-08-10T00:00:00.000Z",
+        rows: ROWS,
+      });
+      expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1 });
+      const before = await w.all<{ account_id: string }>(LIVE);
+      await w.vpass({
+        family: "web",
+        card: "card-001",
+        month: "202608",
+        fetchedAt: "2026-09-27T00:00:00.000Z",
+        rows: ROWS,
+        producer: COLLECTOR,
+        binding: "collector",
+        token,
+      });
+      expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 1, retired: 1 });
+      const after = await w.all<{ producer: string; account_id: string }>(LIVE);
+      expect(after.map((row) => row.producer)).toEqual([COLLECTOR]);
+      expect(after[0]!.account_id).not.toBe(before[0]!.account_id);
+      expect(await w.totals()).toMatchObject({ captured: "1234", unresolved: 1 });
+    },
+    60_000,
+  );
 });

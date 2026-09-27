@@ -63,7 +63,7 @@ describe("moneyforward Layer B parsers", () => {
       );
     const template = "' + 'ANONYMOUS PURCHASE'+ ''+ '' + '";
     const result = parseDescription(template);
-    expect(moneyForwardMonthlyTransactions.version).toBe("2.0.2");
+    expect(moneyForwardMonthlyTransactions.version).toBe("2.0.3");
     expect(result.observations[0]).toMatchObject({
       kind: "transaction",
       description: "ANONYMOUS PURCHASE",

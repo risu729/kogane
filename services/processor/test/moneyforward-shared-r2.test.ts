@@ -1,17 +1,18 @@
 // ADR 0027 end to end: a MoneyForward run the collector persisted to the
 // shared bucket - built by its real `moneyForwardRunPlan` - registers, seals,
 // and parses only when its units are the account identity the parser
-// requires. With the identity key the account's unit is
-// `moneyforward-account-v1-<64 hex>`, and the monthly fragments parse under
-// `moneyforward-monthly-transactions` 2.0.2 and the index and detail under
-// `moneyforward-canonical-evidence-boundary` with no error. Without it the
-// units stay positional (`account-NN`) and every one of those parses is
-// `parser_rejected`, which is the production finding this ADR answers.
+// requires. Since ADR 0029 the collector needs no secret: from the detail
+// page's tuple the account's unit is `moneyforward-account-v2-<64 hex>`, and
+// the monthly fragments parse under `moneyforward-monthly-transactions` 2.0.3
+// and the index and detail under `moneyforward-canonical-evidence-boundary`
+// 1.0.2 with no error. When the detail page carries no tuple the units stay
+// positional (`account-NN`) and every one of those parses is
+// `parser_rejected`, which is the production finding ADR 0027 answered.
 //
 // Everything is synthetic: the pages are the anonymous observation-pipeline
-// fixtures, and the key is made up.
+// fixtures.
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -67,27 +68,27 @@ afterAll(async () => {
   await mf?.dispose();
 });
 
-const KEY = "5a".repeat(32);
 const fixture = (name: string) =>
   readFileSync(
     new URL(`../../../tests/fixtures/observation-pipeline/moneyforward/${name}`, import.meta.url),
     "utf8",
   );
 /** The fixture detail page's `account[id_hash]` and `service[id]`, synthetic. */
-const TOKEN = `moneyforward-account-v1-${createHmac("sha256", Buffer.from(KEY, "hex"))
-  .update(JSON.stringify(["moneyforward-account-v1", "anonymous-account", "anonymous-service"]))
+const TOKEN = `moneyforward-account-v2-${createHash("sha256")
+  .update(JSON.stringify(["moneyforward-account-v2", "anonymous-account", "anonymous-service"]))
   .digest("hex")}`;
 
 /** The identity check in docs/identity-operations.md, as the owner runs it. */
-const IDENTITY_CHECK_SQL = `SELECT r.producer_id, count(DISTINCT u.unit_key) AS identities,
+const IDENTITY_CHECK_SQL = `SELECT r.producer_id, substr(u.unit_key,1,24) AS version,
+       count(DISTINCT u.unit_key) AS identities,
        count(DISTINCT CASE WHEN EXISTS(
          SELECT 1 FROM fetch_units i JOIN fetch_runs ir ON ir.id=i.fetch_run_id
          WHERE ir.source_id='moneyforward-me' AND ir.producer_id='collector-r2-importer'
            AND i.unit_key=u.unit_key)
        THEN u.unit_key END) AS known_to_importer
 FROM fetch_units u JOIN fetch_runs r ON r.id=u.fetch_run_id
-WHERE r.source_id='moneyforward-me' AND u.unit_key GLOB 'moneyforward-account-v1-*'
-GROUP BY r.producer_id;`;
+WHERE r.source_id='moneyforward-me' AND u.unit_key GLOB 'moneyforward-account-v[12]-*'
+GROUP BY r.producer_id, version;`;
 
 const HTML = "text/html; charset=utf-8";
 const artifacts: RawArtifact[] = [
@@ -117,22 +118,26 @@ const artifacts: RawArtifact[] = [
   },
 ];
 
-/** The collector's own plan for one successful run, with or without the key. */
-function runPlan(runId: string, key: string | undefined) {
-  return moneyForwardRunPlan(
-    {
-      schemaVersion: "moneyforward-worker-poc-v1",
-      runId,
-      startedAt: "2026-09-20T00:00:00.000Z",
-      completedAt: "2026-09-20T00:05:00.000Z",
-      status: "success",
-      accountDetailCount: 1,
-      monthlyFragmentCount: 2,
-      artifacts,
-      failures: [],
-    },
-    key,
-  );
+/** The detail page without its hidden inputs: no tuple to derive from. */
+const withoutTuple: RawArtifact[] = artifacts.map((artifact) =>
+  artifact.dataset === "account-detail"
+    ? { ...artifact, body: "<!doctype html><html><body>synthetic detail</body></html>" }
+    : artifact,
+);
+
+/** The collector's own plan for one successful run, with or without a tuple. */
+function runPlan(runId: string, tuple: boolean) {
+  return moneyForwardRunPlan({
+    schemaVersion: "moneyforward-worker-poc-v1",
+    runId,
+    startedAt: "2026-09-20T00:00:00.000Z",
+    completedAt: "2026-09-20T00:05:00.000Z",
+    status: "success",
+    accountDetailCount: 1,
+    monthlyFragmentCount: 2,
+    artifacts: tuple ? artifacts : withoutTuple,
+    failures: [],
+  });
 }
 
 const fetchRun = (runId: string) =>
@@ -153,8 +158,8 @@ async function jobs(runId: string) {
   ).results;
 }
 
-async function registerRun(runId: string, key: string | undefined) {
-  const plan = await runPlan(runId, key);
+async function registerRun(runId: string, tuple: boolean) {
+  const plan = await runPlan(runId, tuple);
   expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
   expect(await registerCollectionRun(env, { source: "moneyforward-me", runId })).toMatchObject({
     outcome: "registered",
@@ -182,7 +187,7 @@ async function registerRun(runId: string, key: string | undefined) {
   ).toEqual([
     {
       status: "success",
-      unit_key: key === undefined ? "account-01" : TOKEN,
+      unit_key: tuple ? TOKEN : "account-01",
       unit_outcome: "success",
       declared: 3,
       artifacts: 3,
@@ -191,21 +196,21 @@ async function registerRun(runId: string, key: string | undefined) {
   return fetchRunId;
 }
 
-test("with the identity key the run's pages parse with no error under the account identity", async () => {
+test("with no secret the run's pages parse with no error under the v2 account identity", async () => {
   const runId = "00000000-0000-4000-8000-00000000a027";
-  const fetchRunId = await registerRun(runId, KEY);
+  const fetchRunId = await registerRun(runId, true);
   expect(await sweep(env)).toMatchObject({ parsed: 4, error: 0 });
   expect(await jobs(runId)).toEqual([
     {
       parser_name: "moneyforward-canonical-evidence-boundary",
-      parser_version: "1.0.1",
+      parser_version: "1.0.2",
       status: "done",
       last_error_code: null,
       n: 2,
     },
     {
       parser_name: "moneyforward-monthly-transactions",
-      parser_version: "2.0.2",
+      parser_version: "2.0.3",
       status: "done",
       last_error_code: null,
       n: 2,
@@ -226,7 +231,7 @@ test("with the identity key the run's pages parse with no error under the accoun
     { source_account: `moneyforward-me:${TOKEN}`, amount_minor: 500 },
   ]);
   await identitySweep(env.DB, resolveIdentity, 40);
-  // It resolves as before (the pattern is unchanged): one provider-local
+  // It resolves as a v1 identity did: one provider-local
   // aggregator-mirror account, on the collector's own source-account reference.
   expect(
     (
@@ -248,34 +253,39 @@ test("with the identity key the run's pages parse with no error under the accoun
   // with no importer run in this store, the collector's identity is not known
   // to the importer.
   expect((await env.DB.prepare(IDENTITY_CHECK_SQL).all()).results).toEqual([
-    { producer_id: "collector-moneyforward-me", identities: 1, known_to_importer: 0 },
+    {
+      producer_id: "collector-moneyforward-me",
+      version: "moneyforward-account-v2-",
+      identities: 1,
+      known_to_importer: 0,
+    },
   ]);
 }, 60000);
 
-test("without the key the units stay positional and every parse is parser_rejected", async () => {
+test("without a tuple the units stay positional and every parse is parser_rejected", async () => {
   const runId = "00000000-0000-4000-8000-00000000b027";
-  const fetchRunId = await registerRun(runId, undefined);
+  const fetchRunId = await registerRun(runId, false);
   expect(await sweep(env)).toMatchObject({ parsed: 1, error: 3 });
   // The index carries no account, so it parses; every page that names an
   // account is rejected, as in production.
   expect(await jobs(runId)).toEqual([
     {
       parser_name: "moneyforward-canonical-evidence-boundary",
-      parser_version: "1.0.1",
+      parser_version: "1.0.2",
       status: "done",
       last_error_code: null,
       n: 1,
     },
     {
       parser_name: "moneyforward-canonical-evidence-boundary",
-      parser_version: "1.0.1",
+      parser_version: "1.0.2",
       status: "failed",
       last_error_code: "parser_rejected",
       n: 1,
     },
     {
       parser_name: "moneyforward-monthly-transactions",
-      parser_version: "2.0.2",
+      parser_version: "2.0.3",
       status: "failed",
       last_error_code: "parser_rejected",
       n: 2,

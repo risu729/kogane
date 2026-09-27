@@ -135,25 +135,29 @@ parses, even for a direct read of the core identity view without UI joins.
 
 The Vpass collector (`collector-vpass`) writes the binding itself
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
-Before it sanitizes a card's responses, the Worker derives the same token the
-retired importer did (the tuple from the selection and discovery
-`vpSessionBean`, the same consistency checks, HMAC-SHA-256 of
-`["vpass-card-binding-v1", externalId, globalid, cardCode]`, key version
-`collector-r2-v1`) with the Worker secret `VPASS_CARD_BINDING_KEY`, and stores
-only the token: a second `card` unit of the card's run, keyed by the token, with
-one `collector_derived` artifact `card-identity-binding.json`. Registration
-gives that artifact the dataset `card-identity-binding` and format
-`vpass-card-identity-binding-json` version `1`. Without the secret, with a
-malformed secret, without the tuple or with a tuple that fails a check, the run
-is stored with no binding and the Worker log carries one closed code
-(`binding_key_absent`, `binding_key_invalid`, `binding_tuple_absent`,
-`binding_tuple_invalid`, `binding_selection_mismatch`,
-`binding_inventory_invalid`, `binding_envelope_invalid`).
+Before it sanitizes a card's responses, the Worker derives the card token from
+the tuple in the selection and discovery `vpSessionBean`, with the retired
+importer's consistency checks, as the unkeyed, domain-separated SHA-256
+`vpass-card-v2-` + SHA-256(`JSON(["vpass-card-binding-v2", externalId,
+globalid, cardCode])`) ([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md)).
+No secret is involved. It stores only the token: a second `card` unit of the
+card's run, keyed by the token, with one `collector_derived` artifact
+`card-identity-binding.json`. Registration gives that artifact the dataset
+`card-identity-binding` and format `vpass-card-identity-binding-json` version
+`1`. Without the tuple or with a tuple that fails a check, the run is stored
+with no binding and the Worker log carries one closed code
+(`binding_tuple_absent`, `binding_tuple_invalid`,
+`binding_selection_mismatch`, `binding_inventory_invalid`,
+`binding_envelope_invalid`).
 
-Migration 0055 recreates `trusted_vpass_card_bindings` to accept this shape;
-the importer's rows are exactly migration 0021's. The evidence is the same: a
-successful, sealed Vpass run whose `card-NNN` unit holds the financial
-artifact, and exactly one binding unit keyed `vpass-card-v1-<64 hex>` with a
+Migration 0055 recreated `trusted_vpass_card_bindings` to accept this shape,
+and migration 0057 recreates it again with one change: the token prefix may be
+`vpass-card-v1-` (the importer's HMAC tokens) or `vpass-card-v2-`, and nothing
+else; it also rebuilds the pin table `identity_vpass_bindings` with the same
+widened CHECK, copying every pin unchanged. The importer's rows are exactly
+migration 0021's. The evidence is the same: a successful, sealed Vpass run
+whose `card-NNN` unit holds the financial artifact, and exactly one binding
+unit keyed `vpass-card-v1-<64 hex>` or `vpass-card-v2-<64 hex>` with a
 successful terminal report, holding the one binding artifact of that dataset
 and format. Only the place differs: the collector's binding is inside the
 card's own run (producer `collector-vpass`, session namespace `shared-r2`, run
@@ -174,104 +178,96 @@ the rows stay unresolved even with a binding. The persist diagnostic's
 **Account continuity.** A source-account reference still includes the
 producer, so a collector row gets its own source account
 `["vpass:card", <token>]` under `collector-vpass`. Its automatic mapping points
-at the account entity derived from the importer's reference for the same
-token, so the importer-era entity id is unchanged and both producers' source
-accounts map to one entity. What is keyed by the entity carries over: its
-label, role and status, ownership links on `account:<entity>`, and the
-`account_id` card purchases and settlements carry. What is keyed by the
-importer's source account does not: its mapping revisions and any manual
-decision on it. If an operator had re-mapped the importer's source account to
-another entity, the collector's source account still maps by rule to the
-token's entity and needs its own decision. A token derived under a different
-key is a different entity with nothing carried over. Card purchases churn once
-per card-month (the recognition key carries the producer): the importer's
-event is retired and the collector's is recognised on the same account, and
-nothing is counted twice.
+at the account entity derived from the importer producer's reference for the
+same token, so one token value is one entity whichever producer read it: for a
+v1 token the importer-era entity id is unchanged, and a v2 token (which the
+importer never registered) names an entity no importer reference names but
+every producer reaches. What is keyed by the entity carries over: its label,
+role and status, ownership links on `account:<entity>`, and the `account_id`
+card purchases and settlements carry. What is keyed by the importer's source
+account does not: its mapping revisions and any manual decision on it. If an
+operator had re-mapped the importer's source account to another entity, the
+collector's source account still maps by rule to the token's entity and needs
+its own decision. Card purchases churn once per card-month (the recognition
+key carries the producer): the importer's event is retired and the collector's
+is recognised, and nothing is counted twice.
 
-**Owner action and check.** Set the Worker secret on `kogane-vpass-collector-poc`:
-`wrangler secret put VPASS_CARD_BINDING_KEY --name kogane-vpass-collector-poc`,
-entering the value of the retired importer's `ORIGIN_FINGERPRINT_KEY` (64
-lowercase hex characters) at the prompt. No
-repository check can prove it is the same key. After the next collection,
-compare token counts (read-only, counts only):
+**The v1 and v2 tokens of one card are two entities.** The collector derives
+only v2 tokens, and the importer's key that made the v1 tokens is lost, so no
+equal value links a card's importer-era account to its collector-era account.
+Until a reviewed crosswalk joins them, a card read under both is two account
+entities with nothing carried over; its purchases are recognised again on the
+new account (the importer's event is retired, so the captured total is not
+doubled). No owner action or secret is needed any more. After the next
+collection, count tokens per producer and version (read-only, counts only):
 
 ```sql
-SELECT r.producer_id, count(DISTINCT u.unit_key) AS tokens,
-       count(DISTINCT CASE WHEN EXISTS(
-         SELECT 1 FROM fetch_units i JOIN fetch_runs ir ON ir.id=i.fetch_run_id
-         WHERE ir.producer_id='collector-r2-importer' AND i.unit_key=u.unit_key)
-       THEN u.unit_key END) AS known_to_importer
+SELECT r.producer_id, substr(u.unit_key,1,14) AS version, count(DISTINCT u.unit_key) AS tokens
 FROM fetch_units u JOIN fetch_runs r ON r.id=u.fetch_run_id
-WHERE r.source_id='vpass' AND u.unit_key GLOB 'vpass-card-v1-*'
-GROUP BY r.producer_id;
+WHERE r.source_id='vpass' AND u.unit_key GLOB 'vpass-card-v[12]-*'
+GROUP BY r.producer_id, version;
 ```
 
-For `collector-vpass`, `known_to_importer` equal to `tokens` for the cards the
-importer also saw means the key is the importer's. Zero means a different key:
-remove the secret and keep the Vpass pages unparsed; the bindings already
-registered stay (evidence is append-only), and each such card would become a
-new account entity if its pages were parsed, so it needs a decision first. The
-collector's statement pages are not parsed today: registration gives them no
-parser dataset, and the change that introduces parser datasets for shared-R2
-artifacts (ADR 0022) withholds the Vpass one. Releasing it is a later change,
-made after this check.
+The collector's statement pages are not parsed today: registration gives them
+no parser dataset, and the change that introduces parser datasets for
+shared-R2 artifacts (ADR 0022) withholds the Vpass one. Releasing it is a
+later change, made once the v1 and v2 entities of each card are decided.
 
 ## MoneyForward collector runs carry the account identity
 
 The MoneyForward parsers accept an account page only when its unit key is
-`moneyforward-account-v1-<64 hex>`
-([ADR 0027](adr/0027-moneyforward-collector-account-identity.md)). The
-collector (`collector-moneyforward-me`) derives it as the retired importer
-did: for each account-detail page, HMAC-SHA-256 of
-`["moneyforward-account-v1", account[id_hash], service[id]]` with the
-importer's checks, keyed by the Worker secret
-`MONEYFORWARD_ACCOUNT_IDENTITY_KEY`. Without the secret, or when a check
-fails, the run keeps positional units (`account-NN`), its account pages are
-`parser_rejected`, and the persist diagnostic's `identity` field says why.
-The identity pattern and its classification (`aggregator-mirror`,
-[identity sources](identity-sources.md)) are unchanged.
+`moneyforward-account-v1-<64 hex>` (the retired importer's identities) or
+`moneyforward-account-v2-<64 hex>`
+([ADR 0027](adr/0027-moneyforward-collector-account-identity.md),
+[ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md)). The
+collector (`collector-moneyforward-me`) derives the v2 identity: for each
+account-detail page, with the importer's checks, the unkeyed,
+domain-separated SHA-256 of
+`["moneyforward-account-v2", account[id_hash], service[id]]`. No secret is
+involved. When a check fails the run keeps positional units (`account-NN`),
+its account pages are `parser_rejected`, and the persist diagnostic's
+`identity` field says why (`identity_tuple_absent`, `identity_tuple_invalid`,
+`identity_duplicate`, `identity_index_mismatch`, `identity_incomplete`). Both
+identity versions are `aggregator-mirror` accounts
+([identity sources](identity-sources.md)).
 
-**Owner action and check.** Set the Worker secret on
-`kogane-moneyforward-collector-poc`:
-`wrangler secret put MONEYFORWARD_ACCOUNT_IDENTITY_KEY --name kogane-moneyforward-collector-poc`,
-entering 64 lowercase hex characters at the prompt: the retired importer's
-`ORIGIN_FINGERPRINT_KEY` if it is still held. No repository check can prove
-it is the same key. After the next collection, compare identity counts
-(read-only, counts only):
+**The v1 and v2 identities of one account are two accounts.** The importer's
+key that made the v1 identities is lost, so no equal value links an
+importer-era account to the collector's. The transactions read ranks the
+current monthly snapshot per unit key and month, so for a month both
+producers captured the importer's v1 snapshot and the collector's v2 snapshot
+are both current: the same provider rows are listed under two source accounts
+and two account entities, and nothing maps one to the other. That is a known
+limit until a reviewed crosswalk joins the two identities of each account.
+The runs are parsed as soon as they register (MoneyForward's datasets are not
+withheld). No owner action or secret is needed any more. After the next
+collection, count identities per producer and version (read-only, counts only):
 
 ```sql
-SELECT r.producer_id, count(DISTINCT u.unit_key) AS identities,
+SELECT r.producer_id, substr(u.unit_key,1,24) AS version,
+       count(DISTINCT u.unit_key) AS identities,
        count(DISTINCT CASE WHEN EXISTS(
          SELECT 1 FROM fetch_units i JOIN fetch_runs ir ON ir.id=i.fetch_run_id
          WHERE ir.source_id='moneyforward-me' AND ir.producer_id='collector-r2-importer'
            AND i.unit_key=u.unit_key)
        THEN u.unit_key END) AS known_to_importer
 FROM fetch_units u JOIN fetch_runs r ON r.id=u.fetch_run_id
-WHERE r.source_id='moneyforward-me' AND u.unit_key GLOB 'moneyforward-account-v1-*'
-GROUP BY r.producer_id;
+WHERE r.source_id='moneyforward-me' AND u.unit_key GLOB 'moneyforward-account-v[12]-*'
+GROUP BY r.producer_id, version;
 ```
 
-For `collector-moneyforward-me`, `known_to_importer` equal to `identities`
-for the accounts the importer also saw means the key is the importer's: each
-collector capture of an account-month replaces the importer's snapshot of
-that month, and nothing is counted twice. Zero means a different key: each
-account is a new identity, source account and account entity with nothing
-carried over, and no mapping to the importer-era accounts is added; the
-importer-era snapshots stay current for their months, so the months both
-captured show the same rows under two source accounts. The runs are parsed
-as soon as they register (MoneyForward's datasets are not withheld), so this
-check is after the fact; removing the secret stops new identities, and the
-ones registered stay (evidence is append-only).
+`known_to_importer` is zero for every v2 row: the importer registered only v1
+identities.
 
 **Account continuity.** The collector's rows get their own source account
 (the reference includes the producer), with its own mapping revisions and
 manual decisions. As for a trusted Vpass token, the account entity of a
-MoneyForward identity is derived from the importer's reference for that
-identity (`accountEntityId`), so under the importer's key the collector's
-source account maps to the importer-era entity by rule. An operator's
-re-mapping of the importer's source account is not followed, and account
-connection reviews, keyed by producer, do not carry over. Under another key
-the identity differs and so does the entity.
+MoneyForward identity is derived from the importer producer's reference for
+that identity (`accountEntityId`), so one identity value, v1 or v2, maps to
+one entity whichever producer read it. An operator's re-mapping of the
+importer's source account is not followed, and account connection reviews,
+keyed by producer, do not carry over. A v1 and a v2 identity differ, and so do
+their entities.
 
 ## Policy 2: Mizuho rule re-identification
 

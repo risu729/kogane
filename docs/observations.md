@@ -70,6 +70,19 @@ observed shapes on synthetic fixtures
 every stored capture passes the checks after the first one is known only once
 the new version's jobs have run.
 
+## MoneyForward v2 account identity (monthly parser 2.0.3, boundary parser 1.0.2)
+
+Both MoneyForward parsers take the account from the artifact's unit key. They
+accepted only the retired importer's `moneyforward-account-v1-<64 hex>`; they
+now also accept the collector's `moneyforward-account-v2-<64 hex>`, the
+unkeyed digest of the same account/service tuple
+([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md)). Nothing
+else changed, so every stored v1 artifact parses as before, positional
+`account-NN` units stay `parser_rejected`, and the new versions' jobs only
+repeat the old ones' outcome for stored artifacts. A v1 and a v2 identity are
+different source accounts: a month captured under both is listed under both
+([identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity)).
+
 ## MoneyForward description-template repair (monthly parser 2.0.2)
 
 Read-only, size/SHA-256-verified inspection of an affected monthly artifact found

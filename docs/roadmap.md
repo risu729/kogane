@@ -122,27 +122,32 @@ Concrete limits in the current code:
   no deployed source does yet); candidates are proposed, never merged by
   amount and date. Excluding a row by decision and allocating a refund to a
   purchase are not available yet. The Vpass collector writes a trusted card
-  binding only once the owner sets its `VPASS_CARD_BINDING_KEY` secret to the
-  retired importer's key, and only if the provider's responses still carry the
-  card tuple, which has not been observed since the importer was retired;
-  without one, a parsed collector capture would retire the importer-era
-  purchases of its card-month and its rows would be skipped as
-  `account_not_resolved`. The collector's statement pages are registered
-  without a parser dataset, so none is parsed today; releasing them is a
-  later change, made after the owner has set the key and checked that the
-  collector's tokens match the importer's
+  binding with no secret: the token is the unkeyed `vpass-card-v2-` digest of
+  the card tuple ([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md);
+  the owner no longer sets a `VPASS_CARD_BINDING_KEY`, which is removed). It
+  binds only if the provider's responses still carry the card tuple, which has
+  not been observed since the importer was retired; without one, a parsed
+  collector capture would retire the importer-era purchases of its card-month
+  and its rows would be skipped as `account_not_resolved`. A card's v2 token
+  is never its importer-era v1 token, so the two are different account
+  entities until a reviewed crosswalk joins them. The collector's statement
+  pages are registered without a parser dataset, so none is parsed today;
+  releasing them is a later change, made once the v1 and v2 entities of each
+  card are decided
   ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
-- Money Forward ME collector runs parse only once the owner sets the
-  collector's `MONEYFORWARD_ACCOUNT_IDENTITY_KEY` secret: without it the
-  account units stay positional and every account page is `parser_rejected`,
-  as all 52 account pages of the first shared-R2 run were. Under the retired
-  importer's key the identities are the importer's and each captured month
-  replaces the importer's snapshot of that month, and the collector's source
-  account maps to the importer-era account entity by rule. Under a new key
-  every account is new, and the months both producers captured are listed
-  under two source accounts in the transactions read until a decision says
-  otherwise. Whether the provider's detail pages still carry the tuple
-  has not been observed since the importer was retired
+- Money Forward ME collector runs derive their account identity with no
+  secret: the unit key is the unkeyed `moneyforward-account-v2-` digest of
+  the account/service tuple
+  ([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md); the owner
+  no longer sets a `MONEYFORWARD_ACCOUNT_IDENTITY_KEY`, which is removed). A
+  run whose detail pages lack the tuple keeps positional units and every
+  account page is `parser_rejected`, as all 52 account pages of the first
+  shared-R2 run were before ADR 0027. The importer's v1 identities are never
+  equal to the collector's v2 identities, so every collector account is a new
+  source account and account entity, and the months both producers captured
+  are listed under two source accounts in the transactions read until a
+  reviewed crosswalk joins them. Whether the provider's detail pages still
+  carry the tuple has not been observed since the importer was retired
   ([ADR 0027](adr/0027-moneyforward-collector-account-identity.md)).
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
   email route), V Point Pay and GLOBAL PASS had no registered collector run
