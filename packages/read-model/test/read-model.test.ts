@@ -319,9 +319,9 @@ describe("named concepts in the final SQL", () => {
         .get(),
     ).toEqual({
       policy_id: "coverage-v1",
-      // 0053 inserted 1.0.0; 0056 moves it to the release that reads the
-      // stored boards (ADR 0028).
-      required_parser_version: "1.0.1",
+      // 0053 inserted 1.0.0; 0056 moved it to 1.0.1, and 0059 to 1.0.2, the
+      // release that reads the stored boards (ADR 0028, amended).
+      required_parser_version: "1.0.2",
       replaces_previous_on_complete_empty: 0,
     });
     // The shadow comparison compiles on the production schema and reads the views.

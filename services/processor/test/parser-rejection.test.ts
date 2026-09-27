@@ -494,6 +494,11 @@ describe("SBI Shinsei yen deposit and exchange-rate throw sites", () => {
       reason: "the board lists a currency twice in one customerCategory",
       label: `${RATES}[].currency`,
     });
+    // The two-digit suffix 1.0.1 assumed is refused by 1.0.2 (ADR 0028,
+    // amended) under the category the stored boards showed, without the value.
+    expect(board((r) => (info(r)["transactionTime"] = "2099/01/01 00:00:00 01"))).toEqual({
+      reason: "provider timestamp format is not recognized",
+    });
     expect(board((r) => (r["header"].adapterResultCode = "1"))).toEqual({
       reason: "response was not successful",
       label: X,

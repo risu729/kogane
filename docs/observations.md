@@ -17,6 +17,33 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## SBI Shinsei board time ends in letters (board parser 1.0.2)
+
+Observed on 2026-09-27 by the owner's agent (structure and counts only,
+[ADR 0028 amendment](adr/0028-sbi-shinsei-observed-capture-shapes.md#amendment-2026-09-27-the-two-trailing-characters-are-letters-parser-102)):
+
+- **Replay diagnostics after 1.0.1.** `sbi-shinsei-exchange-rate`: 17 boards
+  selected, 17 refused, all with "provider timestamp format is not
+  recognized"; 33 `error` and 0 `ok` parse runs of the parser; all 17 are
+  importer-era captures. `sbi-shinsei-top-balances-and-activity`: 0 selected
+  (54 `error`, 29 `ok` and 29 published parse runs; no artifact still failing),
+  so 0.1.2 resolved the activity refusals.
+- **The stored `transactionTime`** is `dddd/dd/dd dd:dd:dd aa`: 22 characters,
+  a time with seconds, a space and two letters. The entry below wrote it as
+  `NNNN/NN/NN NN:NN:NN NN`, and 1.0.1 read each `N` as a digit; it matched no
+  stored board.
+- **Screens.** The logged-in top shows 5 currencies (mid rate only); the FX
+  savings page and the public rate page show 13 (USD, EUR, CAD, AUD, GBP, NZD,
+  SGD, HKD, ZAR, NOK, CNY, TRY, BRL). Their times are minute precision with no
+  trailing letters. CHF and JPY are on no screen; no per-100 unit is shown, and
+  the public pages state fees and rates per 1 base currency unit, in yen.
+
+1.0.2 matches the letter shape exactly (either case) and refuses the digit
+form again; migration 0059 moves the board's policy row to 1.0.2, and the
+repair lane re-parses the stored boards after deploy. The letters' meaning,
+the owner's tier and the board's own time stay unknown; no FX price is
+admitted.
+
 ## GLOBAL PASS activity pages paginate; the collector keeps page 1 (collector, no parser release)
 
 Observed on 2026-09-27 by the owner's agent on the live Account Activities
@@ -89,7 +116,8 @@ What the releases do, and what they leave unknown:
   `(currency, customerCategory)`, the claim expecting rows × 3 over all
   tiers), skips a JPY row with an `info` `row_unreadable` issue of impact
   `none`, and for a `transactionTime` of the observed 22-character shape
-  (digits and separators only; any other unrecognised form still fails)
+  (digits and separators only, which no stored board has: see 1.0.2 above;
+  any other unrecognised form still fails)
   writes no provider time,
   marks `_kogane.providerTimeBasis: "unrecognized"` and records one `info`
   `unknown_fields_preserved` issue without the value. Readers use the fetch

@@ -935,7 +935,8 @@ per tier, and a JPY row was present.
 `required_parser_version` is an exact match, from 1.0.0 to 1.0.1):
 
 - A `transactionTime` of the observed 22-character shape
-  (`NNNN/NN/NN NN:NN:NN NN`, digits only in the `N` places) no longer fails
+  (`NNNN/NN/NN NN:NN:NN NN`, digits only in the `N` places; no stored board
+  has it, and 1.0.2 below matches two letters instead) no longer fails
   the board; any other unrecognised form still does. For that shape the
   observations carry no provider time, so readers use the fetch instant
   marked as the collector's; each records `_kogane.providerTimeBasis:
@@ -950,22 +951,58 @@ per tier, and a JPY row was present.
   and is not counted, so the board stays complete. A board with no quote row
   left is refused like an empty one.
 
+**Parser 1.0.2 (2026-09-27; migration 0059 moves the policy row from 1.0.1
+to 1.0.2).** A `replay-diagnostics` run after 1.0.1 was deployed selected 17
+stored boards and refused all 17 with "provider timestamp format is not
+recognized" (33 `error` and 0 `ok` parse runs of the parser; all 17 are
+importer-era captures): the stored `transactionTime` is
+`dddd/dd/dd dd:dd:dd aa`, 22 characters ending in a space and **two
+letters**, and 1.0.1 had assumed two digits, which no board carries
+([ADR 0028 amendment](../adr/0028-sbi-shinsei-observed-capture-shapes.md#amendment-2026-09-27-the-two-trailing-characters-are-letters-parser-102)).
+1.0.2 matches exactly that shape, two ASCII letters in either case, and
+refuses the two-digit form again; everything else is as 1.0.1 (no provider
+time, `providerTimeBasis: "unrecognized"`, one `info` issue without the value,
+the text verbatim in the provider context). After deploy the repair lane's
+cyclic scan creates a 1.0.2 job for every stored board without an operator
+step; a failed 1.0.1 job does not block it, because jobs are keyed by parser
+version.
+
+**Screens and public pages (2026-09-27, structure only).** The logged-in top
+shows 5 currencies with a mid rate only, each row labelled by a number and
+the currency's name, and a minute-precision update time. The logged-in FX
+savings page shows 13 currencies (USD, EUR, CAD, AUD, GBP, NZD, SGD, HKD,
+ZAR, NOK, CNY, TRY, BRL) with buy, mid and sell, notes that the rates are
+periodic reference values, states its fee per base currency unit, and shows a
+minute-precision time. The public rate page
+(<https://www.sbishinseibank.co.jp/retail/gaika/exchange_rate_fx.html>) shows
+the same 13 with TTS, TTB and mid, in yen, with its fee per 1 base currency
+unit; the beginners' page
+(<https://www.sbishinseibank.co.jp/retail/gaika/feature/beginner/>) works a
+fee example per 1 USD. No screen shows seconds or the two letters, none shows
+CHF or JPY, and none shows a per-100 currency. The basis this gives is
+recorded as the provider's public documentation in the
+[ADR 0020 amendment](../adr/0020-price-promotion-by-rule.md#amendment-2026-09-27-the-quote-basis-from-the-providers-public-pages):
+the 13 listed currencies are quoted per 1 unit; CHF is on no page.
+
 **Limits.** The board is a customer rate tiered by `customerCategory`, not a
 market reference. Which tier applies to the owner is unobserved; the parser
 picks none, and the price rule reads a tier only when an admission names it.
-The board's own time is not known (the trailing characters' meaning is not),
-so the fetch instant stands in. No currency's quote basis is verified, so
-the price promotion lane promotes no FX row (`unsupported_currency`) until a
-currency is admitted with its tier, basis and evidence in
-`SBI_SHINSEI_FX_QUOTE_BASIS` (`packages/domain/src/price-sources.ts`). The FX
+The board's own time is not known (the two trailing letters' meaning is not,
+and no screen shows them), so the fetch instant stands in. The provider's
+public pages quote the 13 listed currencies per 1 unit, but that is general
+documentation, not the owner's confirmation per currency, and CHF is on no
+page; the price promotion lane promotes no FX row (`unsupported_currency`)
+until a currency is admitted with its tier, basis and evidence in
+`SBI_SHINSEI_FX_QUOTE_BASIS` (`packages/domain/src/price-sources.ts`), which
+stays empty while the owner's tier is unknown. The FX
 policy that will value with this board is named `fx-sbi-shinsei-mid-v1` so
 the caveat travels with every result that uses it.
 
 **What admits a currency.** The owner confirms, from the live board or an
 aggregate survey of the stored boards, which `customerCategory` tier is the
-owner's and each currency's quote basis (per 1 unit); the pair is then
-recorded with its `evidence` in `SBI_SHINSEI_FX_QUOTE_BASIS`, in a change that
-amends ADR 0020.
+owner's; a listed currency is then recorded with that tier, basis 1 and the
+public pages above as its `evidence` in `SBI_SHINSEI_FX_QUOTE_BASIS`, in a
+change that amends ADR 0020.
 
 ## Parse status in production (2026-09-26)
 
@@ -1004,7 +1041,9 @@ observed and is still refused. Every other rule is unchanged. After deploy the
 repair lane's cyclic scan creates a 0.1.2 job for each stored capture and a
 1.0.1 job for each stored board with the `exchange-rate` dataset, so both are
 re-parsed without an operator step (or at once through a replay plan per
-dataset).
+dataset). 1.0.1 matched no stored board (the time ends in letters, not
+digits); 1.0.2 and migration 0059 replace it, and the repair lane creates
+1.0.2 jobs the same way.
 
 **Limits.** The activity window's end is not known; only its start is
 enforced. The replay reported the first failing check only, so whether every
