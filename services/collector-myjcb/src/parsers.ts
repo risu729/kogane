@@ -357,6 +357,16 @@ export function creditStatementState(html: string, detailMonth: number): CreditS
 }
 
 /**
+ * The ledger rows a credit detail page shows, counted by the same page reading
+ * as `creditStatementState`. An `unknown` page with rows keeps them only as
+ * HTML evidence, which no parser reads, so the connection that captured it did
+ * not capture that month whole (ADR 0026).
+ */
+export function creditPageRowCount(html: string): number {
+  return readMyJcbStatementPage(parse(html)).rowCount;
+}
+
+/**
  * The heading a closed statement page names its payment month in, compared
  * after whitespace removal. `myjcb-credit-statement-total` reads the same
  * heading (packages/parsers/src/parsers/myjcb.ts), so the month the collector

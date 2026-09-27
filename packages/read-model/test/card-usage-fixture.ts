@@ -5,6 +5,7 @@
 // synthetic payload, so each `extra_json` path the query reads is the one
 // those parsers really emit. No provider data, account or card appears here.
 import { Database } from "bun:sqlite";
+import { fromTemplate } from "./schema-template";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { myJcbCreditLedger } from "../../../packages/parsers/src/parsers/myjcb";
@@ -81,17 +82,9 @@ interface AccountSpec {
   status?: "identified" | "provider-local" | "aggregate" | "unresolved";
 }
 
-/**
- * The migrated schema, built once per test process and copied for each
- * store. Running the migrations is most of what building a world costs, and
- * a copy of the same bytes is the same schema, views and triggers, so every
- * store still starts from exactly what the migrations produce.
- */
-let migratedTemplate: Uint8Array | null = null;
-
+/** The Layer A stub and the CORE migrations from 0017: a copy of one build per process. */
 export function migrated(): Database {
-  migratedTemplate ??= migrate().serialize();
-  return Database.deserialize(migratedTemplate);
+  return fromTemplate("card-usage-stub", migrate);
 }
 
 function migrate(): Database {

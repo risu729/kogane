@@ -2,6 +2,7 @@
 // minimal synthetic Layer A). Proves AT63 at the query level: a correction
 // changes `latest` and never `as-recorded`, and the context says which was read.
 import { Database } from "bun:sqlite";
+import { fromTemplate } from "./schema-template";
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -50,6 +51,13 @@ INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key) VALU
 
 /** Layer B/C schema with one sealed parse whose observation was organized at revision 1. */
 function seededDatabase(): Database {
+  const db = fromTemplate("identity-stub", stubSchema);
+  seed(db);
+  return db;
+}
+
+/** The Layer A stub and the CORE migrations from 0017, built once per process. */
+function stubSchema(): Database {
   const db = new Database(":memory:");
   db.exec(LAYER_A);
   for (const name of readdirSync(MIGRATIONS)
@@ -64,6 +72,10 @@ function seededDatabase(): Database {
     )
     .sort())
     db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
+  return db;
+}
+
+function seed(db: Database): void {
   db.exec(`INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(1,1,'synthetic','1','2026-01-01','pending','[]');
 INSERT INTO balance_observations(id,parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(1,1,'smbc-bank:ordinary-yen','balance','JPY','$','{}');
 UPDATE parse_runs SET status='ok' WHERE id=1;
@@ -81,7 +93,6 @@ INSERT INTO identity_runs VALUES('run',1,1,'2098-01-01');
 INSERT INTO identity_observations VALUES('io','run','balance',1,'ref','am1','[]');
 INSERT INTO identity_instrument_uses VALUES('io','unit','ident','im1');
 INSERT INTO identity_run_seals VALUES('run',1,'2098-01-01');`);
-  return db;
 }
 
 interface Row {

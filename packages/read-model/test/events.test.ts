@@ -5,6 +5,7 @@
 // shown side by side with their difference, and that correcting a wrong merge
 // appends a revision instead of rewriting one.
 import { Database } from "bun:sqlite";
+import { fromTemplate } from "./schema-template";
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,6 +45,13 @@ VALUES('${id}','relation','${subjectRef}',1,'accept','rule','rule:test',NULL,'sy
 }
 
 function seededDatabase(): Database {
+  const db = fromTemplate("events-stub", stubSchema);
+  seed(db);
+  return db;
+}
+
+/** The Layer A stub and the CORE migrations from 0017, built once per process. */
+function stubSchema(): Database {
   const db = new Database(":memory:");
   db.exec(LAYER_A);
   for (const name of readdirSync(MIGRATIONS)
@@ -58,6 +66,10 @@ function seededDatabase(): Database {
     )
     .sort())
     db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
+  return db;
+}
+
+function seed(db: Database): void {
   db.exec(`INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(1,1,'synthetic','1','2026-03-01','pending','[]');
 INSERT INTO transaction_observations(id,parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,raw_locator,extra_json)
  VALUES(1,1,'account:card','row-1','posted',-3000,'-3000',0,'JPY','json:$.rows[0]','{}');
@@ -84,7 +96,6 @@ INSERT INTO obligation_revisions(obligation_id,revision,creditor_ref,debtor_ref,
 ${decision("dr_settle_1", "settlement:st-1")}
 INSERT INTO settlement_relations(id,obligation_id,settlement_component_ref,unit_ref,coefficient,scale,occurred_json,unresolved_coefficient,unresolved_scale,decision_revision_id,superseded_by,created_at)
  VALUES('st-1','obl-1','leg:ev-purchase-1#0','JPY','4000',0,${DATE},NULL,NULL,'dr_settle_1',NULL,'2026-03-01T00:00:00Z');`);
-  return db;
 }
 
 function reader(db: Database): EventsReader {

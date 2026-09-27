@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { fromTemplate } from "./schema-template";
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,12 +38,14 @@ const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migration
 
 /** The production schema, views included, on an in-memory SQLite. */
 function migratedDatabase(): Database {
-  const db = new Database(":memory:");
-  for (const name of readdirSync(MIGRATIONS)
-    .filter((entry) => entry.endsWith(".sql"))
-    .sort())
-    db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
-  return db;
+  return fromTemplate("core", () => {
+    const db = new Database(":memory:");
+    for (const name of readdirSync(MIGRATIONS)
+      .filter((entry) => entry.endsWith(".sql"))
+      .sort())
+      db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
+    return db;
+  });
 }
 
 /** A second implementation of the executor contract: the reader is not tied to D1. */

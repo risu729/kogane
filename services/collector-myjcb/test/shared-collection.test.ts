@@ -103,18 +103,21 @@ describe("G1-02/G1-16 shared mode persists each connection's pages and then the 
     // A card exposes a rolling set of statement periods, so a finished run is
     // not a claim about the card's whole history.
     expect(manifest.coverageStatus).toBe("partial");
+    // ADR 0026: each connection that finished kept everything the run set out
+    // to collect, so its unit is `complete` — the claim registration turns
+    // into the unit outcome `success`.
     expect(manifest.units).toEqual([
       {
         unitKey: "account-one",
         unitKind: "connection",
         artifactCount: 3,
-        coverageStatus: "partial",
+        coverageStatus: "complete",
       },
       {
         unitKey: "account-two",
         unitKind: "connection",
         artifactCount: 3,
-        coverageStatus: "partial",
+        coverageStatus: "complete",
       },
     ]);
     // G1-16: the connections stay separate units of one run, never merged.
@@ -270,12 +273,14 @@ describe("G1-08/G1-09/G3-11 the outcome of the run survives persistence", () => 
     expect(read.manifest.providerOutcome).toBe("partial");
     expect(read.manifest.coverageStatus).toBe("partial");
     expect(read.manifest.safeErrorCode).toBe("human_required");
+    // The connection that finished is still whole: a sibling's failure makes
+    // the run partial, not this unit (ADR 0026).
     expect(read.manifest.units).toEqual([
       {
         unitKey: "account-one",
         unitKind: "connection",
         artifactCount: 3,
-        coverageStatus: "partial",
+        coverageStatus: "complete",
       },
       {
         unitKey: "account-two",
@@ -284,6 +289,32 @@ describe("G1-08/G1-09/G3-11 the outcome of the run survives persistence", () => 
         coverageStatus: "unknown",
         safeErrorCode: "human_required",
       },
+    ]);
+  });
+
+  test("ADR 0026: a connection that reports itself partial keeps a partial unit", async () => {
+    // `collectConnection` reports `partial` when a month's page shows rows it
+    // does not state the state of: the page is kept, its rows reach no
+    // parser. There is no failure entry, and the Worker makes the run partial.
+    const whole = connection("account-one");
+    const partial = {
+      ...connection("account-two"),
+      summary: { ...connection("account-two").summary, status: "partial" as const },
+    };
+    const plan = await myJcbRunPlan(
+      input({
+        status: "partial",
+        connections: [whole, partial],
+        failures: [],
+      }),
+    );
+    expect(plan.run.providerOutcome).toBe("partial");
+    expect(plan.run.coverageStatus).toBe("partial");
+    expect(
+      plan.run.units.map((unit) => [unit.unitKey, unit.coverageStatus, unit.safeErrorCode]),
+    ).toEqual([
+      ["account-one", "complete", undefined],
+      ["account-two", "partial", "collector_partial"],
     ]);
   });
 
