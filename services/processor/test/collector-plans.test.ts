@@ -848,7 +848,10 @@ test("sony-bank: responses, exports, redacted statements and the summary registe
   expect(registered.units).toEqual([{ unit_key: "account", artifacts: 4, declared: 4 }]);
 });
 
-/** A synthetic Vpass card run with one month of `rows` rows whose summary states `allCnt`. */
+/**
+ * A synthetic Vpass card run with one month of `rows` rows whose summary states
+ * `allCnt`, as the JSON string the live site sends (2026-09-27, types only).
+ */
 function vpassPlan(rows: number, allCnt: number) {
   const envelope = (content: Record<string, unknown>) =>
     JSON.stringify({ header: { resultCode: 0 }, body: { content } });
@@ -873,7 +876,7 @@ function vpassPlan(rows: number, allCnt: number) {
             rawJson: envelope({
               WebMeisaiTopDisplayServiceBean: {
                 meisaiList: Array.from({ length: rows }, () => ({ data: [] })),
-                webMeisaiTopK3Vo: { allCnt },
+                webMeisaiTopK3Vo: { allCnt: String(allCnt) },
               },
             }),
           },

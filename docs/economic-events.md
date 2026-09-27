@@ -1189,6 +1189,11 @@ candidate decisions pin published source revisions, ownership evidence and
 exclusive payment allocation, with an approved withdrawal path. Acceptance
 records the observed cash effect and keeps principal/fee decomposition unknown;
 a statement total is not turned into an invented obligation principal.
+A card provider's own statement of the debit account is designed as the
+candidate's primary evidence, proposal-only
+([provider-stated debit accounts](card-settlements.md#provider-stated-debit-accounts),
+[ADR 0032](adr/0032-provider-stated-debit-accounts.md)); only the domain rule
+exists, and no reader produces that evidence yet.
 
 The confirmation flow uses `card-settlement.accept`, `card-settlement.reject`
 and `card-settlement.withdraw`. The last withdraws a judgement, not funds.

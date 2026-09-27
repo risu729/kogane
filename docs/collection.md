@@ -527,14 +527,22 @@ months that were captured, one `terminal` report,
 so a finished run is not a claim about the card's whole history. The card unit
 is `complete` only when every month's captured rows (the pages' `meisaiList`
 entries) equal the total the provider states for it (`webMeisaiTopK3Vo.allCnt`
-on a finalized statement page, `total` on a customized one); otherwise it is
+on a finalized statement page, a string on the live site, `total` on a
+customized one, a number; both read by `providerCount` as a non-negative safe
+integer or a string of ASCII digits only); otherwise it is
 `partial`, which makes registration record the whole fetch run as `partial`,
 which neither identity nor the trusted card binding reads
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented),
 [ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each month's `capturedRows`, `statedTotal`
 and closed `coverage` code (`complete`, `stated_total_unverified`,
 `stated_total_mismatch`) and the card's code, which the persist diagnostic
-also logs (`statement_months_absent` when no month was walked).
+also logs (`statement_months_absent` when no month was walked). The month
+walk (`src/statement-walk.ts`) stops a finalized month after a page whose
+`allCnt` is below its `nextPageRow` or on an empty page after the first, and a
+customized month once its rows reach `total` with `pageFlg` `1` or `3` or on
+an empty answer page; it does not read `pageNo` or `lastPage`, whose meaning
+is unobserved
+([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site)).
 `producerVersion` is `vpass-worker-card-v1`, the schema version central
 storage recorded for a card-scoped Vpass run, and `manifest.json` holds exactly
 the summary central storage held for one.
