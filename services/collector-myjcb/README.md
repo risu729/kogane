@@ -161,9 +161,9 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 
 クレジット初期menuでは観測された月だけを取得し、`detailPastJson`の9〜17候補は`detailAvailableFlag=true`だけを追加する。例ではolder 9候補中10/13だけがavailableだったため、全offset総当たりをしない。API failureやhidden `generalJsonShikibetuId`欠落時は停止する。JSON-RPCは`method=execute`、`params=[{generalJsonShikibetuId}]`、official JSと同じ`0301006`＋2桁counter形のIDを使う。
 
-`detailMonth=0`はmutable `unconfirmed` snapshotで、exportなしの`.detail-list-01`をHTML＋parsed JSONとして保存する。確定月も同ledger componentを持ち、CSV/OFXと突合できる。export linkがその月のHTMLに実在する場合だけCSV/PDF/OFXを取得し、notice PDFは除外する。CSVはmetadata行の後に現れるexact 12-column headerを探し、CP932 bytesをそのまま保存する。
+`detailMonth=0`はmutable `unconfirmed` snapshotで、exportなしの`.detail-list-01`をHTML＋parsed JSONとして保存する。確定月も同ledger componentを持つ。export link（確定月は`detailMonth`を名乗らない相対hrefで持つ）はdetail page自身のURLに対して解決し、そのpageのCSV/PDF/OFX linkをその月のexportとして数える（別の`detailMonth`を名乗るlinkは数えない）。notice PDFは除外する。Workerはexportを取得せず、manifestの`exportOffers`に記録するだけである（共通bucketがexport datasetを拒否するため。ADR 0005のamendment (b)）。`collectCredit`の`exports: "fetch"`でだけ取得し、CSVはmetadata行の後に現れるexact 12-column headerを探してCP932 bytesをそのまま保存する。ledger headerが`ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`（ショッピングスキップ払いの支払予定pageで観測。live DOMは3 cell）で行があるpositionは、pageだけを`unknown`として保存し、行を読まずに次の月へ進む（`scheduled_payments_page`）。
 
-月の明細状態はexport linkの有無ではなく、page自身から決める（`src/parsers.ts`の`creditStatementState`）。調査したconnectionにはどの月にもexport linkがないため、以前の「`detailMonth<=1`でexportなしなら`unconfirmed`」という規則は、position 1の締め済み明細を`unconfirmed`と記録していた。
+月の明細状態はexport linkの有無ではなく、page自身から決める（`src/parsers.ts`の`creditStatementState`）。調査したconnectionではexport linkが一度も見つからなかった（相対hrefを解決できないbugで、2026-09-27に修正）ため、以前の「`detailMonth<=1`でexportなしなら`unconfirmed`」という規則は、position 1の締め済み明細を`unconfirmed`と記録していた。
 
 - `detailMonth=0`: 常に`unconfirmed`。h1があれば停止する
 - `<h1>カードご利用代金明細(確定分)</h1>`がちょうど一つあり、ledger headerの金額labelが`今回のお支払い金額`またはなし: `confirmed`
@@ -229,7 +229,7 @@ mise run //services/collector-myjcb:typecheck
 mise run //services/collector-myjcb:dry-run
 ```
 
-live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第一connectionの実credential testまで行った。成功runは1 connection、20 artifact、failure 0で、内訳はcredit detail 11、parsed ledger 6、menu 1、過去月JSON 1、discovery 1だった。このrunでは公式CSV/PDF/OFX linkが提示されず、export artifactは0だった。従ってこのconnectionではHTML ledgerが実データsourceとして必要であり、別IDでexportが存在する場合だけ確定月をCSV中心へ最適化する。manifestとsource-preserving artifactはprivate R2へ保存し、実値やsecretはPRへ含めない。
+live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第一connectionの実credential testまで行った。成功runは1 connection、20 artifact、failure 0で、内訳はcredit detail 11、parsed ledger 6、menu 1、過去月JSON 1、discovery 1だった。このrunでは公式CSV/PDF/OFX linkが見つからず、export artifactは0だった（2026-09-27の調査で、確定月はlinkを相対hrefで持ち、collectorがそれを解決できていなかったと分かった）。従ってこのconnectionではHTML ledgerが実データsourceとして必要であり、別IDでexportが存在する場合だけ確定月をCSV中心へ最適化する。manifestとsource-preserving artifactはprivate R2へ保存し、実値やsecretはPRへ含めない。
 
 作成済みpersistent resourceはWorker `kogane-myjcb-collector-poc`、Cron `0 21 * * *`、admin/connection secret群である。保存先は共有DATA bucket `kogane-raw-evidence`で、旧private R2 bucket同名は2026-09-13に中央DATAへコピー・検証した後に削除した。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時はWorkerとsecretだけを削除し、他のcollectorとProcessorも使う共有DATA bucketは削除しない。
 

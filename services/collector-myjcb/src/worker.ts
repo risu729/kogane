@@ -1,6 +1,7 @@
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { collectConnection, connectionStopCode, parseCredentialSecrets } from "./collector";
 import {
+  connectionErrorCode,
   persistSharedRun,
   sharedBucket,
   sharedRunDiagnostic,
@@ -162,9 +163,10 @@ async function runSharedCollection(
           : [
               {
                 connectionId: connection.summary.connectionId,
-                // The stop code, or `collector_partial` for a connection that
-                // ran to the end but withheld a month's rows.
-                code: connection.summary.stopCode ?? "collector_partial",
+                // The unit's code: the stop code, or for a connection that
+                // ran to the end but kept months unread,
+                // `scheduled_payments_page` or `collector_partial`.
+                code: connectionErrorCode(connection.summary) ?? "collector_partial",
               },
             ],
       ),
