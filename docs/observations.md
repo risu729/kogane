@@ -54,6 +54,7 @@ stay unread; release adoption does not compare this table. Tests:
 `credit-statement-state.test.ts`, `scripts/artifact-datasets.test.ts`,
 `services/processor/test/myjcb-shared-r2.test.ts`,
 `parser-rejection.test.ts`.
+
 ## MyJCB 「カード情報」 and Vpass debit accounts (no parser release)
 
 Observed on 2026-09-27 (round 4) by the owner's agent, structure and counts
