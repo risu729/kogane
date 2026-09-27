@@ -148,6 +148,10 @@ version is current and does not depend on the dataset table.
   or Vpass terminal written before its redeploy. A Processor follow-up
   should record a seal-trigger refusal as a block (it is about the
   terminal's own bytes and cannot change on retry); it is not done here.
+  (Done since by the
+  [ADR 0024 amendment of 2026-09-26](0024-collection-scan-judged-terminals.md#amendment-2026-09-26-a-seal-core-refuses-is-a-verdict):
+  such a run is blocked `run_inventory_incomplete` once and the blocked
+  stage names its unsealed fetch run.)
 - The Vpass statement pages' new role interacts with ADR 0022's withheld
   Vpass rule, which names `provider_response`: after this change that rule
   matches nothing, which keeps the pages unparsed as ADR 0022 intends. The

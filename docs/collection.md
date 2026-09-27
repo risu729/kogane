@@ -832,7 +832,8 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   of kind `collection`, the same unit the central descriptors use, counting the
   datasets; `manifest.json` names no unit (ADR 0021 — it named the unit
   without being counted, so every run failed its seal with
-  `run_inventory_incomplete` and was retried each tick). No ranges.
+  `run_inventory_incomplete` and was retried each tick until the ADR 0024
+  amendment of 2026-09-26 made that refusal a block). No ranges.
 - A successful run declares `coverageStatus: complete`: the collector walks
   every historical execution and cash-flow page to exhaustion and verifies the
   provider's own pagination totals before finishing.

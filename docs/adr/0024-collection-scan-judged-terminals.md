@@ -1,6 +1,8 @@
 # ADR 0024: The collection scan does not spend registrations on terminals already judged
 
-- Status: proposed
+- Status: accepted (#267); the
+  [amendment of 2026-09-26](#amendment-2026-09-26-a-seal-core-refuses-is-a-verdict)
+  is proposed
 - Date: 2026-09-26
 - Amends: [ADR 0010](0010-terminal-registration-budget.md) (how the scan's
   per-tick registration count is spent; the operation budget is unchanged)
@@ -10,6 +12,7 @@
   `services/processor/src/collection/index.ts`,
   `packages/application/src/collection/register-terminal.ts`,
   `packages/storage-d1/src/core/collection-runs.ts`,
+  `packages/application/src/collection/seal-refusal.ts` (amendment),
   `services/processor/test/collection-scan-convergence.test.ts`
 
 ## Context
@@ -173,3 +176,137 @@ producer without a route for `inactive_ingest_route`):
   `recorded: true`.
 
 The existing collection and registration-budget suites pass unchanged.
+
+## Amendment 2026-09-26: a seal CORE refuses is a verdict
+
+- Status: proposed
+- Date: 2026-09-26
+
+### Context
+
+`registerTerminal` turns what it knows to be a verdict about a terminal into
+a `blocked` or `retryable` row: a `TerminalRegistrationError`, a
+`ContractError`, an `IngestError`. A refusal by CORE's own seal trigger was not
+one of them. When `fetch_run_seal_requires_complete_inventory` refused the
+seal (`RAISE(ABORT, 'run_inventory_incomplete')`, which workerd's D1 in
+Miniflare reports as `D1_ERROR: run_inventory_incomplete: SQLITE_CONSTRAINT
+(extended: SQLITE_CONSTRAINT_TRIGGER)`), the error was rethrown. The run's structure,
+catalogue and reports were in CORE, unsealed; no `registered` stage and no
+`blocked_code` were written; the scan counted the terminal in `failed`; and,
+because its row was neither registered nor blocked, the next walk attempted
+it again. The decision above ("a terminal CORE has already judged is
+answered from its row") could not apply: nothing was judged.
+
+The terminal is immutable and the derivation is fixed for a contract
+version, so every later attempt is refused in the same way. Production on
+2026-09-26 (aggregates only): 14 sbi-vc-trade terminals whose unit declares a
+different artifact count than the run holds, and the collector-vpass
+terminals the [roadmap](../roadmap.md) lists, hit this on every walk.
+
+### Options considered
+
+1. **Keep rethrowing.** Rejected: each such terminal spends one of the tick's
+   five registrations and its operations on every walk, forever, and is
+   reported as an infrastructure failure when it is a verdict about the
+   evidence.
+2. **Record it as `retryable`.** Rejected: `retryable` is for refusals about
+   the deployment that a configuration fix can change. Nothing an operator
+   does changes this answer for this terminal and this contract version.
+3. **Classify every error the seal statement raises.** Rejected. The seal
+   batch's other triggers are not verdicts about the terminal:
+   `inactive_ingest_route` is configuration (registration already meets it
+   earlier, as `retryable`), and `immutable_duplicate_insert` is a race the
+   seal's own reconciliation reads back. A D1 or platform error is not a
+   verdict at all.
+4. **A new `seal_refused` code with the trigger mapped to a sub-code.**
+   Rejected: the trigger's RAISE text is already a closed machine code that
+   fits `blocked_code`'s CHECK (`[a-z0-9_]{1,64}`), and a second name for it
+   would only need its own mapping table.
+5. **Link the unsealed fetch run from `collection_runs.fetch_run_id`.** Not
+   possible without a migration: the 0039 CHECK ties `fetch_run_id` to
+   `registered_at`, and a blocked run is not registered.
+6. **Block with the trigger's code, only for a closed list of trigger codes,
+   and name the unsealed fetch run on the blocked stage.** Chosen.
+
+### Decision
+
+- **What is classified.** Only an error from the seal call itself
+  (`seal` or `sealStagedInventory`), only when it is a trigger refusal
+  (`SQLITE_CONSTRAINT_TRIGGER`: exactly the D1 message above, with or
+  without its `D1_ERROR: ` prefix, or SQLite's own error with that extended
+  code), and only when its code is in
+  `SEAL_REFUSAL_CODES`, which today holds `run_inventory_incomplete` alone
+  (`packages/application/src/collection/seal-refusal.ts`). Everything else the
+  seal raises is rethrown exactly as before.
+- **What is recorded.** The run is blocked with the trigger's code as
+  `blocked_code`, and one `registered` `blocked` stage is appended with
+  `failure_code` = the same code and `evidence_ref` = the id of the fetch
+  run the attempt left behind. The block is write-once as every block is, so
+  the scan answers the terminal from its row from then on (`alreadyJudged`)
+  and never attempts it again under this contract version.
+- **What stays in CORE.** The fetch run, its units, ranges, catalogued
+  artifacts, reports and (for a staged run) its inventory stay as they are:
+  evidence is append-only, and an unsealed run is invisible to every normal
+  reader. The blocked stage is the record that names it.
+- **A later contract version.** A new version is a new identity (ADR 0022),
+  so the terminal gets one fresh attempt under it. That attempt makes its own
+  fetch run, because the version is part of the run key
+  (`<runId>:<version>`) and derivations of two versions are never mixed; the
+  seal is refused again and the new row is blocked naming that run. So each
+  contract version leaves at most one unsealed fetch run per run id, and each
+  is named by its version's blocked stage. The earlier row is not carried
+  over (only a registered row is) and it counts in the cross-version digest
+  conflict check like any earlier record: a different manifest under the
+  same run id is blocked `terminal_digest_conflict` before any fetch run is
+  made for it.
+- **Cost.** The path that seals is unchanged: the classification is a
+  `try` around the seal and adds no operation (a two-artifact registration
+  spends 74 statements, 3 batches and 5 R2 operations before and after).
+
+### Consequences
+
+- **Right after deploy.** Each of these terminals is attempted once more by
+  the walk that reaches it. Under the current version its fetch run already
+  exists (the run key is idempotent), so the attempt re-verifies its objects
+  unless a `pending` stage names that run, skips what CORE holds, is refused
+  at the seal and blocks. From then on it
+  costs the three operations of a judged terminal per walk.
+- **Rows of an earlier version stay as they are.** A version CORE no longer
+  registers under is never worked again (ADR 0022), so a `v1` row whose seal
+  was refused before this amendment keeps no `registered` verdict, and its
+  unsealed `v1` fetch run is named only if a `pending` stage names it.
+- **These terminals still never register.** Registering them needs a
+  terminal whose counts agree (a new capture) or a contract version whose
+  derivation seals them; this amendment decides neither.
+- The seal's other trigger codes stay unclassified; one that turns out to be
+  a verdict is added to `SEAL_REFUSAL_CODES` by a later amendment.
+- **The message shape is Miniflare's.** The D1 message is matched as
+  Miniflare's workerd produces it (inside the Worker and through its Node
+  proxy alike); production D1's message for a trigger refusal has not been
+  observed. A production message of another shape is not classified: the
+  seal error is rethrown and the run is attempted on every walk as before
+  this amendment, which is a limit, not a guess.
+
+### Verification
+
+- `packages/application/test/seal-refusal.test.ts`: the D1 message (with and
+  without the `D1_ERROR:` prefix) and a real SQLite trigger error classify as
+  `run_inventory_incomplete`; another trigger code, a CHECK constraint, a
+  schema error, a platform limit and a message shape nobody observed (a
+  shortened or re-prefixed form) do not.
+- `services/processor/test/collection-scan-convergence.test.ts`, on a
+  synthetic run whose unit declares two artifacts and holds one: the first
+  tick blocks it with the code and one `registered` `blocked` stage naming
+  its unsealed fetch run, while the other terminals on the page register;
+  later ticks (to two days on) answer it `alreadyJudged` with no new stage
+  and no second fetch run; a staged run (51 artifacts) refused by
+  `sealStagedInventory` blocks the same way; blocked under `v1`, it gets one
+  fresh attempt under `v2` with its own fetch run and blocks again, and a
+  different manifest under the same run id is then a digest conflict with no
+  new fetch run; a non-trigger D1 error and an unlisted trigger code still
+  throw, are counted `failed` and record nothing; a normal registration's
+  operation counts are the ones measured before the change.
+- `services/processor/test/registration-datasets.test.ts`: through
+  Miniflare's D1 (workerd), a collector-vpass-shaped run with the same
+  mismatch blocks `run_inventory_incomplete` from the real `D1_ERROR`
+  message and is answered `recorded: true` on the next call.

@@ -14,6 +14,10 @@
 //     `registered` stage with the reason and never seals (G1-14);
 //   * a terminal that cannot be read at all is recorded as a blocked run, so
 //     the scan can move on instead of stopping on it (G1-13);
+//   * a run CORE's seal trigger refuses (`run_inventory_incomplete`: the
+//     declared counts and the catalogue disagree) is blocked with that code,
+//     and the blocked stage names the fetch run left unsealed (ADR 0024,
+//     amendment of 2026-09-26);
 //   * a terminal for a source the Processor does not know, or a failed run
 //     that persisted nothing from the provider, is recorded and blocked
 //     without a single port call: there is no route to authorize the first
@@ -97,6 +101,7 @@ import {
   unitReportRequest,
   unitRequest,
 } from "./descriptors.ts";
+import { sealRefusalCode } from "./seal-refusal.ts";
 
 export { REGISTRATION_CONTRACT_VERSION };
 
@@ -694,8 +699,20 @@ async function register(
   await port.addRunReport(fetchRunId, runReportRequest(manifest));
   const startedAtMs = instantMs(manifest.startedAt);
   const attemptId = `${manifest.runId}:${context.contractVersion}`;
-  if (staged) await port.sealStagedInventory(fetchRunId, inventoryId, attemptId, startedAtMs);
-  else await port.seal(fetchRunId, items, attemptId, startedAtMs);
+  try {
+    if (staged) await port.sealStagedInventory(fetchRunId, inventoryId, attemptId, startedAtMs);
+    else await port.seal(fetchRunId, items, attemptId, startedAtMs);
+  } catch (error) {
+    // CORE's seal trigger refused the run (ADR 0024, amendment of
+    // 2026-09-26): the terminal is immutable and this version's derivation is
+    // fixed, so every later attempt would be refused the same way. It is a
+    // block, and the blocked stage names the fetch run that stays behind
+    // unsealed — catalogued, invisible to every normal reader — so the record
+    // says what the attempt left. Any other error is not a verdict.
+    const refused = sealRefusalCode(error);
+    if (refused === null) throw error;
+    return block(context, row, refused, "registered", context.now(), String(fetchRunId));
+  }
 
   const registeredAt = context.now().toISOString();
   await linkRegisteredRun(env.DB, row.id, {
@@ -923,12 +940,20 @@ async function retryable(
   return { outcome: "retryable", collectionRunId: row.id, code: safe, recorded: false };
 }
 
+/**
+ * Blocks the run, write-once. `evidenceRef` names what the refused attempt
+ * left in CORE — the unsealed fetch run of a seal refusal — and is absent
+ * when the attempt wrote nothing. `collection_runs.fetch_run_id` stays null:
+ * the 0039 CHECK ties it to `registered_at`, and a blocked run is not
+ * registered.
+ */
 async function block(
   context: Registration,
   row: CollectionRunRow,
   code: string,
   stage: "persisted" | "registered",
   at: Date,
+  evidenceRef?: string,
 ): Promise<RegisterTerminalOutcome> {
   const safe = safeCode(code);
   const recordedAt = at.toISOString();
@@ -938,6 +963,7 @@ async function block(
     state: "blocked",
     failureCode: safe,
     recordedAt,
+    ...(evidenceRef === undefined ? {} : { evidenceRef }),
   });
   await blockCollectionRun(context.env.DB, row.id, safe);
   return { outcome: "blocked", collectionRunId: row.id, code: safe, recorded: false };
