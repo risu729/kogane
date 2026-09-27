@@ -4,11 +4,11 @@
   "type": "module",
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
-    "impit": "0.14.3"
+    "impit": "0.14.5"
   },
   "devDependencies": {
     "@types/bun": "1.3.8",
     "typescript": "5.9.3",
-    "wrangler": "4.125.0"
+    "wrangler": "4.138.0"
   }
 }
