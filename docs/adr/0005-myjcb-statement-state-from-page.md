@@ -115,7 +115,9 @@ as a partial unit with a stop code.
   (`artifact_dataset_unobserved`). When every connection of a
   run keeps nothing, the run is `failed` and persists only its terminal, as
   before. Its units are now still written, each with its stop code, so the
-  terminal says where every connection stopped.
+  terminal says where every connection stopped. Registration still refuses
+  such a run (`provider_run_failed`): it is recorded, not sealed, and its
+  units are not registered.
 - The stop codes are a closed list (`CONNECTION_STOP_CODES`): `human_required`,
   `login`, `discovery`, `credit_menu`, `credit_first_detail`,
   `credit_past_months`, `month_fetch`, `month_parse`,
@@ -181,7 +183,11 @@ months it captured.
   condition maps to a closed code. The Worker, with a session connection
   whose month 2 returns HTTP 500, persists months 0 and 1 as a `partial` unit
   with `month_fetch` and a manifest with `stopPosition: 2` and
-  `capturedMonthCount: 2`, without the response body.
+  `capturedMonthCount: 2`, without the response body. Through the manual
+  trigger, an error message, an HTTP error body or an unparsable page that
+  carries a digit string, a merchant-like word and a URL, at a month, at the
+  credit menu, at the past-months response or at login, reaches no stored
+  byte, no log line and no HTTP response; only the stop code does.
 - `services/collector-myjcb/test/shared-collection.test.ts`: the stopped unit,
   its artifacts and its manifest entries; distinct stages keep distinct unit
   codes; a failure before the first month keeps nothing and its `unknown`
@@ -191,7 +197,11 @@ months it captured.
 - `services/processor/test/myjcb-shared-r2.test.ts`: the collector's real
   plan for a stopped connection registers and seals, catalogues its captured
   artifacts, has run status `partial` and unit report `failed` with
-  `month_fetch`, and ends `not_eligible` with nothing parsed.
+  `month_fetch`, is sealed under `terminal-registration-v2`, and ends
+  `not_eligible` with nothing parsed. A failed run whose only unit stopped
+  before its first month persists only its terminal (unit `unknown`, 0
+  artifacts, the stop code) and registration records it as blocked
+  `provider_run_failed` with no fetch run and nothing sealed.
   `services/processor/test/collector-plans.test.ts` (the successful plan) is
   unchanged and passes.
 - No production data was read for this amendment.

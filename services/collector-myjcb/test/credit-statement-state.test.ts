@@ -704,3 +704,169 @@ describe("ADR 0005 amendment: the Worker keeps a stopped connection's months", (
     expect(text).not.toContain("HTTP 500");
   });
 });
+
+describe("ADR 0005 amendment: no stop path carries provider or error text", () => {
+  // A digit string, a merchant-like word and a URL, as an upstream error or
+  // body could carry them. Every value is synthetic.
+  const LEAK_DIGITS = "4829173";
+  const LEAK_WORD = "架空テスト商店";
+  const leak = `synthetic ${LEAK_DIGITS} ${LEAK_WORD} https://example.invalid/${LEAK_DIGITS}`;
+  const mypage =
+    '<!doctype html><html><body><a href="/iss-pc/member/details_inquiry/detailMenu.html?link_id=synthetic">明細</a><a href="#">ログアウト</a></body></html>';
+  const closed = (month: string) =>
+    page({ headings: [CONFIRMED_STATEMENT_HEADING], months: [month], rows: [confirmedRow] });
+  const pages: Record<number, string> = { 0: mutable, 1: closed("2026年3月") };
+  const menu = `<!doctype html><html><body>${[0, 1, 2]
+    .map(
+      (month) =>
+        `<a href="/iss-pc/member/details_inquiry/detail.html?detailMonth=${month}&amp;output=web">明細</a>`,
+    )
+    .join("")}</body></html>`;
+  const html = (text: string) =>
+    new Response(text, { headers: { "content-type": "text/html; charset=utf-8" } });
+
+  /**
+   * Run the manual trigger with `fail` deciding, per request, whether the
+   * provider misbehaves; return every byte stored, every log line and the
+   * HTTP response.
+   */
+  async function run(
+    fail: (url: URL) => Response | "throw" | undefined,
+  ): Promise<{ stored: string; logs: string; response: string; status: number }> {
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (input: unknown) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const failure = fail(url);
+      if (failure === "throw") throw new Error(leak);
+      if (failure !== undefined) return failure;
+      if (url.pathname.endsWith("/mypage.html")) return html(mypage);
+      if (url.pathname.endsWith("/detailMenu.html")) return html(menu);
+      if (url.pathname.endsWith("/detailPastJson.json")) {
+        return Response.json({
+          jsonrpc: "2.0",
+          result: { errId: "0", errMessage: "", detailPastJsonInfo: [] },
+          id: "030100601",
+        });
+      }
+      return html(pages[Number(url.searchParams.get("detailMonth"))]!);
+    }) as unknown as typeof fetch);
+    const lines: string[] = [];
+    const capture = (...values: unknown[]) => {
+      lines.push(values.map(String).join(" "));
+    };
+    const logs = [
+      spyOn(console, "log").mockImplementation(capture),
+      spyOn(console, "warn").mockImplementation(capture),
+      spyOn(console, "error").mockImplementation(capture),
+      spyOn(console, "info").mockImplementation(capture),
+    ];
+    // Bun lacks the Workers-only timing-safe comparison the trigger uses.
+    const hadTimingSafeEqual = Reflect.has(crypto.subtle, "timingSafeEqual");
+    if (!hadTimingSafeEqual) {
+      Object.defineProperty(crypto.subtle, "timingSafeEqual", {
+        configurable: true,
+        value: (left: ArrayBuffer, right: ArrayBuffer) =>
+          Buffer.from(left).equals(Buffer.from(right)),
+      });
+    }
+    const data = new FakeR2Bucket();
+    try {
+      const env = {
+        COLLECTOR_SCHEMA_VERSION: "myjcb-worker-poc-v1",
+        ADMIN_TRIGGER_TOKEN: "synthetic-token",
+        MYJCB_CONNECTIONS_JSON: JSON.stringify([
+          {
+            connectionId: "account-one",
+            bootstrapMode: "session",
+            userAgent: "synthetic-agent",
+            cookies: [{ name: "synthetic", value: "synthetic-cookie" }],
+          },
+        ]),
+        DATA: data,
+      } as unknown as Env;
+      const response = await worker.fetch!(
+        new Request("https://collector.invalid/trigger", {
+          method: "POST",
+          headers: { authorization: "Bearer synthetic-token" },
+        }) as unknown as Parameters<NonNullable<typeof worker.fetch>>[0],
+        env,
+        {} as ExecutionContext,
+      );
+      const decoder = new TextDecoder();
+      const stored = [...data.entries.entries()]
+        .map(([key, entry]) => `${key}\n${decoder.decode(entry.bytes)}`)
+        .join("\n");
+      return {
+        stored,
+        logs: lines.join("\n"),
+        response: await response.text(),
+        status: response.status,
+      };
+    } finally {
+      fetchSpy.mockRestore();
+      logs.forEach((spy) => spy.mockRestore());
+      if (!hadTimingSafeEqual) Reflect.deleteProperty(crypto.subtle, "timingSafeEqual");
+    }
+  }
+
+  function expectNoLeak(result: Awaited<ReturnType<typeof run>>): void {
+    for (const text of [result.stored, result.logs, result.response]) {
+      expect(text).not.toContain(LEAK_DIGITS);
+      expect(text).not.toContain(LEAK_WORD);
+      expect(text).not.toContain("example.invalid");
+    }
+  }
+
+  const detail = (month: number) => (url: URL) =>
+    url.pathname.endsWith("/detail.html") && url.searchParams.get("detailMonth") === String(month);
+  const blockers = (result: Awaited<ReturnType<typeof run>>) =>
+    (JSON.parse(result.response) as { blockers: unknown }).blockers;
+
+  test("a thrown fetch at a month stops the connection with a code only", async () => {
+    const result = await run((url) => (detail(2)(url) ? "throw" : undefined));
+    expect(result.status).toBe(200);
+    expect(blockers(result)).toEqual([{ connectionId: "account-one", code: "month_fetch" }]);
+    expect(result.stored).toContain('"safeErrorCode":"month_fetch"');
+    // The capture sees the stop log and the diagnostics, so the check below reads them.
+    expect(result.logs).toContain('"event":"myjcb-credit-month-failed"');
+    expect(result.logs).toContain('"event":"collector-diagnostic"');
+    expectNoLeak(result);
+  });
+
+  test("an error body or an unparsable page at a month never reaches a stored byte", async () => {
+    const status = await run((url) =>
+      detail(2)(url) ? new Response(leak, { status: 500 }) : undefined,
+    );
+    expect(blockers(status)).toEqual([{ connectionId: "account-one", code: "month_fetch" }]);
+    expectNoLeak(status);
+    // A page whose empty marker contradicts it: the month is dropped whole.
+    const unparsable = await run((url) =>
+      detail(2)(url)
+        ? html(`<html><body><p>ご利用明細はありません</p><p>${leak}</p></body></html>`)
+        : undefined,
+    );
+    expect(blockers(unparsable)).toEqual([{ connectionId: "account-one", code: "month_parse" }]);
+    expectNoLeak(unparsable);
+  });
+
+  test("a stop before the first month or at login leaves codes only", async () => {
+    const menuStop = await run((url) =>
+      url.pathname.endsWith("/detailMenu.html") ? "throw" : undefined,
+    );
+    expect(menuStop.status).toBe(502);
+    expect(blockers(menuStop)).toEqual([{ connectionId: "account-one", code: "credit_menu" }]);
+    expect(menuStop.stored).toContain('"safeErrorCode":"credit_menu"');
+    expectNoLeak(menuStop);
+    const loginStop = await run((url) =>
+      url.pathname.endsWith("/mypage.html") ? "throw" : undefined,
+    );
+    expect(blockers(loginStop)).toEqual([{ connectionId: "account-one", code: "login" }]);
+    expectNoLeak(loginStop);
+    const pastStop = await run((url) =>
+      url.pathname.endsWith("/detailPastJson.json") ? new Response(leak) : undefined,
+    );
+    expect(blockers(pastStop)).toEqual([
+      { connectionId: "account-one", code: "credit_past_months" },
+    ]);
+    expectNoLeak(pastStop);
+  });
+});

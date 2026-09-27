@@ -438,7 +438,8 @@ stage) keeps nothing and has an `unknown` unit with that code, and so does a
 failed debit read (`debit`; a debit capture is refused in shared mode in any
 case, above). A run in which
 every connection kept nothing is `failed` and stores only its terminal, whose
-units still carry each connection's code. The run's own code is the stop code
+units still carry each connection's code; registration records such a run
+as blocked (`provider_run_failed`) and seals nothing, as before. The run's own code is the stop code
 when every connection that is not whole stopped at the same stage. A stopped
 connection's unit registers as `failed`, so the run is `partial` and
 `not_eligible`: its captured months are catalogued and sealed but not parsed.

@@ -467,7 +467,7 @@ unit の coverage は「この run が集めようとしたものを、この un
 
 各停止条件（`StopConditionCode`）は `connectionStopCode` の `Record` で一つの段階に対応する。新しい条件は段階を決めない限り compile できない。manifest の connection と failure は閉じた field だけから組み立て直し、一覧外の code（`manifest_stop_code_invalid`）や `detailMonth` でない位置（`manifest_stop_position_invalid`）は plan を拒否する。error message、HTTP body、provider の文言、金額は保存も log もしない。停止 log（`myjcb-credit-month-failed`）は `detailMonth`、条件 code、停止 code、保存した月の数だけを出す。
 
-run のすべての connection が何も保存しなかった場合、run は `failed` で terminal だけを書く（従来どおり）。それでも unit は書くので、各 connection の停止 code は terminal に残る。止まっていない connection 以外がすべて同じ段階で止まった場合、run の `safeErrorCode` はその停止 code になる（`human_required` と同じ扱い）。
+run のすべての connection が何も保存しなかった場合、run は `failed` で terminal だけを書く（従来どおり）。それでも unit は書くので、各 connection の停止 code は terminal に残る。registration はこの run を従来どおり `provider_run_failed` として記録するだけで、seal しない。止まっていない connection 以外がすべて同じ段階で止まった場合、run の `safeErrorCode` はその停止 code になる（`human_required` と同じ扱い）。
 
 registration と eligibility は変えない。停止 code 付きの `partial` unit は unit report `failed` になり、run は `observation_fetch_runs` で `partial`、parse job は `not_eligible` である。取得済みの月は catalogue され seal されるが、parse されない。変わるのは、evidence と原因が残ることである。
 

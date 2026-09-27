@@ -413,6 +413,14 @@ test("ADR 0005 amendment: a connection that stopped at a month registers and sea
       .bind(fetchRunId)
       .first<number>("n"),
   ).toBe(1);
+  // Sealed under the current registration contract (ADR 0022).
+  expect(
+    await env.DB.prepare(
+      "SELECT registration_contract_version AS v FROM collection_runs WHERE source='myjcb' AND run_id=?",
+    )
+      .bind(runId)
+      .first<string>("v"),
+  ).toBe("terminal-registration-v2");
   expect(
     (
       await env.DB.prepare(
@@ -438,4 +446,60 @@ test("ADR 0005 amendment: a connection that stopped at a month registers and sea
   ]);
   expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
   expect(await workItem(runId)).toEqual({ outcome: "not_eligible", jobs_created: 0 });
+}, 60000);
+
+test("ADR 0005 amendment: a failed run's stopped units carry their codes and the run is recorded, not sealed", async () => {
+  // Every connection stopped before its first month: the plan persists only
+  // the terminal, whose unit is `unknown` with the stop code and no artifact.
+  // Registration refuses a failed run with no provider bytes as before
+  // (`provider_run_failed`): recorded, nothing sealed, nothing to parse.
+  const runId = "00000000-0000-4000-8000-00000000a006";
+  const plan = await myJcbRunPlan({
+    schemaVersion: "myjcb-worker-poc-v1",
+    runId,
+    startedAt: "2026-09-22T00:00:00.000Z",
+    completedAt: "2026-09-22T00:05:00.000Z",
+    status: "failed",
+    trigger: "scheduled",
+    connections: [
+      {
+        summary: {
+          connectionId: CONNECTION,
+          bootstrapMode: "password",
+          status: "failed",
+          cardCount: 0,
+          periodCount: 0,
+          artifactCount: 0,
+          stopCode: "credit_past_months",
+          capturedMonthCount: 0,
+        },
+        artifacts: [],
+      },
+    ],
+    failures: [{ connectionId: CONNECTION, operation: "collect", code: "credit_past_months" }],
+  });
+  expect(plan.artifacts).toEqual([]);
+  expect(plan.run.units).toEqual([
+    {
+      unitKey: CONNECTION,
+      unitKind: "connection",
+      artifactCount: 0,
+      coverageStatus: "unknown",
+      safeErrorCode: "credit_past_months",
+    },
+  ]);
+  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+  expect(await registerCollectionRun(env, { source: "myjcb", runId })).toMatchObject({
+    outcome: "blocked",
+    code: "provider_run_failed",
+  });
+  expect(await fetchRun(runId)).toBeNull();
+  expect(
+    await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM collection_runs WHERE source='myjcb' AND run_id=?",
+    )
+      .bind(runId)
+      .first<number>("n"),
+  ).toBe(1);
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
 }, 60000);
