@@ -512,7 +512,8 @@ contract in `packages/collection/src/stages.ts`, before this table is reached.
 
 ```text
 observation_sweep → collection_scan → identity_sweep → balance_projection
-  → reconciliation_sweep → card_settlement_sweep → purchase_recognition
+  → reconciliation_sweep → card_debit_account_sweep → card_settlement_sweep
+  → purchase_recognition
   → reward_claims_sweep → reward_read_projection → price_promotion
   → report_job → operation_dispatch → decision_outbox
 ```
@@ -537,6 +538,17 @@ lane's log line as `cardSettlements`. It is its own lane now, with its own
 `card_settlement_sweep` log line, `card_settlement_sweep_failed` event and tick
 record ([card-settlements.md](card-settlements.md)), so a failure of either
 sweep no longer hides the other's counts.
+
+`card_debit_account_sweep` shares the same flag and runs right before
+`card_settlement_sweep`, which reads what it writes. It reads the
+「カード情報」 table of stored MyJCB credit detail pages whose
+`myjcb-credit-statement-total` parse is published, at most 20 pages a tick,
+into `card_debit_account_statement` (migration 0060, one row per card, raw
+object and reader version, found by an anti-join on that key, so it keeps no
+cursor). The settlement sweep then appends what that statement says about
+each MyJCB candidate to `card_settlement_debit_account_evidence`, as evidence
+only ([card-settlements.md](card-settlements.md#provider-stated-debit-accounts),
+[ADR 0032](adr/0032-provider-stated-debit-accounts.md)).
 
 `purchase_recognition` runs only while `PURCHASE_RECOGNITION_ENABLED` is `"1"`
 or `"true"` (`"true"` in production since 2026-09-24); it turns adopted
@@ -574,16 +586,17 @@ answered from Workers Logs. `runScheduled` now also writes one row per tick of
 each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 `packages/storage-d1/src/core/lane-ticks.ts`):
 
-| Lane                    | Counts recorded                                                                                                                                                                                                                     |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `identity_sweep`        | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                                                         |
-| `reconciliation_sweep`  | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                                                          |
-| `card_settlement_sweep` | `scanned`, `proposed`, `written`                                                                                                                                                                                                    |
-| `purchase_recognition`  | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped`                                    |
-| `reward_claims_sweep`   | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
-| `price_promotion`       | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
-| `operation_dispatch`    | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                                                            |
-| `decision_outbox`       | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
+| Lane                       | Counts recorded                                                                                                                                                                                                                     |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity_sweep`           | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                                                         |
+| `reconciliation_sweep`     | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                                                          |
+| `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                                                             |
+| `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`                                                                                                                                                                            |
+| `purchase_recognition`     | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped`                                    |
+| `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
+| `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
+| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                                                            |
+| `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 
 Not recorded, because they already keep their own record: `observation_sweep`
 (`observation_lane_state`), `collection_scan` (`collection_scan_state`),

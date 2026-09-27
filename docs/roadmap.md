@@ -86,12 +86,17 @@ Concrete limits in the current code:
   due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
   Sony Bank), partial payments, refunds and complete purchase recognition
   remain extensions; this is not complete event coverage. Which bank account
-  a card debits is still unknown to the code: the card provider's own
-  statement of it is designed as proposal-only evidence
-  ([ADR 0032](adr/0032-provider-stated-debit-accounts.md)), but only the
-  domain rule exists. The MyJCB transfer-account block and any Vpass
-  payment-account field are unobserved, and neither SMBC's account reference
-  (no account number) nor SBI Shinsei's (layout unverified) can be matched.
+  a card debits is not configured anywhere: MyJCB's own statement of it (the
+  「カード情報」 table: bank name, branch name, 科目 and the first four account
+  digits) is read from stored pages into `card_debit_account_statement` and
+  attached to MyJCB candidates as proposal-only evidence
+  ([ADR 0032](adr/0032-provider-stated-debit-accounts.md), 2026-09-27
+  amendment). Limits: the evidence is not shown on the review page yet;
+  branch names are not compared (no bank reference carries one); SMBC's
+  account reference carries no digits and SBI Shinsei's layout is unverified,
+  so neither adapter bank can be matched; Mizuho is comparable but not an
+  adapter; and no Vpass statement API carries a debit account (observed
+  absent), so Vpass candidates keep amount and date only.
 - Vpass and MyJCB pending-to-posted candidates come from the purchase lane's
   [candidate pass](economic-events.md#pending-to-posted-links), which pairs one
   recognised pending event with one posted event per purchase; every pair

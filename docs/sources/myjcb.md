@@ -563,3 +563,12 @@ round 4 の構造調査（label の数だけ、値は記録しない）で、以
 - 拒否の理由は閉じた code（`USAGE_HEADER_REFUSALS`）で、停止 log に `usageHeader` として出す。金額や provider の文字列は log に出さない。
 - `myjcb-credit-ledger@1.2.0` はこの ledger の金額を利用額として読み（`usageAmountText`）、`paymentAmountText` を記録しない。card purchase recognition は利用額と支払額の一致を必要とするので、この行は `payment_split_unknown` で除外され、pending-to-posted の照合にも使われない。明細の支払額は page の合計で、`myjcb-credit-statement-total@1.2.0` が `statementStateBasis: "page-heading-usage-total-proof"` と `ledgerAmountLabel: "ご利用金額"` を付けて公開する。確定の header の page は 1.1.0 と同じに記録する。
 - 制限：保存した page の二つ目の `detail-list-01` が明細の一部かは分からない。ledger artifact は従来どおり最初の ledger だけを保存するので、二つ目に行があればその page は証明されず、従来どおり停止する。行ごとの支払額を利用額とみなさない理由は ADR 0005 の amendment (d) にある。この page の展開 label は数えただけで、行ごとには読んでいない。2026-09-25/26 の停止の原因がこの形であることは、可能性が高いが確認されていない。
+
+## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
+
+round 4 の観測（構造と件数のみ）: 確定明細（`detail.html?detailMonth=N`）とショッピングスキップ払いの頁（位置 8）には「カード・お振替情報」という見出しはなく、引落口座は明細グリッドの後の `h3.hdg-H3`「カード情報」の下、`div.detail-lyt-02.border-01 > div.col-01 > table.table-data`（th/td の縦表）にある。行は カード名称、カード発行会社、金融機関名（銀行名）、支店名（支店名。支店番号はない）、科目・口座番号（「普通 ####\*\*\*」の形: 科目、空白、口座番号の**先頭** 4 桁、残りは `*`）、口座名義（一部 `*` の名義）。同じ表は保存済みの redacted HTML（`credit-detail-NN.html`）にも同じ形で残っている。
+
+- 読み取り: `readMyJcbCardInformation`（`packages/domain/src/myjcb-card-information.ts`）が金融機関名、支店名、科目、先頭 4 桁、`*` の数だけを読む。カード名称と口座名義の値は読まない（ADR 0029 class d。口座名義の保存 HTML からの除去は [#333](https://github.com/risu729/kogane/pull/333)）。表は class 名ではなく、本文が「カード情報」の見出し要素（h1–h6）とその後の最初の table、th の label で探す。他の形は closed code で拒否する。
+- 保存: processor の `card_debit_account_sweep` lane が、`myjcb-credit-statement-total` の parse が公開済みの頁を R2 から読み直し、`card_debit_account_statement`（migration 0060、append-only）へ card・raw object・reader version ごとに 1 行書く。
+- 利用: 決済照合の候補に evidence として付くだけで、候補の facts・適格性・承認は変わらない（[card-settlements.md](../card-settlements.md#provider-stated-debit-accounts)）。
+- collector は変更しない。頁はすでに redacted HTML として保存されており、collector が読む必要はない。

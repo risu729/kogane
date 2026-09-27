@@ -17,6 +17,33 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MyJCB 「カード情報」 and Vpass debit accounts (no parser release)
+
+Observed on 2026-09-27 (round 4) by the owner's agent, structure and counts
+only ([ADR 0032 amendment](adr/0032-provider-stated-debit-accounts.md#amendment-2026-09-27-the-observed-shapes)):
+
+- **MyJCB.** The statement page has no 「カード・お振替情報」 heading. The debit
+  account is under `h3.hdg-H3` 「カード情報」, after the ledger, in a
+  `table.table-data` of th/td rows: カード名称, カード発行会社, 金融機関名 (a bank
+  name), 支店名 (a branch name; no branch code), 科目・口座番号 (the account type,
+  a space, the **first** four digits and three `*`), 口座名義 (a partly masked
+  holder name). The same table is on the ショッピングスキップ払い page, and in
+  the stored redacted `credit-detail-NN.html` pages with the same value
+  shapes (three stored captures of one page have identical digests).
+- **Vpass.** None of `web_meisai_top/v1`, `dropdownlist_init/v1`,
+  `meisai_ans/v1` or `xt_seikyu/v1` carries a bank, branch or debit-account
+  field, for any of seven cards across both bean families. The only
+  account-looking keys, `webMeisaiTopK3Vo.accountNo` (fully masked) and
+  `webMeisaiTopK3Vo.accountOvly`, are card-side identifiers.
+
+What changes: no parser. A processor lane reads the MyJCB table from the
+stored pages into `card_debit_account_statement` (migration 0060) and the
+settlement sweep attaches what it says to MyJCB candidates as evidence
+([card settlements](card-settlements.md#provider-stated-debit-accounts)). The
+holder name and card name are never read. **Kept as limits:** Vpass has no
+reader; branch names are not compared; the relation between the mask length
+and a bank's account-number length is not checked.
+
 ## MyJCB menu groups: schedule pages are not months (collector, no parser release)
 
 2026-09-27. The second structure-only survey of the day (round 4, counts and
