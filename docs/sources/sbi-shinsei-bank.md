@@ -883,37 +883,28 @@ Merged is not enabled: the var ships as `legacy`.
 
 `getBalanceSummaryAndStage` answers with the account holder's name in
 `responseParam.summary.responseParam.customerName`, `customerNameKanji` and
-`customerNameKana`. Until this change the collector stored that response as
-it came (minus the rotating CSRF token), so every stored
-`raw-balance-summary-and-stage.json` carries the name.
+`customerNameKana`. The collector stores that response as the provider sent
+it, names included
+([ADR 0029's amendment 2](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)):
+the Chrome handoff and the local diagnostic collector write each provider
+capture as the provider's text byte for byte, and on the shared path the
+token sanitizer (`sbi-shinsei-token-sanitizer` v3) only removes the rotating
+CSRF token, serializing the capture again as it always has. No parser reads
+the three fields.
 
-The collector now replaces each of the three values with `[redacted:name]`
-when it parses the handoff, before any artifact exists
-(`src/name-redaction.ts`, [ADR 0029's
-amendment](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)).
-The marker is written into the provider's own text as the string value of
-each of the three keys; the response is never serialized again, so every
-other byte, including `branchName` and the balances as the provider wrote
-them, is kept. The result must parse, validate against
-`sbi-shinsei-balance-summary-v1` and equal the original with exactly those
-three fields replaced; otherwise (a name key elsewhere, a name that is not a
-string) the response is refused as an unknown shape rather than stored.
-The collector manifest records `redactedFieldCount` for each provider capture
-(3 for a balance summary with all three names, 0 for the other datasets,
-which the redaction leaves as the provider's text; the shared path's token
-sanitizer serializes every capture again afterwards, as it did before), and the terminal's redaction step is
-`sbi-shinsei-token-sanitizer` v2. The local diagnostic collector applies the
-same redaction.
+History: from [#333](https://github.com/risu729/kogane/pull/333)'s merge
+until amendment 2, the collector replaced each of the three values with
+`[redacted:name]` before the artifact existed, recorded
+`redactedFieldCount` on each capture's manifest entry, and named the step
+`sbi-shinsei-token-sanitizer` v2. Captures written in that window keep the
+marker (append-only; the names were never retained); the response schema
+accepts it as it accepts a name, since both are scalars. Captures stored
+before #333 keep the names.
 
 The live page also keeps a user object with name and national-id fields in
 `sessionStorage` (`SFC_USER_INFO`). The collector never reads
 `sessionStorage`; its tokens come from the login response, so that object is
 not stored.
-
-**Limits.** Captures stored before this change keep the names; they are not
-rewritten, and removing them is the owner's decision. Transaction
-descriptions in `top-accounts-balance-and-activity` are provider text and are
-kept as they are.
 
 ## Exchange-rate board (parser `sbi-shinsei-exchange-rate`, 2026-09-26)
 
@@ -1058,9 +1049,8 @@ rates the FX page shows (the mid rate is the same in all 5). The page labels
 the stage 「今月のステージ」, so it can change monthly. The board has 67 rows:
 13 currencies with 5 rows each and CHF and JPY with one row each; CHF, BRL and
 JPY are not on the FX page. The same artifact also stores the customer's
-names under `summary.responseParam` in R2 (ADR 0029 class d); redacting them
-before the artifact is written is
-[#333](https://github.com/risu729/kogane/pull/333)'s change.
+names under `summary.responseParam` in R2, kept as the provider shows them
+(ADR 0029, amendment 2); this parser does not read them.
 
 **Parser `sbi-shinsei-balance-summary-and-stage` 0.1.0**
 (`packages/parsers/src/parsers/sbi-shinsei-balance-summary-and-stage.ts`):
@@ -1074,8 +1064,8 @@ before the artifact is written is
   block's allowance and fee fields are validated only). An absent, null, empty, boolean or structured category fails the
   artifact.
 - Emits nothing else: the customer's names, the summary balances and the
-  branch are validated only (ADR 0029 class d; the top page already reports
-  the balances).
+  branch are validated only (nothing uses the names; the top page already
+  reports the balances).
 - No snapshot policy row: no current or dated state selects the observation.
 
 **Price rule.** A board row of one of the 13 per-1-unit currencies is

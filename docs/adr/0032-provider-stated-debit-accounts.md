@@ -197,7 +197,7 @@ wiring and the review-page display wait for the round-4 shapes.
   [card settlements: provider-stated debit accounts](../card-settlements.md#provider-stated-debit-accounts),
   [MyJCB source note](../sources/myjcb.md)
 - Related: [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
-  (class d: the holder name)
+  (class d, amendment 2: the holder name is kept as displayed)
 
 ### Context
 
@@ -254,9 +254,9 @@ unobserved.
   (h1-h6) whose text is 「カード情報」, then the first table after it, read by
   its th labels: the bank name, the branch name, the 科目 (普通 or 当座), exactly four
   ASCII leading digits and the number of `*` after them. It checks the labels
-  of カード名称, カード発行会社 and 口座名義 and never reads their values: the
-  holder name is ADR 0029 class d, and its removal from stored pages is
-  [#333](https://github.com/risu729/kogane/pull/333). Any other shape is a closed refusal code, never a partial
+  of カード名称, カード発行会社 and 口座名義 and never reads their values:
+  nothing uses them. The stored page keeps the holder name as displayed
+  ([ADR 0029 amendment 2](0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)). Any other shape is a closed refusal code, never a partial
   reading (INV05). The reader lives in `packages/domain` beside
   `readMyJcbStatementPage` and takes a parse5 tree, so the processor can use
   it; the collector does not need it, because the redacted page already
@@ -308,7 +308,9 @@ unobserved.
 - Branch names are stored and never compared, so two known accounts at one
   bank with the same four leading digits are `ambiguous_accounts`.
 - The stored table adds the bank name, branch name, 科目 and four digits to
-  CORE (ADR 0029 classes b/c); the holder name is never stored. Logs and tick
+  CORE (ADR 0029 classes b/c); the holder name is not read, so it is not
+  copied into CORE (the stored page keeps it as displayed, ADR 0029
+  amendment 2). Logs and tick
   records carry counts only.
 
 ### Verification

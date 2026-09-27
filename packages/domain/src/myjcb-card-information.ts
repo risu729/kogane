@@ -13,9 +13,10 @@
 //   金融機関名       bank name               read
 //   支店名           branch name             read
 //   科目・口座番号   「普通 ####***」          read: type, leading digits, mask
-//   口座名義         holder name, masked     never read (ADR 0029 class d)
+//   口座名義         holder name, masked     never read
 //
-// Only the three rows Kogane uses are read. The other rows' labels are
+// Only the three rows Kogane uses are read. The stored page keeps the holder
+// name as displayed (ADR 0029, amendment 2); nothing here needs it. The other rows' labels are
 // checked, so a changed table is refused, but their values are never looked
 // at. Any other shape is a closed refusal code (INV05), never a partial
 // reading.

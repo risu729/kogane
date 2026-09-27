@@ -120,7 +120,19 @@ is unknown. Tests: `services/collector-myjcb/test/credit-statement-state.test.ts
 `packages/parsers/test/myjcb-statement.test.ts`,
 `services/processor/test/card-purchase-parser-shapes.test.ts`.
 
-## Person names removed from stored captures (collectors, no parser release)
+## Person names kept in stored captures (collectors, no parser release)
+
+Decided on 2026-09-27 by the owner
+([ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)),
+the same day as the entry below: person names may be stored as the provider
+shows them. The collectors no longer replace them; each capture's manifest
+entry no longer carries `redactedFieldCount`, and the sanitizing steps are
+`sbi-shinsei-token-sanitizer` v3 and `myjcb-sanitizer` v3. No parser reads
+either field, so no parser releases and no observation changes. **Kept as a
+fact, not rewritten:** captures written between the two changes carry
+`[redacted:name]` (append-only; the names were never retained).
+
+## Person names removed from stored captures (collectors, withdrawn the same day)
 
 Observed on 2026-09-27 by the owner's agent in stored objects, reporting key
 names, types and match results only
@@ -131,13 +143,10 @@ names, types and match results only
 - MyJCB confirmed statement pages carry a partially masked account holder
   name in the 口座名義 row of the 「カード情報」 table.
 
-What changes: the collectors replace those values with `[redacted:name]`
-before anything is written, and each capture's manifest entry counts the
-replacements (`redactedFieldCount`). No parser reads either field, so no
-parser releases and no observation changes. **Unchanged, kept as limits:**
-captures stored earlier still carry the names (append-only; deleting them is
-the owner's decision), and transaction descriptions and ledger text are kept
-as the provider wrote them.
+What changed then ([#333](https://github.com/risu729/kogane/pull/333)): the
+collectors replaced those values with `[redacted:name]` before anything was
+written, and each capture's manifest entry counted the replacements
+(`redactedFieldCount`). Withdrawn by the entry above.
 
 ## SBI Shinsei board time ends in letters (board parser 1.0.2)
 

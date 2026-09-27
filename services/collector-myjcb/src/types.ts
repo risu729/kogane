@@ -67,8 +67,6 @@ export interface StoredArtifact {
   readonly bytes: number;
   readonly statementState?: StatementState;
   readonly period?: string;
-  /** Person-name cells replaced in a stored page (ADR 0029's amendment): a count only. */
-  readonly redactedFieldCount?: number;
 }
 
 export interface ConnectionSummary {

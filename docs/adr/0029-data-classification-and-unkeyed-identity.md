@@ -21,6 +21,11 @@
   identity is a separate, later decision and is not made here
 - Amended: 2026-09-27, class (d) applies to stored evidence (see
   [Amendment](#amendment-2026-09-27-names-are-removed-from-stored-evidence));
+  merged in [#333](https://github.com/risu729/kogane/pull/333) and withdrawn
+  by amendment 2
+- Amended: 2026-09-27 (amendment 2), class (d) redefined: person names may be
+  stored in raw evidence and observations as the provider shows them (see
+  [Amendment 2](#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence));
   proposed until the amending PR merges
 
 ## Context
@@ -108,7 +113,9 @@ relied on across owners.
   anyone else's. This is what the code already does for SBI Shinsei and
   Mizuho.
 - (d) **Personal names** (account holder names, cardholder names): avoided in
-  CORE. Consistency checks may compare them in memory but do not persist them.
+  CORE. _Redefined by [amendment 2](#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence):
+  names may be stored in raw evidence and observations as the provider shows
+  them._ Consistency checks may compare them in memory but do not persist them.
   Provider pages that contain names stay in R2 under the existing redaction
   templates.
 - Logs and stored operational records keep the existing rule: counts and
@@ -231,7 +238,11 @@ confirmed the field shapes.
 
 ## Amendment (2026-09-27): names are removed from stored evidence
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (merged in [#333](https://github.com/risu729/kogane/pull/333));
+  its decision is withdrawn by
+  [amendment 2](#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence),
+  and the code it names no longer exists. Kept as the record of what objects
+  written under it contain.
 - Date: 2026-09-27
 - Carried by:
   `services/collector-sbi-shinsei/src/name-redaction.ts`,
@@ -388,3 +399,144 @@ exactly the four responses of its plan, so that object is not stored.
 - Not verified: the live pages were not fetched by this change; the list of
   stored objects above counts registered artifacts, not objects whose bytes
   were read.
+
+## Amendment 2 (2026-09-27): person names are kept in stored evidence
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-27
+- Decided by: the owner, 2026-09-27: person names in stored evidence are
+  acceptable; what is forbidden is payment-instrument numbers such as a full
+  card number, and credentials
+- Withdraws: the [amendment above](#amendment-2026-09-27-names-are-removed-from-stored-evidence)
+  ([#333](https://github.com/risu729/kogane/pull/333))
+- Carried by:
+  `services/collector-sbi-shinsei/src/local/windows-chrome-collector.ts`,
+  `services/collector-sbi-shinsei/src/local/collector.ts`,
+  `services/collector-sbi-shinsei/src/shared-collection.ts`,
+  `services/collector-myjcb/src/parsers.ts` (`redactedStatementHtml`),
+  `services/collector-myjcb/src/redaction.ts`,
+  `services/collector-myjcb/src/shared-collection.ts`,
+  [SBI Shinsei](../sources/sbi-shinsei-bank.md#person-names-in-stored-captures-2026-09-27),
+  [MyJCB](../sources/myjcb.md), [collection](../collection.md),
+  [observations](../observations.md), [design](../design.md#mutation-policy)
+
+### Context
+
+The amendment above read class (d) as applying to stored evidence and had the
+SBI Shinsei and MyJCB collectors replace the account holder's name with
+`[redacted:name]` before an object was written. The owner reviewed that
+reading after #333 merged and decided the other way: in a deployment that
+holds one person's own evidence (the single-owner premise of this ADR), the
+owner's own name in the owner's own provider pages is not a thing to hide from
+the owner. What must never be stored are the things that grant access or
+spend money: credentials and full payment-instrument numbers. Nothing reads
+the names today, but removing them costs a rewrite of provider text in every
+collector that meets a name, a check that can fail a run, and a stored object
+that no longer says what the provider showed.
+
+### Options considered
+
+1. **Keep the redaction (the amendment above).** Rejected by the owner: it
+   hides the owner's own name from the owner and alters raw evidence for no
+   use.
+2. **Keep the redaction code but switch it off.** Leaves dead code and a
+   check that still refuses pages. Rejected.
+3. **Remove the redaction and redefine class (d); names are kept as the
+   provider shows them.** Chosen.
+4. **Rewrite the objects written under the redaction to restore the names.**
+   Impossible (the names were never retained) and forbidden: raw evidence is
+   append-only ([mutation policy](../design.md#mutation-policy)). Rejected.
+
+### Decision
+
+Class (d) is redefined, for CORE, READ, the R2 bucket `kogane-raw-evidence`
+and every collector's stored objects:
+
+- (d) **Personal names** (account holder names, customer name fields, the
+  holder name a card page shows): **may** be stored in raw evidence and in
+  observations exactly as the provider shows them, masked or not. No
+  collector removes or replaces them. Nothing is required to read them either:
+  a parser or reader copies a name only when a later, reviewed change needs it.
+
+What stays forbidden in stored evidence is unchanged:
+
+- (a) credentials and keys (passwords, session cookies, OTP seeds, HMAC keys,
+  API tokens, rotating CSRF tokens): never stored, never logged.
+- (b) full payment-instrument numbers (a full card PAN, a full bank card
+  number, CVV, expiry paired with a PAN): never stored raw. A number the
+  provider itself masks (a card's last digits, a bank account number shown
+  with some digits replaced by `*`) is kept as displayed; bank account numbers
+  remain class (c) as above.
+- Logs and stored operational records keep carrying counts and closed codes
+  only, never provider text: a name is provider text, so it never appears in
+  a log, a tick record or a failure message.
+
+In code:
+
+- SBI Shinsei: `src/name-redaction.ts` is removed. The Chrome handoff
+  (`parseCollectionHandoff`) and the local diagnostic collector write each
+  provider capture as the provider's text, byte for byte; the shared path's
+  token sanitizer still removes `header.newToken` (class a) as before.
+- MyJCB: `src/name-redaction.ts` is removed; `redactedStatementHtml` runs the
+  sanitizer only (executable and embedding elements, URL, session and
+  credential attributes, full card numbers), and `assertRedactedHtml` no
+  longer refuses a 口座名義 cell. The closed code
+  `artifact_name_redaction_invalid`, which only the redaction raised, is
+  retired.
+- Manifests: the per-capture `redactedFieldCount` is removed from both
+  collectors' manifests and types. Readers of collector manifests ignore
+  unknown keys, so manifests written with it still read.
+- The sanitizing steps move forward, never back, so every stored run says
+  which step produced it: `sbi-shinsei-token-sanitizer` v3 and
+  `myjcb-sanitizer` v3 (token and markup sanitizing only). v1 runs never
+  redacted names, v2 runs (#333) replaced them with the marker.
+
+### Consequences
+
+- **Objects written under the amendment above keep the marker.** Every
+  object a collector built from #333's merge up to this change wrote carries
+  `[redacted:name]` where the name was, its manifest entry carries
+  `redactedFieldCount`, and its `redacted` step says v2. They are append-only
+  and are not rewritten; the names were never retained, so there is nothing
+  to restore. Whether any such object exists depends on whether a collector
+  ran from that build; production was not read for this change. Every reader
+  that meets one behaves as with a name: the SBI Shinsei response schema and
+  the account-connection proof accept the marker (a scalar), and the MyJCB
+  card-information reader never reads the 口座名義 value.
+- **Objects stored before #333 keep their names**, now as permitted content.
+  The owner decision the amendment above left open (whether to delete them)
+  is closed: they are kept.
+- **Nothing changes in parsing.** No parser or reader reads a name field, so
+  no parser release and no observation changes.
+- **Limits.** The logs rule is the only guard against a name reaching a log:
+  names are not scanned for, because the collectors and the processor log
+  closed codes and counts only.
+
+### Verification
+
+- `services/collector-sbi-shinsei/test/stored-captures.test.ts`: through the
+  Chrome handoff, each of the four provider captures (indented, with an
+  escaped name) is stored as the input text byte for byte, the balance
+  summary's placeholder names included and no marker present, and no artifact
+  carries `redactedFieldCount`; the local diagnostic collector stores the
+  balance summary and exchange rate as the provider's bytes.
+- `services/collector-sbi-shinsei/test/shared-collection.test.ts` (Worker end
+  to end, synthetic container handoff): the stored balance summary carries the
+  placeholder names, nothing logged contains them, the manifest has no
+  `redactedFieldCount`, and the four `redacted` steps are
+  `sbi-shinsei-token-sanitizer` v3; the existing tests still prove the
+  rotating token and the relay secret never reach DATA.
+- `services/collector-myjcb/test/person-names.test.ts`: on a synthetic page
+  with the observed カード情報 structure, every row including 口座名義 is kept
+  and passes `assertRedactedHtml`; a full card number is still removed by the
+  sanitizer and refused by the check; the shared run stores the sanitized page
+  byte for byte, logs no page value, has no `redactedFieldCount` and records
+  `myjcb-sanitizer` v3.
+- `services/collector-myjcb/test/shared-collection.test.ts`: the `redacted`
+  step is `myjcb-sanitizer` v3.
+- `services/processor/test/account-connection-proof.test.ts`: a balance
+  summary with placeholder names, and one with the marker (objects written
+  under #333), both prove the account connection.
+- Not verified: whether any object was written with the marker between #333's
+  merge and this change (production was not read); the live pages were not
+  fetched.
