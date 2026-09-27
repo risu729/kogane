@@ -105,6 +105,8 @@ interface Registered {
   datasets: (string | null)[];
   /** The run's status in `observation_fetch_runs`, the one the parse gate reads. */
   runStatus: string;
+  /** Each unit's terminal-report failure code, by unit key (null when none). */
+  unitFailureCodes: (string | null)[];
 }
 
 /**
@@ -193,7 +195,17 @@ async function registerPlan(plan: PersistRunPlan, expectedArtifacts: number): Pr
     }
   ).status;
   registeredStatus.set(source, runStatus);
-  return { roles, units, datasets, runStatus };
+  const unitFailureCodes = (
+    h.db
+      .query(
+        `SELECT r.safe_failure_code AS code
+           FROM fetch_units u
+           JOIN fetch_unit_reports r ON r.fetch_unit_id=u.id AND r.report_kind='terminal'
+          WHERE u.fetch_run_id=? ORDER BY u.unit_key`,
+      )
+      .all(result.fetchRunId) as { code: string | null }[]
+  ).map((row) => row.code);
+  return { roles, units, datasets, runStatus, unitFailureCodes };
 }
 
 // --- Sources that registered before this change -------------------------------
@@ -494,6 +506,63 @@ test("prestia-globalpass: the run manifest belongs to the run and the account un
   });
   const registered = await registerPlan(plan, 3);
   expect(registered.units).toEqual([{ unit_key: "account", artifacts: 2, declared: 2 }]);
+});
+
+test("prestia-globalpass: a run with a sanitizer code and an unwalked page registers partial with the code", async () => {
+  // One month refused by the sanitizer (its closed code), one month stored
+  // whose page states a second page (ADR 0026's 2026-09-27 amendment). The
+  // manifest's failure entries keep their fixed four keys; the run's first
+  // code becomes the unit's safe failure code.
+  const html = "<!doctype html><html><body>synthetic</body></html>";
+  const months = ["2099-01", "2098-12"];
+  const manifest: GlobalPassManifest = {
+    schemaVersion: GLOBALPASS_SCHEMA_VERSION,
+    source: "prestia-globalpass",
+    runId: RUN_ID,
+    mode: "daily",
+    startedAt: STARTED_AT,
+    completedAt: COMPLETED_AT,
+    status: "partial",
+    availableMonths: months,
+    selectedMonths: months,
+    captureComplete: false,
+    paginationStatus: GLOBALPASS_PAGINATION_STATUS,
+    artifacts: [
+      {
+        dataset: GLOBALPASS_DATASET,
+        month: "2098-12",
+        key: "raw/prestia-globalpass/activity-2098-12.html",
+        mediaType: GLOBALPASS_MEDIA_TYPE,
+        bytes: html.length,
+        sha256: "a".repeat(64),
+      },
+    ],
+    failures: [
+      {
+        operation: "sanitization",
+        errorType: "GlobalPassSanitizerError",
+        errorCode: "globalpass_html_shape_unreviewed",
+        artifactKey: "activity-2099-01.html",
+      },
+      {
+        operation: "pagination",
+        errorType: "PaginationError",
+        errorCode: "activity_pages_unwalked",
+        artifactKey: "activity-2098-12.html",
+      },
+    ],
+  };
+  const plan = await globalPassRunPlan({
+    manifest,
+    manifestJson: JSON.stringify(manifest),
+    captures: [{ month: "2098-12", sanitizedHtml: html }],
+    identity: { attemptId: "attempt-0000" },
+  });
+  expect(plan.run.safeErrorCode).toBe("globalpass_html_shape_unreviewed");
+  const registered = await registerPlan(plan, 2);
+  expect(registered.runStatus).toBe("partial");
+  expect(registered.units).toEqual([{ unit_key: "account", artifacts: 1, declared: 1 }]);
+  expect(registered.unitFailureCodes).toEqual(["globalpass_html_shape_unreviewed"]);
 });
 
 test("myjcb: the ledger and discovery state their extraction from pages nobody keeps", async () => {
@@ -849,8 +918,9 @@ test("ADR 0026: a successful plan's units state what the parse gate reads", () =
   // terminal report is `success`, which registration derives from the unit
   // coverage `complete`. Neither the run scope nor `unit-independent-v1`
   // admits a `partial` run, so a source listed `partial` here is never parsed
-  // from its successful runs. GLOBAL PASS keeps `partial` because nobody has
-  // observed whether a month page paginates. Vpass is `success` here because
+  // from its successful runs. GLOBAL PASS keeps `partial` because its
+  // collector stores only the first page of a month, and a month with more
+  // than ten statements is observed to have a second one. Vpass is `success` here because
   // the fixture's month meets its stated total; a month that does not is
   // `partial` (the case above; ADR 0026, ADR 0023).
   expect(Object.fromEntries([...registeredStatus].sort(([a], [b]) => a.localeCompare(b)))).toEqual({

@@ -1,5 +1,36 @@
 export const NABLARCH_HIDDEN_SENTINEL = "__KOGANE_REDACTED_DYNAMIC_VALUE__";
 
+/**
+ * Every way the sanitizer refuses a page, as a closed code. The code is the
+ * error's message and its `code`, and it is the only thing about a refused
+ * page that leaves this module: the diagnostic log line and the manifest's
+ * failure entry carry it, never provider text or a matched value.
+ */
+export const GLOBALPASS_SANITIZER_CODES = [
+  "globalpass_html_contract_invalid",
+  "globalpass_html_redaction_failed",
+  "globalpass_html_shape_unreviewed",
+  "globalpass_html_utf8_invalid",
+] as const;
+export type GlobalPassSanitizerCode = (typeof GLOBALPASS_SANITIZER_CODES)[number];
+
+export class GlobalPassSanitizerError extends Error {
+  readonly code: GlobalPassSanitizerCode;
+  constructor(code: GlobalPassSanitizerCode) {
+    super(code);
+    this.name = "GlobalPassSanitizerError";
+    this.code = code;
+  }
+}
+
+/** The closed code of a sanitizer refusal, or `undefined` for anything else. */
+export function sanitizerCode(error: unknown): GlobalPassSanitizerCode | undefined {
+  if (!(error instanceof GlobalPassSanitizerError)) return undefined;
+  return (GLOBALPASS_SANITIZER_CODES as readonly string[]).includes(error.code)
+    ? error.code
+    : undefined;
+}
+
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const INPUT = /<input\b[^>]*>/giu;
 const FORM = /<form\b[^>]*>/giu;
@@ -86,7 +117,7 @@ export function sanitizeGlobalPassActivityHtml(html: string): string {
     /\b(?:jsessionid|token|csrf|turnstile|session|localStorage)\b/iu.test(html) ||
     html.includes(NABLARCH_HIDDEN_SENTINEL)
   ) {
-    throw new Error("globalpass_html_contract_invalid");
+    throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
   }
   assertUrlAndEventContract(html, false);
 
@@ -99,17 +130,17 @@ export function sanitizeGlobalPassActivityHtml(html: string): string {
       return tag;
     }
     const values = attributes.filter((attribute) => attribute.name === "value");
-    if (values.length !== 1) throw new Error("globalpass_html_contract_invalid");
+    if (values.length !== 1) throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
     const value = values[0]!;
     if (value.value === "") return tag;
     if (value.valueStart === undefined || value.valueEnd === undefined) {
-      throw new Error("globalpass_html_contract_invalid");
+      throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
     }
     redacted += 1;
     return tag.slice(0, value.valueStart) + NABLARCH_HIDDEN_SENTINEL + tag.slice(value.valueEnd);
   });
   if (redacted !== before.nonemptyDynamicCount) {
-    throw new Error("globalpass_html_redaction_failed");
+    throw new GlobalPassSanitizerError("globalpass_html_redaction_failed");
   }
   output = canonicalizeInteractiveAttributes(output);
   assertUrlAndEventContract(output, true);
@@ -118,7 +149,7 @@ export function sanitizeGlobalPassActivityHtml(html: string): string {
     identifyVariant(after) !== variant ||
     after.nonemptyDynamicCount !== before.nonemptyDynamicCount
   ) {
-    throw new Error("globalpass_html_redaction_failed");
+    throw new GlobalPassSanitizerError("globalpass_html_redaction_failed");
   }
   return output;
 }
@@ -126,7 +157,7 @@ export function sanitizeGlobalPassActivityHtml(html: string): string {
 function inspectShape(html: string, sanitized: boolean): Shape {
   const bytes = new TextEncoder().encode(html);
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_HTML_BYTES) {
-    throw new Error("globalpass_html_contract_invalid");
+    throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
   }
   const hiddenCounts = new Map<string, number>();
   let dynamicCount = 0;
@@ -139,7 +170,7 @@ function inspectShape(html: string, sanitized: boolean): Shape {
       attributes.filter((attribute) => attribute.name === "type").length > 1 ||
       attributes.filter((attribute) => attribute.name === "value").length > 1
     ) {
-      throw new Error("globalpass_html_contract_invalid");
+      throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
     }
     const type = attributeValue(attributes, "type")?.toLowerCase();
     const name = attributeValue(attributes, "name")?.toLowerCase();
@@ -151,21 +182,21 @@ function inspectShape(html: string, sanitized: boolean): Shape {
       name === "usrid" ||
       id === "usrid"
     ) {
-      throw new Error("globalpass_html_contract_invalid");
+      throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
     }
     if (type !== "hidden") continue;
     if (!name || !ALLOWED_HIDDEN_NAMES.has(name)) {
-      throw new Error("globalpass_html_contract_invalid");
+      throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
     }
     hiddenCounts.set(name, (hiddenCounts.get(name) ?? 0) + 1);
     if (name !== "nablarch_hidden") continue;
     dynamicCount += 1;
     const value = attributeValue(attributes, "value");
-    if (value === undefined) throw new Error("globalpass_html_contract_invalid");
+    if (value === undefined) throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
     if (value !== "") {
       nonemptyDynamicCount += 1;
       if (sanitized && value !== NABLARCH_HIDDEN_SENTINEL) {
-        throw new Error("globalpass_html_redaction_failed");
+        throw new GlobalPassSanitizerError("globalpass_html_redaction_failed");
       }
     }
   }
@@ -176,11 +207,12 @@ function inspectShape(html: string, sanitized: boolean): Shape {
     formCount += 1;
     const attributes = parseAttributes(tag);
     if (attributes.filter((attribute) => attribute.name === "action").length > 1) {
-      throw new Error("globalpass_html_contract_invalid");
+      throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
     }
     const action = attributeValue(attributes, "action") ?? "";
     if (action === "") continue;
-    if (action !== STATIC_ACTION) throw new Error("globalpass_html_contract_invalid");
+    if (action !== STATIC_ACTION)
+      throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
     staticActionCount += 1;
   }
   return {
@@ -215,7 +247,7 @@ function identifyVariant(shape: Shape): "a" | "b" {
     count(shape, "w131301.referencedate") === 0;
   if (variantA) return "a";
   if (variantB) return "b";
-  throw new Error("globalpass_html_shape_unreviewed");
+  throw new GlobalPassSanitizerError("globalpass_html_shape_unreviewed");
 }
 
 function count(shape: Shape, name: string): number {
@@ -224,7 +256,7 @@ function count(shape: Shape, name: string): number {
 
 function assertUrlAndEventContract(html: string, canonical: boolean): void {
   if (/\burl\s*\(|@import\b/iu.test(html)) {
-    throw new Error("globalpass_html_contract_invalid");
+    throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
   }
   const extraUrlAttributes = new Set([
     "archive",
@@ -255,7 +287,7 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
     const attributes = parseAttributes(tag);
     const element = tagName(tag);
     if (BLOCKED_NETWORK_ELEMENTS.has(element)) {
-      throw new Error("globalpass_html_contract_invalid");
+      throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
     }
     const sensitiveNames = new Set(
       attributes
@@ -272,7 +304,7 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
     );
     for (const name of sensitiveNames) {
       if (attributes.filter((attribute) => attribute.name === name).length !== 1) {
-        throw new Error("globalpass_html_contract_invalid");
+        throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
       }
     }
     const httpEquiv = attributes.find((attribute) => attribute.name === "http-equiv");
@@ -292,21 +324,21 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
         httpEquiv.value === undefined ||
         !allowed.has(httpEquiv.value.trim().toLowerCase())
       ) {
-        throw new Error("globalpass_html_contract_invalid");
+        throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
       }
     }
     for (const attribute of attributes) {
       const value = attribute.value;
       if (extraUrlAttributes.has(attribute.name)) {
-        throw new Error("globalpass_html_contract_invalid");
+        throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
       }
       if (attribute.name === "action") {
         if (element !== "form" || (value !== "" && value !== STATIC_ACTION)) {
-          throw new Error("globalpass_html_contract_invalid");
+          throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
         }
       } else if (attribute.name === "href") {
         if (value === undefined || !allowedHref(element, value, canonical)) {
-          throw new Error("globalpass_html_contract_invalid");
+          throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
         }
       } else if (attribute.name === "src") {
         const allowed =
@@ -316,11 +348,11 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
               ? ALLOWED_SCRIPT_SRC_PATHS
               : null;
         if (value === undefined || allowed === null || !allowedSameHostPath(value, allowed)) {
-          throw new Error("globalpass_html_contract_invalid");
+          throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
         }
       } else if (attribute.name.startsWith("on")) {
         if (value === undefined || !allowedEventHandler(attribute.name, value, canonical)) {
-          throw new Error("globalpass_html_contract_invalid");
+          throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
         }
       }
     }
@@ -465,13 +497,13 @@ function parseAttributes(tag: string): Attribute[] {
 
 function attributeValue(attributes: Attribute[], name: string): string | undefined {
   const matches = attributes.filter((attribute) => attribute.name === name);
-  if (matches.length > 1) throw new Error("globalpass_html_contract_invalid");
+  if (matches.length > 1) throw new GlobalPassSanitizerError("globalpass_html_contract_invalid");
   return matches[0]?.value;
 }
 
 function assertUtf8RoundTrip(html: string): void {
   const bytes = new TextEncoder().encode(html);
   if (new TextDecoder("utf-8", { fatal: true }).decode(bytes) !== html) {
-    throw new Error("globalpass_html_utf8_invalid");
+    throw new GlobalPassSanitizerError("globalpass_html_utf8_invalid");
   }
 }

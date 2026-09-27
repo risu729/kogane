@@ -15,9 +15,12 @@
 // and relay token are never part of a plan.
 //
 // Coverage is `partial` even on a `success` run. The provider exposes a
-// rolling window of statement months and the collector's pagination status is
-// `unproven` (`GLOBALPASS_PAGINATION_STATUS`), so a finished run is a claim
-// about persistence, never about the account's whole history.
+// rolling window of statement months, and the collector keeps only the page a
+// month selection renders (`GLOBALPASS_PAGINATION_STATUS`,
+// `first_page_only`): a month with more than ten statements has a second page
+// it never reads, and a page that shows no pager is not proven whole. A
+// finished run is a claim about persistence, never about a whole month or the
+// account's history (ADR 0026's 2026-09-27 amendment).
 import {
   persistRun,
   type CoverageStatus,
@@ -116,7 +119,7 @@ export function sharedOutcome(manifest: CollectionManifest): {
   safeErrorCode?: string;
 } {
   if (manifest.status === "success") {
-    // Never `complete`: a rolling window with unproven pagination.
+    // Never `complete`: a rolling window, and only page 1 of each month.
     return { providerOutcome: "success", coverageStatus: "partial" };
   }
   return {
