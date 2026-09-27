@@ -514,3 +514,63 @@ test("a terminal overwritten after its v1 registration is a conflict under v2, n
   });
   expect(await fetchRuns()).toBe(1);
 }, 60000);
+
+test("a seal workerd's D1 refuses by trigger blocks the run with the trigger's code (ADR 0024)", async () => {
+  // The shape of the collector-vpass terminals written before the collector
+  // counted its units right: the unit declares more artifacts than the run
+  // attributes to it, so `fetch_run_seal_requires_complete_inventory` refuses
+  // the seal. Through real D1 the refusal arrives as a `D1_ERROR` message; it
+  // is classified from that message and recorded once.
+  const runId = "vpass-synthetic-seal-refused";
+  await persistRun(env.EVIDENCE, {
+    run: run({
+      source: "vpass",
+      producer: "collector-vpass",
+      producerVersion: "vpass-worker-card-v1",
+      runId,
+      providerOutcome: "success",
+      coverageStatus: "partial",
+      units: [
+        { unitKey: "card-001", unitKind: "card", artifactCount: 2, coverageStatus: "partial" },
+      ],
+    }),
+    artifacts: [
+      await artifact("months/202605/top-001.json", '{"synthetic":"seal-refused"}', {
+        unitKey: "card-001",
+      }),
+    ],
+  });
+  expect(await registerCollectionRun(env, { source: "vpass", runId })).toMatchObject({
+    outcome: "blocked",
+    code: "run_inventory_incomplete",
+    recorded: false,
+  });
+  expect(await registerCollectionRun(env, { source: "vpass", runId })).toMatchObject({
+    outcome: "blocked",
+    code: "run_inventory_incomplete",
+    recorded: true,
+  });
+  const left = await env.DB.prepare(
+    `SELECT f.id,
+            EXISTS (SELECT 1 FROM fetch_run_seals s WHERE s.fetch_run_id = f.id) AS sealed
+       FROM fetch_runs f WHERE f.source_id = 'vpass' AND f.source_run_key LIKE ?`,
+  )
+    .bind(`${runId}:%`)
+    .all<{ id: number; sealed: number }>();
+  expect(left.results).toHaveLength(1);
+  expect(left.results[0]!.sealed).toBe(0);
+  const stages = await env.DB.prepare(
+    `SELECT s.state, s.failure_code, s.evidence_ref FROM collection_run_stages s
+       JOIN collection_runs r ON r.id = s.collection_run_id
+      WHERE r.run_id = ? AND s.stage = 'registered' ORDER BY s.id`,
+  )
+    .bind(runId)
+    .all();
+  expect(stages.results).toEqual([
+    {
+      state: "blocked",
+      failure_code: "run_inventory_incomplete",
+      evidence_ref: String(left.results[0]!.id),
+    },
+  ]);
+}, 60000);
