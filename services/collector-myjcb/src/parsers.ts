@@ -173,19 +173,22 @@ export function parsePastMonthAvailability(json: string): PastMonthAvailability[
 
 /**
  * The URL a credit detail page is served at, which its relative links resolve
- * against. Confirmed months link their exports relatively
- * (`detail.html?output=csv&detailMonth=N`, `detailDbPdf.html?...`), observed
- * 2026-09-27: resolved against the origin alone they named `/detail.html`
- * and never matched, so no run found an export (ADR 0005's second amendment).
+ * against. Confirmed months link their exports relatively and without a
+ * month (`detailDbPdf.html?output=pdf`, `detail.html?output=csv`,
+ * `detail.html?output=money`), observed 2026-09-27: resolved against the
+ * origin alone they named `/detail.html` and never matched, so no run found an
+ * export (ADR 0005's second amendment).
  */
 const CREDIT_DETAIL_PAGE_URL = `${MYJCB_ORIGIN}/iss-pc/member/details_inquiry/detail.html`;
 
 /**
  * The exports a credit detail page links to for its own month. A link is
  * resolved against the page's URL, so relative, root-relative and absolute
- * hrefs are read alike; it must stay on the MyJCB origin and name exactly this
- * `detailMonth` (a link without one names no month and is not an export of
- * this one).
+ * hrefs are read alike; it must stay on the MyJCB origin. The observed links
+ * name no `detailMonth`: a link found on this month's page is this month's
+ * export. A link that does name a `detailMonth` counts only when it names
+ * exactly this one (another month's link, or a malformed month, is not this
+ * month's export).
  */
 export function discoverCreditExports(
   html: string,
@@ -201,7 +204,7 @@ export function discoverCreditExports(
     }
     if (url.origin !== MYJCB_ORIGIN) continue;
     const month = url.searchParams.get("detailMonth");
-    if (month === null || !/^\d{1,2}$/u.test(month) || Number(month) !== detailMonth) continue;
+    if (month !== null && (!/^\d{1,2}$/u.test(month) || Number(month) !== detailMonth)) continue;
     if (
       url.pathname === "/iss-pc/member/details_inquiry/detail.html" &&
       url.searchParams.get("output") === "csv"

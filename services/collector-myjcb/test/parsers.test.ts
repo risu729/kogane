@@ -86,7 +86,17 @@ describe("MyJCB synthetic parsers", () => {
   test("resolves export links against the detail page's own URL (ADR 0005's second amendment)", () => {
     const links = (...hrefs: readonly string[]) =>
       `<html><body>${hrefs.map((href) => `<a href="${href}">export</a>`).join("")}</body></html>`;
-    // Relative, as confirmed months link them (observed 2026-09-27).
+    // Relative and without a month, as confirmed months link them (observed
+    // 2026-09-27): a link on a month's page is that month's export, at month
+    // 0 as at any other.
+    const observed = links(
+      "detailDbPdf.html?output=pdf",
+      "detail.html?output=csv",
+      "detail.html?output=money",
+    );
+    expect(discoverCreditExports(observed, 1)).toEqual(["pdf", "csv", "ofx"]);
+    expect(discoverCreditExports(observed, 0)).toEqual(["pdf", "csv", "ofx"]);
+    // A link that names this month is read alike.
     expect(
       discoverCreditExports(
         links(
@@ -117,17 +127,22 @@ describe("MyJCB synthetic parsers", () => {
         2,
       ),
     ).toEqual(["ofx"]);
-    // Another month's link, a link that names no month (not even at month 0),
-    // a link one directory away, and the notice PDF are not this month's exports.
+    // Another month's link, a malformed month, a link one directory away, a
+    // link with no or another `output`, and the notice PDF are not this
+    // month's exports.
     const others = links(
       "detail.html?output=csv&amp;detailMonth=2",
-      "detail.html?output=csv",
-      "../detail.html?output=csv&amp;detailMonth=1",
-      "detailNewspdf.html?detailMonth=1",
       "detailDbPdf.html?output=pdf&amp;detailMonth=01x",
+      "detail.html?output=money&amp;detailMonth=",
+      "../detail.html?output=csv",
+      "detail.html?detailMonth=1",
+      "detail.html?output=xls",
+      "detailNewspdf.html",
+      "detailNewspdf.html?detailMonth=1",
     );
     expect(discoverCreditExports(others, 1)).toEqual([]);
-    expect(discoverCreditExports(others, 0)).toEqual([]);
+    // At month 0 another month's link is not this month's either.
+    expect(discoverCreditExports(links("detail.html?output=csv&amp;detailMonth=1"), 0)).toEqual([]);
   });
 
   test("parses confirmed and mutable unconfirmed ledger components", () => {

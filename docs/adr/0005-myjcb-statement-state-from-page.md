@@ -231,7 +231,8 @@ shapes, no values). Four findings bear on this ADR.
 1. **Export links.** The confirmed months (positions 1 and 2) link their
    exports, PDF `detailDbPdf.html?output=pdf`, CSV
    `detail.html?output=csv` and OFX `detail.html?output=money`, with relative
-   hrefs carrying the month's `detailMonth`. `discoverCreditExports` resolved
+   hrefs that name no `detailMonth` (the month is the page they are on).
+   `discoverCreditExports` resolved
    every href against the origin alone, so a relative link named
    `/detail.html` and never matched
    `/iss-pc/member/details_inquiry/detail.html`. Every stored run found no
@@ -299,9 +300,12 @@ For the undiagnosable stops (finding 3):
 - **Export discovery.** A link is resolved against the detail page's own
   URL (`https://my.jcb.co.jp/iss-pc/member/details_inquiry/detail.html`), so
   relative, `./`, root-relative and absolute hrefs are read alike. It must
-  stay on the MyJCB origin and name exactly this month's `detailMonth`; a
-  link that names no month is no month's export (before, `Number(null)`
-  made it month 0's).
+  stay on the MyJCB origin, name the export path (`detail.html` or
+  `detailDbPdf.html` in `/iss-pc/member/details_inquiry/`) and an `output` of
+  `csv`, `money` or `pdf`. A link on a month's page that names no
+  `detailMonth`, as observed, is that month's export; a link that does name
+  one counts only when it names exactly this month (before, `Number(null)`
+  made a month-less link month 0's and no other month's).
 - **Exports are recorded, not fetched.** `collectCredit` records, for each
   month kept, the export kinds its page offers
   (`exportOffers: [{ position, kinds }]` on the connection summary and in
@@ -388,9 +392,12 @@ and sealed, and no parser reads it.
 ### Verification
 
 - `services/collector-myjcb/test/parsers.test.ts`: relative, `./`,
-  root-relative and absolute export hrefs are found; another origin,
-  another month, a link without a month (at months 1 and 0), a link one
-  directory away and the notice PDF are not.
+  root-relative and absolute export hrefs are found, the observed
+  month-less relative hrefs at months 1 and 0 included; another origin,
+  another or a malformed month, a link one directory away, a link without an
+  export `output` and the notice PDF are not. `credit-statement-state.test.ts`
+  records the observed month-less links as an offer of their page's month,
+  and stops on them on a page that is not a confirmed statement.
 - `services/collector-myjcb/test/credit-statement-state.test.ts`: the three
   headers in one connection (unconfirmed with rows, confirmed with rows,
   the third with rows under the heading, no ledger, both empty variants):

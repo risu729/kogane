@@ -37,6 +37,8 @@ function page(options: {
   readonly head?: string | null;
   readonly rows?: readonly string[];
   readonly exportMonth?: number;
+  /** The export links as observed on a confirmed month: relative, no month. */
+  readonly observedExports?: boolean;
 }): string {
   const headings = [
     ...(options.headings ?? []).map((heading) => `<h1>${heading}</h1>`),
@@ -46,11 +48,14 @@ function page(options: {
     options.exportMonth === undefined
       ? ""
       : `<a href="/iss-pc/member/details_inquiry/detail.html?detailMonth=${options.exportMonth}&amp;output=csv">CSV</a>`;
+  const observedExports = options.observedExports
+    ? '<a href="detailDbPdf.html?output=pdf">PDF</a><a href="detail.html?output=csv">CSV</a><a href="detail.html?output=money">OFX</a>'
+    : "";
   const ledger =
     options.head === null
       ? ""
       : `<div class="detail-list-01"><div class="head">${options.head ?? CONFIRMED_HEAD}</div>${(options.rows ?? []).join("")}</div>`;
-  return `<!doctype html><html lang="ja"><body><h1>MyJCB</h1>${headings}<input type="hidden" name="generalJsonShikibetuId" value="synthetic-discriminator">${exports}${ledger}</body></html>`;
+  return `<!doctype html><html lang="ja"><body><h1>MyJCB</h1>${headings}<input type="hidden" name="generalJsonShikibetuId" value="synthetic-discriminator">${exports}${observedExports}${ledger}</body></html>`;
 }
 
 const confirmedRow = row(
@@ -438,6 +443,24 @@ describe("ADR 0005 amendment: a stopped connection keeps the months before the s
       "credit-menu",
     ]);
     expect(filenames(run.artifacts).filter((name) => !/\.(?:html|json)$/u.test(name))).toEqual([]);
+  });
+
+  test("the observed month-less relative export links are recorded for their page's month", async () => {
+    const exporting = page({
+      headings: [CONFIRMED_STATEMENT_HEADING],
+      months: ["2026年2月"],
+      rows: [confirmedRow],
+      observedExports: true,
+    });
+    const run = await collectCredit(client({ ...pages, 2: exporting }), "x");
+    expect(run.stop).toBeUndefined();
+    expect(run.exportOffers).toEqual([{ position: 2, kinds: ["pdf", "csv", "ofx"] }]);
+    // The same links on a page that is not a confirmed statement still stop it.
+    const unconfirmed = page({ head: UNCONFIRMED_HEAD, rows: [pendingRow], observedExports: true });
+    expect((await collectCredit(client({ 0: unconfirmed }), "x")).stop).toMatchObject({
+      code: "credit_statement_state",
+      position: 0,
+    });
   });
 
   test("a period or ledger failure names its own stage", async () => {
