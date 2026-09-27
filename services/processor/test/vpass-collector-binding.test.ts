@@ -98,12 +98,15 @@ const envelope = (content: Record<string, unknown>, bean?: Record<string, unknow
   });
 const bean = { ...TUPLE, cardName: "SYNTHETIC CARD" };
 
-/** A finalized statement page whose summary states `allCnt` rows (ADR 0023 option 8). */
+/**
+ * A finalized statement page whose summary states `allCnt` rows (ADR 0023
+ * option 8), as the JSON string the live site sends (2026-09-27, types only).
+ */
 function statementPage(allCnt: number = ROWS.length): string {
   const payload = vpassPayload("web", "202608", ROWS);
   payload.body.content.WebMeisaiTopDisplayServiceBean.webMeisaiTopK3Vo = {
     ...payload.body.content.WebMeisaiTopDisplayServiceBean.webMeisaiTopK3Vo,
-    allCnt,
+    allCnt: String(allCnt),
   };
   return JSON.stringify(payload);
 }
