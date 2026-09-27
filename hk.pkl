@@ -1,51 +1,59 @@
-amends "https://raw.githubusercontent.com/risu729/hk-config/v1.1.0/presets.pkl"
+amends "https://raw.githubusercontent.com/risu729/hk-config/v2.0.0/presets.pkl"
 
-import "https://raw.githubusercontent.com/risu729/hk-config/v1.1.0/helpers.pkl"
-import "package://github.com/jdx/hk/releases/download/v1.58.1/hk@1.58.1#/Config.pkl"
+import "https://raw.githubusercontent.com/risu729/hk-config/v2.0.0/helpers.pkl"
 
 // Evidence and parser fixtures retain their exact committed bytes.
 exclude = List("data/**", "**/fixtures/**", "**/patches/**", "**/worker-configuration.d.ts")
 
-local picked = (helpers.pick(new Listing {
-  "oxlint"
-  "oxfmt"
-  "github-actions"
-  "tombi"
-  "yaml"
-  "typos"
-  "newlines"
-  "trailing-whitespace"
-  "mixed-line-ending"
-  "byte-order-marker"
-  "check-merge-conflict"
-  "check-case-conflict"
-  "check-symlinks"
-  "check-executables-have-shebangs"
-  "shellcheck"
-})) {
+local picked =
+  helpers.pick(new Listing {
+    "oxlint"
+    "oxfmt"
+    "github-actions"
+    "tombi"
+    "yaml"
+    "typos"
+    // Individual hygiene checks, not the whole `hygiene` group. The group adds
+    // four more checks; destroyed-symlinks and forbid-submodules pass, but
+    // fix-smart-quotes and check-shebang-scripts-are-executable do not pass on
+    // the repository yet.
+    "newlines"
+    "trailing-whitespace"
+    "mixed-line-ending"
+    "byte-order-marker"
+    "check-merge-conflict"
+    "check-case-conflict"
+    "check-symlinks"
+    "check-executables-have-shebangs"
+    "shellcheck"
+  })
+
+// Top-level steps feed hk's implicit check, fix and pre-commit hooks, so fast
+// staged-file fixes stay in pre-commit.
+steps = (picked) {
   // Direct exit status also works on Windows; the preset's diff wrapper is Bash.
-  ["typos"] = new Config.Step {
+  ["typos"] = new Step {
     check = "typos --force-exclude {{ files }}"
     fix = "typos --force-exclude --write-changes {{ files }}"
   }
-  ["ruff"] = new Config.Step {
+  ["ruff"] = new Step {
     glob = "**/*.py"
     check = "ruff check {{ files }}"
     fix = "ruff check --fix {{ files }}"
   }
-  ["ruff-format"] = new Config.Step {
+  ["ruff-format"] = new Step {
     glob = "**/*.py"
     check_diff = "ruff format --check --diff {{ files }}"
     fix = "ruff format {{ files }}"
   }
 }
 
-// Fast staged-file fixes stay in pre-commit; the complete verification graph
-// belongs only to check. No glob/profile means it also runs with no changed files.
-hooks = (helpers.standardHooks(picked)) {
+// The complete verification graph belongs only to check. No glob/profile means
+// it also runs with no changed files.
+hooks {
   ["check"] {
-    steps = (picked) {
-      ["repository"] = new Config.Step {
+    steps {
+      ["repository"] = new Step {
         check = "mise run --continue-on-error checks"
       }
     }
