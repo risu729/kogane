@@ -3,7 +3,10 @@
 // docs/sources/myjcb.md, カード情報). Observed on the confirmed statement page
 // and on the ショッピングスキップ払い page, live and in the stored redacted
 // HTML: an `h3.hdg-H3` heading 「カード情報」 after the ledger, followed by a
-// `table.table-data` of vertical th/td rows:
+// `table.table-data` of vertical th/td rows. The reader finds the table by
+// that heading's text and the th labels, not by the class names, which are
+// layout: a heading element (h1-h6) whose text is 「カード情報」, then the
+// first table after it, whose every row must carry a known label:
 //
 //   カード名称       product name            never read
 //   カード発行会社   issuer                  never read
@@ -22,6 +25,7 @@
 import type { StatementPageNode } from "./myjcb-statement-page.ts";
 
 const CARD_INFORMATION_HEADING = "カード情報";
+const HEADING_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
 const READ_LABELS = {
   bankName: "金融機関名",
   branchName: "支店名",
@@ -38,11 +42,11 @@ const ACCOUNT_VALUE = /^(普通|当座) ([0-9]{4})(\*{1,12})$/u;
 const MAX_NAME_LENGTH = 64;
 
 const CARD_INFORMATION_REFUSALS = [
-  /** No 「カード情報」 heading on the page. */
+  /** No heading element whose text is 「カード情報」. */
   "card_information_absent",
-  /** More than one heading. */
+  /** More than one such heading. */
   "card_information_ambiguous",
-  /** No `table.table-data` follows the heading. */
+  /** No table follows the heading. */
   "card_information_table_missing",
   /** A row that is not one th and one td, an unknown or repeated label, or a
    * missing read label. */
@@ -77,8 +81,7 @@ export function readMyJcbCardInformation(document: StatementPageNode): CardInfor
   const ordered = elements(document);
   const headings = ordered.filter(
     (element) =>
-      element.tagName === "h3" &&
-      hasClass(element, "hdg-H3") &&
+      HEADING_TAGS.has(element.tagName ?? "") &&
       compact(text(element)) === CARD_INFORMATION_HEADING,
   );
   if (headings.length === 0) return refused("card_information_absent");
@@ -87,8 +90,7 @@ export function readMyJcbCardInformation(document: StatementPageNode): CardInfor
   // The first table after the heading, in document order, is the heading's
   // table; the heading itself contains no table.
   const table = ordered.slice(headingIndex + 1).find((element) => element.tagName === "table");
-  if (table === undefined || !hasClass(table, "table-data"))
-    return refused("card_information_table_missing");
+  if (table === undefined) return refused("card_information_table_missing");
 
   const values = new Map<string, StatementPageNode>();
   for (const row of elements(table).filter((element) => element.tagName === "tr")) {
@@ -145,11 +147,6 @@ function elements(node: StatementPageNode): StatementPageNode[] {
 
 function children(node: StatementPageNode): StatementPageNode[] {
   return (node.childNodes ?? []).filter((child) => child.tagName !== undefined);
-}
-
-function hasClass(element: StatementPageNode, className: string): boolean {
-  const value = element.attrs?.find((attribute) => attribute.name === "class")?.value ?? "";
-  return value.split(/\s+/u).includes(className);
 }
 
 function text(node: StatementPageNode): string {

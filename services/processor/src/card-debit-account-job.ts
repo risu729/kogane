@@ -62,7 +62,10 @@ const CARD_SOURCE_ACCOUNT_SQL = `'myjcb:'||substr(a.artifact_key,1,instr(a.artif
 /**
  * Published statement pages without a reading under `?1`, oldest first, at
  * most `?2`. The anti-join probes the unique key of
- * `card_debit_account_statement`.
+ * `card_debit_account_statement`. Only keys whose connection segment has the
+ * shape the table's CHECK accepts (`[a-z0-9][a-z0-9-]{0,63}`, one `/`) are
+ * selected: any other key could never be written, and selecting it would
+ * fail the lane on the same page every tick.
  */
 const CARD_DEBIT_ACCOUNT_PAGES_SQL = `SELECT a.id,a.artifact_key,a.sha256,
  coalesce(a.fetched_at_ms,a.recorded_at_ms) AS fetched_at_ms,o.blob_key,o.byte_size,pp.parse_run_id
@@ -71,6 +74,9 @@ const CARD_DEBIT_ACCOUNT_PAGES_SQL = `SELECT a.id,a.artifact_key,a.sha256,
  JOIN raw_objects o ON o.sha256=a.sha256
  WHERE a.source_id='myjcb' AND a.dataset='credit-detail'
   AND a.artifact_key GLOB '[a-z0-9]*/credit-detail-[01][0-9].html'
+  AND instr(a.artifact_key,'/') BETWEEN 2 AND 65
+  AND substr(a.artifact_key,1,instr(a.artifact_key,'/')-1) NOT GLOB '*[^a-z0-9-]*'
+  AND substr(a.artifact_key,instr(a.artifact_key,'/')+1) GLOB 'credit-detail-[01][0-9].html'
   AND NOT EXISTS(SELECT 1 FROM card_debit_account_statement s
    WHERE s.raw_sha256=a.sha256 AND s.card_source_account=${CARD_SOURCE_ACCOUNT_SQL} AND s.reader_version=?1)
  ORDER BY a.id LIMIT ?2`;

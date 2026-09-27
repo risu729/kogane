@@ -15,6 +15,7 @@ import { cardSettlementSweep } from "../src/card-settlement-job.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
 import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 import { cardSettlementEligible } from "../../../packages/domain/src/card-settlement.ts";
+import { bankSourceIdForDisplayedName } from "../../../packages/domain/src/card-debit-account.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
 beforeAll(async () => {
@@ -88,11 +89,13 @@ test("any other shape is a closed refusal, never a partial reading", () => {
   expect(code(page(ROWS, { heading: 0 }))).toBe("card_information_absent");
   expect(code(page(ROWS, { heading: 2 }))).toBe("card_information_ambiguous");
   expect(code(page(ROWS, { table: "<p>架空</p>" }))).toBe("card_information_table_missing");
+  // The first table after the heading is its table, whatever its class: a
+  // table without the read labels is invalid, never another table's reading.
   expect(
     code(
       page(ROWS, { table: `<table class="other"><tr><th>金融機関名</th><td>x</td></tr></table>` }),
     ),
-  ).toBe("card_information_table_missing");
+  ).toBe("card_information_table_invalid");
   expect(code(page([...ROWS, ["未知の項目", "架空"]]))).toBe("card_information_table_invalid");
   expect(code(page([...ROWS, ["支店名", "架空支店"]]))).toBe("card_information_table_invalid");
   expect(code(page(ROWS.filter(([label]) => label !== "支店名")))).toBe(
@@ -118,6 +121,32 @@ test("any other shape is a closed refusal, never a partial reading", () => {
     "普通1234***", // no space
   ])
     expect(code(page(replace("科目・口座番号", value)))).toBe("card_information_account_invalid");
+});
+
+test("the table is found by the heading text and th labels, not by class names", () => {
+  const plain = `<!doctype html><html><body><nav><a href="#x">カード情報</a></nav>
+<h2>カード情報</h2><table>${ROWS.map(([label, value]) => `<tr><th>${label}</th><td>${value}</td></tr>`).join("")}</table></body></html>`;
+  expect(parseCardInformation(plain)).toMatchObject({
+    outcome: "read",
+    information: { bankName: "みずほ銀行", leadingDigits: "1234" },
+  });
+});
+
+test("bank names are read with their whitespace collapsed and resolved after NFKC", () => {
+  const bank = (value: string) => {
+    const reading = parseCardInformation(page(replace("金融機関名", value)));
+    if (reading.outcome !== "read") throw new Error(reading.code);
+    return [
+      reading.information.bankName,
+      bankSourceIdForDisplayedName(reading.information.bankName),
+    ];
+  };
+  // An ideographic space, a line break and a full-width rendering.
+  expect(bank("みずほ\u3000銀行")).toEqual(["みずほ 銀行", "mizuho-bank"]);
+  expect(bank("三井住友\n  銀行")).toEqual(["三井住友 銀行", "smbc-bank"]);
+  expect(bank("ＳＢＩ新生銀行")).toEqual(["ＳＢＩ新生銀行", "sbi-shinsei-bank"]);
+  // A bank Kogane does not model is read but resolves to no bank.
+  expect(bank("架空銀行")).toEqual(["架空銀行", null]);
 });
 
 const resolver: IdentityResolver = (input) => ({
@@ -413,4 +442,56 @@ test("a page naming a bank without comparable references is a closed reason", as
       reason: "no_comparable_bank_account",
       proposal_json: null,
     });
+}, 60000);
+
+test("bytes that fail their digest are refused without values, and unwritable keys are never selected", async () => {
+  const html = page();
+  await seedPage(806, "conn-c/credit-detail-01.html", html);
+  const sha = (await db
+    .prepare("SELECT sha256 FROM fetch_artifacts WHERE id=806")
+    .first<string>("sha256"))!;
+  // Same length, other bytes: only the digest check can tell.
+  await env.EVIDENCE.put(sha, bytes(html.replace("1234***", "5678***")));
+  // A connection segment the table's CHECK refuses: never selected, so the
+  // lane cannot fail on it tick after tick.
+  await seedPage(807, "conn_x/credit-detail-01.html", page(replace("支店名", "別架空支店")));
+  expect(await cardDebitAccountSweep(env)).toEqual({ scanned: 1, read: 0, refused: 1, written: 1 });
+  expect(
+    await db
+      .prepare(
+        "SELECT fetch_artifact_id,outcome,refusal_code,bank_name,leading_digits FROM card_debit_account_statement WHERE fetch_artifact_id IN (806,807)",
+      )
+      .all(),
+  ).toMatchObject({
+    results: [
+      {
+        fetch_artifact_id: 806,
+        outcome: "refused",
+        refusal_code: "raw_object_unreadable",
+        bank_name: null,
+        leading_digits: null,
+      },
+    ],
+  });
+  expect(await cardDebitAccountSweep(env)).toEqual({ scanned: 0, read: 0, refused: 0, written: 0 });
+}, 60000);
+
+test("evidence must cite a reading of the candidate's own card", async () => {
+  const candidate = (await db
+    .prepare(
+      "SELECT id FROM card_settlement_candidates WHERE json_extract(facts_json,'$.statement.sourceAccount')='myjcb:conn-a:root'",
+    )
+    .first<string>("id"))!;
+  const otherCard = (await db
+    .prepare("SELECT id FROM card_debit_account_statement WHERE fetch_artifact_id=805")
+    .first<number>("id"))!;
+  await expect(
+    db
+      .prepare(
+        `INSERT INTO card_settlement_debit_account_evidence(candidate_id,statement_id,policy,outcome,reason,proposal_json,evidence_digest,created_at)
+         VALUES(?,?,'card-debit-account-statement-v2','not_proposed','bank_not_resolved',NULL,?,'t')`,
+      )
+      .bind(candidate, otherCard, "b".repeat(64))
+      .run(),
+  ).rejects.toThrow();
 }, 60000);

@@ -249,12 +249,14 @@ unobserved.
 
 ### Decision
 
-- **Reader.** `readMyJcbCardInformation` reads the 「カード情報」 table by its th
-  labels: the bank name, the branch name, the 科目 (普通 or 当座), exactly four
+- **Reader.** `readMyJcbCardInformation` finds the 「カード情報」 table by text,
+  not by the observed class names, which are layout: the one heading element
+  (h1-h6) whose text is 「カード情報」, then the first table after it, read by
+  its th labels: the bank name, the branch name, the 科目 (普通 or 当座), exactly four
   ASCII leading digits and the number of `*` after them. It checks the labels
   of カード名称, カード発行会社 and 口座名義 and never reads their values: the
-  holder name is ADR 0029 class d, and its removal from stored pages is a
-  separate change. Any other shape is a closed refusal code, never a partial
+  holder name is ADR 0029 class d, and its removal from stored pages is
+  [#333](https://github.com/risu729/kogane/pull/333). Any other shape is a closed refusal code, never a partial
   reading (INV05). The reader lives in `packages/domain` beside
   `readMyJcbStatementPage` and takes a parse5 tree, so the processor can use
   it; the collector does not need it, because the redacted page already
@@ -318,9 +320,13 @@ unobserved.
   are closed reasons; the evidence outcomes and an unchanged candidate.
 - `services/processor/test/card-debit-account.test.ts`: the reader on
   synthetic tables (values, every refusal, holder and card names never read);
-  the lane (one row per card and raw object, none for an unpublished page or
-  on a re-run, refusals without values, append-only guards and the value
-  check); the sweep (a `names_other_account` row, no row appended for the same
+  the table found by heading text and labels without class names; bank names
+  with collapsed whitespace resolved after NFKC; the lane (one row per card
+  and raw object, none for an unpublished page or on a re-run, refusals
+  without values, bytes failing their digest refused as
+  `raw_object_unreadable`, a key the table cannot hold never selected,
+  append-only guards and the value check); the evidence trigger refusing a
+  reading of another card; the sweep (a `names_other_account` row, no row appended for the same
   outcome, a new row for a changed one, the candidate's facts and eligibility
   unchanged, `no_comparable_bank_account` for a bank without comparable
   references).

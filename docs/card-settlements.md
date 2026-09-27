@@ -85,9 +85,13 @@ ledger, followed by a `table.table-data` of th/td rows: カード名称, カー�
 (「普通 ####\*\*\*」 in shape: the account type, a space, the FIRST four digits,
 the rest masked with `*`) and 口座名義 (the holder's name, partly masked).
 `readMyJcbCardInformation` (`packages/domain/src/myjcb-card-information.ts`)
-reads the bank name, branch name, account type, the four leading digits and
-the mask length, checks the other rows' labels, and never reads the card
-name or the holder name (ADR 0029 class d). Any other shape is a closed
+finds the table by text, not by class names: the one heading element (h1-h6)
+whose text is 「カード情報」, then the first table after it, whose every row
+must be one th with a known label and one td. It reads the bank name, branch
+name, account type, the four leading digits and the mask length, checks the
+other rows' labels, and never reads the card name or the holder name
+(ADR 0029 class d; the holder name's removal from stored pages is
+[#333](https://github.com/risu729/kogane/pull/333)). Any other shape is a closed
 refusal code: `card_information_absent`, `card_information_ambiguous`,
 `card_information_table_missing`, `card_information_table_invalid`,
 `card_information_name_invalid`, `card_information_account_invalid`.
@@ -99,8 +103,11 @@ and checking their digest, at most 20 a tick. Each becomes one
 `card_debit_account_statement` row (migration 0060) per card
 (`myjcb:<connection>:root`), raw object and reader version: `read` with the
 displayed values, or `refused` with a closed code (also `page_not_utf8`,
-`raw_object_unreadable`) and no value. The same bytes stored by several runs
-are one row. The table is append-only; a corrected reader is a new version and
+`raw_object_unreadable`, for bytes that are missing, of another size or fail
+their digest) and no value, so a page is not read again under the same reader
+version. The same bytes stored by several runs are one row. Only artifact keys
+whose connection segment is `[a-z0-9][a-z0-9-]{0,63}` are selected, the shape
+the table accepts; any other key is never read. The table is append-only; a corrected reader is a new version and
 new rows. The lane runs under `RECONCILIATION_ENABLED`, right before
 `card_settlement_sweep`, and logs `scanned`, `read`, `refused`, `written`.
 
