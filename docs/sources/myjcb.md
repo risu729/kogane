@@ -435,10 +435,40 @@ ADR 0026 以前の collector は、成功した connection の unit coverage も
 
 unit の coverage は「この run が集めようとしたものを、この unit が欠けなく取得したか」を表す。card の履歴全体についての主張ではない。履歴についての主張は run の `coverageStatus` が持ち、成功 run でも `partial` のままである（registration は記録するだけで、outcome を導かない）。
 
-成功した connection の unit は `complete` と書く。成功した connection は、credit menu と過去月 response が列挙した月をすべて取得している。各月について redact 済み page、状態を示す page から作る ledger、page が示す export をすべて保存する。状態が `unknown` の page は規則どおり HTML だけを保存する（ADR 0005）。これは欠落ではない。ただし `unknown` の page に ledger 行がある場合（見出しがなく position 2 以降に行がある page）、その行は HTML の中にしかなく、どの parser も読まない。この月は欠けなく取得できていないので、`collectCredit` がその月を数え、`collectConnection` は connection を `partial` と報告する。unit は `collector_partial` 付きの `partial` になり、failure がなくても run は `partial` になる。月、export、parse のどれかが失敗すると connection 全体を止め、その connection は artifact を持たず、unit は safe error code 付きの `unknown` になる。plan は `partial` の unit を広げない。
+成功した connection の unit は `complete` と書く。成功した connection は、credit menu と過去月 response が列挙した月をすべて取得している。各月について redact 済み page、状態を示す page から作る ledger、page が示す export をすべて保存する。状態が `unknown` の page は規則どおり HTML だけを保存する（ADR 0005）。これは欠落ではない。ただし `unknown` の page に ledger 行がある場合（見出しがなく position 2 以降に行がある page）、その行は HTML の中にしかなく、どの parser も読まない。この月は欠けなく取得できていないので、`collectCredit` がその月を数え、`collectConnection` は connection を `partial` と報告する。unit は `collector_partial` 付きの `partial` になり、failure がなくても run は `partial` になる。月、export、parse のどれかが失敗したときの扱いは次節のとおりである。plan は `partial` の unit を広げない。
 
 `complete` の unit は registration で unit outcome `success` になる。importer 時代と同じである。成功 run は `observation_fetch_runs` で `success` になり、parse job が作られ、end to end で parse される（`services/processor/test/myjcb-shared-r2.test.ts`）。
 
 制限：`complete` は、一つの `detail.html?detailMonth=N&output=web` がその月の全行を持つことを前提にしている。行数上限や page 分割は未確認（上の未確認事項）で、collector は page の行と page が示す合計を照合していない。GLOBAL PASS を `partial` のままにしている理由と同じ未確認事項だが、MyJCB は importer 時代から connection を `success` と記録しており、これまでの parse はすべてこの前提に立つ。観測ではなく前提として記録する。
 
 制限：ADR 0026 より前に書かれた terminal は変更できず、processor の eligibility 規則も緩めないので、その run は `partial`／`not_eligible` のまま parse されない。ADR 0022 の contract v2 でも変わらない（unit outcome は同じ terminal から導かれる）。MyJCB の明細は次の取得で再び見える snapshot なので、card がまだ見せている月の確定明細は ADR 0026 後の最初の成功 run で取り戻せる。失われるのは、その期間の未確定だけの履歴である。後の取得までに消えた未確定行（取消、または確定前の変更）は、parse された run のどれにも入らない。最初の対象 run までは importer の取得分が current のままである（ADR 0014）。
+
+### connection の停止と取得済みの月（2026-09-27、ADR 0005 の amendment）
+
+以前は、月の取得、状態判定、ledger parse、export のどれかが失敗すると connection 全体を捨てていた。その connection は artifact を一つも残さず、terminal は `collector_failed`、collector manifest は `collector-failure` としか書かなかった。どの段階で止まったか、どの月まで取れていたかは保存された evidence に残らず、期限のある Worker log にしかなかった。
+
+現在の collector は月を `detailMonth` の昇順に一つずつ取得する。一つの月は丸ごと保存するか、何も保存しないかのどちらかである。page、ledger、export がすべて読めた時点で初めて connection の artifact に加わる。月の取得、状態判定、明細の月、ledger parse、export のどれかが失敗すると、connection はその月で止まる（[ADR 0005 の amendment](../adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months)）。credit menu、過去月 response、それより前の月、`discovery.json` は保存し、それ以降は何も読まない（後の月もデビットも読まない）。connection は `partial` になり、unit は停止段階の code 付きの `partial` になる。collector manifest の connection には `stopCode`、`stopPosition`（止まった `detailMonth`）、`capturedMonthCount`（保存した月の数）を書き、failure には `{ connectionId, operation: "collect", code, position }` だけを書く。
+
+停止 code は閉じた一覧（`services/collector-myjcb/src/types.ts` の `CONNECTION_STOP_CODES`）である。
+
+| code                                                       | 段階                                               | 保存するもの                              |
+| ---------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------- |
+| `human_required`                                           | 人の操作が必要                                     | なし（unit は `unknown`）                 |
+| `login`                                                    | login、passkey、session 復元                       | なし                                      |
+| `discovery`                                                | mypage の card 列挙                                | なし                                      |
+| `credit_menu`、`credit_first_detail`、`credit_past_months` | credit menu、最初の明細 page（識別子）、過去月 API | なし                                      |
+| `month_fetch`、`month_parse`                               | 月の page の取得、page の読み取り                  | 止まった月より前の月（unit は `partial`） |
+| `credit_statement_state`、`credit_statement_period`        | 状態の矛盾、明細の月                               | 同上                                      |
+| `ledger_parse`                                             | ledger header、行の cell                           | 同上                                      |
+| `export_fetch`                                             | CSV／PDF／OFX の取得と検証                         | 同上                                      |
+| `debit`                                                    | デビット明細                                       | なし（共通 bucket はデビットを拒否）      |
+| `no_route`                                                 | mypage に credit もデビットもない                  | なし                                      |
+| `unclassified`                                             | 段階を名乗らない error                             | なし                                      |
+
+各停止条件（`StopConditionCode`）は `connectionStopCode` の `Record` で一つの段階に対応する。新しい条件は段階を決めない限り compile できない。manifest の connection と failure は閉じた field だけから組み立て直し、一覧外の code（`manifest_stop_code_invalid`）や `detailMonth` でない位置（`manifest_stop_position_invalid`）は plan を拒否する。error message、HTTP body、provider の文言、金額は保存も log もしない。停止 log（`myjcb-credit-month-failed`）は `detailMonth`、条件 code、停止 code、保存した月の数だけを出す。
+
+run のすべての connection が何も保存しなかった場合、run は `failed` で terminal だけを書く（従来どおり）。それでも unit は書くので、各 connection の停止 code は terminal に残る。registration はこの run を従来どおり `provider_run_failed` として記録するだけで、seal しない。止まっていない connection 以外がすべて同じ段階で止まった場合、run の `safeErrorCode` はその停止 code になる（`human_required` と同じ扱い）。
+
+registration と eligibility は変えない。停止 code 付きの `partial` unit は unit report `failed` になり、run は `observation_fetch_runs` で `partial`、parse job は `not_eligible` である。取得済みの月は catalogue され seal されるが、parse されない。変わるのは、evidence と原因が残ることである。
+
+制限：これ以前の terminal は `collector_failed` のままで、月も残っていない（terminal は変更できない）。停止 code は collector 側の段階を示すだけで、provider が何を意味したかは示さない。

@@ -1,8 +1,5 @@
-import {
-  createDiagnostics,
-  safeErrorDetails,
-} from "../../../packages/collector-diagnostics/src/index";
-import { collectConnection, parseCredentialSecrets } from "./collector";
+import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
+import { collectConnection, connectionStopCode, parseCredentialSecrets } from "./collector";
 import {
   persistSharedRun,
   sharedBucket,
@@ -10,7 +7,6 @@ import {
   type SharedConnectionRun,
 } from "./shared-collection";
 import type { CollectionFailure, CollectionManifest } from "./types";
-import { HumanRequiredError, StopConditionError } from "./types";
 type MyJcbEnv = Env & {
   readonly MYJCB_CONNECTIONS_JSON?: string;
   readonly MYJCB_CONNECTION_SECRET_NAMES?: string;
@@ -100,21 +96,35 @@ async function runSharedCollection(
         );
         artifactCount += collected.artifacts.length;
         connections.push({ summary: collected.summary, artifacts: collected.artifacts });
+        // A connection that stopped at a month keeps the months before it
+        // and is recorded as a failure with its stage and position
+        // (ADR 0005's amendment).
+        const { stopCode, stopPosition } = collected.summary;
+        if (stopCode !== undefined) {
+          failures.push({
+            connectionId: credential.connectionId,
+            operation: "collect",
+            code: stopCode,
+            ...(stopPosition === undefined ? {} : { position: stopPosition }),
+          });
+        }
       } catch (error) {
-        const humanRequired = error instanceof HumanRequiredError;
+        // Stopped before its first credit month: nothing is kept.
+        const code = connectionStopCode(error);
         connections.push({
           summary: {
             connectionId: credential.connectionId,
             bootstrapMode: credential.bootstrapMode,
-            status: humanRequired ? "human-required" : "failed",
+            status: code === "human_required" ? "human-required" : "failed",
             cardCount: 0,
             periodCount: 0,
             artifactCount: 0,
-            blocker: publicError(error),
+            stopCode: code,
+            capturedMonthCount: 0,
           },
           artifacts: [],
         });
-        failures.push(failure(credential.connectionId, "collect", error));
+        failures.push({ connectionId: credential.connectionId, operation: "collect", code });
       }
     }
     const completedAt = new Date().toISOString();
@@ -152,10 +162,9 @@ async function runSharedCollection(
           : [
               {
                 connectionId: connection.summary.connectionId,
-                code:
-                  connection.summary.status === "human-required"
-                    ? "human-required"
-                    : "collector-failure",
+                // The stop code, or `collector_partial` for a connection that
+                // ran to the end but withheld a month's rows.
+                code: connection.summary.stopCode ?? "collector_partial",
               },
             ],
       ),
@@ -210,20 +219,4 @@ function connectionSecretValues(env: MyJcbEnv): string[] {
     }
     return value;
   });
-}
-function failure(connectionId: string, operation: string, error: unknown): CollectionFailure {
-  return {
-    connectionId,
-    operation,
-    errorType: safeErrorDetails(error).errorType,
-    message: publicError(error),
-  };
-}
-function publicError(error: unknown): string {
-  if (error instanceof HumanRequiredError) return `human-required:${error.reason}`;
-  if (error instanceof StopConditionError) return error.code;
-  if (error instanceof SyntaxError || error instanceof TypeError) {
-    return "Collector configuration or response schema is invalid";
-  }
-  return "Collector operation failed";
 }

@@ -24,6 +24,7 @@ import {
   sharedRunDiagnostic,
   type SharedRunInput,
 } from "../src/shared-collection";
+import type { CollectionFailure, ConnectionStopCode } from "../src/types";
 import worker from "../src/worker";
 
 const runId = "7d8f4b16-6d5c-4f0f-9a3e-0a1b2c3d4e5f";
@@ -42,7 +43,9 @@ function connection(connectionId: string, status: "success" | "human-required" =
       cardCount: status === "success" ? 1 : 0,
       periodCount: status === "success" ? 2 : 0,
       artifactCount: status === "success" ? 3 : 0,
-      ...(status === "success" ? {} : { blocker: "human-required:synthetic-reason" }),
+      ...(status === "success"
+        ? {}
+        : { stopCode: "human_required" as const, capturedMonthCount: 0 }),
     },
     artifacts:
       status === "success"
@@ -224,18 +227,27 @@ describe("G3-08 nothing unredacted or free-text reaches the shared bucket", () =
 
   test("a connection blocker is stored as a code, not as upstream text", async () => {
     const bucket = new FakeR2Bucket();
+    // A regression that let free text into a summary or a failure (the fields
+    // the Worker used to fill with error text) is not carried into the
+    // manifest: every entry is rebuilt from its closed fields.
+    const blocked = connection("account-two", "human-required");
+    const leaky = {
+      ...blocked,
+      summary: { ...blocked.summary, blocker: "synthetic-reason", message: "synthetic-reason" },
+    };
     await persistSharedRun(
       bucket,
       input({
         status: "partial",
-        connections: [connection("account-one"), connection("account-two", "human-required")],
+        connections: [connection("account-one"), leaky],
         failures: [
           {
             connectionId: "account-two",
             operation: "collect",
+            code: "human_required" as const,
             errorType: "HumanRequiredError",
             message: "human-required:synthetic-reason",
-          },
+          } as CollectionFailure,
         ],
       }),
     );
@@ -245,8 +257,250 @@ describe("G3-08 nothing unredacted or free-text reaches the shared bucket", () =
     const body = await bucket.get(stored.storageRef.key);
     const text = new TextDecoder().decode(new Uint8Array(await body!.arrayBuffer()));
     expect(text).not.toContain("synthetic-reason");
-    expect(JSON.parse(text).connections[1].blocker).toBe("human-required");
-    expect(JSON.parse(text).failures[0].message).toBe("human-required");
+    expect(text).not.toContain("HumanRequiredError");
+    expect(JSON.parse(text).connections[1]).toEqual({
+      connectionId: "account-two",
+      bootstrapMode: "password",
+      status: "human-required",
+      cardCount: 0,
+      periodCount: 0,
+      artifactCount: 0,
+      stopCode: "human_required",
+      capturedMonthCount: 0,
+    });
+    expect(JSON.parse(text).failures).toEqual([
+      { connectionId: "account-two", operation: "collect", code: "human_required" },
+    ]);
+  });
+
+  test("a stop code outside the closed list refuses the plan", async () => {
+    const blocked = connection("account-two", "human-required");
+    const invented = {
+      ...blocked,
+      summary: { ...blocked.summary, stopCode: "upstream said no" as ConnectionStopCode },
+    };
+    await expect(
+      myJcbRunPlan(
+        input({ status: "partial", connections: [connection("account-one"), invented] }),
+      ),
+    ).rejects.toThrow("manifest_stop_code_invalid");
+    await expect(
+      myJcbRunPlan(
+        input({
+          status: "partial",
+          connections: [connection("account-one"), blocked],
+          failures: [
+            {
+              connectionId: "account-two",
+              operation: "collect",
+              code: "month_fetch",
+              position: 1.5,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("manifest_stop_position_invalid");
+  });
+});
+
+/**
+ * A connection that stopped at credit month `position` after keeping the
+ * months before it, as `collectConnection` reports it (ADR 0005's
+ * amendment): its menu, past-months response, the pages and ledgers of the
+ * months it kept, and its discovery record.
+ */
+function stoppedConnection(
+  connectionId: string,
+  code: ConnectionStopCode,
+  keptMonths: readonly number[],
+  position: number,
+) {
+  const base = connection(connectionId);
+  const months = keptMonths.flatMap((month) => {
+    const nn = String(month).padStart(2, "0");
+    return [
+      {
+        dataset: "credit-detail",
+        filename: `credit-detail-${nn}.html`,
+        body: statementHtml.replace("MyJCB synthetic", `MyJCB synthetic ${nn}`),
+        mediaType: "text/html; charset=utf-8",
+        statementState: "unconfirmed" as const,
+        period: `detailMonth-${month}`,
+      },
+      {
+        dataset: "credit-ledger",
+        filename: `credit-ledger-${nn}.json`,
+        body: `{"schemaVersion":1,"detailMonth":${month}}`,
+        mediaType: "application/json",
+        statementState: "unconfirmed" as const,
+        period: `detailMonth-${month}`,
+      },
+    ];
+  });
+  const artifacts = [base.artifacts[0]!, base.artifacts[1]!, ...months, base.artifacts[2]!];
+  return {
+    summary: {
+      ...base.summary,
+      status: "partial" as const,
+      periodCount: keptMonths.length + 2,
+      artifactCount: artifacts.length,
+      stopCode: code,
+      stopPosition: position,
+      capturedMonthCount: keptMonths.length,
+    },
+    artifacts,
+  };
+}
+
+describe("ADR 0005 amendment: a stopped connection keeps the months it captured", () => {
+  test("a connection stopped at month position k keeps positions < k as a partial unit", async () => {
+    const bucket = new FakeR2Bucket();
+    const stopped = stoppedConnection("account-one", "month_fetch", [0, 1], 2);
+    const outcome = await persistSharedRun(
+      bucket,
+      input({
+        status: "partial",
+        connections: [stopped],
+        failures: [
+          { connectionId: "account-one", operation: "collect", code: "month_fetch", position: 2 },
+        ],
+      }),
+    );
+    expect(outcome.result.outcome).toBe("persisted");
+    const read = await readTerminal(bucket, "myjcb", runId);
+    if (read.outcome !== "found") throw new Error("unreachable");
+    expect(read.manifest.providerOutcome).toBe("partial");
+    expect(read.manifest.coverageStatus).toBe("partial");
+    // The run carries the one stage its only blocked connection stopped at.
+    expect(read.manifest.safeErrorCode).toBe("month_fetch");
+    expect(read.manifest.units).toEqual([
+      {
+        unitKey: "account-one",
+        unitKind: "connection",
+        artifactCount: 7,
+        coverageStatus: "partial",
+        safeErrorCode: "month_fetch",
+      },
+    ]);
+    expect(
+      read.manifest.artifacts
+        .filter((entry) => entry.unitKey === "account-one")
+        .map((entry) => entry.artifactKey),
+    ).toEqual([
+      "account-one/credit-detail-00.html",
+      "account-one/credit-detail-01.html",
+      "account-one/credit-ledger-00.json",
+      "account-one/credit-ledger-01.json",
+      "account-one/credit-menu.html",
+      "account-one/credit-past-months.json",
+      "account-one/discovery.json",
+    ]);
+    expect(await verifyReferencedObjects(bucket, read.manifest)).toMatchObject({
+      outcome: "ok",
+      problems: [],
+    });
+    const stored = read.manifest.artifacts.find((entry) => entry.artifactKey === "manifest.json")!;
+    const body = await bucket.get(stored.storageRef.key);
+    const manifest = JSON.parse(
+      new TextDecoder().decode(new Uint8Array(await body!.arrayBuffer())),
+    );
+    // The stage, the position and the count of months kept are the record.
+    expect(manifest.connections[0]).toMatchObject({
+      status: "partial",
+      stopCode: "month_fetch",
+      stopPosition: 2,
+      capturedMonthCount: 2,
+    });
+    expect(manifest.failures).toEqual([
+      { connectionId: "account-one", operation: "collect", code: "month_fetch", position: 2 },
+    ]);
+    expect(Object.keys(manifest.failures[0]).sort()).toEqual([
+      "code",
+      "connectionId",
+      "operation",
+      "position",
+    ]);
+  });
+
+  test("each stage keeps its own code, and a withheld month stays collector_partial", async () => {
+    const plan = await myJcbRunPlan(
+      input({
+        status: "partial",
+        connections: [
+          stoppedConnection("account-one", "credit_statement_state", [0], 1),
+          stoppedConnection("account-two", "export_fetch", [0, 1], 3),
+          {
+            ...connection("account-three"),
+            summary: { ...connection("account-three").summary, status: "partial" as const },
+          },
+        ],
+        failures: [
+          {
+            connectionId: "account-one",
+            operation: "collect",
+            code: "credit_statement_state",
+            position: 1,
+          },
+          { connectionId: "account-two", operation: "collect", code: "export_fetch", position: 3 },
+        ],
+      }),
+    );
+    expect(plan.run.safeErrorCode).toBe("collector_partial");
+    expect(
+      plan.run.units.map((unit) => [unit.unitKey, unit.coverageStatus, unit.safeErrorCode]),
+    ).toEqual([
+      ["account-one", "partial", "credit_statement_state"],
+      ["account-two", "partial", "export_fetch"],
+      ["account-three", "partial", "collector_partial"],
+    ]);
+  });
+
+  test("a connection that stopped before its first month keeps nothing and is unknown", async () => {
+    // The Worker's failed-connection summary: no artifact, the stage, no
+    // position. The only connection of the run, so the run is failed.
+    const bucket = new FakeR2Bucket();
+    const outcome = await persistSharedRun(
+      bucket,
+      input({
+        status: "failed",
+        connections: [
+          {
+            summary: {
+              connectionId: "account-one",
+              bootstrapMode: "password",
+              status: "failed",
+              cardCount: 0,
+              periodCount: 0,
+              artifactCount: 0,
+              stopCode: "credit_past_months",
+              capturedMonthCount: 0,
+            },
+            artifacts: [],
+          },
+        ],
+        failures: [
+          { connectionId: "account-one", operation: "collect", code: "credit_past_months" },
+        ],
+      }),
+    );
+    expect(outcome.artifactCount).toBe(0);
+    const read = await readTerminal(bucket, "myjcb", runId);
+    if (read.outcome !== "found") throw new Error("unreachable");
+    expect(read.manifest.providerOutcome).toBe("failed");
+    expect(read.manifest.artifacts).toEqual([]);
+    // The terminal says where the connection stopped (G1-09 still holds:
+    // nothing but the terminal is written).
+    expect(read.manifest.safeErrorCode).toBe("credit_past_months");
+    expect(read.manifest.units).toEqual([
+      {
+        unitKey: "account-one",
+        unitKind: "connection",
+        artifactCount: 0,
+        coverageStatus: "unknown",
+        safeErrorCode: "credit_past_months",
+      },
+    ]);
+    expect([...bucket.entries.keys()]).toEqual([terminalKey("myjcb", runId)]);
   });
 });
 
@@ -262,8 +516,7 @@ describe("G1-08/G1-09/G3-11 the outcome of the run survives persistence", () => 
           {
             connectionId: "account-two",
             operation: "collect",
-            errorType: "HumanRequiredError",
-            message: "human-required:synthetic-reason",
+            code: "human_required" as const,
           },
         ],
       }),
@@ -329,8 +582,7 @@ describe("G1-08/G1-09/G3-11 the outcome of the run survives persistence", () => 
           {
             connectionId: "account-one",
             operation: "collect",
-            errorType: "HumanRequiredError",
-            message: "human-required:synthetic-reason",
+            code: "human_required" as const,
           },
         ],
       }),
@@ -434,6 +686,20 @@ describe("G1-15 shared mode writes once", () => {
       expect([...data.entries.keys()]).toEqual(terminals);
       const persisted = records.find((record) => record.event === "myjcb-shared-collection");
       expect(persisted).toMatchObject({ status: "failed", persistence: "persisted" });
+      // The login never happened, so the connection stopped at `login`, kept
+      // nothing, and the terminal says so (ADR 0005's amendment).
+      const read = await readTerminal(data, "myjcb", String(persisted?.runId));
+      if (read.outcome !== "found") throw new Error("unreachable");
+      expect(read.manifest.safeErrorCode).toBe("login");
+      expect(read.manifest.units).toEqual([
+        {
+          unitKey: "account-one",
+          unitKind: "connection",
+          artifactCount: 0,
+          coverageStatus: "unknown",
+          safeErrorCode: "login",
+        },
+      ]);
       expect(JSON.stringify(records)).not.toContain("synthetic-password");
     } finally {
       spies.forEach((spy) => spy.mockRestore());

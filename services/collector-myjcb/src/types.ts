@@ -76,14 +76,51 @@ export interface ConnectionSummary {
   readonly cardCount: number;
   readonly periodCount: number;
   readonly artifactCount: number;
-  readonly blocker?: string;
+  /**
+   * The stage the connection stopped at, when it stopped: a closed code,
+   * never provider text (ADR 0005's amendment). Absent for a connection that
+   * ran to the end, including one that is `partial` only because it withheld
+   * a month's rows.
+   */
+  readonly stopCode?: ConnectionStopCode;
+  /** The `detailMonth` of the credit month the connection stopped at. */
+  readonly stopPosition?: number;
+  /** Credit months kept whole before the stop; set with every `stopCode`. */
+  readonly capturedMonthCount?: number;
 }
 
+/**
+ * The stage a MyJCB connection stopped at (ADR 0005's amendment). A closed
+ * list: the collector manifest, the unit's `safeErrorCode` and the Worker's
+ * response carry one of these and nothing else about the failure.
+ */
+export const CONNECTION_STOP_CODES = [
+  "human_required",
+  "login",
+  "discovery",
+  "credit_menu",
+  "credit_first_detail",
+  "credit_past_months",
+  "month_fetch",
+  "month_parse",
+  "credit_statement_state",
+  "credit_statement_period",
+  "ledger_parse",
+  "export_fetch",
+  "debit",
+  "no_route",
+  "unclassified",
+] as const;
+
+export type ConnectionStopCode = (typeof CONNECTION_STOP_CODES)[number];
+
+/** One stopped connection as the manifest records it: a code and a position. */
 export interface CollectionFailure {
   readonly connectionId: string;
-  readonly operation: string;
-  readonly errorType: string;
-  readonly message: string;
+  readonly operation: "collect";
+  readonly code: ConnectionStopCode;
+  /** The `detailMonth` the connection stopped at; absent before the month loop. */
+  readonly position?: number;
 }
 
 export interface CollectionManifest {
@@ -132,7 +169,9 @@ export type StopConditionCode =
   | "credit-ledger-cell-count"
   | "credit-statement-state"
   | "credit-statement-period"
-  | "collect-debit";
+  | "collect-debit"
+  | "collect-route"
+  | "login";
 
 export class StopConditionError extends Error {
   override readonly name = "StopConditionError";

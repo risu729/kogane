@@ -279,7 +279,11 @@ label stop the collection at position 1 and are `unknown` at an older
 position. A page that contradicts itself stops the collection with
 `credit-statement-state` at any position: two headings, both labels in one
 header, ledgers that disagree, or the heading over an unconfirmed header. So do
-export links on a page that is not a confirmed statement.
+export links on a page that is not a confirmed statement. (Since
+[ADR 0005's amendment](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months),
+such a stop ends that connection at that month: the months before it are kept
+as a `partial` unit with the stop code `credit_statement_state`, and the run is
+`partial` and not parsed.)
 
 Older positions do not stop the run because of production evidence (counts
 only, read only). Every run captured positions 7 and 8 with a ledger of zero

@@ -212,7 +212,11 @@ Concrete limits in the current code:
   (ADR 0026's amendment). A MyJCB connection's `complete` unit rests on the same
   unobserved premise (one detail page holds its whole month), and a
   connection whose older month shows rows without a stated state is
-  `partial` and its run is not parsed.
+  `partial` and its run is not parsed. A MyJCB connection that stops at a
+  month keeps the months before it as a `partial` unit with a closed stop
+  code ([ADR 0005's amendment](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months));
+  those months are catalogued but not parsed, and no rule yet makes a
+  stopped connection's months eligible.
 - [Collector operation dispatch](../services/processor/src/operations/dispatch.ts)
   leaves collector requests, including unattended session refresh, waiting with
   `awaiting_collector_dispatch`. An accepted request is not a completed capture.
