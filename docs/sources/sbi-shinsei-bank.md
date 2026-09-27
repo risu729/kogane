@@ -993,18 +993,28 @@ match 0.1.1's exactly, `activity.responseParam.fromDate` is present as
 `YYYY/MM/DD`, `toDate` is an empty string, and `activityDetails` has 10 rows
 in both. 0.1.1 demanded both window ends or neither, so the replay throws
 `incomplete activity window`; that is the whole cause of the 29 rejections.
+CORE itself still keeps only `parser_rejected` for a throw, never the reason.
 
 `sbi-shinsei-top-balances-and-activity` 0.1.2 reads a stated `fromDate` with
-an empty `toDate` as a window whose end the provider did not state: the start
-still bounds every posting date, no end is checked or invented, and every
-observation of the activity block records `_kogane.activityWindowEnd:
-"not-stated"`. Every other rule is unchanged. After deploy the repair lane's
-cyclic scan creates a 0.1.2 job for each stored capture and a 1.0.1 job for
-each stored board with the `exchange-rate` dataset, so both are re-parsed
-without an operator step (or at once through a replay plan per dataset).
+`toDate` as an empty string as a window whose end the provider did not state:
+the start still bounds every posting date, no end is checked or invented, and
+every observation of the activity block records `_kogane.activityWindowEnd:
+"not-stated"`. An absent or null `toDate` beside a stated start was not
+observed and is still refused. Every other rule is unchanged. After deploy the
+repair lane's cyclic scan creates a 0.1.2 job for each stored capture and a
+1.0.1 job for each stored board with the `exchange-rate` dataset, so both are
+re-parsed without an operator step (or at once through a replay plan per
+dataset).
 
 **Limits.** The activity window's end is not known; only its start is
 enforced. The replay reported the first failing check only, so whether every
 stored capture passes the later checks is known only once the new version's
-jobs run; a remaining refusal shows as `parser_rejected` on them. Production
-was not read for this release.
+jobs run; a remaining refusal shows as `parser_rejected` on them, and CORE
+stores no reason for it. Its cause is found the same way this one was: by
+replaying the stored captures with `replay-diagnostics.ts` ([operations:
+replaying a parser rejection](../operations.md#replaying-a-parser-rejection)),
+which prints a closed category and a shape summary per capture and no values.
+Until that is run for a remaining refusal, its cause stays unknown and the
+parser's rules stay as they are
+([ADR 0004](../adr/0004-payment-type-shapes-from-evidence.md)). Production was
+not read for this release.
