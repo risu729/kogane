@@ -117,6 +117,9 @@ export const LANE_TICK_COUNTS = {
     "promoted",
     "basis_unverified",
     "unsupported_currency",
+    "tier_unmatched",
+    "stage_unstated",
+    "stage_pending",
     "written",
   ]),
   operation_dispatch: countsOf<DispatchSummary>([

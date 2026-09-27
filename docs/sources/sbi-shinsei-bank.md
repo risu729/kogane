@@ -1021,24 +1021,83 @@ recorded as the provider's public documentation in the
 the 13 listed currencies are quoted per 1 unit; CHF is on no page.
 
 **Limits.** The board is a customer rate tiered by `customerCategory`, not a
-market reference. Which tier applies to the owner is unobserved; the parser
-picks none, and the price rule reads a tier only when an admission names it.
+market reference. The parser picks no tier; the price rule reads the tier the
+same run's balance summary states as the owner's stage (ADR 0031, next
+section).
 The board's own time is not known (the two trailing letters' meaning is not,
 and no screen shows them), so the fetch instant stands in. The provider's
 public pages quote the 13 listed currencies per 1 unit, but that is general
 documentation, not the owner's confirmation per currency, and CHF is on no
-page; the price promotion lane promotes no FX row (`unsupported_currency`)
-until a currency is admitted with its tier, basis and evidence in
-`SBI_SHINSEI_FX_QUOTE_BASIS` (`packages/domain/src/price-sources.ts`), which
-stays empty while the owner's tier is unknown. The FX
+page; the price promotion lane admits them only in the stage the same run
+states (ADR 0031), and the manual table `SBI_SHINSEI_FX_QUOTE_BASIS`
+(`packages/domain/src/price-sources.ts`) stays empty. The FX
 policy that will value with this board is named `fx-sbi-shinsei-mid-v1` so
 the caveat travels with every result that uses it.
 
-**What admits a currency.** The owner confirms, from the live board or an
-aggregate survey of the stored boards, which `customerCategory` tier is the
-owner's; a listed currency is then recorded with that tier, basis 1 and the
-public pages above as its `evidence` in `SBI_SHINSEI_FX_QUOTE_BASIS`, in a
-change that amends ADR 0020.
+**What admits a currency.** Since ADR 0031, the provider states both sides:
+see the next section. The manual table `SBI_SHINSEI_FX_QUOTE_BASIS` stays as
+an override, empty; an entry there names a currency, its tier, its basis and
+its `evidence`, in a change that amends ADR 0020.
+
+## Stage category and the board tier (ADR 0031, 2026-09-27)
+
+Every run also stores `IFTP_TopAdapter/getBalanceSummaryAndStage` as the
+`balance-summary-and-stage` artifact (`raw-balance-summary-and-stage.json`,
+schema `sbi-shinsei-balance-summary-v1`). Its
+`category.responseParam.customerCategory` is the customer's Step-Up stage
+(the top page is a different response and has no category block). The owner
+confirmed on 2026-09-27 that the board's 5 `customerCategory` values are the 5
+stages.
+
+**Observed 2026-09-27** (the owner's agent; structure and match results only):
+on a stored run of 2026-09-10, on the live API in one session and on the
+logged-in FX savings page, the stage is a one-character string in the board's
+own scheme and is strictly equal to exactly one of the board's 5 codes; of the
+session's 5 USD rows, the one with that code is the one whose buy and sell
+rates the FX page shows (the mid rate is the same in all 5). The page labels
+the stage 「今月のステージ」, so it can change monthly. The board has 67 rows:
+13 currencies with 5 rows each and CHF and JPY with one row each; CHF, BRL and
+JPY are not on the FX page. The same artifact also stores the customer's
+names under `summary.responseParam` in R2 (ADR 0029 class d); redacting them
+before the artifact is written is
+[#333](https://github.com/risu729/kogane/pull/333)'s change.
+
+**Parser `sbi-shinsei-balance-summary-and-stage` 0.1.0**
+(`packages/parsers/src/parsers/sbi-shinsei-balance-summary-and-stage.ts`):
+
+- Validates the response exactly as the collector does; an unknown field
+  fails the artifact.
+- Emits one observation: valuation kind, account `sbi-shinsei:customer`,
+  subject `customerCategory`, metric `provider_customer_category`, currency
+  `XXX` (no currency), no amount, the category verbatim (string or number) in
+  `extra.customerCategory`, and nothing else from the page (the category
+  block's allowance and fee fields are validated only). An absent, null, empty, boolean or structured category fails the
+  artifact.
+- Emits nothing else: the customer's names, the summary balances and the
+  branch are validated only (ADR 0029 class d; the top page already reports
+  the balances).
+- No snapshot policy row: no current or dated state selects the observation.
+
+**Price rule.** A board row of one of the 13 per-1-unit currencies is
+promoted when its `customerCategory` is strictly equal (same JSON type and
+value) to the stage category the same fetch run's published balance summary
+states; exactly one distinct stage must be stated. A row of another code
+counts `tier_unmatched` (a currency listed once in another code has no owner's
+rate on that board, and nothing stands in for it); a row whose run states no
+stage, or more than one, counts `stage_unstated`; CHF and JPY stay
+`unsupported_currency`. See
+[calculation and reports §1](../calculation-and-reports.md#price-sources-provider-claims-promoted-by-rule).
+
+**Limits.** If the two notations ever diverged, no row would be promoted
+(every per-1-unit row `tier_unmatched`), and a mapping between two notations
+would be a new decision. The owner can check an admitted tier: its buy and sell
+rates should equal the rates the logged-in FX savings page shows at the same
+time. A board parsed before its run's balance summary is not judged while
+that page's stage job can still run: the lane stops before it
+(`stage_pending`) and judges it once the job publishes or fails. A board
+judged when its run had no stage (no page, a refused page, a failed job) is
+`stage_unstated` and is not re-examined without a cursor reset. A v2 registration made before ADR 0031 deploys keeps its
+balance summary without a dataset, so that run's board finds no stage.
 
 ## Parse status in production (2026-09-26)
 

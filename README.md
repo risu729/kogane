@@ -35,6 +35,7 @@ different rules.
 - [ADR 0027: the MoneyForward collector derives the account identity the parser requires (proposed)](docs/adr/0027-moneyforward-collector-account-identity.md)
 - [ADR 0028: the SBI Shinsei parsers accept the stored captures' shapes, with the unknowns kept as reasons (proposed; amended for parser 1.0.2)](docs/adr/0028-sbi-shinsei-observed-capture-shapes.md)
 - [ADR 0029: data classification for central storage; Vpass and MoneyForward identities derived without a secret (proposed)](docs/adr/0029-data-classification-and-unkeyed-identity.md)
+- [ADR 0031: the owner's SBI Shinsei stage category, as the same run states it, selects the FX board tier (proposed)](docs/adr/0031-sbi-shinsei-stage-category-fx-tier.md)
 - [ADR 0032: the card provider's stated debit account is settlement evidence, proposed and never accepted by rule (proposed)](docs/adr/0032-provider-stated-debit-accounts.md)
 - [Next-milestone plan (proposed)](docs/plans/2026-09-next-milestone.md)
 - [Domain contracts (`packages/domain`)](docs/domain-contracts.md)

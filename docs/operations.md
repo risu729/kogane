@@ -238,7 +238,9 @@ last:
 | `{artifact, parser, result: "rejected", category, sites}`             | `category` is `{reason, label?, field?}`; `sites` are parser source positions                                                                                                                                                                                                                  |
 | `{selected, replayed, parsed, rejected: [{parser, category, count}]}` | the counts per category                                                                                                                                                                                                                                                                        |
 
-For the three SBI Shinsei parsers every throw site has its own category:
+For the four SBI Shinsei parsers (the balance-summary stage parser of
+[ADR 0031](adr/0031-sbi-shinsei-stage-category-fx-tier.md) included) every
+throw site has its own category:
 `reason` is the site's fixed message text (for example `expected exactly one
 debit or credit`, `provider timestamp format is not recognized`, `not exactly
 representable in the currency`), `label` is the schema path the parser named
