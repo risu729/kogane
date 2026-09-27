@@ -216,6 +216,63 @@ parser dataset, and the change that introduces parser datasets for shared-R2
 artifacts (ADR 0022) withholds the Vpass one. Releasing it is a later change,
 made after this check.
 
+## MoneyForward collector runs carry the account identity
+
+The MoneyForward parsers accept an account page only when its unit key is
+`moneyforward-account-v1-<64 hex>`
+([ADR 0027](adr/0027-moneyforward-collector-account-identity.md)). The
+collector (`collector-moneyforward-me`) derives it as the retired importer
+did: for each account-detail page, HMAC-SHA-256 of
+`["moneyforward-account-v1", account[id_hash], service[id]]` with the
+importer's checks, keyed by the Worker secret
+`MONEYFORWARD_ACCOUNT_IDENTITY_KEY`. Without the secret, or when a check
+fails, the run keeps positional units (`account-NN`), its account pages are
+`parser_rejected`, and the persist diagnostic's `identity` field says why.
+The identity pattern and its classification (`aggregator-mirror`,
+[identity sources](identity-sources.md)) are unchanged.
+
+**Owner action and check.** Set the Worker secret on
+`kogane-moneyforward-collector-poc`:
+`wrangler secret put MONEYFORWARD_ACCOUNT_IDENTITY_KEY --name kogane-moneyforward-collector-poc`,
+entering 64 lowercase hex characters at the prompt: the retired importer's
+`ORIGIN_FINGERPRINT_KEY` if it is still held. No repository check can prove
+it is the same key. After the next collection, compare identity counts
+(read-only, counts only):
+
+```sql
+SELECT r.producer_id, count(DISTINCT u.unit_key) AS identities,
+       count(DISTINCT CASE WHEN EXISTS(
+         SELECT 1 FROM fetch_units i JOIN fetch_runs ir ON ir.id=i.fetch_run_id
+         WHERE ir.source_id='moneyforward-me' AND ir.producer_id='collector-r2-importer'
+           AND i.unit_key=u.unit_key)
+       THEN u.unit_key END) AS known_to_importer
+FROM fetch_units u JOIN fetch_runs r ON r.id=u.fetch_run_id
+WHERE r.source_id='moneyforward-me' AND u.unit_key GLOB 'moneyforward-account-v1-*'
+GROUP BY r.producer_id;
+```
+
+For `collector-moneyforward-me`, `known_to_importer` equal to `identities`
+for the accounts the importer also saw means the key is the importer's: each
+collector capture of an account-month replaces the importer's snapshot of
+that month, and nothing is counted twice. Zero means a different key: each
+account is a new identity, source account and account entity with nothing
+carried over, and no mapping to the importer-era accounts is added; the
+importer-era snapshots stay current for their months, so the months both
+captured show the same rows under two source accounts. The runs are parsed
+as soon as they register (MoneyForward's datasets are not withheld), so this
+check is after the fact; removing the secret stops new identities, and the
+ones registered stay (evidence is append-only).
+
+**Account continuity.** The collector's rows get their own source account
+(the reference includes the producer), with its own mapping revisions and
+manual decisions. As for a trusted Vpass token, the account entity of a
+MoneyForward identity is derived from the importer's reference for that
+identity (`accountEntityId`), so under the importer's key the collector's
+source account maps to the importer-era entity by rule. An operator's
+re-mapping of the importer's source account is not followed, and account
+connection reviews, keyed by producer, do not carry over. Under another key
+the identity differs and so does the entity.
+
 ## Policy 2: Mizuho rule re-identification
 
 The resolver had no `mizuho-bank` rule when the Mizuho collector started, so

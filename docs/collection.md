@@ -343,17 +343,36 @@ artifact key, not stated by the collector. The collector's manifest is its own
 record and does not carry them.)
 
 Terminal fields: `producer: collector-moneyforward-me`; one unit per account
-(`account-NN`, `unitKind: account`),
-taken from the collector's own filename grammar — the run-wide
-`accounts.html` index belongs to no unit; a `months-account-NN`
+(`unitKind: account`) holding its detail page and its monthly fragments — the
+run-wide `accounts.html` index belongs to no unit; a `months-<unit>`
 `declared_coverage` range per account covering the monthly fragments that were
 actually captured; one `terminal` report carrying the outcome;
 `requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
 aggregator currently shows) listing the accounts as `unitKeys`.
 
+The unit key is the account identity the parser requires,
+`moneyforward-account-v1-<64 hex>`
+([ADR 0027](adr/0027-moneyforward-collector-account-identity.md)): the retired
+importer's HMAC-SHA-256 of `["moneyforward-account-v1", account[id_hash],
+service[id]]`, read from each account-detail page with the importer's checks
+(`src/account-identity.ts`) and keyed by the optional Worker secret
+`MONEYFORWARD_ACCOUNT_IDENTITY_KEY` (64 lowercase hex). The artifact keys stay
+positional. Without the secret, or when any account's tuple is absent or fails
+a check, the whole run keeps positional units (`account-NN`, from the filename
+grammar), which the parsers reject (`parser_rejected`); the persist diagnostic
+carries `identity: derived` or one closed code (`identity_key_absent`,
+`identity_key_invalid`, `identity_tuple_absent`, `identity_tuple_invalid`,
+`identity_duplicate`, `identity_index_mismatch`, `identity_incomplete`). No
+identifier or key is logged or written outside the pages themselves. The
+owner action and the check that the identities are the importer's are in
+[identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity).
+
 Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
-G1-02, G1-08, G1-09, G1-15, G3-07, G3-08). The importer-side parity suite was
+G1-02, G1-08, G1-09, G1-15, G3-07, G3-08) and
+`services/collector-moneyforward/test/account-identity.test.ts` (ADR 0027);
+end to end, registration and parsing in
+`services/processor/test/moneyforward-shared-r2.test.ts`. The importer-side parity suite was
 removed with the importer ([legacy-retirement.md](legacy-retirement.md)). No
 provider was contacted and no production bucket was read or written.
 

@@ -103,7 +103,11 @@ async function runSharedCollection(env: Env): Promise<SharedResult> {
     artifacts,
     failures,
   } as const;
-  const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
+  const outcome = await persistSharedRun(
+    sharedBucket(env.DATA),
+    input,
+    env.MONEYFORWARD_ACCOUNT_IDENTITY_KEY,
+  );
   logEvent(sharedRunDiagnostic(input, outcome));
   return {
     runId,

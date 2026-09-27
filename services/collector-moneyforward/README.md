@@ -104,7 +104,10 @@ Oliveデビットは、銀行連携だけでは加盟店単位の利用履歴を
 PoCを廃止するときは次をまとめて削除します。
 
 - Worker: `kogane-moneyforward-collector-poc`
-- Worker secrets: `MONEYFORWARD_CREDENTIAL_JSON`、`ADMIN_TRIGGER_TOKEN`
+- Worker secrets: `MONEYFORWARD_CREDENTIAL_JSON`、`ADMIN_TRIGGER_TOKEN`、optional
+  `MONEYFORWARD_ACCOUNT_IDENTITY_KEY`（64 lowercase hex。account unit の identity
+  key、[ADR 0027](../../docs/adr/0027-moneyforward-collector-account-identity.md)。
+  `wrangler secret put MONEYFORWARD_ACCOUNT_IDENTITY_KEY --name kogane-moneyforward-collector-poc`）
 - Cron: `15 21 * * *`
 - ローカル管理token: `/home/risu/.local/state/kogane/moneyforward-worker-admin-token`
 - ローカル照合metadata: `/home/risu/.local/state/kogane/moneyforward-bitwarden-match.json`
