@@ -399,8 +399,10 @@ neither stated a step, and the Processor refused the run
 
 Sanitizer: the collector's own `redactedStatementHtml` (parse5 tree: scripts,
 styles, textareas, embedding elements and every URL-bearing attribute removed,
-every `value=` replaced by `[redacted]`, card numbers in text replaced), which
-is what the retired legacy path stored. The collector adds
+every `value=` replaced by `[redacted]`, card numbers in text replaced, and
+since `myjcb-sanitizer` v2 the 口座名義 cell replaced by `[redacted:name]`,
+[ADR 0029's amendment](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)).
+Before v2 this was what the retired legacy path stored. The collector adds
 `assertRedactedHtml` (`src/redaction.ts`), the invariants the importer
 enforced, checked on the bytes about to leave the Worker: a redaction
 regression throws `artifact_html_redaction_invalid` and the run writes no
@@ -846,7 +848,11 @@ the collector's own record, so it is `collector_manifest` now.
 - `requestedScope`: `full_snapshot` — this source is a current snapshot and the
   trigger accepts no date range. No units, ranges or reports.
 - `transformations`: one `redacted` step per provider capture
-  (`sbi-shinsei-token-sanitizer`), one `extracted` step for `normalized.json`
+  (`sbi-shinsei-token-sanitizer` v2: the balance summary's three name fields
+  replaced by `[redacted:name]` when the handoff is parsed, then the rotating
+  CSRF token stripped;
+  [ADR 0029's amendment](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)),
+  one `extracted` step for `normalized.json`
   (`sbi-shinsei-normalizer`), matching the central descriptors.
 - `acquisitionSessionRef`: none. The container authenticates once per run and no
   session survives it, so there is no generation to reference (12 §4).

@@ -1,6 +1,7 @@
 import type { DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
 import { StopConditionError } from "./types";
 import { parse, serialize, type DefaultTreeAdapterMap } from "parse5";
+import { redactPersonNameCells } from "./name-redaction";
 import {
   CONFIRMED_STATEMENT_HEADING,
   readMyJcbStatementPage,
@@ -472,6 +473,9 @@ export function statementState(value: string): StatementState {
 export function redactedStatementHtml(html: string): string {
   const document = parse(html);
   sanitizeHtmlTree(document);
+  // Person names leave the page before it is stored (ADR 0029, amendment
+  // 2026-09-27); the other rows of the カード情報 table are kept.
+  redactPersonNameCells(document);
   return serialize(document);
 }
 

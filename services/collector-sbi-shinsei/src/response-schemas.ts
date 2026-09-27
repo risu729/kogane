@@ -147,6 +147,10 @@ function validateBalanceSummary(value: unknown): JsonObject {
     ["summary", "category", "branchFetch"],
   );
   const summary = wrapper(response.summary, "balanceSummary.summary");
+  // The three name fields are scalars both as the provider returns them and
+  // as they are stored: `./name-redaction` replaces each value with
+  // `NAME_REDACTION_MARKER` before the response is written, and the stored
+  // object must still pass this validator (ADR 0029, amendment 2026-09-27).
   const summaryResponse = exactObject(
     summary.responseParam,
     "balanceSummary.summary.responseParam",

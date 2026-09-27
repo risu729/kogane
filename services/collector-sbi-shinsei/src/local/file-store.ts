@@ -8,6 +8,7 @@ export interface LocalStoredArtifact {
   filename: string;
   bytes: number;
   sha256: string;
+  redactedFieldCount?: number;
 }
 
 export async function createPrivateRunDirectory(
@@ -56,6 +57,9 @@ export async function storePrivateArtifacts(options: {
       filename: artifact.filename,
       bytes: bytes.byteLength,
       sha256: createHash("sha256").update(bytes).digest("hex"),
+      ...(artifact.redactedFieldCount === undefined
+        ? {}
+        : { redactedFieldCount: artifact.redactedFieldCount }),
     });
   }
   return stored;

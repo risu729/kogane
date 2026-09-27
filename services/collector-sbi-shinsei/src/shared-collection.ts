@@ -12,7 +12,9 @@
 // collector manifest carries diagnostic failure text. Both are stripped here
 // with the same rules `services/collector-r2-importer/src/sbi-shinsei.ts`
 // applies before anything reaches central storage today, so the shared path
-// cannot store a credential the legacy path removed. Credentials, the relay
+// cannot store a credential the legacy path removed. Person names were
+// already replaced when the handoff was parsed (`./name-redaction`, ADR 0029's
+// amendment), so no path writes them. Credentials, the relay
 // token and the container handoff envelope never enter a plan at all.
 import {
   persistRun,
@@ -241,7 +243,10 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
             transformationId: `${artifact.filename}:redacted`,
             stepKind: "redacted",
             transformerId: "sbi-shinsei-token-sanitizer",
-            transformerVersion: "v1",
+            // v2: person names are replaced before the token is stripped
+            // (ADR 0029, amendment 2026-09-27); the id is kept so the step
+            // stays one transformer across versions.
+            transformerVersion: "v2",
             // The provider response is not retained: only its redaction is.
             inputArtifactKeys: [],
             outputArtifactKey: artifact.filename,

@@ -8,7 +8,8 @@
 /**
  * Throws a stable code, never the offending text, when a page still carries
  * an executable or embedding element, an attribute that could hold a URL, a
- * session or a credential with its value, or a card number in its text.
+ * session or a credential with its value, a card number in its text, or an
+ * account holder's name cell that is not the name marker.
  */
 export function assertRedactedHtml(html: string): void {
   if (
@@ -20,7 +21,10 @@ export function assertRedactedHtml(html: string): void {
     /\s[a-z0-9:_-]*(?:token|csrf|session|auth|credential|secret|password|nonce|userid|user-id|user_id|cookie)[a-z0-9:_-]*\s*=\s*(?!["']\[redacted\]["'])/iu.test(
       html,
     ) ||
-    /\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b/u.test(html)
+    /\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b/u.test(html) ||
+    // A 口座名義 header whose value cell is anything but the name marker
+    // (ADR 0029, amendment 2026-09-27).
+    /<th\b[^>]*>\s*口座名義\s*<\/th>(?!\s*<td\b[^>]*>\[redacted:name\]<\/td>)/u.test(html)
   ) {
     throw new Error("artifact_html_redaction_invalid");
   }
