@@ -66,17 +66,17 @@ url = "https://github.com/suzuki-shunsuke/ghalint/releases/download/v1.5.6/multi
 
 [[tools.hk]]
 version = "2.3.1"
-backend = "aqua:jdx/hk"
+backend = "packslip:github.com/jdx/hk"
 
 [tools.hk."platforms.linux-x64"]
 checksum = "sha256:b9c9eaef35bf792a31ad0ab6bfbe5fd14898815307459480a4aa572346c3438e"
 url = "https://github.com/jdx/hk/releases/download/v2.3.1/hk-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/jdx/hk/releases/assets/593106742"
+signer = "sigstore-oidc:https://github.com/jdx/hk/.github/workflows/release.yml"
 
 [tools.hk."platforms.windows-x64"]
 checksum = "sha256:53e43dbb2e7225609891d6651d14b588eb79eab1d289d4dbf12f86da9cc57938"
 url = "https://github.com/jdx/hk/releases/download/v2.3.1/hk-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/jdx/hk/releases/assets/593106726"
+signer = "sigstore-oidc:https://github.com/jdx/hk/.github/workflows/release.yml"
 
 [[tools.node]]
 version = "26.10.0"
@@ -216,7 +216,7 @@ url_api = "https://api.github.com/repos/google/yamlfmt/releases/assets/336650206
 
 [[tools.yamllint]]
 version = "1.38.0"
-backend = "pipx:yamllint"
+backend = "pypi:yamllint"
 
 [[tools.zizmor]]
 version = "1.29.0"
