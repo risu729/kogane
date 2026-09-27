@@ -13,9 +13,10 @@ local picked =
     "tombi"
     "yaml"
     "typos"
-    // Individual hygiene checks, not the whole `hygiene` group: the group also
-    // adds fix-smart-quotes and check-shebang-scripts-are-executable, which the
-    // repository does not pass yet.
+    // Individual hygiene checks, not the whole `hygiene` group. The group adds
+    // four more checks; destroyed-symlinks and forbid-submodules pass, but
+    // fix-smart-quotes and check-shebang-scripts-are-executable do not pass on
+    // the repository yet.
     "newlines"
     "trailing-whitespace"
     "mixed-line-ending"
