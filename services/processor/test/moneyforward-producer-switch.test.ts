@@ -276,8 +276,7 @@ test("under the importer's key each provider row is read once, and both producer
   // February, captured by both, is read once, from the collector's newer
   // capture; January, captured only by the importer, stays current.
   expect(await transactions(env)).toEqual([
-    importerEra[0],
-    importerEra[1],
+    ...importerEra.slice(0, 2),
     { producer: COLLECTOR, source_account: account, as_of: "2099-02-03", amount_minor: "-1234" },
     { producer: COLLECTOR, source_account: account, as_of: "2099-02-03", amount_minor: "500" },
   ]);
