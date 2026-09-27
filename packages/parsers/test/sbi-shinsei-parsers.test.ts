@@ -511,8 +511,8 @@ function topActivity(input: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe("SBI Shinsei exchange-rate board", () => {
-  test("parser version 1.0.1 accepts the stored boards' observed shape", () => {
-    expect(sbiShinseiExchangeRate.version).toBe("1.0.1");
+  test("parser version 1.0.2 accepts the stored boards' observed shape", () => {
+    expect(sbiShinseiExchangeRate.version).toBe("1.0.2");
   });
 
   const board = () => value("exchange-rate");
@@ -638,10 +638,10 @@ describe("SBI Shinsei exchange-rate board", () => {
   });
 });
 
-describe("SBI Shinsei exchange-rate board: observed shape (1.0.1)", () => {
+describe("SBI Shinsei exchange-rate board: observed shape (1.0.2)", () => {
   // The stored boards' shape (ADR 0028, observed 2026-09-27): 13 currencies
   // in 5 customerCategory tiers, CHF in one, one JPY row, and a 22-character
-  // transactionTime.
+  // transactionTime ending in a space and two letters (amended for 1.0.2).
   const observed = () => value("exchange-rate-observed-board");
   const information = (input: Record<string, unknown>): Record<string, unknown> => {
     const response = input["responseParam"] as Record<string, unknown>;
@@ -694,6 +694,7 @@ describe("SBI Shinsei exchange-rate board: observed shape (1.0.1)", () => {
     const result = parse(observed());
     const time = information(observed())["transactionTime"] as string;
     expect(time).toHaveLength(22);
+    expect(time).toMatch(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2} [A-Za-z]{2}$/u);
     for (const entry of result.observations) {
       expect(entry).not.toHaveProperty("asOf");
       expect(kogane(entry)["providerTimeBasis"]).toBe("unrecognized");
@@ -704,7 +705,7 @@ describe("SBI Shinsei exchange-rate board: observed shape (1.0.1)", () => {
     for (const warning of result.warnings) expect(warning).not.toContain(time);
     // The two trailing characters change nothing: no value is read from them.
     const other = observed();
-    information(other)["transactionTime"] = `${time.slice(0, 20)}99`;
+    information(other)["transactionTime"] = `${time.slice(0, 20)}qz`;
     const withoutContext = (entries: typeof result.observations) =>
       entries.map((entry) => ({ ...entry, extra: { ...entry.extra, _kogane: null } }));
     expect(withoutContext(parse(other).observations)).toEqual(withoutContext(result.observations));
@@ -725,14 +726,39 @@ describe("SBI Shinsei exchange-rate board: observed shape (1.0.1)", () => {
     expect(() => parse(numeric)).toThrow(/must be a string/u);
   });
 
+  test("the observed letter suffix falls back in either case, at exactly 22 characters", () => {
+    const time = information(observed())["transactionTime"] as string;
+    for (const suffix of ["AB", "ab", "Ab", "zZ"]) {
+      const input = observed();
+      const other = `${time.slice(0, 20)}${suffix}`;
+      expect(other).toHaveLength(22);
+      information(input)["transactionTime"] = other;
+      const result = parse(input);
+      expect(result.observations, suffix).toHaveLength(198);
+      for (const entry of result.observations) {
+        expect(entry).not.toHaveProperty("asOf");
+        expect(kogane(entry)["providerTimeBasis"]).toBe("unrecognized");
+      }
+    }
+  });
+
   test("only the observed 22-character shape falls back; any other unrecognised form still fails", () => {
     const time = information(observed())["transactionTime"] as string;
     for (const other of [
       "not a time",
-      `${time}0`,
-      `${time.slice(0, 20)}9`,
-      `${time.slice(0, 20)}AB`,
+      `${time}X`,
+      time.slice(0, 21),
+      `${time.slice(0, 20)}A1`,
+      `${time.slice(0, 20)}1A`,
+      // The two digits 1.0.1 assumed were never observed and are refused again.
+      `${time.slice(0, 20)}01`,
+      `${time.slice(0, 20)}99`,
+      // Letters outside ASCII are not the observed shape.
+      `${time.slice(0, 20)}\uFF21\uFF22`,
+      `${time.slice(0, 20)}\u00C4B`,
       `${time.slice(0, 19)}_${time.slice(20)}`,
+      `${time.slice(0, 19)}${time.slice(20)}`,
+      `${time.slice(0, 16)} ${time.slice(20)}`,
       "2026-05-12T09:00:00",
       "2026/05/12 09:00",
     ]) {

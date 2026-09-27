@@ -3,7 +3,7 @@
     "exchangeRateInformation": {
       "requestParam": {},
       "responseParam": {
-        "transactionTime": "2026/05/12 09:00:00 01",
+        "transactionTime": "2026/05/12 09:00:00 XY",
         "exchangeRates": [
           {
             "currency": "USD",
