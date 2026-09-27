@@ -536,7 +536,7 @@ describe("G1-09 a card that collected nothing stays a failure", () => {
   });
 });
 
-describe("ADR 0023 option 7 / ADR 0026 the card unit is complete only when every month's rows equal its stated total", () => {
+describe("ADR 0023 option 8 / ADR 0026 the card unit is complete only when every month's rows equal its stated total", () => {
   const finalized = (rows: number, allCnt: unknown) =>
     envelope({
       WebMeisaiTopDisplayServiceBean: {

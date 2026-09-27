@@ -142,6 +142,10 @@ unreachable), which is a separate decision and is not taken here.
   parsed is a separate, open decision. The code shows GLOBAL PASS's plan
   declares the same (`sharedOutcome`: unit and run coverage `partial` on
   success); that has not been exercised.
+  [ADR 0026](0026-collector-unit-coverage.md) fixes it on the collector side
+  for terminals written after it: a successful connection's unit is
+  `complete`. Earlier terminals stay `not_eligible`, and GLOBAL PASS keeps
+  `partial` for a reason of its own.
 - For every input the importer branch completed, the output is identical,
   and every error it raised is raised again (tested against the extractor
   frozen at 396a370). No stored projection changes. `legacy-metadata-v1`
@@ -182,6 +186,10 @@ unreachable), which is a separate decision and is not taken here.
     changes nothing.
   - With the extractor from before this change, the same test ends with four
     parse errors.
+  - Since [ADR 0026](0026-collector-unit-coverage.md) the collector's plan
+    declares the unit `complete` itself, so the test parses the plan
+    unchanged, and the `not_eligible` case restores the old `partial` unit
+    to stand for a terminal written before it.
 - Existing MyJCB extractor tests (`metadata-projections.test.ts`,
   `pipeline.test.ts`, `myjcb-statement-replay.test.ts`) are unchanged and
   pass.

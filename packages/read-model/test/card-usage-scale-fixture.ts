@@ -32,6 +32,7 @@
 // after each capture the settlement reviews the processor sweep would propose
 // are written; at the end most are decided.
 import { Database, type SQLQueryBindings } from "bun:sqlite";
+import { fromTemplate } from "./schema-template";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -319,18 +320,11 @@ interface Built {
 }
 
 /**
- * The migrated schema, built once per test process and copied for each store.
- * Running every migration is most of what building a store costs (about three
- * quarters of a random settlement store, run inside each seed's test), and a
- * copy of the same bytes is the same schema, views and triggers, never
- * analyzed.
+ * The complete CORE schema, every migration in order, foreign keys on, never
+ * analyzed: a copy of one build per process (schema-template.ts).
  */
-let coreTemplate: Uint8Array | null = null;
-
-/** The complete CORE schema, every migration in order, foreign keys on, never analyzed. */
 export function fullCoreSchema(): Database {
-  coreTemplate ??= migrateCore().serialize();
-  const db = Database.deserialize(coreTemplate);
+  const db = fromTemplate("core-foreign-keys", migrateCore);
   // A connection setting, not part of the copied bytes.
   db.exec("PRAGMA foreign_keys=ON");
   return db;

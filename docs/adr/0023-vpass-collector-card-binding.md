@@ -406,7 +406,7 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   value in any stored byte and the token only in the terminal and the binding
   object; the token is the same across sessions and ordinals and differs by
   key and tuple; each fail-closed code, with no binding stored. ("ADR 0023
-  option 7 / ADR 0026"): stated totals met across pages and both statement
+  option 8 / ADR 0026"): stated totals met across pages and both statement
   shapes give a `complete` unit; a short, long, missing or unparsable total
   and a card with no month each give a `partial` unit with its code in the
   diagnostic.

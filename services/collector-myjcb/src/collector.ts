@@ -4,6 +4,7 @@ import { CookieJar } from "./cookie-jar";
 import { loginWithBitwardenPasskey, loginWithOfficialProtection } from "./login-protection";
 import {
   creditStatementPeriod,
+  creditPageRowCount,
   creditStatementState,
   discoverCreditExports,
   extractCreditMenuLinkId,
@@ -44,6 +45,7 @@ export async function collectConnection(options: {
     const client = new MyJcbReadClient(login.jar, login.userAgent);
     const artifacts: RawArtifact[] = [];
     let periodCount = 0;
+    let withheldMonthCount = 0;
 
     const creditLinkId = extractCreditMenuLinkId(login.mypageHtml);
     if (creditLinkId) {
@@ -53,6 +55,7 @@ export async function collectConnection(options: {
       );
       artifacts.push(...credit.artifacts);
       periodCount += credit.periodCount;
+      withheldMonthCount += credit.withheldMonthCount;
     }
     if (login.mypageHtml.includes("/iss-pc/member/debit/details/debitDetailMenu.html")) {
       const debit = await collectionStage("collect-debit", async () => await collectDebit(client));
@@ -86,7 +89,10 @@ export async function collectConnection(options: {
       summary: {
         connectionId: options.credential.connectionId,
         bootstrapMode: options.credential.bootstrapMode,
-        status: "success",
+        // A month whose rows were withheld is missing from what this
+        // connection set out to collect, so it is `partial`, never
+        // `success` (ADR 0026, INV05).
+        status: withheldMonthCount === 0 ? "success" : "partial",
         cardCount: Math.max(cards.length, 1),
         periodCount,
         artifactCount: artifacts.length,
@@ -157,7 +163,16 @@ export type CreditReadClient = Pick<MyJcbReadClient, "get" | "postCreditPastJson
 export async function collectCredit(
   client: CreditReadClient,
   linkId: string,
-): Promise<{ readonly periodCount: number; readonly artifacts: RawArtifact[] }> {
+): Promise<{
+  readonly periodCount: number;
+  readonly artifacts: RawArtifact[];
+  /**
+   * Months whose page shows ledger rows but does not state its statement
+   * state: the page is kept as `unknown` evidence and no ledger is derived,
+   * so its rows reach no parser and the connection is not whole (ADR 0026).
+   */
+  readonly withheldMonthCount: number;
+}> {
   const { menuHtml, initialMonths } = await collectionStage("collect-credit-menu", async () => {
     const menu = await client.get("credit-menu", new URLSearchParams({ link_id: linkId }));
     const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
@@ -213,6 +228,7 @@ export async function collectCredit(
     ]),
   ].sort((left, right) => left - right);
 
+  let withheldMonthCount = 0;
   for (const detailMonth of availableMonths) {
     try {
       const detail = await collectionStage(
@@ -257,6 +273,7 @@ export async function collectCredit(
           return { html, exports, ledger, state, period };
         },
       );
+      if (state === "unknown" && creditPageRowCount(html) > 0) withheldMonthCount += 1;
       artifacts.push({
         dataset: "credit-detail",
         filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,
@@ -294,7 +311,7 @@ export async function collectCredit(
       throw error;
     }
   }
-  return { periodCount: availableMonths.length, artifacts };
+  return { periodCount: availableMonths.length, artifacts, withheldMonthCount };
 }
 
 async function fetchCreditDetail(

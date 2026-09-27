@@ -6,8 +6,9 @@
 // MyJCB snapshots, and purchase recognition recognises their rows.
 //
 // Needs ADR 0021 (the collector states the ledger's lineage, so the run
-// registers) and ADR 0022 (registration gives the artifacts their parser
-// datasets). Everything is synthetic: no amount, merchant, account label or
+// registers), ADR 0022 (registration gives the artifacts their parser
+// datasets) and ADR 0026 (a whole connection's unit claims complete
+// coverage, so the run is eligible for parse jobs). Everything is synthetic: no amount, merchant, account label or
 // date here is a production value.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -184,18 +185,24 @@ const workItem = async (runId: string) =>
     .bind(await fetchRun(runId))
     .first();
 
-test("open limit: the collector's successful run registers but is not eligible, because every unit reports partial coverage", async () => {
-  // `myJcbRunPlan` downgrades a successful connection's unit coverage to
-  // `partial` (a card exposes a rolling set of periods), registration maps a
-  // partial unit to the unit outcome `partial` (`unitReportRequest`), and a
-  // run with a non-success unit report is `partial` in
-  // `observation_fetch_runs`, which neither the run scope nor the unit scope
-  // (`unit-independent-v1`) admits. No parse job is created, so the metadata
-  // extractor is never reached. This blocker is separate from ADR 0025's.
+test("a terminal written before ADR 0026 registers but is not eligible: its units report partial coverage", async () => {
+  // Before ADR 0026 `myJcbRunPlan` downgraded a successful connection's unit
+  // coverage to `partial`. Registration maps a partial unit to the unit
+  // outcome `partial` (`unitReportRequest`), a run with a non-success unit
+  // report is `partial` in `observation_fetch_runs`, and neither the run
+  // scope nor the unit scope (`unit-independent-v1`) admits it. Terminals are
+  // immutable, so such a run stays `not_eligible`; this reproduces one by
+  // restoring the old unit claim on today's plan.
   const runId = "00000000-0000-4000-8000-00000000a024";
   const plan = await runPlan(runId, "2026-09-19T00:00:00.000Z", "2026-09-19T00:05:00.000Z");
-  expect(plan.run.units.map((unit) => unit.coverageStatus)).toEqual(["partial"]);
-  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+  const before0026 = {
+    ...plan,
+    run: {
+      ...plan.run,
+      units: plan.run.units.map((unit) => ({ ...unit, coverageStatus: "partial" as const })),
+    },
+  };
+  expect((await persistRun(env.EVIDENCE, before0026)).outcome).toBe("persisted");
   expect(await registerCollectionRun(env, { source: "myjcb", runId })).toMatchObject({
     outcome: "registered",
     artifacts: 5,
@@ -226,24 +233,24 @@ test("a shared-R2 MyJCB run parses with the statement state and period its manif
     expect(entry).not.toHaveProperty("connectionId");
     expect(entry).not.toHaveProperty("filename");
   }
-  // The one field changed from the collector's plan: the successful
-  // connection's unit claims complete coverage, so its unit report is
-  // `success` as the importer's was, standing in for the fix of the open limit
-  // above. Every byte, key, role, lineage step and the manifest are the
-  // collector's own.
-  const eligible = {
-    ...plan,
-    run: {
-      ...plan.run,
-      units: plan.run.units.map((unit) => ({ ...unit, coverageStatus: "complete" as const })),
-    },
-  };
-
-  expect((await persistRun(env.EVIDENCE, eligible)).outcome).toBe("persisted");
+  // The collector's plan, unchanged (ADR 0026): the successful connection's
+  // unit claims complete coverage, so its unit report is `success` as the
+  // importer's was, and the run is `success` in `observation_fetch_runs`.
+  expect(plan.run.units.map((unit) => unit.coverageStatus)).toEqual(["complete"]);
+  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
   expect(await registerCollectionRun(env, { source: "myjcb", runId: RUN_ID })).toMatchObject({
     outcome: "registered",
     artifacts: 5,
   });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT r.status,ur.normalized_outcome AS unit_outcome FROM observation_fetch_runs r JOIN fetch_units u ON u.fetch_run_id=r.id JOIN fetch_unit_reports ur ON ur.fetch_unit_id=u.id WHERE r.external_run_id=?",
+      )
+        .bind(RUN_ID)
+        .all()
+    ).results,
+  ).toEqual([{ status: "success", unit_outcome: "success" }]);
 
   expect(await sweep(env)).toMatchObject({ parsed: 4, error: 0 });
   expect(await workItem(RUN_ID)).toEqual({ outcome: "jobs_created", jobs_created: 4 });

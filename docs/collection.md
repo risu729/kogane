@@ -401,21 +401,33 @@ shape.) The Processor's metadata extractor reads that shape. It finds an entry
 by the artifact's digest, size and content-addressed key, and takes the
 `statementState` and `period` the collector recorded. The connection and
 position come from the artifact key, as before
-([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)). The unit coverage
-below is still an open limit: it keeps these runs from being parsed.
+([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)).
 
 Terminal fields: `producer: collector-myjcb`; one unit per connection
 (`<connectionId>`, `unitKind: connection`), so several cards in one run stay distinguishable and
 are never merged into one (G1-16); no ranges, because the statement periods are
 provider labels rather than machine ranges and stay in the manifest artifact;
 one `terminal` report carrying the outcome; `requestedScope.scopeKind =
-full_snapshot` over the connections. `coverageStatus` is `partial` even for a
-successful run — a MyJCB card exposes a rolling set of statement periods, so a
-finished run is not a claim about the card's whole history. That unit
-coverage becomes the unit outcome `partial` at registration, so a successful
-MyJCB run is `partial` in `observation_fetch_runs` and gets no parse job (an
-open limit, [ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md#consequences)).
-The importer recorded a successful connection's unit as `success`. A connection that
+full_snapshot` over the connections. The run's `coverageStatus` is `partial`
+even for a successful run — a MyJCB card exposes a rolling set of statement
+periods, so a finished run is not a claim about the card's whole history —
+and registration only records it. Each unit states its own coverage
+([ADR 0026](adr/0026-collector-unit-coverage.md)): `complete` for a
+successful connection, which enumerated its credit months from the menu and
+the past-months response and kept every month's page, the ledger of every page
+that states its state, and every export a page offers. A page kept as
+`unknown` that shows ledger rows (no heading, position 2 or later) gets no
+ledger, so its rows reach no parser: the connection is then `partial`, its
+unit `partial` with `collector_partial`, and the run `partial` although no
+failure was recorded. Any failed month, export or parse stops the whole
+connection, which then keeps no artifact and has an `unknown` unit with a safe
+error code. `complete` assumes one detail page holds its whole month, which
+has not been observed or confirmed (an open limit,
+[ADR 0026](adr/0026-collector-unit-coverage.md#consequences)). A `complete` unit registers as the unit outcome
+`success`, as the importer's did, so a successful run is `success` in
+`observation_fetch_runs` and is parsed. Terminals written before ADR 0026
+declared every unit `partial`; they stay `partial` and `not_eligible`, and the
+next successful run captures their confirmed statements again. A connection that
 needs a human is a `human-required` state on its own unit with
 `safeErrorCode: human_required`, and the run-level code is `human_required`
 when every blocked connection is waiting for a person: nothing here retries a
@@ -477,7 +489,7 @@ on a finalized statement page, `total` on a customized one); otherwise it is
 `partial`, which makes registration record the whole fetch run as `partial`,
 which neither identity nor the trusted card binding reads
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented),
-ADR 0026). `manifest.json` records each month's `capturedRows`, `statedTotal`
+[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each month's `capturedRows`, `statedTotal`
 and closed `coverage` code (`complete`, `stated_total_unverified`,
 `stated_total_mismatch`) and the card's code, which the persist diagnostic
 also logs (`statement_months_absent` when no month was walked).
@@ -826,9 +838,16 @@ Processor maps it to the CORE source `global-pass`), producer
   (ADR 0021 — it named the unit without being counted, which CORE refuses at
   the seal with `run_inventory_incomplete`). `ranges`: one `requested` range
   plus one `declared_coverage` month range per stored page.
-- **Coverage is `partial` even on success.** The provider exposes a rolling
-  window of statement months and `paginationStatus` is `unproven`, so a
-  finished run is a claim about persistence, never about the account's history.
+- **Coverage is `partial` even on success, for the run and the unit.** The
+  provider exposes a rolling window of statement months, and whether one
+  month's activity page holds the whole month has not been observed
+  (`paginationStatus: unproven`), so a finished run is a claim about
+  persistence, never about the account's history or a whole month. The
+  `partial` unit registers as the unit outcome `partial`, so a successful run
+  is `partial` in `observation_fetch_runs` and `not_eligible` for parse jobs:
+  shared-R2 GLOBAL PASS runs are not parsed. Changing that needs the
+  pagination observed or confirmed first
+  ([ADR 0026](adr/0026-collector-unit-coverage.md#consequences)).
 - `transformations`: one `redacted` step per page
   (`globalpass-activity-sanitizer`); the unredacted page is never retained, so
   it has no artifact key.

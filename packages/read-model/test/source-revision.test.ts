@@ -7,6 +7,7 @@
 // counting query the read model used before cannot see the change that made
 // the old identity wrong. Every row below is synthetic.
 import { Database } from "bun:sqlite";
+import { fromTemplate } from "./schema-template";
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,12 +26,14 @@ import {
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
 
 function migratedDatabase(): Database {
-  const db = new Database(":memory:");
-  for (const name of readdirSync(MIGRATIONS)
-    .filter((entry) => entry.endsWith(".sql"))
-    .sort())
-    db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
-  return db;
+  return fromTemplate("core", () => {
+    const db = new Database(":memory:");
+    for (const name of readdirSync(MIGRATIONS)
+      .filter((entry) => entry.endsWith(".sql"))
+      .sort())
+      db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
+    return db;
+  });
 }
 
 const revision = (db: Database): CoreRevisionRow =>

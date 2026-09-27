@@ -103,7 +103,15 @@ interface Registered {
   units: { unit_key: string; artifacts: number; declared: number | null }[];
   /** Distinct parser datasets the registration gave the run's artifacts. */
   datasets: (string | null)[];
+  /** The run's status in `observation_fetch_runs`, the one the parse gate reads. */
+  runStatus: string;
 }
+
+/**
+ * What each source's successful plan registered as, filled by `registerPlan`
+ * and read by the last test (ADR 0026). Tests in one file run in order.
+ */
+const registeredStatus = new Map<string, string>();
 
 /**
  * Persist the plan as the collector would and register it. Asserts the whole
@@ -179,7 +187,13 @@ async function registerPlan(plan: PersistRunPlan, expectedArtifacts: number): Pr
       .query("SELECT DISTINCT dataset FROM fetch_artifacts WHERE fetch_run_id=? ORDER BY dataset")
       .all(result.fetchRunId) as { dataset: string | null }[]
   ).map((row) => row.dataset);
-  return { roles, units, datasets };
+  const runStatus = (
+    h.db.query("SELECT status FROM observation_fetch_runs WHERE id=?").get(result.fetchRunId) as {
+      status: string;
+    }
+  ).status;
+  registeredStatus.set(source, runStatus);
+  return { roles, units, datasets, runStatus };
 }
 
 // --- Sources that registered before this change -------------------------------
@@ -732,10 +746,11 @@ test("sony-bank: responses, exports, redacted statements and the summary registe
   expect(registered.units).toEqual([{ unit_key: "account", artifacts: 4, declared: 4 }]);
 });
 
-test("vpass: one card's sanitized envelopes and the run manifest register and seal", async () => {
+/** A synthetic Vpass card run with one month of `rows` rows whose summary states `allCnt`. */
+function vpassPlan(rows: number, allCnt: number) {
   const envelope = (content: Record<string, unknown>) =>
     JSON.stringify({ header: { resultCode: 0 }, body: { content } });
-  const plan = await vpassCardRunPlan({
+  return vpassCardRunPlan({
     sessionRunId: "2099-01-01T00-00-00-000Z",
     cardLabel: "card-001",
     startedAt: STARTED_AT,
@@ -753,18 +768,35 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
           {
             kind: "top",
             index: 0,
-            // An empty month whose summary states zero rows: the card unit
-            // is complete (ADR 0023 option 7, ADR 0026).
             rawJson: envelope({
-              WebMeisaiTopDisplayServiceBean: { meisaiList: [], webMeisaiTopK3Vo: { allCnt: 0 } },
+              WebMeisaiTopDisplayServiceBean: {
+                meisaiList: Array.from({ length: rows }, () => ({ data: [] })),
+                webMeisaiTopK3Vo: { allCnt },
+              },
             }),
           },
         ],
-        transactionCount: 0,
+        transactionCount: rows,
       },
     },
   });
+}
+
+// Runs before the successful case below, which then records the status Vpass
+// registers as for the last test.
+test("vpass: a month short of its stated total makes the card unit and the run partial (ADR 0026)", async () => {
+  const plan = await vpassPlan(1, 2);
+  expect(plan.run.units[0]?.coverageStatus).toBe("partial");
   const registered = await registerPlan(plan, 5);
+  expect(registered.runStatus).toBe("partial");
+});
+
+test("vpass: one card's sanitized envelopes and the run manifest register and seal", async () => {
+  // Every month's captured rows equal its stated total, so the card unit is
+  // complete (ADR 0023 option 8, ADR 0026).
+  const plan = await vpassPlan(1, 1);
+  const registered = await registerPlan(plan, 5);
+  expect(registered.runStatus).toBe("success");
   expect(registered.roles).toEqual([
     "collector_manifest/generated/not_applicable",
     "sanitized_provider_capture/transformed/source_not_retained_for_security",
@@ -774,4 +806,32 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
   // binding key is set and its tokens match the importer's. The pages' role
   // must not lift that hold.
   expect(registered.datasets).toEqual([null]);
+});
+
+test("ADR 0026: a successful plan's units state what the parse gate reads", () => {
+  // `observation_fetch_runs.status` is `success` only when every unit's
+  // terminal report is `success`, which registration derives from the unit
+  // coverage `complete`. Neither the run scope nor `unit-independent-v1`
+  // admits a `partial` run, so a source listed `partial` here is never parsed
+  // from its successful runs. GLOBAL PASS keeps `partial` because nobody has
+  // observed whether a month page paginates. Vpass is `success` here because
+  // the fixture's month meets its stated total; a month that does not is
+  // `partial` (the case above; ADR 0026, ADR 0023).
+  expect(Object.fromEntries([...registeredStatus].sort(([a], [b]) => a.localeCompare(b)))).toEqual({
+    "mizuho-bank": "success",
+    "mobile-suica": "success",
+    "moneyforward-me": "success",
+    myjcb: "success",
+    "prestia-globalpass": "partial",
+    "sbi-securities": "success",
+    "sbi-shinsei": "success",
+    "sbi-vc-trade": "success",
+    "smbc-direct": "success",
+    "sony-bank": "success",
+    "st-george": "success",
+    "v-point": "success",
+    "v-point-pay": "success",
+    "v-point-pay-email": "success",
+    vpass: "success",
+  });
 });

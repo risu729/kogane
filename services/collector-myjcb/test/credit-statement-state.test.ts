@@ -275,6 +275,38 @@ describe("collectCredit", () => {
     ).toEqual(["credit-detail-00.html", "credit-ledger-00.json"]);
   });
 
+  test("ADR 0026: an empty unknown page withholds nothing; an unknown page with rows is counted", async () => {
+    const olderEmpty = page({
+      head: UNCONFIRMED_HEAD,
+      rows: [
+        '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はありません</div></div></div>',
+      ],
+    });
+    const whole = await collectCredit(
+      client({ 0: mutable, 1: closedWithoutExports, 7: olderEmpty }),
+      "x",
+    );
+    expect(whole.withheldMonthCount).toBe(0);
+    // Rows at an older position without the heading: the page is kept as
+    // `unknown` evidence with no ledger, so its rows reach no parser and the
+    // month is not captured whole.
+    const withheld = await collectCredit(
+      client({
+        0: mutable,
+        1: closedWithoutExports,
+        7: page({ rows: [confirmedRow] }),
+        8: page({ head: UNCONFIRMED_HEAD, rows: [pendingRow] }),
+      }),
+      "x",
+    );
+    expect(withheld.withheldMonthCount).toBe(2);
+    expect(
+      withheld.artifacts
+        .filter((artifact) => artifact.statementState === "unknown")
+        .map((artifact) => artifact.filename),
+    ).toEqual(["credit-detail-07.html", "credit-detail-08.html"]);
+  });
+
   test("a page whose heading and headers disagree stops the collection", async () => {
     const conflicting = page({ headings: [CONFIRMED_STATEMENT_HEADING], head: UNCONFIRMED_HEAD });
     const run = collectCredit(client({ 0: mutable, 1: conflicting }), "x");

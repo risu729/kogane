@@ -108,7 +108,7 @@ export interface SharedRunOutcome {
   readonly artifactCount: number;
   /** A card run only: `bound`, or the closed code of why no binding was stored. */
   readonly binding?: "bound" | VpassBindingUnavailable;
-  /** A card run only: the card unit's coverage code (ADR 0023 option 7). */
+  /** A card run only: the card unit's coverage code (ADR 0023 option 8). */
   readonly coverage?: VpassCardCoverage;
 }
 
@@ -171,7 +171,7 @@ function redaction(artifactKey: string): TerminalTransformation {
 }
 
 /**
- * Whether a month was captured whole, as a closed code (ADR 0023 option 7,
+ * Whether a month was captured whole, as a closed code (ADR 0023 option 8,
  * ADR 0026). `complete` only when the rows the stored pages carry equal the
  * row count the provider stated for the month; anything else is a reason the
  * card unit is `partial`, never a count to adjust.
@@ -458,7 +458,7 @@ async function planFor(run: VpassCardRun, binding: VpassCardBinding): Promise<Pe
           artifactCount: cardArtifactCount,
           // The card unit is `complete` only when every statement month the
           // provider listed was walked and each month's captured rows equal
-          // the row count the provider stated for it (ADR 0023 option 7,
+          // the row count the provider stated for it (ADR 0023 option 8,
           // ADR 0026). Otherwise it is `partial`, registration records a
           // `partial` unit report and a `partial` fetch run, and neither
           // identity nor the trusted binding reads the run, so nothing

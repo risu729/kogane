@@ -91,7 +91,7 @@ const envelope = (content: Record<string, unknown>, bean?: Record<string, unknow
   });
 const bean = { ...TUPLE, cardName: "SYNTHETIC CARD" };
 
-/** A finalized statement page whose summary states `allCnt` rows (ADR 0023 option 7). */
+/** A finalized statement page whose summary states `allCnt` rows (ADR 0023 option 8). */
 function statementPage(allCnt: number = ROWS.length): string {
   const payload = vpassPayload("web", "202608", ROWS);
   payload.body.content.WebMeisaiTopDisplayServiceBean.webMeisaiTopK3Vo = {

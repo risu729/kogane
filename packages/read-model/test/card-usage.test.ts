@@ -3,6 +3,7 @@
 // MyJCB parsers on CORE migrations 0017+ over the synthetic Layer A stub (see
 // card-usage-fixture.ts); every value is synthetic.
 import { Database } from "bun:sqlite";
+import { fromTemplate } from "./schema-template";
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -97,12 +98,14 @@ function transactions(db: Database): TransactionRow[] {
 }
 
 function productionSchema(): Database {
-  const db = new Database(":memory:");
-  for (const name of readdirSync(MIGRATIONS)
-    .filter((entry) => entry.endsWith(".sql"))
-    .sort())
-    db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
-  return db;
+  return fromTemplate("core", () => {
+    const db = new Database(":memory:");
+    for (const name of readdirSync(MIGRATIONS)
+      .filter((entry) => entry.endsWith(".sql"))
+      .sort())
+      db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
+    return db;
+  });
 }
 
 const ids = (rows: readonly { observation_id: number }[]): number[] =>
