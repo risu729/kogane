@@ -29,7 +29,7 @@ jobs:
     permissions:
       contents: read # for checkout
       deployments: write # the release ledger
-    uses: ./.github/workflows/_deploy-workers.yml # zizmor: ignore[secrets-inherit]
+    uses: ./.github/workflows/_deploy-workers.yml # zizmor: ignore[secrets-inherit,self-repository] -- actionlint 1.7.12 does not support $/ yet.
     # The Cloudflare credentials live in the `production` Environment and are
     # read by the called workflow's job, which is where `environment:
     # production` is declared. GitHub resolves `secrets.*` inside a called
