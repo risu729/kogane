@@ -69,7 +69,13 @@ Concrete limits in the current code:
   FX row is promoted to a price until a tier and quote basis are admitted. A debit posted more than three days from the
   due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
   Sony Bank), partial payments, refunds and complete purchase recognition
-  remain extensions; this is not complete event coverage.
+  remain extensions; this is not complete event coverage. Which bank account
+  a card debits is still unknown to the code: the card provider's own
+  statement of it is designed as proposal-only evidence
+  ([ADR 0032](adr/0032-provider-stated-debit-accounts.md)), but only the
+  domain rule exists. The MyJCB transfer-account block and any Vpass
+  payment-account field are unobserved, and neither SMBC's account reference
+  (no account number) nor SBI Shinsei's (layout unverified) can be matched.
 - Vpass and MyJCB pending-to-posted candidates come from the purchase lane's
   [candidate pass](economic-events.md#pending-to-posted-links), which pairs one
   recognised pending event with one posted event per purchase; every pair
