@@ -64,9 +64,12 @@ Concrete limits in the current code:
   the end as not stated
   ([ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)); until the
   repair lane has re-parsed the stored captures after deploy, the adapter
-  admits nothing. The same release lets the SBI Shinsei exchange-rate board
-  be parsed for the first time, every `customerCategory` tier kept, while no
-  FX row is promoted to a price until a tier and quote basis are admitted. A debit posted more than three days from the
+  admits nothing. The SBI Shinsei exchange-rate board is parsed from 1.0.2
+  (1.0.1 assumed digits where the stored time ends in two letters and matched
+  no board; migration 0059), every `customerCategory` tier kept, while no FX
+  row is promoted to a price until the owner's tier is known and a currency
+  is admitted (the provider's public pages quote the 13 listed currencies per
+  1 unit). A debit posted more than three days from the
   due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
   Sony Bank), partial payments, refunds and complete purchase recognition
   remain extensions; this is not complete event coverage. Which bank account
@@ -240,8 +243,14 @@ Concrete limits in the current code:
   and the eligibility rule is not loosened, so the confirmed statements of
   those days come back with the next successful run, while pending-only rows
   that disappeared before it are lost. GLOBAL PASS's successful runs are
-  `partial` the same way and are not parsed: whether an activity page holds a
-  whole month has not been observed. A Vpass card run is `partial` the same
+  `partial` the same way and are not parsed: its collector stores only the
+  first page of a month and follows no Next link, while a month with more
+  than ten statements is observed to have a second page; such a month is
+  marked `activity_pages_unwalked`. Walking the pages is not implemented. No
+  GLOBAL PASS run has stored a page since at least the week before
+  2026-09-27: the sanitizer refused every page, and which check refuses them
+  is recorded as a closed code only from this release on
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes)). A Vpass card run is `partial` the same
   way unless every month's captured rows equal the provider's stated total
   (ADR 0026's amendment). Both stated totals were seen on the live site
   (`allCnt` a string, `total` a number) and are read as exact counts, but the

@@ -54,15 +54,15 @@ previous snapshot, a `partial` one may not.
 Checked against each collector's persist path and registered with
 `collector-plans.test.ts` (the run status each successful plan gets):
 
-| Collector                                                                                                 | Unit on success                                                                                                              | Why that is what the collector captured                                                                               |
-| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| MyJCB                                                                                                     | `complete` (this ADR; was `partial`); a connection stopped at a month is `partial` with its stop code (ADR 0005's amendment) | see below                                                                                                             |
-| GLOBAL PASS                                                                                               | `partial` (unchanged)                                                                                                        | one page per selected month; whether a month's page is paginated has not been observed (`paginationStatus: unproven`) |
-| Vpass                                                                                                     | `complete` only when each month's captured rows equal the provider's stated total; otherwise `partial` (ADR 0023)            | see the amendment below                                                                                               |
-| Mizuho                                                                                                    | `partial` when the page shows more history (`history-pagination-unverified`), else `complete`                                | per page                                                                                                              |
-| Mobile Suica                                                                                              | `complete` only when the collector proved it reached the end of the history                                                  | per run                                                                                                               |
-| Money Forward ME, Sony Bank, SBI Securities, SBI Shinsei, SBI VC Trade, SMBC Direct, V Point, V Point Pay | `complete`                                                                                                                   | the collector's own run status                                                                                        |
-| St. George                                                                                                | no units                                                                                                                     | the run status alone                                                                                                  |
+| Collector                                                                                                 | Unit on success                                                                                                              | Why that is what the collector captured                                                                      |
+| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| MyJCB                                                                                                     | `complete` (this ADR; was `partial`); a connection stopped at a month is `partial` with its stop code (ADR 0005's amendment) | see below                                                                                                    |
+| GLOBAL PASS                                                                                               | `partial` (unchanged)                                                                                                        | page 1 per selected month; a month over ten statements has more (amendment of 2026-09-27, `first_page_only`) |
+| Vpass                                                                                                     | `complete` only when each month's captured rows equal the provider's stated total; otherwise `partial` (ADR 0023)            | see the amendment below                                                                                      |
+| Mizuho                                                                                                    | `partial` when the page shows more history (`history-pagination-unverified`), else `complete`                                | per page                                                                                                     |
+| Mobile Suica                                                                                              | `complete` only when the collector proved it reached the end of the history                                                  | per run                                                                                                      |
+| Money Forward ME, Sony Bank, SBI Securities, SBI Shinsei, SBI VC Trade, SMBC Direct, V Point, V Point Pay | `complete`                                                                                                                   | the collector's own run status                                                                               |
+| St. George                                                                                                | no units                                                                                                                     | the run status alone                                                                                         |
 
 For MyJCB, a connection's `success` means the collector enumerated the
 credit months from the credit menu and the past-months response and kept,
@@ -240,3 +240,145 @@ code shows it after deploy. (2026-09-27: both fields were seen on the live
 site, `allCnt` as a string and `total` as a number, and both are read as
 exact counts; the walk's stops and what stays unobserved are in
 [ADR 0023's note](0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site).)
+
+## Amendment 2026-09-27: GLOBAL PASS pagination observed; sanitizer refusals get closed codes
+
+- Status: proposed; accepted when #281 merges
+- Date: 2026-09-27
+- Carried by: `services/collector-globalpass/src/sanitize.ts`
+  (`GlobalPassSanitizerError`, `GLOBALPASS_SANITIZER_CODES`),
+  `services/collector-globalpass/src/pagination.ts`,
+  `services/collector-globalpass/src/worker.ts`,
+  `services/collector-globalpass/src/model.ts`
+  (`GLOBALPASS_PAGINATION_STATUS`), `packages/collector-diagnostics/src/index.ts`,
+  [collection: GLOBAL PASS](../collection.md#prestia-globalpass-kogane-globalpass-collector-poc),
+  [PRESTIA / GLOBAL PASS source note](../sources/prestia.md#global-pass-activity-pages-and-refusals-2026-09-27),
+  `services/collector-globalpass/test/worker-collection.test.ts`,
+  `services/collector-globalpass/test/pagination.test.ts`,
+  `services/collector-globalpass/test/sanitize.test.ts`,
+  `services/processor/test/collector-plans.test.ts`
+
+### Context
+
+Two things were reported on 2026-09-27 by the owner's agent (structure and
+counts only):
+
+1. **Every production run fails at the sanitizer, and the cause is
+   invisible.** Seven nights out of seven, both selected months failed
+   `artifact-write`, the run stored no page and ended `failed`. The
+   sanitizer throws one of four closed messages, but the Worker kept only
+   `error.name` (`Error`): the diagnostic line said `category: unknown`, and
+   the manifest's failure entry said `html_sanitization_failed`. Which check
+   refused the pages could not be told.
+2. **Account Activities paginates.** A month with more than ten statements
+   shows `Found N Result [p/Ppage] Back Next` and at most ten statement
+   blocks on a page. Back and Next are POST links; there are no page-number
+   links and no page-size setting. Of fifteen months, five had two pages (the
+   largest stated total was 20); a month of ten or fewer shows no pager.
+
+Read from the code: the container (`container/server.mjs`, `collectBrowser`)
+selects each month, waits, and sends `page.content()` once. It sets no page
+size and follows no Next link. **It stores page 1 of a month and nothing
+more.** The same report says stored captures had shown a month stating 16
+results with 16 rows and no pager link. That cannot come from the render path
+in this repository today with the live behaviour above, and nothing here
+establishes what produced it (an earlier provider page, the retired
+importer's path, or something else). It is recorded as unreconciled.
+
+### Options considered
+
+1. **Walk Next in the container now**, storing one artifact per page or
+   joining pages into one. The pager's markup has not been reviewed in any
+   stored capture, the sanitizer accepts exactly two reviewed page shapes
+   (a paged page's form and hidden-field counts are unknown), and every page
+   is refused today for a reason nobody can see. Walking would be written
+   against guessed selectors and could not be exercised; a joined page would
+   no longer be a provider capture, and one artifact per page needs a
+   descriptor and parser contract for page 2.
+2. **Declare the unit `complete` when a page states no pager.** A page that
+   states no pager is not proof it holds the month; the markup that shows the
+   pager is unreviewed.
+3. **Make refusals observable and let the page say when it is incomplete;
+   keep the unit `partial`.**
+
+### Decision
+
+**Option 3.**
+
+- The sanitizer throws `GlobalPassSanitizerError` whose `code` (and message)
+  is one of `globalpass_html_contract_invalid`,
+  `globalpass_html_redaction_failed`, `globalpass_html_shape_unreviewed`,
+  `globalpass_html_utf8_invalid`. The Worker records that code as the
+  failure entry's `errorCode` (operation `sanitization`; the entry keeps its
+  four keys), so it is also the terminal's and the unit's `safeErrorCode`.
+  `packages/collector-diagnostics` allowlists the error name and the four
+  codes, so the `artifact-write` diagnostic line carries `code` and
+  `category: response`. Nothing else about the page is emitted.
+  `html_sanitization_failed` remains the code of a refusal without a closed
+  code; the sanitizer throws none.
+- Before sanitizing, the Worker reads the counts a page states from its
+  visible text (`activityPageState`): `N` of `Found N Result` and `p/P` of
+  `[p/Ppage]`. It logs them as `globalpass-activity-pages` with the month's
+  position in the run (never the month). A page that states more than one
+  page gets the failure `{operation: "pagination", errorType:
+"PaginationError", errorCode: "activity_pages_unwalked"}`; a page whose
+  totals or pagers disagree gets `activity_pager_unreadable`. The page itself
+  is still stored when the sanitizer accepts it, and the run is `partial`.
+  A refused page gets both entries, sanitizer code first.
+- The manifest's `paginationStatus` is `first_page_only` (was `unproven`):
+  a statement of what the collector does.
+- The unit stays `partial` on every run, and the run's coverage too. The
+  Processor's registration and eligibility are unchanged; it reads the
+  manifest's failures only through the terminal's `safeErrorCode`, whose
+  shape did not change.
+
+### Consequences
+
+- The next production run says which sanitizer check refuses the pages, in
+  the diagnostic line, the manifest and the terminal. Fixing the refusal is
+  a later change that needs that code, and possibly the refused shape
+  reviewed from a capture.
+- A month over ten statements, once its page passes the sanitizer, is stored
+  as page 1 with `activity_pages_unwalked`, so the run is `partial`. The
+  parser still sees no GLOBAL PASS shared run (the unit is `partial`), so no
+  page 1 is ever read as a whole month.
+- Walking Next remains undone. It needs the sanitizer refusal diagnosed, the
+  pager's markup and a paged page's form shape reviewed from a capture, and
+  a decision on how page 2 is stored and parsed without counting a row
+  twice.
+- **Limits.** The pager is recognised only by the observed text; if its text
+  differs (another language, other spacing than the reader tolerates), a
+  paged month is not flagged, which changes nothing about coverage because
+  the unit is `partial` regardless. Whether `Found N Result` appears on a
+  month of ten or fewer is not known. The stored capture that stated 16
+  results with 16 rows is unreconciled. A stored page 1 still gets the
+  month's `declared_coverage` range in the terminal (`ranges()` in
+  `shared-collection.ts` emits one per stored page); registration stores the
+  range, and nothing reads `declared_coverage` for eligibility or parsing
+  today, so the month's `activity_pages_unwalked` failure and the `partial`
+  unit are what say it is incomplete.
+
+### Verification
+
+- `test/worker-collection.test.ts`: each of the four refusals, driven from a
+  synthetic container stream, gives exactly one failure entry
+  `{sanitization, GlobalPassSanitizerError, <code>, activity-<month>.html}`,
+  an `artifact-write` diagnostic line with `code: <code>` and
+  `category: response`, and the code as the terminal's `safeErrorCode`; no
+  page marker, password field or heading reaches the logs or the manifest,
+  and no page marker reaches DATA. A page stating `[1/2page]` is stored,
+  gets `activity_pages_unwalked`, and makes the run `partial`; the log line
+  carries counts and the month's position only. A refused paged page gets
+  both codes. A `[1/1page]` page leaves the run `success`.
+- `test/pagination.test.ts`: the reader across markup and spacing, a
+  repeated pager, script/style/comment text ignored, and each decision.
+- `test/sanitize.test.ts`: every refusal is a `GlobalPassSanitizerError`
+  whose code equals its message, and the four cases cover the four codes.
+- `packages/collector-diagnostics/test/diagnostics.test.ts`: the four codes
+  are kept with `category: response`; an unlisted code under the same name
+  is not echoed.
+- `services/processor/test/collector-plans.test.ts`: the collector's real
+  plan for a run with a sanitizer code and an unwalked page registers and
+  seals, `partial`, with the sanitizer code as the unit's failure code.
+- No production data was read for this amendment; the observations above are
+  the owner's agent's report.

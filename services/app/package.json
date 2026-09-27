@@ -4,12 +4,12 @@
   "type": "module",
   "dependencies": {
     "hono": "4.13.9",
-    "jose": "6.2.11",
+    "jose": "6.2.12",
     "zod": "4.6.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.2.5",
-    "@types/node": "26.4.1",
+    "@types/node": "26.6.2",
     "typescript": "7.0.2",
     "vitest": "4.1.11",
     "wrangler": "4.138.0"

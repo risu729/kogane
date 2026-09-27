@@ -44,6 +44,51 @@ holder name and card name are never read. **Kept as limits:** Vpass has no
 reader; branch names are not compared; the relation between the mask length
 and a bank's account-number length is not checked.
 
+## SBI Shinsei board time ends in letters (board parser 1.0.2)
+
+Observed on 2026-09-27 by the owner's agent (structure and counts only,
+[ADR 0028 amendment](adr/0028-sbi-shinsei-observed-capture-shapes.md#amendment-2026-09-27-the-two-trailing-characters-are-letters-parser-102)):
+
+- **Replay diagnostics after 1.0.1.** `sbi-shinsei-exchange-rate`: 17 boards
+  selected, 17 refused, all with "provider timestamp format is not
+  recognized"; 33 `error` and 0 `ok` parse runs of the parser; all 17 are
+  importer-era captures. `sbi-shinsei-top-balances-and-activity`: 0 selected
+  (54 `error`, 29 `ok` and 29 published parse runs; no artifact still failing),
+  so 0.1.2 resolved the activity refusals.
+- **The stored `transactionTime`** is `dddd/dd/dd dd:dd:dd aa`: 22 characters,
+  a time with seconds, a space and two letters. The entry below wrote it as
+  `NNNN/NN/NN NN:NN:NN NN`, and 1.0.1 read each `N` as a digit; it matched no
+  stored board.
+- **Screens.** The logged-in top shows 5 currencies (mid rate only); the FX
+  savings page and the public rate page show 13 (USD, EUR, CAD, AUD, GBP, NZD,
+  SGD, HKD, ZAR, NOK, CNY, TRY, BRL). Their times are minute precision with no
+  trailing letters. CHF and JPY are on no screen; no per-100 unit is shown, and
+  the public pages state fees and rates per 1 base currency unit, in yen.
+
+1.0.2 matches the letter shape exactly (either case) and refuses the digit
+form again; migration 0059 moves the board's policy row to 1.0.2, and the
+repair lane re-parses the stored boards after deploy. The letters' meaning,
+the owner's tier and the board's own time stay unknown; no FX price is
+admitted.
+
+## GLOBAL PASS activity pages paginate; the collector keeps page 1 (collector, no parser release)
+
+Observed on 2026-09-27 by the owner's agent on the live Account Activities
+screen, structure and counts only
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes),
+[source note](sources/prestia.md#global-pass-activity-pages-and-refusals-2026-09-27)):
+a month with more than ten statements shows `Found N Result [p/Ppage] Back
+Next` with ten statement blocks per page; five of 15 months had two pages. The
+collector sends one `page.content()` per month and follows no Next link, so
+for such a month it can store page 1 only. It now marks that month
+`activity_pages_unwalked` and the run `partial`. No parser changed:
+`global-pass-activity` reads no pager and would take page 1 as the month, but
+it sees no shared GLOBAL PASS run, whose unit stays `partial`. Separately,
+in each of the seven nightly runs before 2026-09-27 both months were refused by the
+sanitizer; the refusal is now recorded as one of four closed codes, and which
+one it is has not been observed yet. A stored capture stating 16 results with
+16 rows and no pager is not reconciled with the live behaviour.
+
 ## Vpass stated-total fields on the live site (collector, no parser release)
 
 Observed on 2026-09-27 by the owner's agent on the live web statement page
@@ -98,7 +143,8 @@ What the releases do, and what they leave unknown:
   `(currency, customerCategory)`, the claim expecting rows × 3 over all
   tiers), skips a JPY row with an `info` `row_unreadable` issue of impact
   `none`, and for a `transactionTime` of the observed 22-character shape
-  (digits and separators only; any other unrecognised form still fails)
+  (digits and separators only, which no stored board has: see 1.0.2 above;
+  any other unrecognised form still fails)
   writes no provider time,
   marks `_kogane.providerTimeBasis: "unrecognized"` and records one `info`
   `unknown_fields_preserved` issue without the value. Readers use the fetch

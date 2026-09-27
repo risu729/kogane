@@ -889,15 +889,31 @@ Processor maps it to the CORE source `global-pass`), producer
   the seal with `run_inventory_incomplete`). `ranges`: one `requested` range
   plus one `declared_coverage` month range per stored page.
 - **Coverage is `partial` even on success, for the run and the unit.** The
-  provider exposes a rolling window of statement months, and whether one
-  month's activity page holds the whole month has not been observed
-  (`paginationStatus: unproven`), so a finished run is a claim about
-  persistence, never about the account's history or a whole month. The
-  `partial` unit registers as the unit outcome `partial`, so a successful run
-  is `partial` in `observation_fetch_runs` and `not_eligible` for parse jobs:
-  shared-R2 GLOBAL PASS runs are not parsed. Changing that needs the
-  pagination observed or confirmed first
-  ([ADR 0026](adr/0026-collector-unit-coverage.md#consequences)).
+  provider exposes a rolling window of statement months, and the collector
+  keeps only the page a month selection renders (`paginationStatus:
+first_page_only`): the container sends `page.content()` once per month and
+  follows no Next link, while a month with more than ten statements shows
+  `Found N Result [p/Ppage] Back Next` and at most ten statements per page (observed
+  2026-09-27). A page with no pager is not proven to hold the whole month.
+  So a finished run is a claim about persistence, never about the account's
+  history or a whole month. The `partial` unit registers as the unit outcome
+  `partial`, so a successful run is `partial` in `observation_fetch_runs` and
+  `not_eligible` for parse jobs: shared-R2 GLOBAL PASS runs are not parsed
+  ([ADR 0026](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes)).
+- Pages: before sanitizing, the Worker reads `N` and `p/P` from the page's
+  visible text and logs `globalpass-activity-pages` (the month's position in
+  the run, `statedTotal`, `pageIndex`, `pageCount`; never the month or any
+  text). A page stating more than one page is stored if the sanitizer accepts
+  it, and gets the failure `pagination` / `activity_pages_unwalked` (or
+  `activity_pager_unreadable` when its pagers or totals disagree), which makes
+  the run `partial`. Walking Next is not implemented.
+- Failure entries keep four keys: `operation`, `errorType`, `errorCode`,
+  `artifactKey`. A page the sanitizer refuses is `sanitization` /
+  `GlobalPassSanitizerError` with the check's closed code:
+  `globalpass_html_contract_invalid`, `globalpass_html_redaction_failed`,
+  `globalpass_html_shape_unreviewed` or `globalpass_html_utf8_invalid`. The
+  same code is the `artifact-write` diagnostic line's `code`, and the first
+  failure's code is the terminal's and the unit's `safeErrorCode`.
 - `transformations`: one `redacted` step per page
   (`globalpass-activity-sanitizer`); the unredacted page is never retained, so
   it has no artifact key.

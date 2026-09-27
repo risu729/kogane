@@ -163,7 +163,165 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
     expect(r.response.status).toBe(200);
     expect(r.manifest?.status).toBe("success");
     expect(r.manifest?.captureComplete).toBe(true);
-    expect(r.manifest?.paginationStatus).toBe("unproven");
+    expect(r.manifest?.paginationStatus).toBe("first_page_only");
     expect(r.destroyed).toBe(1);
+  });
+});
+
+// Each of the sanitizer's four refusals, driven through the Worker from the
+// container stream. The pages carry `private-` markers where a provider value
+// would be; none may reach a log line, the manifest or DATA.
+const refusals: Array<{ code: string; html: () => string }> = [
+  {
+    code: "globalpass_html_contract_invalid",
+    html: () =>
+      fixtureHtml().replace(
+        "</body>",
+        '<input type="password" id="password" value="private-password-field"></body>',
+      ),
+  },
+  {
+    code: "globalpass_html_redaction_failed",
+    // A `nablarch_hidden` input without `type="hidden"`: redacted, but not
+    // counted by the shape, so the counts disagree.
+    html: () =>
+      fixtureHtml().replace(
+        "</body>",
+        '<input name="nablarch_hidden" value="private-untyped-state"></body>',
+      ),
+  },
+  {
+    code: "globalpass_html_shape_unreviewed",
+    html: () => fixtureHtml().replace('<input type="hidden" name="nablarch_submit" value="1">', ""),
+  },
+  {
+    code: "globalpass_html_utf8_invalid",
+    html: () => fixtureHtml().replace("</body>", "\ud800</body>"),
+  },
+];
+
+describe("GLOBAL PASS sanitizer refusals carry their closed code", () => {
+  for (const refusal of refusals) {
+    test(refusal.code, async () => {
+      const r = await run([
+        metadata,
+        { type: "artifact", month: "2099-02", html: refusal.html() },
+        { ...artifact, month: "2099-01" },
+      ]);
+      expect(r.manifest?.status).toBe("partial");
+      expect(r.manifest?.artifacts.map((a) => a.month)).toEqual(["2099-01"]);
+      expect(r.manifest?.failures).toEqual([
+        {
+          operation: "sanitization",
+          errorType: "GlobalPassSanitizerError",
+          errorCode: refusal.code as CollectionManifest["failures"][number]["errorCode"],
+          artifactKey: "activity-2099-02.html",
+        },
+      ]);
+      const events = r.logs.map((line) => JSON.parse(line) as Record<string, unknown>);
+      const failed = events.filter((e) => e.stage === "artifact-write" && e.outcome === "failed");
+      expect(failed).toHaveLength(1);
+      expect(failed[0]).toMatchObject({
+        event: "collector-diagnostic",
+        source: "prestia-globalpass",
+        category: "response",
+        errorType: "GlobalPassSanitizerError",
+        code: refusal.code,
+      });
+      // The run's terminal carries the code as its safe error code.
+      const stored = [...r.stored.values()].map((bytes) => new TextDecoder().decode(bytes));
+      const terminal = stored.find((body) => body.includes('"safeErrorCode"'));
+      expect(terminal).toContain(`"safeErrorCode":"${refusal.code}"`);
+      // Nothing of the refused page leaves: no marker, no password field, no
+      // page heading, anywhere in the logs, the manifest or DATA.
+      for (const text of [r.logs.join("\n"), JSON.stringify(r.manifest), ...stored]) {
+        expect(text).not.toContain("private-");
+        expect(text).not.toContain('type="password"');
+      }
+      expect([r.logs.join("\n"), JSON.stringify(r.manifest)].join("\n")).not.toContain(
+        "ご利用明細",
+      );
+    });
+  }
+});
+
+describe("GLOBAL PASS pages that state more pages are not a whole month", () => {
+  const paged = (pager: string) =>
+    fixtureHtml().replace(
+      "</body>",
+      `<div>Found 16 Result</div><div>${pager} <a href="javascript:void(0);">Back</a> <a href="javascript:void(0);">Next</a></div></body>`,
+    );
+
+  test("page 1 of 2 is kept, and the month and run are partial with a closed code", async () => {
+    const r = await run([
+      metadata,
+      { type: "artifact", month: "2099-02", html: paged("[1/2page]") },
+      { ...artifact, month: "2099-01" },
+    ]);
+    expect(r.response.status).toBe(502);
+    expect(r.manifest?.status).toBe("partial");
+    expect(r.manifest?.captureComplete).toBe(false);
+    expect(r.manifest?.artifacts.map((a) => a.month)).toEqual(["2099-02", "2099-01"]);
+    expect(r.manifest?.failures).toEqual([
+      {
+        operation: "pagination",
+        errorType: "PaginationError",
+        errorCode: "activity_pages_unwalked",
+        artifactKey: "activity-2099-02.html",
+      },
+    ]);
+    const pages = r.logs
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((e) => e.event === "globalpass-activity-pages");
+    expect(pages).toEqual([
+      {
+        event: "globalpass-activity-pages",
+        runId: r.manifest!.runId,
+        monthIndex: 0,
+        statedTotal: 16,
+        pageIndex: 1,
+        pageCount: 2,
+        errorCode: "activity_pages_unwalked",
+      },
+      {
+        event: "globalpass-activity-pages",
+        runId: r.manifest!.runId,
+        monthIndex: 1,
+        statedTotal: null,
+        pageIndex: null,
+        pageCount: null,
+      },
+    ]);
+    // The log lines name a month by its position only.
+    expect(r.logs.join("\n")).not.toContain("2099-");
+  });
+
+  test("a refused page still reports that it was one of several", async () => {
+    const r = await run([
+      metadata,
+      {
+        type: "artifact",
+        month: "2099-02",
+        html: paged("[1/2page]").replace(
+          '<input type="hidden" name="nablarch_submit" value="1">',
+          "",
+        ),
+      },
+      { ...artifact, month: "2099-01" },
+    ]);
+    expect(r.manifest?.failures.map((f) => [f.operation, f.errorCode])).toEqual([
+      ["sanitization", "globalpass_html_shape_unreviewed"],
+      ["pagination", "activity_pages_unwalked"],
+    ]);
+  });
+
+  test("a one-page pager states no further page", async () => {
+    const r = await run([
+      metadata,
+      { type: "artifact", month: "2099-02", html: paged("[1/1page]") },
+      { ...artifact, month: "2099-01" },
+    ]);
+    expect(r.manifest?.status).toBe("success");
+    expect(r.manifest?.failures).toEqual([]);
   });
 });

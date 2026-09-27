@@ -341,7 +341,7 @@ test("a tampered row is refused, a pending parse holds the cursor, and a tick st
 test("a tiered board with an unrecognised time: nothing promotes until an admission names a tier", async () => {
   // The stored boards' shape (ADR 0028): 13 currencies in 5 customerCategory
   // tiers, CHF in one, a JPY row and a 22-character transactionTime. Parsed
-  // by the deployed 1.0.1 through the sweep.
+  // by the deployed 1.0.2 through the sweep.
   const fetchedMs = Date.parse("2026-09-08T00:02:00.000Z");
   await seedArtifact(
     env,
@@ -356,7 +356,7 @@ test("a tiered board with an unrecognised time: nothing promotes until an admiss
   await env.DB.prepare("UPDATE observation_scan_state SET cursor=0").run();
   await sweep(env);
   const run = (await env.DB.prepare(
-    "SELECT id FROM parse_runs WHERE fetch_artifact_id=720 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.1' AND status='ok'",
+    "SELECT id FROM parse_runs WHERE fetch_artifact_id=720 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.2' AND status='ok'",
   ).first<number>("id"))!;
   expect(run).toBeGreaterThan(0);
   expect(
@@ -439,7 +439,7 @@ test("a numeric tier promotes only under an admission of the same number, never 
   await env.DB.prepare("UPDATE observation_scan_state SET cursor=0").run();
   await sweep(env);
   const run = (await env.DB.prepare(
-    "SELECT id FROM parse_runs WHERE fetch_artifact_id=721 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.1' AND status='ok'",
+    "SELECT id FROM parse_runs WHERE fetch_artifact_id=721 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.2' AND status='ok'",
   ).first<number>("id"))!;
   expect(run).toBeGreaterThan(0);
   expect(
