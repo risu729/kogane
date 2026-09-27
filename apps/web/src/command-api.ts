@@ -29,6 +29,7 @@ export const COMMAND_KIND_LABELS: Readonly<Record<string, string>> = {
   "card-refund.withdraw": "返金の充当を取り消す",
   "card-installment.link": "分割払いの後続回を支払計画に紐付け",
   "card-installment.unlink": "分割払いの後続回の紐付けを解除",
+  "identity.crosswalk.accept": "旧取込と収集器の口座識別子を同一口座として確定",
 };
 
 export interface PlanTargetView {

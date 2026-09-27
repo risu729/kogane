@@ -9,9 +9,11 @@
 import type { ChangeKind, ChangePayload, ExpectedRevisions } from "../command/contract.ts";
 import type {
   IdentityAssignPayload,
+  IdentityCrosswalkPayload,
   IdentityReleasePayload,
   RelationPayload,
 } from "../command/contract.ts";
+import { crosswalkSubjectRef } from "../../../storage-d1/src/core/identity-crosswalk.ts";
 
 export function identitySubjectRef(subject: "account" | "instrument", referenceId: string): string {
   return `${subject === "account" ? "account_mapping" : "instrument_mapping"}:${referenceId}`;
@@ -28,6 +30,10 @@ export function subjectRefOf(kind: ChangeKind, payload: ChangePayload): string {
       (payload as IdentityReleasePayload).subject,
       (payload as IdentityReleasePayload).referenceId,
     );
+  if (kind === "identity.crosswalk.accept") {
+    const crosswalk = payload as IdentityCrosswalkPayload;
+    return crosswalkSubjectRef(crosswalk.source, crosswalk.fromRef, crosswalk.toRef);
+  }
   return relationSubjectRef(payload as RelationPayload);
 }
 

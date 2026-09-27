@@ -140,10 +140,22 @@ Concrete limits in the current code:
   replaces the importer's snapshot of that month, and the collector's source
   account maps to the importer-era account entity by rule. Under a new key
   every account is new, and the months both producers captured are listed
-  under two source accounts in the transactions read until a decision says
-  otherwise. Whether the provider's detail pages still carry the tuple
-  has not been observed since the importer was retired
+  under two source accounts in the transactions read. Whether the provider's
+  detail pages still carry the tuple has not been observed since the
+  importer was retired
   ([ADR 0027](adr/0027-moneyforward-collector-account-identity.md)).
+- A Vpass card or MoneyForward account whose collector value differs from the
+  importer's is a second account entity until the operator records a
+  one-time crosswalk (`identity.crosswalk.accept`,
+  [ADR 0030](adr/0030-identity-crosswalk.md)); a read-only script proposes
+  them from rows both producers captured. Only a one-to-one overlap can be
+  recorded: a card or account whose collector capture shares no stored row
+  with the importer's, or shares rows with more than one value, stays split,
+  and no command undoes a recorded crosswalk. It joins entities only: the
+  MoneyForward months both producers captured are still listed twice in the
+  transactions read, now under one entity. No collector Vpass row is parsed
+  yet, so no Vpass crosswalk can be proposed until the statement pages are
+  released. No proposal has been run against production.
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
   email route), V Point Pay and GLOBAL PASS had no registered collector run
   between 2026-09-12 and the release that carries

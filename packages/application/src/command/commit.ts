@@ -289,9 +289,11 @@ async function failureReason(
   if (stored && stored.status !== "planned" && stored.status !== "approved")
     return commandError("plan_not_open", [plan.planId]);
   // A review kind's eligibility is its planner's: re-simulating names the
-  // blocker (or `unsupported_semantics` while no planner is registered).
+  // blocker (or `unsupported_semantics` while no planner is registered). A
+  // crosswalk's is the overlap its reservation re-measured (ADR 0030).
   if (
     plan.kind === "card-settlement.accept" ||
+    plan.kind === "identity.crosswalk.accept" ||
     isCardReviewKind(plan.kind) ||
     ((plan.kind === "relation.accept" || plan.kind === "relation.reject") &&
       (ownershipReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||

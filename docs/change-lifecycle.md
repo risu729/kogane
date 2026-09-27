@@ -12,14 +12,15 @@ configuration. The command kinds are a closed list in code (`CHANGE_KINDS`,
 `packages/application/src/command/contract.ts`), and the `change_plans.kind`
 and `operation_receipts.operation_kind` CHECK constraints admit exactly the same list:
 
-| Kinds                                                                          | Since | Plannable                                                                        |
-| ------------------------------------------------------------------------------ | ----- | -------------------------------------------------------------------------------- |
-| `identity.assign`, `identity.release-override`                                 | 0031  | yes                                                                              |
-| `relation.accept`, `relation.reject`                                           | 0031  | yes                                                                              |
-| `card-settlement.accept`, `card-settlement.reject`, `card-settlement.withdraw` | 0045  | yes ([card settlements](card-settlements.md))                                    |
-| `card-purchase.exclude`, `card-purchase.restore`                               | 0051  | no: [refused](#card-purchase-review-kinds-migration-0051) until a planner exists |
-| `card-refund.allocate`, `card-refund.withdraw`                                 | 0051  | no: refused until a planner exists                                               |
-| `card-installment.link`, `card-installment.unlink`                             | 0051  | no: refused until a planner exists                                               |
+| Kinds                                                                          | Since | Plannable                                                                                                                |
+| ------------------------------------------------------------------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------ |
+| `identity.assign`, `identity.release-override`                                 | 0031  | yes                                                                                                                      |
+| `relation.accept`, `relation.reject`                                           | 0031  | yes                                                                                                                      |
+| `card-settlement.accept`, `card-settlement.reject`, `card-settlement.withdraw` | 0045  | yes ([card settlements](card-settlements.md))                                                                            |
+| `card-purchase.exclude`, `card-purchase.restore`                               | 0051  | no: [refused](#card-purchase-review-kinds-migration-0051) until a planner exists                                         |
+| `card-refund.allocate`, `card-refund.withdraw`                                 | 0051  | no: refused until a planner exists                                                                                       |
+| `card-installment.link`, `card-installment.unlink`                             | 0051  | no: refused until a planner exists                                                                                       |
+| `identity.crosswalk.accept`                                                    | 0058  | yes ([identity operations](identity-operations.md#joining-importer-era-and-collector-era-identities-one-time), ADR 0030) |
 
 ## The four steps
 
@@ -56,13 +57,13 @@ the run is published.
 
 `expectedRevisions` is `{ subjectRef: revision }`:
 
-| Subject prefix                  | Meaning                        | "Current revision" is                                   |
-| ------------------------------- | ------------------------------ | ------------------------------------------------------- |
-| `account_mapping:`              | a `source_accounts.id`         | `max(account_mappings.revision)` for that reference     |
-| `instrument_mapping:`           | an `instrument_identifiers.id` | `max(instrument_mappings.revision)` for that identifier |
-| `relation:<kind>\|<from>\|<to>` | one typed relation triple      | the number of `entity_relations` rows for the triple    |
-| `proposal:`                     | a reconciliation proposal      | the highest revision of its `proposal:<id>` decisions   |
-| `card-purchase:`                | a recognised card purchase     | the event's live revision, 0 when it has none           |
+| Subject prefix                  | Meaning                                                                                                               | "Current revision" is                                   |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `account_mapping:`              | a `source_accounts.id`                                                                                                | `max(account_mappings.revision)` for that reference     |
+| `instrument_mapping:`           | an `instrument_identifiers.id`                                                                                        | `max(instrument_mappings.revision)` for that identifier |
+| `relation:<kind>\|<from>\|<to>` | one typed relation triple                                                                                             | the number of `entity_relations` rows for the triple    |
+| `proposal:`                     | a reconciliation proposal, or an identity crosswalk (`proposal:identity-crosswalk\|<source>\|<old>\|<new>`, ADR 0030) | the highest revision of its `proposal:<id>` decisions   |
+| `card-purchase:`                | a recognised card purchase                                                                                            | the event's live revision, 0 when it has none           |
 
 A subject with no history answers `0`. The check is **not** a preceding
 `SELECT`: `expectedRevisionsSql()` is a condition of the receipt-reservation

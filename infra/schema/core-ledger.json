@@ -764,6 +764,29 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "754decfb005229b96c6cc95770dc68c361ad335ce5b96ec5b326f60c756f4dd9"
+    },
+    {
+      "file": "0058_identity_crosswalk.sql",
+      "statementCount": 37,
+      "insertStatements": [
+        {
+          "table": "change_plans_expanded",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "approvals_expanded",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "operation_receipts_expanded",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "decision_outbox_expanded",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "88a5d49db61df19fd96c9686cc5e1ece8157fe6c67c358ab1d95f527c1befb01"
     }
   ],
   "tables": [
@@ -937,6 +960,114 @@
       ],
       "appendOnly": true,
       "sqlSha256": "e423fd2791084cc9"
+    },
+    {
+      "name": "account_identity_crosswalk",
+      "classification": "core-keep",
+      "planRow": "decisions and relations",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "from_account_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "to_account_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "decision_revision_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "operation_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "decision_revision_id",
+          "references": "decision_revisions(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "operation_id",
+          "references": "decision_operations(operation_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "source_id",
+          "references": "sources(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "account_identity_crosswalk_no_delete",
+        "account_identity_crosswalk_no_update"
+      ],
+      "noUpdateTriggers": [
+        "account_identity_crosswalk_no_update"
+      ],
+      "noDeleteTriggers": [
+        "account_identity_crosswalk_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "50fe9a150e59ce5b"
     },
     {
       "name": "account_mappings",
@@ -3485,7 +3616,7 @@
         "change_plans_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "b5743863b77a8a25"
+      "sqlSha256": "9d0ed8ed469fece7"
     },
     {
       "name": "collection_run_stages",
@@ -9094,7 +9225,7 @@
         "operation_receipts_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "7f835188bb1019aa"
+      "sqlSha256": "eefe9086d7464e4c"
     },
     {
       "name": "ops_request_stages",
@@ -13594,6 +13725,20 @@
       "sqlSha256": "bab0607b3a2e4a2f"
     },
     {
+      "name": "account_identity_crosswalk_no_delete",
+      "table": "account_identity_crosswalk",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "b8b8623e99683422"
+    },
+    {
+      "name": "account_identity_crosswalk_no_update",
+      "table": "account_identity_crosswalk",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "8578f019ad92660a"
+    },
+    {
       "name": "account_mapping_revision",
       "table": "account_mappings",
       "timing": "BEFORE",
@@ -16953,13 +17098,14 @@
     }
   ],
   "summary": {
-    "tableCount": 113,
+    "tableCount": 114,
     "viewCount": 39,
-    "triggerCount": 403,
+    "triggerCount": 405,
     "explicitIndexCount": 114,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
+        "account_identity_crosswalk",
         "account_mappings",
         "accounts",
         "acquisition_sessions",
@@ -17165,8 +17311,9 @@
       "0046_st_george_balance_snapshot.sql",
       "0047_card_purchase_recognition.sql",
       "0051_card_purchase_review_commands.sql",
-      "0053_price_promotion.sql"
+      "0053_price_promotion.sql",
+      "0058_identity_crosswalk.sql"
     ],
-    "schemaSha256": "d65145c8d90bcaac99e40f66cfdbabe242eb4ce8fa357ac087aff7d942c0f759"
+    "schemaSha256": "5fc6d2090534e7f6bb6af56efc247f72185a5e1909f63e58f9e76eae27100321"
   }
 }
