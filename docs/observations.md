@@ -37,8 +37,9 @@ one exact reader, and the synthetic fixtures state `allCnt` as a string and
 `pageNo`, `lastPage`, `rowCnt`, `limitCnt`, `dispCnt`, `prevPageRow` and
 `responseCnt`, which the walk therefore does not read; the type and meaning
 of `nextPageRow`, which the walk compares with `allCnt` and sends back as the
-next page's cursor, as it did before; and whether any live month logs `stated_total_unverified` or
-`stated_total_mismatch`, which the next collection's persist diagnostic shows.
+next page's cursor, as it did before; and whether any live month logs
+`stated_total_unverified` or `stated_total_mismatch`, which the next
+collection's persist diagnostic shows.
 
 ## SBI Shinsei stored-capture shapes (activity parser 0.1.2, board parser 1.0.1)
 

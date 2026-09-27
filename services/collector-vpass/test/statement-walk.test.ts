@@ -193,6 +193,21 @@ describe("the finalized walk stops on its stated total when `allCnt` is a string
     expect(requests).toHaveLength(2);
     expect(await monthCoverage(capture)).toBe("stated_total_unverified");
   });
+  test("a negative or over-long stated count no longer stops the walk: it is no count", async () => {
+    // Before `providerCount`, the walk read any integer number and any digit
+    // string of any length, so a negative `allCnt` stopped it after one page.
+    // Now such a value is no count: the walk runs to its first empty page and
+    // the month check reports the month unverified.
+    for (const allCnt of [-1, "00000000000000000002"]) {
+      const { post, requests } = scripted([
+        finalizedPage(2, { allCnt, nextPageRow: "3" }),
+        finalizedPage(0, { allCnt, nextPageRow: "5" }),
+      ]);
+      const capture = await collectMonth(post, "202609");
+      expect([allCnt, requests.length]).toEqual([allCnt, 2]);
+      expect(await monthCoverage(capture)).toBe("stated_total_unverified");
+    }
+  });
 });
 
 describe("the customized walk stops on its stated numeric `total`", () => {

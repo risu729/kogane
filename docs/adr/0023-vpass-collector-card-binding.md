@@ -524,7 +524,14 @@ the cause is how the value is read, which this note checks.
   decimal point, full-width digits or an unsafe value is no count (the walk
   treats it as absent, the check reports `stated_total_unverified`). Before
   this, the walk and the clients accepted any digit string, however long, and
-  any integer number, negative or unsafe.
+  any integer number, negative or unsafe. What follows from the stricter read
+  on such a value: a finalized `allCnt` or `nextPageRow` no longer triggers
+  the stated-total stop, so the walk runs to its first empty page (or fails
+  the card on a bad cursor); a customized `total` falls back to the rows
+  counted so far; a `pageSize` falls back to 100 rows instead of being
+  clamped to 1. The month check's only change is one digit wider: a 16-digit
+  string that is a safe integer is now read, where its old reader stopped at
+  15 digits.
 - The Worker's month walk moves unchanged from `src/worker.ts` to
   `src/statement-walk.ts` so it can be driven by a synthetic provider. What
   it does, stated precisely (option 7 above described only its fallback): a
@@ -551,8 +558,8 @@ the cause is how the value is read, which this note checks.
   `pageNo`, `lastPage`, `rowCnt`, `limitCnt`, `dispCnt`, `prevPageRow` or
   `responseCnt`. A finalized page where the stated-total stop does not fire
   and whose `nextPageRow` is missing, empty or repeats an earlier cursor, and
-  that is not an empty page after the first, fails the card (`invalid page
-cursor`). The meaning of `nextPageRow` (read as the next
+  that is not an empty page after the first, fails the card with
+  `invalid page cursor`. The meaning of `nextPageRow` (read as the next
   page's first row) and the type of every field except `allCnt` and `total`
   have not been observed.
 
@@ -568,7 +575,10 @@ cursor`). The meaning of `nextPageRow` (read as the next
   `allCnt` is not a count ends on its first empty page as
   `stated_total_unverified`. The customized walk, with a numeric `total`,
   stops at the total without another request, and an empty answer page short
-  of it is `stated_total_mismatch`.
+  of it is `stated_total_mismatch`. A negative or over-long `allCnt`, which
+  the old reader took as a count and stopped on, now walks to the first empty
+  page and is `stated_total_unverified` (added in review; it fails against
+  the old reader).
 - `services/collector-vpass/test/shared-collection.test.ts`: the fixtures'
   `allCnt` is a string; a stated total reads the same as a number or a digit
   string; nine malformed strings are `stated_total_unverified`.
