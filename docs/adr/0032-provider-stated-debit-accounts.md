@@ -11,10 +11,9 @@
   (data classes b and c), [ADR 0004](0004-payment-type-shapes-from-evidence.md)
   (unobserved provider semantics stay unsupported),
   [ADR 0001](0001-domain-axes.md) (INV07: heuristics only propose)
-- Waits for: the round-4 observation of the MyJCB statement page's
-  transfer-account block (its labels, whether bank and branch names or codes
-  appear, the mask pattern of the account number) and of whether any Vpass
-  statement API carries a payment-account field.
+- Amended: [2026-09-27](#amendment-2026-09-27-the-observed-shapes), with the
+  round-4 observation this decision waited for: MyJCB shows a bank name, a
+  branch name and the leading digits; Vpass shows no debit account.
 
 ## Context
 
@@ -182,3 +181,156 @@ wiring and the review-page display wait for the round-4 shapes.
   bank/branch rendering and mask; any
   Vpass payment-account field; the relation between SBI Shinsei `accountNo`
   and a displayed account number. These wait for the round-4 observations.
+
+## Amendment 2026-09-27: the observed shapes
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-27
+- Carried by:
+  `packages/domain/src/myjcb-card-information.ts` (`readMyJcbCardInformation`),
+  `packages/domain/src/card-debit-account.ts` (policy
+  `card-debit-account-statement-v2`),
+  `services/processor/src/card-debit-account-job.ts` (the
+  `card_debit_account_sweep` lane),
+  `services/processor/src/card-settlement-job.ts` (evidence on candidates),
+  migration `0060_card_debit_account_statements.sql`,
+  [card settlements: provider-stated debit accounts](../card-settlements.md#provider-stated-debit-accounts),
+  [MyJCB source note](../sources/myjcb.md)
+- Related: [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
+  (class d: the holder name)
+
+### Context
+
+The round-4 observation this ADR waited for was made on 2026-09-27
+(structure and counts only, no value recorded):
+
+- **MyJCB.** The statement page (`detail.html?detailMonth=N`, confirmed month)
+  has no 「カード・お振替情報」 or お振替口座 block. The debit account is under an
+  `h3.hdg-H3` heading 「カード情報」 after the ledger grid, in
+  `div.detail-lyt-02.border-01 > div.col-01 > table.table-data`, a table of
+  vertical th/td rows: カード名称 (product name), カード発行会社 (issuer),
+  金融機関名 (bank name, text), 支店名 (branch **name**, text; no branch code),
+  科目・口座番号 (「普通 ####\*\*\*」 in shape: 普通 or 当座, a space, the
+  **first** four digits, the last three masked with `*`), and 口座名義 (the
+  holder's name, partly masked). The same table is on the
+  ショッピングスキップ払い page (menu position 8).
+- **Stored evidence.** The same table, with the same value shapes, is in the
+  stored redacted HTML (`credit-detail-01.html`; three captures of it have
+  identical digests). The redaction keeps body text, so the bank name,
+  branch name, masked number and partly masked holder name are already in
+  stored evidence.
+- **Vpass.** None of the statement APIs (`web_meisai_top/v1`,
+  `dropdownlist_init/v1`, `meisai_ans/v1`, `xt_seikyu/v1`) carries a bank,
+  branch or debit-account field, for any of the seven cards (two bean
+  families). The only account-looking keys, `webMeisaiTopK3Vo.accountNo`
+  (fully masked) and `webMeisaiTopK3Vo.accountOvly` (one letter and three
+  digits), are card-side identifiers.
+
+Two assumptions of the decision above are wrong for MyJCB: the visible
+digits are the leading ones, not the trailing ones, and the branch is a name,
+not a code. The bank side was checked for branch names: no bank reference
+(`mizuho-bank:ordinary:<code>:<account>`, `smbc-bank:ordinary-yen`,
+`sbi-shinsei:<accountNo>`) carries one. The Mizuho account-list parser keeps
+the provider's branch name in its observation `extra`, but only a synthetic
+fixture shows its rendering, so whether it can equal MyJCB's rendering is
+unobserved.
+
+### Options considered
+
+1. **Keep ADR 0032's rule and map MyJCB onto it.** Treat the four digits as
+   trailing digits. Rejected: it would propose the wrong account whenever an
+   account ends in the digits another begins with.
+2. **Compare branch names with Mizuho's `extra.branchName`.** It would
+   separate two accounts with the same leading digits. Rejected for now: the
+   renderings have never been compared (ADR 0004), and Mizuho is not a debit
+   adapter, so it would change no candidate.
+3. **Prefix rule, bank by name through an explicit table, account type
+   compared, branch carried but not compared (chosen).**
+
+### Decision
+
+- **Reader.** `readMyJcbCardInformation` finds the 「カード情報」 table by text,
+  not by the observed class names, which are layout: the one heading element
+  (h1-h6) whose text is 「カード情報」, then the first table after it, read by
+  its th labels: the bank name, the branch name, the 科目 (普通 or 当座), exactly four
+  ASCII leading digits and the number of `*` after them. It checks the labels
+  of カード名称, カード発行会社 and 口座名義 and never reads their values: the
+  holder name is ADR 0029 class d, and its removal from stored pages is
+  [#333](https://github.com/risu729/kogane/pull/333). Any other shape is a closed refusal code, never a partial
+  reading (INV05). The reader lives in `packages/domain` beside
+  `readMyJcbStatementPage` and takes a parse5 tree, so the processor can use
+  it; the collector does not need it, because the redacted page already
+  stores the table.
+- **Observation.** A new processor lane, `card_debit_account_sweep`, under
+  `RECONCILIATION_ENABLED` and right before `card_settlement_sweep`, reads
+  pages whose `myjcb-credit-statement-total` parse is published and writes
+  one append-only `card_debit_account_statement` row per card, raw object and
+  reader version (migration 0060): `read` with the displayed values, or
+  `refused` with the code and no value. It is a table of its own rather than
+  a new observation kind, so no parser, parser digest or observation union
+  changes. The fact reference is `typed-claim`
+  `card_debit_account_statement:<id>` at revision
+  `reader:<reader version>`.
+- **Rule** (policy `card-debit-account-statement-v2`). The displayed bank name
+  resolves to a source id only through a table in code of the banks Kogane
+  models (みずほ銀行, 三井住友銀行, SBI新生銀行, ソニー銀行, compared after NFKC
+  and whitespace removal); anything else is `bank_not_resolved`. 普通 is
+  `ordinary`, 当座 is `current`, anything else `account_type_not_resolved`.
+  A relation is proposed when exactly one known account at the bank has the
+  same account type and an account number that **starts with** the leading
+  digits, and every known account at the bank is comparable. The rationale
+  codes are `provider_stated_debit_account`, `bank_agrees`,
+  `account_type_agrees`, `branch_not_compared`, `leading_digits_agree`,
+  `unique_among_known_accounts`; `branch_code_agrees` and
+  `trailing_digits_agree` are retired with the v1 policy. The display type
+  names the mask direction (`leadingDigits`, `maskedDigitCount`) and drops
+  `branchCode` and `maskedAccountNumber`, which MyJCB does not show.
+- **Settlement sweep.** For each MyJCB candidate the sweep reads the reading
+  of the page its statement total was parsed from and appends what the rule
+  says about the candidate to `card_settlement_debit_account_evidence`:
+  `supports`, `names_other_account` or `not_proposed` with the reason, only
+  when that differs from the candidate's latest row. The candidate's facts
+  and digest do not include it, so no candidate is duplicated or changed and
+  eligibility is exactly as before (INV07). This settles the question left
+  open above: the relation stays evidence cited beside the candidate, with no
+  command of its own.
+- **Vpass** is recorded as observed absent: no reader and no statement.
+
+### Consequences
+
+- MyJCB candidates carry evidence rows. With the bank references Kogane has
+  today, a page naming an adapter bank is `no_comparable_bank_account`, and a
+  page naming Mizuho can at most be `names_other_account`: nothing
+  `supports` a candidate until an adapter bank's reference carries the
+  displayed account number.
+- The evidence is not shown on the review page: that needs a field in the
+  published review contract and the web page, a later change.
+- Branch names are stored and never compared, so two known accounts at one
+  bank with the same four leading digits are `ambiguous_accounts`.
+- The stored table adds the bank name, branch name, 科目 and four digits to
+  CORE (ADR 0029 classes b/c); the holder name is never stored. Logs and tick
+  records carry counts only.
+
+### Verification
+
+- `packages/domain/test/card-debit-account.test.ts`: the bank-name table and
+  account types; a unique prefix match is proposed with the listed codes; an
+  account ending in the digits is not; two accounts sharing the prefix are
+  ambiguous whatever their branch; the account type must agree; missing parts
+  are closed reasons; the evidence outcomes and an unchanged candidate.
+- `services/processor/test/card-debit-account.test.ts`: the reader on
+  synthetic tables (values, every refusal, holder and card names never read);
+  the table found by heading text and labels without class names; bank names
+  with collapsed whitespace resolved after NFKC; the lane (one row per card
+  and raw object, none for an unpublished page or on a re-run, refusals
+  without values, bytes failing their digest refused as
+  `raw_object_unreadable`, a key the table cannot hold never selected,
+  append-only guards and the value check); the evidence trigger refusing a
+  reading of another card; the sweep (a `names_other_account` row, no row appended for the same
+  outcome, a new row for a changed one, the candidate's facts and eligibility
+  unchanged, `no_comparable_bank_account` for a bank without comparable
+  references).
+- Not verified: the reader against a stored production page (the synthetic
+  table mirrors the reported shape); whether Mizuho's branch-name rendering
+  equals MyJCB's; the relation between the mask length and a bank's account
+  number length.

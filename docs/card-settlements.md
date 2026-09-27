@@ -60,9 +60,9 @@ SMBC debit, none is accepted, and there is no published SBI Shinsei
 transaction: every stored capture of the SBI Shinsei activity page was
 rejected by its parser (closed code `parser_rejected`), so the SBI Shinsei
 adapter admits nothing until the parser accepts them. A card provider's own
-statement of the debit account is the designed evidence for this pairing
-([Provider-stated debit accounts](#provider-stated-debit-accounts)); no reader
-produces it yet.
+statement of the debit account is recorded beside each MyJCB candidate as
+evidence for this pairing, never as a decision
+([Provider-stated debit accounts](#provider-stated-debit-accounts)).
 
 A debit posted more than three days from the due date, for example after a
 long run of bank holidays, produces no candidate. That is a limit of the
@@ -74,51 +74,97 @@ own supported model. No payment total is manufactured by summing purchase rows.
 
 ### Provider-stated debit accounts
 
-Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md) (proposed).
-Implemented today: the domain rule only
-(`packages/domain/src/card-debit-account.ts`), tested with synthetic inputs.
-No reader, observation table, sweep wiring or review-page display exists, so
-the sweep and the review behave exactly as described in the rest of this
-page.
+Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md) and its
+2026-09-27 amendment (proposed). What the code does today:
 
-The design: a card provider's description of the debit account (bank, branch,
-account type, masked account number), stored verbatim as displayed, becomes a
-`card_debit_account_statement` observation. `proposeCardDebitAccount` proposes
-a card → bank account relation when exactly one known account at the stated
-bank ends in the digits the provider shows and, when both sides show a branch
-code, the codes agree. Anything else is a closed reason with no proposal
-(`statement_invalid`, `bank_not_resolved`, `account_digits_not_shown`,
-`no_comparable_bank_account`,
-`no_matching_account`, `ambiguous_accounts`, `uncomparable_account_at_bank`).
+**The page.** Every MyJCB credit detail page observed in round 4 (the
+confirmed statement and the ショッピングスキップ払い page, live and in the
+stored redacted HTML) has an `h3.hdg-H3` heading 「カード情報」 after the
+ledger, followed by a `table.table-data` of th/td rows: カード名称, カード発行会社,
+金融機関名 (bank name), 支店名 (branch name, no branch code), 科目・口座番号
+(「普通 ####\*\*\*」 in shape: the account type, a space, the FIRST four digits,
+the rest masked with `*`) and 口座名義 (the holder's name, partly masked).
+`readMyJcbCardInformation` (`packages/domain/src/myjcb-card-information.ts`)
+finds the table by text, not by class names: the one heading element (h1-h6)
+whose text is 「カード情報」, then the first table after it, whose every row
+must be one th with a known label and one td. It reads the bank name, branch
+name, account type, the four leading digits and the mask length, checks the
+other rows' labels, and never reads the card name or the holder name
+(ADR 0029 class d; the holder name's removal from stored pages is
+[#333](https://github.com/risu729/kogane/pull/333)). Any other shape is a closed
+refusal code: `card_information_absent`, `card_information_ambiguous`,
+`card_information_table_missing`, `card_information_table_invalid`,
+`card_information_name_invalid`, `card_information_account_invalid`.
 
-What it would change, once a reader lands: a candidate whose statement and
-debit accounts a proposal names carries that proposal as its primary evidence,
-shown on the ownership review as both providers stating the same account;
-amount and date stay a consistency check. What it does not change: the
-proposal sets no owner and no ownership evidence, so it never makes a
-candidate eligible; ownership and settlement acceptance stay operator
-decisions, and nothing is accepted automatically.
+**The observation.** The `card_debit_account_sweep` lane
+(`services/processor/src/card-debit-account-job.ts`) reads pages whose
+`myjcb-credit-statement-total` parse is published, re-reading the bytes from R2
+and checking their digest, at most 20 a tick. Each becomes one
+`card_debit_account_statement` row (migration 0060) per card
+(`myjcb:<connection>:root`), raw object and reader version: `read` with the
+displayed values, or `refused` with a closed code (also `page_not_utf8`,
+`raw_object_unreadable`, for bytes that are missing, of another size or fail
+their digest) and no value, so a page is not read again under the same reader
+version. The same bytes stored by several runs are one row. Only artifact keys
+whose connection segment is `[a-z0-9][a-z0-9-]{0,63}` are selected, the shape
+the table accepts; any other key is never read. The table is append-only; a corrected reader is a new version and
+new rows. The lane runs under `RECONCILIATION_ENABLED`, right before
+`card_settlement_sweep`, and logs `scanned`, `read`, `refused`, `written`.
+
+**The rule** (`proposeCardDebitAccount`, policy
+`card-debit-account-statement-v2`). The displayed bank name resolves to a CORE
+source id only through a table of the banks Kogane models (みずほ銀行,
+三井住友銀行, SBI新生銀行, ソニー銀行, compared after NFKC and whitespace
+removal); any other name is `bank_not_resolved`. 普通 is `ordinary` and 当座 is
+`current`. A card → bank account relation is proposed when exactly one known
+account at that bank has the same account type and an account number that
+starts with the four leading digits, and every known account at that bank is
+comparable. The branch name is carried as displayed and never compared: no
+bank reference carries one (Mizuho's parser records a branch name in its
+observation `extra`, but its rendering next to MyJCB's is unobserved). Other
+outcomes are closed reasons: `statement_invalid`, `bank_not_resolved`,
+`account_type_not_resolved`, `account_digits_not_shown`,
+`no_comparable_bank_account`, `no_matching_account`, `ambiguous_accounts`,
+`uncomparable_account_at_bank`. Known accounts are the distinct source
+accounts the identity rules recorded for that bank (`source_accounts`, at most
+100; beyond that nothing is recorded).
+
+**In the settlement sweep.** For each MyJCB candidate, the sweep reads the
+debit-account row of the page the candidate's statement total was parsed from
+(same raw object, same card, current reader version) and appends to
+`card_settlement_debit_account_evidence` what it says: `supports` (the
+proposal names the candidate's card and bank account), `names_other_account`,
+or `not_proposed` with the reason. A row is appended only when the outcome
+differs from the candidate's latest row for that statement and policy. The
+candidate's facts, digest and eligibility are unchanged: the evidence sets no
+owner and no ownership evidence, and ownership and acceptance stay operator
+decisions (INV07). The sweep's log line adds `debitAccountEvidence`, the
+number of evidence rows appended.
 
 Limits:
 
-- **MyJCB**: a transfer-account (お振替口座) block on the statement page is
-  owner-reported and read from JCB's public help, not verified here: no
-  fixture contains it. Whether it exists, its labels, whether it shows bank
-  and branch names or codes, and the mask pattern are unobserved (round 4
-  pending), so no reader exists. Labels are never invented.
-- **Vpass**: the statement parser's key allowlists name no payment-account
-  field, but nested objects such as the statement summary are not
-  key-allowlisted, so that is not proof of absence; whether any Vpass API
-  carries one is unknown.
-- **Bank references**: only a reference carrying the provider's displayed
-  account number is comparable (`bankAccountReference`). Mizuho's
-  (`mizuho-bank:ordinary:<branch>:<account>`) is, but Mizuho is not an adapter.
-  SMBC's (`smbc-bank:ordinary-yen`) carries no account number, and SBI
-  Shinsei's `accountNo` layout is unverified. So neither adapter bank can be
-  matched today.
+- **Not on the review page.** The evidence rows are not read by the
+  `カード照合` review or its API: showing them needs a new field in the review
+  contract (`packages/observation-shared/src/card-settlement-contract.ts`) and
+  the web page, which this change does not make.
+- **Adapter banks cannot be matched.** SMBC's reference
+  (`smbc-bank:ordinary-yen`) carries no account digits, and SBI Shinsei's
+  `accountNo` layout next to a displayed account number is unverified, so a
+  page naming either bank yields `no_comparable_bank_account`. Mizuho's
+  reference (`mizuho-bank:ordinary:<branch>:<account>`) is comparable, but
+  Mizuho is not an adapter, so a Mizuho proposal can name another account
+  (`names_other_account`) and never `supports` a candidate today.
+- **Branch names are not compared** (above), so two known accounts at one bank
+  with the same four leading digits are `ambiguous_accounts`.
+- **Vpass**: none of the statement APIs (`web_meisai_top/v1`,
+  `dropdownlist_init/v1`, `meisai_ans/v1`, `xt_seikyu/v1`) carries a bank,
+  branch or debit-account field, for any of the seven cards observed in
+  round 4; the only account-looking keys (`webMeisaiTopK3Vo.accountNo`, fully
+  masked, and `accountOvly`) are card-side identifiers. Vpass has no reader.
 - A unique match among the accounts Kogane knows can still be wrong (an
-  uncollected account at the same bank with the same visible digits), which is
-  why acceptance stays with the operator.
+  uncollected account at the same bank with the same leading digits), which
+  is why acceptance stays with the operator.
+- The mask length is recorded but not compared with the bank account's length.
 
 ## Candidate and decision lifecycle
 
@@ -468,9 +514,17 @@ blocks acceptance; an accepted SBI Shinsei debit reserves the statement
 against an SMBC one. `packages/read-model/test/card-bank-debit-facts.test.ts`
 shows the SMBC branch returns exactly the 0044 view's rows.
 `packages/domain/test/card-debit-account.test.ts` covers the provider-stated
-debit-account rule on synthetic inputs: a unique match is proposed, branch
-codes must agree when both are shown, every other case is a closed reason, and
-a proposal never makes a candidate eligible.
+debit-account rule on synthetic inputs: bank names resolve only through the
+table, a unique account starting with the leading digits is proposed, an
+account ending in them is not, the account type must agree, every other case
+is a closed reason, and a proposal never makes a candidate eligible.
+`services/processor/test/card-debit-account.test.ts` covers the MyJCB reader on
+synthetic 「カード情報」 tables (the read values, every refusal shape, the holder
+and card names never read), the lane (one row per card and raw object, no
+second row on a re-run or for the same bytes of another run, refusals stored
+without values, append-only guards), and the settlement sweep (evidence
+attached, a changed outcome appended, the candidate's facts and eligibility
+unchanged).
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.

@@ -224,6 +224,17 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "bounded card settlement scan progress",
   },
+  // 0060 (ADR 0032): the card provider's own statement of the debit account,
+  // read from stored MyJCB pages, and what it says about each settlement
+  // candidate. Both append-only evidence; neither is lane state.
+  card_debit_account_statement: {
+    classification: "core-keep",
+    planRow: "card settlement evidence and decisions",
+  },
+  card_settlement_debit_account_evidence: {
+    classification: "core-keep",
+    planRow: "card settlement evidence and decisions",
+  },
   card_purchase_recognitions: {
     classification: "core-keep",
     planRow: "card purchase recognition evidence",

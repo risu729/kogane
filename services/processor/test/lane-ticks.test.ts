@@ -85,7 +85,8 @@ const RESULTS = {
     failed: 0,
     autoAccepted: 0,
   },
-  settlements: { scanned: 5, proposed: 1, written: 1 },
+  debitAccounts: { scanned: 3, read: 2, refused: 1, written: 3 },
+  settlements: { scanned: 5, proposed: 1, written: 1, debitAccountEvidence: 1 },
   purchases: PURCHASES,
   rewards: {
     enabled: true,
@@ -147,6 +148,7 @@ function stagesFor(
 const RECORDED = [
   "identity_sweep",
   "reconciliation_sweep",
+  "card_debit_account_sweep",
   "card_settlement_sweep",
   "purchase_recognition",
   "reward_claims_sweep",
@@ -183,6 +185,7 @@ test("a tick records one row per recorded lane with exactly the counts its log l
     "identity_sweep",
     "balance_projection",
     "reconciliation_sweep",
+    "card_debit_account_sweep",
     "card_settlement_sweep",
     "purchase_recognition",
     "reward_claims_sweep",
@@ -208,6 +211,7 @@ test("a tick records one row per recorded lane with exactly the counts its log l
   expect(counts["purchase_recognition"]).toEqual(PURCHASES);
   expect(counts["reconciliation_sweep"]).toEqual(RESULTS.reconcile);
   expect(counts["card_settlement_sweep"]).toEqual(RESULTS.settlements);
+  expect(counts["card_debit_account_sweep"]).toEqual(RESULTS.debitAccounts);
   expect(counts["identity_sweep"]).toEqual(RESULTS.identity);
   // Identifiers, cursors, release names and open-ended outcome keys stay in
   // the log line only.
@@ -308,12 +312,13 @@ test("a lane whose flag is off records `skipped-by-flag`, is not run and still l
     "operation_dispatch",
     "decision_outbox",
   ]);
-  for (const stage of ["reconcile", "settlements", "purchases", "rewards"])
+  for (const stage of ["reconcile", "debitAccounts", "settlements", "purchases", "rewards"])
     expect(calls[stage]).toBeUndefined();
   const rows = await ticks();
   expect(rows.map((row) => [row.lane, row.outcome])).toEqual([
     ["identity_sweep", "ran"],
     ["reconciliation_sweep", "skipped-by-flag"],
+    ["card_debit_account_sweep", "skipped-by-flag"],
     ["card_settlement_sweep", "skipped-by-flag"],
     ["purchase_recognition", "skipped-by-flag"],
     ["reward_claims_sweep", "skipped-by-flag"],

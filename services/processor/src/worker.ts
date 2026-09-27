@@ -22,6 +22,7 @@ import { internalHealthRoute } from "./internal-health.ts";
 import { runBatch } from "../../../packages/storage-d1/src/d1.ts";
 import { dispatchDecisionOutbox } from "./decision-outbox.ts";
 import { cardSettlementSweep } from "./card-settlement-job.ts";
+import { cardDebitAccountSweep } from "./card-debit-account-job.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import { cardPurchaseSweep, purchaseRecognitionEnabled } from "./card-purchase-job.ts";
 import { laneTickSummary, recordTick, type LaneTickResult } from "./lane-ticks.ts";
@@ -1721,6 +1722,12 @@ export interface ScheduledStages {
    */
   settlements?: (env: Env) => Promise<object>;
   /**
+   * MyJCB 「カード情報」 readings (ADR 0032, migration 0060), under the same
+   * flag as the settlement sweep, which reads them. Absent stage means the
+   * lane never runs.
+   */
+  debitAccounts?: (env: Env) => Promise<object>;
+  /**
    * Card purchase recognition (docs/economic-events.md). Absent stage, or
    * PURCHASE_RECOGNITION_ENABLED off, means the lane never runs and writes
    * nothing.
@@ -1772,6 +1779,7 @@ const defaultStages: ScheduledStages = {
   balanceProjection: (env) => runBalanceProjection(env),
   reconcile: (env) => reconciliationSweep(env.DB),
   settlements: (env) => cardSettlementSweep(env.DB),
+  debitAccounts: (env) => cardDebitAccountSweep(env),
   purchases: (env) => cardPurchaseSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
   rewardReadProjection: (env) => rewardReadProjectionStage(env),
@@ -1850,6 +1858,9 @@ export async function runScheduled(
     ["reconciliation_sweep", stages.reconcile, reconciliation],
     // Same flag, its own lane, so a failure of either sweep no longer hides
     // the other's counts (docs/card-settlements.md).
+    // The debit accounts MyJCB pages state, read before the settlement sweep
+    // that attaches them to candidates as evidence (docs/card-settlements.md).
+    ["card_debit_account_sweep", stages.debitAccounts, reconciliation],
     ["card_settlement_sweep", stages.settlements, reconciliation],
     // Off unless PURCHASE_RECOGNITION_ENABLED is set: then adopted Vpass and
     // MyJCB usage rows become purchase/refund events, each with a rule

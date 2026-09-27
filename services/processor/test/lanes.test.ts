@@ -91,6 +91,7 @@ test("harness applies every Layer B migration in order through 0061", () => {
     "0057_vpass_card_token_v2.sql",
     "0058_identity_crosswalk.sql",
     "0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql",
+    "0060_card_debit_account_statements.sql",
     "0061_scheduled_payment_observations.sql",
   ]);
   expect([...names].sort()).toEqual(names);
