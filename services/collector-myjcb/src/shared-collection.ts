@@ -9,16 +9,18 @@
 // collector regression must fail the run rather than publish a session token
 // or a card number (G3-08).
 //
-// The collector manifest is written in the shape central storage receives:
-// connection blockers and failure messages become coarse codes, so the free
-// text of an upstream error never reaches the shared bucket either.
+// The collector manifest records a stopped connection as a closed stop code, a
+// month position and a count of the months it kept (ADR 0005's amendment), so
+// the free text of an upstream error never reaches the shared bucket either.
 import { assertRedactedHtml } from "./redaction";
-import type {
-  CollectionFailure,
-  CollectionManifest,
-  ConnectionSummary,
-  RawArtifact,
-  StoredArtifact,
+import {
+  CONNECTION_STOP_CODES,
+  type CollectionFailure,
+  type CollectionManifest,
+  type ConnectionStopCode,
+  type ConnectionSummary,
+  type RawArtifact,
+  type StoredArtifact,
 } from "./types";
 import {
   objectKey,
@@ -132,10 +134,12 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * `success` connection enumerated its credit months from the menu and the
  * past-months response and kept every one of them: the page, the ledger the
  * collector derives from a page that states its state, and every export the
- * page offers. A month or an export that fails stops the whole connection
- * (ADR 0005's stop rule), which then keeps no artifact. `collectConnection`
- * reports `partial` when a month's page shows rows but no stated state, so
- * the rows were kept as HTML only; that unit stays `partial`.
+ * page offers. `collectConnection` reports `partial` when a month's page
+ * shows rows but no stated state (the rows were kept as HTML only), and when
+ * a month's fetch, state, period, ledger or export failed: the connection
+ * stopped there and kept the months before it (ADR 0005's amendment). Either
+ * unit stays `partial`. A connection that stopped before its first credit
+ * month keeps nothing and is `unknown`.
  */
 function coverage(status: ConnectionSummary["status"]): CoverageStatus {
   if (status === "success") return "complete";
@@ -153,19 +157,28 @@ function runCoverage(status: CollectionManifest["status"]): CoverageStatus {
 }
 
 /** A blocked connection is a state to report, never a reason to retry a login
- * (source policy, G3-10/G3-11). */
-function connectionErrorCode(status: ConnectionSummary["status"]): string | undefined {
-  if (status === "success") return undefined;
-  if (status === "human-required") return "human_required";
-  return status === "partial" ? "collector_partial" : "collector_failed";
+ * (source policy, G3-10/G3-11). A stopped connection's unit carries the stage
+ * it stopped at; one that ran to the end but withheld a month's rows carries
+ * `collector_partial`. */
+function connectionErrorCode(summary: ConnectionSummary): string | undefined {
+  if (summary.status === "success") return undefined;
+  if (summary.stopCode !== undefined) return stopCode(summary.stopCode);
+  if (summary.status === "human-required") return "human_required";
+  return summary.status === "partial" ? "collector_partial" : "collector_failed";
 }
 
 function runErrorCode(input: SharedRunInput): string | undefined {
   if (input.status === "success") return undefined;
-  const blocked = input.connections.filter((connection) => connection.summary.status !== "success");
-  if (blocked.length > 0 && blocked.every((c) => c.summary.status === "human-required")) {
-    return "human_required";
-  }
+  // When every connection that is not whole says the same thing (all wait for
+  // a person, or all stopped at the same stage), the run carries that code;
+  // otherwise the coarse one, and each unit keeps its own.
+  const codes = new Set(
+    input.connections
+      .filter((connection) => connection.summary.status !== "success")
+      .map((connection) => connectionErrorCode(connection.summary)),
+  );
+  const [only] = codes;
+  if (codes.size === 1 && only !== undefined && STOP_CODES.has(only)) return only;
   return input.status === "partial" ? "collector_partial" : "collector_failed";
 }
 
@@ -175,21 +188,35 @@ function identifier(value: string | undefined, code: string): string | undefined
   return value;
 }
 
+const STOP_CODES: ReadonlySet<string> = new Set(CONNECTION_STOP_CODES);
+
+/** A stop code from the closed list, or a refused plan. */
+function stopCode(value: string): ConnectionStopCode {
+  if (!STOP_CODES.has(value)) throw new Error("manifest_stop_code_invalid");
+  return value as ConnectionStopCode;
+}
+
+/** A month position (`detailMonth`), or a refused plan. */
+function position(value: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > 17) {
+    throw new Error("manifest_stop_position_invalid");
+  }
+  return value;
+}
+
 /**
- * The collector manifest as central storage receives it
- * (`normalizeMyJcbManifestForCentral`): a connection blocker and a failure
- * message become coarse codes, and each artifact names the content-addressed
- * object that was written rather than a bucket path shared mode never
- * creates.
+ * The collector manifest the shared bucket stores. Each connection and each
+ * failure is rebuilt field by field from closed values: a status, counts, a
+ * stop code from `CONNECTION_STOP_CODES` and a month position. No error
+ * message, provider text or amount has a field to travel in, and a code
+ * outside the list refuses the plan. Each artifact names the
+ * content-addressed object that was written.
  */
 function manifestBytes(
   input: SharedRunInput,
   connections: readonly ConnectionSummary[],
   stored: readonly StoredArtifact[],
 ): Uint8Array {
-  const statusByConnection = new Map(
-    connections.map((connection) => [connection.connectionId, connection.status]),
-  );
   const manifest: CollectionManifest = {
     schemaVersion: input.schemaVersion,
     source: "myjcb",
@@ -199,22 +226,28 @@ function manifestBytes(
     status: input.status,
     trigger: input.trigger,
     connections: connections.map((connection) => ({
-      ...connection,
-      ...(connection.blocker === undefined
+      connectionId: connection.connectionId,
+      bootstrapMode: connection.bootstrapMode,
+      status: connection.status,
+      cardCount: connection.cardCount,
+      periodCount: connection.periodCount,
+      artifactCount: connection.artifactCount,
+      ...(connection.stopCode === undefined
         ? {}
         : {
-            blocker:
-              connection.status === "human-required" ? "human-required" : "collector-failure",
+            stopCode: stopCode(connection.stopCode),
+            ...(connection.stopPosition === undefined
+              ? {}
+              : { stopPosition: position(connection.stopPosition) }),
+            capturedMonthCount: connection.capturedMonthCount ?? 0,
           }),
     })),
     artifacts: stored,
     failures: input.failures.map((failure) => ({
-      ...failure,
-      message: failure.operation.startsWith("r2:")
-        ? "r2-write-failure"
-        : statusByConnection.get(failure.connectionId) === "human-required"
-          ? "human-required"
-          : "collector-failure",
+      connectionId: failure.connectionId,
+      operation: "collect",
+      code: stopCode(failure.code),
+      ...(failure.position === undefined ? {} : { position: position(failure.position) }),
     })),
   };
   return new TextEncoder().encode(JSON.stringify(manifest));
@@ -225,16 +258,19 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
   const outcome: ProviderOutcome = input.status;
   const errorCode = runErrorCode(input);
   // A failed run keeps no artifact: there is nothing whose persistence could
-  // be claimed, and the terminal states the failure on its own (G1-09).
-  const sources = outcome === "failed" ? [] : input.connections;
+  // be claimed, and the terminal states the failure on its own (G1-09). Its
+  // connections stay units with no artifact, so each one's stop code is in
+  // the terminal (ADR 0005's amendment).
+  const failed = outcome === "failed";
 
   const artifacts: PersistArtifact[] = [];
   const stored: StoredArtifact[] = [];
   const transformations: TerminalTransformation[] = [];
   const units: TerminalUnit[] = [];
-  for (const connection of sources) {
+  for (const connection of input.connections) {
     const unitKey = connection.summary.connectionId;
-    for (const artifact of connection.artifacts) {
+    const kept = failed ? [] : connection.artifacts;
+    for (const artifact of kept) {
       if (UNOBSERVED_DATASETS.has(artifact.dataset)) {
         throw new Error("artifact_dataset_unobserved");
       }
@@ -296,17 +332,17 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         });
       }
     }
-    const connectionCode = connectionErrorCode(connection.summary.status);
+    const connectionCode = connectionErrorCode(connection.summary);
     units.push({
       unitKey,
       unitKind: "connection",
-      artifactCount: connection.artifacts.length,
-      coverageStatus: coverage(connection.summary.status),
+      artifactCount: kept.length,
+      coverageStatus: failed ? "unknown" : coverage(connection.summary.status),
       ...(connectionCode === undefined ? {} : { safeErrorCode: connectionCode }),
     });
   }
 
-  const summaries = sources.map((connection) => connection.summary);
+  const summaries = input.connections.map((connection) => connection.summary);
   if (artifacts.length > 0) {
     const bytes = manifestBytes(input, summaries, stored);
     artifacts.push({

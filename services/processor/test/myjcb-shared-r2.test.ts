@@ -357,3 +357,149 @@ test("a shared-R2 MyJCB run parses with the statement state and period its manif
     retired: 0,
   });
 }, 60000);
+
+test("ADR 0005 amendment: a connection that stopped at a month registers and seals its captured months, and stays not_eligible", async () => {
+  // The collector's real plan for a connection that stopped at position 1
+  // (`month_fetch`) after keeping position 0: its page and ledger. The unit is
+  // `partial` with the stop code, which registration turns into a `failed`
+  // unit report, so the run is `partial` and nothing is parsed (ADR 0026's
+  // eligibility is unchanged). The evidence and the cause are kept.
+  const runId = "00000000-0000-4000-8000-00000000a005";
+  const kept = artifacts.slice(0, 2);
+  const plan = await myJcbRunPlan({
+    schemaVersion: "myjcb-worker-poc-v1",
+    runId,
+    startedAt: "2026-09-22T00:00:00.000Z",
+    completedAt: "2026-09-22T00:05:00.000Z",
+    status: "partial",
+    trigger: "scheduled",
+    connections: [
+      {
+        summary: {
+          connectionId: CONNECTION,
+          bootstrapMode: "password",
+          status: "partial",
+          cardCount: 1,
+          periodCount: 2,
+          artifactCount: kept.length,
+          stopCode: "month_fetch",
+          stopPosition: 1,
+          capturedMonthCount: 1,
+        },
+        artifacts: kept,
+      },
+    ],
+    failures: [
+      { connectionId: CONNECTION, operation: "collect", code: "month_fetch", position: 1 },
+    ],
+  });
+  expect(plan.run.units).toEqual([
+    {
+      unitKey: CONNECTION,
+      unitKind: "connection",
+      artifactCount: 2,
+      coverageStatus: "partial",
+      safeErrorCode: "month_fetch",
+    },
+  ]);
+  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+  expect(await registerCollectionRun(env, { source: "myjcb", runId })).toMatchObject({
+    outcome: "registered",
+    artifacts: 3,
+  });
+  const fetchRunId = await fetchRun(runId);
+  expect(
+    await env.DB.prepare("SELECT COUNT(*) AS n FROM fetch_run_seals WHERE fetch_run_id=?")
+      .bind(fetchRunId)
+      .first<number>("n"),
+  ).toBe(1);
+  // Sealed under the current registration contract (ADR 0022).
+  expect(
+    await env.DB.prepare(
+      "SELECT registration_contract_version AS v FROM collection_runs WHERE source='myjcb' AND run_id=?",
+    )
+      .bind(runId)
+      .first<string>("v"),
+  ).toBe("terminal-registration-v2");
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT r.status,ur.normalized_outcome AS unit_outcome,ur.safe_failure_code AS code FROM observation_fetch_runs r JOIN fetch_units u ON u.fetch_run_id=r.id JOIN fetch_unit_reports ur ON ur.fetch_unit_id=u.id WHERE r.external_run_id=?",
+      )
+        .bind(runId)
+        .all()
+    ).results,
+  ).toEqual([{ status: "partial", unit_outcome: "failed", code: "month_fetch" }]);
+  // Every captured artifact is catalogued under the run.
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT artifact_key FROM fetch_artifacts WHERE fetch_run_id=? ORDER BY artifact_key",
+      )
+        .bind(fetchRunId)
+        .all()
+    ).results,
+  ).toEqual([
+    { artifact_key: "manifest.json" },
+    { artifact_key: `${CONNECTION}/credit-detail-00.html` },
+    { artifact_key: `${CONNECTION}/credit-ledger-00.json` },
+  ]);
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  expect(await workItem(runId)).toEqual({ outcome: "not_eligible", jobs_created: 0 });
+}, 60000);
+
+test("ADR 0005 amendment: a failed run's stopped units carry their codes and the run is recorded, not sealed", async () => {
+  // Every connection stopped before its first month: the plan persists only
+  // the terminal, whose unit is `unknown` with the stop code and no artifact.
+  // Registration refuses a failed run with no provider bytes as before
+  // (`provider_run_failed`): recorded, nothing sealed, nothing to parse.
+  const runId = "00000000-0000-4000-8000-00000000a006";
+  const plan = await myJcbRunPlan({
+    schemaVersion: "myjcb-worker-poc-v1",
+    runId,
+    startedAt: "2026-09-22T00:00:00.000Z",
+    completedAt: "2026-09-22T00:05:00.000Z",
+    status: "failed",
+    trigger: "scheduled",
+    connections: [
+      {
+        summary: {
+          connectionId: CONNECTION,
+          bootstrapMode: "password",
+          status: "failed",
+          cardCount: 0,
+          periodCount: 0,
+          artifactCount: 0,
+          stopCode: "credit_past_months",
+          capturedMonthCount: 0,
+        },
+        artifacts: [],
+      },
+    ],
+    failures: [{ connectionId: CONNECTION, operation: "collect", code: "credit_past_months" }],
+  });
+  expect(plan.artifacts).toEqual([]);
+  expect(plan.run.units).toEqual([
+    {
+      unitKey: CONNECTION,
+      unitKind: "connection",
+      artifactCount: 0,
+      coverageStatus: "unknown",
+      safeErrorCode: "credit_past_months",
+    },
+  ]);
+  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+  expect(await registerCollectionRun(env, { source: "myjcb", runId })).toMatchObject({
+    outcome: "blocked",
+    code: "provider_run_failed",
+  });
+  expect(await fetchRun(runId)).toBeNull();
+  expect(
+    await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM collection_runs WHERE source='myjcb' AND run_id=?",
+    )
+      .bind(runId)
+      .first<number>("n"),
+  ).toBe(1);
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+}, 60000);
