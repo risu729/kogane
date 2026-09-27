@@ -7,11 +7,14 @@
 //   fx-sbi-shinsei-board-v1         SBI Shinsei's FX board: `bank_mid_rate` is
 //                                   `reference`, `bank_buy_rate` `bid`,
 //                                   `bank_sell_rate` `ask`; base the currency,
-//                                   quote JPY. Admitted only for a currency
-//                                   whose quote basis is verified as per 1 unit
-//                                   and only for the `customerCategory` tier
-//                                   its admission names
-//                                   (SBI_SHINSEI_FX_QUOTE_BASIS).
+//                                   quote JPY, per 1 unit. A row is admitted
+//                                   by an entry of the manual table
+//                                   SBI_SHINSEI_FX_QUOTE_BASIS (currency, tier,
+//                                   basis; empty), or else when its currency
+//                                   is one the provider's public pages quote
+//                                   per 1 unit and its `customerCategory` is
+//                                   strictly equal to the stage category the
+//                                   same collection run states (ADR 0031).
 //   sbi-domestic-current-price-v1   SBI Securities' domestic `current_price`,
 //                                   paired with its position and `market_value`
 //                                   in the same provider record by the
@@ -59,6 +62,8 @@ export const PRICE_PROMOTION_OUTCOMES = [
   "promoted",
   "basis_unverified",
   "unsupported_currency",
+  "tier_unmatched",
+  "stage_unstated",
 ] as const;
 export type PricePromotionOutcome = (typeof PRICE_PROMOTION_OUTCOMES)[number];
 
@@ -91,6 +96,70 @@ export type FxQuoteBasisTable = Readonly<Record<string, FxQuoteBasis>>;
  * evidence, in a change that amends the ADR.
  */
 export const SBI_SHINSEI_FX_QUOTE_BASIS: FxQuoteBasisTable = Object.freeze({});
+
+/**
+ * The currencies the provider's public pages quote in yen per 1 unit: the 13
+ * its rate page lists, whose fees are stated per 1 base currency unit
+ * (https://www.sbishinseibank.co.jp/retail/gaika/exchange_rate_fx.html,
+ * https://www.sbishinseibank.co.jp/retail/gaika/feature/beginner/; surveyed
+ * 2026-09-27, ADR 0020 amendment, ADR 0031). CHF is on no page and JPY is not
+ * a quote, so neither is here. This is the provider's documentation, not a
+ * per-currency confirmation by the owner; a board row of one of these
+ * currencies is admitted only in the owner's own tier (`fxBoardPrice`).
+ */
+export const SBI_SHINSEI_FX_PER_UNIT_CURRENCIES: readonly string[] = Object.freeze([
+  "USD",
+  "EUR",
+  "CAD",
+  "AUD",
+  "GBP",
+  "NZD",
+  "SGD",
+  "HKD",
+  "ZAR",
+  "NOK",
+  "CNY",
+  "TRY",
+  "BRL",
+]);
+
+/**
+ * The owner's stage category for one board row: what the balance summary of
+ * the row's own collection run states (ADR 0031). `stated` carries the JSON
+ * text of the one category the run's published stage observations hold;
+ * `absent` means the run has none (no page, no published parse, or a parse
+ * that refused the page); `disagreeing` means the run's stage observations
+ * name more than one category. Only `stated` can admit a row.
+ */
+export type FxStageCategory =
+  | { state: "stated"; categoryJson: string }
+  | { state: "absent" }
+  | { state: "disagreeing" };
+
+/** JSON text of a non-empty string or a finite number: the only category a stage match accepts. */
+function stageCategoryText(text: string | null): string | null {
+  if (text === null) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+  const accepted =
+    typeof value === "string" ? value !== "" : typeof value === "number" && Number.isFinite(value);
+  return accepted ? JSON.stringify(value) : null;
+}
+
+/**
+ * Whether a board row's category is strictly the run's stated stage: same JSON
+ * type and same value, compared as JSON text, so `"3"` never equals `3` and
+ * nothing is trimmed, case-folded or mapped.
+ */
+export function stageMatches(rowCategoryJson: string | null, stage: FxStageCategory): boolean {
+  if (stage.state !== "stated") return false;
+  const row = stageCategoryText(rowCategoryJson);
+  return row !== null && row === stageCategoryText(stage.categoryJson);
+}
 
 /** The claim a price was promoted from: an observation, its parse run and a path inside it. */
 export interface PriceClaim {
@@ -130,7 +199,11 @@ export type PriceDraft = Omit<PriceObservation, "id">;
 
 export type PriceVerdict =
   | { outcome: "promoted"; rule: PriceRuleId; claim: PriceClaim; price: PriceDraft }
-  | { outcome: "basis_unverified" | "unsupported_currency"; rule: PriceRuleId; claim: PriceClaim };
+  | {
+      outcome: "basis_unverified" | "unsupported_currency" | "tier_unmatched" | "stage_unstated";
+      rule: PriceRuleId;
+      claim: PriceClaim;
+    };
 
 const ONE: ExactDecimal = { coefficient: "1", scale: 0 };
 const ZERO: ExactDecimal = { coefficient: "0", scale: 0 };
@@ -180,6 +253,14 @@ export interface FxBoardRow {
   fetchedAt: string;
   /** The row's `customerCategory` as stored in its `extra`, or null when it has none. */
   customerCategory: string | number | null;
+  /**
+   * The same category as JSON text (`"A"`, `3`), or null when the row has
+   * none: the stage match compares types as well as values (ADR 0031).
+   * Absent means the stage path finds no match.
+   */
+  customerCategoryJson?: string | null;
+  /** The stage category of the row's own collection run; absent means none. */
+  stage?: FxStageCategory;
 }
 
 /** Whether a stored valuation row is one this rule reads at all. */
@@ -210,13 +291,26 @@ export function fxBoardPrice(
   if (!CURRENCY.test(row.subject) || row.subject === "JPY" || row.currency !== "JPY")
     return { outcome: "unsupported_currency", rule, claim };
   const basis = Object.hasOwn(quoteBasis, row.subject) ? quoteBasis[row.subject] : undefined;
-  if (basis === undefined) return { outcome: "unsupported_currency", rule, claim };
-  // The board lists the currency once per tier; only the admitted tier's rows
-  // are read, so the rule itself never picks a tier.
-  if (row.customerCategory !== basis.customerCategory)
+  if (basis !== undefined) {
+    // The manual table decides its currency alone (ADR 0020 amendment). The
+    // board lists the currency once per tier; only the admitted tier's rows
+    // are read, so the rule itself never picks a tier.
+    if (row.customerCategory !== basis.customerCategory)
+      return { outcome: "unsupported_currency", rule, claim };
+    // A per-100 quote (or any basis but 1) is refused; nothing is ever rescaled.
+    if (basis.baseQuantity !== "1") return { outcome: "basis_unverified", rule, claim };
+  } else if (!SBI_SHINSEI_FX_PER_UNIT_CURRENCIES.includes(row.subject)) {
     return { outcome: "unsupported_currency", rule, claim };
-  // A per-100 quote (or any basis but 1) is refused; nothing is ever rescaled.
-  if (basis.baseQuantity !== "1") return { outcome: "basis_unverified", rule, claim };
+  } else if ((row.stage ?? { state: "absent" }).state !== "stated") {
+    // ADR 0031: the row's own run states no stage (no page, no published
+    // parse, a refused page) or more than one. The owner's tier is unknown
+    // for this run, so nothing is picked: no other run, no default tier.
+    return { outcome: "stage_unstated", rule, claim };
+  } else if (!stageMatches(row.customerCategoryJson ?? null, row.stage!)) {
+    // Another tier's row, or a row with no category. A currency listed only
+    // once, in a tier that is not the owner's, is not the owner's rate either.
+    return { outcome: "tier_unmatched", rule, claim };
+  }
   const rate = positiveDecimal(row.amountText);
   if (rate === null) return { outcome: "basis_unverified", rule, claim };
   return {

@@ -1,0 +1,44 @@
+{
+  "responseParam": {
+    "summary": {
+      "requestParam": {},
+      "responseParam": {
+        "customerName": "SYNTHETIC CUSTOMER",
+        "customerNameKanji": "SYNTHETIC",
+        "customerNameKana": "SYNTHETIC",
+        "mfAccountStatus": "NONE",
+        "savingsBalance": "300000",
+        "odLimit": "0",
+        "totalCredit": "300000",
+        "totalDebit": "0",
+        "fxCasaBalance": "0",
+        "yenTDBalance": "0"
+      },
+      "header": {},
+      "errorInfo": {}
+    },
+    "mutualFundBalance": "0",
+    "category": {
+      "requestParam": {},
+      "responseParam": {
+        "freeTransferCount": "1",
+        "customerCategory": "SYNTHETIC",
+        "atmFee": "0",
+        "allowedAtmWithFreeCnt": "1",
+        "balanceAtmWithFreeCnt": "1"
+      },
+      "header": {},
+      "errorInfo": {}
+    },
+    "branchFetch": {
+      "requestParam": {},
+      "responseParam": {
+        "branchCode": "000",
+        "branchName": "SYNTHETIC BRANCH"
+      },
+      "header": {},
+      "errorInfo": {}
+    }
+  },
+  "header": { "adapterResultCode": "0" }
+}

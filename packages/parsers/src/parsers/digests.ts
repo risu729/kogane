@@ -14,8 +14,14 @@ export const PARSER_DIGESTS: ParserDigests = {
       "d3444ac617de5c63c31f6ee2fd9e8eda19daa3a7a28880566c2d97ed34bf8c57",
     "packages/domain/src/guards.ts":
       "5b40a5fb92a270668fbc3e9053e84af0d990c16d5873934e125b1e9822aa4fc9",
+    "packages/domain/src/myjcb-amounts.ts":
+      "072dc5fc2570fc8257343d85d53e93cf9fa9036f61a1648390a8d8845303ea3e",
     "packages/domain/src/myjcb-statement-page.ts":
-      "f84d7e4cc297116706c1d30bde976d7bb2bdbac6e5cb7d6bbb7aa7600e07e8d2",
+      "e5f382ed90b5f133ed794b479aebb4c5e42e27477198030d2d00e64972984587",
+    "packages/domain/src/values.ts":
+      "8dbd56b587a436b5c6809b399e6b444e08835f89d176f3bcd0a03a170068c987",
+    "packages/observation-shared/src/normalized-decimal.ts":
+      "2c2ffee7636e5c0be5957db53c57c439e6b125fa5428cc29c9d1814cc284cbcd",
     "poc/observation-pipeline/src/money.ts":
       "abdc4ec01a822393810025e3fd2476e47d469f9ad3add42829237b2fecc1ef84",
     "poc/observation-pipeline/src/parsers/coverage.ts":
@@ -35,7 +41,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
       "00f80782d205b967c6c7d9719d18b7800a0ff9b0a6dd992b0991cd840a564815",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
-      "40b75a904b4340bb11927199c98dab325ba29eb689b19b8b02a19344cf172923",
+      "68eed341fea07b8abba8c61478ba7512033b68fb59124f1ab93472b64bc54176",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
       "a89829e4856c7baa3abcda2e25762b7debf4a22fddc777756adb920ed8951621",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
@@ -50,6 +56,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "e7d26122534728665d274a62a99d46cd541ae39e5817ea1c39252c059f3c2fc7",
     "poc/observation-pipeline/src/parsers/sbi-foreign-trade-records.ts":
       "af02593d61d6d7f1ab2e371d94cd47a9584bd4fb202715e32e079d8c2cef1d95",
+    "poc/observation-pipeline/src/parsers/sbi-shinsei-balance-summary-and-stage.ts":
+      "2b681e18858799a0af62b32f504dc792d615f1585cc2f170b5a5dbe40c133e33",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts":
       "e9d08f2520bd293d5b4bd4656af8bb318fba01143734a1fd01bafb0a5ce5781f",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-exchange-rate.ts":
@@ -180,12 +188,15 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-canonical-evidence-boundary": {
-      version: "1.1.2",
-      codeDigest: "5231f1047b242f91d3325ec0f8f2b6d6e76922f6f35fb1368c827fdad058b74a",
+      version: "1.1.3",
+      codeDigest: "4f14b6d986a9b335d96576da62cbb2d92fd04733e58be12b869804e97e1265f6",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-amounts.ts",
         "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/myjcb.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
@@ -194,12 +205,15 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-ledger": {
-      version: "1.1.2",
-      codeDigest: "5231f1047b242f91d3325ec0f8f2b6d6e76922f6f35fb1368c827fdad058b74a",
+      version: "1.2.0",
+      codeDigest: "4f14b6d986a9b335d96576da62cbb2d92fd04733e58be12b869804e97e1265f6",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-amounts.ts",
         "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/myjcb.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
@@ -208,12 +222,15 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-past-month-balances": {
-      version: "1.1.2",
-      codeDigest: "5231f1047b242f91d3325ec0f8f2b6d6e76922f6f35fb1368c827fdad058b74a",
+      version: "1.1.3",
+      codeDigest: "4f14b6d986a9b335d96576da62cbb2d92fd04733e58be12b869804e97e1265f6",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-amounts.ts",
         "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/myjcb.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
@@ -222,12 +239,15 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-statement-total": {
-      version: "1.1.0",
-      codeDigest: "5231f1047b242f91d3325ec0f8f2b6d6e76922f6f35fb1368c827fdad058b74a",
+      version: "1.2.0",
+      codeDigest: "4f14b6d986a9b335d96576da62cbb2d92fd04733e58be12b869804e97e1265f6",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-amounts.ts",
         "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/myjcb.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
@@ -322,6 +342,20 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/sbi-foreign-trade-records.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sbi-shinsei-balance-summary-and-stage": {
+      version: "0.1.0",
+      codeDigest: "ad5ddcfa6938df22a06d2ec00ac61a30800a96db715a4cc95203e5a37b2eb49a",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-shinsei-balance-summary-and-stage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

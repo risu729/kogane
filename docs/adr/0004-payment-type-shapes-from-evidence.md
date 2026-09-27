@@ -4,8 +4,9 @@
 - Date: 2026-09-25
 - Implemented by: #246
 - Carried by: [economic events](../economic-events.md#single-payment-per-source),
-  `classifyCardUsage` and `myjcbSinglePayment` in
-  `packages/domain/src/card-purchase.ts`, `payment_type` in
+  `classifyCardUsage` in `packages/domain/src/card-purchase.ts`,
+  `myjcbSinglePayment` in `packages/domain/src/myjcb-amounts.ts` (moved
+  there by [ADR 0005's amendment (d)](0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-d-a-confirmed-page-under-the-usage-header-proven-by-the-page)), `payment_type` in
   `packages/read-model/src/card-usage.ts`
 
 ## Context

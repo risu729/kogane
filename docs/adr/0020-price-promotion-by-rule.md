@@ -14,7 +14,9 @@
 - Amended by: [ADR 0028](0028-sbi-shinsei-observed-capture-shapes.md) (the
   board is tiered; an admission names its tier; see the amendment below);
   amended 2026-09-27 (the quote basis from the provider's public pages; no
-  admission yet)
+  admission yet);
+  [ADR 0031](0031-sbi-shinsei-stage-category-fx-tier.md) (the stage category
+  of the same run selects the tier; see the note below)
 
 ## Context
 
@@ -75,7 +77,8 @@ the FX policy.
   and nothing reads them until it selects them. At most 500 claims a tick,
   one cursor per claim kind in `price_promotion_cursor` (operational-mutable,
   outside the revision ledger), `INSERT … WHERE NOT EXISTS`, counts-only log
-  and tick record. A tick makes at most eight D1 calls: the cursor read, then
+  and tick record. A tick makes at most eight D1 calls (nine since ADR 0031,
+  which adds the stage read for board rows): the cursor read, then
   per claim kind the read bound, one page, the domestic record lookup
   (valuation claims only) and one batch with the writes and the cursor.
 - **Selection.** `selectPrices` picks, per (base, quote, kind), the latest
@@ -204,3 +207,23 @@ convention is not detected by the parser, which records
 **Verification.** Documentation only; no code or test changes for this
 amendment. The domain tests that every tier is `unsupported_currency` with the
 production table still hold.
+
+## Amendment (2026-09-27, ADR 0031): the stage category of the same run selects the tier
+
+[ADR 0031](0031-sbi-shinsei-stage-category-fx-tier.md) gives
+`fx-sbi-shinsei-board-v1` a second admission path beside the manual table,
+which stays empty: a row of one of the 13 currencies the provider's public
+pages quote per 1 unit (`SBI_SHINSEI_FX_PER_UNIT_CURRENCIES`; CHF and JPY
+never) is admitted when its `customerCategory` is strictly equal to the stage
+category that the balance summary of the same collection run states (parser
+`sbi-shinsei-balance-summary-and-stage`). A per-1-unit row that path does not
+admit is counted `tier_unmatched` (another code) or `stage_unstated` (its run
+states no stage, or more than one); the lane makes one more read per tick
+(at most nine D1 calls). A board row whose run's balance summary still has a
+stage-parser job that can run is not refused but left for a later tick
+(`stage_pending`): the cursor stops before it, as it does before a pending
+parse. The argument above that prices are derived state
+promoted without an operator step is unchanged, and ADR 0031 relies on it.
+The basis amendment above said every row stays `unsupported_currency` while
+the owner's tier is unknown; from ADR 0031 the tier is the one the same
+run states, and the 13 currencies it lists are admitted in that tier.

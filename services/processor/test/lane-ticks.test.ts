@@ -96,7 +96,16 @@ const RESULTS = {
     release: "reward-promotion-v1",
   },
   rewardReadProjection: { enabled: true, status: "unchanged" },
-  prices: { scanned: 6, promoted: 3, basis_unverified: 2, unsupported_currency: 1, written: 3 },
+  prices: {
+    scanned: 8,
+    promoted: 3,
+    basis_unverified: 2,
+    unsupported_currency: 1,
+    tier_unmatched: 1,
+    stage_unstated: 1,
+    stage_pending: 1,
+    written: 3,
+  },
   reports: { generated: 0, reused: 1, reportId: "report-synthetic" },
   operations: {
     enabled: true,
