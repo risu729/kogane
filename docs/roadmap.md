@@ -72,7 +72,13 @@ Concrete limits in the current code:
   1 unit). A debit posted more than three days from the
   due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
   Sony Bank), partial payments, refunds and complete purchase recognition
-  remain extensions; this is not complete event coverage.
+  remain extensions; this is not complete event coverage. Which bank account
+  a card debits is still unknown to the code: the card provider's own
+  statement of it is designed as proposal-only evidence
+  ([ADR 0032](adr/0032-provider-stated-debit-accounts.md)), but only the
+  domain rule exists. The MyJCB transfer-account block and any Vpass
+  payment-account field are unobserved, and neither SMBC's account reference
+  (no account number) nor SBI Shinsei's (layout unverified) can be matched.
 - Vpass and MyJCB pending-to-posted candidates come from the purchase lane's
   [candidate pass](economic-events.md#pending-to-posted-links), which pairs one
   recognised pending event with one posted event per purchase; every pair
@@ -235,7 +241,13 @@ Concrete limits in the current code:
   `partial` the same way and are not parsed: whether an activity page holds a
   whole month has not been observed. A Vpass card run is `partial` the same
   way unless every month's captured rows equal the provider's stated total
-  (ADR 0026's amendment). A MyJCB connection's `complete` unit rests on the same
+  (ADR 0026's amendment). Both stated totals were seen on the live site
+  (`allCnt` a string, `total` a number) and are read as exact counts, but the
+  finalized walk still ends on its first empty page when `allCnt` or
+  `nextPageRow` is unreadable, and the page-number fields (`pageNo`,
+  `lastPage`) are not read because their meaning is unobserved
+  ([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site)).
+  A MyJCB connection's `complete` unit rests on the same
   unobserved premise (one detail page holds its whole month), and a
   connection whose older month shows rows without a stated state is
   `partial` and its run is not parsed. A MyJCB connection that stops at a

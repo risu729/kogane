@@ -59,7 +59,10 @@ ownership makes the pairing a decision. In production at the time of writing
 SMBC debit, none is accepted, and there is no published SBI Shinsei
 transaction: every stored capture of the SBI Shinsei activity page was
 rejected by its parser (closed code `parser_rejected`), so the SBI Shinsei
-adapter admits nothing until the parser accepts them.
+adapter admits nothing until the parser accepts them. A card provider's own
+statement of the debit account is the designed evidence for this pairing
+([Provider-stated debit accounts](#provider-stated-debit-accounts)); no reader
+produces it yet.
 
 A debit posted more than three days from the due date, for example after a
 long run of bank holidays, produces no candidate. That is a limit of the
@@ -68,6 +71,54 @@ matcher, not evidence that the bill was unpaid.
 The parsers preserve zero and refund totals as source values. The positive-debit
 matcher excludes them; a refund or a partial/multiple settlement requires its
 own supported model. No payment total is manufactured by summing purchase rows.
+
+### Provider-stated debit accounts
+
+Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md) (proposed).
+Implemented today: the domain rule only
+(`packages/domain/src/card-debit-account.ts`), tested with synthetic inputs.
+No reader, observation table, sweep wiring or review-page display exists, so
+the sweep and the review behave exactly as described in the rest of this
+page.
+
+The design: a card provider's description of the debit account (bank, branch,
+account type, masked account number), stored verbatim as displayed, becomes a
+`card_debit_account_statement` observation. `proposeCardDebitAccount` proposes
+a card → bank account relation when exactly one known account at the stated
+bank ends in the digits the provider shows and, when both sides show a branch
+code, the codes agree. Anything else is a closed reason with no proposal
+(`statement_invalid`, `bank_not_resolved`, `account_digits_not_shown`,
+`no_comparable_bank_account`,
+`no_matching_account`, `ambiguous_accounts`, `uncomparable_account_at_bank`).
+
+What it would change, once a reader lands: a candidate whose statement and
+debit accounts a proposal names carries that proposal as its primary evidence,
+shown on the ownership review as both providers stating the same account;
+amount and date stay a consistency check. What it does not change: the
+proposal sets no owner and no ownership evidence, so it never makes a
+candidate eligible; ownership and settlement acceptance stay operator
+decisions, and nothing is accepted automatically.
+
+Limits:
+
+- **MyJCB**: a transfer-account (お振替口座) block on the statement page is
+  owner-reported and read from JCB's public help, not verified here: no
+  fixture contains it. Whether it exists, its labels, whether it shows bank
+  and branch names or codes, and the mask pattern are unobserved (round 4
+  pending), so no reader exists. Labels are never invented.
+- **Vpass**: the statement parser's key allowlists name no payment-account
+  field, but nested objects such as the statement summary are not
+  key-allowlisted, so that is not proof of absence; whether any Vpass API
+  carries one is unknown.
+- **Bank references**: only a reference carrying the provider's displayed
+  account number is comparable (`bankAccountReference`). Mizuho's
+  (`mizuho-bank:ordinary:<branch>:<account>`) is, but Mizuho is not an adapter.
+  SMBC's (`smbc-bank:ordinary-yen`) carries no account number, and SBI
+  Shinsei's `accountNo` layout is unverified. So neither adapter bank can be
+  matched today.
+- A unique match among the accounts Kogane knows can still be wrong (an
+  uncollected account at the same bank with the same visible digits), which is
+  why acceptance stays with the operator.
 
 ## Candidate and decision lifecycle
 
@@ -416,6 +467,10 @@ rows do not; a re-observed `txnReferenceNo` is one payment; unknown ownership
 blocks acceptance; an accepted SBI Shinsei debit reserves the statement
 against an SMBC one. `packages/read-model/test/card-bank-debit-facts.test.ts`
 shows the SMBC branch returns exactly the 0044 view's rows.
+`packages/domain/test/card-debit-account.test.ts` covers the provider-stated
+debit-account rule on synthetic inputs: a unique match is proposed, branch
+codes must agree when both are shown, every other case is a closed reason, and
+a proposal never makes a candidate eligible.
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.

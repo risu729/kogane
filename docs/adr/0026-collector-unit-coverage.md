@@ -236,4 +236,7 @@ the count. The run's own `coverageStatus` stays `partial` (the rolling window).
 Limit: no fixture in this repository shows whether production finalized
 statement pages carry `allCnt`. If they do not, every such month is
 `stated_total_unverified` and no Vpass run registers `success`; the logged
-code shows it after deploy.
+code shows it after deploy. (2026-09-27: both fields were seen on the live
+site, `allCnt` as a string and `total` as a number, and both are read as
+exact counts; the walk's stops and what stays unobserved are in
+[ADR 0023's note](0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site).)

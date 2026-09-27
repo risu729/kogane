@@ -1,5 +1,6 @@
 import { Impit } from "impit";
 import { CookieJar } from "tough-cookie";
+import { providerCount } from "./provider-count";
 
 const BASE_URL = "https://www.smbc-card.com";
 const MYPAGE_PATH = "/memx/mypage/index.html";
@@ -58,11 +59,7 @@ function arrayAt(value: unknown, ...path: string[]): unknown[] {
   return Array.isArray(current) ? current : [];
 }
 
-function toInteger(value: unknown): number | null {
-  if (typeof value === "number" && Number.isInteger(value)) return value;
-  if (typeof value === "string" && /^\d+$/.test(value)) return Number.parseInt(value, 10);
-  return null;
-}
+const toInteger = providerCount;
 
 function pairList(value: unknown): VpassCard[] {
   if (!Array.isArray(value)) return [];
