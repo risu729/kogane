@@ -24,7 +24,8 @@ import {
   type LaneTickOutcome,
 } from "../../../packages/storage-d1/src/core/lane-ticks.ts";
 import type { CardPurchaseSweepResult } from "./card-purchase-job.ts";
-import type { cardSettlementSweep } from "./card-settlement-job.ts";
+import type { CardDebitAccountSweepResult } from "./card-debit-account-job.ts";
+import type { CardSettlementSweepResult } from "./card-settlement-job.ts";
 import type { DispatchSummary } from "./operations/dispatch.ts";
 import type { PricePromotionResult } from "./price-promotion-job.ts";
 import type { ReconciliationSweepResult } from "./reconciliation-job.ts";
@@ -90,10 +91,17 @@ export const LANE_TICK_COUNTS = {
     "failed",
     "autoAccepted",
   ]),
-  card_settlement_sweep: countsOf<Awaited<ReturnType<typeof cardSettlementSweep>>>([
+  card_debit_account_sweep: countsOf<CardDebitAccountSweepResult>([
+    "scanned",
+    "read",
+    "refused",
+    "written",
+  ]),
+  card_settlement_sweep: countsOf<CardSettlementSweepResult>([
     "scanned",
     "proposed",
     "written",
+    "debitAccountEvidence",
   ]),
   purchase_recognition: countsOf<CardPurchaseSweepResult>(
     [

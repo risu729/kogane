@@ -802,6 +802,12 @@
         }
       ],
       "sha256": "749b34ef1caf938de49c38d0a0310e41d462a3e99233aeddfc9bb346bed3a323"
+    },
+    {
+      "file": "0060_card_debit_account_statements.sql",
+      "statementCount": 9,
+      "insertStatements": [],
+      "sha256": "35093e36399a6c4d3ddf2fa1bcfa0a26c3cbb2035e2b17e29222bebd8a4adcf4"
     }
   ],
   "tables": [
@@ -2895,6 +2901,175 @@
       "sqlSha256": "7e2fb2705ac4c799"
     },
     {
+      "name": "card_debit_account_statement",
+      "classification": "core-keep",
+      "planRow": "card settlement evidence and decisions",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "card_source_account",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "fetch_artifact_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "statement_parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "raw_sha256",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_object_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observed_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reader_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "refusal_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bank_name",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "branch_name",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "account_type",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "leading_digits",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "masked_digit_count",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "fetch_artifact_id",
+          "references": "fetch_artifacts(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "statement_parse_run_id",
+          "references": "parse_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "card_debit_account_statement_object",
+          "unique": true,
+          "partial": false,
+          "columns": [
+            "raw_sha256",
+            "card_source_account",
+            "reader_version"
+          ]
+        }
+      ],
+      "triggers": [
+        "card_debit_account_statement_no_delete",
+        "card_debit_account_statement_no_update"
+      ],
+      "noUpdateTriggers": [
+        "card_debit_account_statement_no_update"
+      ],
+      "noDeleteTriggers": [
+        "card_debit_account_statement_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "47efb6a7eb1dcd81"
+    },
+    {
       "name": "card_purchase_recognition_keys",
       "classification": "core-keep",
       "planRow": "card purchase recognition evidence",
@@ -3388,6 +3563,121 @@
       ],
       "appendOnly": true,
       "sqlSha256": "a8b096a2533c3501"
+    },
+    {
+      "name": "card_settlement_debit_account_evidence",
+      "classification": "core-keep",
+      "planRow": "card settlement evidence and decisions",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "candidate_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "statement_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "policy",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "proposal_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "candidate_id",
+          "references": "card_settlement_candidates(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "statement_id",
+          "references": "card_debit_account_statement(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "card_settlement_debit_account_evidence_candidate",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "candidate_id",
+            "statement_id",
+            "policy",
+            "id"
+          ]
+        }
+      ],
+      "triggers": [
+        "card_settlement_debit_account_evidence_card",
+        "card_settlement_debit_account_evidence_no_delete",
+        "card_settlement_debit_account_evidence_no_update"
+      ],
+      "noUpdateTriggers": [
+        "card_settlement_debit_account_evidence_no_update"
+      ],
+      "noDeleteTriggers": [
+        "card_settlement_debit_account_evidence_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "886921c2aa545783"
     },
     {
       "name": "card_settlement_decisions",
@@ -14286,6 +14576,20 @@
       "sqlSha256": "c01baa60705e79d6"
     },
     {
+      "name": "card_debit_account_statement_no_delete",
+      "table": "card_debit_account_statement",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "b8171cc8f724fca5"
+    },
+    {
+      "name": "card_debit_account_statement_no_update",
+      "table": "card_debit_account_statement",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "e8ade07fa781173f"
+    },
+    {
       "name": "card_purchase_recognition_keys_guard",
       "table": "card_purchase_recognition_keys",
       "timing": "BEFORE",
@@ -14403,6 +14707,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "628137b883071435"
+    },
+    {
+      "name": "card_settlement_debit_account_evidence_card",
+      "table": "card_settlement_debit_account_evidence",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "1036e71f0c7fd862"
+    },
+    {
+      "name": "card_settlement_debit_account_evidence_no_delete",
+      "table": "card_settlement_debit_account_evidence",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "a68ce842a6f1a5b1"
+    },
+    {
+      "name": "card_settlement_debit_account_evidence_no_update",
+      "table": "card_settlement_debit_account_evidence",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "7015db9431f6db79"
     },
     {
       "name": "card_settlement_decisions_bump_revision_delete",
@@ -16577,6 +16902,11 @@
       "sqlSha256": "d1ea79e43a286823"
     },
     {
+      "name": "card_debit_account_statement_object",
+      "table": "card_debit_account_statement",
+      "sqlSha256": "69b317feb166789b"
+    },
+    {
       "name": "card_purchase_recognition_keys_key",
       "table": "card_purchase_recognition_keys",
       "sqlSha256": "07530959930ba7cc"
@@ -16605,6 +16935,11 @@
       "name": "card_settlement_candidates_statement_period",
       "table": "card_settlement_candidates",
       "sqlSha256": "4d73d1fcde6fdade"
+    },
+    {
+      "name": "card_settlement_debit_account_evidence_candidate",
+      "table": "card_settlement_debit_account_evidence",
+      "sqlSha256": "33e67cb228866cec"
     },
     {
       "name": "change_plans_status",
@@ -17113,10 +17448,10 @@
     }
   ],
   "summary": {
-    "tableCount": 114,
+    "tableCount": 116,
     "viewCount": 39,
-    "triggerCount": 405,
-    "explicitIndexCount": 114,
+    "triggerCount": 410,
+    "explicitIndexCount": 116,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -17138,10 +17473,12 @@
         "calculation_policies",
         "calculation_results",
         "calculation_runs",
+        "card_debit_account_statement",
         "card_purchase_recognition_keys",
         "card_purchase_recognitions",
         "card_settlement_allocation_withdrawals",
         "card_settlement_candidates",
+        "card_settlement_debit_account_evidence",
         "card_settlement_decisions",
         "change_plans",
         "collection_run_stages",
@@ -17330,6 +17667,6 @@
       "0057_vpass_card_token_v2.sql",
       "0058_identity_crosswalk.sql"
     ],
-    "schemaSha256": "a4ea1a7b0e9979d403a17c5b7a375d676c403b44dcdc3d40b30be4e84e976901"
+    "schemaSha256": "5d3e2a21297bce2d69875baf343dee487fd1f22448053d9aa30d846da1e152b5"
   }
 }

@@ -472,3 +472,12 @@ run のすべての connection が何も保存しなかった場合、run は `f
 registration と eligibility は変えない。停止 code 付きの `partial` unit は unit report `failed` になり、run は `observation_fetch_runs` で `partial`、parse job は `not_eligible` である。取得済みの月は catalogue され seal されるが、parse されない。変わるのは、evidence と原因が残ることである。
 
 制限：これ以前の terminal は `collector_failed` のままで、月も残っていない（terminal は変更できない）。停止 code は collector 側の段階を示すだけで、provider が何を意味したかは示さない。
+
+## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
+
+round 4 の観測（構造と件数のみ）: 確定明細（`detail.html?detailMonth=N`）とショッピングスキップ払いの頁（位置 8）には「カード・お振替情報」という見出しはなく、引落口座は明細グリッドの後の `h3.hdg-H3`「カード情報」の下、`div.detail-lyt-02.border-01 > div.col-01 > table.table-data`（th/td の縦表）にある。行は カード名称、カード発行会社、金融機関名（銀行名）、支店名（支店名。支店番号はない）、科目・口座番号（「普通 ####\*\*\*」の形: 科目、空白、口座番号の**先頭** 4 桁、残りは `*`）、口座名義（一部 `*` の名義）。同じ表は保存済みの redacted HTML（`credit-detail-NN.html`）にも同じ形で残っている。
+
+- 読み取り: `readMyJcbCardInformation`（`packages/domain/src/myjcb-card-information.ts`）が金融機関名、支店名、科目、先頭 4 桁、`*` の数だけを読む。カード名称と口座名義の値は読まない（ADR 0029 class d。口座名義の保存 HTML からの除去は別 PR）。他の形は closed code で拒否する。
+- 保存: processor の `card_debit_account_sweep` lane が、`myjcb-credit-statement-total` の parse が公開済みの頁を R2 から読み直し、`card_debit_account_statement`（migration 0060、append-only）へ card・raw object・reader version ごとに 1 行書く。
+- 利用: 決済照合の候補に evidence として付くだけで、候補の facts・適格性・承認は変わらない（[card-settlements.md](../card-settlements.md#provider-stated-debit-accounts)）。
+- collector は変更しない。頁はすでに redacted HTML として保存されており、collector が読む必要はない。
