@@ -435,7 +435,7 @@ ADR 0026 以前の collector は、成功した connection の unit coverage も
 
 unit の coverage は「この run が集めようとしたものを、この unit が欠けなく取得したか」を表す。card の履歴全体についての主張ではない。履歴についての主張は run の `coverageStatus` が持ち、成功 run でも `partial` のままである（registration は記録するだけで、outcome を導かない）。
 
-成功した connection の unit は `complete` と書く。成功した connection は、credit menu と過去月 response が列挙した月をすべて取得している。各月について redact 済み page、状態を示す page から作る ledger、page が示す export をすべて保存する。状態が `unknown` の page は規則どおり HTML だけを保存する（ADR 0005）。これは欠落ではない。ただし `unknown` の page に ledger 行がある場合（見出しがなく position 2 以降に行がある page）、その行は HTML の中にしかなく、どの parser も読まない。この月は欠けなく取得できていないので、`collectCredit` がその月を数え、`collectConnection` は connection を `partial` と報告する。unit は `collector_partial` 付きの `partial` になり、failure がなくても run は `partial` になる。月、export、parse のどれかが失敗したときの扱いは次節のとおりである。plan は `partial` の unit を広げない。
+成功した connection の unit は `complete` と書く。成功した connection は、credit menu と過去月 response が列挙した月をすべて取得している。各月について redact 済み page と、状態を示す page から作る ledger をすべて保存する。page が示す export は記録するだけで取得しない（下の amendment (b) の節）。状態が `unknown` の page は規則どおり HTML だけを保存する（ADR 0005）。これは欠落ではない。ただし `unknown` の page に ledger 行がある場合（見出しがなく position 2 以降に行がある page）、その行は HTML の中にしかなく、どの parser も読まない。この月は欠けなく取得できていないので、`collectCredit` がその月を数え、`collectConnection` は connection を `partial` と報告する。unit は `collector_partial` 付きの `partial` になり、failure がなくても run は `partial` になる。月、export、parse のどれかが失敗したときの扱いは次節のとおりである。plan は `partial` の unit を広げない。
 
 `complete` の unit は registration で unit outcome `success` になる。importer 時代と同じである。成功 run は `observation_fetch_runs` で `success` になり、parse job が作られ、end to end で parse される（`services/processor/test/myjcb-shared-r2.test.ts`）。
 
@@ -485,22 +485,27 @@ registration と eligibility は変えない。停止 code 付きの `partial` u
 | 1、2          | あり、行あり | `ご利用日 / ご利用先など / 支払区分 / 今回のお支払い金額` | PDF、CSV、OFX（相対 href） | `confirmed`、ledger を作る、export は記録だけ |
 | 3–6           | なし         | —                                                         | なし                       | `unknown`、page だけ                          |
 | 7             | あり、空     | `ご利用日 / ご利用先など / 支払区分 / ご利用金額`         | なし                       | `unknown`、page だけ（欠落なし）              |
-| 8             | あり、空     | `ご利用日 / ご利用先など / お支払日 / 今後のお支払い金額` | なし                       | `unknown`、page だけ（欠落なし）              |
+| 8             | あり、空     | `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`   | なし                       | `unknown`、page だけ（欠落なし）              |
+
+同じ日の二度目の構造調査（round 4）で、position 7 と 8 が月ではないと分かった。menu の 9 link はすべて文言 「明細を見る」 で、DOM 順は 0、1、7、8、2、3、4、5、6。月名は link ではなく同じ box の見出しにある。0 と 1 は h2 「最新のご利用明細」、2〜6 は 「過去の明細」 の下にあり、これが月である。7 と 8 は h2 「ボーナス#回払い・ショッピングスキップ払い」 の下にあり、7 は ボーナス払い、8 は ショッピングスキップ払い（box に月名なし）の支払予定 page である。position 8 の page は h1 「ショッピングスキップ払いご利用明細(未確定分)」 を持つ。ledger はどの page でも `div.detail-list-01` の grid で、`<table>` ではない（collector も `<table>` に依存しない）。三つ目の header の live の `div.head` は 3 cell で、2 番目の cell が 「ご利用先など」 と 「お支払日」 を二行で持つ。最初の調査はこれを 4 label と書いた。
+
+collector は `detailMonth` の position を数え、月と支払予定 page を区別しない。7 と 8 も取得、保存され、`periodCount` と `capturedMonthCount` に数えられ、読まなければ `unreadMonths` に入る。period は `detailMonth-7`／`detailMonth-8` の相対 label で、どの reader も暦月に解決しない（解決するのは `detailMonth-0` と `-1` だけ）。
 
 **export link。** 確定月は `detailDbPdf.html?output=pdf`、`detail.html?output=csv`、`detail.html?output=money` を、`detailMonth` を名乗らない相対 href で持つ（月はその link がある page の月である）。以前の `discoverCreditExports` は href を origin だけに対して解決したので `/detail.html` になり、一度も一致しなかった。保存済みのどの run も export を 0 件と記録したのはこの bug で、「調べた connection はどの月にも export link を持たない」（上の明細状態の判定）は誤りだった。現在は detail page 自身の URL（`https://my.jcb.co.jp/iss-pc/member/details_inquiry/detail.html`）に対して解決するので、相対、`./`、root 相対、絶対の href が同じく読める。MyJCB の origin にあり、export の path（`/iss-pc/member/details_inquiry/` の `detail.html` か `detailDbPdf.html`）と `output`（`csv`、`money`、`pdf`）を持つ link を数える。観測どおり `detailMonth` を名乗らない link は、その link がある page の月の export とする。`detailMonth` を名乗る link は、その月をちょうど名乗る場合だけ数える（以前は `Number(null)` により、月のない link を month 0 のものとし、他の月では数えなかった）。
 
 Worker は見つけた export を取得しない。共通 bucket は `credit-csv`／`credit-pdf`／`credit-ofx` を拒否する（`artifact_dataset_unobserved`）ので、取得すれば確定月のある run はすべて plan の段階で失敗し、terminal を書かない。そこで collector manifest の connection に `exportOffers: [{ position, kinds }]`（kind は `csv`、`pdf`、`ofx`）として記録するだけにした。offer は unit を `partial` にしない。確定明細でない page に export link があれば停止する規則（`credit_statement_state`）は変えておらず、発見を直したことで live page でも働くようになった。
 
-**三つ目の header。** `ご利用日 / ご利用先など / お支払日 / 今後のお支払い金額` は、読む二種の金額 label のどちらも持たない。行の意味（支払予定、分割の残りなど）は行のある状態で観測されておらず、確認もされていないので、statement としては読まない（ADR 0004）。`支払区分`、`今回のお支払い金額`、`ご利用金額` のどれも表示せず、この 4 label をすべて表示する header をこの型とみなす（`scheduledLedgerRowCount`）。
+**三つ目の header。** `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` は、読む二種の金額 label のどちらも持たない。ショッピングスキップ払いの支払予定 page でだけ観測されたので、code は `scheduled_payments_page` とした。行の意味は確認されていないので、statement としては読まない（ADR 0004）。header の文字列から空白を除いたものに `ご利用日`、`ご利用先など`、`お支払日`、`今後のお支払い金額` がすべてあり、`支払区分`、`今回のお支払い金額`、`ご利用金額` のどれもない header をこの型とみなす（`scheduledLedgerRowCount`）。cell 単位では比べないので、観測された 3 cell の形も 4 cell の形も同じく読む（どちらも行は読まない）。
 
-- 行があれば、どの position でもその月を「取得したが読まない」月にする。状態を読む前に判定し、page を `unknown` の evidence として（API label か `detailMonth-N` の period で）保存し、ledger を作らず、export も取得せず、次の月へ進む。以前は、position 0 では未確定 header 一式がないので `ledger_parse`、position 1 では見出しなしなら `credit_statement_state`、見出しがあればどの position でも確定 header 一式がないので `ledger_parse` で停止し、見出しのない position 2 以降だけは状態を示さない行として読まずに進んだ（現在の `rows_unstated`）。
+- 行があれば、どの position でもその position を「取得したが読まない」ものにする。状態を読む前に判定し、page を `unknown` の evidence として（API label か `detailMonth-N` の period で）保存し、ledger を作らず、export も取得せず、次の月へ進む。以前は、position 0 では未確定 header 一式がないので `ledger_parse`、position 1 では見出しなしなら `credit_statement_state`、見出しがあればどの position でも確定 header 一式がないので `ledger_parse` で停止し、見出しのない position 2 以降だけは状態を示さない行として読まずに進んだ（現在の `rows_unstated`）。
 - 同じ page に別の ledger があっても、月全体を読まない。
 - 空なら何も欠けないので、従来どおり読む（position 8 の観測どおり）。
 - 三種のどれでもない header で行があれば、従来どおり停止する。
+- ショッピングスキップ払いの page に行があるかぎり、connection は `partial` で、run は parse されない。行が月の明細にも現れるかは観測されていないので、欠落として扱う（INV05）。支払予定 page を月と分けて扱う規則は、menu の見出しの読み取りと別の決定が要る。
 
-読まない月は manifest の connection に `unreadMonths: [{ position, code }]` として書く。code は閉じた一覧（`UNREAD_MONTH_CODES`）で、`scheduled_unrecognized`（三つ目の header）と `rows_unstated`（position 2 以降で状態を示さない page の行。以前から数えていたが名前がなかった）である。読まない月のある connection は `partial` になる。読まない月がすべて `scheduled_unrecognized` で、connection が止まっていなければ unit の `safeErrorCode` は `scheduled_unrecognized`、それ以外は従来どおり `collector_partial` である。manifest の `failures` には書かない（停止ではない）。log は `myjcb-credit-month-unread` に position と code だけを出す。registration と eligibility は変えない。unit report は `failed`、run は `partial`、`not_eligible` で、読まない page は catalogue と seal はされるが、どの parser も読まない。
+読まない月は manifest の connection に `unreadMonths: [{ position, code }]` として書く。code は閉じた一覧（`UNREAD_MONTH_CODES`）で、`scheduled_payments_page`（三つ目の header）と `rows_unstated`（position 2 以降で状態を示さない page の行。以前から数えていたが名前がなかった）である。読まない月のある connection は `partial` になる。読まない月がすべて `scheduled_payments_page` で、connection が止まっていなければ unit の `safeErrorCode` は `scheduled_payments_page`、それ以外は従来どおり `collector_partial` である。manifest の `failures` には書かない（停止ではない）。log は `myjcb-credit-month-unread` に position と code だけを出す。registration と eligibility は変えない。unit report は `failed`、run は `partial`、`not_eligible` で、読まない page は catalogue と seal はされるが、どの parser も読まない。
 
-**停止した page。** `credit_statement_state`、`credit_statement_period`、`ledger_parse` で止まった場合、止まった月の page を redact して `credit-detail`（状態 `unknown`、ledger なし、export なし）として保存する。`capturedMonthCount` はそれより前の月の数のままで、`stopPosition` がその page の月を示す。停止 log には `stopPageKept` を加えた。statement page として読めなかった page（`month_parse`）は従来どおり保存しない。
+**停止した page。** `credit_statement_state`、`credit_statement_period`、`ledger_parse` で止まった場合、止まった月の page を redact して `credit-detail`（状態 `unknown`、ledger なし、export なし）として保存する。redaction は script や属性を除くが本文は残すので、保存した他の明細 page と同じく、ledger の後の 「カード情報」 の表も残る。`capturedMonthCount` はそれより前の月の数のままで、`stopPosition` がその page の月を示す。停止 log には `stopPageKept` を加えた。statement page として読めなかった page（`month_parse`）は従来どおり保存しない。
 
 **menu が先。** `detailMenu.html` を経ずに `detail.html?detailMonth=N` を取得すると別の page（h1 `カードご利用明細一覧`、ledger なし）が返り、menu を経ると明細 page が返ることが観測された。`collectCredit` は同じ session で `detailMenu.html` を一度読み、最初の月、過去月 API、残りの月の順に読む。この順序は以前からで、test で固定した。
 
@@ -508,5 +513,5 @@ Worker は見つけた export を取得しない。共通 bucket は `credit-csv
 
 制限：
 
-- 2026-09-25 と 09-26 の run は position 1 で `credit-ledger-headers` により止まり、artifact を残さなかった（最初の amendment の前）。09-27 の live の position 1 は確定の形で、通るはずである。position 1 の page の形は時刻か session によって変わる。その夜の page は保存されていないので、原因は分からない。次に同じ停止が起きれば、停止した page が保存される。
+- 2026-09-25 と 09-26 の run は position 1 で `credit-ledger-headers` により止まり、artifact を残さなかった（最初の amendment の前）。09-27 の live の position 1 は確定の形で、通るはずである。position 1 の page の形は時刻か session によって変わる。その夜の page は保存されていないので、原因は確かめられない。以前の run が保存した position 1 の page（round 4 で label の数だけを数えた）は `(確定分)` の見出しを持つが `今回のお支払い金額` をどこにも持たず、`ご利用金額` だけを持つ。この ADR の規則は、行のあるこの形の page で停止する（確定の ledger は確定 header 一式を表示しなければならない、`ledger_parse`）ので、これが最も考えられる原因だが、確認はされていない。次に同じ停止が起きれば、停止した page が保存される。
 - 三つ目の header の行の意味、export の中身（2026-08-31 に確認、保存はしない）、menu を月ごとに読み直す必要があるかは未確認である。

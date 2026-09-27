@@ -109,11 +109,15 @@ export type CreditExportKind = "csv" | "pdf" | "ofx";
  *
  * - `rows_unstated`: the page shows rows but does not state its statement
  *   state (no heading, position 2 or later), as before;
- * - `scheduled_unrecognized`: a ledger carries the observed header
- *   `ご利用日 / ご利用先など / お支払日 / 今後のお支払い金額` and has rows. What
- *   those rows mean has not been confirmed, so they are not read (ADR 0004).
+ * - `scheduled_payments_page`: a ledger carries the observed header
+ *   `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` and has rows. That
+ *   header was observed on the ショッピングスキップ払い schedule page, a menu
+ *   position that is a payment schedule and not a statement month; what its
+ *   rows mean has not been confirmed, so they are not read (ADR 0004).
+ *
+ * Entries are `detailMonth` positions, not calendar months.
  */
-export const UNREAD_MONTH_CODES = ["rows_unstated", "scheduled_unrecognized"] as const;
+export const UNREAD_MONTH_CODES = ["rows_unstated", "scheduled_payments_page"] as const;
 
 export type UnreadMonthCode = (typeof UNREAD_MONTH_CODES)[number];
 

@@ -780,14 +780,14 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
     };
   }
 
-  test("a connection whose only unread months are third-header months carries scheduled_unrecognized", async () => {
+  test("a connection whose only unread months are third-header months carries scheduled_payments_page", async () => {
     const plan = await myJcbRunPlan(
       input({
         status: "partial",
         connections: [
           unreadConnection(
             "account-one",
-            [{ position: 2, code: "scheduled_unrecognized" }],
+            [{ position: 2, code: "scheduled_payments_page" }],
             [{ position: 1, kinds: ["pdf", "csv", "ofx"] }],
           ),
         ],
@@ -799,10 +799,10 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
         unitKind: "connection",
         artifactCount: 3,
         coverageStatus: "partial",
-        safeErrorCode: "scheduled_unrecognized",
+        safeErrorCode: "scheduled_payments_page",
       },
     ]);
-    expect(plan.run.safeErrorCode).toBe("scheduled_unrecognized");
+    expect(plan.run.safeErrorCode).toBe("scheduled_payments_page");
     const manifest = await storedManifest(plan);
     expect(manifest.connections[0]).toEqual({
       connectionId: "account-one",
@@ -811,7 +811,7 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
       cardCount: 1,
       periodCount: 2,
       artifactCount: 3,
-      unreadMonths: [{ position: 2, code: "scheduled_unrecognized" }],
+      unreadMonths: [{ position: 2, code: "scheduled_payments_page" }],
       exportOffers: [{ position: 1, kinds: ["pdf", "csv", "ofx"] }],
     });
     // Not a stop: nothing is recorded as a failure.
@@ -825,17 +825,17 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
         connections: [
           unreadConnection("account-one", [{ position: 7, code: "rows_unstated" }]),
           unreadConnection("account-two", [
-            { position: 2, code: "scheduled_unrecognized" },
+            { position: 2, code: "scheduled_payments_page" },
             { position: 7, code: "rows_unstated" },
           ]),
-          unreadConnection("account-three", [{ position: 2, code: "scheduled_unrecognized" }]),
+          unreadConnection("account-three", [{ position: 2, code: "scheduled_payments_page" }]),
         ],
       }),
     );
     expect(plan.run.units.map((unit) => [unit.unitKey, unit.safeErrorCode])).toEqual([
       ["account-one", "collector_partial"],
       ["account-two", "collector_partial"],
-      ["account-three", "scheduled_unrecognized"],
+      ["account-three", "scheduled_payments_page"],
     ]);
     // The connections do not agree, so the run keeps the coarse code.
     expect(plan.run.safeErrorCode).toBe("collector_partial");
@@ -848,13 +848,13 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
       plan([unreadConnection("account-one", [{ position: 2, code: "upstream said no" }])]),
     ).rejects.toThrow("manifest_unread_code_invalid");
     await expect(
-      plan([unreadConnection("account-one", [{ position: 18, code: "scheduled_unrecognized" }])]),
+      plan([unreadConnection("account-one", [{ position: 18, code: "scheduled_payments_page" }])]),
     ).rejects.toThrow("manifest_stop_position_invalid");
     await expect(
       plan([
         unreadConnection(
           "account-one",
-          [{ position: 2, code: "scheduled_unrecognized" }],
+          [{ position: 2, code: "scheduled_payments_page" }],
           [{ position: 1, kinds: ["xlsx"] }],
         ),
       ]),

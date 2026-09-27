@@ -164,7 +164,7 @@ function runCoverage(status: CollectionManifest["status"]): CoverageStatus {
 /** A blocked connection is a state to report, never a reason to retry a login
  * (source policy, G3-10/G3-11). A stopped connection's unit carries the stage
  * it stopped at. One that ran to the end but kept months unread carries
- * `scheduled_unrecognized` when every unread month is under the observed third
+ * `scheduled_payments_page` when every unread month is under the observed third
  * ledger header (ADR 0005's second amendment), and `collector_partial`
  * otherwise, as before. */
 export function connectionErrorCode(summary: ConnectionSummary): string | undefined {
@@ -173,8 +173,8 @@ export function connectionErrorCode(summary: ConnectionSummary): string | undefi
   if (summary.status === "human-required") return "human_required";
   if (summary.status !== "partial") return "collector_failed";
   const unread = new Set((summary.unreadMonths ?? []).map((month) => month.code));
-  return unread.size === 1 && unread.has("scheduled_unrecognized")
-    ? "scheduled_unrecognized"
+  return unread.size === 1 && unread.has("scheduled_payments_page")
+    ? "scheduled_payments_page"
     : "collector_partial";
 }
 
@@ -192,7 +192,7 @@ function runErrorCode(input: SharedRunInput): string | undefined {
   if (
     codes.size === 1 &&
     only !== undefined &&
-    (STOP_CODES.has(only) || only === "scheduled_unrecognized")
+    (STOP_CODES.has(only) || only === "scheduled_payments_page")
   )
     return only;
   return input.status === "partial" ? "collector_partial" : "collector_failed";

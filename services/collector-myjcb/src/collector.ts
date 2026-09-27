@@ -299,7 +299,7 @@ export async function collectCredit(
    * Months whose page is kept but whose rows no parser reads, with the
    * closed reason: a page with rows that does not state its statement state
    * (`rows_unstated`, kept as `unknown` evidence without a ledger), or a
-   * ledger under the observed third header (`scheduled_unrecognized`). The
+   * ledger under the observed third header (`scheduled_payments_page`). The
    * connection is then not whole (ADR 0026).
    */
   readonly unreadMonths: readonly UnreadMonth[];
@@ -414,7 +414,7 @@ export async function collectCredit(
             ledger: undefined,
             state,
             period,
-            unread: "scheduled_unrecognized" as const,
+            unread: "scheduled_payments_page" as const,
           };
         }
         // The page states whether it is a closed statement; export links are
@@ -520,7 +520,7 @@ export async function collectCredit(
     artifacts.push(...monthArtifacts);
     if (unread !== undefined) {
       unreadMonths.push({ position: detailMonth, code: unread });
-      if (unread === "scheduled_unrecognized") {
+      if (unread === "scheduled_payments_page") {
         // Counts and codes only: the page's text never reaches the log.
         console.warn(
           JSON.stringify({

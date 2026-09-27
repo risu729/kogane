@@ -255,7 +255,7 @@ Two sentences of the MyJCB section above change.
   the unit `partial`.
 - "whose unit is `partial` with `collector_partial`": a month whose rows are
   kept unread is now named in the manifest (`unreadMonths`, codes
-  `rows_unstated` and `scheduled_unrecognized`). A connection whose unread
+  `rows_unstated` and `scheduled_payments_page`). A connection whose unread
   months are all under the observed third ledger header carries
-  `scheduled_unrecognized`; any other unread month keeps `collector_partial`.
+  `scheduled_payments_page`; any other unread month keeps `collector_partial`.
   The unit is `partial` either way, so eligibility is unchanged.

@@ -231,20 +231,28 @@ collector read wrongly or not at all
   links against the detail page's URL and records the offered kinds in the
   manifest. It does not fetch them: the shared bucket refuses the export
   datasets.
-- The oldest listed month shows a third ledger header,
-  `ご利用日 / ご利用先など / お支払日 / 今後のお支払い金額`, over an empty
-  ledger. With rows it would have stopped the connection. A month whose
-  ledger has rows under it is now kept unread (`scheduled_unrecognized`): its
-  page is stored as `unknown` evidence, no ledger is derived, and the next
-  month is read. Its run is `partial` and not parsed.
+- Position 8 shows a third ledger header,
+  `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` (three cells), over
+  an empty ledger. A second look the same day found that positions 7 and 8
+  are not months: the menu groups them under
+  「ボーナス#回払い・ショッピングスキップ払い」, and position 8 is the
+  ショッピングスキップ払い payment schedule. With rows at position 0 or 1, or
+  under the confirmed heading, the header stopped the connection. A position
+  whose ledger has rows under it is now kept unread
+  (`scheduled_payments_page`): its page is stored as `unknown` evidence, no
+  ledger is derived, and the next position is read. Its run is `partial` and
+  not parsed; the collector still counts positions, not months.
 - A detail page fetched without the credit menu first is a different page;
   the collector already reads the menu first. A 「通信エラーが発生しました」
   page followed many consecutive fetches; the collector does not recognise
   it (a limit).
 
 No parser changes and nothing stored is rewritten. The position-1 stops of
-2026-09-25 and 09-26 (`credit-ledger-headers`, no artifact kept) remain
-unexplained; a later stop on a page's own shape stores the page. Tests:
+2026-09-25 and 09-26 (`credit-ledger-headers`, no artifact kept) are not
+confirmed: a position-1 page an earlier run stored carries the `(確定分)`
+heading without `今回のお支払い金額` (label counts only), a shape the current
+rule stops on, so it is the likely cause. A later stop on a page's own shape
+stores the page. Tests:
 `services/collector-myjcb/test/parsers.test.ts`,
 `credit-statement-state.test.ts`, `shared-collection.test.ts`, and
 `services/processor/test/myjcb-shared-r2.test.ts`.

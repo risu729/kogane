@@ -447,11 +447,13 @@ the run's plan
 A month can be kept unread: a page kept as `unknown` that shows ledger rows
 (no heading, position 2 or later; `rows_unstated`), or a page whose ledger
 shows rows under the observed third header
-`ご利用日 / ご利用先など / お支払日 / 今後のお支払い金額`
-(`scheduled_unrecognized`, at any position). Such a page gets no ledger, so
+`ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`, seen on the
+ショッピングスキップ払い schedule page (`scheduled_payments_page`, at any
+position; the collector counts `detailMonth` positions and does not tell a
+month from a schedule page). Such a page gets no ledger, so
 its rows reach no parser, and the connection goes on to the next month. The
 manifest lists these months (`unreadMonths: [{ position, code }]`), the
-connection is `partial`, its unit `partial` with `scheduled_unrecognized`
+connection is `partial`, its unit `partial` with `scheduled_payments_page`
 when every unread month is under the third header and `collector_partial`
 otherwise, and the run `partial` although no failure was recorded. The credit
 menu (`detailMenu.html`) is read once, before any detail page, in the same

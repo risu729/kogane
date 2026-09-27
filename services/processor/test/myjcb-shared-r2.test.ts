@@ -507,14 +507,15 @@ test("ADR 0005 amendment: a failed run's stopped units carry their codes and the
 test("ADR 0005 second amendment: a month under the third ledger header registers unread, the run stays not_eligible", async () => {
   // The collector's real plan for a connection that read positions 0 and 1
   // and kept position 2 unread: its page shows rows under
-  // `ご利用日 / ご利用先など / お支払日 / 今後のお支払い金額`, so it is stored
+  // `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` (three cells, as the
+  // ショッピングスキップ払い schedule page shows it), so it is stored
   // as `unknown` evidence with no ledger, and the connection went on. The unit
-  // is `partial` with `scheduled_unrecognized`: registration turns it into a
+  // is `partial` with `scheduled_payments_page`: registration turns it into a
   // `failed` unit report, the run is `partial`, and nothing of it is parsed,
   // so no parser reads the unread month (ADR 0026's eligibility, unchanged).
   const runId = "00000000-0000-4000-8000-00000000a007";
   const scheduledPage =
-    '<!doctype html><html><body><h1>MyJCB</h1><div class="detail-list-01"><div class="head">ご利用日 ご利用先など お支払日 今後のお支払い金額</div><div class="content"><div class="item-cell"><div class="cell">2026/03/10</div><div class="cell">架空分割店</div><div class="cell">2026/04/10</div><div class="cell">3,000円</div></div></div></div></body></html>';
+    '<!doctype html><html><body><h1>MyJCB</h1><div class="detail-list-01"><div class="head"><div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div></div><div class="content"><div class="item-cell"><div class="cell">2026/03/10</div><div class="cell">架空分割店</div><div class="cell">2026/04/10</div><div class="cell">3,000円</div></div></div></div></body></html>';
   const kept: RawArtifact[] = [
     ...artifacts,
     {
@@ -542,7 +543,7 @@ test("ADR 0005 second amendment: a month under the third ledger header registers
           cardCount: 1,
           periodCount: 3,
           artifactCount: kept.length,
-          unreadMonths: [{ position: 2, code: "scheduled_unrecognized" }],
+          unreadMonths: [{ position: 2, code: "scheduled_payments_page" }],
           exportOffers: [{ position: 1, kinds: ["pdf", "csv", "ofx"] }],
         },
         artifacts: kept,
@@ -556,7 +557,7 @@ test("ADR 0005 second amendment: a month under the third ledger header registers
       unitKind: "connection",
       artifactCount: 5,
       coverageStatus: "partial",
-      safeErrorCode: "scheduled_unrecognized",
+      safeErrorCode: "scheduled_payments_page",
     },
   ]);
   expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
@@ -578,7 +579,7 @@ test("ADR 0005 second amendment: a month under the third ledger header registers
         .bind(runId)
         .all()
     ).results,
-  ).toEqual([{ status: "partial", unit_outcome: "failed", code: "scheduled_unrecognized" }]);
+  ).toEqual([{ status: "partial", unit_outcome: "failed", code: "scheduled_payments_page" }]);
   // The unread month is catalogued as evidence, with no ledger beside it.
   expect(
     (

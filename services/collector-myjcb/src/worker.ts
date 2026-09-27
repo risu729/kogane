@@ -165,7 +165,7 @@ async function runSharedCollection(
                 connectionId: connection.summary.connectionId,
                 // The unit's code: the stop code, or for a connection that
                 // ran to the end but kept months unread,
-                // `scheduled_unrecognized` or `collector_partial`.
+                // `scheduled_payments_page` or `collector_partial`.
                 code: connectionErrorCode(connection.summary) ?? "collector_partial",
               },
             ],

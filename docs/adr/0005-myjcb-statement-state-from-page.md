@@ -242,17 +242,34 @@ shapes, no values). Four findings bear on this ADR.
    `ご利用日 / ご利用先など / 支払区分 / ご利用金額` (unconfirmed), positions 1
    and 2 show `ご利用日 / ご利用先など / 支払区分 / 今回のお支払い金額`
    (confirmed), and position 8 shows a third header,
-   `ご利用日 / ご利用先など / お支払日 / 今後のお支払い金額`, over an empty
-   ledger. Positions 3 to 6 have no ledger element. The third header carries
-   neither read amount label: with rows, the page stops the connection
-   (`credit_statement_state` at position 1 without the heading;
-   `ledger_parse` under the heading, because the confirmed header set is
-   missing). Empty, it is `unknown` and withholds nothing, as today.
+   `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`, over an empty
+   ledger. Positions 3 to 6 have no ledger element. A second structure-only
+   look the same day (round 4) found what positions 7 and 8 are: the menu's
+   nine 「明細を見る」 links (DOM order 0, 1, 7, 8, 2, 3, 4, 5, 6) put
+   positions 0 and 1 under 「最新のご利用明細」 and 2 to 6 under 「過去の明細」
+   (the months), and 7 and 8 under 「ボーナス#回払い・ショッピングスキップ払い」:
+   position 7 is the ボーナス払い schedule and position 8 the
+   ショッピングスキップ払い schedule (h1 「ショッピングスキップ払いご利用明細
+   (未確定分)」, no payment month named). They are payment schedules, not
+   statement months. The third header's live `div.head` (a `div` grid, not a
+   `<table>`) has three cells: 「ご利用日」, 「ご利用先など」 and 「お支払日」 on
+   two lines of one cell, and 「今後のお支払い金額」; the first survey wrote
+   it as four labels. The third header carries neither read amount label:
+   with rows at position 0 or 1, or under the confirmed heading, the page
+   stops the connection (`ledger_parse` at position 0 or under the heading,
+   `credit_statement_state` at position 1 without it); at position 2 or later
+   without the heading its rows were already withheld as an unstated page.
+   Empty, it is `unknown` and withholds nothing, as today.
 3. **A variable page at position 1.** The runs of 2026-09-25 and 2026-09-26
    stopped with `credit-ledger-headers` at position 1 and kept no artifact
    (they ran before the first amendment). On 2026-09-27 the live position 1
    was the confirmed form, which passes. What position 1 showed on those
-   nights was not stored and cannot be recovered. Also observed: a detail
+   nights was not stored and cannot be recovered. A position-1 page stored
+   by an earlier run (counted by label only, round 4) carries the
+   `(確定分)` heading but no `今回のお支払い金額` label anywhere, only
+   `ご利用金額`; the rule of this ADR stops on such a page with rows (a
+   confirmed ledger must show the confirmed header set, `ledger_parse`), so
+   a page of that shape is the likely cause, not a confirmed one. Also observed: a detail
    page fetched without visiting `detailMenu.html` first in the session is a
    different page (h1 `カードご利用明細一覧`, no ledger), and after many
    consecutive fetches the site served a 「通信エラーが発生しました」 page.
@@ -315,23 +332,37 @@ For the undiagnosable stops (finding 3):
   a confirmed statement still stops the connection
   (`credit_statement_state`), as this ADR decided; with discovery fixed,
   that check now runs on live pages.
-- **The third header.** A ledger whose header shows `ご利用日`,
-  `ご利用先など`, `お支払日` and `今後のお支払い金額` and none of `支払区分`,
-  `今回のお支払い金額` or `ご利用金額` is the third header
-  (`scheduledLedgerRowCount`). When such ledgers have rows, the month is
-  captured unread at any position: before the statement state is read, its
+- **The third header.** A ledger whose header text, whitespace removed,
+  shows `ご利用日`, `ご利用先など`, `お支払日` and `今後のお支払い金額` and
+  none of `支払区分`, `今回のお支払い金額` or `ご利用金額` is the third header
+  (`scheduledLedgerRowCount`); labels are matched in the head's text, never
+  by cell, so the observed three-cell head and a four-cell one are read
+  alike. The code is `scheduled_payments_page` because the header was
+  observed only on the ショッピングスキップ払い schedule page. When such
+  ledgers have rows, the position is captured unread, whatever it is:
+  before the statement state is read, its
   page is kept as `unknown` evidence with its relative or API period, no
   ledger is derived, no export is fetched, and the next month is read. The
   unread month is recorded as `unreadMonths: [{ position, code:
-"scheduled_unrecognized" }]` on the summary and in the manifest, and is
+"scheduled_payments_page" }]` on the summary and in the manifest, and is
   logged as `myjcb-credit-month-unread` with the position and the code only.
   A page that carries the third header beside another ledger is unread
   whole. An empty third-header ledger withholds nothing and is read as before.
+- **Positions, not months.** The collector enumerates `detailMonth`
+  positions from the menu and the past-months response and does not tell a
+  statement month from a schedule page: positions 7 and 8 are fetched,
+  kept, counted in `periodCount` and `capturedMonthCount`, and, when
+  unread, named in `unreadMonths` like any month, with the relative period
+  labels
+  `detailMonth-7` and `detailMonth-8`, which no reader resolves to a
+  calendar month (only `detailMonth-0` and `-1` are). A schedule page with
+  rows keeps the connection `partial`: the rows are unread, and whether
+  they appear in any statement month has not been observed (INV05).
 - **Unread months are one closed list** (`UNREAD_MONTH_CODES`):
-  `scheduled_unrecognized`, and `rows_unstated` for the months ADR 0026
+  `scheduled_payments_page`, and `rows_unstated` for the months ADR 0026
   already withheld (rows without a stated state at position 2 or later),
   which were counted but not named. A connection with an unread month is
-  `partial` (ADR 0026). Its unit's `safeErrorCode` is `scheduled_unrecognized`
+  `partial` (ADR 0026). Its unit's `safeErrorCode` is `scheduled_payments_page`
   when every unread month is under the third header and the connection did
   not stop, and `collector_partial` otherwise, as before. The run carries
   that code when every connection that is not whole carries it. The manifest
@@ -360,7 +391,7 @@ For the undiagnosable stops (finding 3):
   unknown, so a detection rule would be a guess. It is a limit (below).
 
 Registration and eligibility are unchanged. A unit with
-`scheduled_unrecognized` is `partial`, registers as a `failed` unit report,
+`scheduled_payments_page` is `partial`, registers as a `failed` unit report,
 and its run is `partial` and `not_eligible`: the unread page is catalogued
 and sealed, and no parser reads it.
 
@@ -380,7 +411,13 @@ and sealed, and no parser reads it.
   connections must not read it as a captured month.
 - Limits: the export contents on this connection were last checked
   2026-08-31 and are not stored. What the third header's rows mean is
-  unconfirmed. The cause of the 2026-09-25/26 stops is not known. The
+  unconfirmed. The cause of the 2026-09-25/26 stops is not confirmed
+  (finding 3 names the likely one). While the ショッピングスキップ払い
+  page shows rows, every run is `partial` and nothing of it is parsed; a
+  rule that treats a schedule page apart from the months needs the menu's
+  grouping read and a decision of its own. A stored page keeps its body
+  text, so a stop page carries the page's 「カード情報」 table as every
+  stored credit detail page does. The
   「通信エラーが発生しました」 page is not detected: served for the first
   detail page it stops the connection before any month
   (`credit_first_detail`, no discriminator), and served for any later month
@@ -409,7 +446,7 @@ and sealed, and no parser reads it.
   recorded and not fetched by default, and the fetch path still stops with
   `export_fetch`; the menu is read once, before any detail page. Through the
   Worker, a third-header month at position 2 persists a `partial` unit with
-  `scheduled_unrecognized`, `unreadMonths` in the manifest, no failure, and
+  `scheduled_payments_page`, `unreadMonths` in the manifest, no failure, and
   logs with codes only.
 - `services/collector-myjcb/test/shared-collection.test.ts`: the unit and
   run codes for third-header-only, `rows_unstated` and mixed unread months;
@@ -417,9 +454,9 @@ and sealed, and no parser reads it.
   code, kind or position; an offer on a whole connection keeps it
   `complete`.
 - `services/processor/test/myjcb-shared-r2.test.ts`: the collector's real
-  plan with a `scheduled_unrecognized` month registers and seals, catalogues
+  plan with a `scheduled_payments_page` month registers and seals, catalogues
   the unread page without a ledger, has run status `partial` and unit report
-  `failed` with `scheduled_unrecognized`, and ends `not_eligible` with no
+  `failed` with `scheduled_payments_page`, and ends `not_eligible` with no
   parse job.
 - No production data was read for this amendment; the findings above are
   the owner's agent's structure-only survey.

@@ -913,19 +913,19 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
 
   test("a month under the third ledger header is kept unread and the Worker persists the rest (ADR 0005's second amendment)", async () => {
     const scheduled = page({
-      head: "ご利用日 ご利用先など お支払日 今後のお支払い金額",
+      head: '<div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div>',
       rows: [row("お支払日", ["2026/03/10", LEAK_WORD, "2026/04/10", `${LEAK_DIGITS}円`], "1円")],
     });
     const result = await run((url) => (detail(2)(url) ? html(scheduled) : undefined));
     expect(result.status).toBe(200);
     expect(blockers(result)).toEqual([
-      { connectionId: "account-one", code: "scheduled_unrecognized" },
+      { connectionId: "account-one", code: "scheduled_payments_page" },
     ]);
     // The terminal's unit and the manifest carry the closed code and the
     // position; no failure is recorded, because the connection did not stop.
-    expect(result.stored).toContain('"safeErrorCode":"scheduled_unrecognized"');
+    expect(result.stored).toContain('"safeErrorCode":"scheduled_payments_page"');
     expect(result.stored).toContain(
-      '"unreadMonths":[{"position":2,"code":"scheduled_unrecognized"}]',
+      '"unreadMonths":[{"position":2,"code":"scheduled_payments_page"}]',
     );
     expect(result.stored).toContain('"failures":[]');
     expect(result.stored).toContain('"coverageStatus":"partial"');
@@ -933,7 +933,7 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
     // row text, as every stored page carries its rows); no ledger is derived.
     expect(result.stored).not.toContain('"detailMonth":2');
     expect(result.logs).toContain(
-      '{"event":"myjcb-credit-month-unread","detailMonth":2,"code":"scheduled_unrecognized"}',
+      '{"event":"myjcb-credit-month-unread","detailMonth":2,"code":"scheduled_payments_page"}',
     );
     expect(result.logs).not.toContain(LEAK_DIGITS);
     expect(result.logs).not.toContain(LEAK_WORD);
@@ -964,9 +964,13 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
 });
 
 describe("ADR 0005 second amendment: the three observed ledger headers", () => {
-  // The third header, observed 2026-09-27 on the oldest listed month with an
-  // empty ledger. Every value below is synthetic.
-  const SCHEDULED_HEAD = "ご利用日 ご利用先など お支払日 今後のお支払い金額";
+  // The third header as the live DOM shows it on the ショッピングスキップ払い
+  // page (observed 2026-09-27, position 8): three cells, the second holding
+  // 「ご利用先など」 and 「お支払日」 on two lines. Every value below is synthetic.
+  const SCHEDULED_HEAD =
+    '<div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div>';
+  // The same labels as four cells, as the first survey wrote them down.
+  const FOUR_CELL_SCHEDULED_HEAD = "ご利用日 ご利用先など お支払日 今後のお支払い金額";
   const emptyRow =
     '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はありません</div></div></div>';
   const scheduledRow = row(
@@ -983,6 +987,11 @@ describe("ADR 0005 second amendment: the three observed ledger headers", () => {
     expect(scheduledLedgerRowCount(page({ head: null }))).toBeUndefined();
     expect(scheduledLedgerRowCount(page({ head: SCHEDULED_HEAD, rows: [emptyRow] }))).toBe(0);
     expect(scheduledLedgerRowCount(page({ head: SCHEDULED_HEAD, rows: [scheduledRow] }))).toBe(1);
+    // The four-cell form is the same header: its rows are counted as
+    // scheduled, so they are kept unread, never read as a statement.
+    expect(
+      scheduledLedgerRowCount(page({ head: FOUR_CELL_SCHEDULED_HEAD, rows: [scheduledRow] })),
+    ).toBe(1);
     // Whitespace and markup inside the header are not part of it.
     expect(
       scheduledLedgerRowCount(
@@ -1046,7 +1055,7 @@ describe("ADR 0005 second amendment: the three observed ledger headers", () => {
       "x",
     );
     expect(run.stop).toBeUndefined();
-    expect(run.unreadMonths).toEqual([{ position: 2, code: "scheduled_unrecognized" }]);
+    expect(run.unreadMonths).toEqual([{ position: 2, code: "scheduled_payments_page" }]);
     const states = Object.fromEntries(
       run.artifacts.map((artifact) => [artifact.filename, artifact.statementState ?? null]),
     );
@@ -1071,6 +1080,20 @@ describe("ADR 0005 second amendment: the three observed ledger headers", () => {
     ).toMatchObject({ period: "detailMonth-2" });
   });
 
+  test("third-header rows in the four-cell form are kept unread, never read", async () => {
+    const run = await collectCredit(
+      client({
+        0: mutable,
+        1: closed("2026年3月"),
+        8: page({ head: FOUR_CELL_SCHEDULED_HEAD, rows: [scheduledRow] }),
+      }),
+      "x",
+    );
+    expect(run.stop).toBeUndefined();
+    expect(run.unreadMonths).toEqual([{ position: 8, code: "scheduled_payments_page" }]);
+    expect(filenames(run.artifacts).filter((name) => name.endsWith("-08.json"))).toEqual([]);
+  });
+
   test("third-header rows at positions 0 and 1 are kept unread too", async () => {
     const scheduled = page({ head: SCHEDULED_HEAD, rows: [scheduledRow] });
     const run = await collectCredit(
@@ -1079,8 +1102,8 @@ describe("ADR 0005 second amendment: the three observed ledger headers", () => {
     );
     expect(run.stop).toBeUndefined();
     expect(run.unreadMonths).toEqual([
-      { position: 0, code: "scheduled_unrecognized" },
-      { position: 1, code: "scheduled_unrecognized" },
+      { position: 0, code: "scheduled_payments_page" },
+      { position: 1, code: "scheduled_payments_page" },
     ]);
     expect(filenames(run.artifacts).filter((name) => name.startsWith("credit-ledger"))).toEqual([
       "credit-ledger-02.json",

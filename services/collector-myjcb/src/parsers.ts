@@ -394,11 +394,14 @@ export function creditPageRowCount(html: string): number {
 }
 
 /**
- * The third ledger header observed on a credit detail page (2026-09-27, the
- * oldest listed month of the surveyed connection, an empty ledger): the
- * payment date and a future payment amount in place of the payment type and
- * this statement's or the usage amount. What its rows mean (a payment
- * schedule, instalments still due) has not been observed with rows nor
+ * The third ledger header, observed 2026-09-27 on the ショッピングスキップ払い
+ * page (menu position 8 of the surveyed connection, a payment schedule under
+ * the menu's 「ボーナス#回払い・ショッピングスキップ払い」 box, not a statement
+ * month): the payment date and a future payment amount in place of the payment
+ * type and this statement's or the usage amount. The live `div.head` has three
+ * cells, 「ご利用日」 / 「ご利用先など」 and 「お支払日」 on two lines of one
+ * cell / 「今後のお支払い金額」, so the labels are matched in the head's text
+ * with whitespace removed, never by cell. What its rows mean is not
  * confirmed, so they are never read as a statement (ADR 0004).
  */
 const SCHEDULED_LEDGER_LABELS = ["ご利用日", "ご利用先など", "お支払日", "今後のお支払い金額"];
