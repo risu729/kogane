@@ -4,6 +4,8 @@
   [2026-09-27 amendment](#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months)
   is accepted (#275); the
   [second 2026-09-27 amendment](#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page)
+  is accepted (#331); the
+  [amendment (d)](#amendment-2026-09-27-d-a-confirmed-page-under-the-usage-header-proven-by-the-page)
   is proposed
 - Date: 2026-09-25
 - Implemented by: #248
@@ -210,7 +212,7 @@ months it captured.
 
 ## Amendment 2026-09-27 (b): export links, the third ledger header and the stop page
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#331)
 - Date: 2026-09-27
 - Carried by: `discoverCreditExports`, `scheduledLedgerRowCount` in
   `services/collector-myjcb/src/parsers.ts`; `collectCredit` (the month loop,
@@ -460,3 +462,201 @@ and sealed, and no parser reads it.
   parse job.
 - No production data was read for this amendment; the findings above are
   the owner's agent's structure-only survey.
+
+## Amendment 2026-09-27 (d): a confirmed page under the usage header, proven by the page
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-27
+- Decision owner: the owner chose option 3 below on 2026-09-27; this record
+  carries it into the repository.
+- Carried by: `provenUsageHeader` and `USAGE_HEADER_REFUSALS` in
+  `packages/domain/src/myjcb-statement-page.ts` (`readMyJcbStatementPage`
+  `usageHeader`); `myjcbSinglePayment` and `myjcbDisplayQuantity` in
+  `packages/domain/src/myjcb-amounts.ts`; `creditStatementState` and
+  `parseCreditLedger` in `services/collector-myjcb/src/parsers.ts`;
+  `myjcb-credit-ledger@1.2.0` and `myjcb-credit-statement-total@1.2.0` in
+  `packages/parsers/src/parsers/myjcb.ts`;
+  [MyJCB source note](../sources/myjcb.md),
+  [observations](../observations.md#myjcb-a-confirmed-page-under-the-usage-header-ledger-and-statement-parsers-120)
+
+### Context
+
+This ADR accepts a page with the `(確定分)` heading only when its ledger
+header shows the confirmed amount label, 「今回のお支払い金額」. A heading over
+the unconfirmed header set, 「ご利用日 / ご利用先など / 支払区分 / ご利用金額」,
+is a `conflict`: the collector stops the connection at that month
+(`credit_statement_state`) and the statement parser fails the page. The
+reason is what the fourth label says. It names the one amount the row's
+summary shows: this statement's payment under 「今回のお支払い金額」, the usage
+amount under 「ご利用金額」. For an installment, revolving or bonus row the
+two differ, so reading a 「ご利用金額」 cell as this statement's payment could
+be wrong.
+
+A structure-only look on 2026-09-27 (round 4, counts and label shapes only,
+no values) found that such pages exist:
+
+- The position-1 page an earlier run stored (the same bytes on three nights)
+  has the `(確定分)` heading and the unconfirmed header set. Counted by label,
+  「今回のお支払い金額」 occurs 0 times and 「ご利用金額」 11 times.
+- The live page of the same position on 2026-09-27 showed 「今回のお支払い金額」.
+  So the label a closed month shows varies between nights or sessions. Why it
+  varies is not known.
+- The page states its own total: `div.detail-box-price-01 dl`, with the `dt`
+  「YYYY年M月D日(曜)お支払い金額合計」 and the `dd` 「#,###円」. The statement
+  parser already reads this total.
+
+The runs of 2026-09-25 and 2026-09-26 stopped at position 1 and kept no page
+(amendment (b), finding 3). A page of this shape is the likely cause. It is
+not confirmed, because the pages of those nights were not stored.
+
+### Options considered
+
+1. Accept the heading over the usage header unconditionally. Rejected: an
+   installment, revolving or bonus row's usage amount is not this
+   statement's payment, and nothing would check it.
+2. Keep stopping on it (the status quo). Rejected by the owner: whenever the
+   provider shows this form, the connection loses that month and every later
+   one, and a month with only single-payment rows is refused for a label that
+   says nothing false about it.
+3. Accept it only when the page itself proves that its usage amounts are this
+   statement's payment. Otherwise keep stopping. Chosen.
+
+### Decision
+
+A page with exactly one `(確定分)` heading, whose ledgers all show the
+unconfirmed header, is read `confirmed` only when both of these hold.
+Otherwise it stays `conflict` and stops exactly as before.
+
+1. **Every row is one single payment.** A row's payment type is read with
+   the grammar card purchase recognition reads the same cell with
+   (`myjcbSinglePayment`, now in `packages/domain/src/myjcb-amounts.ts`). The
+   cell is the combined 「ご利用先など／支払区分」 cell (`summaryCells[1]`). The
+   rule is that at least one payment count is present, every count is 1,
+   and no 分割, リボ, ボーナス or キャッシング appears. The count may be written
+   `1回払` (the form every production row shows), `1回払い` or `一回払い`, and
+   full-width digits are allowed. No new label is added. A row that is 分割,
+   リボ, ボーナス or 2回払, a cell with no payment type or an empty one, or a
+   row whose four cells cannot be read, is refused:
+   `usage_header_payment_type_unproven`.
+2. **The rows add up to the page's total.** Each row amount is the one cell
+   of the third and fourth that reads as an exact JPY amount, as the ledger
+   parser reads it. The amounts are added exactly with `sumQuantities`
+   (INV03) and compared with the one 「…お支払い金額合計」 total on the page.
+   No total, more than one, or an unreadable one is refused:
+   `usage_header_total_missing`. A row amount that does not read, or a sum
+   that differs from the total, is refused: `usage_header_total_mismatch`.
+   A refund row is added with its sign. A ledger without rows proves only a
+   zero total.
+
+The checks run in this order, so a page always reports the same code. The
+codes are a closed list (`USAGE_HEADER_REFUSALS`). `readMyJcbStatementPage`
+returns `usageHeader`: `proven`, a refusal code, or `null` for every other
+page. The collector's stop log and its unstated-page log carry this field,
+beside the existing counts and label codes. No amount is logged.
+
+When the page is proven:
+
+- **Collector.** `creditStatementState` returns `confirmed`, and the
+  position rules are unchanged. Position 0 still stops on any closed page.
+  `parseCreditLedger` stores the header set the page shows, the unconfirmed
+  one. The expanded labels are a confirmed page's (「ご利用金額」, 摘要, 今回回数,
+  備考, 訂正サイン): the stored page shows 「ご利用金額」 and no
+  「今回のお支払い金額」 anywhere. Called on an unproven page, it still refuses
+  it (`credit-ledger-headers`).
+- **Ledger parser (`myjcb-credit-ledger@1.2.0`).** A `confirmed` ledger may
+  carry the unconfirmed header set. Its amount cell is read as the usage
+  amount it is labelled as: `amountBasis: "confirmed-usage"` and
+  `usageAmountText`. It records no `paymentAmountText`. Nothing on the row
+  states this statement's payment for the row, and the proof is about the
+  page, not about each row. Every other header and state pair is read as in
+  1.1.2, and an unconfirmed ledger under the confirmed header is still
+  refused.
+- **Statement parser (`myjcb-credit-statement-total@1.2.0`).** The page
+  yields its total. The observation records
+  `statementStateBasis: "page-heading-usage-total-proof"` and
+  `ledgerAmountLabel: "ご利用金額"`. A page under the confirmed header is
+  recorded exactly as in 1.1.0, with `page-heading` and no new key.
+- **Downstream.** The statement's payment is the page total. Card
+  settlement matching and `card_statement_facts` read it from the statement
+  parser, as for every confirmed page. Card purchase recognition reads the
+  row through its one MyJCB amount rule (`myjcbAgreedAmount`), which needs a
+  usage text and a payment text that agree. The row has no payment text, so
+  it is excluded `payment_split_unknown`, and pending-to-posted matching
+  never compares it (`comparableCardPayment`). Recognition is not loosened
+  here. Counting such a row as a captured purchase would claim a per-row
+  payment the page does not state.
+
+The MyJCB cell grammars (`myjcbSinglePayment`, `MYJCB_NOT_SINGLE_WORDS` and
+the display-amount reader) move from `card-purchase.ts` to
+`myjcb-amounts.ts`, and `card-purchase.ts` re-exports them. The MyJCB
+parsers' code digest covers every module they import. With the move, that
+set is this module and `values.ts`, not the whole recognition module. All
+four MyJCB parsers share `myjcb.ts`, so all four change digest. The
+past-month and evidence-boundary parsers move to 1.1.3 with no change in
+behaviour.
+
+### Consequences
+
+- A night whose position-1 page shows the usage header over single-payment
+  rows that add up to the total no longer stops. The month is `confirmed`,
+  its total is published, and later months are read. A month with any
+  installment, revolving or bonus row under that header still stops, as
+  before.
+- The rows of such a month are recorded but not recognised as purchases
+  (`payment_split_unknown`). The pending rows of the same purchases,
+  captured earlier at position 0, follow the existing rules for pending
+  rows ([ADR 0016](0016-myjcb-pending-statement-slots.md)); no captured
+  event from this month replaces them. The captured total therefore
+  undercounts such a month's purchases; it never double-counts them. Recognising them would need a
+  per-row payment the page does not state, and that is a separate decision.
+- In the activity view the rows fall under the MyJCB ledger's catch-all
+  metric (`card.statement-line`) and the label 「明細の記録額（内訳未判定）」,
+  because no metric names `confirmed-usage`.
+- Stored pages are not rewritten. On the next sweeps, the repair lane
+  re-parses the stored MyJCB artifacts under the new releases. A stored
+  closed page under the usage header that 1.1.0 failed as a conflict, in a
+  run that is eligible for parsing, publishes its total at 1.2.0 when the
+  page proves it. Which stored pages
+  do was not surveyed. Stored ledgers were written before this amendment
+  and never carry the confirmed state with the usage header, so their rows
+  parse as before.
+- Limits: why the provider shows 「ご利用金額」 on a closed month on some
+  nights is unknown. Whether the second `detail-list-01` on the stored page
+  is a second part of the statement is unknown. The proof adds the rows of
+  every ledger on the page, as the page reading counts them, but the stored
+  ledger artifact holds the first ledger only, as before. The expanded
+  labels of such a page were counted, not read row by row. That the
+  09-25/26 stops had this cause is likely, not confirmed.
+
+### Verification
+
+- `services/collector-myjcb/test/credit-statement-state.test.ts`: a proven
+  page (single-payment rows including a refund, sum equal to the total, and
+  a total with full-width digits and spaces) is `confirmed` at positions 1,
+  2 and 5, and its ledger stores the unconfirmed header set with a confirmed
+  page's expanded labels. Each refusal stops with `credit_statement_state`
+  and logs its code, with no amount or provider text in the log: a 分割,
+  2回払 or リボ row, a cell with no payment type, an empty cell, a
+  three-cell row, no total, two totals, an unreadable or empty total, a sum
+  off by one yen, an unreadable row amount, and an empty ledger. Position 0
+  still stops. The same rows without the heading are `unconfirmed`. A second
+  heading, or a second ledger under the confirmed header, is still a
+  conflict (`usageHeader: null`). Through `collectCredit`, a proven month is
+  stored `confirmed` with the header it shows, and an unproven one stops
+  the connection at that month.
+- `packages/parsers/test/myjcb-statement.test.ts`: statement parser 1.2.0
+  publishes the total of a proven page with the new basis and label. A
+  confirmed-header page has neither key. An installment row, a missing
+  payment type, a mismatched or missing total, and an empty ledger all fail
+  as conflicts. Ledger parser 1.2.0 reads a confirmed ledger under the usage
+  header as `confirmed-usage` with no `paymentAmountText`. The other pairs
+  are read as in 1.1.2, and the confirmed state with the unconfirmed
+  expanded label is refused.
+- `services/processor/test/card-purchase-parser-shapes.test.ts`: such a row,
+  parsed by the deployed ledger parser, carries the observed usage amount
+  and no payment amount. Recognition excludes it `payment_split_unknown`,
+  and the matching guard does not compare it.
+- The existing conflict, unconfirmed and unknown cases in these files pass
+  unchanged.
+- No production data was read for this amendment. The findings above are
+  the owner's agent's structure-only survey; every test value is synthetic.

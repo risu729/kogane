@@ -17,6 +17,49 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MyJCB: a confirmed page under the usage header (ledger and statement parsers 1.2.0)
+
+2026-09-27. A position-1 page an earlier run stored carries the `(確定分)`
+heading over the unconfirmed ledger header
+(「ご利用日 / ご利用先など / 支払区分 / ご利用金額」; 「今回のお支払い金額」 0 times),
+while the live page of the same position showed the confirmed header the
+same day. Until now such a page was a `conflict`: the collector stopped the
+connection at that month and the statement parser failed it. The owner
+chose to accept it only when the page proves it
+([ADR 0005 amendment (d)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-d-a-confirmed-page-under-the-usage-header-proven-by-the-page)).
+The proof has two parts. Every row's combined 「ご利用先など／支払区分」 cell must
+be one single payment by recognition's own grammar (`myjcbSinglePayment`).
+The exact sum of the row amounts (`sumQuantities`) must equal the page's
+「…お支払い金額合計」. Otherwise the page stays a conflict. The log names one
+closed reason: `usage_header_payment_type_unproven`,
+`usage_header_total_missing` or `usage_header_total_mismatch`.
+
+- **Collector.** A proven page is `confirmed`. Its ledger stores the header
+  the page shows and a confirmed page's expanded labels.
+- **`myjcb-credit-ledger@1.2.0`.** A `confirmed` ledger under the usage
+  header records its amount as the usage amount (`amountBasis`
+  `confirmed-usage`, `usageAmountText`) and no `paymentAmountText`.
+  Recognition therefore excludes such rows (`payment_split_unknown`), and
+  matching never compares them. Every other ledger parses as in 1.1.2.
+- **`myjcb-credit-statement-total@1.2.0`.** A proven page publishes its
+  total with `statementStateBasis: "page-heading-usage-total-proof"` and
+  `ledgerAmountLabel: "ご利用金額"`. Every other page is recorded exactly as
+  in 1.1.0.
+- **`myjcb-credit-past-month-balances@1.1.3` and
+  `myjcb-canonical-evidence-boundary@1.1.3`.** These change digest only. The
+  MyJCB cell grammars moved to `packages/domain/src/myjcb-amounts.ts`, which
+  the shared module now imports.
+
+Deploying rewrites nothing. The repair lane re-parses the stored MyJCB
+artifacts under the new releases. Ledgers and pages under the confirmed
+header publish identical observations. A stored closed page under the usage
+header, in a run eligible for parsing, publishes its total when it proves
+it. How many do was not surveyed. The cause of the 2026-09-25/26 stops is
+likely this page shape, not confirmed. Why the label changes between nights
+is unknown. Tests: `services/collector-myjcb/test/credit-statement-state.test.ts`,
+`packages/parsers/test/myjcb-statement.test.ts`,
+`services/processor/test/card-purchase-parser-shapes.test.ts`.
+
 ## SBI Shinsei board time ends in letters (board parser 1.0.2)
 
 Observed on 2026-09-27 by the owner's agent (structure and counts only,

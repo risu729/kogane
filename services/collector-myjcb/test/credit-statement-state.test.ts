@@ -1215,7 +1215,10 @@ describe("ADR 0005 amendment (d): a confirmed page under the usage header", () =
       lines.push(String(value));
     });
     try {
-      return { code: stopCode(() => creditStatementState(html, detailMonth)), logs: lines.map((line) => JSON.parse(line)) };
+      return {
+        code: stopCode(() => creditStatementState(html, detailMonth)),
+        logs: lines.map((line) => JSON.parse(line)),
+      };
     } finally {
       spy.mockRestore();
     }
@@ -1255,17 +1258,26 @@ describe("ADR 0005 amendment (d): a confirmed page under the usage header", () =
     for (const [html, reason] of [
       // One installment row, even when the sum still matches.
       [
-        usagePage([
-          usageRow("架空商店A 分割払い", "1,000円"),
-          ...provenRows.slice(1),
-        ]),
+        usagePage([usageRow("架空商店A 分割払い", "1,000円"), ...provenRows.slice(1)]),
         "usage_header_payment_type_unproven",
       ],
-      [usagePage([usageRow("架空商店A 2回払", "1,000円"), ...provenRows.slice(1)]), "usage_header_payment_type_unproven"],
-      [usagePage([usageRow("架空商店A リボ払", "1,000円"), ...provenRows.slice(1)]), "usage_header_payment_type_unproven"],
+      [
+        usagePage([usageRow("架空商店A 2回払", "1,000円"), ...provenRows.slice(1)]),
+        "usage_header_payment_type_unproven",
+      ],
+      [
+        usagePage([usageRow("架空商店A リボ払", "1,000円"), ...provenRows.slice(1)]),
+        "usage_header_payment_type_unproven",
+      ],
       // A cell with no payment type at all, or an empty one.
-      [usagePage([usageRow("架空商店A", "1,000円"), ...provenRows.slice(1)]), "usage_header_payment_type_unproven"],
-      [usagePage([usageRow("", "1,000円"), ...provenRows.slice(1)]), "usage_header_payment_type_unproven"],
+      [
+        usagePage([usageRow("架空商店A", "1,000円"), ...provenRows.slice(1)]),
+        "usage_header_payment_type_unproven",
+      ],
+      [
+        usagePage([usageRow("", "1,000円"), ...provenRows.slice(1)]),
+        "usage_header_payment_type_unproven",
+      ],
       // A row whose cells cannot be read.
       [
         usagePage([
@@ -1282,7 +1294,10 @@ describe("ADR 0005 amendment (d): a confirmed page under the usage header", () =
       // A sum that is not the total, by one yen.
       [usagePage(provenRows, [total("3,501円")]), "usage_header_total_mismatch"],
       // A row amount that does not read.
-      [usagePage([usageRow("架空商店A 1回払", "1,0円"), ...provenRows.slice(1)]), "usage_header_total_mismatch"],
+      [
+        usagePage([usageRow("架空商店A 1回払", "1,0円"), ...provenRows.slice(1)]),
+        "usage_header_total_mismatch",
+      ],
       // An empty usage-header ledger proves only a zero total.
       [usagePage([]), "usage_header_total_mismatch"],
     ] as const) {

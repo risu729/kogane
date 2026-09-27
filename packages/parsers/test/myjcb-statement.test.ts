@@ -246,8 +246,11 @@ describe("a confirmed page under the usage header, proven by the page (1.2.0, AD
   });
 
   test("a page under the confirmed header is recorded exactly as in 1.1.0", () => {
-    const confirmed = usagePage([]).replace(USAGE_HEAD, "ご利用日 ご利用先など 支払区分 今回のお支払い金額");
-    const kogane = (parse(confirmed).observations[0]?.extra as { _kogane: Record<string, unknown> })
+    const confirmed = usagePage([]).replace(
+      USAGE_HEAD,
+      "ご利用日 ご利用先など 支払区分 今回のお支払い金額",
+    );
+    const kogane = (parse(confirmed).observations[0]!.extra as { _kogane: Record<string, unknown> })
       ._kogane;
     expect(kogane["statementStateBasis"]).toBe("page-heading");
     expect(Object.keys(kogane)).not.toContain("ledgerAmountLabel");
@@ -298,10 +301,12 @@ describe("the credit ledger under the usage header (1.2.0)", () => {
     );
 
   test("a confirmed ledger under the usage header records the amount as the usage amount only", () => {
-    const [row] = myJcbCreditLedger.parse(ledger("confirmed", USAGE_HEADERS), ledgerArtifact("confirmed"))
-      .observations;
+    const [row] = myJcbCreditLedger.parse(
+      ledger("confirmed", USAGE_HEADERS),
+      ledgerArtifact("confirmed"),
+    ).observations;
     expect(row).toMatchObject({ status: "confirmed", amountText: "-1000" });
-    const kogane = (row?.extra as { _kogane: Record<string, unknown> })._kogane;
+    const kogane = (row!.extra as { _kogane: Record<string, unknown> })._kogane;
     expect(kogane["amountBasis"]).toBe("confirmed-usage");
     expect(kogane["usageAmountText"]).toBe("1,000円");
     // Nothing on the row states this statement's payment for it.
@@ -313,7 +318,7 @@ describe("the credit ledger under the usage header (1.2.0)", () => {
       ledger("confirmed", PAYMENT_HEADERS),
       ledgerArtifact("confirmed"),
     ).observations;
-    expect((confirmed?.extra as { _kogane: Record<string, unknown> })._kogane).toMatchObject({
+    expect((confirmed!.extra as { _kogane: Record<string, unknown> })._kogane).toMatchObject({
       amountBasis: "current-statement-payment",
       usageAmountText: "1,000円",
       paymentAmountText: "1,000円",
@@ -322,7 +327,7 @@ describe("the credit ledger under the usage header (1.2.0)", () => {
       ledger("unconfirmed", USAGE_HEADERS, { 今回のお支払い金額: "1,000円" }),
       ledgerArtifact("unconfirmed"),
     ).observations;
-    expect((pending?.extra as { _kogane: Record<string, unknown> })._kogane).toMatchObject({
+    expect((pending!.extra as { _kogane: Record<string, unknown> })._kogane).toMatchObject({
       amountBasis: "unconfirmed-usage",
       usageAmountText: "1,000円",
       paymentAmountText: "1,000円",
@@ -330,7 +335,10 @@ describe("the credit ledger under the usage header (1.2.0)", () => {
     // An unconfirmed ledger under the confirmed header is still refused, and a
     // confirmed ledger's expanded labels are a confirmed page's whatever its header.
     expect(() =>
-      myJcbCreditLedger.parse(ledger("unconfirmed", PAYMENT_HEADERS), ledgerArtifact("unconfirmed")),
+      myJcbCreditLedger.parse(
+        ledger("unconfirmed", PAYMENT_HEADERS),
+        ledgerArtifact("unconfirmed"),
+      ),
     ).toThrow(/provider contract/u);
     expect(() =>
       myJcbCreditLedger.parse(
