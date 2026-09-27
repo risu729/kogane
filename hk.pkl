@@ -1,6 +1,6 @@
-amends "https://raw.githubusercontent.com/risu729/hk-config/v1.1.0/presets.pkl"
+amends "https://raw.githubusercontent.com/risu729/hk-config/v2.0.0/presets.pkl"
 
-import "https://raw.githubusercontent.com/risu729/hk-config/v1.1.0/helpers.pkl"
+import "https://raw.githubusercontent.com/risu729/hk-config/v2.0.0/helpers.pkl"
 import "package://github.com/jdx/hk/releases/download/v1.58.1/hk@1.58.1#/Config.pkl"
 
 // Evidence and parser fixtures retain their exact committed bytes.
