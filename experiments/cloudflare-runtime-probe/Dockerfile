@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 
 # The build context is the repository root (`image_build_context` in
 # wrangler.jsonc). There is one `bun.lock` at the root since the workspace
