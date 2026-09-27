@@ -4,49 +4,13 @@ import { getPlatformProxy } from "wrangler";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 import { parse } from "parse5";
+import { classifyParserRejection, topActivityShape } from "./parser-rejection.ts";
 
 const proxy = await getPlatformProxy<{ DB: D1Database; EVIDENCE: R2Bucket }>({
   configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,
   persist: false,
   remoteBindings: true,
 });
-function safeReason(message: string): string {
-  for (const reason of [
-    "MTS payload length disagrees with recordCount",
-    "MTS positions payload is incomplete",
-    "MTS empty-result layout disagrees with its count fields",
-    "Sony history CSV media type drift",
-    "Sony history CSV charset drift",
-    "Sony history fetch window is missing",
-    "Sony WALLET media type drift",
-    "Sony WALLET month selector drift",
-    "Sony JSON media type drift",
-    "unknown field",
-    "missing field",
-    "expected an object",
-    "expected an array",
-    "HTML doctype drift",
-    "activity table cardinality drift",
-    "month selector cardinality drift",
-    "provider timestamp format is not recognized",
-  ]) {
-    if (message.includes(reason)) return reason;
-  }
-  if (/schema/.test(message)) return "unsupported_schema";
-  if (/fields changed/.test(message))
-    return message.includes("depositRecordList")
-      ? "record_fields_changed"
-      : message.includes("pages[")
-        ? "page_fields_changed"
-        : "bundle_fields_changed";
-  if (/exact decimal/.test(message)) return "decimal_shape_rejected";
-  if (/pagination|page metadata|page chain|page inventory/.test(message))
-    return "pagination_rejected";
-  if (/incomplete|truncated|length|width/.test(message)) return "incomplete_payload";
-  if (/duplicate did/.test(message)) return "duplicate_record_id";
-  if (/must be|is invalid|unsupported|not successful/.test(message)) return "field_value_rejected";
-  return "parser_rejected_other";
-}
 try {
   const newestSbi = process.argv.includes("--newest-sbi");
   const remainingAll = process.argv.includes("--remaining-all");
@@ -240,9 +204,11 @@ try {
           JSON.stringify({
             parser: parser.name,
             result: "rejected",
-            reason: safeReason(error instanceof Error ? error.message : ""),
+            reason: classifyParserRejection(parser.name, error),
           }),
         );
+        if (parser.name === "sbi-shinsei-top-balances-and-activity")
+          console.log(JSON.stringify({ parser: parser.name, shape: topActivityShape(bytes) }));
         if (!remainingAll && parser.name === "sbi-yen-detail-history") {
           const root = JSON.parse(new TextDecoder().decode(bytes));
           console.log(
