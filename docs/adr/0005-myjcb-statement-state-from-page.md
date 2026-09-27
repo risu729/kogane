@@ -5,8 +5,10 @@
   is accepted (#275); the
   [second 2026-09-27 amendment](#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page)
   is accepted (#331); the
+  [amendment (c)](#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months)
+  and
   [amendment (d)](#amendment-2026-09-27-d-a-confirmed-page-under-the-usage-header-proven-by-the-page)
-  is proposed
+  are proposed
 - Date: 2026-09-25
 - Implemented by: #248
 - Carried by:
@@ -360,6 +362,8 @@ For the undiagnosable stops (finding 3):
   calendar month (only `detailMonth-0` and `-1` are). A schedule page with
   rows keeps the connection `partial`: the rows are unread, and whether
   they appear in any statement month has not been observed (INV05).
+  (Amended by [amendment (c)](#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months):
+  the menu's headings now tell the two apart.)
 - **Unread months are one closed list** (`UNREAD_MONTH_CODES`):
   `scheduled_payments_page`, and `rows_unstated` for the months ADR 0026
   already withheld (rows without a stated state at position 2 or later),
@@ -417,7 +421,8 @@ and sealed, and no parser reads it.
   (finding 3 names the likely one). While the ショッピングスキップ払い
   page shows rows, every run is `partial` and nothing of it is parsed; a
   rule that treats a schedule page apart from the months needs the menu's
-  grouping read and a decision of its own. A stored page keeps its body
+  grouping read and a decision of its own (made in
+  [amendment (c)](#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months)). A stored page keeps its body
   text, so a stop page carries the page's 「カード情報」 table as every
   stored credit detail page does. The
   「通信エラーが発生しました」 page is not detected: served for the first
@@ -460,6 +465,166 @@ and sealed, and no parser reads it.
   the unread page without a ledger, has run status `partial` and unit report
   `failed` with `scheduled_payments_page`, and ends `not_eligible` with no
   parse job.
+- No production data was read for this amendment; the findings above are
+  the owner's agent's structure-only survey.
+
+## Amendment 2026-09-27 (c): the menu's schedule pages are not months
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-27
+- Carried by: `readCreditMenuGroups` in
+  `services/collector-myjcb/src/parsers.ts`; `collectCredit` and
+  `collectConnection` in `services/collector-myjcb/src/collector.ts`;
+  `SCHEDULE_PAGE_CODES`, `ConnectionSummary.schedulePages` and
+  `schedulePageCount`, the stop code `credit_menu_group_unrecognized` in
+  `services/collector-myjcb/src/types.ts`; the manifest in
+  `services/collector-myjcb/src/shared-collection.ts`;
+  [ADR 0026's MyJCB coverage](0026-collector-unit-coverage.md#amendment-myjcb-schedule-pages-are-outside-the-coverage-2026-09-27);
+  [MyJCB source note](../sources/myjcb.md)
+
+### Context
+
+The round-4 structure survey (2026-09-27, structure and counts only) read
+the credit menu `detailMenu.html`. It has nine links, all
+`detail.html?detailMonth=N` and all with the text 「明細を見る」, in DOM
+order 0, 1, 7, 8, 2, 3, 4, 5, 6. Each sits in a card box under an `h2`:
+
+| `detailMonth` | `h2` heading                                  | box text (values replaced)                  |
+| ------------- | --------------------------------------------- | ------------------------------------------- |
+| 0, 1          | 「最新のご利用明細」                          | 未確定 / 確定 … お支払い分                  |
+| 2–6           | 「過去の明細」                                | … お支払い分 #円, or 「ご請求はありません」 |
+| 7             | 「ボーナス#回払い・ショッピングスキップ払い」 | 未確定 … お支払い分ボーナス#回払い          |
+| 8             | 「ボーナス#回払い・ショッピングスキップ払い」 | 未確定 ショッピングスキップ払い (no month)  |
+
+`#` stands for a digit or an amount the survey did not record. The page
+at position 8 has the h1 「ショッピングスキップ払いご利用明細(未確定分)」
+and a `div.detail-list-01` grid with the third header
+(「ご利用日」 / 「ご利用先など お支払日」 / 「今後のお支払い金額」) over two
+rows. Position 7 has not been observed with rows.
+
+After amendment (b), a position whose ledger shows rows under the third
+header is stored unread (`scheduled_payments_page`) and the connection goes
+on, but it stays `partial`. Registration turns a `partial` unit into a
+`failed` unit report, so the run is `partial` and `not_eligible` and nothing
+of it is parsed (ADR 0026). While a skip payment is outstanding, position 8
+shows rows on every night, so no MyJCB run is parsed at all, including the
+months that were read whole.
+
+### Options considered
+
+1. **A: read the menu's groups.** The months are the positions under the
+   two month headings; the schedule positions are stored as evidence
+   outside the unit's coverage. Chosen.
+2. **B: parse the ショッピングスキップ払い schedule as a dataset of its
+   own.** Deferred to a later PR, and only for pages observed with rows:
+   what the rows mean (a payment schedule, instalments still due, whether
+   they also appear in a statement month) is not confirmed (ADR 0004), and
+   position 7 has never been seen with rows.
+3. **C: status quo.** Rejected: every night with an outstanding skip
+   payment parses nothing.
+
+### Decision
+
+- **The menu's grouping is read, not guessed.** `readCreditMenuGroups`
+  reads every link to `/iss-pc/member/details_inquiry/detail.html` with a
+  one- or two-digit `detailMonth` (resolved against the menu's URL, so
+  relative, root-relative and absolute hrefs are read alike; a link to
+  another page or origin is not a menu position). A link belongs to the
+  last `h2` before it in document order. The heading, whitespace removed,
+  must be exactly 「最新のご利用明細」 or 「過去の明細」 (months) or
+  「ボーナス」, one or more digits, 「回払い・ショッピングスキップ払い」
+  (schedule pages; the observed text has a digit where the survey wrote
+  `#`). Any other heading, a link before any `h2`, or a position listed in
+  both groups stops the connection before its first month with the closed
+  code `credit_menu_group_unrecognized` (condition `credit-menu-group`). The
+  stop keeps nothing, like every stop before the first month, and logs
+  `myjcb-credit-menu-groups` with link counts only, never the heading. It
+  replaces `parseCreditMenuMonths`, which also read `detailMonth` values
+  outside links; the survey found only links.
+- **Months.** The unit's months are the month-group positions and the
+  past-months response's available positions, read as before.
+  `periodCount` and `capturedMonthCount` count months only. A position the
+  past-months response offers that the menu lists as a schedule page is not
+  resolved either way: it stops with `credit_past_months`.
+- **Schedule pages.** After the last month, each schedule position is
+  fetched once, in ascending order, and stored whole, redacted, as
+  `credit-schedule-NN.html` (dataset `credit-schedule`, state `unknown`,
+  period `detailMonth-N`), whatever it shows. Nothing reads its rows, its
+  state or its links. The file name is not a `credit-detail-NN.html`, so no
+  registration rule gives it a parser dataset: it is catalogued and sealed
+  as evidence, and no parse job is created for it. The summary and the
+  manifest record each schedule position as `schedulePages: [{ position,
+code }]` with a code from `SCHEDULE_PAGE_CODES`:
+  `scheduled_payments_page` (stored) or `schedule_page_fetch` (the fetch or
+  decoding failed; nothing stored; logged as
+  `myjcb-credit-schedule-page-failed` with the position and code only), and
+  `schedulePageCount`, the number stored. The manifest rebuilds both from
+  closed values and refuses another code (`manifest_schedule_code_invalid`),
+  position (`manifest_stop_position_invalid`) or a count that is not the
+  number of stored entries (`manifest_schedule_count_invalid`).
+- **Coverage.** A connection is `success`, and its unit `complete`, when
+  every month was read whole, whatever the schedule pages showed and
+  whether or not they were fetched. A failed schedule page is not a stop,
+  not a manifest `failures` entry and not an unread month: the page is
+  outside what the unit claims, and its reason is recorded (INV05). A
+  connection that stopped at a month reads no schedule page.
+- **Unchanged.** A MONTH position whose ledger shows rows under the third
+  header is still kept unread with `scheduled_payments_page` in
+  `unreadMonths`, and keeps the connection `partial` (amendment (b)); that
+  has not been observed. `detailMonth-7` and `detailMonth-8` still never
+  resolve to calendar months.
+
+### Consequences
+
+- A night with an outstanding skip payment registers `success` and its
+  months are parsed; the schedule page is stored beside them unread.
+- Empty schedule pages move from `credit-detail-07.html` and
+  `credit-detail-08.html` (read by the statement parser, which found no
+  confirmed statement in them) to `credit-schedule-07.html` and
+  `credit-schedule-08.html` (read by nothing). Stored runs are not
+  rewritten.
+- A menu redesign that renames a heading stops the connection before its
+  first month and keeps nothing until the new heading is observed and
+  recorded here; the log says how many links fell under an unrecognised
+  heading.
+- Limits: what the schedule rows mean is unconfirmed; position 7 has not
+  been observed with rows; whether the digit in 「ボーナス#回払い」 is a
+  half-width or full-width character was not recorded, so both are
+  accepted. The menu page is stored redacted without `href` attributes, so
+  the stored menu cannot show which link opened which position.
+
+### Verification
+
+- `services/collector-myjcb/test/parsers.test.ts`: the synthetic menu
+  fixture has the nine links in the observed DOM order under the three
+  headings and reads as months 0–6 and schedule pages 7 and 8; headings
+  match across whitespace and markup and with any half- or full-width
+  digits (a kanji numeral or other character in the count stops); an `h3`
+  inside a card box leaves its link under the section's `h2`; an
+  unrecognised heading, an unobserved `h2` inside a card box, near misses of the observed texts, a link before any heading
+  and a position in both groups stop with `credit-menu-group`, and the
+  log carries counts only.
+- `services/collector-myjcb/test/credit-statement-state.test.ts`: schedule
+  pages are read after the months, stored as `credit-schedule-NN.html`
+  with state `unknown` and a relative label, and never counted as months;
+  a failed schedule page is recorded and the next one is read; a stopped
+  month reads none; an unrecognised heading and a schedule position the
+  past-months response offers stop before any month. Through the Worker's
+  manual trigger, months 0 and 1 read whole beside a skip page with rows
+  and a failed bonus page persist a `complete` unit, the manifest's
+  `schedulePages` and `schedulePageCount`, no failure and no unread month,
+  and the error body reaches no stored byte, log line or response; an
+  unrecognised heading stops with `credit_menu_group_unrecognized` and its
+  text reaches nothing.
+- `services/collector-myjcb/test/shared-collection.test.ts`: stored and
+  failed schedule pages keep the unit `complete` and are named in the
+  manifest; an unknown code, position or count, or a count with no
+  entries, refuses the plan.
+- `services/processor/test/myjcb-shared-r2.test.ts`: the collector's plan
+  for a whole connection with a stored schedule page registers and seals,
+  has run status `success` and unit report `success`, catalogues the
+  schedule page with no dataset, and creates and completes parse jobs for
+  the four month artifacts only.
 - No production data was read for this amendment; the findings above are
   the owner's agent's structure-only survey.
 

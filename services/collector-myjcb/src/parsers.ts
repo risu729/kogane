@@ -107,13 +107,113 @@ export function extractCreditMenuLinkId(html: string): string | undefined {
   return undefined;
 }
 
-export function parseCreditMenuMonths(html: string): number[] {
+/**
+ * The URL the credit menu is served at, which its relative links resolve
+ * against.
+ */
+const CREDIT_MENU_PAGE_URL = `${MYJCB_ORIGIN}/iss-pc/member/details_inquiry/detailMenu.html`;
+
+/**
+ * The menu's section headings, compared after whitespace removal, and the
+ * group each one names (observed 2026-09-27, round 4; ADR 0005's amendment
+ * (c)). The `#` in the observed 「ボーナス#回払い」 is a digit, so any run of
+ * digits is accepted there; every other character must match exactly.
+ */
+const CREDIT_MENU_GROUP_HEADINGS: readonly {
+  readonly pattern: RegExp;
+  readonly group: CreditMenuGroup;
+}[] = [
+  { pattern: /^最新のご利用明細$/u, group: "months" },
+  { pattern: /^過去の明細$/u, group: "months" },
+  { pattern: /^ボーナス[0-9０-９]+回払い・ショッピングスキップ払い$/u, group: "schedules" },
+];
+
+/** What a credit menu position is: a statement month, or a payment schedule page. */
+export type CreditMenuGroup = "months" | "schedules";
+
+export interface CreditMenuPositions {
+  /** Positions under 「最新のご利用明細」 and 「過去の明細」, ascending. */
+  readonly months: readonly number[];
+  /** Positions under 「ボーナス#回払い・ショッピングスキップ払い」, ascending. */
+  readonly schedules: readonly number[];
+}
+
+/**
+ * The credit menu's `detail.html?detailMonth=N` links, grouped by the section
+ * heading each falls under: the last `h2` before the link in document order.
+ * The observed menu puts its nine 「明細を見る」 links in card boxes under
+ * three `h2` headings, in DOM order 0, 1, 7, 8, 2, 3, 4, 5, 6; the link text
+ * names no month, so only the heading tells a statement month from a
+ * schedule page.
+ *
+ * A link before any `h2`, a link under a heading that is not one of the
+ * observed three, or a position listed under both groups stops the collection
+ * (`credit-menu-group`): the grouping is never guessed (ADR 0004). The stop
+ * log carries counts only, never the heading text.
+ */
+export function readCreditMenuGroups(html: string): CreditMenuPositions {
   const months = new Set<number>();
-  for (const match of html.matchAll(/(?:[?&]|\b)detailMonth(?:=|["']?\s+value=["'])(\d{1,2})/giu)) {
-    const month = Number(match[1]);
-    if (Number.isInteger(month) && month >= 0 && month <= 17) months.add(month);
+  const schedules = new Set<number>();
+  let unrecognized = 0;
+  let outside = 0;
+  let heading: string | undefined;
+  const visit = (node: HtmlNode): void => {
+    // A link inside a heading belongs to that heading.
+    if (isElement(node) && node.tagName === "h2") heading = nodeText(node).replace(/\s+/gu, "");
+    if (isElement(node) && node.tagName === "a") {
+      const position = creditDetailLinkPosition(node);
+      if (position !== undefined) {
+        if (heading === undefined) outside += 1;
+        else {
+          const text = heading;
+          const group = CREDIT_MENU_GROUP_HEADINGS.find(({ pattern }) => pattern.test(text))?.group;
+          if (group === "months") months.add(position);
+          else if (group === "schedules") schedules.add(position);
+          else unrecognized += 1;
+        }
+      }
+    }
+    for (const child of childNodes(node)) visit(child);
+  };
+  visit(parse(html));
+  const both = [...months].filter((position) => schedules.has(position)).length;
+  if (unrecognized > 0 || outside > 0 || both > 0) {
+    // Counts only: the heading text never reaches the log.
+    console.warn(
+      JSON.stringify({
+        event: "myjcb-credit-menu-groups",
+        monthLinks: months.size,
+        scheduleLinks: schedules.size,
+        unrecognizedHeadingLinks: unrecognized,
+        linksOutsideHeading: outside,
+        positionsInBothGroups: both,
+      }),
+    );
+    throw new StopConditionError(
+      "MyJCB credit menu grouped a link under an unrecognised heading",
+      "credit-menu-group",
+    );
   }
-  return [...months].sort((left, right) => left - right);
+  const ascending = (values: Set<number>) => [...values].sort((left, right) => left - right);
+  return { months: ascending(months), schedules: ascending(schedules) };
+}
+
+/** The `detailMonth` a menu link opens, or undefined for any other link. */
+function creditDetailLinkPosition(link: HtmlElement): number | undefined {
+  const href = link.attrs.find((attribute) => attribute.name === "href")?.value;
+  if (href === undefined) return undefined;
+  let url: URL;
+  try {
+    url = new URL(href, CREDIT_MENU_PAGE_URL);
+  } catch {
+    return undefined;
+  }
+  if (url.origin !== MYJCB_ORIGIN) return undefined;
+  if (url.pathname !== "/iss-pc/member/details_inquiry/detail.html") return undefined;
+  const month = url.searchParams.get("detailMonth");
+  if (month === null || !/^\d{1,2}$/u.test(month)) return undefined;
+  const position = Number(month);
+  return position <= 17 ? position : undefined;
 }
 
 export function extractGeneralJsonDiscriminator(html: string): string {

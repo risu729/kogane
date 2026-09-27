@@ -54,15 +54,15 @@ previous snapshot, a `partial` one may not.
 Checked against each collector's persist path and registered with
 `collector-plans.test.ts` (the run status each successful plan gets):
 
-| Collector                                                                                                 | Unit on success                                                                                                              | Why that is what the collector captured                                                                      |
-| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| MyJCB                                                                                                     | `complete` (this ADR; was `partial`); a connection stopped at a month is `partial` with its stop code (ADR 0005's amendment) | see below                                                                                                    |
-| GLOBAL PASS                                                                                               | `partial` (unchanged)                                                                                                        | page 1 per selected month; a month over ten statements has more (amendment of 2026-09-27, `first_page_only`) |
-| Vpass                                                                                                     | `complete` only when each month's captured rows equal the provider's stated total; otherwise `partial` (ADR 0023)            | see the amendment below                                                                                      |
-| Mizuho                                                                                                    | `partial` when the page shows more history (`history-pagination-unverified`), else `complete`                                | per page                                                                                                     |
-| Mobile Suica                                                                                              | `complete` only when the collector proved it reached the end of the history                                                  | per run                                                                                                      |
-| Money Forward ME, Sony Bank, SBI Securities, SBI Shinsei, SBI VC Trade, SMBC Direct, V Point, V Point Pay | `complete`                                                                                                                   | the collector's own run status                                                                               |
-| St. George                                                                                                | no units                                                                                                                     | the run status alone                                                                                         |
+| Collector                                                                                                 | Unit on success                                                                                                                                                                                                                            | Why that is what the collector captured                                                                      |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| MyJCB                                                                                                     | `complete` (this ADR; was `partial`) when every month is read whole; the menu's schedule pages are outside the coverage (ADR 0005's amendment (c)); a connection stopped at a month is `partial` with its stop code (ADR 0005's amendment) | see below                                                                                                    |
+| GLOBAL PASS                                                                                               | `partial` (unchanged)                                                                                                                                                                                                                      | page 1 per selected month; a month over ten statements has more (amendment of 2026-09-27, `first_page_only`) |
+| Vpass                                                                                                     | `complete` only when each month's captured rows equal the provider's stated total; otherwise `partial` (ADR 0023)                                                                                                                          | see the amendment below                                                                                      |
+| Mizuho                                                                                                    | `partial` when the page shows more history (`history-pagination-unverified`), else `complete`                                                                                                                                              | per page                                                                                                     |
+| Mobile Suica                                                                                              | `complete` only when the collector proved it reached the end of the history                                                                                                                                                                | per run                                                                                                      |
+| Money Forward ME, Sony Bank, SBI Securities, SBI Shinsei, SBI VC Trade, SMBC Direct, V Point, V Point Pay | `complete`                                                                                                                                                                                                                                 | the collector's own run status                                                                               |
+| St. George                                                                                                | no units                                                                                                                                                                                                                                   | the run status alone                                                                                         |
 
 For MyJCB, a connection's `success` means the collector enumerated the
 credit months from the credit menu and the past-months response and kept,
@@ -385,7 +385,7 @@ importer's path, or something else). It is recorded as unreconciled.
 
 ## Amendment: MyJCB unread months and export offers (2026-09-27)
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#331)
 - Date: 2026-09-27
 - Carried by: [ADR 0005's amendment (b)](0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page),
   `connectionErrorCode` in `services/collector-myjcb/src/shared-collection.ts`
@@ -404,3 +404,25 @@ Two sentences of the MyJCB section above change.
   months are all under the observed third ledger header carries
   `scheduled_payments_page`; any other unread month keeps `collector_partial`.
   The unit is `partial` either way, so eligibility is unchanged.
+
+## Amendment: MyJCB schedule pages are outside the coverage (2026-09-27)
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-27
+- Carried by: [ADR 0005's amendment (c)](0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months),
+  `readCreditMenuGroups` in `services/collector-myjcb/src/parsers.ts`
+
+"the collector enumerated the credit months from the credit menu and the
+past-months response" now reads: the months are the menu's links under
+「最新のご利用明細」 and 「過去の明細」 and the past-months response's
+available positions. The links under
+「ボーナス#回払い・ショッピングスキップ払い」 are payment schedule pages,
+not months. They are stored as `credit-schedule-NN.html` evidence that no
+parser reads and recorded in the manifest (`schedulePages`,
+`schedulePageCount`); whether they show rows, or failed to fetch
+(`schedule_page_fetch`), does not change the unit's coverage. So a MyJCB
+unit is `complete` when every month it enumerated reached a ledger or had
+no row, and a schedule page with rows no longer makes it `partial`. A menu
+link under any other heading, or before any heading, stops the connection
+before its first month (`credit_menu_group_unrecognized`), so a unit never
+claims coverage over a grouping nobody observed.

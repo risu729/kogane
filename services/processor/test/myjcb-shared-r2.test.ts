@@ -600,3 +600,110 @@ test("ADR 0005 second amendment: a month under the third ledger header registers
       .first<number>("n"),
   ).toBe(0);
 }, 60000);
+
+test("ADR 0005 amendment (c): a whole connection with a stored schedule page is eligible; only its month pages are parsed", async () => {
+  // The collector's real plan for a connection that read its two months
+  // whole and, beside them, stored the ショッピングスキップ払い page (menu
+  // position 8, rows under the third header) as `credit-schedule-08.html`.
+  // Schedule pages are not months: the unit is `complete`, the run
+  // `success`, and parse jobs are created for the month artifacts only. No
+  // parser reads a schedule page yet.
+  const runId = "00000000-0000-4000-8000-00000000a0c8";
+  const connectionId = "synthetic-sched";
+  const schedulePage =
+    '<!doctype html><html><body><h1>ショッピングスキップ払いご利用明細(未確定分)</h1><div class="detail-list-01"><div class="head"><div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div></div><div class="content"><div class="item-cell"><div class="cell">2026/03/10</div><div class="cell">架空分割店</div><div class="cell">2026/04/10</div><div class="cell">3,000円</div></div></div></div></body></html>';
+  const kept: RawArtifact[] = [
+    ...artifacts,
+    {
+      dataset: "credit-schedule",
+      filename: "credit-schedule-08.html",
+      body: schedulePage,
+      mediaType: HTML,
+      statementState: "unknown",
+      period: "detailMonth-8",
+    },
+  ];
+  const plan = await myJcbRunPlan({
+    schemaVersion: "myjcb-worker-poc-v1",
+    runId,
+    startedAt: "2026-09-24T00:00:00.000Z",
+    completedAt: "2026-09-24T00:05:00.000Z",
+    status: "success",
+    trigger: "scheduled",
+    connections: [
+      {
+        summary: {
+          connectionId,
+          bootstrapMode: "password",
+          status: "success",
+          cardCount: 1,
+          periodCount: 2,
+          artifactCount: kept.length,
+          schedulePages: [
+            { position: 7, code: "schedule_page_fetch" },
+            { position: 8, code: "scheduled_payments_page" },
+          ],
+          schedulePageCount: 1,
+        },
+        artifacts: kept,
+      },
+    ],
+    failures: [],
+  });
+  expect(plan.run.units).toEqual([
+    { unitKey: connectionId, unitKind: "connection", artifactCount: 5, coverageStatus: "complete" },
+  ]);
+  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+  expect(await registerCollectionRun(env, { source: "myjcb", runId })).toMatchObject({
+    outcome: "registered",
+    artifacts: 6,
+  });
+  const fetchRunId = await fetchRun(runId);
+  expect(
+    await env.DB.prepare("SELECT COUNT(*) AS n FROM fetch_run_seals WHERE fetch_run_id=?")
+      .bind(fetchRunId)
+      .first<number>("n"),
+  ).toBe(1);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT r.status,ur.normalized_outcome AS unit_outcome,ur.safe_failure_code AS code FROM observation_fetch_runs r JOIN fetch_units u ON u.fetch_run_id=r.id JOIN fetch_unit_reports ur ON ur.fetch_unit_id=u.id WHERE r.external_run_id=?",
+      )
+        .bind(runId)
+        .all()
+    ).results,
+  ).toEqual([{ status: "success", unit_outcome: "success", code: null }]);
+  // The schedule page is catalogued as evidence with no parser dataset.
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT artifact_key,dataset FROM observation_fetch_artifacts WHERE fetch_run_id=? ORDER BY artifact_key",
+      )
+        .bind(fetchRunId)
+        .all()
+    ).results,
+  ).toEqual([
+    { artifact_key: "manifest.json", dataset: null },
+    { artifact_key: `${connectionId}/credit-detail-00.html`, dataset: "credit-detail" },
+    { artifact_key: `${connectionId}/credit-detail-01.html`, dataset: "credit-detail" },
+    { artifact_key: `${connectionId}/credit-ledger-00.json`, dataset: "credit-ledger" },
+    { artifact_key: `${connectionId}/credit-ledger-01.json`, dataset: "credit-ledger" },
+    { artifact_key: `${connectionId}/credit-schedule-08.html`, dataset: null },
+  ]);
+  expect(await sweep(env)).toMatchObject({ parsed: 4, error: 0 });
+  expect(await workItem(runId)).toEqual({ outcome: "jobs_created", jobs_created: 4 });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT a.artifact_key,j.status FROM observation_parse_jobs j JOIN fetch_artifacts a ON a.id=j.fetch_artifact_id WHERE a.fetch_run_id=? ORDER BY a.artifact_key",
+      )
+        .bind(fetchRunId)
+        .all()
+    ).results,
+  ).toEqual([
+    { artifact_key: `${connectionId}/credit-detail-00.html`, status: "done" },
+    { artifact_key: `${connectionId}/credit-detail-01.html`, status: "done" },
+    { artifact_key: `${connectionId}/credit-ledger-00.json`, status: "done" },
+    { artifact_key: `${connectionId}/credit-ledger-01.json`, status: "done" },
+  ]);
+}, 60000);
