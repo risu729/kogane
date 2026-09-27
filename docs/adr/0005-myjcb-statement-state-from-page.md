@@ -899,7 +899,8 @@ amount check and be recognised with one live holder per recognition key
   `myjcb-skip-payment-schedule@0.1.0` in
   `packages/parsers/src/parsers/myjcb-skip-payment-schedule.ts`;
   `ScheduledPaymentObservation` in `packages/parsers/src/scheduled-payment.ts`;
-  `fields.scheduled_payment` in `services/processor/src/worker.ts`; migration
+  `fields.scheduled_payment` and `scheduledPaymentRows` in
+  `services/processor/src/worker.ts`; migration
   `0061_scheduled_payment_observations.sql`; the classifier branch in
   `services/processor/scripts/parser-rejection.ts`;
   [MyJCB source note](../sources/myjcb.md),
@@ -987,6 +988,10 @@ statement months), not rows of a confirmed statement, and not a balance.
   - a page with rows names exactly one as-of heading (any `h1`–`h6`) whose
     date and month are on the calendar, else `schedule_as_of_invalid`; a
     page with no rows may omit it;
+  - the ledger read (the one with rows, or every ledger when none has
+    rows) has as element children its `head` first and then only `content`
+    rows, else `schedule_row_shape_unobserved`: rows nested anywhere else
+    are refused, never read as an empty ledger (INV05);
   - each row is one `item-cell` of exactly three `cell`s whose middle cell
     renders exactly two non-empty lines (a `br` ends a line, a block element
     starts and ends one), else `schedule_row_shape_unobserved`. The body
@@ -1022,6 +1027,21 @@ statement months), not rows of a confirmed statement, and not a balance.
   column (INV03). It is classified `core-keep` with the other observation
   tables. The processor writes it in the same pending parse run as the other
   kinds, so it is visible only once the parse run is published.
+- **The boundary check.** Because the kind is declared outside the parser
+  contract's `Observation` union and reaches it through a cast
+  (`scheduledPaymentsAsObservations`), the type system does not check what
+  is persisted as `scheduled_payment`. The processor checks it instead
+  (`scheduledPaymentRows`), after the parse and before anything is written:
+  a row of that kind from any parser other than
+  `myjcb-skip-payment-schedule`, or with any key other than the declared
+  ones, an empty text field, a date that is not a calendar `YYYY-MM-DD`, an
+  `amount_text` that is not a canonical integer, a scale other than 0, a
+  currency other than JPY, a schedule kind other than `card-skip-payment` or
+  an `extra` that is not an object, fails the parse with
+  `parse_contract_invalid`. The table's CHECKKs stay the last line. This is
+  a deliberate trade: the four older kinds are checked by the type system
+  and the tables only, this one by a runtime check and the table, until a
+  parser contract release widens the union.
 - **Nothing downstream reads it.** No read path, purchase recognition,
   settlement candidate, identity run, release comparison, decimal
   projection or explanation reads the table.
@@ -1063,7 +1083,8 @@ statement months), not rows of a confirmed statement, and not a balance.
   heading, two skip headings, no ledger, two ledgers with rows, a four-cell
   head, 1,001 rows, a missing or impossible as-of date, a four-cell or
   one-line row, an impossible date, a missing amount, an ineligible run,
-  wrong key, period or state, a link in the page, a fragment), and no
+  wrong key, period or state, a link in the page, a fragment, rows nested
+  under a wrapper, a stray element beside an empty ledger), and no
   message carries a date, merchant or amount. Only this parser accepts the
   metadata, and its digest is recorded.
 - `services/collector-myjcb/test/parsers.test.ts`: only exactly one h1 with
@@ -1083,7 +1104,9 @@ statement months), not rows of a confirmed statement, and not a balance.
   page; the two rows land in `scheduled_payment_observations` with the
   synthetic dates, amounts and months, the parser wrote no row to any other
   observation table, and the table refuses `UPDATE` and `DELETE`. A page
-  stored under the old name gets no dataset (amendment (c)'s test).
+  stored under the old name gets no dataset (amendment (c)'s test). The
+  boundary check accepts the declared row and refuses it from another
+  parser and with each malformed field.
 - `services/processor/test/parser-rejection.test.ts`: every refusal
   classifies as exactly the code it threw; any other message prints
   `parser_rejected_other`.

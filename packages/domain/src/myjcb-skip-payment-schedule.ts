@@ -65,8 +65,12 @@ export const SKIP_PAYMENT_SCHEDULE_ROW_LIMIT = 1_000;
  * - `schedule_as_of_invalid`: rows, and not exactly one readable "as of"
  *   heading; or a heading of that form that does not read as a calendar date
  *   and month, whether or not there are rows;
- * - `schedule_row_shape_unobserved`: a row that is not one `item-cell` of
- *   exactly three `cell`s whose middle cell is exactly two non-empty lines;
+ * - `schedule_row_shape_unobserved`: a ledger read (the one with rows, or,
+ *   when none has rows, every ledger) whose element children are not the one
+ *   `head` followed only by `content` rows, so that rows in any other
+ *   nesting are refused instead of reading as an empty ledger (INV05); or a
+ *   row that is not one `item-cell` of exactly three `cell`s whose middle
+ *   cell is exactly two non-empty lines;
  * - `schedule_date_invalid`: a usage date or payment date that is not
  *   `YYYY/MM/DD` on the calendar;
  * - `schedule_amount_invalid`: an amount cell that does not read as an exact
@@ -157,6 +161,7 @@ export function readMyJcbSkipPaymentSchedule(
     if (asOf === null || paymentFromMonth === null) return refuse("schedule_as_of_invalid");
   }
 
+  if (!read.every(onlyHeadAndRows)) return refuse("schedule_row_shape_unobserved");
   const readRows: SkipPaymentScheduleRow[] = [];
   for (const [index, row] of rows.entries()) {
     const rowChildren = children(row);
@@ -203,6 +208,20 @@ function observedHead(ledger: SchedulePageNode): boolean {
     cells.every(
       (cell, index) => hasClass(cell, "cell") && compact(text(cell)) === HEAD_CELLS[index],
     )
+  );
+}
+
+/**
+ * The ledger's element children are its `head` first and then only `content`
+ * rows, as the survey recorded the grid. Zero rows is then a reading of the
+ * page, never the result of rows nested where this reader does not look.
+ */
+function onlyHeadAndRows(ledger: SchedulePageNode): boolean {
+  const [head, ...rest] = children(ledger);
+  return (
+    head !== undefined &&
+    hasClass(head, "head") &&
+    rest.every((element) => hasClass(element, "content") && !hasClass(element, "head"))
   );
 }
 

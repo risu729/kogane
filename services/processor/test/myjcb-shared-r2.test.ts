@@ -29,7 +29,7 @@ import type { RawArtifact } from "../../collector-myjcb/src/types.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { cardPurchaseSweep } from "../src/card-purchase-job.ts";
 import { identitySweep } from "../src/identity-store.ts";
-import { sweep } from "../src/worker.ts";
+import { scheduledPaymentRows, sweep } from "../src/worker.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -872,3 +872,49 @@ test("ADR 0005 amendment (e): only the ショッピングスキップ払い page
     env.DB.prepare("UPDATE scheduled_payment_observations SET amount_text='0'").run(),
   ).rejects.toThrow(/append-only/u);
 }, 60000);
+
+test("ADR 0005 amendment (e): a scheduled payment is checked at the persist boundary, since the type system does not check it", () => {
+  // Synthetic values only.
+  const row = {
+    kind: "scheduled_payment",
+    sourceAccount: "myjcb:synthetic-skip:root",
+    externalId: "myjcb-skip-payment:00:0",
+    scheduleKind: "card-skip-payment",
+    usageDate: "2026-03-02",
+    dueDate: "2026-05-11",
+    amountText: "-1200",
+    amountScale: 0,
+    currency: "JPY",
+    counterparty: "架空スキップ店",
+    asOf: "2026-03-20",
+    observedAt: "2026-03-20T01:00:00.000Z",
+    rawLocator: "html:div.detail-list-01>div.content[0]",
+    extra: {},
+  };
+  const other = { kind: "balance", anything: 1 };
+  expect(() => scheduledPaymentRows("myjcb-skip-payment-schedule", [row, other])).not.toThrow();
+  // Another parser may not emit the kind at all.
+  expect(() => scheduledPaymentRows("myjcb-credit-statement", [row])).toThrow(
+    /^parse_contract_invalid$/u,
+  );
+  for (const broken of [
+    { ...row, amountText: "12000.5" },
+    { ...row, amountText: "012" },
+    { ...row, amountText: "-0" },
+    { ...row, amountText: 12000 },
+    { ...row, amountScale: 2 },
+    { ...row, currency: "USD" },
+    { ...row, scheduleKind: "bonus" },
+    { ...row, dueDate: "2026-02-30" },
+    { ...row, usageDate: "2026/03/02" },
+    { ...row, asOf: null },
+    { ...row, counterparty: "" },
+    { ...row, extra: [] },
+    { ...row, unexpected: 1 },
+    Object.fromEntries(Object.entries(row).filter(([key]) => key !== "rawLocator")),
+  ])
+    expect(
+      () => scheduledPaymentRows("myjcb-skip-payment-schedule", [broken]),
+      JSON.stringify(broken),
+    ).toThrow(/^parse_contract_invalid$/u);
+});

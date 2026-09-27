@@ -162,6 +162,27 @@ export const REFUSAL_CASES: readonly {
     }),
     meta: skipMeta(),
   },
+  // Rows nested under a wrapper are not the observed grid: refused, never
+  // read as an empty ledger (INV05).
+  {
+    code: "schedule_row_shape_unobserved",
+    html: skipPage({
+      ledgers: [
+        `<div class="detail-list-01">${SKIP_HEAD}<div class="body">${ROWS.join("")}</div></div>`,
+      ],
+    }),
+    meta: skipMeta(),
+  },
+  {
+    code: "schedule_row_shape_unobserved",
+    html: skipPage({
+      asOf: [],
+      ledgers: [
+        `<div class="detail-list-01">${SKIP_HEAD}${EMPTY_ROW}<div class="note">x</div></div>`,
+      ],
+    }),
+    meta: skipMeta(),
+  },
   {
     code: "schedule_date_invalid",
     html: skipPage({

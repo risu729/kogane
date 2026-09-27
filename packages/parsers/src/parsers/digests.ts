@@ -17,7 +17,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "packages/domain/src/myjcb-amounts.ts":
       "072dc5fc2570fc8257343d85d53e93cf9fa9036f61a1648390a8d8845303ea3e",
     "packages/domain/src/myjcb-skip-payment-schedule.ts":
-      "bd0e857b68a026fb94c528396fca2fb533676f98d3b0da170f471464bd614638",
+      "fbdf98ddddc8d3b6ab75e5d10fff2c40ddcf2b1af569b5802bbbd61bbb9457c6",
     "packages/domain/src/myjcb-statement-page.ts":
       "e5f382ed90b5f133ed794b479aebb4c5e42e27477198030d2d00e64972984587",
     "packages/domain/src/values.ts":
@@ -263,7 +263,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-skip-payment-schedule": {
       version: "0.1.0",
-      codeDigest: "db1c2abc7c9d7308913901d039d410d8d0f5ae52199833c1b28c99eca1ec947b",
+      codeDigest: "2d0d453e977ef90fe017d5c1781ce2b6fa1aa20e09b2cbb7cd2bf81981905741",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
