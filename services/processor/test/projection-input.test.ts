@@ -34,11 +34,11 @@ const off = (base: Env = env): Env =>
   ({ ...base, BALANCE_PROJECTION_ENABLED: "0" }) as unknown as Env;
 
 /**
- * A second store, for the two cases that must not be mixed with the shared
- * one: a chunk conflict leaves a build tampered with, and a relation set over
- * its budget cannot be removed again (entity relations are append-only). One
- * instance is shared by both, in declaration order, so the suite runs two
- * Workers rather than three.
+ * A second store, for the cases that must not be mixed with the shared one: a
+ * chunk conflict leaves a build tampered with, a relation set over its budget
+ * cannot be removed again (entity relations are append-only), and the
+ * unregistered-processor case must count only its own outbox row. One instance
+ * is shared by all three, in declaration order.
  */
 let extra: { mf: Miniflare; env: Env } | null = null;
 const extraPipeline = async (): Promise<Env> => {
@@ -459,8 +459,8 @@ test("G2-07/G2-08: a re-sent chunk is a no-op or a conflict, and a failing chunk
 }, 120000);
 
 test("G2-06: a declared budget that overflows refuses the build instead of truncating it", async () => {
-  // Runs last on the shared second store: entity relations are append-only, so
-  // a set over the budget cannot be taken back.
+  // The last build on the shared second store: entity relations are
+  // append-only, so a set over the budget cannot be taken back.
   const local = { env: await extraPipeline() };
   {
     await seedBalances(local.env, ["smbc:budget"]);
@@ -504,24 +504,28 @@ test("G2-06: a declared budget that overflows refuses the build instead of trunc
 }, 120000);
 
 /** The FK chain a committed operation leaves behind, written directly. */
-async function seedOperation(operationId: string, decisionId: string): Promise<void> {
+async function seedOperation(
+  operationId: string,
+  decisionId: string,
+  target: Env = env,
+): Promise<void> {
   const planId = operationId
     .padEnd(64, "0")
     .slice(0, 64)
     .replace(/[^0-9a-f]/gu, "a");
-  await env.DB.batch([
-    env.DB.prepare(
+  await target.DB.batch([
+    target.DB.prepare(
       `INSERT INTO change_plans(plan_id,kind,payload_json,base_context_id,expected_revisions_json,
         simulation_json,created_by,created_at,expires_at,status)
        VALUES(?1,'relation.accept','{}','identity-current-v1','{}','{}','operator:1',
         '2026-09-12T01:00:00Z','2026-09-12T02:00:00Z','committed')`,
     ).bind(planId),
-    env.DB.prepare(
+    target.DB.prepare(
       `INSERT INTO operation_receipts(operation_id,principal,operation_kind,payload_digest,plan_id,
         status,result_json,created_at,published_at)
        VALUES(?1,'operator:1','relation.accept',?3,?2,'accepted','{}','2026-09-12T01:00:00Z',NULL)`,
     ).bind(operationId, planId, "c".repeat(64)),
-    env.DB.prepare(
+    target.DB.prepare(
       `INSERT INTO decision_outbox(decision_revision_id,principal,operation_id,target,
         enqueued_at,available_at_ms)
        VALUES(?1,'operator:1',?2,'balance-projection','2026-09-12T01:00:00Z',0)`,
@@ -529,53 +533,79 @@ async function seedOperation(operationId: string, decisionId: string): Promise<v
   ]);
 }
 
-const receiptStatus = async (operationId: string): Promise<string> =>
-  (await env.DB.prepare("SELECT status FROM operation_receipts WHERE operation_id=?1")
+const receiptStatus = async (operationId: string, target: Env = env): Promise<string> =>
+  (await target.DB.prepare("SELECT status FROM operation_receipts WHERE operation_id=?1")
     .bind(operationId)
     .first<{ status: string }>())!.status;
 
-const outboxState = async (operationId: string) =>
-  await env.DB.prepare(
-    `SELECT processed_at,outcome,progress_code,pending_polls,blocked_code,evidence_ref,
-      applied_source_revision,required_source_revision FROM decision_outbox WHERE operation_id=?1`,
+const outboxState = async (operationId: string, target: Env = env) =>
+  await target.DB.prepare(
+    `SELECT processed_at,outcome,progress_code,pending_polls,blocked_code,last_error_code,
+      evidence_ref,applied_source_revision,required_source_revision
+     FROM decision_outbox WHERE operation_id=?1`,
   )
     .bind(operationId)
     .first<Record<string, unknown>>();
+
+const buildingSnapshots = async (target: Env = env): Promise<number> =>
+  (await target.READ.prepare(
+    "SELECT count(*) AS n FROM balance_read_snapshots WHERE status='building'",
+  ).first<{ n: number }>())!.n;
+
+// Every delivery below asserts its `outcomes` before its counts. A count says
+// only that a row did not wait; the outcome says why (`retryable:<code>`,
+// `blocked:<code>`, `pending:<progress>`), so a failure names its cause.
 
 test("G2-11/G2-12/G2-13: the CORE side completes only after the read model, and converges once", async () => {
   const decision = await seedDecision();
   await seedBalances(env, ["smbc:outbox-1", "smbc:outbox-2", "smbc:outbox-3"]);
   await seedOperation("op_pending_1", decision);
+  // One clock for every delivery of this case. A delivery's `now` decides
+  // which rows are due, so each poll below is due by arithmetic on this clock
+  // (a pending poll is due again 30 s later), never by the time the runner
+  // took between two reads of the real one.
+  const t0 = Date.now();
 
   // The flag is off: nothing was updated, so nothing is completed and the
   // receipt stays accepted (G2-13).
   const flagOff = await dispatchDecisionOutbox(env.DB, {
+    now: t0,
     processors: { "balance-projection": balanceProjectionOutboxProcessor(off()) },
   });
+  expect(flagOff.outcomes).toEqual({ "pending:projection_flag_off": 1 });
   expect(flagOff.processed).toBe(0);
   expect(flagOff.waiting).toBe(1);
-  expect(flagOff.outcomes).toEqual({ "pending:projection_flag_off": 1 });
   expect(await receiptStatus("op_pending_1")).toBe("accepted");
   expect(await outboxState("op_pending_1")).toMatchObject({
     processed_at: null,
     progress_code: "projection_flag_off",
     pending_polls: 1,
+    last_error_code: null,
   });
+
+  // No build is in progress, so no writer lease is held: the lease is the one
+  // piece of state on this path that runs on the real clock, and a live one
+  // would make the poll below `retryable:writer_lease_unavailable`.
+  expect(await buildingSnapshots()).toBe(0);
 
   // The build cannot finish inside this tick: still pending, and the CORE side
   // is not completed before the read model is (G2-11).
   const building = await dispatchDecisionOutbox(env.DB, {
-    now: Date.now() + 60_000,
+    now: t0 + 60_000,
     processors: {
       "balance-projection": balanceProjectionOutboxProcessor(on(), { writeBudget: 1 }),
     },
   });
+  expect(building.outcomes).toEqual({ "pending:projection_building": 1 });
   expect(building.processed).toBe(0);
   expect(building.waiting).toBe(1);
-  expect(building.outcomes).toEqual({ "pending:projection_building": 1 });
   expect(await receiptStatus("op_pending_1")).toBe("accepted");
   const polled = await outboxState("op_pending_1");
-  expect(polled).toMatchObject({ processed_at: null, progress_code: "projection_building" });
+  expect(polled).toMatchObject({
+    processed_at: null,
+    progress_code: "projection_building",
+    last_error_code: null,
+  });
   // Polls of work that is running do not burn the failure budget.
   expect(polled!.pending_polls).toBe(2);
 
@@ -589,12 +619,12 @@ test("G2-11/G2-12/G2-13: the CORE side completes only after the read model, and 
   const snapshots = await count("SELECT count(*) AS n FROM balance_read_snapshots");
 
   const converged = await dispatchDecisionOutbox(env.DB, {
-    now: Date.now() + 120_000,
+    now: t0 + 120_000,
     processors: { "balance-projection": balanceProjectionOutboxProcessor(on()) },
   });
+  expect(converged.outcomes).toEqual({ balance_projection_active: 1 });
   expect(converged.processed).toBe(1);
   expect(converged.published).toBe(1);
-  expect(converged.outcomes).toEqual({ balance_projection_active: 1 });
   // No second build, and the completion carries the snapshot that proves it.
   expect(await count("SELECT count(*) AS n FROM balance_read_snapshots")).toBe(snapshots);
   expect(await receiptStatus("op_pending_1")).toBe("published");
@@ -609,27 +639,122 @@ test("G2-11/G2-12/G2-13: the CORE side completes only after the read model, and 
 
   // A redelivery changes nothing: the row is processed, not reopened.
   const again = await dispatchDecisionOutbox(env.DB, {
-    now: Date.now() + 180_000,
+    now: t0 + 180_000,
     processors: { "balance-projection": balanceProjectionOutboxProcessor(on()) },
   });
+  expect(again.outcomes).toEqual({});
   expect(again.claimed).toBe(0);
   expect(again.published).toBe(0);
   expect(await outboxState("op_pending_1")).toEqual(done!);
 }, 180000);
 
 test("G2-13: an unregistered processor blocks the row and never publishes the receipt", async () => {
-  const decision = await seedDecision();
-  await seedOperation("op_blocked_1", decision);
-  const result = await dispatchDecisionOutbox(env.DB, { now: Date.now() + 240_000 });
+  // On the second store, where no other outbox row exists: the dispatcher
+  // claims every due row, so on the shared store a row an earlier case left
+  // open would be blocked and counted here too.
+  const local = await extraPipeline();
+  const decision = await seedDecision(local);
+  await seedOperation("op_blocked_1", decision, local);
+  const t0 = Date.now();
+  const result = await dispatchDecisionOutbox(local.DB, { now: t0 });
+  expect(result.outcomes).toEqual({ "blocked:no_processor": 1 });
   expect(result.processed).toBe(0);
   expect(result.blocked).toBe(1);
-  expect(result.outcomes).toEqual({ "blocked:no_processor": 1 });
-  expect(await receiptStatus("op_blocked_1")).toBe("accepted");
-  expect(await outboxState("op_blocked_1")).toMatchObject({
+  expect(await receiptStatus("op_blocked_1", local)).toBe("accepted");
+  expect(await outboxState("op_blocked_1", local)).toMatchObject({
     processed_at: null,
     blocked_code: "no_processor",
   });
   // A blocked row is not claimed again until an operator clears it.
-  const retry = await dispatchDecisionOutbox(env.DB, { now: Date.now() + 300_000 });
+  const retry = await dispatchDecisionOutbox(local.DB, { now: t0 + 300_000 });
   expect(retry.claimed).toBe(0);
 }, 60000);
+
+test("a failing build step and a live writer lease are retryable: the row neither waits nor completes, and is claimed again", async () => {
+  // The two retryable results of the balance-projection poll, each forced on
+  // purpose. Both give the same counts (`waiting` 0, `processed` 0) and leave
+  // the row open for the next due delivery; only `outcomes` tells them apart.
+  // Its own store, so nothing it leaves open reaches another case.
+  const own = await startPipeline();
+  try {
+    const target = own.env;
+    const decision = await seedDecision(target);
+    await seedBalances(target, ["smbc:retry-1", "smbc:retry-2"]);
+    await seedOperation("op_retry_1", decision, target);
+    const t0 = Date.now();
+    const flagOff = await dispatchDecisionOutbox(target.DB, {
+      now: t0,
+      processors: { "balance-projection": balanceProjectionOutboxProcessor(off(target)) },
+    });
+    expect(flagOff.outcomes).toEqual({ "pending:projection_flag_off": 1 });
+    // A pending poll is due again exactly 30 s later and not before, so a
+    // delivery at or after that instant always claims it.
+    expect((await dispatchDecisionOutbox(target.DB, { now: t0 + 29_999 })).claimed).toBe(0);
+
+    // The input store refuses the write, so the build step throws. The
+    // dispatcher records the error's class as a retryable code and backs off.
+    const failingStore = {
+      get: async (key: string) => await target.DATA.get(key),
+      put: async () => {
+        throw new Error("synthetic input store failure");
+      },
+    };
+    const failing = { ...on(target), DATA: failingStore } as unknown as Env;
+    const failed = await dispatchDecisionOutbox(target.DB, {
+      now: t0 + 60_000,
+      processors: {
+        "balance-projection": balanceProjectionOutboxProcessor(failing, { writeBudget: 1 }),
+      },
+    });
+    expect(failed.outcomes).toEqual({ "retryable:Error": 1 });
+    expect(failed).toMatchObject({ claimed: 1, processed: 0, waiting: 0, failed: 1, blocked: 0 });
+    expect(await outboxState("op_retry_1", target)).toMatchObject({
+      processed_at: null,
+      blocked_code: null,
+      last_error_code: "Error",
+      pending_polls: 1,
+    });
+    expect(await receiptStatus("op_retry_1", target)).toBe("accepted");
+    // The input is written before the build exists, so no build was started.
+    expect(await buildingSnapshots(target)).toBe(0);
+
+    // After its backoff the row is due again: a delivery with no processor
+    // handed in blocks it together with a row of its own.
+    const other = await seedDecision(target);
+    await seedOperation("op_blocked_2", other, target);
+    const unregistered = await dispatchDecisionOutbox(target.DB, { now: t0 + 240_000 });
+    expect(unregistered.outcomes).toEqual({ "blocked:no_processor": 2 });
+    expect(unregistered.blocked).toBe(2);
+
+    // The other result: a build another writer holds under a live lease. The
+    // lease is on the real clock, the one `claimWriterLease` reads.
+    const third = await seedDecision(target);
+    await seedBalances(target, ["smbc:lease-1", "smbc:lease-2"]);
+    await seedOperation("op_lease_1", third, target);
+    const held = await runBalanceProjection(on(target), {
+      writeBudget: 1,
+      writerToken: "writer-x",
+    });
+    expect(held.status).toBe("building");
+    await target.READ.prepare(
+      `UPDATE balance_read_snapshots SET writer_lease='writer-y',writer_lease_until_ms=?2,
+        writer_fence=writer_fence+1 WHERE snapshot_id=?1`,
+    )
+      .bind(held.snapshotId, Date.now() + 60_000)
+      .run();
+    const leased = await dispatchDecisionOutbox(target.DB, {
+      now: t0 + 300_000,
+      processors: {
+        "balance-projection": balanceProjectionOutboxProcessor(on(target), { writeBudget: 1 }),
+      },
+    });
+    expect(leased.outcomes).toEqual({ "retryable:writer_lease_unavailable": 1 });
+    expect(leased).toMatchObject({ claimed: 1, processed: 0, waiting: 0, failed: 1, blocked: 0 });
+    expect(await outboxState("op_lease_1", target)).toMatchObject({
+      processed_at: null,
+      last_error_code: "writer_lease_unavailable",
+    });
+  } finally {
+    await own.mf.dispose();
+  }
+}, 120000);

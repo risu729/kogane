@@ -305,9 +305,15 @@ stays inflated, which is why the three counting call sites were changed to
 | The receipt that stays `accepted` while a target is blocked                                                                                                                                                                                                                           | `services/processor/test/change-lifecycle.test.ts`                                                     |
 | The v2 pages, cursors and the v1 parity over the new identity                                                                                                                                                                                                                         | `services/app/test/balances-v2.test.ts`                                                                |
 
+A failing build step is covered by injection only: in
+`projection-input.test.ts` an input store whose write throws makes the outbox
+poll `retryable:Error`, and a build held under another writer's live lease
+makes it `retryable:writer_lease_unavailable`; either way the row neither waits
+nor completes, backs off, and is claimed again by the next due delivery.
+
 Not verified: production data volumes, a real concurrent second Worker (the
 lease and the fence are exercised by simulating the displaced writer), R2
-behaviour under failure injection, and the retention of stored inputs (their
+behaviour under real failures, and the retention of stored inputs (their
 collection is left to a later maintenance workflow).
 
 ## Known limits
