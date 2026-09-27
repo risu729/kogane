@@ -7,7 +7,7 @@
   },
   "devDependencies": {
     "@cloudflare/puppeteer": "1.4.0",
-    "@cloudflare/vitest-plugin": "1.2.5",
+    "@cloudflare/vitest-plugin": "1.2.6",
     "@types/bun": "1.4.2",
     "@types/node": "26.6.2",
     "devtools-protocol": "0.0.1704034",
