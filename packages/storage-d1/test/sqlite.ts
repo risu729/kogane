@@ -32,8 +32,8 @@ CREATE TABLE raw_objects(sha256 TEXT PRIMARY KEY,byte_size INTEGER,blob_key TEXT
 CREATE TABLE fetch_run_ranges(id INTEGER PRIMARY KEY,fetch_run_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);
 CREATE TABLE artifact_ranges(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);`;
 
-/** CORE from migration `from` onwards, applied in order over the Layer A stub. */
-export function coreDatabase(from = "0017"): Database {
+/** CORE from migration `from` onwards (up to, not including, `before`), applied in order over the Layer A stub. */
+export function coreDatabase(from = "0017", before = "9999"): Database {
   const directory = fileURLToPath(CORE_MIGRATIONS_URL);
   const db = new Database(":memory:");
   db.exec(LAYER_A);
@@ -42,7 +42,10 @@ export function coreDatabase(from = "0017"): Database {
     // has neither those rows nor the registry/immutability tables it touches.
     .filter(
       (entry) =>
-        entry.endsWith(".sql") && entry >= from && entry !== "0043_remove_synthetic_bootstrap.sql",
+        entry.endsWith(".sql") &&
+        entry >= from &&
+        entry < before &&
+        entry !== "0043_remove_synthetic_bootstrap.sql",
     )
     .sort())
     db.exec(readFileSync(join(directory, name), "utf8"));

@@ -52,19 +52,16 @@ Processor registers each terminal in process
 [collection.md](../../docs/collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc)
 for the artifact keys and terminal fields.
 
-Card binding (ADR 0023): before sanitizing, the Worker derives each card's
-durable binding token from the selection and discovery responses
-(`src/card-binding.ts`, the retired importer's construction) and stores only
-the token, as `card-identity-binding.json` on a second unit of the card's run.
-It needs the optional Worker secret `VPASS_CARD_BINDING_KEY` (64 lowercase hex
-characters, the retired importer's `ORIGIN_FINGERPRINT_KEY`):
+Card binding (ADR 0023, ADR 0029): before sanitizing, the Worker derives each
+card's durable binding token from the selection and discovery responses
+(`src/card-binding.ts`, the retired importer's checks) as the unkeyed
+`vpass-card-v2-` SHA-256 of the card tuple, and stores only the token, as
+`card-identity-binding.json` on a second unit of the card's run. No secret is
+needed; a `VPASS_CARD_BINDING_KEY` set earlier is no longer read and can be
+removed with `wrangler secret delete VPASS_CARD_BINDING_KEY`.
 
-```sh
-wrangler secret put VPASS_CARD_BINDING_KEY
-```
-
-Without it, or when the responses carry no card tuple, the run is stored with
-no binding, its rows stay unresolved, and the persist log line carries a
+When the responses carry no card tuple, or it fails a check, the run is stored
+with no binding, its rows stay unresolved, and the persist log line carries a
 closed `binding` code. See
 [collection.md](../../docs/collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc).
 

@@ -55,7 +55,7 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
         const binding = input.trustedVpassBinding;
         if (
           binding &&
-          /^vpass-card-v1-[0-9a-f]{64}$/u.test(binding.cardToken) &&
+          /^vpass-card-v[12]-[0-9a-f]{64}$/u.test(binding.cardToken) &&
           Number.isSafeInteger(binding.bindingArtifactId) &&
           binding.bindingArtifactId > 0 &&
           Number.isSafeInteger(binding.financialUnitId) &&
@@ -168,6 +168,13 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
         account(
           "aggregator-mirror",
           "verified-hmac-account-service-tuple-not-direct-account-alias",
+        );
+      // The collector's unkeyed digest of the same tuple (ADR 0029): its own
+      // account, never the v1 account of the same service.
+      else if (/^moneyforward-me:moneyforward-account-v2-[0-9a-f]{64}$/u.test(a))
+        account(
+          "aggregator-mirror",
+          "verified-digest-account-service-tuple-not-direct-account-alias",
         );
       break;
     case "paypay":

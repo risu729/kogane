@@ -1,8 +1,9 @@
-// ADR 0027: the collector derives the account identity the parser requires,
-// with the retired importer's tuple, checks and HMAC. Synthetic pages, tuples
-// and keys only: no value here is a provider's.
+// ADR 0027 and ADR 0029: the collector derives the account identity the
+// parser requires, with the retired importer's tuple and checks, as an
+// unkeyed, domain-separated SHA-256 (`moneyforward-account-v2-`). Synthetic
+// pages and tuples only: no value here is a provider's.
 import { describe, expect, spyOn, test } from "bun:test";
-import { createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { readTerminal } from "../../../packages/collection/src/index";
 import {
@@ -16,20 +17,19 @@ import worker from "../src/worker";
 
 const runId = "3f2504e0-4f89-41d3-9a0c-0305e82c3327";
 const schemaVersion = "moneyforward-worker-poc-v1";
-const KEY = "0f1e2d3c4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeeff0";
-const OTHER_KEY = "ab".repeat(32);
 /**
- * Known answers computed by the retired importer's own
- * `moneyForwardAccountKeys` (git `49d5d65^:services/collector-r2-importer/src/moneyforward-account-identity.ts`)
- * on the pages `detail(1, "synthetic-account-a", "synthetic-service-1")` and
- * `detail(2, "synthetic-account-b", "synthetic-service-2")` under `KEY`, and
- * the first checked with `openssl dgst -sha256 -mac HMAC`.
+ * Known answers for the pages `detail(1, "synthetic-account-a",
+ * "synthetic-service-1")` and `detail(2, "synthetic-account-b",
+ * "synthetic-service-2")`, computed outside this code with
+ * `printf '%s' '["moneyforward-account-v2","synthetic-account-a","synthetic-service-1"]' | sha256sum`
+ * (and likewise for B). Pinned as literals so a silent change of the domain
+ * string, the tuple order or the encoding fails here.
  */
-const IMPORTER_TOKEN_A =
-  "moneyforward-account-v1-205be4208b34c414dba938ec50b50b6caf1117f464b179850c38741fbde9ecb5";
-const IMPORTER_TOKEN_B =
-  "moneyforward-account-v1-ddaf1a1aa537707640916a1b2fc08fd984c7c76206965e3800256f8b277bf982";
-const TOKEN = /^moneyforward-account-v1-[0-9a-f]{64}$/u;
+const TOKEN_A =
+  "moneyforward-account-v2-2dc934287d14c0bcfbf95309174a182fdf4eb7d1d674b601c079390fea687aae";
+const TOKEN_B =
+  "moneyforward-account-v2-8b1264e5db14410381e1d9d571928ee58827f48773254d1e335a8c49febd10d8";
+const TOKEN = /^moneyforward-account-v2-[0-9a-f]{64}$/u;
 
 const HTML = "text/html; charset=utf-8";
 const pad = (ordinal: number) => String(ordinal).padStart(2, "0");
@@ -100,47 +100,61 @@ const twoAccounts = () =>
     month(2, "2026-09"),
   ]);
 
-/** The importer's construction, written out with a second HMAC implementation. */
-function independentToken(key: string, account: string, service: string): string {
-  const mac = createHmac("sha256", Buffer.from(key, "hex"))
-    .update(JSON.stringify(["moneyforward-account-v1", account, service]))
+/** The construction, written out with a second SHA-256 implementation. */
+function independentToken(domain: string, account: string, service: string): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify([domain, account, service]))
     .digest("hex");
-  return `moneyforward-account-v1-${mac}`;
+  return `${domain}-${digest}`;
 }
 
-async function unitOf(run: SharedRunInput, key: string | undefined, filename: string) {
-  const plan = await moneyForwardRunPlan(run, key);
+async function unitOf(run: SharedRunInput, filename: string) {
+  const plan = await moneyForwardRunPlan(run);
   return plan.artifacts.find((artifact) => artifact.artifactKey === filename)?.unitKey;
 }
 
-describe("ADR 0027 the unit key is the importer's account identity", () => {
-  test("the identity equals the importer's known answer and an independent HMAC", async () => {
-    const plan = await moneyForwardRunPlan(twoAccounts(), KEY);
-    expect(IMPORTER_TOKEN_A).toBe(
-      independentToken(KEY, "synthetic-account-a", "synthetic-service-1"),
+describe("ADR 0029 the unit key is the unkeyed v2 account identity", () => {
+  test("the identity equals the pinned known answer and an independent SHA-256", async () => {
+    const plan = await moneyForwardRunPlan(twoAccounts());
+    expect(TOKEN_A).toBe(
+      independentToken("moneyforward-account-v2", "synthetic-account-a", "synthetic-service-1"),
     );
-    expect(IMPORTER_TOKEN_B).toBe(
-      independentToken(KEY, "synthetic-account-b", "synthetic-service-2"),
+    expect(TOKEN_B).toBe(
+      independentToken("moneyforward-account-v2", "synthetic-account-b", "synthetic-service-2"),
     );
+    // The domain string separates the derivation: the same tuple under the
+    // v1 domain, or with its fields swapped, is another value.
+    expect(
+      independentToken(
+        "moneyforward-account-v1",
+        "synthetic-account-a",
+        "synthetic-service-1",
+      ).slice(-64),
+    ).not.toBe(TOKEN_A.slice(-64));
+    expect(
+      independentToken("moneyforward-account-v2", "synthetic-service-1", "synthetic-account-a"),
+    ).not.toBe(TOKEN_A);
+    // No key parameter exists any more.
+    expect(moneyForwardRunPlan.length).toBe(1);
     // Filenames stay positional; only the unit is the identity.
     expect(
       plan.artifacts.map((artifact) => [artifact.artifactKey, artifact.unitKey] as const),
     ).toEqual([
       ["accounts.html", undefined],
-      ["account-detail-01.html", IMPORTER_TOKEN_A],
-      ["account-01-month-2026-08.html", IMPORTER_TOKEN_A],
-      ["account-01-month-2026-09.html", IMPORTER_TOKEN_A],
-      ["account-detail-02.html", IMPORTER_TOKEN_B],
-      ["account-02-month-2026-09.html", IMPORTER_TOKEN_B],
+      ["account-detail-01.html", TOKEN_A],
+      ["account-01-month-2026-08.html", TOKEN_A],
+      ["account-01-month-2026-09.html", TOKEN_A],
+      ["account-detail-02.html", TOKEN_B],
+      ["account-02-month-2026-09.html", TOKEN_B],
       ["manifest.json", undefined],
     ]);
-    const sorted = [IMPORTER_TOKEN_A, IMPORTER_TOKEN_B].sort();
+    const sorted = [TOKEN_A, TOKEN_B].sort();
     expect(plan.run.requestedScope.unitKeys).toEqual(sorted);
     expect(plan.run.units).toEqual(
       sorted.map((unitKey) => ({
         unitKey,
         unitKind: "account",
-        artifactCount: unitKey === IMPORTER_TOKEN_A ? 3 : 2,
+        artifactCount: unitKey === TOKEN_A ? 3 : 2,
         coverageStatus: "complete",
       })),
     );
@@ -149,10 +163,10 @@ describe("ADR 0027 the unit key is the importer's account identity", () => {
     );
   });
 
-  test("the terminal and the log carry the identity, never the identifiers or the key", async () => {
+  test("the terminal and the log carry the identity, never the identifiers", async () => {
     const bucket = new FakeR2Bucket();
     const run = twoAccounts();
-    const outcome = await persistSharedRun(bucket, run, KEY);
+    const outcome = await persistSharedRun(bucket, run);
     expect(outcome.result.outcome).toBe("persisted");
     expect(outcome.identity).toBe("derived");
     const read = await readTerminal(bucket, "moneyforward-me", runId);
@@ -161,12 +175,12 @@ describe("ADR 0027 the unit key is the importer's account identity", () => {
     const diagnostic = JSON.stringify(sharedRunDiagnostic(run, outcome));
     expect(diagnostic).toContain('"identity":"derived"');
     for (const text of [terminal, diagnostic]) {
-      for (const secret of ["synthetic-account", "synthetic-service", KEY]) {
+      for (const secret of ["synthetic-account", "synthetic-service"]) {
         expect(text).not.toContain(secret);
       }
     }
-    expect(terminal).toContain(IMPORTER_TOKEN_A);
-    expect(diagnostic).not.toContain("moneyforward-account-v1-");
+    expect(terminal).toContain(TOKEN_A);
+    expect(diagnostic).not.toContain("moneyforward-account-v");
     // The stored manifest artifact is unchanged by the identity: it names
     // objects, not units.
     const manifestEntry = read.manifest.artifacts.find(
@@ -174,11 +188,10 @@ describe("ADR 0027 the unit key is the importer's account identity", () => {
     )!;
     const body = await bucket.get(manifestEntry.storageRef.key);
     const stored = new TextDecoder().decode(new Uint8Array(await body!.arrayBuffer()));
-    expect(stored).not.toContain("moneyforward-account-v1-");
-    expect(stored).not.toContain(KEY);
+    expect(stored).not.toContain("moneyforward-account-v");
   });
 
-  test("the identity survives ordinal movement and separates exact tuples and keys", async () => {
+  test("the identity survives ordinal movement and separates exact tuples", async () => {
     const before = input([
       index(["synthetic-beta"]),
       detail(1, "synthetic-beta", "service"),
@@ -191,19 +204,18 @@ describe("ADR 0027 the unit key is the importer's account identity", () => {
       detail(2, "synthetic-beta", "service"),
       month(2, "2026-09"),
     ]);
-    const beta = await unitOf(before, KEY, "account-01-month-2026-09.html");
+    const beta = await unitOf(before, "account-01-month-2026-09.html");
     expect(beta).toMatch(TOKEN);
-    expect(await unitOf(after, KEY, "account-02-month-2026-09.html")).toBe(beta);
-    expect(await unitOf(after, KEY, "account-01-month-2026-09.html")).not.toBe(beta);
+    expect(await unitOf(after, "account-02-month-2026-09.html")).toBe(beta);
+    expect(await unitOf(after, "account-01-month-2026-09.html")).not.toBe(beta);
     const service = input([detail(1, "synthetic-beta", "other"), month(1, "2026-09")]);
-    expect(await unitOf(service, KEY, "account-01-month-2026-09.html")).not.toBe(beta);
+    expect(await unitOf(service, "account-01-month-2026-09.html")).not.toBe(beta);
     const tupleA = input([detail(1, "ab", "c")]);
     const tupleB = input([detail(1, "a", "bc")]);
-    expect(await unitOf(tupleA, KEY, "account-detail-01.html")).not.toBe(
-      await unitOf(tupleB, KEY, "account-detail-01.html"),
+    expect(await unitOf(tupleA, "account-detail-01.html")).not.toBe(
+      await unitOf(tupleB, "account-detail-01.html"),
     );
-    expect(await unitOf(before, OTHER_KEY, "account-01-month-2026-09.html")).not.toBe(beta);
-    expect(await unitOf(before, OTHER_KEY, "account-01-month-2026-09.html")).toMatch(TOKEN);
+    expect(beta).toBe(independentToken("moneyforward-account-v2", "synthetic-beta", "service"));
   });
 
   test("the tuple is read as parse5 reads it, template content included", async () => {
@@ -215,16 +227,12 @@ describe("ADR 0027 the unit key is the importer's account identity", () => {
         ),
       },
     ]);
-    expect(await unitOf(templated, KEY, "account-detail-01.html")).toBe(IMPORTER_TOKEN_A);
+    expect(await unitOf(templated, "account-detail-01.html")).toBe(TOKEN_A);
   });
 });
 
 describe("ADR 0027 no identity: the run keeps positional units and logs one code", () => {
-  const cases: [string, SharedRunInput, string | undefined, MoneyForwardIdentityState][] = [
-    ["no key", twoAccounts(), undefined, "identity_key_absent"],
-    ["an empty key", twoAccounts(), "", "identity_key_absent"],
-    ["an uppercase key", twoAccounts(), KEY.toUpperCase(), "identity_key_invalid"],
-    ["a short key", twoAccounts(), KEY.slice(2), "identity_key_invalid"],
+  const cases: [string, SharedRunInput, MoneyForwardIdentityState][] = [
     [
       "a detail without the service id",
       input([
@@ -233,7 +241,6 @@ describe("ADR 0027 no identity: the run keeps positional units and logs one code
           body: detailBody(`<input name="account[id_hash]" value="synthetic-account-a">`),
         },
       ]),
-      KEY,
       "identity_tuple_absent",
     ],
     [
@@ -246,42 +253,37 @@ describe("ADR 0027 no identity: the run keeps positional units and logs one code
           ),
         },
       ]),
-      KEY,
       "identity_tuple_invalid",
     ],
-    ["an empty value", input([detail(1, "", "s")]), KEY, "identity_tuple_invalid"],
-    ["a value with a space", input([detail(1, "has space", "s")]), KEY, "identity_tuple_invalid"],
-    ["a value with a slash", input([detail(1, "a/b", "s")]), KEY, "identity_tuple_invalid"],
-    ["an overlong value", input([detail(1, "x".repeat(4097), "s")]), KEY, "identity_tuple_invalid"],
+    ["an empty value", input([detail(1, "", "s")]), "identity_tuple_invalid"],
+    ["a value with a space", input([detail(1, "has space", "s")]), "identity_tuple_invalid"],
+    ["a value with a slash", input([detail(1, "a/b", "s")]), "identity_tuple_invalid"],
+    ["an overlong value", input([detail(1, "x".repeat(4097), "s")]), "identity_tuple_invalid"],
     [
       "two details with one tuple",
       input([detail(1, "same", "s"), detail(2, "same", "s")]),
-      KEY,
       "identity_duplicate",
     ],
     [
       "a detail that is not the index's account at its ordinal",
       input([index(["synthetic-alpha", "synthetic-beta"]), detail(1, "synthetic-beta", "s")]),
-      KEY,
       "identity_index_mismatch",
     ],
     [
       "a month of an account without a detail",
       input([detail(1, "a", "s"), month(1, "2026-09"), month(2, "2026-09")]),
-      KEY,
       "identity_incomplete",
     ],
     [
       "a successful run with fewer details than it counted",
       input([detail(1, "a", "s")], { accountDetailCount: 2 }),
-      KEY,
       "identity_incomplete",
     ],
   ];
-  for (const [name, run, key, code] of cases) {
+  for (const [name, run, code] of cases) {
     test(name, async () => {
       const bucket = new FakeR2Bucket();
-      const outcome = await persistSharedRun(bucket, run, key);
+      const outcome = await persistSharedRun(bucket, run);
       expect(outcome.result.outcome).toBe("persisted");
       expect(outcome.identity).toBe(code);
       const read = await readTerminal(bucket, "moneyforward-me", runId);
@@ -292,12 +294,11 @@ describe("ADR 0027 no identity: the run keeps positional units and logs one code
       expect(diagnostic["identity"]).toBe(code);
       const text = JSON.stringify(diagnostic);
       expect(text).not.toContain("synthetic-account");
-      if (key) expect(text).not.toContain(key);
     });
   }
 });
 
-describe("ADR 0027 the Worker reads the optional secret", () => {
+describe("ADR 0029 the Worker needs no identity secret", () => {
   async function trigger(extra: Record<string, unknown>): Promise<Record<string, unknown>[]> {
     const records: Record<string, unknown>[] = [];
     const spies = [
@@ -328,19 +329,14 @@ describe("ADR 0027 the Worker reads the optional secret", () => {
     return records;
   }
 
-  test("the persist diagnostic states the identity code and never the key", async () => {
+  test("no secret is read: a run derives with none set, and a retired secret changes nothing", async () => {
+    const identity = (records: Record<string, unknown>[]) =>
+      records.find((record) => record.event === "moneyforward-shared-collection")?.["identity"];
     const without = await trigger({});
-    expect(
-      without.find((record) => record.event === "moneyforward-shared-collection")?.["identity"],
-    ).toBe("identity_key_absent");
-    const invalid = await trigger({ MONEYFORWARD_ACCOUNT_IDENTITY_KEY: "not-hex" });
-    expect(
-      invalid.find((record) => record.event === "moneyforward-shared-collection")?.["identity"],
-    ).toBe("identity_key_invalid");
-    const withKey = await trigger({ MONEYFORWARD_ACCOUNT_IDENTITY_KEY: KEY });
-    expect(
-      withKey.find((record) => record.event === "moneyforward-shared-collection")?.["identity"],
-    ).toBe("derived");
-    expect(JSON.stringify([without, invalid, withKey])).not.toContain(KEY);
+    expect(identity(without)).toBe("derived");
+    const retired = "0f".repeat(32);
+    const withRetired = await trigger({ MONEYFORWARD_ACCOUNT_IDENTITY_KEY: retired });
+    expect(identity(withRetired)).toBe("derived");
+    expect(JSON.stringify(withRetired)).not.toContain(retired);
   });
 });

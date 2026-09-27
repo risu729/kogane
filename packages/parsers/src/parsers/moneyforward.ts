@@ -29,7 +29,10 @@ const ISO_DATE = /\d{4}-\d{2}-\d{2}/gu;
 const MAX_HTML_BYTES = 8 * 1024 * 1024;
 const MAX_TABLES = 1_000;
 const MAX_ROWS_PER_TABLE = 1_000;
-const ACCOUNT_IDENTITY = /^moneyforward-account-v1-[0-9a-f]{64}$/u;
+// The importer's HMAC identity (v1, historical) or the unkeyed digest the
+// collector derives (v2, ADR 0029); the two are different accounts until a
+// crosswalk decides otherwise.
+const ACCOUNT_IDENTITY = /^moneyforward-account-v[12]-[0-9a-f]{64}$/u;
 // The provider emits an escaped dialog template alongside the empty calendar.
 // Compare only audited tag/attribute-name structure, never provider text or values.
 const EMPTY_SURFACE = [
@@ -53,7 +56,7 @@ const EMPTY_SURFACE = [
 export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtmlParser): Parser {
   return {
     name: "moneyforward-monthly-transactions",
-    version: "2.0.2",
+    version: "2.0.3",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (
@@ -202,7 +205,7 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
 export function createMoneyForwardEvidenceOnly(parseHtml: MoneyForwardHtmlParser): Parser {
   return {
     name: "moneyforward-canonical-evidence-boundary",
-    version: "1.0.1",
+    version: "1.0.2",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (

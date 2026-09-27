@@ -373,7 +373,8 @@ const TRANSACTION_CTES = `${MYJCB_LEDGER_SNAPSHOT_CTES}, ranked_smbc_direct_snap
          WHERE ${ACTIVE}
            AND p.parser_name = 'moneyforward-monthly-transactions'
            AND fa.dataset = 'monthly-transactions'
-           AND fa.fetch_unit_key LIKE 'moneyforward-account-v1-%'
+           AND (fa.fetch_unit_key LIKE 'moneyforward-account-v1-%'
+             OR fa.fetch_unit_key LIKE 'moneyforward-account-v2-%')
        ), current_moneyforward_snapshots AS (
          SELECT fetch_artifact_id
          FROM ranked_moneyforward_snapshots

@@ -1,45 +1,43 @@
-// The Vpass durable card binding, derived in the Worker (ADR 0023, option 3).
+// The Vpass durable card binding, derived in the Worker (ADR 0023, ADR 0029).
 //
 // A Vpass card ordinal (`card-NNN`) is a position in the provider's card list,
 // not an identity. The successful card-selection and statement-discovery
 // responses carry `header.vpSessionBean` with the provider-local card
-// reference `externalId`, `globalid` and `cardCode`; the retired importer
+// reference `externalId`, `globalid` and `cardCode`. This module turns that
+// tuple into
+//
+//   vpass-card-v2- + SHA-256(JSON(["vpass-card-binding-v2", externalId, globalid, cardCode]))
+//
+// an unkeyed, domain-separated digest (ADR 0029). The retired importer
 // (`services/collector-r2-importer/src/vpass-identity.ts`, removed in #203)
-// turned that tuple into
+// derived `vpass-card-v1-` tokens from the same tuple as an HMAC under a key
+// that was retired with it. v1 tokens stay readable as historical evidence,
+// but nothing derives them any more, and the v1 and the v2 token of one card
+// are different values ([Vpass card binding](../../../docs/vpass-card-identity.md)).
 //
-//   vpass-card-v1- + HMAC-SHA-256(key, JSON(["vpass-card-binding-v1", externalId, globalid, cardCode]))
-//
-// under the fingerprint key version `collector-r2-v1`, and stored only the
-// token ([Vpass card binding](../../../docs/vpass-card-identity.md)).
-//
-// This module is the same derivation with the same checks, run on the raw
-// responses while they are still in the Worker's memory, before the sanitizer
-// redacts `vpSessionBean`. The tuple never leaves this module: the only
-// output is the token, or a closed code saying why there is none. It fails
-// closed: no key, a malformed key, no tuple, a malformed tuple, an ambiguous
-// card inventory or a selection that disagrees with discovery all return
-// `unavailable`, and the card run is stored without a binding.
-//
-// The token equals the importer's for the same card only when the key is the
-// importer's `collector-r2-v1` key (its `ORIGIN_FINGERPRINT_KEY`). The Worker
-// secret `VPASS_CARD_BINDING_KEY` must therefore hold that value; a different
-// key would be a different key version, which this module does not support.
+// The checks are the importer's, run on the raw responses while they are
+// still in the Worker's memory, before the sanitizer redacts `vpSessionBean`.
+// The tuple never leaves this module: the only output is the token, or a
+// closed code saying why there is none. It fails closed: no tuple, a
+// malformed tuple, an ambiguous card inventory or a selection that disagrees
+// with discovery all return `unavailable`, and the card run is stored without
+// a binding. No secret is involved: ADR 0029 classifies the card reference as
+// a provider-local identifier that central storage may hold, so the digest
+// only fixes the token's shape and separates it from every other derivation.
 
-export const VPASS_BINDING_CONTRACT = "vpass-card-binding-v1";
-export const VPASS_BINDING_KEY_VERSION = "collector-r2-v1";
-/** The artifact, dataset and format the trusted binding view requires (migrations 0020, 0021, 0055). */
+export const VPASS_BINDING_CONTRACT = "vpass-card-binding-v2";
+/** The token prefix of this derivation (ADR 0029). */
+export const VPASS_BINDING_TOKEN_PREFIX = "vpass-card-v2-";
+/** The artifact, dataset and format the trusted binding view requires (migrations 0020, 0021, 0055, 0057). */
 export const VPASS_BINDING_ARTIFACT_KEY = "card-identity-binding.json";
 export const VPASS_BINDING_TRANSFORMER_ID = "vpass-card-binding";
-export const VPASS_BINDING_TRANSFORMER_VERSION = "v1";
-const TOKEN = /^vpass-card-v1-[0-9a-f]{64}$/u;
-const KEY = /^[0-9a-f]{64}$/u;
+export const VPASS_BINDING_TRANSFORMER_VERSION = "v2";
+const TOKEN = /^vpass-card-v2-[0-9a-f]{64}$/u;
 const CARD_LABEL = /^card-(\d{3})$/u;
 const DESCRIPTOR = /^[A-Za-z0-9_-]+$/u;
 
 /** Why a card run carries no binding. Closed codes; safe to log. */
 export type VpassBindingUnavailable =
-  | "binding_key_absent"
-  | "binding_key_invalid"
   | "binding_envelope_invalid"
   | "binding_inventory_invalid"
   | "binding_tuple_absent"
@@ -104,15 +102,8 @@ function hex(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function hmac(keyHex: string, value: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    Uint8Array.from(keyHex.match(/../gu)!, (pair) => Number.parseInt(pair, 16)),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  return hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
+async function sha256(value: string): Promise<string> {
+  return hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
 }
 
 function deriveTuple(input: VpassBindingInput): [string, string, string] {
@@ -173,18 +164,8 @@ function deriveTuple(input: VpassBindingInput): [string, string, string] {
   return [externalId, globalid, cardCode];
 }
 
-/**
- * The card's durable token, or why there is none. `keyHex` is the Worker
- * secret; undefined or empty means the secret is not set.
- */
-export async function deriveVpassCardBinding(
-  input: VpassBindingInput,
-  keyHex: string | undefined,
-): Promise<VpassCardBinding> {
-  if (keyHex === undefined || keyHex.length === 0) {
-    return { status: "unavailable", code: "binding_key_absent" };
-  }
-  if (!KEY.test(keyHex)) return { status: "unavailable", code: "binding_key_invalid" };
+/** The card's durable token, or why there is none. */
+export async function deriveVpassCardBinding(input: VpassBindingInput): Promise<VpassCardBinding> {
   let tuple: [string, string, string];
   try {
     tuple = deriveTuple(input);
@@ -192,7 +173,7 @@ export async function deriveVpassCardBinding(
     if (error instanceof Unavailable) return { status: "unavailable", code: error.code };
     throw error;
   }
-  const token = `vpass-card-v1-${await hmac(keyHex, JSON.stringify([VPASS_BINDING_CONTRACT, ...tuple]))}`;
+  const token = `${VPASS_BINDING_TOKEN_PREFIX}${await sha256(JSON.stringify([VPASS_BINDING_CONTRACT, ...tuple]))}`;
   if (!TOKEN.test(token)) throw new Error("vpass_binding_token_invalid");
   return { status: "derived", token };
 }

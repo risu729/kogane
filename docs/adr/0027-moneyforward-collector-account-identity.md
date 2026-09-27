@@ -1,6 +1,8 @@
 # ADR 0027: The MoneyForward collector derives the account identity the parser requires
 
-- Status: proposed
+- Status: proposed; amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
+  (the identity is derived without a key; see
+  [Amendment: ADR 0029](#amendment-adr-0029-the-identity-needs-no-key))
 - Date: 2026-09-27
 - Carried by:
   `services/collector-moneyforward/src/account-identity.ts`,
@@ -258,3 +260,22 @@ so the importer's and the collector's references for one identity differ):
   after deploy answers it), and whether the provider's current account-detail
   pages still carry both inputs (the diagnostic's code answers it on the first
   run; the production failure says the pages registered, not what they hold).
+
+## Amendment (ADR 0029): the identity needs no key
+
+2026-09-27. [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
+classifies `account[id_hash]` and `service[id]` as provider-local opaque
+identifiers that central storage may hold, so the HMAC above is no longer
+needed, and the importer's key is lost. The collector now derives
+`moneyforward-account-v2-` + SHA-256 of
+`JSON(["moneyforward-account-v2", account[id_hash], service[id]])` with the
+same checks and closed codes, minus `identity_key_absent` and
+`identity_key_invalid`, which can no longer occur; every run derives.
+`MONEYFORWARD_ACCOUNT_IDENTITY_KEY` and the owner action above are removed.
+The parsers (`moneyforward-monthly-transactions` 2.0.3,
+`moneyforward-canonical-evidence-boundary` 1.0.2), the identity rule and the
+transactions read accept both `moneyforward-account-v1-` and
+`moneyforward-account-v2-` unit keys. An account's v1 and v2 identities are
+different values and so different account entities, and the months both
+producers captured are listed under both until a separate, reviewed crosswalk
+joins them. The text above is left as it was decided.

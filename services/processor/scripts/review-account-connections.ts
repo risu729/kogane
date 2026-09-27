@@ -69,7 +69,7 @@ try {
     details.length < 1 ||
     details.length > 64 ||
     new Set(details.map((d) => d.fetch_unit_key)).size !== details.length ||
-    details.some((d) => !/^moneyforward-account-v1-[0-9a-f]{64}$/u.test(d.fetch_unit_key))
+    details.some((d) => !/^moneyforward-account-v[12]-[0-9a-f]{64}$/u.test(d.fetch_unit_key))
   )
     throw new Error("connection_inventory_invalid");
   const direct = await proxy.env.DB.prepare(

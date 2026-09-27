@@ -33,7 +33,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/moneyforward-parser.ts":
       "9ff15fc630314c798312a9d39872bbeb88872a03e83a464abf53446eff373108",
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
-      "4f416ffcee43ae0425a5597adefd33636d2a8e8b3ab103c00b95d0603d4bb2f8",
+      "00f80782d205b967c6c7d9719d18b7800a0ff9b0a6dd992b0991cd840a564815",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
       "40b75a904b4340bb11927199c98dab325ba29eb689b19b8b02a19344cf172923",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
@@ -152,8 +152,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "moneyforward-canonical-evidence-boundary": {
-      version: "1.0.1",
-      codeDigest: "82bcd353211a7287bbb0239c19c16756f285866f5feba884b3444a7239891d57",
+      version: "1.0.2",
+      codeDigest: "b0e6a02b02e12b5c188d1be0f7d2538c2dac1657c9bafa4c969976ff51d7533c",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -166,8 +166,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "moneyforward-monthly-transactions": {
-      version: "2.0.2",
-      codeDigest: "82bcd353211a7287bbb0239c19c16756f285866f5feba884b3444a7239891d57",
+      version: "2.0.3",
+      codeDigest: "b0e6a02b02e12b5c188d1be0f7d2538c2dac1657c9bafa4c969976ff51d7533c",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

@@ -1,8 +1,14 @@
 // Migration 0055's `trusted_vpass_card_bindings` is one select for both
 // producers; ADR 0023 specifies it as migration 0021's select verbatim UNION
-// ALL the collector's select (`vpass-binding-legacy-sql.ts`). This differential
-// test runs both on random stores and requires the same rows, and checks that
-// the random stores are sharp enough to catch a dropped condition.
+// ALL the collector's select (`vpass-binding-legacy-sql.ts`). Migration 0057
+// (ADR 0029) ships 0055's text with the one token-prefix condition widened
+// from `vpass-card-v1-` to `vpass-card-v1-` or `vpass-card-v2-`. This
+// differential test runs the shipped view and the specification (the frozen
+// UNION ALL with the same prefix widened) on random stores and requires the
+// same rows; it proves the shipped view's v1 rows are exactly 0055's and its
+// v2 rows exactly the rows 0055 returns once each v2 token is read as v1; and
+// it checks that the random stores are sharp enough to catch a dropped
+// condition.
 //
 // The stores hold only the relations the view reads, as plain tables with
 // `fetch_runs`' real uniqueness on (acquisition session, source, run key), so
@@ -15,17 +21,27 @@ import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { IMPORTER_BINDING_SELECT_0021, TRUSTED_BINDINGS_SPEC } from "./vpass-binding-legacy-sql.ts";
 
-const SHIPPED = (() => {
+const viewOf = (migration: string) => {
   const text = readFileSync(
-    new URL(
-      "../../../packages/storage-d1/migrations/core/0055_vpass_collector_card_binding.sql",
-      import.meta.url,
-    ),
+    new URL(`../../../packages/storage-d1/migrations/core/${migration}`, import.meta.url),
     "utf8",
   );
   const marker = "CREATE VIEW trusted_vpass_card_bindings AS\n";
   return text.slice(text.indexOf(marker) + marker.length).replace(/;\s*$/u, "");
-})();
+};
+const SHIPPED = viewOf("0057_vpass_card_token_v2.sql");
+const SHIPPED_0055 = viewOf("0055_vpass_collector_card_binding.sql");
+
+const V1_PREFIX = "substr(bu.unit_key,1,14)='vpass-card-v1-'";
+const V1_OR_V2_PREFIX = "substr(bu.unit_key,1,14) IN ('vpass-card-v1-','vpass-card-v2-')";
+/** ADR 0023's frozen specification with ADR 0029's one change: the prefix admits v1 and v2. */
+const SPEC_0057 = TRUSTED_BINDINGS_SPEC.replaceAll(V1_PREFIX, V1_OR_V2_PREFIX);
+
+test("0057 changes 0055's view text in the prefix condition and nowhere else", () => {
+  expect(TRUSTED_BINDINGS_SPEC.split(V1_PREFIX)).toHaveLength(3);
+  expect(SHIPPED_0055.split(V1_PREFIX)).toHaveLength(2);
+  expect(SHIPPED).toBe(SHIPPED_0055.replace(V1_PREFIX, V1_OR_V2_PREFIX));
+});
 
 const SCHEMA = `
 CREATE TABLE acquisition_sessions(id INTEGER PRIMARY KEY, producer_id TEXT, external_id_namespace TEXT);
@@ -47,6 +63,10 @@ const TOKENS = [
   `vpass-card-v1-${"b".repeat(64)}`,
   `vpass-card-v1-${"A".repeat(64)}`,
   `vpass-card-v1-${"c".repeat(63)}`,
+  `vpass-card-v2-${"a".repeat(64)}`,
+  `vpass-card-v2-${"d".repeat(64)}`,
+  `vpass-card-v2-${"A".repeat(64)}`,
+  `vpass-card-v3-${"a".repeat(64)}`,
 ] as const;
 
 /** A small deterministic generator (mulberry32). */
@@ -200,8 +220,11 @@ function store(seed: number, sessions = 12): Database {
       }
     }
   }
-  db.exec(`CREATE VIEW spec AS ${TRUSTED_BINDINGS_SPEC}`);
-  db.exec(`CREATE VIEW importer_0021 AS ${IMPORTER_BINDING_SELECT_0021}`);
+  db.exec(`CREATE VIEW spec AS ${SPEC_0057}`);
+  db.exec(
+    `CREATE VIEW importer_0021 AS ${IMPORTER_BINDING_SELECT_0021.replace(V1_PREFIX, V1_OR_V2_PREFIX)}`,
+  );
+  db.exec(`CREATE VIEW shipped_0055 AS ${SHIPPED_0055}`);
   return db;
 }
 
@@ -254,6 +277,38 @@ test("the shipped view returns exactly the specified rows on random stores", () 
   expect(rejected).toBeGreaterThan(40);
 });
 
+test("0057's v1 rows are exactly 0055's, and its v2 rows exactly 0055's once v2 is read as v1", () => {
+  // Reading v2 as v1 is a rename of the prefix in every unit key: the view
+  // compares a token only with its shape, never with another token, so the
+  // rename changes which prefix a row carries and nothing else.
+  const asV1 = (rows: unknown[]): unknown[] =>
+    rows.map((row) => {
+      const r = row as { card_token: string };
+      return { ...r, card_token: r.card_token.replace(/^vpass-card-v2-/u, "vpass-card-v1-") };
+    });
+  let v1 = 0;
+  let v2 = 0;
+  for (const seed of [...SEEDS, 101, 102]) {
+    const db = store(seed, seed > 100 ? 300 : 12);
+    db.exec(`CREATE VIEW shipped AS ${SHIPPED}`);
+    const v1Rows = db
+      .query(`SELECT * FROM shipped WHERE card_token GLOB 'vpass-card-v1-*'${ORDER}`)
+      .all();
+    expect([seed, v1Rows]).toEqual([seed, rows(db, "shipped_0055")]);
+    const shipped = rows(db, "shipped");
+    v1 += v1Rows.length;
+    v2 += shipped.length - v1Rows.length;
+    db.exec(
+      "UPDATE fetch_units SET unit_key='vpass-card-v1-'||substr(unit_key,15) WHERE unit_key GLOB 'vpass-card-v2-*'",
+    );
+    expect([seed, asV1(shipped)]).toEqual([seed, rows(db, "shipped_0055")]);
+    db.close();
+  }
+  // The stores drew rows of both versions.
+  expect(v1).toBeGreaterThan(20);
+  expect(v2).toBeGreaterThan(20);
+});
+
 test("the shipped view returns exactly the specified rows on scaled stores", () => {
   // The same generator at 50 times the sessions: many sessions share tokens,
   // so equal tokens across cards, sessions and producers are common, and the
@@ -271,6 +326,12 @@ test("the shipped view returns exactly the specified rows on scaled stores", () 
 });
 
 const MUTATIONS: [string, string, string][] = [
+  ["a v2 token is refused", V1_OR_V2_PREFIX, V1_PREFIX],
+  [
+    "any token version is admitted",
+    V1_OR_V2_PREFIX,
+    "substr(bu.unit_key,1,12)='vpass-card-v' AND substr(bu.unit_key,14,1)='-'",
+  ],
   [
     "the collector run may hold a third unit",
     "AND (financial.producer_id='collector-r2-importer' OR other.id<>fu.id))",

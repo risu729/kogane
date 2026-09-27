@@ -584,7 +584,7 @@ test("workerd decodes MoneyForward static descriptions from canonical text/html 
   expect(response.status).toBe(200);
   expect(
     await env.DB.prepare(
-      "SELECT status FROM observation_parse_jobs WHERE fetch_artifact_id=90 AND parser_name='moneyforward-monthly-transactions' AND parser_version='2.0.2'",
+      "SELECT status FROM observation_parse_jobs WHERE fetch_artifact_id=90 AND parser_name='moneyforward-monthly-transactions' AND parser_version='2.0.3'",
     ).first<string>("status"),
   ).toBe("done");
   expect(
