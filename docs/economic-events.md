@@ -408,8 +408,8 @@ external id change, a card statement against a bank debit
 
 ### Single payment, per source
 
-The rule (`classifyCardUsage`, `myjcbSinglePayment` in
-`packages/domain/src/card-purchase.ts`) reads the payment type (支払区分)
+The rule (`classifyCardUsage` in `packages/domain/src/card-purchase.ts`,
+`myjcbSinglePayment` in `packages/domain/src/myjcb-amounts.ts`) reads the payment type (支払区分)
 where production rows carry it, the read model's `payment_type`
 (`packages/read-model/src/card-usage.ts`), and a shape it does not know is
 `payment_type_unsupported`, never guessed:

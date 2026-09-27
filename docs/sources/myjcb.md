@@ -358,18 +358,18 @@ checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査し�
 
 collectorは状態をpage自身から決める（`services/collector-myjcb/src/parsers.ts`の`creditStatementState`）。pageは状態を二か所で示す。一つは`カードご利用代金明細(確定分)`のh1で、もう一つはledger headerの金額label（確定は`今回のお支払い金額`、未確定は`ご利用金額`。parserの`CONFIRMED_HEADERS`／`UNCONFIRMED_HEADERS`の4番目）である。
 
-`(確定分)` h1だけが「締め済み明細である」というpage自身の表明である。h1、ledger行、金額labelの読み取りは`packages/domain/src/myjcb-statement-page.ts`の`readMyJcbStatementPage`一か所にあり、collectorと`myjcb-credit-statement-total@1.1.0`が共用する。position規則はcollectorだけが加える。
+`(確定分)` h1だけが「締め済み明細である」というpage自身の表明である。h1、ledger行、金額labelの読み取りは`packages/domain/src/myjcb-statement-page.ts`の`readMyJcbStatementPage`一か所にあり、collectorと明細total parser（`myjcb-credit-statement-total`、1.1.0以降）が共用する。position規則はcollectorだけが加える。
 
-| `(確定分)` h1 | ledger                                          | 記録する状態                                         |
-| ------------- | ----------------------------------------------- | ---------------------------------------------------- |
-| 1個           | 金額labelが`今回のお支払い金額`／なし           | `confirmed`                                          |
-| 1個           | 金額labelが`ご利用金額`                         | 停止（`credit-statement-state`）                     |
-| なし          | ledgerなし                                      | `unknown`                                            |
-| なし          | 行のないledger（labelは問わない）               | `unknown`（ledger artifactは作らない）               |
-| なし          | 行があり、金額labelが`ご利用金額`               | position 1は`unconfirmed`、position 2以降は`unknown` |
-| なし          | 行があり、金額labelが`今回のお支払い金額`／なし | position 1は停止、position 2以降は`unknown`          |
-| 2個以上       | 任意                                            | 停止                                                 |
-| 任意          | 一つのheaderに両label、またはledger間で不一致   | 停止                                                 |
+| `(確定分)` h1 | ledger                                          | 記録する状態                                                                                                                                                   |
+| ------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1個           | 金額labelが`今回のお支払い金額`／なし           | `confirmed`                                                                                                                                                    |
+| 1個           | 金額labelが`ご利用金額`                         | pageが証明すれば`confirmed`、しなければ停止（`credit-statement-state`、[amendment (d)](#確定分の見出しとご利用金額のheader2026-09-27adr-0005-の-amendment-d)） |
+| なし          | ledgerなし                                      | `unknown`                                                                                                                                                      |
+| なし          | 行のないledger（labelは問わない）               | `unknown`（ledger artifactは作らない）                                                                                                                         |
+| なし          | 行があり、金額labelが`ご利用金額`               | position 1は`unconfirmed`、position 2以降は`unknown`                                                                                                           |
+| なし          | 行があり、金額labelが`今回のお支払い金額`／なし | position 1は停止、position 2以降は`unknown`                                                                                                                    |
+| 2個以上       | 任意                                            | 停止                                                                                                                                                           |
+| 任意          | 一つのheaderに両label、またはledger間で不一致   | 停止                                                                                                                                                           |
 
 `detailMonth=0`は常に`unconfirmed`である。position 0のpageが確定を示した場合は停止する。`unknown`のpageはHTMLだけをevidenceとして保存し、ledger artifactを作らない。position 2以降でh1のないpageを停止にしない理由は、production evidenceにある（read-only、件数だけの集計で、値は記録していない）。各runで取得したposition 7と8は、h1のない行0件のledgerを持っていた（manifestは`confirmed`、`myjcb-credit-statement-total@1.0.1`は12 runすべてで`statement_total_not_confirmed`）。これらを停止にすれば日次runが毎回止まる。`unconfirmed`として保存すれば、同じrunでposition 0より後に記録されるため、当時のread modelではconnectionで一つの未確定snapshot slotを空のcaptureが占め、position 0の保留行がcurrentでなくなっていた。締め済み明細はすべてposition 1を通り、そこでh1を持つ（production evidenceでは12 run中12 run）。そのためposition 1では、h1なしで確定labelの行があるpageを停止にする。一方、古いpage一つで日次runを止めることはしない。停止または`unknown`のlogにはh1の個数、ledger数、行数、label codeだけを出し、page本文は出さない。
 
@@ -377,7 +377,7 @@ export linkは状態の根拠にしない。ただし、確定明細でないpag
 
 既存captureのraw evidenceとmanifestは書き換えない。解釈はversion付きparserで直す。
 
-- 明細total（`myjcb-credit-statement-total@1.1.0`）: 状態をpageから読み、manifestの状態は照合用として`_kogane.manifestStatementState`に記録する。manifestとpageで「確定かどうか」が異なる場合はwarning `statement_state_differs_from_manifest`を出す（`unconfirmed`と`unknown`の違いはwarningにしない）。失敗させるのはpage自身が矛盾する場合（h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と未確定header）だけで、manifestだけが違う場合は失敗させない。h1のないpageは1.0.1と同じくtotalを出さない。1.0.1で`parser_rejected`だったposition-1 pageは、repair laneの再parseまたはbounded replayで、正確な支払日を持つtotalを公開する。1.0.1のerror runは履歴として残る。
+- 明細total（`myjcb-credit-statement-total@1.1.0`）: 状態をpageから読み、manifestの状態は照合用として`_kogane.manifestStatementState`に記録する。manifestとpageで「確定かどうか」が異なる場合はwarning `statement_state_differs_from_manifest`を出す（`unconfirmed`と`unknown`の違いはwarningにしない）。失敗させるのはpage自身が矛盾する場合（h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と未確定header。1.2.0以降はpageが証明しない未確定headerだけ）だけで、manifestだけが違う場合は失敗させない。h1のないpageは1.0.1と同じくtotalを出さない。1.0.1で`parser_rejected`だったposition-1 pageは、repair laneの再parseまたはbounded replayで、正確な支払日を持つtotalを公開する。1.0.1のerror runは履歴として残る。
 - ledger（`myjcb-credit-ledger@1.1.2`）: 同じmoduleのdigest変更によるversion bumpだけで、挙動は変えない。parserは一artifactしか見ない。`credit-ledger-NN.json`の`state`はcollectorの判断であり、`headers`もその判断から書かれていて、pageの証拠を含まない。確定pageを未確定labelで読んだため、`ご利用金額`も保存されていない。さらにread modelのsnapshot区分は、manifestが書いたappend-onlyの`observation_artifact_metadata.statement_state`を使う。したがってparserで行の状態を直すことはできない。既存のposition-1行は、当時collectorが述べた記録として`unconfirmed`のまま残る。
 - 既存行は、修正後collectorの最初の成功runでcurrentでなくなる。当時、connectionの未確定captureは一つのsnapshot slotを共有し、その最新は以後position 0になった（現在の規則は[未確定明細のslot](#未確定明細のslot2026-09-26)）（例外は、position 1がh1なしで`ご利用金額`の行を示す場合だけで、production evidenceでは観測していない）。同じ明細はposition 1で`confirmed`として別slot（`detailMonth-1`）に再取得される。以前はposition 0と1が同じslotを奪い合い、片方しかcurrentにならなかった。purchase laneはcurrentでなくなった`authorized` eventを`unknown`へretireし、確定行を`captured`として新しいeventで認識する。状態はfingerprintとexternal idに含まれるため、同じeventのreviseにはならない。retireされた`unknown` eventはlegを持たないので、同じ購入が二重に数えられることはない。
 
@@ -523,6 +523,26 @@ Worker は見つけた export を取得しない。共通 bucket は `credit-csv
 
 - 2026-09-25 と 09-26 の run は position 1 で `credit-ledger-headers` により止まり、artifact を残さなかった（最初の amendment の前）。09-27 の live の position 1 は確定の形で、通るはずである。position 1 の page の形は時刻か session によって変わる。その夜の page は保存されていないので、原因は確かめられない。以前の run が保存した position 1 の page（round 4 で label の数だけを数えた）は `(確定分)` の見出しを持つが `今回のお支払い金額` をどこにも持たず、`ご利用金額` だけを持つ。この ADR の規則は、行のあるこの形の page で停止する（確定の ledger は確定 header 一式を表示しなければならない、`ledger_parse`）ので、これが最も考えられる原因だが、確認はされていない。次に同じ停止が起きれば、停止した page が保存される。
 - 三つ目の header の行の意味、export の中身（2026-08-31 に確認、保存はしない）、menu を月ごとに読み直す必要があるかは未確認である。
+
+### 確定分の見出しとご利用金額のheader（2026-09-27、ADR 0005 の amendment (d)）
+
+round 4 の構造調査（label の数だけ、値は記録しない）で、以前の run が保存した position 1 の page は `(確定分)` の見出しの下に未確定の header 一式（`ご利用日 / ご利用先など / 支払区分 / ご利用金額`）を持ち、`今回のお支払い金額` は 0 回だった。同じ日の live の同じ position は確定の header だった。どちらの label を出すかは夜か session によって変わり、その理由は分からない。page 自身は合計を `div.detail-box-price-01 dl` の dt 「YYYY年M月D日(曜)お支払い金額合計」 と dd 「#,###円」 で示す。
+
+4 番目の label は summary の金額が何かを示す。`今回のお支払い金額` ならその明細の支払額、`ご利用金額` なら利用額である。分割、リボ、ボーナスの行では二つが異なるので、label だけでは `ご利用金額` を支払額と読めない。そこで owner は、page 自身が証明する場合だけ受け入れると決めた（`readMyJcbStatementPage` の `usageHeader`）。
+
+| header の組み合わせ        | 条件                                                | 状態                                      | ledger に保存する header          | 行の金額                                                |
+| -------------------------- | --------------------------------------------------- | ----------------------------------------- | --------------------------------- | ------------------------------------------------------- |
+| h1 と `今回のお支払い金額` | なし                                                | `confirmed`                               | 確定の一式                        | 今回のお支払い金額（`current-statement-payment`）       |
+| h1 と `ご利用金額`         | 全行が1回払い、かつ行の合計がお支払い金額合計に一致 | `confirmed`                               | 未確定の一式（page が示すとおり） | ご利用金額（`confirmed-usage`）。行の支払額は記録しない |
+| h1 と `ご利用金額`         | 上記を満たさない                                    | 停止（`credit-statement-state`）          | —                                 | —                                                       |
+| h1 なし、`ご利用金額`      | なし                                                | 従来どおり（position 1 は `unconfirmed`） | 未確定の一式                      | ご利用金額（`unconfirmed-usage`）                       |
+
+- **支払区分。** 行の支払区分は、card purchase recognition と同じ規則（`packages/domain/src/myjcb-amounts.ts` の `myjcbSinglePayment`）で、`summaryCells[1]` の 「ご利用先など／支払区分」 の結合 cell から読む。支払回数が一つ以上あり、すべて 1 で、`分割`、`リボ`、`ボーナス`、`キャッシング` を含まないことが条件である。書き方は `1回払`（production の全行）、`1回払い`、`一回払い` と全角数字で、新しい label は加えていない。満たさない行、支払区分のない cell、空の cell、4 cell で読めない行があれば `usage_header_payment_type_unproven` で拒否する。
+- **合計。** 行の金額は、3 番目と 4 番目の cell のうち exact な円として読める一つ（ledger parser と同じ読み方）である。`sumQuantities` で exact に足し、page の一つの 「…お支払い金額合計」 と比べる。合計がない、二つ以上ある、読めない場合は `usage_header_total_missing`、行の金額が読めない、または合計と一致しない場合は `usage_header_total_mismatch` で拒否する。返金行は符号付きで足す。行のない ledger は合計 0 だけを証明する。
+- **行の場所。** 行はすべて最初の `detail-list-01` になければならない。collector が保存する ledger はそれだけなので、ほかの `detail-list-01` に行があれば、合計が一致しても `usage_header_rows_outside_first_ledger` で拒否する（保存した ledger に行が欠けたまま合計を公開しないため）。行のない二つ目の ledger は影響しない。この確認は支払区分と合計より先に行う。
+- 拒否の理由は閉じた code（`USAGE_HEADER_REFUSALS`）で、停止 log に `usageHeader` として出す。金額や provider の文字列は log に出さない。
+- `myjcb-credit-ledger@1.2.0` はこの ledger の金額を利用額として読み（`usageAmountText`）、`paymentAmountText` を記録しない。card purchase recognition は利用額と支払額の一致を必要とするので、この行は `payment_split_unknown` で除外され、pending-to-posted の照合にも使われない。明細の支払額は page の合計で、`myjcb-credit-statement-total@1.2.0` が `statementStateBasis: "page-heading-usage-total-proof"` と `ledgerAmountLabel: "ご利用金額"` を付けて公開する。確定の header の page は 1.1.0 と同じに記録する。
+- 制限：保存した page の二つ目の `detail-list-01` が明細の一部かは分からない。ledger artifact は従来どおり最初の ledger だけを保存するので、二つ目に行があればその page は証明されず、従来どおり停止する。行ごとの支払額を利用額とみなさない理由は ADR 0005 の amendment (d) にある。この page の展開 label は数えただけで、行ごとには読んでいない。2026-09-25/26 の停止の原因がこの形であることは、可能性が高いが確認されていない。
 
 ## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
 

@@ -225,6 +225,16 @@ export function discoverCreditExports(
   return [...found];
 }
 
+/**
+ * The ledger of a credit detail page whose statement state is `state`.
+ *
+ * A confirmed page shows the confirmed header set (「今回のお支払い金額」), or,
+ * when the page itself proves that the usage amounts are this statement's
+ * payment (`usageHeader: "proven"`, ADR 0005 amendment d), the unconfirmed set
+ * (「ご利用金額」). The stored `headers` are the set the page shows, so the
+ * ledger parser reads the amount cell as the usage amount it is labelled as,
+ * and nothing records a row's 「今回のお支払い金額」.
+ */
 export function parseCreditLedger(
   html: string,
   state: "confirmed" | "unconfirmed",
@@ -236,7 +246,9 @@ export function parseCreditLedger(
   const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u.test(
     nodeText(ledger),
   );
-  const headers = state === "unconfirmed" ? UNCONFIRMED_LEDGER_HEADERS : CONFIRMED_LEDGER_HEADERS;
+  const usageHeader =
+    state === "unconfirmed" || readMyJcbStatementPage(document).usageHeader === "proven";
+  const headers = usageHeader ? UNCONFIRMED_LEDGER_HEADERS : CONFIRMED_LEDGER_HEADERS;
   const headerText = header ? normalizeText(nodeText(header)) : "";
   // A ledger with rows must display the whole header set of its state: the
   // fourth label says which amount the summary cell holds, so `headers` in the
@@ -246,6 +258,9 @@ export function parseCreditLedger(
   if (requiredHeaders.some((label) => !headerText.includes(label))) {
     throw new StopConditionError(`MyJCB ${state} ledger headers changed`, "credit-ledger-headers");
   }
+  // A confirmed page's expanded labels are read whichever amount header it
+  // shows: the stored page with the usage header shows 「ご利用金額」 and no
+  // 「今回のお支払い金額」 anywhere (counted by label, 2026-09-27).
   const expandedLabels =
     state === "unconfirmed"
       ? ["今回のお支払い金額", "摘要", "今回回数", "備考", "訂正サイン"]
@@ -320,6 +335,12 @@ export function parseCreditLedger(
  * - `detailMonth=0` is the mutable current month and is always `unconfirmed`;
  *   a position-0 page that shows the heading stops the collection;
  * - the heading, with a confirmed (or no) amount header: `confirmed`;
+ * - the heading, with the unconfirmed amount header, when the page proves its
+ *   usage amounts are this statement's payment (every row in the first
+ *   ledger, the one `parseCreditLedger` stores, every row one single payment,
+ *   and the rows' exact sum equal to the page's 「お支払い金額合計」;
+ *   `readMyJcbStatementPage` `usageHeader: "proven"`, ADR 0005 amendment d):
+ *   `confirmed`, and its ledger is stored under the header it shows;
  * - no heading and no ledger: `unknown`, as before;
  * - no heading and a ledger without rows: `unknown`. Production captures of
  *   older closed months (positions 7 and 8 of the surveyed connection) are
@@ -339,7 +360,8 @@ export function parseCreditLedger(
  * `unknown` stores the page as evidence and no ledger artifact. A page that
  * contradicts itself stops the collection at every position
  * (`credit-statement-state`): more than one heading, a header with both
- * labels, ledgers that disagree, or the heading over an unconfirmed header.
+ * labels, ledgers that disagree, or the heading over an unconfirmed header
+ * the page does not prove; its log names the closed reason (`usageHeader`).
  */
 export function creditStatementState(html: string, detailMonth: number): CreditStatementState {
   const page = readMyJcbStatementPage(parse(html));
@@ -352,6 +374,9 @@ export function creditStatementState(html: string, detailMonth: number): CreditS
       ledgerCount: page.ledgerCount,
       rowCount: page.rowCount,
       amountHeaders: page.amountHeaders,
+      // A closed code or null: why a heading over the usage header was or
+      // was not accepted. Never an amount.
+      usageHeader: page.usageHeader,
     });
   const stop = (message: string): never => {
     console.warn(shape("myjcb-credit-statement-state"));
