@@ -348,7 +348,12 @@ importer's path, or something else). It is recorded as unreconciled.
   paged month is not flagged, which changes nothing about coverage because
   the unit is `partial` regardless. Whether `Found N Result` appears on a
   month of ten or fewer is not known. The stored capture that stated 16
-  results with 16 rows is unreconciled.
+  results with 16 rows is unreconciled. A stored page 1 still gets the
+  month's `declared_coverage` range in the terminal (`ranges()` in
+  `shared-collection.ts` emits one per stored page); registration stores the
+  range, and nothing reads `declared_coverage` for eligibility or parsing
+  today, so the month's `activity_pages_unwalked` failure and the `partial`
+  unit are what say it is incomplete.
 
 ### Verification
 

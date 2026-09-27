@@ -565,7 +565,7 @@ test("prestia-globalpass: a run with a sanitizer code and an unwalked page regis
   expect(registered.unitFailureCodes).toEqual(["globalpass_html_shape_unreviewed"]);
 });
 
-test("myjcb:the ledger and discovery state their extraction from pages nobody keeps", async () => {
+test("myjcb: the ledger and discovery state their extraction from pages nobody keeps", async () => {
   // Already in the redacted shape `assertRedactedHtml` accepts: no script, no
   // URL-bearing attribute, no unredacted value. (The collector's own
   // `redactedStatementHtml` is not imported: its module does not compile

@@ -885,7 +885,7 @@ Processor maps it to the CORE source `global-pass`), producer
   keeps only the page a month selection renders (`paginationStatus:
 first_page_only`): the container sends `page.content()` once per month and
   follows no Next link, while a month with more than ten statements shows
-  `Found N Result [p/Ppage] Back Next` and ten statements per page (observed
+  `Found N Result [p/Ppage] Back Next` and at most ten statements per page (observed
   2026-09-27). A page with no pager is not proven to hold the whole month.
   So a finished run is a claim about persistence, never about the account's
   history or a whole month. The `partial` unit registers as the unit outcome
