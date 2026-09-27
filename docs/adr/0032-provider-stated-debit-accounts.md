@@ -34,20 +34,27 @@ which account the card provider actually debits. The owner asked on
 
 What is known about the card side:
 
-- **MyJCB.** JCB's public help describes the MyJCB statement page
-  (カードご利用代金明細照会) as showing card information, transfer-account
-  (お振替口座) information, the payment date and the payment total. The
-  collector's `redactedStatementHtml` removes scripts, forms and attribute
-  values but keeps text, so the stored `credit-detail-NN.html` pages probably
-  contain that block. No fixture in the repository contains it
-  (`services/collector-myjcb/test/fixtures/` and
-  `tests/fixtures/observation-pipeline/myjcb/` hold only the heading, the
-  export links and the ledger). Its labels, whether it shows bank and branch
-  names or codes, and how the account number is masked are unobserved.
-- **Vpass.** The statement parser's key allowlists for the Web and customized
-  statement beans (`packages/parsers/src/parsers/vpass.ts`) contain no
-  payment-account field. Whether another statement API carries one is
-  unknown.
+- **MyJCB.** That the MyJCB statement page (カードご利用代金明細照会) shows
+  a transfer-account (お振替口座) block next to the payment date and total is
+  reported by the owner and by a reading of JCB's public help; it is not
+  verified in this repository, and the round-4 observation is pending. No
+  fixture contains such a block (`services/collector-myjcb/test/fixtures/`
+  and `tests/fixtures/observation-pipeline/myjcb/` hold the heading, the
+  export links and the ledger; `debit-detail.html` is the JCB debit card's
+  お振替日 ledger, a different page). The collector's `redactedStatementHtml`
+  drops scripts, styles, frames, comments and similar elements, strips link,
+  form-target, event and `data-` attributes, redacts `value` and token-like
+  attributes and 16-digit card numbers in text, and keeps other text, so if
+  the block exists the stored `credit-detail-NN.html` pages would likely
+  contain it. Whether it exists, its labels, whether it shows bank and branch
+  names or codes, and how the account number is masked are all unobserved.
+- **Vpass.** The key allowlists in the statement parser
+  (`packages/parsers/src/parsers/vpass.ts`) name no payment-account field.
+  They do not prove its absence: nested objects such as the statement summary
+  (`webMeisaiTopK3Vo`), `paramMap` and `linkHanteiVo` are read by name and are
+  not key-allowlisted, and the meaning of the top-level
+  `TkAccountExplanation` is unobserved. Whether any Vpass statement API
+  carries a payment-account field is unknown until round 4.
 
 What is known about the bank side, from the CORE source-account references
 the identity rules accept (`packages/identity/src/other.ts`):
@@ -62,8 +69,9 @@ the identity rules accept (`packages/identity/src/other.ts`):
 
 1. **Keep amount and date only.** Nothing new to build or store. The operator
    keeps accepting on amount, date and a separately recorded ownership, with
-   no evidence of which account the card debits. Rejected: the evidence exists
-   on a page Kogane already stores.
+   no evidence of which account the card debits. Rejected: the owner reports that
+   the card side states the account, and if round 4 confirms it the evidence
+   is on a page Kogane already stores.
 2. **An owner-typed card → bank mapping.** The owner records which account
    each card debits. It works for every bank, including SMBC, but it is a
    human assertion with no source, it goes stale silently when the owner
@@ -100,7 +108,8 @@ are equal. The proposal carries the statement as evidence and closed rationale
 codes (`provider_stated_debit_account`, `bank_agrees`, `branch_code_agrees` or
 `branch_not_compared`, `trailing_digits_agree`,
 `unique_among_known_accounts`). Every other case is a closed reason and no
-proposal: `bank_not_resolved`, `account_digits_not_shown`,
+proposal: `statement_invalid` (the cited fact is not a valid `typed-claim`
+reference), `bank_not_resolved`, `account_digits_not_shown`,
 `no_comparable_bank_account`, `no_matching_account`, `ambiguous_accounts`, and
 `uncomparable_account_at_bank` (another account at that bank whose number
 Kogane cannot compare could be the real one). A reference is comparable only
@@ -128,8 +137,8 @@ wiring and the review-page display wait for the round-4 shapes.
 
 ## Consequences
 
-- **Sources.** MyJCB can probably supply the statement once its block is
-  observed. Vpass is unknown until round 4; if no Vpass API carries a
+- **Sources.** MyJCB can supply the statement only if round 4 confirms the
+  owner-reported block. Vpass is unknown until round 4; if no Vpass API carries a
   payment-account field, Vpass candidates keep amount and date only.
 - **Banks.** Of the two debit adapters, neither can be matched today: SMBC's
   reference has no account number, and SBI Shinsei's `accountNo` layout is
@@ -168,6 +177,8 @@ wiring and the review-page display wait for the round-4 shapes.
   supports a matching settlement candidate and the candidate stays
   ineligible.
 - `mise run //packages/domain:ci`.
-- Not verified: the MyJCB block's labels, bank/branch rendering and mask; any
+- Not verified: whether the MyJCB block exists at all (owner-reported and
+  read from JCB's public help, not observed in any fixture), its labels,
+  bank/branch rendering and mask; any
   Vpass payment-account field; the relation between SBI Shinsei `accountNo`
   and a displayed account number. These wait for the round-4 observations.

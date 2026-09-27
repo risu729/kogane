@@ -87,7 +87,8 @@ account type, masked account number), stored verbatim as displayed, becomes a
 a card → bank account relation when exactly one known account at the stated
 bank ends in the digits the provider shows and, when both sides show a branch
 code, the codes agree. Anything else is a closed reason with no proposal
-(`bank_not_resolved`, `account_digits_not_shown`, `no_comparable_bank_account`,
+(`statement_invalid`, `bank_not_resolved`, `account_digits_not_shown`,
+`no_comparable_bank_account`,
 `no_matching_account`, `ambiguous_accounts`, `uncomparable_account_at_bank`).
 
 What it would change, once a reader lands: a candidate whose statement and
@@ -100,12 +101,15 @@ decisions, and nothing is accepted automatically.
 
 Limits:
 
-- **MyJCB**: JCB's help describes a transfer-account block on the statement
-  page, but no fixture contains it. Its labels, whether it shows bank and
-  branch names or codes, and the mask pattern are unobserved, so no reader
-  exists. Labels are never invented.
-- **Vpass**: the statement parser's key allowlists contain no payment-account
-  field; whether any Vpass API carries one is unknown.
+- **MyJCB**: a transfer-account (お振替口座) block on the statement page is
+  owner-reported and read from JCB's public help, not verified here: no
+  fixture contains it. Whether it exists, its labels, whether it shows bank
+  and branch names or codes, and the mask pattern are unobserved (round 4
+  pending), so no reader exists. Labels are never invented.
+- **Vpass**: the statement parser's key allowlists name no payment-account
+  field, but nested objects such as the statement summary are not
+  key-allowlisted, so that is not proof of absence; whether any Vpass API
+  carries one is unknown.
 - **Bank references**: only a reference carrying the provider's displayed
   account number is comparable (`bankAccountReference`). Mizuho's
   (`mizuho-bank:ordinary:<branch>:<account>`) is, but Mizuho is not an adapter.
