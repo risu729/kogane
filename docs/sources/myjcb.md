@@ -421,13 +421,11 @@ per-source bucket + importer 経由。`shared` にすると run は `packages/co
 分離され、human-required は unit の状態として記録するだけで再 login はしない。
 deploy 順と rollback は `docs/collection.md` の該当節を参照。
 
-### 口座名義の除去（2026-09-27、ADR 0029 の amendment）
+### 口座名義（2026-09-27、ADR 0029 の amendment 2）
 
-確定明細の page には 「カード情報」 表（縦の th／td）があり、口座名義の行は provider が一部を `*` で隠した口座名義人の名前である。一部が隠されていても名前なので、保存しない（[ADR 0029 の amendment](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)）。
+確定明細の page には 「カード情報」 表（縦の th／td）があり、口座名義の行は provider が一部を `*` で隠した口座名義人の名前である。保存する page はこの行を provider の表示どおりに残す（[ADR 0029 の amendment 2](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)）。`redactedStatementHtml` は sanitizer（script などの要素、URL・session・credential の属性、card 番号の除去）だけを行い、`assertRedactedHtml` は口座名義の cell を検査しない。terminal の redaction step は `myjcb-sanitizer` v3 である。
 
-`redactedStatementHtml` は sanitizer の後に、全体の文字列が 「口座名義」 である `th` の次の `td` の中身を `[redacted:name]` に置き換える（`src/name-redaction.ts`）。同じ表の カード名称、カード発行会社、金融機関名、支店名、科目・口座番号 の行はそのまま残す。口座名義の `th` の後に `td` がない page は観測していない形なので、`artifact_name_redaction_invalid` で保存しない。共通 bucket へ書く前の `assertRedactedHtml` は、口座名義の cell が marker でない page を拒否する。collector manifest の page の entry には置き換えた cell の数（`redactedFieldCount`）だけを書き、terminal の redaction step は `myjcb-sanitizer` v2 になる。
-
-制限：この変更より前に保存した page は口座名義を含んだままで、書き換えない。削除するかどうかは owner が決める。ledger の本文（ご利用先など）と CSV／PDF／OFX export は対象外である。
+経緯：[#333](https://github.com/risu729/kogane/pull/333) の merge から amendment 2 までは、口座名義の `td` の中身を `[redacted:name]` に置き換え、manifest の page の entry に `redactedFieldCount` を書き、step は `myjcb-sanitizer` v2 だった。その間に保存した page は marker のままで、書き換えない（append-only。名前は保持していない）。#333 より前に保存した page は口座名義を含む。
 
 ### 共通 DATA R2 の manifest と明細メタデータ（2026-09-26、ADR 0025）
 
@@ -580,7 +578,7 @@ round 4 の構造調査で、position 8 の page は h1 「ショッピングス
 
 round 4 の観測（構造と件数のみ）: 確定明細（`detail.html?detailMonth=N`）とショッピングスキップ払いの頁（位置 8）には「カード・お振替情報」という見出しはなく、引落口座は明細グリッドの後の `h3.hdg-H3`「カード情報」の下、`div.detail-lyt-02.border-01 > div.col-01 > table.table-data`（th/td の縦表）にある。行は カード名称、カード発行会社、金融機関名（銀行名）、支店名（支店名。支店番号はない）、科目・口座番号（「普通 ####\*\*\*」の形: 科目、空白、口座番号の**先頭** 4 桁、残りは `*`）、口座名義（一部 `*` の名義）。同じ表は保存済みの redacted HTML（`credit-detail-NN.html`）にも同じ形で残っている。
 
-- 読み取り: `readMyJcbCardInformation`（`packages/domain/src/myjcb-card-information.ts`）が金融機関名、支店名、科目、先頭 4 桁、`*` の数だけを読む。カード名称と口座名義の値は読まない（ADR 0029 class d。口座名義の保存 HTML からの除去は [#333](https://github.com/risu729/kogane/pull/333)）。表は class 名ではなく、本文が「カード情報」の見出し要素（h1–h6）とその後の最初の table、th の label で探す。他の形は closed code で拒否する。
+- 読み取り: `readMyJcbCardInformation`（`packages/domain/src/myjcb-card-information.ts`）が金融機関名、支店名、科目、先頭 4 桁、`*` の数だけを読む。カード名称と口座名義の値は読まない（使う処理がない。保存 HTML は口座名義を表示どおりに残す。ADR 0029 の amendment 2）。表は class 名ではなく、本文が「カード情報」の見出し要素（h1–h6）とその後の最初の table、th の label で探す。他の形は closed code で拒否する。
 - 保存: processor の `card_debit_account_sweep` lane が、`myjcb-credit-statement-total` の parse が公開済みの頁を R2 から読み直し、`card_debit_account_statement`（migration 0060、append-only）へ card・raw object・reader version ごとに 1 行書く。
 - 利用: 決済照合の候補に evidence として付くだけで、候補の facts・適格性・承認は変わらない（[card-settlements.md](../card-settlements.md#provider-stated-debit-accounts)）。
 - collector は変更しない。頁はすでに redacted HTML として保存されており、collector が読む必要はない。

@@ -89,9 +89,9 @@ finds the table by text, not by class names: the one heading element (h1-h6)
 whose text is 「カード情報」, then the first table after it, whose every row
 must be one th with a known label and one td. It reads the bank name, branch
 name, account type, the four leading digits and the mask length, checks the
-other rows' labels, and never reads the card name or the holder name
-(ADR 0029 class d; the holder name's removal from stored pages is
-[#333](https://github.com/risu729/kogane/pull/333)). Any other shape is a closed
+other rows' labels, and never reads the card name or the holder name:
+nothing uses them. The stored page keeps the holder name as displayed
+([ADR 0029 amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)). Any other shape is a closed
 refusal code: `card_information_absent`, `card_information_ambiguous`,
 `card_information_table_missing`, `card_information_table_invalid`,
 `card_information_name_invalid`, `card_information_account_invalid`.

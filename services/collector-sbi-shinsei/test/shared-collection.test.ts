@@ -267,7 +267,7 @@ async function trigger(target: string | undefined) {
   };
   // A rotating CSRF token as the provider really returns it.
   fixtures.topBalances.header.newToken = "synthetic-next-csrf-token";
-  // Made-up placeholder names in the fields ADR 0029's amendment redacts.
+  // Made-up placeholder names in the holder-name fields (ADR 0029, amendment 2).
   Object.assign(
     (
       (fixtures.balanceSummary as { responseParam: Record<string, { responseParam: object }> })
@@ -399,47 +399,43 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
     expect(everything).not.toContain("synthetic-secret");
   });
 
-  test("ADR 0029 amendment: DATA holds the name marker, the manifest its count, logs neither name", async () => {
+  test("ADR 0029 amendment 2: DATA keeps the names as sent, the manifest no name count, logs no name", async () => {
     const { result, data, logged } = await trigger("shared");
     expect(result.status).toBe("success");
     const decoded = [...data.entries.values()].map((entry) =>
       new TextDecoder().decode(entry.bytes),
     );
-    const everything = decoded.join("\n");
     for (const name of Object.values(PLACEHOLDER_NAMES)) {
-      expect(everything).not.toContain(name);
       expect(JSON.stringify(logged)).not.toContain(name);
     }
     const summaries = decoded
       .filter((text) => text.includes('"customerNameKana"'))
       .map((text) => JSON.parse(text) as { responseParam: { summary: { responseParam: object } } });
     expect(summaries).toHaveLength(1);
-    expect(summaries[0]!.responseParam.summary.responseParam).toMatchObject({
-      customerName: "[redacted:name]",
-      customerNameKanji: "[redacted:name]",
-      customerNameKana: "[redacted:name]",
-    });
+    expect(summaries[0]!.responseParam.summary.responseParam).toMatchObject(PLACEHOLDER_NAMES);
+    expect(decoded.join("\n")).not.toContain("[redacted:name]");
     const read = await readTerminal(data, "sbi-shinsei", result.runId);
     if (read.outcome !== "found") throw new Error("terminal missing");
     const manifestRef = read.manifest.artifacts.find(
       (entry) => entry.artifactKey === "manifest.json",
     )!.storageRef.key;
     const manifest = JSON.parse(new TextDecoder().decode(data.entries.get(manifestRef)!.bytes)) as {
-      artifacts: { dataset: string; redactedFieldCount?: number }[];
+      artifacts: Record<string, unknown>[];
     };
-    expect(
-      manifest.artifacts.map((artifact) => [artifact.dataset, artifact.redactedFieldCount]),
-    ).toEqual([
-      ["top-accounts-balance-and-activity", 0],
-      ["balance-summary-and-stage", 3],
-      ["exchange-rate", 0],
-      ["yen-deposit-account", 0],
-      ["normalized", undefined],
+    expect(manifest.artifacts.map((artifact) => artifact.dataset)).toEqual([
+      "top-accounts-balance-and-activity",
+      "balance-summary-and-stage",
+      "exchange-rate",
+      "yen-deposit-account",
+      "normalized",
     ]);
+    for (const artifact of manifest.artifacts) {
+      expect(Object.keys(artifact)).not.toContain("redactedFieldCount");
+    }
     expect(
       read.manifest.transformations
         .filter((step) => step.stepKind === "redacted")
         .map((step) => [step.transformerId, step.transformerVersion]),
-    ).toEqual(Array.from({ length: 4 }, () => ["sbi-shinsei-token-sanitizer", "v2"]));
+    ).toEqual(Array.from({ length: 4 }, () => ["sbi-shinsei-token-sanitizer", "v3"]));
   });
 });

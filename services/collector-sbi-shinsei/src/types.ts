@@ -124,12 +124,6 @@ export interface RawArtifact {
   filename: string;
   mediaType: string;
   body: string | ArrayBuffer;
-  /**
-   * How many person-name fields were replaced with the marker before `body`
-   * was built (ADR 0029, amendment 2026-09-27). Set on every provider
-   * capture, 0 when there was nothing to remove; absent on derived artifacts.
-   */
-  redactedFieldCount?: number;
 }
 
 export interface StoredArtifact {
@@ -138,8 +132,6 @@ export interface StoredArtifact {
   mediaType: string;
   sha256: string;
   bytes: number;
-  /** The artifact's `redactedFieldCount`, a count only, never a value. */
-  redactedFieldCount?: number;
 }
 
 export interface CollectionFailure {

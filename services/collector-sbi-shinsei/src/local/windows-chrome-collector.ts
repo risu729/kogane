@@ -1,7 +1,6 @@
 import { browserDiagnostics } from "../diagnostics";
 import { fileURLToPath } from "node:url";
 import { JscAcquisitionError, UnknownResponseShapeError } from "../errors";
-import { redactPersonNames } from "../name-redaction";
 import { normalizeCoreResponses } from "../normalized";
 import { validateKnownResponse } from "../response-schemas";
 import type {
@@ -168,7 +167,7 @@ export function parseCollectionHandoff(
   }
   const validated: Array<{
     plan: (typeof RESPONSE_PLAN)[number];
-    response: { raw: string; redactedFieldCount: number; data: JsonObject };
+    response: { raw: string; data: JsonObject };
   }> = [];
   const failures: CollectionFailure[] = [];
   for (const plan of RESPONSE_PLAN.slice(0, responseKeys.length)) {
@@ -221,10 +220,7 @@ export function parseCollectionHandoff(
   return {
     ...(normalized ? { normalized } : {}),
     artifacts: [
-      ...validated.map(({ plan, response }) => ({
-        ...artifact(plan.dataset, plan.filename, response.raw),
-        redactedFieldCount: response.redactedFieldCount,
-      })),
+      ...validated.map(({ plan, response }) => artifact(plan.dataset, plan.filename, response.raw)),
       ...(normalized
         ? [artifact("normalized", "normalized.json", `${JSON.stringify(normalized, null, 2)}\n`)]
         : []),
@@ -237,7 +233,7 @@ function validateRaw(
   value: unknown,
   schema: Parameters<typeof validateKnownResponse>[0],
   label: string,
-): { raw: string; redactedFieldCount: number; data: JsonObject } {
+): { raw: string; data: JsonObject } {
   if (typeof value !== "string" || value.length === 0) {
     throw new UnknownResponseShapeError(`${label} response was missing`);
   }
@@ -247,11 +243,7 @@ function validateRaw(
   } catch {
     throw new UnknownResponseShapeError(`${label} response was invalid JSON`);
   }
-  const data = validateKnownResponse(schema, parsed);
-  // Names leave the response here, before anything can store it; `data`
-  // (what normalization reads) keeps the provider's values in memory only.
-  const redacted = redactPersonNames(schema, value, data);
-  return { raw: redacted.body, redactedFieldCount: redacted.redactedFieldCount, data };
+  return { raw: value, data: validateKnownResponse(schema, parsed) };
 }
 
 function exactObject(value: unknown, keys: readonly string[], label: string): JsonObject {

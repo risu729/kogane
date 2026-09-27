@@ -11,8 +11,8 @@
 //     that key, so it needs no cursor, and running it again writes nothing.
 //   * A page whose table has another shape is a `refused` row with a closed
 //     code (INV05), so it is not read again under the same reader version.
-//   * The account holder's name and the card name are never read
-//     (ADR 0029 class d). The log line and tick record carry counts only.
+//   * The account holder's name and the card name are never read: nothing
+//     uses them. The log line and tick record carry counts only.
 import { parse } from "parse5";
 import {
   readMyJcbCardInformation,

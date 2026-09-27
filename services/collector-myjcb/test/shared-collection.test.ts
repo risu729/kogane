@@ -155,7 +155,7 @@ describe("G1-02/G1-16 shared mode persists each connection's pages and then the 
     expect(manifest.transformations[2]).toMatchObject({
       stepKind: "redacted",
       transformerId: "myjcb-sanitizer",
-      transformerVersion: "v2",
+      transformerVersion: "v3",
       inputArtifactKeys: [],
     });
     // Statement period labels are provider text; they stay in the manifest

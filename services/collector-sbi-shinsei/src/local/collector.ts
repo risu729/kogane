@@ -1,18 +1,10 @@
 import { parseCredential } from "../credential";
 import { SbiShinseiLoginTransport } from "../login";
-import { redactPersonNames } from "../name-redaction";
 import { normalizeCoreResponses } from "../normalized";
 import { noBodyRequest, YEN_DEPOSIT_SCREEN_GROUP_ID, yenDepositAccountRequest } from "../requests";
 import { InMemorySessionState } from "../session";
-import { getReadRoute } from "../read-allowlist";
 import { SbiShinseiReadTransport } from "../transport";
-import type {
-  JscProvider,
-  NormalizedSnapshot,
-  RawArtifact,
-  ReadOperationId,
-  ReadTransportResult,
-} from "../types";
+import type { JscProvider, NormalizedSnapshot, RawArtifact } from "../types";
 
 export interface LocalCollectorResult {
   artifacts: RawArtifact[];
@@ -59,30 +51,18 @@ export async function collectHybridLocalSbiShinsei(options: {
   return {
     normalized,
     artifacts: [
-      providerCapture(
+      jsonArtifact(
         "top-accounts-balance-and-activity",
         "raw-top-accounts-balance-and-activity.json",
-        "top.accounts-balance-and-activity",
-        topBalances,
+        topBalances.rawBody,
       ),
-      providerCapture(
+      jsonArtifact(
         "balance-summary-and-stage",
         "raw-balance-summary-and-stage.json",
-        "top.balance-summary-and-stage",
-        balanceSummary,
+        balanceSummary.rawBody,
       ),
-      providerCapture(
-        "exchange-rate",
-        "raw-exchange-rate.json",
-        "common.exchange-rate",
-        exchangeRate,
-      ),
-      providerCapture(
-        "yen-deposit-account",
-        "raw-yen-deposit-account.json",
-        "yen-deposit.account",
-        yenDeposit,
-      ),
+      jsonArtifact("exchange-rate", "raw-exchange-rate.json", exchangeRate.rawBody),
+      jsonArtifact("yen-deposit-account", "raw-yen-deposit-account.json", yenDeposit.rawBody),
       jsonArtifact("normalized", "normalized.json", `${JSON.stringify(normalized, null, 2)}\n`),
     ],
   };
@@ -90,22 +70,4 @@ export async function collectHybridLocalSbiShinsei(options: {
 
 function jsonArtifact(dataset: string, filename: string, body: string): RawArtifact {
   return { dataset, filename, mediaType: "application/json", body };
-}
-
-/** A provider response as it may be written: person names already removed. */
-function providerCapture(
-  dataset: string,
-  filename: string,
-  operation: ReadOperationId,
-  result: ReadTransportResult,
-): RawArtifact {
-  const redacted = redactPersonNames(
-    getReadRoute(operation).responseSchema,
-    result.rawBody,
-    result.data,
-  );
-  return {
-    ...jsonArtifact(dataset, filename, redacted.body),
-    redactedFieldCount: redacted.redactedFieldCount,
-  };
 }

@@ -19,7 +19,7 @@ export type DebitAccountType = "ordinary" | "current";
 
 /**
  * What the card provider displays about the debit account, verbatim, except
- * the account holder's name, which is never read (ADR 0029 class d). `null`
+ * the account holder's name, which is never read: nothing uses it. `null`
  * means the reading does not have that part; it is never filled in. Kogane
  * never stores more digits than the provider shows.
  */

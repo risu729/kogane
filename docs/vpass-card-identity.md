@@ -24,7 +24,8 @@ tuple is a provider-local opaque identifier (class c): it names a card inside
 Vpass, it is not a credential, and in this single-owner store it cannot be
 confused with anyone else's, so CORE may hold it raw or hashed when identity
 needs it. Card holder names (class d) are compared in memory as consistency
-checks and never persisted; credentials and keys (class a) are never stored or
+checks and are not part of the binding (class d as redefined by ADR 0029's
+amendment 2 permits names in stored evidence; the binding does not need them); credentials and keys (class a) are never stored or
 logged; logs and operational records carry counts and closed codes only. The
 collector therefore derives the token without a secret, as the unkeyed,
 domain-separated SHA-256 `vpass-card-v2-` +

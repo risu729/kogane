@@ -21,7 +21,8 @@
   (the dataset table for shared-R2 registration; amended with a note),
   [ADR 0028](0028-sbi-shinsei-observed-capture-shapes.md) (the board is tiered
   by `customerCategory`), [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
-  (names are avoided in CORE)
+  (names were avoided in CORE; its amendment 2 permits them, and this parser
+  still does not copy them)
 
 ## Context
 
@@ -209,10 +210,12 @@ provider states both, in one session.
   state lists it.
 - **Names in the raw artifact.** `raw-balance-summary-and-stage.json` also
   stores `customerName`, `customerNameKanji` and `customerNameKana` under
-  `responseParam.summary.responseParam` in R2 (ADR 0029 class d: names are
-  avoided); this parser never copies them, and redacting them before the
-  artifact is written is [#333](https://github.com/risu729/kogane/pull/333)'s
-  change (already-stored objects are not rewritten).
+  `responseParam.summary.responseParam` in R2; this parser never copies them.
+  They are kept as the provider shows them
+  ([ADR 0029, amendment 2](0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence));
+  captures written while [#333](https://github.com/risu729/kogane/pull/333)'s
+  redaction was deployed carry `[redacted:name]` instead, which the parser
+  accepts the same way.
 
 ## Verification
 

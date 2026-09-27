@@ -72,7 +72,18 @@ test("rejects ambiguous institution or summary evidence", () => {
     "connection_summary_shape",
   );
 });
-test("a balance summary stored with its names redacted (ADR 0029 amendment) still proves the connection", () => {
+test("a balance summary with the holder's names as displayed (ADR 0029, amendment 2) proves the connection", () => {
+  const { top, summary } = fixtures();
+  summary.responseParam.summary = section({
+    customerName: "PLACEHOLDER HOLDER",
+    customerNameKanji: "見本　名前",
+    customerNameKana: "ミホン　ナマエ",
+  });
+  expect(verifyShinseiConnection(readConnectionDetail(html()), top, summary)).toEqual({
+    directSourceAccounts: ["sbi-shinsei:111111111111111", "sbi-shinsei:222222222222222"],
+  });
+});
+test("a balance summary stored while #333's redaction was deployed still proves the connection", () => {
   const { top, summary } = fixtures();
   summary.responseParam.summary = section({
     customerName: "[redacted:name]",

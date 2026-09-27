@@ -94,9 +94,11 @@ Layer transitions have different rules:
 | Derived / disposable   | current balances, positions, P&L, net worth, tax calculations, dashboards      | Freely regenerated from the layers above.  |
 
 What a collector may write in the first place is narrower than what it
-reads: person names are replaced before an object is stored, and objects
-stored earlier are not rewritten
-([ADR 0029's amendment](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)).
+reads: credentials and full payment-instrument numbers are removed before an
+object is stored; person names are kept as the provider shows them. Objects
+written while names were replaced carry the marker `[redacted:name]` and are
+not rewritten
+([ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)).
 
 Evidence is not "the truth" — providers correct their own data. Evidence is a
 record of _what a source claimed at a point in time_. That is why nothing
