@@ -26,9 +26,11 @@ import { REPO_ROOT } from "./repo-root.ts";
 export const ROOTS = ["services", "packages", "apps", "experiments"] as const;
 
 /**
- * Floor for the cruised module count. The run cruises 530 modules today; a
- * number well below that but far above the ~44 of a transpiler-less run fails
- * a silent regression without failing every deletion.
+ * Floor for the cruised module count. It exists to catch the quiet failure
+ * above: with no TypeScript < 7 transpiler the run cruises ~44 modules and
+ * exits 0. A healthy run cruised about a thousand modules as of 2026-09, so a
+ * floor far above ~44 but well below the real count fails that regression
+ * without failing every deletion.
  */
 export const MINIMUM_MODULES = 400;
 
