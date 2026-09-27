@@ -444,13 +444,26 @@ recorded in the manifest (`exportOffers: [{ position, kinds }]`) and not
 fetched: the datasets are refused here (above), so a fetched export would fail
 the run's plan
 ([ADR 0005's amendment (b)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page)).
+The months are the credit menu's links under the `h2` headings
+「最新のご利用明細」 and 「過去の明細」 and the past-months response's
+available positions; the links under
+「ボーナス#回払い・ショッピングスキップ払い」 are payment schedule pages
+([ADR 0005's amendment (c)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months)).
+A link under any other heading, or before any heading, stops the connection
+before its first month (`credit_menu_group_unrecognized`). After the last
+month each schedule page is fetched and stored whole, redacted, as
+`credit-schedule-NN.html` (state `unknown`, period `detailMonth-N`), which
+no registration rule gives a parser dataset, so it is catalogued and sealed
+but never parsed. The manifest records each one as
+`schedulePages: [{ position, code }]` (`scheduled_payments_page` when stored,
+`schedule_page_fetch` when its fetch failed, which is not a stop) and
+`schedulePageCount`; schedule pages never count in `periodCount` or
+`capturedMonthCount` and never change the unit's coverage.
 A month can be kept unread: a page kept as `unknown` that shows ledger rows
-(no heading, position 2 or later; `rows_unstated`), or a page whose ledger
-shows rows under the observed third header
-`ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`, seen on the
-ショッピングスキップ払い schedule page (`scheduled_payments_page`, at any
-position; the collector counts `detailMonth` positions and does not tell a
-month from a schedule page). Such a page gets no ledger, so
+(no heading, position 2 or later; `rows_unstated`), or a month page whose
+ledger shows rows under the observed third header
+`ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`, seen so far only on
+the ショッピングスキップ払い schedule page (`scheduled_payments_page`). Such a page gets no ledger, so
 its rows reach no parser, and the connection goes on to the next month. The
 manifest lists these months (`unreadMonths: [{ position, code }]`), the
 connection is `partial`, its unit `partial` with `scheduled_payments_page`
@@ -471,7 +484,8 @@ On `credit_statement_state`, `credit_statement_period` and `ledger_parse` the
 page it stopped on is also kept, redacted, as an `unknown` `credit-detail`
 with no ledger, so the stop can be diagnosed; it is not counted as a kept
 month. A connection that stops before its first month (`login`,
-`human_required`, `discovery`, `credit_menu`, `credit_first_detail`,
+`human_required`, `discovery`, `credit_menu`,
+`credit_menu_group_unrecognized`, `credit_first_detail`,
 `credit_past_months`, `no_route`, or `unclassified` for an error that names no
 stage) keeps nothing and has an `unknown` unit with that code, and so does a
 failed debit read (`debit`; a debit capture is refused in shared mode in any

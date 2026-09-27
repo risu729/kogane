@@ -69,9 +69,7 @@ describe("MyJCB synthetic parsers", () => {
 
   test("enumerates only API-reported available older credit months", () => {
     expect(extractCreditMenuLinkId(fixture("credit-mypage.html"))).toBe("synthetic_credit_menu");
-    expect(readCreditMenuGroups(fixture("credit-menu.html")).months).toEqual([
-      0, 1, 2, 3, 4, 5, 6,
-    ]);
+    expect(readCreditMenuGroups(fixture("credit-menu.html")).months).toEqual([0, 1, 2, 3, 4, 5, 6]);
     const past = parsePastMonthAvailability(fixture("credit-past.json"));
     expect(past.filter((month) => month.available).map((month) => month.detailMonth)).toEqual([
       10, 13,
@@ -220,10 +218,7 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
   });
 
   test("headings match after whitespace removal, with any digits in the bonus count", () => {
-    for (const heading of [
-      " 最新の\nご利用明細 ",
-      "<span>過去の</span> 明細",
-    ])
+    for (const heading of [" 最新の\nご利用明細 ", "<span>過去の</span> 明細"])
       expect(readCreditMenuGroups(`<h2>${heading}</h2>${link(3)}`)).toEqual({
         months: [3],
         schedules: [],

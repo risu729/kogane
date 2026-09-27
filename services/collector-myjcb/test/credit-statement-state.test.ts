@@ -974,7 +974,10 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
   test("a menu heading nobody observed stops before any month, with a code only", async () => {
     const result = await run(
       () => undefined,
-      creditMenu([0, 1]).replace("</body>", `<h2>${LEAK_WORD}</h2><a href="detail.html?detailMonth=2">x</a></body>`),
+      creditMenu([0, 1]).replace(
+        "</body>",
+        `<h2>${LEAK_WORD}</h2><a href="detail.html?detailMonth=2">x</a></body>`,
+      ),
     );
     expect(result.status).toBe(502);
     expect(blockers(result)).toEqual([

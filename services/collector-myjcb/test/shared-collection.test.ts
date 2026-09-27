@@ -927,7 +927,12 @@ describe("ADR 0005 amendment (c): schedule pages beside the months", () => {
       }),
     );
     expect(plan.run.units).toEqual([
-      { unitKey: "account-one", unitKind: "connection", artifactCount: 4, coverageStatus: "complete" },
+      {
+        unitKey: "account-one",
+        unitKind: "connection",
+        artifactCount: 4,
+        coverageStatus: "complete",
+      },
     ]);
     expect(plan.run.providerOutcome).toBe("success");
     expect(plan.run).not.toHaveProperty("safeErrorCode");
