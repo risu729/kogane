@@ -219,7 +219,10 @@ category that the balance summary of the same collection run states (parser
 `sbi-shinsei-balance-summary-and-stage`). A per-1-unit row that path does not
 admit is counted `tier_unmatched` (another code) or `stage_unstated` (its run
 states no stage, or more than one); the lane makes one more read per tick
-(at most nine D1 calls). The argument above that prices are derived state
+(at most nine D1 calls). A board row whose run's balance summary still has a
+stage-parser job that can run is not refused but left for a later tick
+(`stage_pending`): the cursor stops before it, as it does before a pending
+parse. The argument above that prices are derived state
 promoted without an operator step is unchanged, and ADR 0031 relies on it.
 The basis amendment above said every row stays `unsupported_currency` while
 the owner's tier is unknown; from ADR 0031 the tier is the one the same

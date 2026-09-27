@@ -1023,7 +1023,8 @@ the stage 「今月のステージ」, so it can change monthly. The board has 6
 13 currencies with 5 rows each and CHF and JPY with one row each; CHF, BRL and
 JPY are not on the FX page. The same artifact also stores the customer's
 names under `summary.responseParam` in R2 (ADR 0029 class d); redacting them
-is left to a separate change.
+before the artifact is written is
+[#333](https://github.com/risu729/kogane/pull/333)'s change.
 
 **Parser `sbi-shinsei-balance-summary-and-stage` 0.1.0**
 (`packages/parsers/src/parsers/sbi-shinsei-balance-summary-and-stage.ts`):
@@ -1033,8 +1034,8 @@ is left to a separate change.
 - Emits one observation: valuation kind, account `sbi-shinsei:customer`,
   subject `customerCategory`, metric `provider_customer_category`, currency
   `XXX` (no currency), no amount, the category verbatim (string or number) in
-  `extra.customerCategory`, the category block's allowance fields as provider
-  context. An absent, null, empty, boolean or structured category fails the
+  `extra.customerCategory`, and nothing else from the page (the category
+  block's allowance and fee fields are validated only). An absent, null, empty, boolean or structured category fails the
   artifact.
 - Emits nothing else: the customer's names, the summary balances and the
   branch are validated only (ADR 0029 class d; the top page already reports
@@ -1055,8 +1056,11 @@ stage, or more than one, counts `stage_unstated`; CHF and JPY stay
 (every per-1-unit row `tier_unmatched`), and a mapping between two notations
 would be a new decision. The owner can check an admitted tier: its buy and sell
 rates should equal the rates the logged-in FX savings page shows at the same
-time. A board judged before its run's stage was published
-(`stage_unstated`) is not re-examined without a cursor reset. A v2 registration made before ADR 0031 deploys keeps its
+time. A board parsed before its run's balance summary is not judged while
+that page's stage job can still run: the lane stops before it
+(`stage_pending`) and judges it once the job publishes or fails. A board
+judged when its run had no stage (no page, a refused page, a failed job) is
+`stage_unstated` and is not re-examined without a cursor reset. A v2 registration made before ADR 0031 deploys keeps its
 balance summary without a dataset, so that run's board finds no stage.
 
 ## Parse status in production (2026-09-26)

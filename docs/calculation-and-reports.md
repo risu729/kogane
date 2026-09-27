@@ -77,7 +77,11 @@ as `basis_unverified`; a currency a rule does not admit, as
 than the stage its run states, as `tier_unmatched`, and one whose run states
 no stage or more than one, as `stage_unstated`. None writes anything and none
 is retried under
-the same rules; a price is never rescaled, rounded or defaulted. Execution
+the same rules. A board row whose run still has its balance summary to parse
+(a job of the deployed stage parser that can still run, and no published
+parse of that page) is not judged yet: the tick stops before it, counts the
+rest of its page as `stage_pending`, and the cursor waits there until that
+job publishes, fails or runs out of attempts; a price is never rescaled, rounded or defaulted. Execution
 prices are never valuation prices, so no rule reads one. The effective time is
 the provider's own instant when the claim states one (the board's
 `transactionTime`, basis `provider`), otherwise the artifact's fetch instant

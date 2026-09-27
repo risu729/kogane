@@ -100,6 +100,7 @@ test("the lane promotes VT, AAPL, the domestic price and the admitted FX rows, a
     unsupported_currency: 0,
     tier_unmatched: 0,
     stage_unstated: 3,
+    stage_pending: 0,
     written: 6,
   });
   const prices = (
@@ -205,6 +206,7 @@ test("the lane promotes VT, AAPL, the domestic price and the admitted FX rows, a
     unsupported_currency: 0,
     tier_unmatched: 0,
     stage_unstated: 6,
+    stage_pending: 0,
     written: 0,
   });
 }, 60000);
@@ -218,6 +220,7 @@ test("replay writes nothing: the same tick, or the same claims from a reset curs
     unsupported_currency: 0,
     tier_unmatched: 0,
     stage_unstated: 0,
+    stage_pending: 0,
     written: 0,
   });
   await env.DB.prepare("DELETE FROM price_promotion_cursor").run();
@@ -387,6 +390,7 @@ test("a tiered board with an unrecognised time: nothing promotes until an admiss
     unsupported_currency: 33,
     tier_unmatched: 0,
     stage_unstated: 165,
+    stage_pending: 0,
     written: 0,
   });
 
@@ -409,6 +413,7 @@ test("a tiered board with an unrecognised time: nothing promotes until an admiss
     unsupported_currency: 45,
     tier_unmatched: 0,
     stage_unstated: 150,
+    stage_pending: 0,
     written: 3,
   });
   const written = (
@@ -486,6 +491,7 @@ test("a numeric tier promotes only under an admission of the same number, never 
     promoted: 3,
     unsupported_currency: 45,
     stage_unstated: 150,
+    stage_pending: 0,
     written: 3,
   });
   const tiers = (

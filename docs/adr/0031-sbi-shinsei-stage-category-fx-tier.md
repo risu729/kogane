@@ -7,7 +7,7 @@
   `packages/domain/src/price-sources.ts` (`SBI_SHINSEI_FX_PER_UNIT_CURRENCIES`,
   `FxStageCategory`, `stageMatches`, `fxBoardPrice`),
   `services/processor/src/price-promotion-job.ts` (`STAGE_SQL`,
-  `tier_unmatched`, `stage_unstated`),
+  `tier_unmatched`, `stage_unstated`, `stage_pending`),
   `packages/application/src/collection/descriptors.ts` (the
   `balance-summary-and-stage` dataset),
   `services/processor/scripts/parser-rejection.ts` (the new parser's throw
@@ -105,8 +105,8 @@ provider states both, in one session.
   `customerCategory`, metric `provider_customer_category`, currency `XXX`
   (ISO 4217: no currency involved), no amount, the category verbatim in
   `extra.customerCategory` with `_kogane.valueType` and
-  `_kogane.amountDisposition: "not-an-amount"`, and the category block's other
-  fields as provider context. A category that is absent, null, empty, boolean
+  `_kogane.amountDisposition: "not-an-amount"`; the category block's other
+  fields (transfer and ATM allowances, the ATM fee) are validated only. A category that is absent, null, empty, boolean
   or structured fails the artifact. Nothing else leaves the artifact: the
   summary block's names (class d) and balances (already reported by the top
   page, INV06) and the branch block are validated only.
@@ -140,7 +140,13 @@ provider states both, in one session.
   `unsupported_currency`.
 - **Lane.** The promotion lane makes one more read per tick, `STAGE_SQL`, and
   only when its page holds board rows: per board observation, its category
-  and the run's stated categories. Every table is reached by key from the
+  and the run's stated categories, and whether the run still waits for its
+  stage: a balance-summary artifact of the run with no published stage parse
+  and a job of the deployed stage parser that can still run (pending or
+  running, attempts left, no stopped replay plan). The page is judged up to
+  the first board row whose run waits; that row and the rest of the page are
+  counted `stage_pending`, not judged, and the cursor stops before it, as it
+  stops before a pending parse. Every table is reached by key from the
   page's own rows (plan checked without statistics). A tick makes at most
   nine D1 calls.
 - **No operator step (INV06, INV07).** A price is derived state, not an
@@ -165,17 +171,22 @@ provider states both, in one session.
   check the owner's agent made on 2026-09-27). If they differ, the stage
   match picked a tier the owner does not get, and the rule must be stopped
   (revert, or an empty per-unit list) before any report uses it.
-- **Order dependence is bounded, not removed.** A board row is judged when the
-  lane reaches it. If the same run's balance-summary parse is not yet
-  published then (its job failed and retries later, or the artifact was
-  registered without a dataset), the row is `stage_unstated` and, like every
-  refusal, not retried under the same rules; re-examining it needs the
+- **A board waits for its own run's stage page.** Parse jobs run by priority,
+  availability and artifact id, and a job that fails backs off, so a board
+  can be published before its run's balance summary (the order of the
+  registered artifact ids is not verified). While that page's job of the
+  deployed stage parser can still run, the lane does not judge the board: it
+  stops before it (`stage_pending`) and the valuation cursor waits, which
+  also holds back the valuation claims after it for those ticks. The wait is
+  bounded by the parse lane's own limits: it ends when the job publishes,
+  when it is `failed` or out of attempts, or when its replay plan stops. A
+  board of a run with no balance-summary artifact with the dataset, or with
+  no job for it, is judged at once. A row judged `stage_unstated` is, like
+  every refusal, not retried under the same rules; re-examining it needs the
   valuation cursor reset, an operator action on operational state that writes
-  nothing twice. Within a run the collector reads the balance summary before
-  the board, and parse jobs of one lane run in artifact-id order after
-  priority and availability, so a fresh run's stage is expected to be
-  published first; that the registered artifact ids follow the read order is
-  not verified.
+  nothing twice. A stage job created only after its run's board was judged
+  (the repair lane creating the two jobs on different pages) is not waited
+  for.
 - **Registration window.** A v2 registration made before this change deploys
   keeps its balance-summary artifact without a dataset, so its boards find no
   stage. A balance-summary artifact stored with the dataset (the retired
@@ -199,8 +210,9 @@ provider states both, in one session.
 - **Names in the raw artifact.** `raw-balance-summary-and-stage.json` also
   stores `customerName`, `customerNameKanji` and `customerNameKana` under
   `responseParam.summary.responseParam` in R2 (ADR 0029 class d: names are
-  avoided); this parser never copies them, and redacting them from the stored
-  artifact going forward is left to a separate change.
+  avoided); this parser never copies them, and redacting them before the
+  artifact is written is [#333](https://github.com/risu729/kogane/pull/333)'s
+  change (already-stored objects are not rewritten).
 
 ## Verification
 
@@ -225,11 +237,15 @@ provider states both, in one session.
   promotes nothing; a stage stated only by another run promotes nothing
   (`stage_unstated`); two disagreeing pages in one run promote nothing and
   two agreeing ones promote; a page the parser refuses promotes nothing; a
-  currency listed once promotes only in the stated tier; and `STAGE_SQL`'s
+  currency listed once promotes only in the stated tier; a board parsed
+  before its run's balance summary waits (`stage_pending`, cursor unmoved)
+  and is promoted once the stage page is parsed; the wait ends when the stage
+  job fails, is out of attempts, belongs to a paused replay plan or is of
+  another parser version; and `STAGE_SQL`'s
   plan on a store migrated through every core migration, without statistics,
   scans none of its tables and reaches them by
   `idx_fetch_artifacts_run_role`, the publication key,
-  `idx_val_obs_parse_run` and primary keys.
+  `idx_val_obs_parse_run`, the parse job's key and primary keys.
 - `services/processor/test/price-promotion.test.ts`, `lanes.test.ts` and
   `lane-ticks.test.ts`: the existing lane cases with the new counters, and the
   tick record keeps both.

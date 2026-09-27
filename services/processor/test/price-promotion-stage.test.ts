@@ -153,6 +153,7 @@ test("the stated tier of the same run promotes USD and EUR per 1 unit; other tie
     unsupported_currency: 3,
     tier_unmatched: 24,
     stage_unstated: 0,
+    stage_pending: 0,
     written: 6,
   });
   const prices = (
@@ -176,6 +177,19 @@ test("the stated tier of the same run promotes USD and EUR per 1 unit; other tie
     { base: "USD", tier: "SYNTHETIC-TOP" },
   ]);
   expect(SBI_SHINSEI_FX_PER_UNIT_CURRENCIES).not.toContain("CHF");
+  // The stage row is no amount (INV05): its exact decimal is `missing`, never
+  // zero, and no price claims it.
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT v.amount_text AS amount,v.currency,d.status,d.coefficient,
+          (SELECT count(*) FROM price_observation_claims c WHERE c.observation_id=v.id) AS claims
+         FROM valuation_observations v
+         LEFT JOIN observation_decimal_values d ON d.kind='valuation' AND d.observation_id=v.id
+         WHERE v.metric='provider_customer_category'`,
+      ).all()
+    ).results,
+  ).toEqual([{ amount: null, currency: "XXX", status: "missing", coefficient: null, claims: 0 }]);
 }, 60000);
 
 test("a stage in another notation admits nothing: a number never equals a string", async () => {
@@ -206,6 +220,7 @@ test("a stage stated only by another run is not current for this board", async (
     unsupported_currency: 6,
     tier_unmatched: 6,
     stage_unstated: 30,
+    stage_pending: 0,
     written: 0,
   });
   expect(await promotedTiers()).toEqual([]);
@@ -220,6 +235,7 @@ test("two stage pages of one run that disagree admit nothing, even the tier one 
     unsupported_currency: 3,
     tier_unmatched: 0,
     stage_unstated: 30,
+    stage_pending: 0,
     written: 0,
   });
   // Two pages that agree are one stage.
@@ -269,9 +285,125 @@ test("a currency listed once is promoted only when that one row is in the stated
     unsupported_currency: 3,
     tier_unmatched: 3,
     stage_unstated: 0,
+    stage_pending: 0,
     written: 3,
   });
   expect(await promotedTiers()).toEqual([{ base: "USD", tier: "SYNTHETIC-TOP" }]);
+}, 60000);
+
+/** Parses one incremental job: the lowest artifact id first, so the board before its stage page. */
+async function parseOne(): Promise<void> {
+  await sweep(env, { lane: "incremental", maxJobs: 1 });
+}
+
+test("a board parsed before its stage page waits for it and is then promoted, not refused", async () => {
+  await seedRun(run, ["SYNTHETIC-TOP"]);
+  await parseOne();
+  const stageJob = () =>
+    env.DB.prepare(
+      `SELECT j.status FROM observation_parse_jobs j
+       WHERE j.fetch_artifact_id=? AND j.parser_name='sbi-shinsei-balance-summary-and-stage'`,
+    )
+      .bind(run + 1)
+      .first<string>("status");
+  expect(await stageJob()).toBe("pending");
+  const before = await env.DB.prepare(
+    "SELECT last_observation_id AS id FROM price_promotion_cursor WHERE claim_kind='valuation'",
+  ).first<number>("id");
+  // The board's rows are neither judged nor passed: the cursor stays put.
+  expect(await pricePromotionSweep(env.DB, { now: NOW })).toEqual({
+    scanned: 0,
+    promoted: 0,
+    basis_unverified: 0,
+    unsupported_currency: 0,
+    tier_unmatched: 0,
+    stage_unstated: 0,
+    stage_pending: 33,
+    written: 0,
+  });
+  expect(
+    await env.DB.prepare(
+      "SELECT last_observation_id AS id FROM price_promotion_cursor WHERE claim_kind='valuation'",
+    ).first<number>("id"),
+  ).toBe(before);
+  await parseOne();
+  expect(await stageJob()).toBe("done");
+  expect(await pricePromotionSweep(env.DB, { now: NOW })).toMatchObject({
+    scanned: 33,
+    promoted: 6,
+    unsupported_currency: 3,
+    tier_unmatched: 24,
+    stage_unstated: 0,
+    stage_pending: 0,
+    written: 6,
+  });
+  expect(await promotedTiers()).toEqual([
+    { base: "EUR", tier: "SYNTHETIC-TOP" },
+    { base: "USD", tier: "SYNTHETIC-TOP" },
+  ]);
+}, 60000);
+
+test("the wait ends when the stage page's job fails: the board is then stage_unstated", async () => {
+  await seedRun(run, [null]);
+  await parseOne();
+  expect(await pricePromotionSweep(env.DB, { now: NOW })).toMatchObject({
+    scanned: 0,
+    stage_pending: 33,
+  });
+  // The parser refuses the page; the job is failed and can never publish.
+  await parseOne();
+  expect(await pricePromotionSweep(env.DB, { now: NOW })).toMatchObject({
+    scanned: 33,
+    promoted: 0,
+    unsupported_currency: 3,
+    stage_unstated: 30,
+    stage_pending: 0,
+  });
+}, 60000);
+
+test("a stage job out of attempts, of another version or of a stopped replay plan is not waited for", async () => {
+  await seedRun(run, ["SYNTHETIC-TOP"]);
+  await parseOne();
+  const job = (sql: string) =>
+    env.DB.prepare(
+      `UPDATE observation_parse_jobs SET ${sql}
+       WHERE fetch_artifact_id=? AND parser_name='sbi-shinsei-balance-summary-and-stage'`,
+    )
+      .bind(run + 1)
+      .run();
+  const valuationCursor = () =>
+    env.DB.prepare(
+      "SELECT last_observation_id AS id FROM price_promotion_cursor WHERE claim_kind='valuation'",
+    ).first<number>("id");
+  const before = await valuationCursor();
+  const judge = async () => {
+    const result = await pricePromotionSweep(env.DB, { now: NOW });
+    await env.DB.prepare(
+      "UPDATE price_promotion_cursor SET last_observation_id=? WHERE claim_kind='valuation'",
+    )
+      .bind(before)
+      .run();
+    return result;
+  };
+  // A lease lost on the last attempt: `running` but never runnable again.
+  await job("status='running',attempts=5");
+  expect(await judge()).toMatchObject({ scanned: 33, stage_unstated: 30, stage_pending: 0 });
+  // A replay job whose plan is paused.
+  await env.DB.prepare(
+    `INSERT INTO observation_replay_plans(id,created_at_ms,updated_at_ms,source_id,parser_name,
+      parser_version,artifact_id_high_water,status,reason)
+     VALUES(?,0,0,'sbi-shinsei-bank','sbi-shinsei-balance-summary-and-stage','0.1.0',?,'paused','synthetic')`,
+  )
+    .bind(run, run + 1)
+    .run();
+  await job(`status='pending',attempts=0,replay_plan_id=${run}`);
+  expect(await judge()).toMatchObject({ scanned: 33, stage_unstated: 30, stage_pending: 0 });
+  // Another version of the parser than the deployed one.
+  await job("status='pending',attempts=0,replay_plan_id=NULL,parser_version='0.0.9'");
+  expect(await judge()).toMatchObject({ scanned: 33, stage_unstated: 30, stage_pending: 0 });
+  // The same job, runnable again: the board waits.
+  await job("status='pending',attempts=0,replay_plan_id=NULL,parser_version='0.1.0'");
+  expect(await judge()).toMatchObject({ scanned: 0, stage_pending: 33 });
 }, 60000);
 
 test("the stage read reaches every table by key without statistics", () => {
@@ -286,13 +418,25 @@ test("the stage read reaches every table by key without statistics", () => {
   ).map((row) => row.detail);
   // Shown in the test output so a reviewer sees the plan the assertion reads.
   console.log(plan.join("\n"));
-  for (const table of ["v", "p", "a", "sa", "pp", "s"])
+  for (const table of ["v", "p", "a", "sa", "pp", "s", "wa", "j", "wp", "rp"])
     expect(plan.some((line) => line.startsWith(`SCAN ${table} `) || line === `SCAN ${table}`)).toBe(
       false,
     );
   // Driven from the page's own rows: never from all stage rows of every run.
   expect(plan).toContain("SEARCH sa USING INDEX idx_fetch_artifacts_run_role (fetch_run_id=?)");
   expect(plan).toContain("SEARCH s USING INDEX idx_val_obs_parse_run (parse_run_id=?)");
+  expect(plan).toContain("SEARCH wa USING INDEX idx_fetch_artifacts_run_role (fetch_run_id=?)");
+  expect(
+    plan.some((line) =>
+      /^SEARCH j USING (?:PRIMARY KEY|INDEX sqlite_autoindex_observation_parse_jobs_1) \(fetch_artifact_id=\? AND parser_name=\? AND parser_version=\?\)$/u.test(
+        line,
+      ),
+    ),
+  ).toBe(true);
+  expect(
+    plan.some((line) => /^SEARCH wp USING (?:PRIMARY KEY|(?:COVERING )?INDEX)/u.test(line)),
+  ).toBe(true);
+  expect(plan.some((line) => /^SEARCH rp USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
   expect(plan.some((line) => /^SEARCH pp USING (?:PRIMARY KEY|INDEX)/u.test(line))).toBe(true);
   expect(plan.some((line) => line.includes("idx_val_obs_subject"))).toBe(false);
   expect(plan.some((line) => line.includes("idx_fetch_artifacts_source_dataset_time"))).toBe(false);

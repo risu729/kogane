@@ -4,6 +4,13 @@
 // exports of a Worker's entry module, and the tests pin these values.
 
 export const LANES = ["incremental", "repair", "replay"] as const;
+
+/**
+ * Attempts a parse job gets before it is `failed`. The price lane reads it
+ * too: it waits for a run's stage page only while that page's job can still
+ * run (price-promotion-job.ts, ADR 0031).
+ */
+export const PARSE_MAX_ATTEMPTS = 5;
 export type Lane = (typeof LANES)[number];
 
 /** Incremental jobs executed per sweep: the historical per-sweep budget. */

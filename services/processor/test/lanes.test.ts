@@ -469,6 +469,7 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     unsupported_currency: expect.any(Number),
     tier_unmatched: expect.any(Number),
     stage_unstated: expect.any(Number),
+    stage_pending: expect.any(Number),
     written: expect.any(Number),
   });
   expect(lines[0]).toHaveProperty("lanes");

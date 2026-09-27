@@ -20,10 +20,15 @@
 //     collection run (ADR 0031): one read per tick, STAGE_SQL, made only when
 //     the page holds board rows, gives each board row its category and the
 //     categories the run's published `sbi-shinsei-balance-summary-and-stage`
-//     observations state.
+//     observations state. A board row whose run still has its stage page to
+//     parse (a job of the deployed stage parser that can still run and no
+//     published parse of that page) is not judged: the page stops before it
+//     and the cursor waits there, as it waits for a pending parse, so a board
+//     parsed before its stage page is never refused for good. The wait ends
+//     when that job publishes, fails or runs out of attempts.
 //   * Its log line and tick record carry counts only: `scanned`, `promoted`,
 //     `basis_unverified`, `unsupported_currency`, `tier_unmatched`,
-//     `stage_unstated` and `written`. No price, quantity, code, category or account label leaves
+//     `stage_unstated`, `stage_pending` and `written`. No price, quantity, code, category or account label leaves
 //     the lane.
 import {
   domesticCurrentPrice,
@@ -38,6 +43,7 @@ import {
   type PriceClaimKind,
   type PriceVerdict,
 } from "../../../packages/domain/src/price-sources.ts";
+import { PARSE_MAX_ATTEMPTS } from "./lane-budgets.ts";
 import {
   SBI_SHINSEI_CUSTOMER_ACCOUNT,
   SBI_SHINSEI_STAGE_METRIC,
@@ -72,6 +78,12 @@ export interface PricePromotionResult {
    * run states no stage category, or more than one (ADR 0031).
    */
   stage_unstated: number;
+  /**
+   * Claims left for a later tick, not judged and not in `scanned`: the page
+   * stopped at a board row whose run's stage page is still to be parsed
+   * (ADR 0031).
+   */
+  stage_pending: number;
   /** Price rows this tick newly wrote. */
   written: number;
 }
@@ -135,10 +147,14 @@ const DOMESTIC_RECORD_SQL = `SELECT 'position' AS role,po.parse_run_id,po.source
  * ?1 is a JSON array of board observation ids. Per row: its category as JSON
  * text (`->` keeps the JSON type, so `"3"` and `3` differ), how many distinct
  * categories the run's published stage observations state, and the category
- * when there is exactly one. Every table is reached by key from the page's
+ * when there is exactly one, and whether the run still waits for its stage:
+ * a balance-summary artifact of the run with no published stage parse and a
+ * job of the deployed stage parser that can still run (the parse lane's own
+ * runnable predicate less its clock). Every table is reached by key from the page's
  * own rows: the observation, parse run and artifact by primary key, the run's
  * balance-summary artifact by `idx_fetch_artifacts_run_role`, its publication
- * by primary key and its observations by `idx_val_obs_parse_run`. The CROSS
+ * by primary key and its observations by `idx_val_obs_parse_run`, the job and
+ * its replay plan by primary key. The CROSS
  * JOINs fix that order and the unary `+` keeps the planner off
  * `idx_val_obs_subject` and the dataset index, which would read the stage rows
  * of every run ever stored (test/price-promotion-stage.test.ts checks the plan
@@ -161,15 +177,32 @@ stage AS (
   AND pp.parser_name='${sbiShinseiBalanceSummaryAndStage.name}'
  CROSS JOIN valuation_observations s ON s.parse_run_id=pp.parse_run_id
   AND +s.metric='${SBI_SHINSEI_STAGE_METRIC}' AND +s.source_account='${SBI_SHINSEI_CUSTOMER_ACCOUNT}'
- GROUP BY r.fetch_run_id)
-SELECT b.id,b.row_category,coalesce(st.stated,0) AS stated,st.category
- FROM board b LEFT JOIN stage st ON st.fetch_run_id=b.fetch_run_id`;
+ GROUP BY r.fetch_run_id),
+waiting AS (
+ SELECT DISTINCT r.fetch_run_id
+ FROM runs r
+ CROSS JOIN fetch_artifacts wa ON wa.fetch_run_id=r.fetch_run_id
+  AND +wa.source_id='sbi-shinsei-bank' AND +wa.dataset='balance-summary-and-stage'
+ CROSS JOIN observation_parse_jobs j ON j.fetch_artifact_id=wa.id
+  AND j.parser_name='${sbiShinseiBalanceSummaryAndStage.name}'
+  AND j.parser_version='${sbiShinseiBalanceSummaryAndStage.version}'
+ WHERE +j.status IN ('pending','running') AND +j.attempts<${PARSE_MAX_ATTEMPTS}
+  AND (j.replay_plan_id IS NULL OR EXISTS(SELECT 1 FROM observation_replay_plans rp
+   WHERE rp.id=j.replay_plan_id AND rp.status='running'))
+  AND NOT EXISTS(SELECT 1 FROM published_parse_runs wp WHERE wp.fetch_artifact_id=wa.id
+   AND wp.parser_name='${sbiShinseiBalanceSummaryAndStage.name}'))
+SELECT b.id,b.row_category,coalesce(st.stated,0) AS stated,st.category,
+  w.fetch_run_id IS NOT NULL AS waiting
+ FROM board b LEFT JOIN stage st ON st.fetch_run_id=b.fetch_run_id
+ LEFT JOIN waiting w ON w.fetch_run_id=b.fetch_run_id`;
 
 interface StageRow {
   id: number;
   row_category: string | null;
   stated: number;
   category: string | null;
+  /** 1 while the row's run still has its stage page to parse. */
+  waiting: number;
 }
 
 /** What STAGE_SQL says about one board row: its category and its run's stage. */
@@ -260,13 +293,17 @@ function parsedExtra(text: string): unknown {
   }
 }
 
+/**
+ * The verdicts of a valuation page, judged up to the first board row whose
+ * run still waits for its stage page (`held`: that row's index, or the page
+ * length when nothing waits). Rows from `held` on get no verdict.
+ */
 async function valuationVerdicts(
   db: D1Like,
-  rows: ValuationCandidate[],
+  page: ValuationCandidate[],
   fxQuoteBasis: FxQuoteBasisTable,
-): Promise<PriceVerdict[]> {
-  const domestic = rows.filter((row) => row.parser_name === VALUATION_PARSERS[1]);
-  const board = rows.filter(
+): Promise<{ verdicts: PriceVerdict[]; held: number }> {
+  const boardRows = page.filter(
     (row) =>
       row.parser_name === VALUATION_PARSERS[0] &&
       isFxBoardRow({
@@ -277,17 +314,21 @@ async function valuationVerdicts(
       }),
   );
   const stages = new Map<number, StageRow>(
-    board.length === 0
+    boardRows.length === 0
       ? []
       : (
           (
             await db
               .prepare(STAGE_SQL)
-              .bind(JSON.stringify(board.map((row) => row.id)))
+              .bind(JSON.stringify(boardRows.map((row) => row.id)))
               .all<StageRow>()
           ).results ?? []
         ).map((row) => [row.id, row]),
   );
+  const firstWaiting = page.findIndex((row) => stages.get(row.id)?.waiting === 1);
+  const held = firstWaiting === -1 ? page.length : firstWaiting;
+  const rows = page.slice(0, held);
+  const domestic = rows.filter((row) => row.parser_name === VALUATION_PARSERS[1]);
   const records =
     domestic.length === 0
       ? []
@@ -297,7 +338,7 @@ async function valuationVerdicts(
             .bind(JSON.stringify([...new Set(domestic.map((row) => row.parse_run_id))]))
             .all<RecordRow>()
         ).results ?? []);
-  return rows.map((row) => {
+  const verdicts = rows.map((row) => {
     if (row.parser_name === VALUATION_PARSERS[1]) {
       // POSITION_VALUATIONS_SQL's pairing: same parse run, account and code,
       // and the valuation's bytes inside the position's MTS record.
@@ -360,6 +401,7 @@ async function valuationVerdicts(
       fxQuoteBasis,
     );
   });
+  return { verdicts, held };
 }
 
 function positionVerdicts(rows: PositionCandidate[]): PriceVerdict[] {
@@ -440,6 +482,7 @@ export async function pricePromotionSweep(
     unsupported_currency: 0,
     tier_unmatched: 0,
     stage_unstated: 0,
+    stage_pending: 0,
     written: 0,
   };
   const cursors = new Map<string, number>(
@@ -461,15 +504,22 @@ export async function pricePromotionSweep(
     const rows =
       (await db.prepare(candidatesSql).bind(from, upper, budget).all<Record<string, unknown>>())
         .results ?? [];
-    const verdicts =
+    const { verdicts, held } =
       kind === "valuation"
         ? await valuationVerdicts(db, rows as unknown as ValuationCandidate[], fxQuoteBasis)
-        : positionVerdicts(rows as unknown as PositionCandidate[]);
+        : { verdicts: positionVerdicts(rows as unknown as PositionCandidate[]), held: rows.length };
     for (const verdict of verdicts) result[verdict.outcome] += 1;
-    result.scanned += rows.length;
-    // A full page stops at its last row; a short page has read everything up
-    // to the bound, so the cursor moves past the rows no rule reads as well.
-    const last = rows.length === budget ? Number(rows.at(-1)!["id"]) : upper;
+    result.scanned += held;
+    result.stage_pending += rows.length - held;
+    // A held page stops just before the board row that waits for its stage; a
+    // full page stops at its last row; a short page has read everything up to
+    // the bound, so the cursor moves past the rows no rule reads as well.
+    const last =
+      held < rows.length
+        ? Number(rows[held]!["id"]) - 1
+        : rows.length === budget
+          ? Number(rows.at(-1)!["id"])
+          : upper;
     result.written += await commit(db, kind, verdicts, last, now);
   }
   return result;

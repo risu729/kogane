@@ -86,6 +86,7 @@ import {
   LANE_BUDGETS,
   LANES,
   MAX_LANE_JOBS,
+  PARSE_MAX_ATTEMPTS,
   type Lane,
 } from "./lane-budgets.ts";
 import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identity";
@@ -104,7 +105,7 @@ const REPORT_BASE_UNIT = "JPY";
 const REPORT_PERIMETER = "perimeter:all-visible-evidence";
 const SCAN_PAGE = 200;
 const MAX_BYTES = 16 * 1024 * 1024;
-const MAX_ATTEMPTS = 5;
+const MAX_ATTEMPTS = PARSE_MAX_ATTEMPTS;
 const LEASE_MS = 10 * 60 * 1000;
 // Contract v2 budgets: bounded like observation rows so one artifact cannot
 // flood D1 with diagnostics. A parser exceeding them is a parser bug.

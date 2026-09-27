@@ -70,8 +70,9 @@ Concrete limits in the current code:
   row of the 13 currencies the provider's public pages quote per 1 unit is
   promoted only in the stage category the same run's balance summary states
   ([ADR 0031](adr/0031-sbi-shinsei-stage-category-fx-tier.md); the two were
-  observed on 2026-09-27 to use one scheme). Until the stage parser has
-  published a run's balance summary, that run's board promotes nothing. A
+  observed on 2026-09-27 to use one scheme). A board waits while its run's
+  balance-summary parse can still run, and promotes nothing when that page is
+  missing, refused or its job failed. A
   debit posted more than three days from the
   due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
   Sony Bank), partial payments, refunds and complete purchase recognition

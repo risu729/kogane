@@ -103,6 +103,7 @@ const RESULTS = {
     unsupported_currency: 1,
     tier_unmatched: 1,
     stage_unstated: 1,
+    stage_pending: 1,
     written: 3,
   },
   reports: { generated: 0, reused: 1, reportId: "report-synthetic" },
