@@ -13,6 +13,7 @@
 // month position and a count of the months it kept (ADR 0005's amendment), so
 // the free text of an upstream error never reaches the shared bucket either.
 import { assertRedactedHtml } from "./redaction";
+import { nameRedactionCount } from "./name-redaction";
 import {
   CONNECTION_STOP_CODES,
   SCHEDULE_PAGE_CODES,
@@ -363,11 +364,16 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
       }
       const bytes = bodyBytes(artifact.body);
       const role = artifactRole(artifact);
+      // Person-name cells the redaction replaced (ADR 0029's amendment): a
+      // count, recorded on the page's manifest entry, never a value.
+      let redactedFieldCount: number | undefined;
       if (role === "sanitized_provider_capture") {
         // The redaction the collector applied is re-checked here, against the
         // same invariants the central path enforces, before the bytes leave
         // the Worker.
-        assertRedactedHtml(new TextDecoder().decode(bytes));
+        const html = new TextDecoder().decode(bytes);
+        assertRedactedHtml(html);
+        redactedFieldCount = nameRedactionCount(html);
       }
       const sha256 = await sha256Hex(bytes);
       const artifactKey = `${unitKey}/${artifact.filename}`;
@@ -388,13 +394,15 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         bytes: bytes.byteLength,
         ...(artifact.statementState ? { statementState: artifact.statementState } : {}),
         ...(artifact.period ? { period: artifact.period } : {}),
+        ...(redactedFieldCount === undefined ? {} : { redactedFieldCount }),
       });
       if (role === "sanitized_provider_capture") {
         transformations.push({
           transformationId: `redacted:${artifactKey.replaceAll("/", ":")}`,
           stepKind: "redacted",
           transformerId: "myjcb-sanitizer",
-          transformerVersion: "v1",
+          // v2: also replaces person-name cells (ADR 0029, amendment 2026-09-27).
+          transformerVersion: "v2",
           // The provider HTML was deliberately not retained.
           inputArtifactKeys: [],
           outputArtifactKey: artifactKey,
