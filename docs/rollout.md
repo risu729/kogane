@@ -187,7 +187,7 @@ Repair READ using [the rebuild runbook](read-rebuild-runbook.md).
 
 ## 6. One-time GitHub and Cloudflare settings
 
-These settings are maintained in the repository owner’s GitHub and Cloudflare accounts.
+These settings are maintained in the repository owner's GitHub and Cloudflare accounts.
 Until each is done the corresponding automation degrades safely rather than
 doing something partial. The authoritative text is
 [ci-cd.md](ci-cd.md#required-github-settings); this is the checklist form.

@@ -111,7 +111,7 @@ foreign keys. `0002_registry.sql` seeds every source currently represented by
 `docs/sources`, plus the existing `vpass` and `global-pass` collectors.
 `0003_runtime_contract.sql` adds MoneyForward and a dedicated synthetic
 verification source. The registry also
-seeds separate Kuebiko, collector-R2, and local-file import mechanisms. “Active”
+seeds separate Kuebiko, collector-R2, and local-file import mechanisms. "Active"
 means evidence may be catalogued; it does not claim unattended collection is
 already implemented.
 
