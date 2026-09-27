@@ -7,9 +7,10 @@
 // fails across the seeds, and each change listed in MUTATIONS, which would make
 // the CTEs inexact, fails the comparison on some seed. Every value is synthetic.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { cardSettlementReadinessCtes } from "../src/card-settlement-readiness";
 import { explain } from "./card-usage-plan";
+import { fullCoreSchema } from "./card-usage-scale-fixture";
 import {
   READINESS_STATES,
   randomSettlementStore,
@@ -120,6 +121,13 @@ const ids = (db: Database): string[] =>
   );
 
 describe("keyed card settlement readiness on random stores", () => {
+  // The first store pays the one-time CORE schema build (schema-template.ts,
+  // every migration in order), which crossed a seed's 5 s default timeout on
+  // the loaded CI runner. Pay it here, outside any seed's budget.
+  beforeAll(() => {
+    fullCoreSchema().close();
+  }, 60_000);
+
   const stores = new Map<number, RandomSettlementStore>();
   const store = (seed: number): RandomSettlementStore => {
     let found = stores.get(seed);
