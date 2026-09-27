@@ -195,7 +195,9 @@ is recognised, and nothing is counted twice.
 **The v1 and v2 tokens of one card are two entities.** The collector derives
 only v2 tokens, and the importer's key that made the v1 tokens is lost, so no
 equal value links a card's importer-era account to its collector-era account.
-Until a reviewed crosswalk joins them, a card read under both is two account
+Until a reviewed crosswalk
+([below](#joining-importer-era-and-collector-era-identities-one-time)) joins
+them, a card read under both is two account
 entities with nothing carried over; its purchases are recognised again on the
 new account (the importer's event is retired, so the captured total is not
 doubled). No owner action or secret is needed any more. After the next
@@ -238,7 +240,8 @@ current monthly snapshot per unit key and month, so for a month both
 producers captured the importer's v1 snapshot and the collector's v2 snapshot
 are both current: the same provider rows are listed under two source accounts
 and two account entities, and nothing maps one to the other. That is a known
-limit until a reviewed crosswalk joins the two identities of each account.
+limit until a reviewed crosswalk joins the two identities of each account
+([below](#joining-importer-era-and-collector-era-identities-one-time)).
 The runs are parsed as soon as they register (MoneyForward's datasets are not
 withheld). No owner action or secret is needed any more. After the next
 collection, count identities per producer and version (read-only, counts only):
@@ -300,8 +303,12 @@ counter, because its external id carries the identity itself. `unique`: the
 new value shares rows with exactly one old value, which shares rows with no
 other new value. `ambiguous`: anything else shared. `none`: nothing shared
 (`oldKeyRef` and `oldOnlyRows` are null). Only a `unique` line can be
-recorded; `ambiguous` and `none` stay split. Collector Vpass statement pages
-are not parsed today, so Vpass lines are `none` or absent until they are.
+recorded; `ambiguous` and `none` stay split. A verdict is a proposal, not
+proof: an identical row in another account (same month, date, description,
+amount and occurrence) makes a real match `ambiguous`, and coincidental rows
+alone can make an unrelated pair `unique`, so read `sharedRows` against the
+only-rows before recording one. Collector Vpass statement pages are not
+parsed today, so Vpass lines are `none` or absent until they are.
 
 **2. Record one crosswalk (operator only).** Through the command routes of
 the evidence browser (`POST /api/command/v1/plan`, then `simulate`,

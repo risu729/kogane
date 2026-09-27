@@ -6,13 +6,16 @@
 // operator records it through the change lifecycle, and from then on the new
 // value resolves to the importer-era entity.
 //
-// Everything is synthetic: tokens are repeated hex digits or HMACs under
-// made-up keys, and the rows, merchants and amounts are placeholders in the
-// observed shapes. The collector-era values here are `v1`-shaped values under
-// another key, which is what the deployed binding view and resolver admit
-// today; the code treats `v1` and `v2` alike (packages/storage-d1 tests).
+// Everything is synthetic: tokens are repeated hex digits or unkeyed digests
+// of the anonymous fixtures' tuple, and the rows, merchants and amounts are
+// placeholders in the observed shapes. The importer-era values are
+// `v1`-shaped (the importer's HMACs; the key is gone, so they are made up) and
+// the collector-era values are the `v2` values the collectors derive since
+// ADR 0029: the Vpass collector's token is a `vpass-card-v2-` value bound in
+// its own run, and the MoneyForward collector's identity is the one
+// `moneyForwardRunPlan` derives from the fixture's detail page.
 import { afterEach, expect, test } from "bun:test";
-import { createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -24,7 +27,7 @@ import {
   type IdentityCrosswalkPayload,
   type Principal,
 } from "../../../packages/application/src/index.ts";
-import { persistRun } from "../../../packages/collection/src/writer.ts";
+import { persistRun, type PersistRunPlan } from "../../../packages/collection/src/writer.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import {
   CROSSWALK_PROPOSALS_SQL,
@@ -64,8 +67,8 @@ afterEach(async () => {
 
 const COLLECTOR_VPASS = "collector-vpass";
 const NOW = "2026-09-27T00:00:00.000Z";
-/** The collector's token for the card whose importer token is `TOKEN_A`, under another key. */
-const NEW_TOKEN = `vpass-card-v1-${"c".repeat(64)}`;
+/** The collector's v2 token (ADR 0029) for the card whose importer token is `TOKEN_A`. */
+const NEW_TOKEN = `vpass-card-v2-${"c".repeat(64)}`;
 const operator: Principal = {
   id: "operator@synthetic.test",
   kind: "human",
@@ -219,7 +222,7 @@ test("Vpass: rows captured by both producers propose one unique crosswalk, count
 test("Vpass: a third value sharing a row makes it ambiguous, and a value sharing nothing is none", async () => {
   const w = await world();
   const OTHER_OLD = `vpass-card-v1-${"d".repeat(64)}`;
-  const LONE = `vpass-card-v1-${"e".repeat(64)}`;
+  const LONE = `vpass-card-v2-${"e".repeat(64)}`;
   await w.vpass({
     family: "web",
     month: "202605",
@@ -532,12 +535,35 @@ test("Vpass: without a crosswalk the rule keeps the collector's own entity", asy
 // ── MoneyForward ME: the external id carries the identity, so rows are
 // compared by what its fingerprint covers besides it. ─────────────────────
 
-const MF_IMPORTER_KEY = "5a".repeat(32);
-const MF_COLLECTOR_KEY = "c3".repeat(32);
-const mfToken = (key: string) =>
-  `moneyforward-account-v1-${createHmac("sha256", Buffer.from(key, "hex"))
-    .update(JSON.stringify(["moneyforward-account-v1", "anonymous-account", "anonymous-service"]))
-    .digest("hex")}`;
+/** What the collector derives from the fixture's detail page (ADR 0029). */
+const MF_V2 = `moneyforward-account-v2-${createHash("sha256")
+  .update(JSON.stringify(["moneyforward-account-v2", "anonymous-account", "anonymous-service"]))
+  .digest("hex")}`;
+/** A made-up importer identity: the key that derived the real ones is gone. */
+const MF_V1 = `moneyforward-account-v1-${"5a".repeat(32)}`;
+
+/** The plan with every unit key `from` renamed `to`: how an importer-era run carried its v1 key. */
+function relabel(plan: PersistRunPlan, from: string, to: string): PersistRunPlan {
+  const swap = (key: string) => (key === from ? to : key);
+  return {
+    run: {
+      ...plan.run,
+      requestedScope: {
+        ...plan.run.requestedScope,
+        unitKeys: plan.run.requestedScope.unitKeys.map(swap),
+      },
+      units: plan.run.units.map((unit) => ({ ...unit, unitKey: swap(unit.unitKey) })),
+      ranges: plan.run.ranges.map((range) => ({
+        ...range,
+        rangeKey: range.rangeKey.replace(from, to),
+        ...(range.unitKey === undefined ? {} : { unitKey: swap(range.unitKey) }),
+      })),
+    },
+    artifacts: plan.artifacts.map((artifact) =>
+      artifact.unitKey === undefined ? artifact : { ...artifact, unitKey: swap(artifact.unitKey) },
+    ),
+  };
+}
 const fixture = (name: string) =>
   readFileSync(
     new URL(`../../../tests/fixtures/observation-pipeline/moneyforward/${name}`, import.meta.url),
@@ -592,7 +618,7 @@ async function mfStore(): Promise<Env> {
 
 async function mfRun(
   env: Env,
-  input: { runId: string; key: string; at: string; months: [string, string][]; producer?: string },
+  input: { runId: string; at: string; months: [string, string][]; importer?: boolean },
 ): Promise<void> {
   const pages: RawArtifact[] = [
     {
@@ -614,24 +640,21 @@ async function mfRun(
       body,
     })),
   ];
-  const plan = await moneyForwardRunPlan(
-    {
-      schemaVersion: "moneyforward-worker-poc-v1",
-      runId: input.runId,
-      startedAt: input.at,
-      completedAt: input.at,
-      status: "success",
-      accountDetailCount: 1,
-      monthlyFragmentCount: input.months.length,
-      artifacts: pages,
-      failures: [],
-    },
-    input.key,
-  );
-  const run =
-    input.producer === undefined
-      ? plan
-      : { ...plan, run: { ...plan.run, producer: input.producer } };
+  const plan = await moneyForwardRunPlan({
+    schemaVersion: "moneyforward-worker-poc-v1",
+    runId: input.runId,
+    startedAt: input.at,
+    completedAt: input.at,
+    status: "success",
+    accountDetailCount: 1,
+    monthlyFragmentCount: input.months.length,
+    artifacts: pages,
+    failures: [],
+  });
+  // The importer's run of the same account carried its v1 identity.
+  const run = input.importer
+    ? relabel({ ...plan, run: { ...plan.run, producer: IMPORTER } }, MF_V2, MF_V1)
+    : plan;
   expect((await persistRun(env.EVIDENCE, run)).outcome).toBe("persisted");
   expect(
     await registerCollectionRun(env, { source: "moneyforward-me", runId: input.runId }),
@@ -640,22 +663,20 @@ async function mfRun(
 
 test("MoneyForward: the proposal matches rows across identities and the crosswalk joins the entities", async () => {
   const env = await mfStore();
-  const oldRef = mfToken(MF_IMPORTER_KEY);
-  const newRef = mfToken(MF_COLLECTOR_KEY);
+  const oldRef = MF_V1;
+  const newRef = MF_V2;
   await mfRun(env, {
     runId: "00000000-0000-4000-8000-00000000d030",
-    key: MF_IMPORTER_KEY,
     at: "2026-08-01T00:00:00.000Z",
     months: [
       ["2099-01", JANUARY],
       ["2099-02", FEBRUARY],
     ],
-    producer: IMPORTER,
+    importer: true,
   });
   expect(await sweep(env)).toMatchObject({ error: 0 });
   await mfRun(env, {
     runId: "00000000-0000-4000-8000-00000000c030",
-    key: MF_COLLECTOR_KEY,
     at: "2026-09-20T00:00:00.000Z",
     months: [["2099-02", FEBRUARY]],
   });
@@ -692,6 +713,9 @@ test("MoneyForward: the proposal matches rows across identities and the crosswal
   const [collector, importer] = await mappings();
   expect(collector!.account_id).not.toBe(importer!.account_id);
   expect(importer!.account_id).toBe(await importerEntityId("moneyforward-me", oldRef));
+  // Before the crosswalk the v2 value has its own entity, anchored like any
+  // identity value (ADR 0029), not the v1 value's.
+  expect(collector!.account_id).toBe(await importerEntityId("moneyforward-me", newRef));
 
   const planned = await plan(env.DB, operator, payload(lines[0]!));
   if (!planned.ok) throw new Error(planned.error);
@@ -699,6 +723,26 @@ test("MoneyForward: the proposal matches rows across identities and the crosswal
   if (!committed.ok) throw new Error(committed.error);
   expect(await mappings()).toEqual([
     { producer_id: "collector-moneyforward-me", account_id: importer!.account_id, revision: 2 },
+    importer!,
+  ]);
+
+  // The rule itself now resolves the v2 value to the importer-era entity: a
+  // newer policy run over the collector's February parse appends a rule
+  // revision that names it.
+  const parse = await env.DB.prepare(
+    `SELECT p.id,a.id AS artifact_id,a.source_id,r.producer_id,a.fetch_run_id FROM parse_runs p
+      JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN fetch_runs r ON r.id=a.fetch_run_id
+     WHERE p.status='ok' AND r.producer_id='collector-moneyforward-me' AND a.dataset='monthly-transactions'`,
+  ).first<{
+    id: number;
+    artifact_id: number;
+    source_id: string;
+    producer_id: string;
+    fetch_run_id: number;
+  }>();
+  await identifyParse(env.DB, parse!, resolveIdentity, 3);
+  expect(await mappings()).toEqual([
+    { producer_id: "collector-moneyforward-me", account_id: importer!.account_id, revision: 3 },
     importer!,
   ]);
 }, 90_000);

@@ -15,7 +15,7 @@
 --    statement: the only difference is the kind CHECK on change_plans.kind and
 --    operation_receipts.operation_kind, which gains the new kind. approvals and
 --    decision_outbox are copied solely because they reference the rebuilt
---    parents. No migration from 0052 to 0056 touches these four tables.
+--    parents. No migration from 0052 to 0057 touches these four tables.
 --    D1 applies each migration atomically; foreign-key enforcement stays ON
 --    throughout. Explicit column lists preserve every historical value.
 --    https://developers.cloudflare.com/d1/reference/migrations/

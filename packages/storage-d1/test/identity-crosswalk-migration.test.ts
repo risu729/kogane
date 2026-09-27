@@ -1,7 +1,7 @@
 // 0058 (ADR 0030) adds `account_identity_crosswalk` and rebuilds the four
 // command tables to widen the kind CHECK by `identity.crosswalk.accept`, as
 // 0051 did for the card review kinds. These tests seed a store migrated
-// through 0056 with synthetic history of every existing kind and status, apply
+// through 0057 with synthetic history of every existing kind and status, apply
 // 0058 statement by statement with foreign keys on, and prove that nothing but
 // the CHECK changed in the rebuilt tables, and that the new table is
 // append-only and one-to-one per source.
@@ -60,7 +60,7 @@ function fixture() {
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
   const earlier = migrationFiles(CORE_MIGRATIONS_URL).filter((f) => f < MIGRATION);
-  expect(earlier.at(-1)).toBe("0056_sbi_shinsei_exchange_rate_policy_version.sql");
+  expect(earlier.at(-1)).toBe("0057_vpass_card_token_v2.sql");
   for (const file of earlier) apply(db, file);
   for (let index = 0; index < OLD_KINDS.length; index++) {
     const id = index + 1;

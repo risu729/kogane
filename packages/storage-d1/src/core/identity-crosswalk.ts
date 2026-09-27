@@ -101,6 +101,14 @@ export function crosswalkSubjectRef(
   return `proposal:identity-crosswalk|${source}|${fromRef}|${toRef}`;
 }
 
+/**
+ * The hot-path read of `accountEntityId`: one SEARCH of the
+ * UNIQUE(source_id,to_account_ref) index, pinned without table statistics in
+ * packages/storage-d1/test/identity-crosswalk-plan.test.ts.
+ */
+export const CROSSWALK_FROM_SQL =
+  "SELECT from_account_ref FROM account_identity_crosswalk WHERE source_id=? AND to_account_ref=?";
+
 /** The old value an accepted crosswalk maps `toRef` from, or null. One indexed read. */
 export async function crosswalkFrom(
   db: D1Like,
@@ -108,9 +116,7 @@ export async function crosswalkFrom(
   toRef: string,
 ): Promise<string | null> {
   const row = await db
-    .prepare(
-      "SELECT from_account_ref FROM account_identity_crosswalk WHERE source_id=? AND to_account_ref=?",
-    )
+    .prepare(CROSSWALK_FROM_SQL)
     .bind(source, toRef)
     .first<{ from_account_ref: string }>();
   return row?.from_account_ref ?? null;

@@ -20,8 +20,9 @@
   [ADR 0027](0027-moneyforward-collector-account-identity.md) (the importer's
   entity for an identity value, whichever producer read it),
   [ADR 0017](0017-card-purchase-review-commands.md) (the last widening of the
-  command vocabulary, which 0058 repeats), ADR 0029 (in review in parallel:
-  collectors that derive their identity values without the lost key)
+  command vocabulary, which 0058 repeats),
+  [ADR 0029](0029-data-classification-and-unkeyed-identity.md) (collectors
+  that derive their identity values without the lost key)
 
 ## Context
 
@@ -29,7 +30,7 @@ The retired importer (`collector-r2-importer`) registered every Vpass card
 under a token `vpass-card-v1-<64 hex>` and every MoneyForward ME account
 under an identity `moneyforward-account-v1-<64 hex>`, each an HMAC under the
 importer's secret key. That key is lost. A collector that derives its values
-any other way (another key, or the keyless derivation ADR 0029 proposes,
+any other way (another key, or the keyless derivation ADR 0029 adopts,
 `vpass-card-v2-…` and `moneyforward-account-v2-…`) produces a different
 value for the same card or account. ADR 0023 and ADR 0027 derive the account
 entity of a value from the importer's reference for that value, so a
@@ -51,8 +52,12 @@ Two facts about the rows decide how the overlap can be measured:
   `moneyforward-monthly:<fingerprint>:<occurrence>`, and the fingerprint
   covers the account identity. The same row therefore has two different ids
   in the two eras. What the fingerprint covers besides the identity (the
-  selected month, the date, the description and the amount text) plus the
-  occurrence counter is the same.
+  selected month, the date, the description and the amount) plus the
+  occurrence counter is the same. The comparison reads the stored
+  observation's `amount_text` (the parsed signed amount), not the cell text
+  the fingerprint hashed; two cells that differ only in formatting compare
+  equal, which a capture of one row by two producers cannot tell apart
+  anyway.
 
 ## Options considered
 
@@ -171,6 +176,17 @@ reason}` (`fromRef` the old value, `toRef` the new; both values of the
   emits transactions only, so no balance or total is computed over them).
   For Vpass, card-month currentness in the purchase lane ignores the producer
   (ADR 0014), as before.
+- **Coincidental rows.** A row key is not an account identifier. Two
+  accounts can carry an identical row (for MoneyForward the same month,
+  date, description, amount and occurrence; for Vpass the same external id,
+  which needs the same card ordinal and page as well). Such a row in another
+  account turns a real match into `ambiguous`, which cannot be recorded, and
+  a new value whose true counterpart the importer never captured can be
+  `unique` against another account on coincidental rows alone. The verdict
+  is therefore only a proposal: the operator reads `sharedRows` against
+  `newOnlyRows` and `oldOnlyRows` (a real continuation shares most of the
+  months both captured) before planning, and nothing is recorded without
+  that decision.
 - **No overlap, no join.** A card or account whose collector capture shares
   no stored row with the importer's (the collector captured only later
   months, or the Vpass card or page numbering changed) is `none` and stays
@@ -208,17 +224,26 @@ reason}` (`fromRef` the old value, `toRef` the new; both values of the
   the crosswalk a new collector capture is attributed to the importer-era
   entity with no extra revision, and a newer policy run's rule revision names
   that entity, where without a crosswalk it names the collector's own; a
-  MoneyForward account captured under two keys, whose four February rows
-  carry four distinct external ids, proposes `unique` (2 shared, 2 old-only,
-  1 month) and the committed crosswalk maps the collector's source account to
-  the importer-era entity.
+  MoneyForward account captured by the importer under a `v1` identity and by
+  the collector under the `v2` identity it derives from the page (ADR 0029),
+  whose four February rows carry four distinct external ids, proposes
+  `unique` (2 shared, 2 old-only, 1 month); before the crosswalk the `v2`
+  value maps to its own entity, the committed crosswalk maps the collector's
+  source account to the importer-era entity, and a newer policy run's rule
+  revision names that entity. The collector-era Vpass tokens are
+  `vpass-card-v2-` values bound in the collector's own run.
+- `packages/storage-d1/test/identity-crosswalk-plan.test.ts` (whole CORE
+  schema, no table statistics): the resolver's read is one SEARCH of the
+  UNIQUE (source, new value) index; the proposal and the pair re-measurement
+  reach observations through `identity_observation_lookup` and rows and
+  source accounts by key, never by scanning them.
 - `packages/storage-d1/test/identity-crosswalk.test.ts`: both value
   derivations of both sources are values and nothing else is; the
   importer-era entity equals the one the importer's reference derives; the
   verdict rule in both directions; every line has exactly the eight fields,
   identity values or counts.
 - `packages/storage-d1/test/identity-crosswalk-migration.test.ts`: 0058 on a
-  store migrated through 0056 with history of all 13 earlier kinds keeps every
+  store migrated through 0057 with history of all 13 earlier kinds keeps every
   row, index, trigger and FK of the four rebuilt tables, differs only in the
   kind CHECK, accepts the new kind and refuses unknown ones, keeps the
   append-only and forward-only guards, rolls back whole when interrupted; the
