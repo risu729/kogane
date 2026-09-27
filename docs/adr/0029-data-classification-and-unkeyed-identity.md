@@ -112,12 +112,14 @@ relied on across owners.
   credentials, and in a single-owner store they cannot be confused with
   anyone else's. This is what the code already does for SBI Shinsei and
   Mizuho.
-- (d) **Personal names** (account holder names, cardholder names): avoided in
-  CORE. _Redefined by [amendment 2](#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence):
-  names may be stored in raw evidence and observations as the provider shows
-  them._ Consistency checks may compare them in memory but do not persist them.
-  Provider pages that contain names stay in R2 under the existing redaction
-  templates.
+- (d) **Personal names** (account holder names, cardholder names): may be
+  stored in raw evidence and in observations as the provider shows them; no
+  collector removes them, and nothing reads them until a reviewed change needs
+  one. Consistency checks may compare them in memory. _Redefined by
+  [amendment 2](#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence);
+  the original text read: "avoided in CORE. Consistency checks may compare
+  them in memory but do not persist them. Provider pages that contain names
+  stay in R2 under the existing redaction templates."_
 - Logs and stored operational records keep the existing rule: counts and
   closed codes only.
 

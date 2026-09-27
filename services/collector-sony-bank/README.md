@@ -40,7 +40,7 @@ objects/<2 hex>/<sha256>                 gross-balance.json、yen-history.csv、
 runs/sony-bank/<run-id>/terminal.json    最後に書くrunの完了記録（artifact keyとobjectの対応を持つ）
 ```
 
-login response、氏名、Cookie値、CSRF、password、WALLETの一時SSO値、JSESSIONID、hidden form値はR2へ保存しない。WALLET HTMLは保存直前にこれらを除去する。取得した残高・履歴には個人金融情報が含まれるため、bucketをpublicにしない。
+login response（氏名を含む）、Cookie値、CSRF、password、WALLETの一時SSO値、JSESSIONID、hidden form値はR2へ保存しない。WALLET HTMLは保存直前にJSESSIONIDとhidden form値を除去する。本文のテキストは除去しない（人名は保存してよい。ADR 0029 の amendment 2）。取得した残高・履歴には個人金融情報が含まれるため、bucketをpublicにしない。
 
 WALLETは銀行BFFの`/jada/debit-sso/login-usage-dtl-inq`から毎回一時SSO値を発行し、
 `igw.sonybank.jp`を経由して`dc.sonybank.jp`の月別一覧へ通常HTTPで接続する。明細項目は一覧に
