@@ -263,11 +263,15 @@ as soon as they register (MoneyForward's datasets are not withheld), so this
 check is after the fact; removing the secret stops new identities, and the
 ones registered stay (evidence is append-only).
 
-**Account continuity.** Even under the importer's key, the collector's rows
-get their own source account (the reference includes the producer) and
-their own account entity, with their own mapping revisions and manual
-decisions. Unlike Vpass, no rule derives that entity from the importer's
-reference; joining them is an identity decision nobody has taken.
+**Account continuity.** The collector's rows get their own source account
+(the reference includes the producer), with its own mapping revisions and
+manual decisions. As for a trusted Vpass token, the account entity of a
+MoneyForward identity is derived from the importer's reference for that
+identity (`accountEntityId`), so under the importer's key the collector's
+source account maps to the importer-era entity by rule. An operator's
+re-mapping of the importer's source account is not followed, and account
+connection reviews, keyed by producer, do not carry over. Under another key
+the identity differs and so does the entity.
 
 ## Policy 2: Mizuho rule re-identification
 

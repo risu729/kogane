@@ -5,11 +5,13 @@
 - Carried by:
   `services/collector-moneyforward/src/account-identity.ts`,
   `services/collector-moneyforward/src/shared-collection.ts`,
+  `packages/storage-d1/src/core/identity-store.ts` (`accountEntityId`),
   [collection: Money Forward ME](../collection.md#money-forward-me-servicescollector-moneyforward-kogane-moneyforward-collector-poc),
   [identity operations](../identity-operations.md#moneyforward-collector-runs-carry-the-account-identity),
   [MoneyForward source record](../sources/moneyforward.md),
   `services/collector-moneyforward/test/account-identity.test.ts`,
   `services/processor/test/moneyforward-shared-r2.test.ts`,
+  `services/processor/test/moneyforward-producer-switch.test.ts`,
   `services/processor/test/collector-plans.test.ts`
 - Related: [ADR 0023](0023-vpass-collector-card-binding.md) (the same move for
   Vpass, option 3), [ADR 0021](0021-collector-registration-contract.md) and
@@ -73,6 +75,28 @@ bytes. What was missing is only the key and the derivation.
    no evidence that one was needed (ADR 0004: unobserved semantics stay
    unsupported).
 
+For the account entity (the source-account reference includes the producer,
+so the importer's and the collector's references for one identity differ):
+
+4. **Leave each producer's reference its own entity.** Rejected in review:
+   one provider account would be two entities, and what is keyed by the
+   entity (its label, role and status, ownership links, operator decisions on
+   `account:<entity>`) would not follow the account across the producer
+   switch, although the evidence that they are the same account is stored
+   and mechanical.
+5. **Derive the entity of an identity from the importer's reference for that
+   identity, whichever producer read it.** Chosen, as ADR 0023 did for a
+   trusted Vpass token. An identity is an HMAC of the provider's own account
+   tuple under a secret key, so two equal identities are the same key and the
+   same account; nothing about it is a heuristic. The importer-era entity ids
+   are unchanged.
+6. **Keep the collector's captures of the months the importer captured out of
+   the current snapshot until a decision.** Rejected: under the importer's
+   key the snapshot ranking already reads each account-month once (below), so
+   there is nothing to hold; under another key the read could not tell an
+   account the importer knew under another identity from an account linked
+   since, without guessing.
+
 ## Decision
 
 - **Collector.** `services/collector-moneyforward/src/account-identity.ts`
@@ -112,6 +136,19 @@ bytes. What was missing is only the key and the derivation.
   importer's for the same account only under the importer's key
   (`collector-r2-v1`). Nothing here, and no other code, maps an identity
   derived under another key to the importer's.
+- **Accounts.** `accountEntityId` in
+  `packages/storage-d1/src/core/identity-store.ts` derives the entity of a
+  MoneyForward identity (`["moneyforward-me:moneyforward-account-v1-<64 hex>"]`)
+  from `identityKey("sa", ["moneyforward-me", "collector-r2-importer", key])`,
+  for every producer. For the importer's own references this is the entity
+  they already had; a collector's reference for the same identity maps to that
+  entity by rule; an identity the importer never registered gets an entity no
+  importer reference names. Every other entity is derived from its own
+  reference as before. The mapping's status and reason
+  (`provider-local`, `verified-hmac-account-service-tuple-not-direct-account-alias`)
+  are unchanged, and no identity policy version changes: no collector
+  MoneyForward row has been identified before this change (every one was
+  `parser_rejected`), so no existing mapping moves.
 - **Nothing else changes.** No parser, parser version, identity pattern
   (`packages/identity/src/other.ts`), registration rule, dataset or migration
   changes. MoneyForward's parser datasets are not withheld (ADR 0022), so a
@@ -132,25 +169,35 @@ bytes. What was missing is only the key and the derivation.
   current snapshot (the ranking partitions by unit key and month and ignores
   the producer), so it replaces the importer's snapshot of the same month
   rather than adding to it; months only the importer captured stay current.
-  Nothing is counted twice and the importer's parses stay readable. What does
-  not carry over: the source-account reference includes the producer, so the
-  collector's rows get their own source account (`moneyforward-me:<identity>`
-  under `collector-moneyforward-me`) and their own account entity, with their
-  own mapping revisions and manual decisions; the importer's source account
-  keeps its entity, mappings and decisions. Unlike ADR 0023, this change adds
-  no rule that derives the collector's entity from the importer's reference:
-  that is an identity decision, and it is not taken here. MoneyForward's
-  observations are transactions of an aggregator mirror, and no purchase,
-  settlement or balance is keyed by these entities today.
-- **Under a new key**, every identity differs: each account becomes a new
-  unit, source account and entity, with nothing carried over, and no mapping
-  to the importer-era accounts is added (agents never decide identity). The
-  importer-era accounts stay as historical evidence under their own
-  identities. Their latest snapshot of each month stays current, because a
-  collector capture of the same month has a different unit key, so for the
-  months both captured the MoneyForward transactions read shows the same
-  provider rows under two source accounts. Nothing merges or hides them; that
-  needs its own decision. Any identities registered under the new key stay
+  Nothing is counted twice and the importer's parses stay readable (INV06).
+  That read is the only one MoneyForward rows reach: MoneyForward emits
+  transactions only (no balance, position or valuation), and card usage,
+  purchase recognition, reconciliation and settlement read only named
+  card and bank sources (`vpass`, `myjcb`, `smbc-bank`, `sbi-shinsei-bank`),
+  never `moneyforward-me`. The identity reads count observations per source
+  reference, as they already counted every importer re-capture, not provider
+  rows. The collector's rows get their own source account
+  (`moneyforward-me:<identity>` under `collector-moneyforward-me`), which maps
+  to the importer-era account entity (option 5), so what is keyed by the
+  entity carries over. What does not: the collector's source account starts
+  at its own rule revision, with none of the importer's source account's
+  mapping revisions or manual decisions; an operator's re-mapping of the
+  importer's source account to another entity is not followed and needs the
+  same decision again; and account connection reviews
+  (`account_connection_reviews`) are keyed by producer and connection key, so
+  the importer-era ones do not cover the collector's reference.
+- **Under a new key** (a limit, not a design choice), every identity differs:
+  each account becomes a new unit, source account and entity, with nothing
+  carried over, and no mapping to the importer-era accounts is added (agents
+  never decide identity). The importer-era accounts stay as historical
+  evidence under their own identities. Their latest snapshot of each month
+  stays current, because a collector capture of the same month has a
+  different unit key, so for the months both captured the MoneyForward
+  transactions read lists the same provider rows under two source accounts
+  (no total is computed over them, but the list shows them twice). Nothing
+  merges or hides them; that needs its own decision. The identity check
+  after the first run with the secret shows it (`known_to_importer` zero);
+  removing the secret stops new identities, and those registered stay
   (evidence is append-only).
 - **Without the secret**, or when a check fails, runs keep registering with
   positional units and their account pages are `parser_rejected`, as the first
@@ -190,10 +237,23 @@ bytes. What was missing is only the key and the derivation.
   the key registers and seals with its unit keyed by the identity and a
   catalogued count equal to the declared one; the plan without it still
   registers as before.
+- `services/processor/test/moneyforward-producer-switch.test.ts`: an
+  importer-era run (producer `collector-r2-importer`, the identity as unit
+  key, January and February) and the collector's later run under the same key
+  (February), both registered and parsed on every CORE migration: the shipped
+  transactions read (`transactionsSql`) lists January's rows from the
+  importer and February's once, from the collector; the importer's February
+  observations are still stored; the two producers' source accounts map to
+  the one account entity the importer's already had, and one `accounts` row
+  exists. Under another key the read lists February under both source
+  accounts and the two map to different entities (the stated limit). With the
+  rule removed the first test fails on the entity.
 - Read from the code, not changed or tested here: the parsers' identity check,
   the identity pattern in `packages/identity/src/other.ts` and
-  `docs/identity-sources.md` (unchanged), and the snapshot ranking in
-  `packages/read-model/src/sql.ts`.
+  `docs/identity-sources.md` (unchanged), the snapshot ranking in
+  `packages/read-model/src/sql.ts`, and the source filters of card usage,
+  purchase recognition, reconciliation (`RECONCILIATION_SLICES`) and
+  settlement readiness, none of which names `moneyforward-me`.
 - Not verified: whether the owner still holds the importer's key (the check
   after deploy answers it), and whether the provider's current account-detail
   pages still carry both inputs (the diagnostic's code answers it on the first
