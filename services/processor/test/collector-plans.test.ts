@@ -753,7 +753,11 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
           {
             kind: "top",
             index: 0,
-            rawJson: envelope({ WebMeisaiTopDisplayServiceBean: { meisaiList: [] } }),
+            // An empty month whose summary states zero rows: the card unit
+            // is complete (ADR 0023 option 7, ADR 0026).
+            rawJson: envelope({
+              WebMeisaiTopDisplayServiceBean: { meisaiList: [], webMeisaiTopK3Vo: { allCnt: 0 } },
+            }),
           },
         ],
         transactionCount: 0,
@@ -766,7 +770,8 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
     "sanitized_provider_capture/transformed/source_not_retained_for_security",
   ]);
   expect(registered.units).toEqual([{ unit_key: "card-001", artifacts: 4, declared: 4 }]);
-  // ADR 0022/0023 withhold Vpass from a parser dataset until the collector
-  // derives the card binding. The pages' new role must not lift that hold.
+  // ADR 0022/0023 withhold Vpass from a parser dataset until the collector's
+  // binding key is set and its tokens match the importer's. The pages' role
+  // must not lift that hold.
   expect(registered.datasets).toEqual([null]);
 });

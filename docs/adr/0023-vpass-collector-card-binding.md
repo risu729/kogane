@@ -269,18 +269,25 @@ For the card unit's coverage:
    decides what every registered run of every source means, and changing it
    is a registration contract change (its version, re-registration) with its
    own decision.
-7. **Declare the card unit `complete`.** Chosen. The unit collected every
-   statement month the provider listed for the card (any failure fails the
-   run), which is what the importer reported. The gap that is real, the
-   rolling window of months, stays on the run's `coverageStatus: partial` and
-   on the `statement-months` declared-coverage range. Limit: inside a month,
-   the walk (`collectMonth` in `src/worker.ts`) also ends on the first empty
-   page without checking that the provider's stated row count (`allCnt`,
-   `total`) was reached, so `complete` means "every listed month, each walked
-   until the provider returned an empty or last page", not a proven whole
-   month. ADR 0026 (#272, proposed) keeps the Vpass unit `partial` for exactly
-   this reason; whichever of the two merges second reconciles them, and the
-   Vpass pages are not released (below) until it is.
+7. **Declare the card unit `complete` unconditionally.** Rejected in review:
+   the unit did collect every month the provider listed (any failure fails
+   the run), but inside a month the walk (`collectMonth` in `src/worker.ts`)
+   ends on the first empty page without checking the provider's stated row
+   count, so `complete` would guess that each month is whole, which ADR 0026
+   and ADR 0004 forbid.
+8. **`complete` only when every walked month's captured rows equal the
+   provider's stated total.** Chosen. The plan reads the stored pages of each
+   month: the rows are the pages' `meisaiList` entries, the stated total is
+   `webMeisaiTopK3Vo.allCnt` on a finalized statement page or `total` on a
+   customized one (the last value the pages carry, the one the walk stopped
+   on). A month is `complete` when the two are equal,
+   `stated_total_unverified` when no page states a total or the value is not
+   a non-negative integer, and `stated_total_mismatch` when they differ; a
+   card with no month is `statement_months_absent`. The card unit is
+   `complete` only when every month is, and `partial` otherwise, so the run
+   registers `partial` and nothing binds. Nothing is rescaled or inferred from
+   the count. The rolling window of months stays on the run's
+   `coverageStatus: partial` and on the `statement-months` range.
 
 ### Decision
 
@@ -295,7 +302,10 @@ For the card unit's coverage:
   artifact) and `card-identity-binding.json` (`collector_derived`, one
   `extracted` step `vpass-card-binding` v1 with no input artifact, so its
   lineage registers as `source_bytes_not_available`). The card unit is
-  `complete`, the run stays `partial`.
+  `complete` only under option 8's check, otherwise `partial`; the run's own
+  coverage stays `partial`. The per-month counts, stated totals and codes are
+  in the run's `manifest.json`, and the card's code is in the persist
+  diagnostic (`coverage`).
 - **Registration.** `VPASS_CARD_BINDING_DESCRIPTOR` names the dataset
   `card-identity-binding` and format `vpass-card-identity-binding-json`
   version `1` for exactly that source, key, role and media type. It is not a
@@ -344,8 +354,8 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   dataset" is narrowed: releasing it is a later change, made only after this
   change is deployed, the owner has set the secret, the token check in
   [identity operations](../identity-operations.md#collector-vpass-runs-bind-in-their-own-run)
-  shows the collector's tokens are the importer's, and the card unit's
-  coverage claim is settled with ADR 0026 (option 7's limit).
+  shows the collector's tokens are the importer's, and the persist
+  diagnostics show card units reaching `complete` (option 8).
 - **The owner's one action** is to set `VPASS_CARD_BINDING_KEY` on
   `kogane-vpass-collector-poc` to the retired importer's
   `ORIGIN_FINGERPRINT_KEY`
@@ -376,12 +386,15 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   before the release exists to catch it.
 - Without the secret, or if the provider no longer sends the tuple, nothing
   binds and the earlier consequences hold.
-- Collector card runs register as `success` instead of `partial` from this
-  release on; terminals written before keep `partial` and stay unreadable to
-  identity. None of them has been parsed.
-- The same unit-coverage mechanism applies to other collectors; what each
-  collector's successful unit declares is ADR 0026's decision (#272), not
-  this one's.
+- Collector card runs whose every month meets its stated total register as
+  `success` from this release on; the others, and terminals written before,
+  register `partial` and stay unreadable to identity. None of them has been
+  parsed. Whether production finalized statement pages carry `allCnt` is not
+  shown by any fixture in this repository: if they do not, every such month
+  is `stated_total_unverified`, no card binds, and the diagnostics say so.
+- The same unit-coverage mechanism applies to other collectors; ADR 0026
+  records what each collector's successful unit declares, Vpass's rule
+  included.
 
 ### Verification
 
@@ -392,7 +405,11 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   run's units, the artifact's role, unit and step, and its payload; no tuple
   value in any stored byte and the token only in the terminal and the binding
   object; the token is the same across sessions and ordinals and differs by
-  key and tuple; each fail-closed code, with no binding stored.
+  key and tuple; each fail-closed code, with no binding stored. ("ADR 0023
+  option 7 / ADR 0026"): stated totals met across pages and both statement
+  shapes give a `complete` unit; a short, long, missing or unparsable total
+  and a card with no month each give a `partial` unit with its code in the
+  diagnostic.
 - `services/processor/test/vpass-collector-binding.test.ts`: the collector's
   real plan, persisted and registered on every CORE migration plus the
   operator bootstrap, seals as a successful run whose binding has the
@@ -400,7 +417,9 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   artifacts with that token; a statement page parsed by the deployed parser
   is identified under policy 2 through the pin and seal triggers and appears in
   `current_identity_observations` on `["vpass:card", token]`. Without the
-  secret the view is empty and the rows are run-scoped and unresolved. In the
+  secret the view is empty and the rows are run-scoped and unresolved. With
+  the secret but a month short of its stated total the card unit and the run
+  are `partial` and the view reads no binding. In the
   card world: the view's guards (importer producer, namespace, run key, a
   third unit, a second binding, a non-success binding report, a malformed
   token, no binding); the importer-era event of a card-month retired and
@@ -426,8 +445,8 @@ ALL` a shared-R2 select with the same requirements: a visible artifact of a
   the same account reference as the importer's.
 - Not verified: whether the provider's current responses still carry the
   session bean (no provider was contacted), whether the owner's key is the
-  importer's (the token check after deploy answers it), and whether a month
-  walk that ends on an empty page has every row of the month (option 7's
-  limit). The MyJCB statement is
+  importer's (the token check after deploy answers it), and whether
+  production finalized statement pages carry `allCnt` (option 8; the
+  diagnostics answer it). The MyJCB statement is
   read from its collector's plan output and the registration code, not from a
   registered MyJCB run.

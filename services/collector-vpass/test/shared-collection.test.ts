@@ -196,12 +196,25 @@ describe("G1-02/G1-08/G1-16 a card run persists its sanitized set and then the t
         startedAt: "2026-09-11T21:00:00.000Z",
         completedAt: "2026-09-11T21:04:00.000Z",
         status: "success",
+        coverage: "complete",
         monthCount: 2,
         pageCount: 2,
         transactionCount: 2,
         months: {
-          "202608": { pages: 1, transactions: 1 },
-          "202609": { pages: 1, transactions: 1 },
+          "202608": {
+            pages: 1,
+            transactions: 1,
+            capturedRows: 1,
+            statedTotal: 1,
+            coverage: "complete",
+          },
+          "202609": {
+            pages: 1,
+            transactions: 1,
+            capturedRows: 1,
+            statedTotal: 1,
+            coverage: "complete",
+          },
         },
       },
     );
@@ -523,6 +536,69 @@ describe("G1-09 a card that collected nothing stays a failure", () => {
   });
 });
 
+describe("ADR 0023 option 7 / ADR 0026 the card unit is complete only when every month's rows equal its stated total", () => {
+  const finalized = (rows: number, allCnt: unknown) =>
+    envelope({
+      WebMeisaiTopDisplayServiceBean: {
+        meisaiList: Array.from({ length: rows }, () => ({ amount: 1, shop: "SYNTHETIC SHOP" })),
+        ...(allCnt === undefined ? {} : { webMeisaiTopK3Vo: { allCnt, nextPageRow: rows + 1 } }),
+      },
+    });
+  const customized = (rows: number, total: unknown) =>
+    envelope({
+      CustomizedMeisaiAnsDisplayServiceBean: {
+        meisaiList: Array.from({ length: rows }, () => ({ amount: 1, shop: "SYNTHETIC SHOP" })),
+        ...(total === undefined ? {} : { total }),
+        pageFlg: "3",
+      },
+    });
+  const month = (...rawJson: string[]) => ({
+    pages: rawJson.map((raw, index) => ({
+      kind: index === 0 ? ("top" as const) : ("answer" as const),
+      index,
+      rawJson: raw,
+    })),
+    transactionCount: 0,
+  });
+  const cardUnit = async (months: VpassCardRun["months"]) => {
+    const plan = await vpassCardRunPlan(run({ months }));
+    return plan.run.units[0]!.coverageStatus;
+  };
+
+  test("stated totals met across pages and both statement shapes: complete", async () => {
+    expect(
+      await cardUnit({
+        "202609": month(finalized(2, 3), finalized(1, "3")),
+        "202608": month(customized(0, 0), customized(2, 2)),
+        "202607": month(finalized(0, 0)),
+      }),
+    ).toBe("complete");
+  });
+
+  test("a missing, unparsable or unmet stated total makes the unit partial with its code", async () => {
+    const cases: [VpassCardRun["months"], string][] = [
+      [{ "202609": month(finalized(1, 2)) }, "stated_total_mismatch"],
+      [{ "202609": month(finalized(3, 2)) }, "stated_total_mismatch"],
+      [{ "202609": month(customized(1, 1), customized(0, 5)) }, "stated_total_mismatch"],
+      [{ "202609": month(finalized(1, undefined)) }, "stated_total_unverified"],
+      [{ "202609": month(customized(1, "one")) }, "stated_total_unverified"],
+      [{ "202609": month(customized(1, -1)) }, "stated_total_unverified"],
+      [
+        { "202609": month(finalized(1, 1)), "202608": month(finalized(1, undefined)) },
+        "stated_total_unverified",
+      ],
+      [{}, "statement_months_absent"],
+    ];
+    for (const [months, code] of cases) {
+      expect([code, await cardUnit(months)]).toEqual([code, "partial"]);
+      const bucket = new FakeR2Bucket();
+      const outcome = await persistCardRun(bucket, run({ months }), "5e".repeat(32));
+      expect([code, outcome.result.outcome, outcome.coverage]).toEqual([code, "persisted", code]);
+      expect(sharedRunDiagnostic("r", "card-001", outcome)).toMatchObject({ coverage: code });
+    }
+  });
+});
+
 describe("G1-01 a failed put leaves no terminal", () => {
   test("the run reports incomplete and logs codes and counts only", async () => {
     const card = run();
@@ -545,6 +621,7 @@ describe("G1-01 a failed put leaves no terminal", () => {
       persistence: "incomplete",
       artifactCount: plan.artifacts.length,
       binding: "binding_key_absent",
+      coverage: "complete",
       reasonCode: "object_put_failed",
       persistedCount: outcome.result.checkpoint.persistedArtifactKeys.length,
       pendingCount: outcome.result.checkpoint.pendingArtifactKeys.length,

@@ -91,6 +91,16 @@ const envelope = (content: Record<string, unknown>, bean?: Record<string, unknow
   });
 const bean = { ...TUPLE, cardName: "SYNTHETIC CARD" };
 
+/** A finalized statement page whose summary states `allCnt` rows (ADR 0023 option 7). */
+function statementPage(allCnt: number = ROWS.length): string {
+  const payload = vpassPayload("web", "202608", ROWS);
+  payload.body.content.WebMeisaiTopDisplayServiceBean.webMeisaiTopK3Vo = {
+    ...payload.body.content.WebMeisaiTopDisplayServiceBean.webMeisaiTopK3Vo,
+    allCnt,
+  };
+  return JSON.stringify(payload);
+}
+
 function collectorCardRun(overrides: Partial<VpassCardRun> = {}): VpassCardRun {
   return {
     sessionRunId: SESSION,
@@ -109,9 +119,7 @@ function collectorCardRun(overrides: Partial<VpassCardRun> = {}): VpassCardRun {
     webMeisaiTopRawJson: envelope({ WebMeisaiTopDisplayServiceBean: {} }, bean),
     months: {
       "202608": {
-        pages: [
-          { kind: "top", index: 0, rawJson: JSON.stringify(vpassPayload("web", "202608", ROWS)) },
-        ],
+        pages: [{ kind: "top", index: 0, rawJson: statementPage() }],
         transactionCount: ROWS.length,
       },
     },
@@ -138,9 +146,9 @@ async function importerToken(key: string): Promise<string> {
   return `vpass-card-v1-${Buffer.from(mac).toString("hex")}`;
 }
 
-async function registered(key: string | undefined) {
+async function registered(key: string | undefined, overrides: Partial<VpassCardRun> = {}) {
   const h = harness();
-  const plan = await vpassCardRunPlan(collectorCardRun(), key);
+  const plan = await vpassCardRunPlan(collectorCardRun(overrides), key);
   expect(plan.run.producer).toBe(COLLECTOR);
   expect((await persistRun(h.bucket, plan)).outcome).toBe("persisted");
   const result = await registerCollectionRun(h.env, { source: "vpass", runId: plan.run.runId });
@@ -317,6 +325,27 @@ describe("ADR 0023 a registered collector card run", () => {
         reason: "verified-collector-durable-card-binding",
       },
     ]);
+  }, 30_000);
+
+  test("with the key but a month short of its stated total: the unit and run are partial and the view reads no binding", async () => {
+    const token = await importerToken(KEY);
+    const { plan, run, all, one } = await registered(KEY, {
+      months: {
+        "202608": {
+          pages: [{ kind: "top", index: 0, rawJson: statementPage(ROWS.length + 1) }],
+          transactionCount: ROWS.length,
+        },
+      },
+    });
+    // The binding is still written (it is evidence), but on a partial run.
+    expect(plan.run.units.map((unit) => [unit.unitKey, unit.coverageStatus])).toEqual([
+      ["card-001", "partial"],
+      [token, "complete"],
+    ]);
+    expect(
+      one<Record<string, unknown>>("SELECT status FROM observation_fetch_runs WHERE id=?", run),
+    ).toEqual({ status: "partial" });
+    expect(all("SELECT * FROM trusted_vpass_card_bindings")).toEqual([]);
   }, 30_000);
 
   test("without the key: no binding, the view is empty, and the rows stay run-scoped and unresolved", async () => {

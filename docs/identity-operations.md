@@ -162,11 +162,14 @@ and the run may hold no other unit and no second binding. Policy 2, its pins,
 the seal trigger and `eligible_identity_runs` read the view, so they need no
 change.
 
-The card's unit reports `complete` coverage. A `partial` unit makes
-registration record a `partial` unit report, which makes the whole fetch run
-`partial` in `observation_fetch_runs`; neither this view nor
-`current_identity_observations` reads a partial run, so every row would stay
-unresolved even with a binding.
+The card's unit reports `complete` coverage only when every month's captured
+rows equal the total the provider states for it
+([collection: Vpass](collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc)).
+Otherwise it is `partial`: registration records a `partial` unit report,
+which makes the whole fetch run `partial` in `observation_fetch_runs`, and
+neither this view nor `current_identity_observations` reads a partial run, so
+the rows stay unresolved even with a binding. The persist diagnostic's
+`coverage` code says which it was.
 
 **Account continuity.** A source-account reference still includes the
 producer, so a collector row gets its own source account

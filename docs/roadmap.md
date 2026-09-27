@@ -156,9 +156,12 @@ Concrete limits in the current code:
   again once, on the same account, where the collector's run carries a card
   binding, and not recognised again where it does not (ADR 0023). What a
   collector's successful unit declares decides whether its run registers as
-  `success` or `partial`, and identity reads no partial run; the Vpass card
-  unit declares `complete` (ADR 0023), and MyJCB's connection units are
-  decided by ADR 0026 (#272).
+  `success` or `partial`, and identity reads no partial run. The Vpass card
+  unit is `complete` only when every month's captured rows equal the total
+  the provider states for it, otherwise `partial` with a closed code, so a
+  card binds only from such a run (ADR 0023); whether production finalized
+  pages state that total has not been observed. The other collectors' units
+  are ADR 0026's (#272).
 - Shared-R2 registration gives an artifact the parser dataset it needs since
   2026-09-26 ([ADR 0022](adr/0022-registration-artifact-datasets.md); before,
   every registered artifact had none, so only Mizuho's were parsed). The

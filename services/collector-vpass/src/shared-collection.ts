@@ -108,6 +108,8 @@ export interface SharedRunOutcome {
   readonly artifactCount: number;
   /** A card run only: `bound`, or the closed code of why no binding was stored. */
   readonly binding?: "bound" | VpassBindingUnavailable;
+  /** A card run only: the card unit's coverage code (ADR 0023 option 7). */
+  readonly coverage?: VpassCardCoverage;
 }
 
 /**
@@ -168,14 +170,110 @@ function redaction(artifactKey: string): TerminalTransformation {
   };
 }
 
+/**
+ * Whether a month was captured whole, as a closed code (ADR 0023 option 7,
+ * ADR 0026). `complete` only when the rows the stored pages carry equal the
+ * row count the provider stated for the month; anything else is a reason the
+ * card unit is `partial`, never a count to adjust.
+ */
+export type VpassMonthCoverage = "complete" | "stated_total_unverified" | "stated_total_mismatch";
+/** The card unit's coverage: `complete`, or the first reason it is not. */
+export type VpassCardCoverage = VpassMonthCoverage | "statement_months_absent";
+
+interface MonthCheck {
+  readonly capturedRows: number;
+  readonly statedTotal: number | null;
+  readonly coverage: VpassMonthCoverage;
+}
+
+function statedInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^\d{1,15}$/u.test(value)) return Number(value);
+  return null;
+}
+
+function objectField(value: unknown, key: string): unknown {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+
+/**
+ * Compare a month's captured rows with the provider's stated total, read from
+ * the raw pages the walk kept. A finalized statement page
+ * (`WebMeisaiTopDisplayServiceBean`) states `webMeisaiTopK3Vo.allCnt`; a
+ * customized page (`CustomizedMeisaiAnsDisplayServiceBean`) states `total`.
+ * The rows are the pages' `meisaiList` entries, as the walk counts them. The
+ * stated total is the last one the pages carry, which is the value the walk
+ * itself stopped on; a page that carries the field unparsable leaves the
+ * month unverified. Nothing else is inferred from the count.
+ */
+function monthCheck(capture: VpassMonthCapture): MonthCheck {
+  let capturedRows = 0;
+  let statedTotal: number | null = null;
+  let readable = true;
+  for (const page of capture.pages) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(page.rawJson);
+    } catch {
+      readable = false;
+      continue;
+    }
+    const content = objectField(objectField(parsed, "body"), "content");
+    const finalized = objectField(content, "WebMeisaiTopDisplayServiceBean");
+    const customized = objectField(content, "CustomizedMeisaiAnsDisplayServiceBean");
+    const bean = finalized ?? customized;
+    const rows = objectField(bean, "meisaiList");
+    if (Array.isArray(rows)) capturedRows += rows.length;
+    const stated =
+      finalized !== undefined
+        ? objectField(objectField(finalized, "webMeisaiTopK3Vo"), "allCnt")
+        : objectField(customized, "total");
+    if (stated !== undefined && stated !== null) {
+      statedTotal = statedInteger(stated);
+      if (statedTotal === null) readable = false;
+    }
+  }
+  const coverage: VpassMonthCoverage =
+    !readable || statedTotal === null
+      ? "stated_total_unverified"
+      : capturedRows === statedTotal
+        ? "complete"
+        : "stated_total_mismatch";
+  return { capturedRows, statedTotal: readable ? statedTotal : null, coverage };
+}
+
+/** The card unit's coverage: `complete` only when every walked month is. */
+function cardCoverage(checks: readonly MonthCheck[]): VpassCardCoverage {
+  if (checks.length === 0) return "statement_months_absent";
+  return (
+    checks.find((check) => check.coverage === "stated_total_mismatch")?.coverage ??
+    checks.find((check) => check.coverage === "stated_total_unverified")?.coverage ??
+    "complete"
+  );
+}
+
 /** The run summary in the shape central storage records it. */
-function manifestBytes(run: VpassCardRun, months: readonly string[]): Uint8Array {
+function manifestBytes(
+  run: VpassCardRun,
+  months: readonly string[],
+  checks: readonly MonthCheck[],
+  coverage: VpassCardCoverage,
+): Uint8Array {
   const summary: Record<string, JsonValue> = {};
   let pageCount = 0;
   let transactionCount = 0;
-  for (const month of months) {
+  for (const [index, month] of months.entries()) {
     const capture = run.months[month]!;
-    summary[month] = { pages: capture.pages.length, transactions: capture.transactionCount };
+    const check = checks[index]!;
+    summary[month] = {
+      pages: capture.pages.length,
+      transactions: capture.transactionCount,
+      capturedRows: check.capturedRows,
+      statedTotal: check.statedTotal,
+      coverage: check.coverage,
+    };
     pageCount += capture.pages.length;
     transactionCount += capture.transactionCount;
   }
@@ -187,6 +285,7 @@ function manifestBytes(run: VpassCardRun, months: readonly string[]): Uint8Array
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     status: "success",
+    coverage,
     monthCount: months.length,
     pageCount,
     transactionCount,
@@ -288,7 +387,9 @@ async function planFor(run: VpassCardRun, binding: VpassCardBinding): Promise<Pe
   const transformations: TerminalTransformation[] = artifacts.map((artifact) =>
     redaction(artifact.artifactKey),
   );
-  const summary = manifestBytes(run, months);
+  const checks = months.map((month) => monthCheck(run.months[month]!));
+  const coverage = cardCoverage(checks);
+  const summary = manifestBytes(run, months, checks, coverage);
   // The card run's manifest belongs to the run and names no unit (ADR 0021).
   const cardArtifactCount = artifacts.length;
   artifacts.push(await artifactOf("manifest.json", summary, "collector_manifest"));
@@ -355,18 +456,17 @@ async function planFor(run: VpassCardRun, binding: VpassCardBinding): Promise<Pe
           unitKey,
           unitKind: "card",
           artifactCount: cardArtifactCount,
-          // The card unit collected every statement month the provider listed
-          // for it, so its own terminal report is a success, as the retired
-          // importer's card units were. Registration turns a `partial` unit
-          // into a `partial` unit report, which makes the whole fetch run
-          // `partial` downstream: no identity and no trusted binding reads a
-          // partial run, so every row would stay unresolved (ADR 0023). The
-          // gap that is real, the rolling window, stays on the run's
-          // `coverageStatus` and on the `statement-months` range.
-          // Limit: `collectMonth` ends a month on the first empty page
-          // without checking the stated row count, so this is not a proof
-          // that each month is whole (ADR 0023, option 7; ADR 0026).
-          coverageStatus: "complete",
+          // The card unit is `complete` only when every statement month the
+          // provider listed was walked and each month's captured rows equal
+          // the row count the provider stated for it (ADR 0023 option 7,
+          // ADR 0026). Otherwise it is `partial`, registration records a
+          // `partial` unit report and a `partial` fetch run, and neither
+          // identity nor the trusted binding reads the run, so nothing
+          // binds; the reason is the closed `coverage` code in
+          // `manifest.json` and in the persist diagnostic. The rolling
+          // window of months stays on the run's `coverageStatus` and on the
+          // `statement-months` range.
+          coverageStatus: coverage === "complete" ? "complete" : "partial",
         },
         ...bindingUnits,
       ],
@@ -452,7 +552,12 @@ export async function persistCardRun(
 ): Promise<SharedRunOutcome> {
   const binding = await deriveVpassCardBinding(run, bindingKey);
   const outcome = await persist(bucket, await planFor(run, binding));
-  return { ...outcome, binding: binding.status === "derived" ? "bound" : binding.code };
+  const months = Object.keys(run.months).sort();
+  return {
+    ...outcome,
+    binding: binding.status === "derived" ? "bound" : binding.code,
+    coverage: cardCoverage(months.map((month) => monthCheck(run.months[month]!))),
+  };
 }
 
 /** Persist the terminal of a card or session that collected nothing. */
@@ -482,6 +587,7 @@ export function sharedRunDiagnostic(
     persistence: result.outcome,
     artifactCount: outcome.artifactCount,
     ...(outcome.binding === undefined ? {} : { binding: outcome.binding }),
+    ...(outcome.coverage === undefined ? {} : { coverage: outcome.coverage }),
     ...(result.outcome === "incomplete"
       ? {
           reasonCode: result.reasonCode,
