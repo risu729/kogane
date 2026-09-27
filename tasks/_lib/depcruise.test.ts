@@ -65,8 +65,9 @@ describe("G4-07 resolved-import guard", () => {
   });
 
   test("a cruise that saw almost nothing fails instead of passing", () => {
-    // dependency-cruiser 18 exits 0 with ~44 modules when no TypeScript < 7 is
-    // resolvable. That is the silent failure this floor exists to catch.
+    // dependency-cruiser 18 exits 0 with a few dozen modules when no
+    // TypeScript < 7 is resolvable. That is the silent failure this floor
+    // exists to catch.
     expect(cruiseProblems(healthy({ totalCruised: 44 }))).toEqual([
       `only 44 modules were cruised, below the ${MINIMUM_MODULES} floor: the rules would pass vacuously`,
     ]);
