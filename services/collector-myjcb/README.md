@@ -182,7 +182,7 @@ position 2以降を停止にしないのは、productionのposition 7と8がh1�
 
 停止log（`myjcb-credit-statement-period`）には`detailMonth`、名乗った月の個数、API labelの有無だけを出す。詳細は`docs/sources/myjcb.md`の「明細の月」にある。
 
-行を持つledgerは、状態に対応するheader一式（`ご利用日`、`ご利用先など`、`支払区分`、`今回のお支払い金額`または`ご利用金額`）をheadに表示していなければならない（`credit-ledger-headers`）。これにより、ledger JSONの`headers`はpageで確認した事実になる。確定ledgerはexpandedの`ご利用金額`を、未確定ledgerは`今回のお支払い金額`を読む。
+行を持つledgerは、状態に対応するheader一式（`ご利用日`、`ご利用先など`、`支払区分`、`今回のお支払い金額`または`ご利用金額`）をheadに表示していなければならない（`credit-ledger-headers`）。これにより、ledger JSONの`headers`はpageで確認した事実になる。確定ledgerはexpandedの`ご利用金額`を、未確定ledgerは`今回のお支払い金額`を読む。`(確定分)`の見出しの下に`ご利用金額`のheaderを示すpageは、全行が1回払いで行の合計がpageの「お支払い金額合計」と一致する場合だけ`confirmed`とし、ledgerにはpageが示すheader一式（`ご利用金額`）を保存する。一致しなければ従来どおり`credit-statement-state`で停止し、logには閉じた理由code（`usageHeader`）だけを出す（ADR 0005のamendment (d)、`docs/sources/myjcb.md`）。
 
 既存captureのraw evidenceとmanifestは書き換えない。position-1 pageの確定totalは`myjcb-credit-statement-total@1.1.0`がpageから読み直す。ledger JSONにはpageの証拠がないため、既存のposition-1 ledger行は`unconfirmed`のまま残る。これらの行は修正後の最初の成功runでcurrentでなくなる。詳細は`docs/sources/myjcb.md`の「明細状態の判定」と`docs/observations.md`のrelease noteにある。
 
