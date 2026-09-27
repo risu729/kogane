@@ -240,7 +240,7 @@ code shows it after deploy.
 
 ## Amendment 2026-09-27: GLOBAL PASS pagination observed; sanitizer refusals get closed codes
 
-- Status: proposed; accepted when the PR that carries it merges
+- Status: proposed; accepted when #281 merges
 - Date: 2026-09-27
 - Carried by: `services/collector-globalpass/src/sanitize.ts`
   (`GlobalPassSanitizerError`, `GLOBALPASS_SANITIZER_CODES`),
