@@ -433,7 +433,7 @@ The measured results were:
 | `TAMIA.fetch()` to an AWS IP reflector                                | HTTP 200 and TAMIA public IPv4                                          | HTTP-level VPC routing through the existing Tunnel works.                                                                                        |
 | Container Chromium -> local SOCKS5 -> egress Worker                   | SOCKS negotiation and WebSocket upgrade succeeded                       | The Container, Chromium proxy configuration and Worker relay were not the first failure.                                                         |
 | `TAMIA.connect()` to Cloudflare-hosted `icanhazip.com:443`            | Socket became readable EOF with zero response bytes; Chromium timed out | Initially suggested the documented Workers restriction on outbound TCP to Cloudflare IP ranges, but this was only a hypothesis.                  |
-| `TAMIA.connect()` to AWS-hosted `checkip.amazonaws.com` on 80 and 443 | Same zero-byte EOF                                                      | Falsifies “Cloudflare-owned destination alone caused the EOF.” Public raw-TCP egress through this direct `tunnel_id` binding is not established. |
+| `TAMIA.connect()` to AWS-hosted `checkip.amazonaws.com` on 80 and 443 | Same zero-byte EOF                                                      | Falsifies "Cloudflare-owned destination alone caused the EOF." Public raw-TCP egress through this direct `tunnel_id` binding is not established. |
 | Direct read-only TCP/TLS from TAMIA to both reflectors                | Successful                                                              | The public destinations and TAMIA's ordinary IPv4 Internet access were healthy.                                                                  |
 | `TAMIA.connect("100.64.1.254:22")`                                    | Zero-byte EOF                                                           | TAMIA's LAN-side address was not reachable as an announced route through this binding.                                                           |
 | `TAMIA.connect("127.0.0.1:22")`                                       | Returned the TAMIA OpenSSH banner                                       | Raw TCP over the VPC binding works for a service local to the `cloudflared` host.                                                                |
@@ -452,8 +452,8 @@ rather than a stable contract.
 Cloudflare separately documents that the ordinary Workers outbound TCP Socket
 API blocks Cloudflare-owned IP ranges. That warning explains why a
 Cloudflare-hosted reflector was a poor first test target, but it does **not**
-explain the AWS EOF and must not be generalized into “every Cloudflare VPC TCP
-connection to Cloudflare is impossible.” The VPC binding's successful
+explain the AWS EOF and must not be generalized into "every Cloudflare VPC TCP
+connection to Cloudflare is impossible." The VPC binding's successful
 localhost SSH connection is a distinct private-network path.
 
 At this stage, before testing the account-wide Mesh binding, the remaining
@@ -533,8 +533,8 @@ boundary, so the application allowlist is mandatory.
 #### Separating the scraper route from personal WARP use
 
 A hostname route is configured in the account's Zero Trust route table, not
-inside one Worker, so it cannot itself be scoped to “requests from this
-scraper.” An enrolled personal WARP client may also be eligible for that route.
+inside one Worker, so it cannot itself be scoped to "requests from this
+scraper." An enrolled personal WARP client may also be eligible for that route.
 Use a dedicated personal-device profile to keep this effect off the user's
 ordinary browsing. There are two distinct goals:
 

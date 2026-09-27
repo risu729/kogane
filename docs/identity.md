@@ -79,8 +79,8 @@ names the interpretation it was computed under.
   out-of-order versions, stale/manual corrections, immutable rows, invalid
   provenance, wrong mappings and incomplete seals.
 - Source-level production coverage compares all currently eligible B rows to
-  sealed C rows, separately from resolution status. “Organized” is not “globally
-  identified,” and account resolution counts are not a security resolution rate.
+  sealed C rows, separately from resolution status. "Organized" is not "globally
+  identified," and account resolution counts are not a security resolution rate.
 - Source-specific evidence-only datasets and rejected B parses have no invented
   account/instrument observations. Their existing raw/parse coverage remains
   visible separately.

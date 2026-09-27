@@ -13,24 +13,21 @@ local picked =
     "tombi"
     "yaml"
     "typos"
-    // Individual hygiene checks, not the whole `hygiene` group. The group adds
-    // four more checks; destroyed-symlinks and forbid-submodules pass, but
-    // fix-smart-quotes and check-shebang-scripts-are-executable do not pass on
-    // the repository yet.
-    "newlines"
-    "trailing-whitespace"
-    "mixed-line-ending"
-    "byte-order-marker"
-    "check-merge-conflict"
-    "check-case-conflict"
-    "check-symlinks"
-    "check-executables-have-shebangs"
+    "hygiene"
     "shellcheck"
   })
 
 // Top-level steps feed hk's implicit check, fix and pre-commit hooks, so fast
 // staged-file fixes stay in pre-commit.
 steps = (picked) {
+  ["hygiene"] = (picked["hygiene"] as Group) {
+    steps = ((picked["hygiene"] as Group).steps) {
+      ["fix-smart-quotes"] = ((picked["hygiene"] as Group).steps["fix-smart-quotes"]) {
+        // The synthetic request-error page mirrors the curly apostrophes the bank page shows.
+        exclude = List("experiments/st-george-automation/test/probe.test.ts")
+      }
+    }
+  }
   // Direct exit status also works on Windows; the preset's diff wrapper is Bash.
   ["typos"] = new Step {
     check = "typos --force-exclude {{ files }}"

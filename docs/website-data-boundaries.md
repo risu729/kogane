@@ -17,7 +17,7 @@ No hardcoded personal balances, activity rows or fabricated holdings were found 
 
 ## Static information that deliberately remains
 
-There is static information, so “nothing is hardcoded” would be inaccurate:
+There is static information, so "nothing is hardcoded" would be inaccurate:
 
 - Japanese UI labels, parser-specific semantic rules, page-size and timeout constants.
 - `shared/financial-products.ts`: versioned public product codes, names, currency coverage and evidence URLs. These identify a product only against observed evidence; listing a currency here does not create a holding.
