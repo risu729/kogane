@@ -72,7 +72,7 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(policies.every((row) => row.unit_scope === "run")).toBe(true);
   // A coverage-v1 row that pins a version names one this build deploys: the
   // selection matches it exactly, so a stale pin would adopt nothing (0056
-  // moves the SBI Shinsei board to 1.0.1).
+  // moves the SBI Shinsei board to 1.0.1, 0059 to 1.0.2).
   const pinned = await all<{ parser_name: string; required_parser_version: string }>(
     "SELECT parser_name,required_parser_version FROM dataset_snapshot_policies WHERE policy_id='coverage-v1' AND required_parser_version IS NOT NULL ORDER BY parser_name",
   );

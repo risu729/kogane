@@ -54,7 +54,11 @@ WebSocket TCP relayは非hibernating接続である。対応するupstream TCP s
 
 ### Raw evidence v2 contract
 
-`globalpass-browser-poc-v2`では、ContainerのNDJSONを厳密な契約として扱う。metadataは必ず1回だけ受け取り、`availableMonths`は最大15か月の連続した降順、`selectedMonths`はdailyなら先頭2か月、backfillなら全月との完全一致を要求する。manifestには`selectedMonths`、`captureComplete`、`paginationStatus: "unproven"`、固定形のfailureを記録し、選択月と保存artifactが完全一致してfailureが0件のrunだけを`success`とする。失敗runも、DATAへterminalを書ける限り保存する。
+`globalpass-browser-poc-v2`では、ContainerのNDJSONを厳密な契約として扱う。metadataは必ず1回だけ受け取り、`availableMonths`は最大15か月の連続した降順、`selectedMonths`はdailyなら先頭2か月、backfillなら全月との完全一致を要求する。manifestには`selectedMonths`、`captureComplete`、`paginationStatus: "first_page_only"`、固定形のfailure（`operation`、`errorType`、`errorCode`、`artifactKey`）を記録し、選択月と保存artifactが完全一致してfailureが0件のrunだけを`success`とする。失敗runも、DATAへterminalを書ける限り保存する。
+
+sanitizerが拒否したpageのfailureは`errorCode`にどの検査で拒否したかを閉じたcodeで記録する（`globalpass_html_contract_invalid`、`globalpass_html_redaction_failed`、`globalpass_html_shape_unreviewed`、`globalpass_html_utf8_invalid`）。同じcodeは`artifact-write`のdiagnostic行の`code`にも出る。providerの文字列や一致した値は出さない。
+
+Containerは月を選択した後の`page.content()`を1回だけ保存し、`Next`を辿らない。明細が10件を超える月は`Found N Result [p/Ppage] Back Next`を表示する（2026-09-27の実画面観察）。Workerは保存前のpage本文からこの件数とpage番号だけを読み、`globalpass-activity-pages`行（run内の月の位置、`statedTotal`、`pageIndex`、`pageCount`）に記録する。2page以上あると示すpageは保存するが、`operation: "pagination"`、`errorCode: "activity_pages_unwalked"`のfailureを付けてrunを`partial`にする。pagerの表示が矛盾する場合は`activity_pager_unreadable`。pagerが見つからないpageが1か月分すべてを含むことは証明されていない（[ADR 0026](../../docs/adr/0026-collector-unit-coverage.md)）。
 
 保存前には35件の既存HTML監査で確認した2種類の画面shapeだけを許可する。変動する非空の`nablarch_hidden`だけを`__KOGANE_REDACTED_DYNAMIC_VALUE__`へ置換し、空値は空のまま、明細選択に必要な`W131301.referenceDate`などは保持する。これとは別に、current-document fragmentの`href`は`#`へ、許可された`onclick`/`onchange`の値全体は`return false;`へ固定し、元fragmentやhandler引数をR2へ残さない。hidden field、inputの`id/name/type/value`重複、form action重複、URL-bearing attribute、inline event handlerは監査済みのexact inventoryだけを許可する。query付きURL、未知host/path/scheme、`formaction`、data URL、`srcset`、`ping`、CSSの`url()`/`@import`、meta refresh、SVG URL属性、`base`/`object`/`embed`/`iframe`などの未監査network/navigation sink、未知event属性・関数、ログイン画面、session/token文字列、UTF-8不整合を検出した場合はfail closedとし、そのHTMLをR2へ保存しない。保存したpageはterminalへ`redacted` transformation（`globalpass-activity-sanitizer`）として記録する。
 

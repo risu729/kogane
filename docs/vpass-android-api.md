@@ -217,6 +217,36 @@ for the billing month and `p03` for the page. The response models contain the
 same `seikyuYMList`, `meisaiList`, `total`, date, merchant, amount, and payment
 fields already handled by the JSON PoC. Therefore no CSV conversion is needed.
 
+## Statement response fields (live, 2026-09-27)
+
+The owner's agent opened the web statement page (`/memx/web_meisai/top/`) for
+all seven cards of the account and reported field names and JSON types only,
+never values. The page calls the four member routes above. A month answers in
+one of two shapes:
+
+| Shape (cards)                                                                   | Stated total                        | Other paging fields present                                                                                         |
+| ------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `WebMeisaiCommonDisplayServiceBean` + `WebMeisaiTopDisplayServiceBean` (5 of 7) | `webMeisaiTopK3Vo.allCnt`, a string | `webMeisaiTopK3Vo`: `rowCnt`, `limitCnt`, `dispCnt`, `pageNo`, `lastPage`, `nextPageRow`, `prevPageRow`, `payTotal` |
+| `CustomizedMeisaiAnsDisplayServiceBean` (2 of 7)                                | `total`, a number                   | `responseCnt`, `pageSize`, `pageFlg`                                                                                |
+
+Only `allCnt`'s and `total`'s types were reported; the other fields' types and
+what their values mean were not. The discovery response listed 16 statement
+months (`seikyuYMList`).
+
+What the collector does with them
+([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site)):
+`allCnt`, `total`, `nextPageRow` and `pageSize` are read by one exact reader,
+`providerCount` in `services/collector-vpass/src/provider-count.ts` (a
+non-negative safe integer number, or a string of ASCII digits only). The month
+walk (`src/statement-walk.ts`) stops a finalized month after a page whose
+`allCnt` is below its `nextPageRow`, or on an empty page after the first, and
+a customized month once its rows reach `total` with `pageFlg` `1` or `3`, or on
+an empty answer page. A month is `complete` only when its rows equal the last
+stated total. `pageNo`, `lastPage`, `rowCnt`, `limitCnt`, `dispCnt`,
+`prevPageRow` and `responseCnt` are not read: their meaning is unobserved.
+`nextPageRow` is read as it was before this observation, as the next page's
+first row and cursor; the observation shows it is present, not that meaning.
+
 ## Unauthenticated network probes
 
 On 2026-08-26, plain `curl` from an Australian Cloudflare/WARP egress reached

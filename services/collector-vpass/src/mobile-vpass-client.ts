@@ -7,6 +7,7 @@ import {
   buildConfigAuth,
   buildFirstLoginAuth,
 } from "./mobile-auth";
+import { providerCount } from "./provider-count";
 import {
   adler32,
   extractAvailableMonths,
@@ -48,11 +49,7 @@ function arrayAt(value: unknown, ...path: string[]): unknown[] {
   return Array.isArray(current) ? current : [];
 }
 
-function integer(value: unknown): number | null {
-  if (typeof value === "number" && Number.isInteger(value)) return value;
-  if (typeof value === "string" && /^\d+$/.test(value)) return Number.parseInt(value, 10);
-  return null;
-}
+const integer = providerCount;
 
 function cardsFrom(response: unknown): VpassCard[] {
   const list = objectAt(response, "body", "content", "DropdownListInitDisplayServiceBean")?.[
