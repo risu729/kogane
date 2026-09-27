@@ -188,7 +188,7 @@ only):
 **Decision.** This is recorded as the **provider's public documentation**,
 not as the owner's confirmation per currency: per those pages, all 13 listed
 currencies are quoted in yen per 1 unit. CHF has no such statement (it is on
-no page), and a JPY row is not a quote (parser 1.0.1 skips it). Admission
+no page), and a JPY row is not a quote (the parser skips it). Admission
 still waits on the owner's `customerCategory` tier: an admission names
 `(currency, customerCategory, basis)` (amendment above), and which tier is the
 owner's is unknown. `SBI_SHINSEI_FX_QUOTE_BASIS` stays empty, so no FX row is

@@ -255,7 +255,10 @@ test("a stored board a retired version rejected gets a 1.0.2 job from the repair
   ).run();
   await setCursor(409);
   const result = await sweep(env, { lane: "repair" });
-  expect(result.lanes.repair).toMatchObject({ created: 1, parsed: 1 });
+  // Scoped to this board: the page after the cursor may also hold artifacts
+  // an earlier test left without a job, which this test does not own.
+  expect(result.lanes.repair?.created).toBeGreaterThanOrEqual(1);
+  expect(result.lanes.repair?.error).toBe(0);
   const jobs = (
     await env.DB.prepare(
       "SELECT parser_version,lane,status FROM observation_parse_jobs WHERE fetch_artifact_id=410 ORDER BY parser_version",
