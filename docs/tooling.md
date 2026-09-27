@@ -32,8 +32,11 @@ fixed toolchain:
   (its `typescript` entry point exports only the version): the root for
   dependency-cruiser ([package layout](package-layout.md)), and
   collector-globalpass because its Turnstile capture analysis scripts parse
-  JavaScript with `ts.createSourceFile`. Moving that workspace to 7 is open:
-  the scripts need another parser first.
+  JavaScript with `ts.createSourceFile`
+  (`analyze-turnstile-capture.mjs`, `analyze-turnstile-debugger-capture.mjs`,
+  `compare-turnstile-probes.mjs`). A Renovate rule keeps both manifests
+  below 7. Porting those scripts off the compiler API is a separate decision;
+  until then that workspace is type-checked by TypeScript 5.9.3.
 - **hk** is the complete verification entrypoint: `hk check --all` runs the
   shared lint presets plus mise tasks for repository guards, Knip, typechecks,
   tests, builds and Worker dry runs. `hk fix` and the staged pre-commit hook

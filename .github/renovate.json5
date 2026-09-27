@@ -20,9 +20,11 @@
       groupName: "typescript",
     },
     {
-      // dependency-cruiser 18 needs the TypeScript < 7 compiler API; the root
-      // manifest keeps 5.x for root:depcruise (docs/package-layout.md).
-      matchFileNames: ["package.json"],
+      // Both need the in-process TypeScript < 7 compiler API, which 7.0 no
+      // longer ships (docs/tooling.md): dependency-cruiser at the root
+      // (docs/package-layout.md) and collector-globalpass's Turnstile
+      // capture analysis scripts.
+      matchFileNames: ["package.json", "services/collector-globalpass/package.json"],
       matchPackageNames: ["typescript"],
       allowedVersions: "<7",
     },
