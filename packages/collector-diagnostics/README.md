@@ -29,7 +29,7 @@ Every consumer is a collector Worker; nothing in `services/app`, `services/proce
 | `services/collector-smbc-direct`    | `createDiagnostics`                     |
 | `services/collector-vpass`          | `createDiagnostics`, `safeErrorDetails` |
 
-The API also supports PRESTIA GLOBAL PASS stages that the GLOBAL PASS Worker does not emit yet. Collectors outside this repository are not covered.
+The API also supports PRESTIA GLOBAL PASS stages that the GLOBAL PASS Worker does not emit yet. The GLOBAL PASS activity sanitizer's `GlobalPassSanitizerError` and its four refusal codes (`globalpass_html_*`) are on the error-type and code allowlists, so its `artifact-write` failure line names which check refused a page (ADR 0026, 2026-09-27 amendment). Collectors outside this repository are not covered.
 
 ## Boundaries
 

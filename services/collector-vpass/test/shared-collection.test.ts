@@ -55,10 +55,12 @@ const webMeisaiTopRawJson = envelope({
     authToken: secret,
   },
 });
+// The live finalized page states `allCnt` as a JSON string (2026-09-27, field
+// types only); the fixture mirrors that type.
 const pageRawJson = envelope({
   WebMeisaiTopDisplayServiceBean: {
     meisaiList: [{ amount: 1234, shop: "SYNTHETIC SHOP" }],
-    webMeisaiTopK3Vo: { allCnt: 1, nextPageRow: 2 },
+    webMeisaiTopK3Vo: { allCnt: "1", nextPageRow: 2 },
   },
 });
 
@@ -563,26 +565,42 @@ describe("ADR 0023 option 8 / ADR 0026 the card unit is complete only when every
     return plan.run.units[0]!.coverageStatus;
   };
 
+  // Mirrors the live types: a finalized page's `allCnt` is a string, a
+  // customized page's `total` a number (2026-09-27, field types only).
   test("stated totals met across pages and both statement shapes: complete", async () => {
     expect(
       await cardUnit({
-        "202609": month(finalized(2, 3), finalized(1, "3")),
+        "202609": month(finalized(2, "3"), finalized(1, "3")),
         "202608": month(customized(0, 0), customized(2, 2)),
-        "202607": month(finalized(0, 0)),
+        "202607": month(finalized(0, "0")),
       }),
     ).toBe("complete");
   });
 
+  test("a stated total reads the same as a digit string or a number", async () => {
+    expect(await cardUnit({ "202609": month(finalized(2, 2)) })).toBe("complete");
+    expect(await cardUnit({ "202609": month(finalized(2, "2")) })).toBe("complete");
+    expect(await cardUnit({ "202609": month(finalized(2, "002")) })).toBe("complete");
+    expect(await cardUnit({ "202609": month(customized(2, "2")) })).toBe("complete");
+  });
+
   test("a missing, unparsable or unmet stated total makes the unit partial with its code", async () => {
     const cases: [VpassCardRun["months"], string][] = [
-      [{ "202609": month(finalized(1, 2)) }, "stated_total_mismatch"],
-      [{ "202609": month(finalized(3, 2)) }, "stated_total_mismatch"],
+      [{ "202609": month(finalized(1, "2")) }, "stated_total_mismatch"],
+      [{ "202609": month(finalized(3, "2")) }, "stated_total_mismatch"],
       [{ "202609": month(customized(1, 1), customized(0, 5)) }, "stated_total_mismatch"],
       [{ "202609": month(finalized(1, undefined)) }, "stated_total_unverified"],
       [{ "202609": month(customized(1, "one")) }, "stated_total_unverified"],
       [{ "202609": month(customized(1, -1)) }, "stated_total_unverified"],
+      // A string that is not digits only is not read as a count.
+      ...["-1", "+1", " 1", "1 ", "1,000", "1.0", "\uff11", "", "99999999999999999"].map(
+        (allCnt): [VpassCardRun["months"], string] => [
+          { "202609": month(finalized(1, allCnt)) },
+          "stated_total_unverified",
+        ],
+      ),
       [
-        { "202609": month(finalized(1, 1)), "202608": month(finalized(1, undefined)) },
+        { "202609": month(finalized(1, "1")), "202608": month(finalized(1, undefined)) },
         "stated_total_unverified",
       ],
       [{}, "statement_months_absent"],

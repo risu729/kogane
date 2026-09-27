@@ -79,6 +79,31 @@ describe("safe collector diagnostics", () => {
     ).toMatchObject({ category: "response", code: "collect-credit-export" });
   });
 
+  test("keeps the GLOBAL PASS sanitizer's closed code and nothing else", () => {
+    for (const code of [
+      "globalpass_html_contract_invalid",
+      "globalpass_html_redaction_failed",
+      "globalpass_html_shape_unreviewed",
+      "globalpass_html_utf8_invalid",
+    ]) {
+      const error = Object.assign(new Error(code), { name: "GlobalPassSanitizerError", code });
+      expect(safeErrorDetails(error)).toEqual({
+        category: "response",
+        errorType: "GlobalPassSanitizerError",
+        code,
+      });
+    }
+    // A code outside the list is not echoed, even under the sanitizer's name.
+    expect(
+      safeErrorDetails(
+        Object.assign(new Error("globalpass_html_private"), {
+          name: "GlobalPassSanitizerError",
+          code: "globalpass_html_private",
+        }),
+      ),
+    ).toEqual({ category: "unknown", errorType: "GlobalPassSanitizerError" });
+  });
+
   test("rejects unrecognized source, stage and correlation values", () => {
     const records = capture();
     createDiagnostics("secret-source", "user@example.test").failure("secret-stage", "private-body");

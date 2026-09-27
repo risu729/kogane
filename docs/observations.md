@@ -17,6 +17,48 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## GLOBAL PASS activity pages paginate; the collector keeps page 1 (collector, no parser release)
+
+Observed on 2026-09-27 by the owner's agent on the live Account Activities
+screen, structure and counts only
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes),
+[source note](sources/prestia.md#global-pass-activity-pages-and-refusals-2026-09-27)):
+a month with more than ten statements shows `Found N Result [p/Ppage] Back
+Next` with ten statement blocks per page; five of 15 months had two pages. The
+collector sends one `page.content()` per month and follows no Next link, so
+for such a month it can store page 1 only. It now marks that month
+`activity_pages_unwalked` and the run `partial`. No parser changed:
+`global-pass-activity` reads no pager and would take page 1 as the month, but
+it sees no shared GLOBAL PASS run, whose unit stays `partial`. Separately,
+in each of the seven nightly runs before 2026-09-27 both months were refused by the
+sanitizer; the refusal is now recorded as one of four closed codes, and which
+one it is has not been observed yet. A stored capture stating 16 results with
+16 rows and no pager is not reconciled with the live behaviour.
+
+## Vpass stated-total fields on the live site (collector, no parser release)
+
+Observed on 2026-09-27 by the owner's agent on the live web statement page
+for all seven cards, reporting field names and JSON types only
+([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site),
+[field table](vpass-android-api.md#statement-response-fields-live-2026-09-27)):
+
+- Five cards answer with `WebMeisaiCommonDisplayServiceBean` and
+  `WebMeisaiTopDisplayServiceBean`; `webMeisaiTopK3Vo.allCnt` is present and
+  a JSON string.
+- Two cards answer with `CustomizedMeisaiAnsDisplayServiceBean`; `total` is
+  present and a JSON number.
+
+What changes: nothing in any parser. The collector's month check already read
+a digit-string `allCnt`; it, the Worker's walk and both Node clients now share
+one exact reader, and the synthetic fixtures state `allCnt` as a string and
+`total` as a number. **Unknown, kept as limits:** the meaning and type of
+`pageNo`, `lastPage`, `rowCnt`, `limitCnt`, `dispCnt`, `prevPageRow` and
+`responseCnt`, which the walk therefore does not read; the type and meaning
+of `nextPageRow`, which the walk compares with `allCnt` and sends back as the
+next page's cursor, as it did before; and whether any live month logs
+`stated_total_unverified` or `stated_total_mismatch`, which the next
+collection's persist diagnostic shows.
+
 ## SBI Shinsei stored-capture shapes (activity parser 0.1.2, board parser 1.0.1)
 
 Observed on 2026-09-27 by the owner's local agent replaying stored captures

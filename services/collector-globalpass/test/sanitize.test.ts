@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { NABLARCH_HIDDEN_SENTINEL, sanitizeGlobalPassActivityHtml } from "../src/sanitize";
+import {
+  GLOBALPASS_SANITIZER_CODES,
+  GlobalPassSanitizerError,
+  NABLARCH_HIDDEN_SENTINEL,
+  sanitizeGlobalPassActivityHtml,
+  sanitizerCode,
+} from "../src/sanitize";
 
 describe("GLOBAL PASS HTML sanitizer", () => {
   test("redacts only the four nonempty dynamic values in variant A", async () => {
@@ -69,6 +75,40 @@ describe("GLOBAL PASS HTML sanitizer", () => {
     expect(() => sanitizeGlobalPassActivityHtml(fixture("a") + "\ud800")).toThrow(
       "globalpass_html_utf8_invalid",
     );
+  });
+
+  test("every refusal is a typed error whose code is one of four and equals its message", () => {
+    const thrown = (html: string): unknown => {
+      try {
+        sanitizeGlobalPassActivityHtml(html);
+      } catch (error) {
+        return error;
+      }
+      throw new Error("expected a refusal");
+    };
+    const cases: Array<[string, string]> = [
+      [
+        fixture("a").replace('name="cc"', 'name="unknown_state"'),
+        "globalpass_html_contract_invalid",
+      ],
+      [
+        fixture("a").replace("</body>", '<input name="nablarch_hidden" value="opaque-x"></body>'),
+        "globalpass_html_redaction_failed",
+      ],
+      [
+        fixture("a").replace('<input type="hidden" name="nablarch_submit" value="1">', ""),
+        "globalpass_html_shape_unreviewed",
+      ],
+      [fixture("a") + "\ud800", "globalpass_html_utf8_invalid"],
+    ];
+    for (const [html, code] of cases) {
+      const error = thrown(html);
+      expect(error).toBeInstanceOf(GlobalPassSanitizerError);
+      expect(error).toMatchObject({ name: "GlobalPassSanitizerError", code, message: code });
+      expect(sanitizerCode(error)).toBe(code as (typeof GLOBALPASS_SANITIZER_CODES)[number]);
+    }
+    expect(cases.map(([, code]) => code)).toEqual([...GLOBALPASS_SANITIZER_CODES]);
+    expect(sanitizerCode(new Error("globalpass_html_contract_invalid"))).toBeUndefined();
   });
 
   test("rejects unreviewed network and navigation sinks", () => {
