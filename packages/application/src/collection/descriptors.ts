@@ -257,9 +257,16 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
     ],
     "collector_derived",
   ),
-  // `exchange-rate` is read by `sbi-shinsei-exchange-rate` (ADR 0020).
+  // `exchange-rate` is read by `sbi-shinsei-exchange-rate` (ADR 0020) and
+  // `balance-summary-and-stage` by `sbi-shinsei-balance-summary-and-stage`
+  // (ADR 0031).
   "sbi-shinsei": jsonByName(
-    ["top-accounts-balance-and-activity", "yen-deposit-account", "exchange-rate"],
+    [
+      "top-accounts-balance-and-activity",
+      "yen-deposit-account",
+      "exchange-rate",
+      "balance-summary-and-stage",
+    ],
     "sanitized_provider_capture",
     "raw-",
   ),

@@ -27,6 +27,7 @@ aba3ef263b4c8d06c49b6160655358b802c72e48e26df7da5f410d5336d94a96  tests/fixtures
 1390f34c52bce921024ba6face8b616a89018e9a06daec5b3375f42d12be1afe  tests/fixtures/observation-pipeline/sbi-securities/2026-08-20/run-20260820-210000-poc01/foreign-cash-positions.json
 2425a0d4cba3cbe99e85564249de241fa28ef72dd19e16d1224a83938e0b075e  tests/fixtures/observation-pipeline/sbi-securities/2026-08-20/run-20260820-210000-poc01/manifest.json
 9383e79b78f66e1cc4011589187b2915b8936c23346776c751feecf9ae65dfdd  tests/fixtures/observation-pipeline/sbi-securities/2026-08-20/run-20260820-210000-poc01/yen-detail-history.json
+54b8976e3ba3735a3dff6b617548f220c7801111cc07f5cae3d20453f6981cc5  tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/balance-summary-and-stage.json
 f0fbf66559560b8168bed6a6429155fe8b2ba3b340d91901d7b68399ef96ce09  tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/exchange-rate-observed-board.json
 0c0cba8a7103b031c33f04600f1fb97209a3f4f6a215de65f17c1dc5e6330c6b  tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/exchange-rate.json
 6ecc30f856c5fd8080c1599caa2fe7159815ca5bda1b8c594089bf9392fa6c66  tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/top-accounts-balance-and-activity-window-end-not-stated.json

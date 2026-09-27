@@ -10,7 +10,9 @@ import {
   priceClaimRef,
   priceEffectiveTime,
   priceId,
+  SBI_SHINSEI_FX_PER_UNIT_CURRENCIES,
   SBI_SHINSEI_FX_QUOTE_BASIS,
+  stageMatches,
   type DomesticPriceRow,
   type ForeignPositionRow,
   type FxBoardRow,
@@ -119,9 +121,13 @@ describe("the rule list", () => {
 });
 
 describe("fx-sbi-shinsei-board-v1", () => {
-  test("no currency's basis is verified yet, so production promotes no FX row", () => {
+  test("the manual table stays empty, so without a stated stage production promotes no FX row", () => {
     expect(Object.keys(SBI_SHINSEI_FX_QUOTE_BASIS)).toEqual([]);
-    expect(fxBoardPrice(fxRow()).outcome).toBe("unsupported_currency");
+    // USD is quoted per 1 unit by the provider's pages, but no stage is known.
+    expect(fxBoardPrice(fxRow()).outcome).toBe("stage_unstated");
+    expect(fxBoardPrice(fxRow({ customerCategoryJson: '"SYNTHETIC"' })).outcome).toBe(
+      "stage_unstated",
+    );
   });
 
   test("a verified per-1 currency maps mid, buy and sell to reference, bid and ask", () => {
@@ -144,7 +150,9 @@ describe("fx-sbi-shinsei-board-v1", () => {
 
   test("a per-100 quote is refused and never rescaled; an unlisted currency is unsupported", () => {
     expect(fxBoardPrice(fxRow({ subject: "KRW" }), VERIFIED).outcome).toBe("basis_unverified");
-    expect(fxBoardPrice(fxRow({ subject: "EUR" }), VERIFIED).outcome).toBe("unsupported_currency");
+    // EUR has no manual entry: the stage path decides it, and no stage is stated.
+    expect(fxBoardPrice(fxRow({ subject: "EUR" }), VERIFIED).outcome).toBe("stage_unstated");
+    expect(fxBoardPrice(fxRow({ subject: "CHF" }), VERIFIED).outcome).toBe("unsupported_currency");
     expect(fxBoardPrice(fxRow({ currency: "USD" }), VERIFIED).outcome).toBe("unsupported_currency");
     expect(fxBoardPrice(fxRow({ subject: "JPY" }), VERIFIED).outcome).toBe("unsupported_currency");
   });
@@ -161,7 +169,7 @@ describe("fx-sbi-shinsei-board-v1", () => {
     // The stored boards' shape (ADR 0028): one row per currency per tier.
     const tiers = ["SYNTHETIC-TIER-1", "SYNTHETIC-TIER-2", "SYNTHETIC-TIER-3", 4, null];
     for (const customerCategory of tiers) {
-      expect(fxBoardPrice(fxRow({ customerCategory })).outcome).toBe("unsupported_currency");
+      expect(fxBoardPrice(fxRow({ customerCategory })).outcome).toBe("stage_unstated");
       // An admission of the currency for another tier reads none of them.
       expect(fxBoardPrice(fxRow({ customerCategory }), VERIFIED).outcome).toBe(
         "unsupported_currency",
@@ -187,6 +195,19 @@ describe("fx-sbi-shinsei-board-v1", () => {
     expect(fxBoardPrice(fxRow({ customerCategory: "4" }), numeric).outcome).toBe(
       "unsupported_currency",
     );
+  });
+
+  test("a manual entry decides its currency alone; the stage path never overrides it", () => {
+    const stage = { state: "stated", categoryJson: '"SYNTHETIC-TIER-2"' } as const;
+    const tier2Row = {
+      customerCategory: "SYNTHETIC-TIER-2",
+      customerCategoryJson: '"SYNTHETIC-TIER-2"',
+    };
+    // VERIFIED admits USD in tier SYNTHETIC only; the stage names tier 2.
+    expect(fxBoardPrice(fxRow({ ...tier2Row, stage }), VERIFIED).outcome).toBe(
+      "unsupported_currency",
+    );
+    expect(fxBoardPrice(fxRow({ ...tier2Row, stage })).outcome).toBe("promoted");
   });
 
   test("without a provider time the fetch instant is used, marked collector", () => {
@@ -303,5 +324,120 @@ describe("sbi-domestic-current-price-v1", () => {
     expect(inDomesticRecord(at(34), at(34 + 423, 11))).toBe(false);
     expect(inDomesticRecord(at(457), at(164, 11))).toBe(false);
     expect(inDomesticRecord("json:$", at(164))).toBe(false);
+  });
+});
+
+describe("fx-sbi-shinsei-board-v1: the stage category of the same run (ADR 0031)", () => {
+  const stated = (categoryJson: string) => ({ state: "stated", categoryJson }) as const;
+  const tierRow = (category: string | number | null, overrides: Partial<FxBoardRow> = {}) =>
+    fxRow({
+      customerCategory: category,
+      customerCategoryJson: category === null ? null : JSON.stringify(category),
+      ...overrides,
+    });
+
+  test("the per-1-unit list is the provider's 13 currencies; CHF and JPY are never on it", () => {
+    expect([...SBI_SHINSEI_FX_PER_UNIT_CURRENCIES].sort()).toEqual([
+      "AUD",
+      "BRL",
+      "CAD",
+      "CNY",
+      "EUR",
+      "GBP",
+      "HKD",
+      "NOK",
+      "NZD",
+      "SGD",
+      "TRY",
+      "USD",
+      "ZAR",
+    ]);
+    expect(SBI_SHINSEI_FX_PER_UNIT_CURRENCIES).not.toContain("CHF");
+    expect(SBI_SHINSEI_FX_PER_UNIT_CURRENCIES).not.toContain("JPY");
+    const stage = stated('"SYNTHETIC-TOP"');
+    for (const subject of SBI_SHINSEI_FX_PER_UNIT_CURRENCIES)
+      expect(fxBoardPrice(tierRow("SYNTHETIC-TOP", { subject, stage })).outcome).toBe("promoted");
+    expect(fxBoardPrice(tierRow("SYNTHETIC-TOP", { subject: "CHF", stage })).outcome).toBe(
+      "unsupported_currency",
+    );
+    expect(fxBoardPrice(tierRow("SYNTHETIC-TOP", { subject: "JPY", stage })).outcome).toBe(
+      "unsupported_currency",
+    );
+    expect(fxBoardPrice(tierRow("SYNTHETIC-TOP", { subject: "KRW", stage })).outcome).toBe(
+      "unsupported_currency",
+    );
+  });
+
+  test("of five tiers exactly the stated one promotes, per 1 unit, with mid, buy and sell", () => {
+    const tiers = ["SYNTHETIC-1", "SYNTHETIC-2", "SYNTHETIC-3", "SYNTHETIC-4", "SYNTHETIC-TOP"];
+    const stage = stated('"SYNTHETIC-TOP"');
+    expect(tiers.map((tier) => fxBoardPrice(tierRow(tier, { stage })).outcome)).toEqual([
+      "tier_unmatched",
+      "tier_unmatched",
+      "tier_unmatched",
+      "tier_unmatched",
+      "promoted",
+    ]);
+    const kinds = ["bank_mid_rate", "bank_buy_rate", "bank_sell_rate"].map((metric) => {
+      const verdict = fxBoardPrice(tierRow("SYNTHETIC-TOP", { stage, metric }));
+      if (verdict.outcome !== "promoted") throw new Error(verdict.outcome);
+      expect(verdict.price).toMatchObject({
+        baseInstrumentRef: "USD",
+        baseQuantity: { coefficient: "1", scale: 0 },
+        quoteUnitRef: "JPY",
+      });
+      expect(validPriceObservation({ id: "price_x", ...verdict.price })).toBe(true);
+      return verdict.price.priceKind;
+    });
+    expect(kinds).toEqual(["reference", "bid", "ask"]);
+  });
+
+  test("equality is strict: a string never equals a number, and nothing is trimmed or folded", () => {
+    expect(fxBoardPrice(tierRow("3", { stage: stated("3") })).outcome).toBe("tier_unmatched");
+    expect(fxBoardPrice(tierRow(3, { stage: stated('"3"') })).outcome).toBe("tier_unmatched");
+    expect(fxBoardPrice(tierRow(3, { stage: stated("3") })).outcome).toBe("promoted");
+    expect(fxBoardPrice(tierRow(" top", { stage: stated('"top"') })).outcome).toBe(
+      "tier_unmatched",
+    );
+    expect(fxBoardPrice(tierRow("TOP", { stage: stated('"top"') })).outcome).toBe("tier_unmatched");
+    expect(stageMatches("true", stated("true"))).toBe(false);
+    expect(stageMatches("null", stated("null"))).toBe(false);
+    expect(stageMatches('""', stated('""'))).toBe(false);
+    expect(stageMatches('{"a":1}', stated('{"a":1}'))).toBe(false);
+    expect(stageMatches("not json", stated("not json"))).toBe(false);
+    expect(stageMatches(null, stated('"A"'))).toBe(false);
+  });
+
+  test("no promotion when the run's stage is absent or its observations disagree", () => {
+    for (const stage of [{ state: "absent" }, { state: "disagreeing" }] as const)
+      expect(fxBoardPrice(tierRow("SYNTHETIC-TOP", { stage })).outcome).toBe("stage_unstated");
+    // A row without a category never matches, whatever the stage.
+    expect(fxBoardPrice(tierRow(null, { stage: stated('"SYNTHETIC-TOP"') })).outcome).toBe(
+      "tier_unmatched",
+    );
+  });
+
+  test("a currency listed once in another tier is not the owner's rate: no fallback to it", () => {
+    const stage = stated('"SYNTHETIC-TOP"');
+    expect(fxBoardPrice(tierRow("SYNTHETIC-2", { subject: "NOK", stage })).outcome).toBe(
+      "tier_unmatched",
+    );
+    expect(fxBoardPrice(tierRow("SYNTHETIC-TOP", { subject: "NOK", stage })).outcome).toBe(
+      "promoted",
+    );
+  });
+
+  test("an admitted tier still needs a positive exact rate and a JPY quote", () => {
+    const stage = stated('"SYNTHETIC-TOP"');
+    for (const amountText of [null, "0", "-1", "1e2"])
+      expect(fxBoardPrice(tierRow("SYNTHETIC-TOP", { stage, amountText })).outcome).toBe(
+        "basis_unverified",
+      );
+    expect(fxBoardPrice(tierRow("SYNTHETIC-TOP", { stage, currency: "USD" })).outcome).toBe(
+      "unsupported_currency",
+    );
+    expect(
+      fxBoardPrice(tierRow("SYNTHETIC-TOP", { stage, sourceAccount: "sbi-shinsei:other" })).outcome,
+    ).toBe("basis_unverified");
   });
 });

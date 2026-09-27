@@ -16,20 +16,33 @@
 //     `price_<sha256(rule, claimRef)>`, and the prices, their claims and the
 //     cursor move in one batch. Running the lane again over the same
 //     observations, even from a reset cursor, writes nothing.
+//   * FX board rows are judged against the stage category of their own
+//     collection run (ADR 0031): one read per tick, STAGE_SQL, made only when
+//     the page holds board rows, gives each board row its category and the
+//     categories the run's published `sbi-shinsei-balance-summary-and-stage`
+//     observations state.
 //   * Its log line and tick record carry counts only: `scanned`, `promoted`,
-//     `basis_unverified`, `unsupported_currency` and `written`. No price,
-//     quantity, code or account label leaves the lane.
+//     `basis_unverified`, `unsupported_currency`, `tier_unmatched`,
+//     `stage_unstated` and `written`. No price, quantity, code, category or account label leaves
+//     the lane.
 import {
   domesticCurrentPrice,
   foreignStockPrice,
   fxBoardPrice,
   inDomesticRecord,
+  isFxBoardRow,
   priceId,
   SBI_SHINSEI_FX_QUOTE_BASIS,
   type FxQuoteBasisTable,
+  type FxStageCategory,
   type PriceClaimKind,
   type PriceVerdict,
 } from "../../../packages/domain/src/price-sources.ts";
+import {
+  SBI_SHINSEI_CUSTOMER_ACCOUNT,
+  SBI_SHINSEI_STAGE_METRIC,
+  sbiShinseiBalanceSummaryAndStage,
+} from "../../../packages/parsers/src/parsers/sbi-shinsei-balance-summary-and-stage.ts";
 
 /** Claims examined per tick, over both claim kinds. */
 export const PRICE_PROMOTION_BATCH = 500;
@@ -48,6 +61,17 @@ export interface PricePromotionResult {
   basis_unverified: number;
   /** Claims refused because the currency is not one the rule admits. */
   unsupported_currency: number;
+  /**
+   * FX board claims of a per-1-unit currency refused because the row is not
+   * in the one stage category its own run states: another tier's row, or a
+   * row without a category (ADR 0031).
+   */
+  tier_unmatched: number;
+  /**
+   * FX board claims of a per-1-unit currency refused because the row's own
+   * run states no stage category, or more than one (ADR 0031).
+   */
+  stage_unstated: number;
   /** Price rows this tick newly wrote. */
   written: number;
 }
@@ -105,6 +129,63 @@ const DOMESTIC_RECORD_SQL = `SELECT 'position' AS role,po.parse_run_id,po.source
   v.as_of,v.raw_locator
  FROM valuation_observations v
  WHERE v.parse_run_id IN (SELECT value FROM json_each(?1)) AND v.metric='market_value'`;
+
+/**
+ * The stage category of each FX board row's own collection run (ADR 0031).
+ * ?1 is a JSON array of board observation ids. Per row: its category as JSON
+ * text (`->` keeps the JSON type, so `"3"` and `3` differ), how many distinct
+ * categories the run's published stage observations state, and the category
+ * when there is exactly one. Every table is reached by key from the page's
+ * own rows: the observation, parse run and artifact by primary key, the run's
+ * balance-summary artifact by `idx_fetch_artifacts_run_role`, its publication
+ * by primary key and its observations by `idx_val_obs_parse_run`. The CROSS
+ * JOINs fix that order and the unary `+` keeps the planner off
+ * `idx_val_obs_subject` and the dataset index, which would read the stage rows
+ * of every run ever stored (test/price-promotion-stage.test.ts checks the plan
+ * without statistics).
+ */
+export const STAGE_SQL = `WITH board AS (
+ SELECT v.id,v.extra_json -> '$.customerCategory' AS row_category,a.fetch_run_id
+ FROM valuation_observations v
+ JOIN parse_runs p ON p.id=v.parse_run_id
+ JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+ WHERE v.id IN (SELECT value FROM json_each(?1))),
+runs AS (SELECT DISTINCT fetch_run_id FROM board),
+stage AS (
+ SELECT r.fetch_run_id,count(DISTINCT s.extra_json -> '$.customerCategory') AS stated,
+  min(s.extra_json -> '$.customerCategory') AS category
+ FROM runs r
+ CROSS JOIN fetch_artifacts sa ON sa.fetch_run_id=r.fetch_run_id
+  AND +sa.source_id='sbi-shinsei-bank' AND +sa.dataset='balance-summary-and-stage'
+ CROSS JOIN published_parse_runs pp ON pp.fetch_artifact_id=sa.id
+  AND pp.parser_name='${sbiShinseiBalanceSummaryAndStage.name}'
+ CROSS JOIN valuation_observations s ON s.parse_run_id=pp.parse_run_id
+  AND +s.metric='${SBI_SHINSEI_STAGE_METRIC}' AND +s.source_account='${SBI_SHINSEI_CUSTOMER_ACCOUNT}'
+ GROUP BY r.fetch_run_id)
+SELECT b.id,b.row_category,coalesce(st.stated,0) AS stated,st.category
+ FROM board b LEFT JOIN stage st ON st.fetch_run_id=b.fetch_run_id`;
+
+interface StageRow {
+  id: number;
+  row_category: string | null;
+  stated: number;
+  category: string | null;
+}
+
+/** What STAGE_SQL says about one board row: its category and its run's stage. */
+function stageOf(row: StageRow | undefined): {
+  categoryJson: string | null;
+  stage: FxStageCategory;
+} {
+  if (row === undefined) return { categoryJson: null, stage: { state: "absent" } };
+  const stage: FxStageCategory =
+    row.stated === 1 && row.category !== null
+      ? { state: "stated", categoryJson: row.category }
+      : row.stated > 1
+        ? { state: "disagreeing" }
+        : { state: "absent" };
+  return { categoryJson: row.row_category, stage };
+}
 
 const INSERT_PRICES_SQL = `INSERT INTO price_observations(id,base_instrument_ref,base_quantity_coefficient,
  base_quantity_scale,quote_unit_ref,quote_amount_coefficient,quote_amount_scale,price_kind,effective_time,
@@ -185,6 +266,28 @@ async function valuationVerdicts(
   fxQuoteBasis: FxQuoteBasisTable,
 ): Promise<PriceVerdict[]> {
   const domestic = rows.filter((row) => row.parser_name === VALUATION_PARSERS[1]);
+  const board = rows.filter(
+    (row) =>
+      row.parser_name === VALUATION_PARSERS[0] &&
+      isFxBoardRow({
+        sourceId: row.source_id,
+        parserName: row.parser_name,
+        sourceAccount: row.source_account,
+        metric: row.metric,
+      }),
+  );
+  const stages = new Map<number, StageRow>(
+    board.length === 0
+      ? []
+      : (
+          (
+            await db
+              .prepare(STAGE_SQL)
+              .bind(JSON.stringify(board.map((row) => row.id)))
+              .all<StageRow>()
+          ).results ?? []
+        ).map((row) => [row.id, row]),
+  );
   const records =
     domestic.length === 0
       ? []
@@ -236,6 +339,7 @@ async function valuationVerdicts(
         })),
       });
     }
+    const { categoryJson, stage } = stageOf(stages.get(row.id));
     return fxBoardPrice(
       {
         observationId: row.id,
@@ -250,6 +354,8 @@ async function valuationVerdicts(
         asOf: row.as_of,
         fetchedAt: row.fetched_at,
         customerCategory: row.customer_category,
+        customerCategoryJson: categoryJson,
+        stage,
       },
       fxQuoteBasis,
     );
@@ -332,6 +438,8 @@ export async function pricePromotionSweep(
     promoted: 0,
     basis_unverified: 0,
     unsupported_currency: 0,
+    tier_unmatched: 0,
+    stage_unstated: 0,
     written: 0,
   };
   const cursors = new Map<string, number>(

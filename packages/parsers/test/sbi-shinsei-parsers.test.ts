@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { PARSERS } from "../src/parsers/registry.ts";
+import { sbiShinseiBalanceSummaryAndStage } from "../src/parsers/sbi-shinsei-balance-summary-and-stage.ts";
 import { sbiShinseiExchangeRate } from "../src/parsers/sbi-shinsei-exchange-rate.ts";
 import { sbiShinseiTopBalancesAndActivity } from "../src/parsers/sbi-shinsei-top-balances-and-activity.ts";
 import { sbiShinseiYenDepositAccount } from "../src/parsers/sbi-shinsei-yen-deposit-account.ts";
@@ -39,11 +40,13 @@ function parserFor(dataset: string): Parser {
 }
 
 describe("SBI Shinsei parser routing", () => {
-  test("routes only the three source artifacts with verified observation semantics", () => {
+  test("routes only the four source artifacts with verified observation semantics", () => {
     expect(parserFor("top-accounts-balance-and-activity")).toBe(sbiShinseiTopBalancesAndActivity);
     expect(parserFor("yen-deposit-account")).toBe(sbiShinseiYenDepositAccount);
     expect(parserFor("exchange-rate")).toBe(sbiShinseiExchangeRate);
-    for (const dataset of ["balance-summary-and-stage", "normalized", "collector-manifest"]) {
+    // ADR 0031: the stage category only; nothing else on the page is emitted.
+    expect(parserFor("balance-summary-and-stage")).toBe(sbiShinseiBalanceSummaryAndStage);
+    for (const dataset of ["normalized", "collector-manifest"]) {
       expect(PARSERS.filter((parser) => parser.accepts(artifact(dataset)))).toEqual([]);
     }
     expect(
@@ -758,5 +761,118 @@ describe("SBI Shinsei exchange-rate board: observed shape (1.0.1)", () => {
       failureCause: "row_unreadable",
       expectedCount: 198,
     });
+  });
+});
+
+describe("SBI Shinsei balance summary and stage (ADR 0031)", () => {
+  const parse = (input: unknown) =>
+    sbiShinseiBalanceSummaryAndStage.parse(encode(input), artifact("balance-summary-and-stage"));
+  const withCategory = (sent: unknown, drop = false): Record<string, unknown> => {
+    const input = value("balance-summary-and-stage");
+    const category = (
+      input["responseParam"] as Record<string, Record<string, Record<string, unknown>>>
+    )["category"]!["responseParam"]!;
+    if (drop) delete category["customerCategory"];
+    else category["customerCategory"] = sent;
+    return input;
+  };
+
+  test("emits the stage category verbatim as one amount-free observation of the customer", () => {
+    const result = sbiShinseiBalanceSummaryAndStage.parse(
+      fixture("balance-summary-and-stage"),
+      artifact("balance-summary-and-stage"),
+    );
+    expect(sbiShinseiBalanceSummaryAndStage.version).toBe("0.1.0");
+    expect(result.observations).toEqual([
+      {
+        kind: "valuation",
+        sourceAccount: "sbi-shinsei:customer",
+        subject: "customerCategory",
+        metric: "provider_customer_category",
+        currency: "XXX",
+        rawLocator: "json:$.responseParam.category.responseParam.customerCategory",
+        extra: {
+          customerCategory: "SYNTHETIC",
+          _kogane: {
+            providerContext: {
+              freeTransferCount: "1",
+              atmFee: "0",
+              allowedAtmWithFreeCnt: "1",
+              balanceAtmWithFreeCnt: "1",
+            },
+            attribute: "stage-category",
+            valueType: "string",
+            amountDisposition: "not-an-amount",
+          },
+        },
+      },
+    ]);
+    expect(result.coverage).toEqual([
+      expect.objectContaining({ completeness: "complete", observedCount: 1, expectedCount: 1 }),
+    ]);
+  });
+
+  test("names, balances and the branch never leave the artifact", () => {
+    const text = JSON.stringify(
+      sbiShinseiBalanceSummaryAndStage.parse(
+        fixture("balance-summary-and-stage"),
+        artifact("balance-summary-and-stage"),
+      ),
+    );
+    for (const field of [
+      "customerName",
+      "SYNTHETIC CUSTOMER",
+      "savingsBalance",
+      "300000",
+      "branchCode",
+      "SYNTHETIC BRANCH",
+    ])
+      expect(text).not.toContain(field);
+  });
+
+  test("a number stays a number and a string stays a string: nothing is mapped", () => {
+    for (const [sent, type] of [
+      [3, "number"],
+      ["3", "string"],
+      [" 3", "string"],
+    ] as const) {
+      const observations = parse(withCategory(sent)).observations;
+      expect(observations).toHaveLength(1);
+      const extra = observations[0]!.extra;
+      expect(extra["customerCategory"]).toBe(sent);
+      expect((extra["_kogane"] as Record<string, unknown>)["valueType"]).toBe(type);
+    }
+  });
+
+  test("an absent, empty, null, boolean or structured category fails the artifact", () => {
+    expect(() => parse(withCategory(undefined, true))).toThrow(/customerCategory/u);
+    for (const sent of ["", null, true, false, { rank: 1 }, [1]])
+      expect(() => parse(withCategory(sent))).toThrow(/customerCategory|scalar/u);
+  });
+
+  test("an unknown field anywhere fails like the collector's validator", () => {
+    const cases: ((input: Record<string, any>) => void)[] = [
+      (input) => (input["responseParam"]["extra"] = {}),
+      (input) => (input["responseParam"]["summary"]["responseParam"]["unknown"] = "x"),
+      (input) => (input["responseParam"]["category"]["responseParam"]["rank"] = "x"),
+      (input) => (input["responseParam"]["branchFetch"]["responseParam"]["x"] = "x"),
+      (input) => (input["responseParam"]["mutualFundBalance"] = { responseParam: { x: 1 } }),
+      (input) => delete input["responseParam"]["category"],
+      (input) => (input["header"]["adapterResultCode"] = "1"),
+      (input) =>
+        (input["responseParam"]["category"]["errorInfo"] = {
+          statusID: "E1",
+          statusMessage: "failure",
+        }),
+    ];
+    for (const change of cases) {
+      const input = value("balance-summary-and-stage") as Record<string, any>;
+      change(input);
+      expect(() => parse(input)).toThrow();
+    }
+    // The collector's other accepted form: an empty wrapper for the fund balance.
+    const wrapped = value("balance-summary-and-stage") as Record<string, any>;
+    wrapped["responseParam"]["mutualFundBalance"] = { requestParam: {}, responseParam: {} };
+    expect(parse(wrapped).observations).toHaveLength(1);
   });
 });

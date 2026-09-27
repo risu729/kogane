@@ -65,8 +65,12 @@ Concrete limits in the current code:
   ([ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)); until the
   repair lane has re-parsed the stored captures after deploy, the adapter
   admits nothing. The same release lets the SBI Shinsei exchange-rate board
-  be parsed for the first time, every `customerCategory` tier kept, while no
-  FX row is promoted to a price until a tier and quote basis are admitted. A debit posted more than three days from the
+  be parsed for the first time, every `customerCategory` tier kept. A board
+  row of the 13 per-1-unit currencies is promoted only in the stage category
+  the same run's balance summary states
+  ([ADR 0031](adr/0031-sbi-shinsei-stage-category-fx-tier.md); the two were
+  observed on 2026-09-27 to use one scheme). Until the stage parser has
+  published a run's balance summary, that run's board promotes nothing. A debit posted more than three days from the
   due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
   Sony Bank), partial payments, refunds and complete purchase recognition
   remain extensions; this is not complete event coverage.
