@@ -44,6 +44,25 @@ holder name and card name are never read. **Kept as limits:** Vpass has no
 reader; branch names are not compared; the relation between the mask length
 and a bank's account-number length is not checked.
 
+## Person names removed from stored captures (collectors, no parser release)
+
+Observed on 2026-09-27 by the owner's agent in stored objects, reporting key
+names, types and match results only
+([ADR 0029's amendment](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)):
+
+- SBI Shinsei `balance-summary-and-stage` captures carry the account holder's
+  name in three fields of `responseParam.summary.responseParam`.
+- MyJCB confirmed statement pages carry a partially masked account holder
+  name in the 口座名義 row of the 「カード情報」 table.
+
+What changes: the collectors replace those values with `[redacted:name]`
+before anything is written, and each capture's manifest entry counts the
+replacements (`redactedFieldCount`). No parser reads either field, so no
+parser releases and no observation changes. **Unchanged, kept as limits:**
+captures stored earlier still carry the names (append-only; deleting them is
+the owner's decision), and transaction descriptions and ledger text are kept
+as the provider wrote them.
+
 ## SBI Shinsei board time ends in letters (board parser 1.0.2)
 
 Observed on 2026-09-27 by the owner's agent (structure and counts only,

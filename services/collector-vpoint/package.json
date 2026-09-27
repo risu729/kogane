@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "cheerio": "1.1.2",
+    "cheerio": "1.2.0",
     "iconv-lite": "0.7.3",
     "postal-mime": "3.0.0",
     "set-cookie-parser": "3.1.2"
