@@ -144,6 +144,12 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   decision_operations: { classification: "core-keep", planRow: "decisions and relations" },
   decision_revisions: { classification: "core-keep", planRow: "decisions and relations" },
   entity_relations: { classification: "core-keep", planRow: "decisions and relations" },
+  // 0058 (ADR 0030): the operator's one-time crosswalk of importer-era to
+  // collector-era identity values, append-only evidence of that decision.
+  account_identity_crosswalk: {
+    classification: "core-keep",
+    planRow: "decisions and relations",
+  },
   // change_plans, approvals, operation_receipts, decision_outbox → CORE
   approvals: { classification: "core-keep", planRow: "change plans, approvals and receipts" },
   change_plans: { classification: "core-keep", planRow: "change plans, approvals and receipts" },

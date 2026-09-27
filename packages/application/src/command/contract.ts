@@ -7,6 +7,11 @@
 import { isOneOf, isRecord, isText } from "../../../domain/src/guards.ts";
 import { RELATION_KINDS, type RelationKind } from "../../../domain/src/decisions.ts";
 import {
+  type CrosswalkSource,
+  isCrosswalkSource,
+  isCrosswalkValue,
+} from "../../../storage-d1/src/core/identity-crosswalk.ts";
+import {
   CARD_PURCHASE_EXCLUSION_REASONS,
   type CardPurchaseExclusionReason,
   isCardEventIdOfKind,
@@ -36,6 +41,7 @@ export const CHANGE_KINDS = [
   "card-refund.withdraw",
   "card-installment.link",
   "card-installment.unlink",
+  "identity.crosswalk.accept",
 ] as const;
 export type ChangeKind = (typeof CHANGE_KINDS)[number];
 
@@ -120,6 +126,23 @@ export interface CardInstallmentUnlinkPayload {
   portionKeys: string[];
   reason: string;
 }
+/**
+ * `identity.crosswalk.accept` (ADR 0030): the collector-era identity value
+ * `toRef` continues the importer-era value `fromRef` of the same source. The
+ * counts are the proposal the operator reviewed; the server recomputes them at
+ * plan and again inside the commit, and refuses when they differ, so they pin
+ * the evidence rather than assert it.
+ */
+export interface IdentityCrosswalkPayload {
+  source: CrosswalkSource;
+  fromRef: string;
+  toRef: string;
+  sharedRows: number;
+  newOnlyRows: number;
+  oldOnlyRows: number;
+  months: number;
+  reason: string;
+}
 export type CardReviewPayload =
   | CardPurchaseExcludePayload
   | CardPurchaseRestorePayload
@@ -132,7 +155,8 @@ export type ChangePayload =
   | IdentityReleasePayload
   | RelationPayload
   | CardSettlementPayload
-  | CardReviewPayload;
+  | CardReviewPayload
+  | IdentityCrosswalkPayload;
 
 const REASON_MAX = 1000;
 
@@ -148,6 +172,7 @@ export function validPayload(kind: ChangeKind, value: unknown): value is ChangeP
     return exactKeys(value, ["proposalId", "reason"]) && isText(value.proposalId, 512) && reason;
   }
   if (isCardReviewKind(kind)) return reason && validCardReviewPayload(kind, value);
+  if (kind === "identity.crosswalk.accept") return reason && validCrosswalkPayload(value);
   if (kind === "identity.assign" || kind === "identity.release-override") {
     const assign = kind === "identity.assign";
     const keys = assign
@@ -219,6 +244,33 @@ function validCardReviewPayload(kind: CardReviewKind, value: Record<string, unkn
         isPortionList(value.portionKeys, isCardInstallmentPortionKey)
       );
   }
+}
+
+function validCrosswalkPayload(value: Record<string, unknown>): boolean {
+  const count = (entry: unknown) =>
+    typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 0;
+  return (
+    exactKeys(value, [
+      "source",
+      "fromRef",
+      "toRef",
+      "sharedRows",
+      "newOnlyRows",
+      "oldOnlyRows",
+      "months",
+      "reason",
+    ]) &&
+    isCrosswalkSource(value.source) &&
+    isCrosswalkValue(value.source, value.fromRef) &&
+    isCrosswalkValue(value.source, value.toRef) &&
+    value.fromRef !== value.toRef &&
+    count(value.sharedRows) &&
+    (value.sharedRows as number) > 0 &&
+    count(value.newOnlyRows) &&
+    count(value.oldOnlyRows) &&
+    count(value.months) &&
+    (value.months as number) > 0
+  );
 }
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {

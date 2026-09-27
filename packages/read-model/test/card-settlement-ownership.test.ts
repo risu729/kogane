@@ -4,9 +4,10 @@
 // ownership-claim state the view distinguishes. The last test checks that the
 // seeds together drew every one of those states. Every value is synthetic.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { cardSettlementOwnershipCtes, type OwnershipKind } from "../src/card-settlement-ownership";
 import { explain } from "./card-usage-plan";
+import { fullCoreSchema } from "./card-usage-scale-fixture";
 import {
   RANDOM_STATES,
   randomSettlementStore,
@@ -42,6 +43,13 @@ function same(db: Database, kind: OwnershipKind, ids: readonly number[]): unknow
 }
 
 describe("keyed card settlement ownership on random stores", () => {
+  // The first store pays the one-time CORE schema build (schema-template.ts,
+  // every migration in order), which crossed a seed's 5 s default timeout on
+  // the loaded CI runner. Pay it here, outside any seed's budget.
+  beforeAll(() => {
+    fullCoreSchema().close();
+  }, 60_000);
+
   const stores = new Map<number, RandomSettlementStore>();
   const store = (seed: number): RandomSettlementStore => {
     let found = stores.get(seed);

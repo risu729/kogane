@@ -195,7 +195,9 @@ is recognised, and nothing is counted twice.
 **The v1 and v2 tokens of one card are two entities.** The collector derives
 only v2 tokens, and the importer's key that made the v1 tokens is lost, so no
 equal value links a card's importer-era account to its collector-era account.
-Until a reviewed crosswalk joins them, a card read under both is two account
+Until a reviewed crosswalk
+([below](#joining-importer-era-and-collector-era-identities-one-time)) joins
+them, a card read under both is two account
 entities with nothing carried over; its purchases are recognised again on the
 new account (the importer's event is retired, so the captured total is not
 doubled). No owner action or secret is needed any more. After the next
@@ -238,7 +240,8 @@ current monthly snapshot per unit key and month, so for a month both
 producers captured the importer's v1 snapshot and the collector's v2 snapshot
 are both current: the same provider rows are listed under two source accounts
 and two account entities, and nothing maps one to the other. That is a known
-limit until a reviewed crosswalk joins the two identities of each account.
+limit until a reviewed crosswalk joins the two identities of each account
+([below](#joining-importer-era-and-collector-era-identities-one-time)).
 The runs are parsed as soon as they register (MoneyForward's datasets are not
 withheld). No owner action or secret is needed any more. After the next
 collection, count identities per producer and version (read-only, counts only):
@@ -268,6 +271,97 @@ one entity whichever producer read it. An operator's re-mapping of the
 importer's source account is not followed, and account connection reviews,
 keyed by producer, do not carry over. A v1 and a v2 identity differ, and so do
 their entities.
+
+## Joining importer-era and collector-era identities (one-time)
+
+The retired importer's Vpass tokens and MoneyForward identities were derived
+under a key that is lost, so a collector's value for the same card or account
+differs and resolves to a second account entity. Where both producers
+captured the same provider rows, an operator can record, once per card or
+account, that the new value continues the old one
+([ADR 0030](adr/0030-identity-crosswalk.md)).
+
+**1. Proposals (read-only, counts only).** From the repository root, with
+D1 read access through `wrangler.diagnostic.jsonc`:
+
+```sh
+bun services/processor/scripts/identity-crosswalk-proposals.ts
+```
+
+One line per collector-era value and importer-era candidate, then a summary:
+
+```json
+{"source":"moneyforward-me","newKeyRef":"moneyforward-account-v2-<64 hex>","oldKeyRef":"moneyforward-account-v1-<64 hex>","sharedRows":12,"newOnlyRows":3,"oldOnlyRows":40,"months":2,"verdict":"unique"}
+{"summary":{"unique":1,"ambiguous":0,"none":0}}
+```
+
+The key refs are the identity values (opaque hashes); nothing else but
+counts is printed. The rows compared are current transaction observations
+filed under a value. A Vpass row is its external id; a MoneyForward row is
+the selected month, date, description and amount text plus the occurrence
+counter, because its external id carries the identity itself. `unique`: the
+new value shares rows with exactly one old value, which shares rows with no
+other new value. `ambiguous`: anything else shared. `none`: nothing shared
+(`oldKeyRef` and `oldOnlyRows` are null). Only a `unique` line can be
+recorded; `ambiguous` and `none` stay split. A verdict is a proposal, not
+proof: an identical row in another account (same month, date, description,
+amount and occurrence) makes a real match `ambiguous`, and coincidental rows
+alone can make an unrelated pair `unique`, so read `sharedRows` against the
+only-rows before recording one. Collector Vpass statement pages are not
+parsed today, so Vpass lines are `none` or absent until they are.
+
+**2. Record one crosswalk (operator only).** Through the command routes of
+the evidence browser (`POST /api/command/v1/plan`, then `simulate`,
+`approve`, `commit`; [change lifecycle](change-lifecycle.md)), with the
+line's values copied as they are:
+
+```json
+{
+  "kind": "identity.crosswalk.accept",
+  "payload": {
+    "source": "moneyforward-me",
+    "fromRef": "<oldKeyRef>",
+    "toRef": "<newKeyRef>",
+    "sharedRows": 12,
+    "newOnlyRows": 3,
+    "oldOnlyRows": 40,
+    "months": 2,
+    "reason": "Reviewed proposal: the same rows under both values"
+  }
+}
+```
+
+The server measures the pair again and refuses the plan when the counts
+differ (`stale_context`, run the script again), when either value is already
+in a crosswalk or the overlap is not one-to-one (`target_ambiguous`), or
+when nothing is shared (`incomplete_evidence`). An agent may plan it; only
+the operator in `OPERATOR_SUBJECTS` approves and commits. The commit measures
+once more inside its write, so rows parsed after the plan make it
+`stale_context` with nothing written.
+
+**What the commit writes.** An `accept` decision, one
+`account_identity_crosswalk` row (counts and a digest), and, for each
+collector source account of the new value whose current mapping is
+automatic, a new rule revision pointing at the importer-era entity. From
+then on `accountEntityId` resolves the new value to that entity. Nothing is
+deleted; a manual decision on the collector's source account stays; the
+MoneyForward months both producers captured are still listed under two
+source accounts in the transactions read (ADR 0027), now of one entity.
+There is no command that undoes a crosswalk.
+
+**Check (read-only, counts only).**
+
+```sql
+SELECT x.source_id, count(DISTINCT x.id) AS crosswalks,
+       count(m.source_account_id) AS collector_source_accounts
+FROM account_identity_crosswalk x
+LEFT JOIN source_accounts s ON s.source_id=x.source_id
+ AND s.producer_id<>'collector-r2-importer'
+ AND s.reference_json IN (json_array('vpass:card',x.to_account_ref),
+                          json_array('moneyforward-me:'||x.to_account_ref))
+LEFT JOIN current_account_mappings m ON m.source_account_id=s.id
+GROUP BY x.source_id;
+```
 
 ## Policy 2: Mizuho rule re-identification
 

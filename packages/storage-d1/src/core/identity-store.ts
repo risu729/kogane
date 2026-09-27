@@ -8,6 +8,7 @@ import type {
 import { record } from "../../../identity/src/types.ts";
 import { executeIdentityCommand, type IdentityCommandError } from "./identity-commands.ts";
 import { identityKey } from "./identity-keys.ts";
+import { crosswalkFrom, crosswalkKeyValue, importerEntityId } from "./identity-crosswalk.ts";
 import {
   BASE_IDENTITY_POLICY_VERSION,
   dependencyDigest,
@@ -91,16 +92,27 @@ const MONEYFORWARD_ACCOUNT_REFERENCE = /^moneyforward-me:moneyforward-account-v[
  * value) gets an entity no importer reference names, and every producer that
  * reads that value reaches the same one. The v1 and the v2 value of one
  * account are different values and so different entities; nothing here joins
- * them (that is a separate, reviewed crosswalk). Nothing else is shared: the
- * collector's source account is its own subject, with its own mapping
- * revisions and manual decisions.
+ * them by rule. Nothing else is shared: the collector's source account is its
+ * own subject, with its own mapping revisions and manual decisions.
+ *
+ * One more exception is an operator's decision, not a rule of the value: an
+ * accepted crosswalk (ADR 0030, `account_identity_crosswalk`) says that a
+ * collector-era value continues an importer-era one derived under the lost
+ * key. For such a value (a trusted Vpass token or a MoneyForward identity,
+ * `v1` or `v2`), the entity is the importer-era value's, so the collector's
+ * history joins the importer-era entity. It is one indexed read, made only for
+ * those two key shapes, and only the new value is looked up: the importer's
+ * own rows keep their entity as before.
  */
 async function accountEntityId(
+  db: D1Like,
   input: IdentityInput,
   account: AccountIdentity,
   ref: string,
 ): Promise<string> {
   const key = account.key;
+  const crosswalked = await crosswalkEntityId(db, input, key);
+  if (crosswalked !== null) return crosswalked;
   if (
     input.sourceId === "vpass" &&
     input.trustedVpassBinding !== undefined &&
@@ -124,6 +136,20 @@ async function accountEntityId(
   return identityKey("account", [ref]);
 }
 
+/** The importer-era entity an accepted crosswalk maps this key's value to, or null. */
+async function crosswalkEntityId(
+  db: D1Like,
+  input: IdentityInput,
+  key: readonly string[],
+): Promise<string | null> {
+  const value = crosswalkKeyValue(input.sourceId, key);
+  if (value === null) return null;
+  if (input.sourceId === "vpass" && input.trustedVpassBinding?.cardToken !== value) return null;
+  const source = input.sourceId === "vpass" ? "vpass" : "moneyforward-me";
+  const from = await crosswalkFrom(db, source, value);
+  return from === null ? null : importerEntityId(source, from);
+}
+
 /** Appends an automatic decision only when no effective manual decision
  * protects the subject and no current automatic decision of an equal or newer
  * policy exists. Version comparison is numeric; old workers cannot undo newer rules. */
@@ -134,7 +160,7 @@ async function accountMapping(
   version: number,
 ) {
   const ref = await identityKey("sa", [input.sourceId, input.producerId, account.key]);
-  const entity = await accountEntityId(input, account, ref);
+  const entity = await accountEntityId(db, input, account, ref);
   await db.batch([
     db
       .prepare(
