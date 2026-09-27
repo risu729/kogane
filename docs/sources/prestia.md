@@ -882,8 +882,40 @@ container. The per-source staging bucket is not written in shared mode: the
 run is stored once, in `DATA` (plan 00).
 
 A successful run still declares `coverageStatus: partial`, because the provider
-exposes a rolling window of statement months and pagination remains unproven.
+exposes a rolling window of statement months and the collector stores only
+the first page of a month (below).
 
 Deploy order, rollback and the artifact/role table are in
 [`docs/collection.md`](../collection.md#prestia-globalpass-kogane-globalpass-collector-poc).
 Merged is not enabled: the var ships as `legacy`.
+
+## GLOBAL PASS activity pages and refusals (2026-09-27)
+
+Observed on the live Account Activities screen by the owner's agent
+(structure and counts only, no values):
+
+- The month select (`W131301.referenceDate`, a placeholder option plus 15
+  months) submits by POST on change.
+- A month with more than ten statements shows `Found N Result [p/Ppage] Back
+Next`. Back and Next are Nablarch POST links; there are no page-number
+  links and no page-size setting. A page holds at most ten statement blocks
+  (each block two `table.tableStyle4`). A month of ten or fewer shows no
+  pager. Of 15 months, five had two pages; the largest stated total was 20.
+  Whether a month ever had a second page before is not known to the owner.
+- Stored captures had shown a month stating 16 results with 16 rows and no
+  pager link. That is not reconciled with the above: the collector in this
+  repository keeps `page.content()` once per month and follows no Next link,
+  and nothing here shows what rendered that capture.
+
+Production runs, the seven nights before 2026-09-27: every night both selected months were
+refused by the activity sanitizer, so no page was stored. Which of its checks
+refused them was not recorded then. The Worker now records it as a closed
+code (`globalpass_html_contract_invalid`, `_redaction_failed`,
+`_shape_unreviewed`, `_utf8_invalid`), and logs each month's stated total and
+page numbers as counts. The collector still stores page 1 only, and marks a
+month whose page states more pages `activity_pages_unwalked`
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes)).
+
+Open: which check refuses production pages; the pager's markup and a paged
+page's form shape (neither reviewed from a capture); whether `Found N Result`
+appears for a month of ten or fewer.
