@@ -9,9 +9,9 @@
     "@cloudflare/puppeteer": "1.4.0",
     "@cloudflare/vitest-plugin": "1.2.5",
     "@types/bun": "1.4.2",
-    "@types/node": "24.13.6",
+    "@types/node": "26.6.2",
     "devtools-protocol": "0.0.1704034",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vitest": "4.1.11",
     "wrangler": "4.138.0"
   }

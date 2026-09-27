@@ -20,6 +20,13 @@
       groupName: "typescript",
     },
     {
+      // dependency-cruiser 18 needs the TypeScript < 7 compiler API; the root
+      // manifest keeps 5.x for root:depcruise (docs/package-layout.md).
+      matchFileNames: ["package.json"],
+      matchPackageNames: ["typescript"],
+      allowedVersions: "<7",
+    },
+    {
       matchFileNames: ["services/**", "packages/**"],
       addLabels: ["deployed"],
     },

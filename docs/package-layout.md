@@ -150,7 +150,7 @@ graph (`tsPreCompilationDeps: true` is what keeps the type-only edges).
 
 dependency-cruiser 18 supports `typescript` < 7 and, with none resolvable,
 cruises ~44 modules instead of 530 while still exiting 0. The root manifest
-therefore keeps `typescript@5.9.3` (the Worker workspaces keep their own 7.x),
+therefore keeps `typescript@5.9.3` (the workspaces pin their own, 7.x almost everywhere),
 and `tasks/_lib/depcruise.ts` fails unless a TypeScript transpiler was found,
 at least 400 modules were cruised, and three known cross-workspace edges are
 still in the graph.
