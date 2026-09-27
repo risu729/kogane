@@ -17,12 +17,60 @@ import {
   redactedStatementHtml,
 } from "./parsers";
 import { allowedUrl, MYJCB_ORIGIN } from "./policy";
-import type { ConnectionSummary, MyJcbCredential, RawArtifact, SessionCredential } from "./types";
-import { StopConditionError, type StopConditionCode } from "./types";
+import type {
+  ConnectionStopCode,
+  ConnectionSummary,
+  MyJcbCredential,
+  RawArtifact,
+  SessionCredential,
+} from "./types";
+import { HumanRequiredError, StopConditionError, type StopConditionCode } from "./types";
 
 export interface ConnectionCollection {
   readonly summary: ConnectionSummary;
   readonly artifacts: readonly RawArtifact[];
+}
+
+/**
+ * The stage each stop condition names, as the closed stop code the terminal
+ * and the manifest record (ADR 0005's amendment). A `Record` over every
+ * condition, so a new condition cannot be added without a stage.
+ */
+const STOP_CODE_BY_CONDITION: Readonly<Record<StopConditionCode, ConnectionStopCode>> = {
+  "unknown-upstream-state": "unclassified",
+  login: "login",
+  "passkey-browser-setup": "login",
+  "passkey-cdp-enable": "login",
+  "passkey-authenticator-add": "login",
+  "passkey-credential-add": "login",
+  "passkey-login-page": "login",
+  "passkey-control": "login",
+  "passkey-trigger": "login",
+  "passkey-assertion": "login",
+  "passkey-landing": "login",
+  "passkey-session-import": "login",
+  "collect-discovery": "discovery",
+  "collect-credit": "unclassified",
+  "collect-credit-menu": "credit_menu",
+  "collect-credit-first-detail": "credit_first_detail",
+  "collect-credit-past-months": "credit_past_months",
+  "collect-credit-month-fetch": "month_fetch",
+  "collect-credit-month-parse": "month_parse",
+  "collect-credit-export": "export_fetch",
+  "credit-ledger-headers": "ledger_parse",
+  "credit-ledger-item-cell": "ledger_parse",
+  "credit-ledger-cell-count": "ledger_parse",
+  "credit-statement-state": "credit_statement_state",
+  "credit-statement-period": "credit_statement_period",
+  "collect-debit": "debit",
+  "collect-route": "no_route",
+};
+
+/** The closed stop code for whatever stopped a connection. */
+export function connectionStopCode(error: unknown): ConnectionStopCode {
+  if (error instanceof HumanRequiredError) return "human_required";
+  if (error instanceof StopConditionError) return STOP_CODE_BY_CONDITION[error.code];
+  return "unclassified";
 }
 
 export async function collectConnection(options: {
@@ -32,12 +80,13 @@ export async function collectConnection(options: {
   browserBinding: BrowserRun;
   credential: MyJcbCredential;
 }): Promise<ConnectionCollection> {
-  const login =
+  const login = await loginStage(async () =>
     options.credential.bootstrapMode === "password"
       ? await loginWithOfficialProtection(options.browserBinding, options.credential)
       : options.credential.bootstrapMode === "passkey"
         ? await loginWithBitwardenPasskey(options.browserBinding, options.credential)
-        : await restoreSession(options.credential);
+        : await restoreSession(options.credential),
+  );
   try {
     const cards = await collectionStage("collect-discovery", async () =>
       parseCardInventory(login.mypageHtml),
@@ -46,6 +95,7 @@ export async function collectConnection(options: {
     const artifacts: RawArtifact[] = [];
     let periodCount = 0;
     let withheldMonthCount = 0;
+    let stop: CreditStop | undefined;
 
     const creditLinkId = extractCreditMenuLinkId(login.mypageHtml);
     if (creditLinkId) {
@@ -56,14 +106,23 @@ export async function collectConnection(options: {
       artifacts.push(...credit.artifacts);
       periodCount += credit.periodCount;
       withheldMonthCount += credit.withheldMonthCount;
+      stop = credit.stop;
     }
-    if (login.mypageHtml.includes("/iss-pc/member/debit/details/debitDetailMenu.html")) {
+    // A connection stops where its credit months stopped: nothing further is
+    // read (ADR 0005's amendment).
+    if (
+      stop === undefined &&
+      login.mypageHtml.includes("/iss-pc/member/debit/details/debitDetailMenu.html")
+    ) {
       const debit = await collectionStage("collect-debit", async () => await collectDebit(client));
       artifacts.push(...debit.artifacts);
       periodCount += debit.periodCount;
     }
     if (artifacts.length === 0) {
-      throw new Error("MyJCB mypage exposed neither an allowlisted credit nor debit route");
+      throw new StopConditionError(
+        "MyJCB mypage exposed neither an allowlisted credit nor debit route",
+        "collect-route",
+      );
     }
 
     const discovery = {
@@ -89,13 +148,20 @@ export async function collectConnection(options: {
       summary: {
         connectionId: options.credential.connectionId,
         bootstrapMode: options.credential.bootstrapMode,
-        // A month whose rows were withheld is missing from what this
-        // connection set out to collect, so it is `partial`, never
-        // `success` (ADR 0026, INV05).
-        status: withheldMonthCount === 0 ? "success" : "partial",
+        // A month whose rows were withheld, or a stop that left months
+        // unread, is missing from what this connection set out to collect,
+        // so it is `partial`, never `success` (ADR 0026, INV05).
+        status: withheldMonthCount === 0 && stop === undefined ? "success" : "partial",
         cardCount: Math.max(cards.length, 1),
         periodCount,
         artifactCount: artifacts.length,
+        ...(stop === undefined
+          ? {}
+          : {
+              stopCode: stop.code,
+              stopPosition: stop.position,
+              capturedMonthCount: stop.capturedMonthCount,
+            }),
       },
       artifacts,
     };
@@ -103,6 +169,32 @@ export async function collectConnection(options: {
     if (options.diagnostic) await options.diagnostic.step("browser-close", () => login.close());
     else await login.close();
   }
+}
+
+/**
+ * Login and session restore: a person being needed stays
+ * `HumanRequiredError`, a passkey stage keeps its own condition, and anything
+ * else becomes the `login` condition, so every error that leaves
+ * `collectConnection` names its stage.
+ */
+async function loginStage<T>(action: () => Promise<T>): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof HumanRequiredError) throw error;
+    if (error instanceof StopConditionError && error.code !== "unknown-upstream-state") throw error;
+    throw Object.assign(new StopConditionError("MyJCB login stopped", "login"), {
+      httpStatus: safeErrorDetails(error).httpStatus,
+    });
+  }
+}
+
+/** Where the credit months stopped, and how many were kept whole before it. */
+export interface CreditStop {
+  readonly code: ConnectionStopCode;
+  /** The `detailMonth` whose fetch, state, period, ledger or export failed. */
+  readonly position: number;
+  readonly capturedMonthCount: number;
 }
 
 async function collectionStage<T>(code: StopConditionCode, action: () => Promise<T>): Promise<T> {
@@ -172,6 +264,13 @@ export async function collectCredit(
    * so its rows reach no parser and the connection is not whole (ADR 0026).
    */
   readonly withheldMonthCount: number;
+  /**
+   * Set when a month's fetch, statement state, period, ledger or export
+   * failed: the months before it are kept, that month and every later one
+   * are not (ADR 0005's amendment). A failure before the month loop (menu,
+   * first detail, past months) is thrown instead and keeps nothing.
+   */
+  readonly stop?: CreditStop;
 }> {
   const { menuHtml, initialMonths } = await collectionStage("collect-credit-menu", async () => {
     const menu = await client.get("credit-menu", new URLSearchParams({ link_id: linkId }));
@@ -229,7 +328,12 @@ export async function collectCredit(
   ].sort((left, right) => left - right);
 
   let withheldMonthCount = 0;
+  let capturedMonthCount = 0;
   for (const detailMonth of availableMonths) {
+    // A month is kept whole or not at all: its page, ledger and exports join
+    // the connection's artifacts only once every one of them was read.
+    const monthArtifacts: RawArtifact[] = [];
+    let withheld = false;
     try {
       const detail = await collectionStage(
         "collect-credit-month-fetch",
@@ -273,8 +377,8 @@ export async function collectCredit(
           return { html, exports, ledger, state, period };
         },
       );
-      if (state === "unknown" && creditPageRowCount(html) > 0) withheldMonthCount += 1;
-      artifacts.push({
+      withheld = state === "unknown" && creditPageRowCount(html) > 0;
+      monthArtifacts.push({
         dataset: "credit-detail",
         filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,
         body: redactedStatementHtml(html),
@@ -283,7 +387,7 @@ export async function collectCredit(
         period,
       });
       if (ledger) {
-        artifacts.push({
+        monthArtifacts.push({
           dataset: "credit-ledger",
           filename: `credit-ledger-${String(detailMonth).padStart(2, "0")}.json`,
           body: JSON.stringify({ schemaVersion: 1, detailMonth, period, ...ledger }),
@@ -293,7 +397,7 @@ export async function collectCredit(
         });
       }
       for (const exportKind of exports) {
-        artifacts.push(
+        monthArtifacts.push(
           await collectionStage(
             "collect-credit-export",
             async () => await fetchCreditExport(client, detailMonth, period, exportKind),
@@ -301,15 +405,27 @@ export async function collectCredit(
         );
       }
     } catch (error) {
+      const code = connectionStopCode(error);
       console.warn(
         JSON.stringify({
           event: "myjcb-credit-month-failed",
           detailMonth,
           code: error instanceof StopConditionError ? error.code : "collector-operation-failed",
+          stopCode: code,
+          capturedMonthCount,
         }),
       );
-      throw error;
+      // The connection stops at this month and keeps the months before it.
+      return {
+        periodCount: availableMonths.length,
+        artifacts,
+        withheldMonthCount,
+        stop: { code, position: detailMonth, capturedMonthCount },
+      };
     }
+    artifacts.push(...monthArtifacts);
+    if (withheld) withheldMonthCount += 1;
+    capturedMonthCount += 1;
   }
   return { periodCount: availableMonths.length, artifacts, withheldMonthCount };
 }

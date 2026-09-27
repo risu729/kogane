@@ -391,10 +391,13 @@ never accepted (`debit-menu`, `debit-detail`, `credit-csv`, `credit-pdf`,
 `credit-ofx` — it refused a manifest naming one with
 `manifest_dataset_unobserved`) are refused here the same way
 (`artifact_dataset_unobserved`): `DATA` holds nothing the legacy path never
-let through. The collector manifest is written in its central shape — a
-connection blocker and a failure message become coarse codes
-(`human-required`, `collector-failure`, `r2-write-failure`), so upstream free
-text never reaches the shared bucket either. (As for Money Forward, the
+let through. The collector manifest rebuilds each connection and each failure
+from closed fields: a status, counts, and for a connection that stopped, a
+stop code from `CONNECTION_STOP_CODES`, the month position it stopped at and
+the number of months it kept (failure entries are
+`{ connectionId, operation: "collect", code, position }`). A code outside the
+list or a position that is not a `detailMonth` refuses the plan, so upstream
+free text never reaches the shared bucket either. (As for Money Forward, the
 importer's central bytes also carried its parsed `connectionId`, `filename`
 and `ordinal` per artifact; the collector's manifest keeps its own artifact
 shape.) The Processor's metadata extractor reads that shape. It finds an entry
@@ -419,9 +422,28 @@ that states its state, and every export a page offers. A page kept as
 `unknown` that shows ledger rows (no heading, position 2 or later) gets no
 ledger, so its rows reach no parser: the connection is then `partial`, its
 unit `partial` with `collector_partial`, and the run `partial` although no
-failure was recorded. Any failed month, export or parse stops the whole
-connection, which then keeps no artifact and has an `unknown` unit with a safe
-error code. `complete` assumes one detail page holds its whole month, which
+failure was recorded. The credit months are read one at a time in ascending
+`detailMonth` order, and a month is kept whole or not at all. When a month's
+fetch, statement state, period, ledger parse or export fails, the connection
+stops at that month ([ADR 0005's amendment](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months)):
+it keeps the credit menu, the past-months response, the months before it and
+`discovery.json`, reads nothing further, and is `partial`. Its unit is
+`partial` with the stage's stop code (`month_fetch`, `month_parse`,
+`credit_statement_state`, `credit_statement_period`, `ledger_parse`,
+`export_fetch`), and its manifest entry records the code, the position and the
+count of months kept. A connection that stops before its first month (`login`,
+`human_required`, `discovery`, `credit_menu`, `credit_first_detail`,
+`credit_past_months`, `no_route`, or `unclassified` for an error that names no
+stage) keeps nothing and has an `unknown` unit with that code, and so does a
+failed debit read (`debit`; a debit capture is refused in shared mode in any
+case, above). A run in which
+every connection kept nothing is `failed` and stores only its terminal, whose
+units still carry each connection's code. The run's own code is the stop code
+when every connection that is not whole stopped at the same stage. A stopped
+connection's unit registers as `failed`, so the run is `partial` and
+`not_eligible`: its captured months are catalogued and sealed but not parsed.
+The eligibility rule is not loosened; what is kept is the evidence and the
+cause. `complete` assumes one detail page holds its whole month, which
 has not been observed or confirmed (an open limit,
 [ADR 0026](adr/0026-collector-unit-coverage.md#consequences)). A `complete` unit registers as the unit outcome
 `success`, as the importer's did, so a successful run is `success` in
