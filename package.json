@@ -9,11 +9,11 @@
   ],
   "type": "module",
   "devDependencies": {
-    "dependency-cruiser": "18.2.0",
+    "dependency-cruiser": "18.4.0",
     "knip": "6.38.0",
     "typescript": "5.9.3",
     "vitest": "4.1.11",
-    "wrangler": "4.128.0"
+    "wrangler": "4.138.0"
   },
   "packageManager": "bun@1.4.2"
 }

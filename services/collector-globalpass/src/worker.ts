@@ -26,7 +26,8 @@ import {
   type ContainerRecord,
   type StoredArtifact,
 } from "./model";
-import { sanitizeGlobalPassActivityHtml } from "./sanitize";
+import { activityPageState, uncapturedPagesCode } from "./pagination";
+import { sanitizeGlobalPassActivityHtml, sanitizerCode } from "./sanitize";
 import {
   dataBucket,
   persistSharedRun,
@@ -363,14 +364,45 @@ async function collectWithContainer(
       }
       attemptedMonths.add(month);
       const artifactKey = artifactFilename(month);
+      // Read before sanitizing, so a refused page still says whether it was
+      // one of several. Counts only: the log line carries the month's
+      // position in the run, never the month, and no provider text.
+      const pages = activityPageState(record.html);
+      const pagesCode = uncapturedPagesCode(pages);
+      logEvent(
+        "log",
+        JSON.stringify({
+          event: "globalpass-activity-pages",
+          runId,
+          monthIndex: attemptedMonths.size - 1,
+          statedTotal: pages.statedTotal,
+          pageIndex: pages.pageIndex,
+          pageCount: pages.pageCount,
+          ...(pagesCode ? { errorCode: pagesCode } : {}),
+        }),
+      );
+      const pagesFailure: CollectionFailure | undefined = pagesCode
+        ? {
+            operation: "pagination",
+            errorType: "PaginationError",
+            errorCode: pagesCode,
+            artifactKey,
+          }
+        : undefined;
       let sanitizedHtml: string;
       try {
         sanitizedHtml = sanitizeGlobalPassActivityHtml(record.html);
       } catch (error) {
         diagnostics.failure("artifact-write", error);
         failures.push(
-          collectionFailure("sanitization", error, "html_sanitization_failed", artifactKey),
+          collectionFailure(
+            "sanitization",
+            error,
+            sanitizerCode(error) ?? "html_sanitization_failed",
+            artifactKey,
+          ),
         );
+        if (pagesFailure) failures.push(pagesFailure);
         continue;
       }
       try {
@@ -383,6 +415,9 @@ async function collectWithContainer(
       } catch (error) {
         failures.push(collectionFailure("r2", error, "artifact_store_failed", artifactKey));
       }
+      // The stored page is page 1 of a longer month: it is kept, but the
+      // month is not captured whole, so the run cannot be `success`.
+      if (pagesFailure) failures.push(pagesFailure);
     }
   } catch (error) {
     diagnostics.failure("browser-collection", error);

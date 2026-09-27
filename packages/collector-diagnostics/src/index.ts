@@ -65,6 +65,7 @@ const ERROR_TYPES = new Set([
   "HumanRequiredError",
   "StopConditionError",
   "HistoryBoundaryError",
+  "GlobalPassSanitizerError",
 ]);
 const SAFE_CODES = new Set([
   "history_request_failed",
@@ -113,6 +114,11 @@ const SAFE_CODES = new Set([
   "credit-statement-state",
   "credit-statement-period",
   "collect-debit",
+  // GLOBAL PASS: which check of the activity-page sanitizer refused a page.
+  "globalpass_html_contract_invalid",
+  "globalpass_html_redaction_failed",
+  "globalpass_html_shape_unreviewed",
+  "globalpass_html_utf8_invalid",
 ]);
 
 export interface SafeErrorDetails {

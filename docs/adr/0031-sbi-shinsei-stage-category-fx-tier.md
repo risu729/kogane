@@ -181,10 +181,10 @@ provider states both, in one session.
   stage. A balance-summary artifact stored with the dataset (the retired
   importer registered this dataset name; how many stored artifacts carry it
   was not surveyed) is parsed by the repair lane without an operator step.
-  The stored boards have no observations yet (the owner's agent reported on
-  2026-09-27 that parser 1.0.1 refused every stored board), so each is judged
-  when a board parser that accepts it writes its rows, against the stage its
-  run has published by then.
+  The stored boards had no observations before parser 1.0.2 (#286, migration
+  0059; 1.0.1 refused every stored board), so each is judged when 1.0.2's
+  repair-lane re-parse writes its rows, against the stage its run has
+  published by then.
 - **What stays manual.** `SBI_SHINSEI_FX_QUOTE_BASIS` is unchanged and empty.
   CHF stays out until a page or screen states its basis. BRL is admitted on
   the public page's statement although the logged-in FX page does not list

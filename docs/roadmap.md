@@ -64,16 +64,24 @@ Concrete limits in the current code:
   the end as not stated
   ([ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)); until the
   repair lane has re-parsed the stored captures after deploy, the adapter
-  admits nothing. The same release lets the SBI Shinsei exchange-rate board
-  be parsed for the first time, every `customerCategory` tier kept. A board
-  row of the 13 per-1-unit currencies is promoted only in the stage category
-  the same run's balance summary states
+  admits nothing. The SBI Shinsei exchange-rate board is parsed from 1.0.2
+  (1.0.1 assumed digits where the stored time ends in two letters and matched
+  no board; migration 0059), every `customerCategory` tier kept. A board
+  row of the 13 currencies the provider's public pages quote per 1 unit is
+  promoted only in the stage category the same run's balance summary states
   ([ADR 0031](adr/0031-sbi-shinsei-stage-category-fx-tier.md); the two were
   observed on 2026-09-27 to use one scheme). Until the stage parser has
-  published a run's balance summary, that run's board promotes nothing. A debit posted more than three days from the
+  published a run's balance summary, that run's board promotes nothing. A
+  debit posted more than three days from the
   due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
   Sony Bank), partial payments, refunds and complete purchase recognition
-  remain extensions; this is not complete event coverage.
+  remain extensions; this is not complete event coverage. Which bank account
+  a card debits is still unknown to the code: the card provider's own
+  statement of it is designed as proposal-only evidence
+  ([ADR 0032](adr/0032-provider-stated-debit-accounts.md)), but only the
+  domain rule exists. The MyJCB transfer-account block and any Vpass
+  payment-account field are unobserved, and neither SMBC's account reference
+  (no account number) nor SBI Shinsei's (layout unverified) can be matched.
 - Vpass and MyJCB pending-to-posted candidates come from the purchase lane's
   [candidate pass](economic-events.md#pending-to-posted-links), which pairs one
   recognised pending event with one posted event per purchase; every pair
@@ -233,10 +241,22 @@ Concrete limits in the current code:
   and the eligibility rule is not loosened, so the confirmed statements of
   those days come back with the next successful run, while pending-only rows
   that disappeared before it are lost. GLOBAL PASS's successful runs are
-  `partial` the same way and are not parsed: whether an activity page holds a
-  whole month has not been observed. A Vpass card run is `partial` the same
+  `partial` the same way and are not parsed: its collector stores only the
+  first page of a month and follows no Next link, while a month with more
+  than ten statements is observed to have a second page; such a month is
+  marked `activity_pages_unwalked`. Walking the pages is not implemented. No
+  GLOBAL PASS run has stored a page since at least the week before
+  2026-09-27: the sanitizer refused every page, and which check refuses them
+  is recorded as a closed code only from this release on
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes)). A Vpass card run is `partial` the same
   way unless every month's captured rows equal the provider's stated total
-  (ADR 0026's amendment). A MyJCB connection's `complete` unit rests on the same
+  (ADR 0026's amendment). Both stated totals were seen on the live site
+  (`allCnt` a string, `total` a number) and are read as exact counts, but the
+  finalized walk still ends on its first empty page when `allCnt` or
+  `nextPageRow` is unreadable, and the page-number fields (`pageNo`,
+  `lastPage`) are not read because their meaning is unobserved
+  ([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site)).
+  A MyJCB connection's `complete` unit rests on the same
   unobserved premise (one detail page holds its whole month), and a
   connection whose older month shows rows without a stated state is
   `partial` and its run is not parsed. A MyJCB connection that stops at a

@@ -6,13 +6,13 @@
     "iconv-lite": "0.7.3"
   },
   "devDependencies": {
-    "@cloudflare/puppeteer": "1.1.0",
-    "@cloudflare/vitest-plugin": "1.1.3",
-    "@types/bun": "1.3.8",
-    "@types/node": "24.3.0",
+    "@cloudflare/puppeteer": "1.4.0",
+    "@cloudflare/vitest-plugin": "1.2.5",
+    "@types/bun": "1.4.2",
+    "@types/node": "24.13.6",
     "devtools-protocol": "0.0.1704034",
     "typescript": "5.9.3",
     "vitest": "4.1.11",
-    "wrangler": "4.127.1"
+    "wrangler": "4.138.0"
   }
 }
