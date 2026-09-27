@@ -9,6 +9,8 @@ import { sbiShinseiExchangeRate } from "../../../packages/parsers/src/parsers/sb
 import { sbiShinseiTopBalancesAndActivity } from "../../../packages/parsers/src/parsers/sbi-shinsei-top-balances-and-activity.ts";
 import { sbiShinseiYenDepositAccount } from "../../../packages/parsers/src/parsers/sbi-shinsei-yen-deposit-account.ts";
 import type { ArtifactMeta, Parser } from "../../../packages/parsers/src/types.ts";
+import { myJcbSkipPaymentSchedule } from "../../../packages/parsers/src/parsers/myjcb-skip-payment-schedule.ts";
+import { REFUSAL_CASES as SKIP_PAYMENT_REFUSAL_CASES } from "../../../packages/parsers/test/myjcb-skip-payment-fixture.ts";
 import {
   classifyParserRejection,
   classifySbiShinseiMessage,
@@ -590,6 +592,30 @@ describe("classifier closure", () => {
       reason: "unknown field",
       field: "y",
     });
+  });
+});
+
+describe("myjcb-skip-payment-schedule: every throw site is its own closed code (ADR 0005 amendment e)", () => {
+  test("each refusal of a synthetic page classifies as the code it threw, and nothing else", () => {
+    for (const entry of SKIP_PAYMENT_REFUSAL_CASES) {
+      let thrown: unknown;
+      try {
+        myJcbSkipPaymentSchedule.parse(new TextEncoder().encode(entry.html), entry.meta);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(classifyParserRejection("myjcb-skip-payment-schedule", thrown)).toEqual({
+        reason: entry.code,
+      });
+    }
+  });
+  test("a message that is not one of its codes is not printed", () => {
+    expect(
+      classifyParserRejection("myjcb-skip-payment-schedule", new Error("架空スキップ店 12,000円")),
+    ).toEqual({ reason: "parser_rejected_other" });
+    expect(
+      classifyParserRejection("myjcb-skip-payment-schedule", new TypeError("x is undefined")),
+    ).toEqual({ reason: "runtime_TypeError" });
   });
 });
 

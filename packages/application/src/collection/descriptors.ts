@@ -236,6 +236,16 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
       mediaTypes: JSON_TYPE,
       dataset: "credit-ledger",
     },
+    // Only the schedule page whose h1 is the observed ショッピングスキップ払い
+    // heading is stored under this name (ADR 0005 amendment e). Every other
+    // schedule page stays `credit-schedule-NN.html`, catalogued with no
+    // dataset and read by nothing.
+    {
+      key: /^[^/]+\/credit-skip-payment-\d{2}\.html$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: "credit-schedule",
+    },
   ],
   "prestia-globalpass": [
     {

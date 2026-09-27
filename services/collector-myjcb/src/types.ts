@@ -145,8 +145,11 @@ export interface UnreadMonth {
  * What became of one schedule page the credit menu listed (ADR 0005's
  * amendment (c)):
  *
- * - `scheduled_payments_page`: fetched and stored, redacted, as
- *   `credit-schedule-NN.html` with state `unknown`; no parser reads it yet;
+ * - `scheduled_payments_page`: fetched and stored, redacted, with state
+ *   `unknown`: as `credit-skip-payment-NN.html` when its h1 is the observed
+ *   ショッピングスキップ払い heading, which `myjcb-skip-payment-schedule` reads
+ *   (amendment (e)), otherwise as `credit-schedule-NN.html`, which nothing
+ *   reads;
  * - `schedule_page_fetch`: the fetch or the decoding failed and nothing was
  *   stored. It is not a stop and does not make the connection `partial`,
  *   because a schedule page is not part of the months the unit covers; the

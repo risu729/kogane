@@ -152,8 +152,10 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * The months are the menu positions under 「最新のご利用明細」 and 「過去の明細」
  * and the past-months response's; the positions under
  * 「ボーナス#回払い・ショッピングスキップ払い」 are payment schedule pages, stored
- * as `credit-schedule-NN.html` and never part of the coverage, whether they
- * show rows or failed to fetch (ADR 0005's amendment (c)).
+ * as `credit-skip-payment-NN.html` (the ショッピングスキップ払い page, amendment
+ * (e)) or `credit-schedule-NN.html` (any other) and never part of the
+ * coverage, whether they show rows or failed to fetch (ADR 0005's amendment
+ * (c)).
  */
 function coverage(status: ConnectionSummary["status"]): CoverageStatus {
   if (status === "success") return "complete";

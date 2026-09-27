@@ -808,6 +808,12 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "3f391a880bc3c0870b6f66610d5db899a57cb114b8a3aea32e68ae44a3fcc90f"
+    },
+    {
+      "file": "0061_scheduled_payment_observations.sql",
+      "statementCount": 4,
+      "insertStatements": [],
+      "sha256": "e2376a044a7af9d9fe12c17c97fa3e7fbdb85ad7709a63a8eb39599bda34df29"
     }
   ],
   "tables": [
@@ -12500,6 +12506,153 @@
       "sqlSha256": "2fbe8139ce2f86cd"
     },
     {
+      "name": "scheduled_payment_observations",
+      "classification": "core-keep",
+      "planRow": "parse runs and observations",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_account",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "external_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "schedule_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "usage_date",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "due_date",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_text",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_scale",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "currency",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "counterparty",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "as_of",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observed_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "raw_locator",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "extra_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "parse_run_id",
+          "references": "parse_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_sched_pay_obs_parse_run",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "parse_run_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "scheduled_payment_observations_no_delete",
+        "scheduled_payment_observations_no_update"
+      ],
+      "noUpdateTriggers": [
+        "scheduled_payment_observations_no_update"
+      ],
+      "noDeleteTriggers": [
+        "scheduled_payment_observations_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "5db094ebaae5e4aa"
+    },
+    {
       "name": "settlement_relations",
       "classification": "core-keep",
       "planRow": "economic events",
@@ -16441,6 +16594,20 @@
       "sqlSha256": "b89de520fa007cb2"
     },
     {
+      "name": "scheduled_payment_observations_no_delete",
+      "table": "scheduled_payment_observations",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "476a5654fdaddaf4"
+    },
+    {
+      "name": "scheduled_payment_observations_no_update",
+      "table": "scheduled_payment_observations",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "50a00c69658aea91"
+    },
+    {
       "name": "settlement_relations_no_delete",
       "table": "settlement_relations",
       "timing": "BEFORE",
@@ -16878,6 +17045,11 @@
       "sqlSha256": "31677d7645c58a0b"
     },
     {
+      "name": "idx_sched_pay_obs_parse_run",
+      "table": "scheduled_payment_observations",
+      "sqlSha256": "50e2acb05dfd0a0b"
+    },
+    {
       "name": "idx_txn_obs_account",
       "table": "transaction_observations",
       "sqlSha256": "040ee8b285eb6dd6"
@@ -17119,10 +17291,10 @@
     }
   ],
   "summary": {
-    "tableCount": 114,
+    "tableCount": 115,
     "viewCount": 39,
-    "triggerCount": 405,
-    "explicitIndexCount": 114,
+    "triggerCount": 407,
+    "explicitIndexCount": 115,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -17218,6 +17390,7 @@
         "reward_programs",
         "run_inventories",
         "run_inventory_items",
+        "scheduled_payment_observations",
         "settlement_relations",
         "source_accounts",
         "source_external_ids",
@@ -17336,6 +17509,6 @@
       "0057_vpass_card_token_v2.sql",
       "0058_identity_crosswalk.sql"
     ],
-    "schemaSha256": "a4ea1a7b0e9979d403a17c5b7a375d676c403b44dcdc3d40b30be4e84e976901"
+    "schemaSha256": "64847055bede49f7c4a3077b919d7517c31529f32a30fbca553bcd56f3218416"
   }
 }

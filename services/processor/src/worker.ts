@@ -1,4 +1,5 @@
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import type { PersistedObservation } from "../../../packages/parsers/src/scheduled-payment.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import {
   snapshotPolicyComparisonSql,
@@ -93,7 +94,6 @@ import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identit
 import type {
   ArtifactMeta,
   CoverageClaim,
-  Observation,
   Parser,
   ParseIssue,
   ParseResult,
@@ -294,6 +294,24 @@ const fields = {
     "rawLocator",
     "extra",
   ],
+  // A payment still to come (ADR 0005 amendment e, migration 0061). Declared
+  // outside the parser contract's `Observation` union so that no deployed
+  // parser's digest changes (`packages/parsers/src/scheduled-payment.ts`).
+  scheduled_payment: [
+    "sourceAccount",
+    "externalId",
+    "scheduleKind",
+    "usageDate",
+    "dueDate",
+    "amountText",
+    "amountScale",
+    "currency",
+    "counterparty",
+    "asOf",
+    "observedAt",
+    "rawLocator",
+    "extra",
+  ],
 } as const;
 const snake = (field: string) =>
   field === "extra" ? "extra_json" : field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
@@ -301,8 +319,8 @@ const snake = (field: string) =>
 export function observationInsert(
   db: D1Database,
   id: number,
-  kind: Observation["kind"],
-  rows: Observation[],
+  kind: PersistedObservation["kind"],
+  rows: PersistedObservation[],
 ): D1PreparedStatement {
   const names = fields[kind];
   return db
@@ -584,10 +602,13 @@ async function executeParseJob(
         }),
       )
       .run();
-    for (const kind of Object.keys(fields) as Observation["kind"][]) {
-      let chunk: Observation[] = [];
+    // A parse result's rows are persisted by their own `kind`; the kinds
+    // `fields` names are every kind a registered parser emits.
+    const persisted = result.observations as PersistedObservation[];
+    for (const kind of Object.keys(fields) as PersistedObservation["kind"][]) {
+      let chunk: PersistedObservation[] = [];
       let bytes = 0;
-      for (const observation of result.observations) {
+      for (const observation of persisted) {
         if (observation.kind !== kind) continue;
         const size = new TextEncoder().encode(JSON.stringify(observation)).length;
         if (size > 500_000) throw new PipelineError("observation_row_too_large");

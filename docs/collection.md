@@ -378,14 +378,14 @@ provider was contacted and no production bucket was read or written.
 
 ### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
 
-| Artifact key                                                                   | Role                         | Step (ADR 0021)                            |
-| ------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------ |
-| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input  |
-| `<connectionId>/credit-past-months.json`                                       | `provider_response`          | none                                       |
-| `<connectionId>/credit-{csv,pdf,ofx}` exports                                  | `provider_export`            | none                                       |
-| `<connectionId>/credit-ledger-NN.json`                                         | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
-| `<connectionId>/discovery.json`                                                | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
-| `manifest.json`                                                                | `collector_manifest`         | none; names no unit                        |
+| Artifact key                                                                                                                                 | Role                         | Step (ADR 0021)                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
+| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/credit-schedule-NN.html`, `…/credit-skip-payment-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input  |
+| `<connectionId>/credit-past-months.json`                                                                                                     | `provider_response`          | none                                       |
+| `<connectionId>/credit-{csv,pdf,ofx}` exports                                                                                                | `provider_export`            | none                                       |
+| `<connectionId>/credit-ledger-NN.json`                                                                                                       | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `<connectionId>/discovery.json`                                                                                                              | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `manifest.json`                                                                                                                              | `collector_manifest`         | none; names no unit                        |
 
 A ledger is parsed from the statement page of the same `detailMonth` before
 that page is redacted, and `discovery.json` from the login and mypage
@@ -453,9 +453,14 @@ available positions; the links under
 ([ADR 0005's amendment (c)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months)).
 A link under any other heading, or before any heading, stops the connection
 before its first month (`credit_menu_group_unrecognized`). After the last
-month each schedule page is fetched and stored whole, redacted, as
-`credit-schedule-NN.html` (state `unknown`, period `detailMonth-N`), which
-no registration rule gives a parser dataset, so it is catalogued and sealed
+month each schedule page is fetched and stored whole, redacted (state
+`unknown`, period `detailMonth-N`). The page whose one h1 is
+「ショッピングスキップ払いご利用明細(未確定分)」 is stored as
+`credit-skip-payment-NN.html`, which registration gives the dataset
+`credit-schedule` and `myjcb-skip-payment-schedule` reads
+([amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments));
+every other schedule page is stored as `credit-schedule-NN.html`, which no
+registration rule gives a parser dataset, so it is catalogued and sealed
 but never parsed. The manifest records each one as
 `schedulePages: [{ position, code }]` (`scheduled_payments_page` when stored,
 `schedule_page_fetch` when its fetch failed, which is not a stop) and

@@ -6,9 +6,11 @@
   [second 2026-09-27 amendment](#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page)
   is accepted (#331); the
   [amendment (c)](#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months)
-  and
+  is accepted (#337); the
   [amendment (d)](#amendment-2026-09-27-d-a-confirmed-page-under-the-usage-header-proven-by-the-page)
-  are proposed
+  is accepted (#336); the
+  [amendment (e)](#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)
+  is proposed
 - Date: 2026-09-25
 - Implemented by: #248
 - Carried by:
@@ -470,7 +472,7 @@ and sealed, and no parser reads it.
 
 ## Amendment 2026-09-27 (c): the menu's schedule pages are not months
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#337)
 - Date: 2026-09-27
 - Carried by: `readCreditMenuGroups` in
   `services/collector-myjcb/src/parsers.ts`; `collectCredit` and
@@ -630,7 +632,7 @@ code }]` with a code from `SCHEDULE_PAGE_CODES`:
 
 ## Amendment 2026-09-27 (d): a confirmed page under the usage header, proven by the page
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#336)
 - Date: 2026-09-27
 - Decision owner: the owner chose option 3 below on 2026-09-27; this record
   carries it into the repository.
@@ -880,3 +882,211 @@ amount check and be recognised with one live holder per recognition key
   unchanged.
 - No production data was read for this amendment. The findings above are
   the owner's agent's structure-only survey; every test value is synthetic.
+
+## Amendment 2026-09-27 (e): the skip-payment schedule page is read as scheduled payments
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-27
+- Decision owner: the owner chose option B of amendment (c), after option A,
+  on 2026-09-27, only for pages observed with rows; this record carries it
+  into the repository.
+- Carried by: `myjcbSchedulePageKind`, `readMyJcbSkipPaymentSchedule` and
+  `SKIP_PAYMENT_SCHEDULE_REFUSALS` in
+  `packages/domain/src/myjcb-skip-payment-schedule.ts`; `schedulePageKind`
+  in `services/collector-myjcb/src/parsers.ts` and `collectCredit` in
+  `services/collector-myjcb/src/collector.ts`; the `credit-skip-payment-NN.html`
+  rule in `packages/application/src/collection/descriptors.ts`;
+  `myjcb-skip-payment-schedule@0.1.0` in
+  `packages/parsers/src/parsers/myjcb-skip-payment-schedule.ts`;
+  `ScheduledPaymentObservation` in `packages/parsers/src/scheduled-payment.ts`;
+  `fields.scheduled_payment` in `services/processor/src/worker.ts`; migration
+  `0061_scheduled_payment_observations.sql`; the classifier branch in
+  `services/processor/scripts/parser-rejection.ts`;
+  [MyJCB source note](../sources/myjcb.md),
+  [observations](../observations.md#myjcb-the-skip-payment-schedule-page-is-read-as-scheduled-payments-schedule-parser-010),
+  [parser coverage](../parser-coverage.md)
+
+### Context
+
+Amendment (c) stores every menu schedule page whole and reads none. The
+round-4 structure survey (2026-09-27, structure and counts only) recorded
+the page at position 8:
+
+- the h1 「ショッピングスキップ払いご利用明細(未確定分)」, and a second heading
+  「YYYY年M月D日(曜)時点のショッピングスキップ払いご利用明細(YYYY年M月以降のお支払い分)」;
+- one `div.detail-list-01` ledger whose `div.head` has three cells:
+  「ご利用日」 / 「ご利用先など」 and 「お支払日」 on two lines of one cell /
+  「今後のお支払い金額」, over two body rows;
+- before it the notice `p.em-02` that the page shows usage before the bill is
+  settled, the month-switch form and a link about unrecognised charges;
+  after it 「利用覚えのない請求がある場合」 and the 「カード情報」 table.
+
+The survey recorded the body rows as a count only: what the body cells
+contain, and how many there are, was not recorded. The page at position 7
+(ボーナス払い) has never been observed with rows.
+
+The rows are future payments of purchases whose payment was deferred. They
+are not purchases to recognise (the purchases are the usage rows of the
+statement months), not rows of a confirmed statement, and not a balance.
+
+### Options considered
+
+1. **Leave the page unread** (amendment (c)). Rejected by the owner: the
+   page is the only place the provider states the deferred payments.
+2. **Read the rows as transactions** (`transaction_observations`). Rejected:
+   every transaction reader would see them. The activity read
+   (`TRANSACTIONS_SQL`) lists every parser's rows except the ones it names,
+   so they would appear as activity and would need a rewrite of shipped
+   query text; purchase recognition and settlement matching would have to
+   be taught to skip them (INV06).
+3. **Read them as balances.** Rejected: the latest-balance read keeps one
+   value per account and metric, so two rows would collapse into one, and
+   the metric would be shown as a balance.
+4. **A fifth observation kind, `scheduled_payment`, in a table of its own.**
+   Chosen. Nothing that reads transactions, balances, positions or
+   valuations reads it, so nothing is counted twice and nothing adopted
+   changes (INV07). Declaring the kind in the parser contract's `types.ts`
+   was rejected: every parser's code digest covers that file, and migration
+   0028 refuses the same parser name and version with another digest, so it
+   would re-identify every deployed parser. The kind is declared in its own
+   module, which only the new parser and the processor import.
+5. **Read every schedule page, and let the parser refuse the others.**
+   Rejected: registration gives datasets by artifact key, and the bonus page
+   is fetched every night, so it would fail a parse job every night.
+
+### Decision
+
+- **The collector names the page by its h1.** After the months, each
+  schedule page is still fetched and stored whole, redacted, with state
+  `unknown` and period `detailMonth-N`, and recorded in `schedulePages` as
+  before. A page with exactly one h1 that is, after whitespace removal,
+  「ショッピングスキップ払いご利用明細(未確定分)」 (`myjcbSchedulePageKind`) is
+  stored as `credit-skip-payment-NN.html`; every other page (the ボーナス払い
+  page, a page with no or two such headings, a full-width variant) keeps the
+  name `credit-schedule-NN.html`. Nothing else on the page is read for the
+  name, and the manifest, the codes and the coverage are unchanged: the unit
+  is `complete` whatever the schedule pages show (amendment (c)).
+- **Registration.** `credit-skip-payment-NN.html`
+  (`sanitized_provider_capture`, `text/html`) gets the dataset
+  `credit-schedule`; `credit-schedule-NN.html` still gets none and no parse
+  job.
+- **Parser `myjcb-skip-payment-schedule@0.1.0`.** It accepts MyJCB
+  `credit-schedule` HTML, requires a failure-free run (or a unit-scope
+  admission), the key `<connection>/credit-skip-payment-NN.html`, state
+  `unknown` and period `detailMonth-N`, and the redaction boundary of the
+  other MyJCB page parsers. It reads only the observed shape
+  (`readMyJcbSkipPaymentSchedule`), in this order, and refuses any other
+  with one closed code:
+  - exactly one h1 with the skip heading, else `schedule_kind_unobserved`;
+  - at least one `detail-list-01`, else `schedule_ledger_missing`; at most
+    one with rows, else `schedule_ledger_ambiguous`;
+  - the ledger's `div.head` is exactly the three observed `cell`s (the one
+    with rows, or every ledger when none has rows), else
+    `schedule_head_unobserved`; a four-cell head is refused here;
+  - at most 1,000 rows, else `schedule_row_limit`;
+  - a page with rows names exactly one as-of heading (any `h1`–`h6`) whose
+    date and month are on the calendar, else `schedule_as_of_invalid`; a
+    page with no rows may omit it;
+  - each row is one `item-cell` of exactly three `cell`s whose middle cell
+    renders exactly two non-empty lines (a `br` ends a line, a block element
+    starts and ends one), else `schedule_row_shape_unobserved`. The body
+    layout was not recorded; this is the one that mirrors the observed head.
+    The first line is the merchant text (ご利用先など), the second the payment
+    date (お支払日), as the head's two lines name them;
+  - the usage date and the payment date are `YYYY/MM/DD` on the calendar,
+    else `schedule_date_invalid`;
+  - the amount reads as an exact JPY amount with the MyJCB display grammar
+    (`myjcbDisplayInteger`), else `schedule_amount_invalid`.
+
+  Its own checks throw `schedule_run_ineligible`,
+  `schedule_artifact_metadata_invalid` and `schedule_html_boundary`. Every
+  message is one of these codes (`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`), and
+  the read-only rejection classifier prints the code and nothing else. A
+  ledger with no rows (the known empty row included) is zero observations,
+  not a failure.
+
+- **Observation.** Each row is one `scheduled_payment` observation:
+  `source_account` `myjcb:<connection>:root`, `external_id`
+  `myjcb-skip-payment:<fingerprint of the three displayed cells>:<occurrence>`
+  (the as-of date is not part of it, so a row keeps its id across nights),
+  `schedule_kind` `card-skip-payment`, `usage_date`, `due_date` (the payment
+  date), `amount_text` as an exact integer decimal with the displayed sign
+  and `amount_scale` 0, `currency` JPY, `counterparty` the merchant text,
+  `as_of` the page's as-of date, and in `extra_json` the displayed cells and
+  `_kogane.paymentFromMonth` (the 「YYYY年M月以降のお支払い分」 month),
+  `detailMonth` and `amountBasis` `future-payment-amount`.
+- **Storage.** Migration 0061 adds `scheduled_payment_observations`,
+  append-only (`*_no_update`, `*_no_delete`), with an index on
+  `parse_run_id`, closed checks on the kind, the date shapes, a canonical
+  integer `amount_text` and `amount_scale` 0, and no float or minor-unit
+  column (INV03). It is classified `core-keep` with the other observation
+  tables. The processor writes it in the same pending parse run as the other
+  kinds, so it is visible only once the parse run is published.
+- **Nothing downstream reads it.** No read path, purchase recognition,
+  settlement candidate, identity run, release comparison, decimal
+  projection or explanation reads the table.
+
+### Consequences
+
+- A night with an outstanding skip payment stores its rows as scheduled
+  payments beside the months; the months are parsed as before, and the unit
+  stays `complete`.
+- A page in any other shape fails its parse job with a closed code and stays
+  stored; the months are unaffected. If the body cells differ from the
+  mirrored layout (a detail list under each row, four cells, the payment
+  date in its own cell), the first production parse fails with
+  `schedule_row_shape_unobserved`, and the shape is read in a structure-only
+  survey before a new release.
+- The ボーナス払い page stays stored as `credit-schedule-07.html` and unread
+  until it is observed with rows (ADR 0004).
+- Skip pages stored before this amendment are named `credit-schedule-NN.html`
+  and stay unread: the key does not say which kind they are, and stored
+  runs are not rewritten.
+- Limits: what a row's amount covers (one deferred payment, or the rest of
+  it) and whether a row's payment later appears in a statement month is not
+  confirmed, so rows are not matched against statements, settlements or
+  purchases. No read model, API or UI shows scheduled payments yet. A
+  candidate release of this parser is not compared by release adoption,
+  whose comparison reads the four older tables only. The kind has no identity
+  run or account mapping. Whether the headings use half-width parentheses
+  was recorded as half-width and is matched exactly.
+
+### Verification
+
+- `packages/parsers/test/myjcb-skip-payment-schedule.test.ts` on synthetic
+  pages (`myjcb-skip-payment-fixture.ts`): two rows become two scheduled
+  payments with exact decimal text, the page's dates and months, distinct
+  ids, and ids that do not change with the as-of date; the whole 0.1.0
+  observation is frozen; a refund keeps its sign; the middle cell may split
+  on a `br` or on block elements; an empty ledger is zero rows with or
+  without the as-of heading; one case per closed code reaches it (a bonus
+  heading, two skip headings, no ledger, two ledgers with rows, a four-cell
+  head, 1,001 rows, a missing or impossible as-of date, a four-cell or
+  one-line row, an impossible date, a missing amount, an ineligible run,
+  wrong key, period or state, a link in the page, a fragment), and no
+  message carries a date, merchant or amount. Only this parser accepts the
+  metadata, and its digest is recorded.
+- `services/collector-myjcb/test/parsers.test.ts`: only exactly one h1 with
+  the observed heading is `skip-payment`; a bonus heading, none, two, the
+  full-width parentheses, the heading without 「(未確定分)」 and an `h2` are
+  `unobserved`. `credit-statement-state.test.ts`: the skip page is stored
+  as `credit-skip-payment-08.html` and the bonus page as
+  `credit-schedule-07.html`, through `collectCredit` and through the
+  Worker's manual trigger.
+- `scripts/artifact-datasets.test.ts`: `credit-skip-payment-08.html` gets
+  `credit-schedule`, `credit-schedule-07.html` gets none, and a parser
+  accepts the dataset.
+- `services/processor/test/myjcb-shared-r2.test.ts`: the collector's plan
+  for a whole connection with a bonus page and a skip page registers, gives
+  only the skip page the dataset, and creates and completes a
+  `myjcb-skip-payment-schedule@0.1.0` job for it and none for the bonus
+  page; the two rows land in `scheduled_payment_observations` with the
+  synthetic dates, amounts and months, the parser wrote no row to any other
+  observation table, and the table refuses `UPDATE` and `DELETE`. A page
+  stored under the old name gets no dataset (amendment (c)'s test).
+- `services/processor/test/parser-rejection.test.ts`: every refusal
+  classifies as exactly the code it threw; any other message prints
+  `parser_rejected_other`.
+- `services/processor/test/lanes.test.ts`: the migration list ends at 0061.
+- No production data was read for this amendment. The findings above are the
+  owner's agent's structure-only survey; every test value is synthetic.

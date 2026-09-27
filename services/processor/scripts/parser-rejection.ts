@@ -9,6 +9,14 @@
 // for the SBI Shinsei parsers, whose every label is proved (by the test) to be
 // assembled from constants, array positions and schema keys; row positions
 // are folded to `[]` so a category is closed and does not count rows.
+import { SKIP_PAYMENT_SCHEDULE_PARSER_CODES } from "../../../packages/parsers/src/parsers/myjcb-skip-payment-schedule.ts";
+
+/**
+ * `myjcb-skip-payment-schedule` throws only closed codes (ADR 0005 amendment
+ * e), so its message is its category when it is one of them, and nothing
+ * else is printed.
+ */
+const SKIP_PAYMENT_SCHEDULE_PARSER = "myjcb-skip-payment-schedule";
 
 /** The parsers whose throw sites map one-to-one onto categories. */
 export const SBI_SHINSEI_PARSERS = [
@@ -152,6 +160,10 @@ export function classifyParserRejection(parserName: string, error: unknown): Rej
     return { reason: `runtime_${RUNTIME_ERRORS.has(error.name) ? error.name : "other"}` };
   if ((SBI_SHINSEI_PARSERS as readonly string[]).includes(parserName))
     return classifySbiShinseiMessage(error.message);
+  if (parserName === SKIP_PAYMENT_SCHEDULE_PARSER)
+    return (SKIP_PAYMENT_SCHEDULE_PARSER_CODES as readonly string[]).includes(error.message)
+      ? { reason: error.message }
+      : { reason: "parser_rejected_other" };
   const reason = legacySafeReason(error.message);
   const field = error.message.match(
     /(?:unknown|missing) field ([A-Za-z][A-Za-z0-9_]{0,63})$/u,

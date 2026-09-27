@@ -7,6 +7,7 @@ import {
   CONFIRMED_STATEMENT_HEADING,
   readMyJcbStatementPage,
 } from "../../../packages/domain/src/myjcb-statement-page";
+import { myjcbSchedulePageKind } from "../../../packages/domain/src/myjcb-skip-payment-schedule";
 
 type HtmlNode = DefaultTreeAdapterMap["node"];
 type HtmlElement = DefaultTreeAdapterMap["element"];
@@ -554,6 +555,18 @@ export function scheduledLedgerRowCount(html: string): number | undefined {
   });
   if (scheduled.length === 0) return undefined;
   return scheduled.reduce((count, ledger) => count + readMyJcbStatementPage(ledger).rowCount, 0);
+}
+
+/**
+ * The kind of a menu schedule page, read from its h1 only (ADR 0005 amendment
+ * e): `skip-payment` when exactly one h1 is the observed
+ * 「ショッピングスキップ払いご利用明細(未確定分)」, otherwise `unobserved`. The
+ * collector names the stored page by it, so that only the skip-payment page
+ * gets a parser dataset at registration. Its rows are read by the parser, not
+ * here.
+ */
+export function schedulePageKind(html: string): "skip-payment" | "unobserved" {
+  return myjcbSchedulePageKind(parse(html));
 }
 
 /**

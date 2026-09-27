@@ -604,10 +604,12 @@ test("ADR 0005 second amendment: a month under the third ledger header registers
 test("ADR 0005 amendment (c): a whole connection with a stored schedule page is eligible; only its month pages are parsed", async () => {
   // The collector's real plan for a connection that read its two months
   // whole and, beside them, stored the ショッピングスキップ払い page (menu
-  // position 8, rows under the third header) as `credit-schedule-08.html`.
-  // Schedule pages are not months: the unit is `complete`, the run
-  // `success`, and parse jobs are created for the month artifacts only. No
-  // parser reads a schedule page yet.
+  // position 8, rows under the third header) as `credit-schedule-08.html`,
+  // the name every schedule page had before amendment (e). Schedule pages
+  // are not months: the unit is `complete`, the run `success`, and parse
+  // jobs are created for the month artifacts only. A page under this name
+  // gets no dataset, whatever it shows: only `credit-skip-payment-NN.html`
+  // is read (the next test).
   const runId = "00000000-0000-4000-8000-00000000a0c8";
   const connectionId = "synthetic-sched";
   const schedulePage =
@@ -706,4 +708,167 @@ test("ADR 0005 amendment (c): a whole connection with a stored schedule page is 
     { artifact_key: `${connectionId}/credit-ledger-00.json`, status: "done" },
     { artifact_key: `${connectionId}/credit-ledger-01.json`, status: "done" },
   ]);
+}, 60000);
+
+test("ADR 0005 amendment (e): only the ショッピングスキップ払い page gets a parse job, and its rows are scheduled payments, not purchases", async () => {
+  // The collector names a schedule page by its h1: the skip page (two rows,
+  // each one item-cell of three cells mirroring the observed three-cell
+  // head, the middle cell two lines) is `credit-skip-payment-08.html`; the
+  // bonus page, never observed with rows, stays `credit-schedule-07.html`.
+  // Every value is synthetic.
+  const runId = "00000000-0000-4000-8000-00000000a0e8";
+  const connectionId = "synthetic-skip";
+  const skipRow = (usage: string, merchant: string, due: string, amount: string) =>
+    `<div class="content"><div class="item-cell"><div class="cell">${usage}</div><div class="cell">${merchant}<br>${due}</div><div class="cell">${amount}</div></div></div>`;
+  const skipPage = `<!doctype html><html><body><h1>MyJCB</h1><h1>ショッピングスキップ払いご利用明細(未確定分)</h1><h2>2026年3月20日(金)時点のショッピングスキップ払いご利用明細(2026年5月以降のお支払い分)</h2><div class="detail-list-01"><div class="head"><div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div></div>${skipRow("2026/03/02", "架空スキップ店", "2026/05/11", "12,000円")}${skipRow("2026/03/05", "架空スキップ商会", "2026/06/10", "3,400円")}</div></body></html>`;
+  const bonusPage =
+    '<!doctype html><html><body><h1>MyJCB</h1><h1>ボーナス払いご利用明細(未確定分)</h1><div class="detail-list-01"><div class="head">ご利用日 ご利用先など 支払区分 ご利用金額</div></div></body></html>';
+  const kept: RawArtifact[] = [
+    ...artifacts,
+    {
+      dataset: "credit-schedule",
+      filename: "credit-schedule-07.html",
+      body: bonusPage,
+      mediaType: HTML,
+      statementState: "unknown",
+      period: "detailMonth-7",
+    },
+    {
+      dataset: "credit-schedule",
+      filename: "credit-skip-payment-08.html",
+      body: skipPage,
+      mediaType: HTML,
+      statementState: "unknown",
+      period: "detailMonth-8",
+    },
+  ];
+  const plan = await myJcbRunPlan({
+    schemaVersion: "myjcb-worker-poc-v1",
+    runId,
+    startedAt: "2026-09-24T00:00:00.000Z",
+    completedAt: "2026-09-24T00:05:00.000Z",
+    status: "success",
+    trigger: "scheduled",
+    connections: [
+      {
+        summary: {
+          connectionId,
+          bootstrapMode: "password",
+          status: "success",
+          cardCount: 1,
+          periodCount: 2,
+          artifactCount: kept.length,
+          schedulePages: [
+            { position: 7, code: "scheduled_payments_page" },
+            { position: 8, code: "scheduled_payments_page" },
+          ],
+          schedulePageCount: 2,
+        },
+        artifacts: kept,
+      },
+    ],
+    failures: [],
+  });
+  expect(plan.run.units[0]?.coverageStatus).toBe("complete");
+  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+  expect(await registerCollectionRun(env, { source: "myjcb", runId })).toMatchObject({
+    outcome: "registered",
+    artifacts: 7,
+  });
+  const fetchRunId = await fetchRun(runId);
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT artifact_key,dataset FROM observation_fetch_artifacts WHERE fetch_run_id=? AND artifact_key LIKE '%credit-s%' ORDER BY artifact_key",
+      )
+        .bind(fetchRunId)
+        .all()
+    ).results,
+  ).toEqual([
+    {
+      artifact_key: `${connectionId}/credit-schedule-07.html`,
+      dataset: null,
+    },
+    {
+      artifact_key: `${connectionId}/credit-skip-payment-08.html`,
+      dataset: "credit-schedule",
+    },
+  ]);
+  expect(await sweep(env)).toMatchObject({ parsed: 5, error: 0 });
+  expect(await workItem(runId)).toEqual({ outcome: "jobs_created", jobs_created: 5 });
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT a.artifact_key,j.parser_name,j.parser_version,j.status FROM observation_parse_jobs j JOIN fetch_artifacts a ON a.id=j.fetch_artifact_id WHERE a.fetch_run_id=? AND a.artifact_key LIKE '%credit-s%'",
+      )
+        .bind(fetchRunId)
+        .all()
+    ).results,
+  ).toEqual([
+    {
+      artifact_key: `${connectionId}/credit-skip-payment-08.html`,
+      parser_name: "myjcb-skip-payment-schedule",
+      parser_version: "0.1.0",
+      status: "done",
+    },
+  ]);
+  // The rows are scheduled payments in their own table, exact decimal text,
+  // and the parse run wrote nothing any transaction or balance reader sees.
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT o.source_account,o.schedule_kind,o.usage_date,o.due_date,o.amount_text,o.amount_scale,o.currency,o.counterparty,o.as_of,
+                json_extract(o.extra_json,'$._kogane.paymentFromMonth') AS from_month
+           FROM scheduled_payment_observations o JOIN parse_runs p ON p.id=o.parse_run_id
+           JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+          WHERE a.fetch_run_id=? AND p.status='ok' ORDER BY o.id`,
+      )
+        .bind(fetchRunId)
+        .all()
+    ).results,
+  ).toEqual([
+    {
+      source_account: `myjcb:${connectionId}:root`,
+      schedule_kind: "card-skip-payment",
+      usage_date: "2026-03-02",
+      due_date: "2026-05-11",
+      amount_text: "12000",
+      amount_scale: 0,
+      currency: "JPY",
+      counterparty: "架空スキップ店",
+      as_of: "2026-03-20",
+      from_month: "2026-05",
+    },
+    {
+      source_account: `myjcb:${connectionId}:root`,
+      schedule_kind: "card-skip-payment",
+      usage_date: "2026-03-05",
+      due_date: "2026-06-10",
+      amount_text: "3400",
+      amount_scale: 0,
+      currency: "JPY",
+      counterparty: "架空スキップ商会",
+      as_of: "2026-03-20",
+      from_month: "2026-05",
+    },
+  ]);
+  for (const table of [
+    "transaction_observations",
+    "balance_observations",
+    "position_observations",
+    "valuation_observations",
+  ])
+    expect(
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM ${table} o JOIN parse_runs p ON p.id=o.parse_run_id WHERE p.parser_name='myjcb-skip-payment-schedule'`,
+      ).first<number>("n"),
+      table,
+    ).toBe(0);
+  // Append-only, as every observation table.
+  await expect(env.DB.prepare("DELETE FROM scheduled_payment_observations").run()).rejects.toThrow(
+    /append-only/u,
+  );
+  await expect(
+    env.DB.prepare("UPDATE scheduled_payment_observations SET amount_text='0'").run(),
+  ).rejects.toThrow(/append-only/u);
 }, 60000);

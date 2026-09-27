@@ -42,6 +42,29 @@ A confidence number is not produced anywhere. A candidate carries rationale
 codes and rejection conditions, which is what a reviewer needs; a score is at
 most an ordering aid and never evidence or authority (addendum 07 §3).
 
+## Scheduled card payments are observations, not obligations
+
+The MyJCB ショッピングスキップ払い page lists payments the provider says are
+still due on a later date
+([ADR 0005 amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
+`myjcb-skip-payment-schedule` stores each row as a `scheduled_payment`
+observation in `scheduled_payment_observations` (Layer B): usage date,
+payment date, exact decimal amount, merchant text and the page's as-of date.
+No event kind, obligation revision, allocation or settlement is written from
+it, and no rule proposes one:
+
+- the rows are not purchases (the purchases are the usage rows of the
+  statement months) and are never recognised, so no recognition key is held
+  twice (INV06);
+- they are not confirmed statement rows or statement totals, and settlement
+  matching does not read them;
+- turning a row into an `obligation_revisions` schedule would be adopted
+  state, which needs a decision (INV07) and a confirmed meaning of the
+  amount (one deferred payment or the rest of it), which is not confirmed
+  (ADR 0004).
+
+This is a limit, not a design: upcoming obligations have no read path yet.
+
 ## Tables (migration `0032_economic_events.sql`)
 
 Additive only. Every table has the `*_no_delete` / `*_no_replace` triggers of

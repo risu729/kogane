@@ -961,7 +961,10 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
       '"schedulePages":[{"position":7,"code":"schedule_page_fetch"},{"position":8,"code":"scheduled_payments_page"}],"schedulePageCount":1',
     );
     expect(result.stored).toContain('"periodCount":2');
-    expect(result.stored).toContain("account-one/credit-schedule-08.html");
+    // The skip page is named by its h1, the name registration reads
+    // (amendment (e)).
+    expect(result.stored).toContain("account-one/credit-skip-payment-08.html");
+    expect(result.stored).not.toContain("credit-schedule-08");
     expect(result.stored).not.toContain("credit-schedule-07");
     expect(result.stored).not.toContain("credit-detail-08");
     expect(result.stored).toContain('"dataset":"credit-schedule"');
@@ -1291,8 +1294,10 @@ describe("ADR 0005 amendment (c): the menu's schedule pages are not months", () 
       ["credit-detail", "credit-detail-01.html", "confirmed", "2026-03"],
       ["credit-ledger", "credit-ledger-01.json", "confirmed", "2026-03"],
       // Stored whole and redacted, with the relative label no reader resolves.
+      // The ショッピングスキップ払い page is named by its h1 (amendment (e));
+      // the page without it stays unread under the old name.
       ["credit-schedule", "credit-schedule-07.html", "unknown", "detailMonth-7"],
-      ["credit-schedule", "credit-schedule-08.html", "unknown", "detailMonth-8"],
+      ["credit-schedule", "credit-skip-payment-08.html", "unknown", "detailMonth-8"],
     ]);
   });
 
@@ -1323,9 +1328,11 @@ describe("ADR 0005 amendment (c): the menu's schedule pages are not months", () 
       { position: 7, code: "schedule_page_fetch" },
       { position: 8, code: "scheduled_payments_page" },
     ]);
-    expect(filenames(run.artifacts).filter((name) => name.startsWith("credit-schedule"))).toEqual([
-      "credit-schedule-08.html",
-    ]);
+    expect(
+      filenames(run.artifacts).filter(
+        (name) => name.startsWith("credit-schedule") || name.startsWith("credit-skip-payment"),
+      ),
+    ).toEqual(["credit-skip-payment-08.html"]);
     expect(warnings).toEqual([
       '{"event":"myjcb-credit-schedule-page-failed","detailMonth":7,"code":"schedule_page_fetch"}',
     ]);
