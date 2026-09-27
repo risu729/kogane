@@ -1,9 +1,18 @@
+import type { ActivityPaginationCode } from "./pagination";
+import type { GlobalPassSanitizerCode } from "./sanitize";
+
 export type CollectionMode = "daily" | "backfill";
 
 export const GLOBALPASS_SCHEMA_VERSION = "globalpass-browser-poc-v2" as const;
 export const GLOBALPASS_DATASET = "globalpass-activity" as const;
 export const GLOBALPASS_MEDIA_TYPE = "text/html" as const;
-export const GLOBALPASS_PAGINATION_STATUS = "unproven" as const;
+/**
+ * What the collector does with a month's pages: it keeps the page the month
+ * selection renders and follows no Next link (`container/server.mjs`). A month
+ * with more than ten statements shows a pager on that page (observed
+ * 2026-09-27, ADR 0026's amendment), so page 1 is all it stores of it.
+ */
+export const GLOBALPASS_PAGINATION_STATUS = "first_page_only" as const;
 
 export const CONTAINER_PROBE_VARIANTS = [
   "baseline",
@@ -37,12 +46,17 @@ export interface StoredArtifact {
   sha256: string;
 }
 export interface CollectionFailure {
-  operation: "browser-collection" | "contract" | "sanitization" | "r2";
+  operation: "browser-collection" | "contract" | "sanitization" | "pagination" | "r2";
   errorType: string;
   errorCode:
     | "browser_collection_failed"
     | "container_contract_invalid"
+    /** A sanitizer refusal that carried no closed code (none is thrown today). */
     | "html_sanitization_failed"
+    /** Which check of `sanitizeGlobalPassActivityHtml` refused the page. */
+    | GlobalPassSanitizerCode
+    /** The page states more pages than the one stored (`pagination.ts`). */
+    | ActivityPaginationCode
     | "artifact_store_failed"
     | "selected_month_missing";
   artifactKey?: string;
