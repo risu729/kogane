@@ -421,6 +421,14 @@ per-source bucket + importer 経由。`shared` にすると run は `packages/co
 分離され、human-required は unit の状態として記録するだけで再 login はしない。
 deploy 順と rollback は `docs/collection.md` の該当節を参照。
 
+### 口座名義の除去（2026-09-27、ADR 0029 の amendment）
+
+確定明細の page には 「カード情報」 表（縦の th／td）があり、口座名義の行は provider が一部を `*` で隠した口座名義人の名前である。一部が隠されていても名前なので、保存しない（[ADR 0029 の amendment](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)）。
+
+`redactedStatementHtml` は sanitizer の後に、全体の文字列が 「口座名義」 である `th` の次の `td` の中身を `[redacted:name]` に置き換える（`src/name-redaction.ts`）。同じ表の カード名称、カード発行会社、金融機関名、支店名、科目・口座番号 の行はそのまま残す。口座名義の `th` の後に `td` がない page は観測していない形なので、`artifact_name_redaction_invalid` で保存しない。共通 bucket へ書く前の `assertRedactedHtml` は、口座名義の cell が marker でない page を拒否する。collector manifest の page の entry には置き換えた cell の数（`redactedFieldCount`）だけを書き、terminal の redaction step は `myjcb-sanitizer` v2 になる。
+
+制限：この変更より前に保存した page は口座名義を含んだままで、書き換えない。削除するかどうかは owner が決める。ledger の本文（ご利用先など）と CSV／PDF／OFX export は対象外である。
+
 ### 共通 DATA R2 の manifest と明細メタデータ（2026-09-26、ADR 0025）
 
 ledger と明細 page の parser が使う statement state と period は、run の collector manifest から processor の metadata extractor（`services/processor/src/metadata-extractors/myjcb.ts`）が読む。terminal にはこれらの field がない。importer 時代の中央 manifest は各 artifact に `connectionId` と `filename` を持っており、extractor はその二つで entry を探していた。collector が共通 bucket に書く manifest の entry は `dataset`、`key`（`objects/<2 hex>/<sha256>`）、`mediaType`、`sha256`、`bytes` と、記録した場合の `statementState`／`period` だけを持つ。そのため共通 R2 の run はすべて `manifest_artifact_mismatch` で parse に失敗していた。

@@ -19,6 +19,9 @@
   dated amendment note)
 - Related: the one-time crosswalk that joins each account's v1 and v2
   identity is a separate, later decision and is not made here
+- Amended: 2026-09-27, class (d) applies to stored evidence (see
+  [Amendment](#amendment-2026-09-27-names-are-removed-from-stored-evidence));
+  proposed until the amending PR merges
 
 ## Context
 
@@ -225,3 +228,163 @@ confirmed the field shapes.
   Vpass session bean and the MoneyForward hidden inputs (no provider was
   contacted, production was not read); the field shapes that storing the raw
   tuple would need (being checked separately).
+
+## Amendment (2026-09-27): names are removed from stored evidence
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-27
+- Carried by:
+  `services/collector-sbi-shinsei/src/name-redaction.ts`,
+  `services/collector-sbi-shinsei/src/local/windows-chrome-collector.ts`,
+  `services/collector-sbi-shinsei/src/local/collector.ts`,
+  `services/collector-sbi-shinsei/src/storage.ts`,
+  `services/collector-sbi-shinsei/src/shared-collection.ts`,
+  `services/collector-myjcb/src/name-redaction.ts`,
+  `services/collector-myjcb/src/parsers.ts` (`redactedStatementHtml`),
+  `services/collector-myjcb/src/redaction.ts`,
+  `services/collector-myjcb/src/shared-collection.ts`,
+  [SBI Shinsei](../sources/sbi-shinsei-bank.md#person-names-in-stored-captures-2026-09-27),
+  [MyJCB](../sources/myjcb.md),
+  [observations](../observations.md), [roadmap](../roadmap.md)
+
+### Context
+
+Class (d) above said names are avoided in CORE and that provider pages with
+names "stay in R2 under the existing redaction templates". A structure-only
+survey of stored objects on 2026-09-27 (key names, types and match results;
+no value was read) found that those templates do not remove names:
+
+- SBI Shinsei: the stored `raw-balance-summary-and-stage.json` (dataset
+  `balance-summary-and-stage`, response `getBalanceSummaryAndStage`) carries
+  `responseParam.summary.responseParam.customerName`, `customerNameKanji`
+  and `customerNameKana`. The collector stored the provider's response text
+  as it came, minus the rotating CSRF token.
+- MyJCB: the stored statement page (`credit-detail-NN.html`) keeps the
+  「カード情報」 table, whose 口座名義 row is the account holder's name as the
+  provider masks it (some characters replaced by `*`, the rest visible). The
+  sanitizer removes scripts, attributes and card numbers, not text.
+
+The live SBI Shinsei page also keeps a user object in `sessionStorage`
+(`SFC_USER_INFO`, with name and national-id fields). The collector never reads
+`sessionStorage`: its bearer token and CSRF token come from the login response
+(`src/browser-page.ts`, `scripts/windows-cdp-collect.ps1`) and it hands back
+exactly the four responses of its plan, so that object is not stored.
+
+### Options considered
+
+1. **Keep names in R2, as class (d) read.** Nothing needs the names: no
+   parser registers `balance-summary-and-stage`, the account-connection proof
+   reads its branch and category blocks only, and the statement parsers read
+   the ledger and totals. Rejected: storing a value nobody reads is exposure
+   without a use.
+2. **Delete the name fields or rows.** The SBI Shinsei response schema
+   accepts the fields as optional, but an absent field is indistinguishable
+   from a provider that stopped sending it, and a deleted table row changes
+   the page structure other readers rely on. Rejected.
+3. **Replace each observed name value with a fixed marker before the object
+   is written, and record how many were replaced.** Shape, schema and every
+   other value stay; the stored object says where a name was. Chosen.
+4. **Rewrite the objects already stored.** Raw evidence is append-only
+   ([mutation policy](../design.md#mutation-policy)). Rejected; see
+   Consequences.
+
+### Decision
+
+- Class (d) applies to stored evidence, not only to identities: a collector
+  removes the person-name fields it has observed **before** the object is
+  written, and the fields are listed in code and here, by key or label.
+  Nothing is guessed from a key's spelling or from free text.
+- The value is replaced by the fixed marker `[redacted:name]`, so the object
+  keeps the shape its response schema and parsers accept. An absent, `null`
+  or empty field has nothing to remove and is left as it is.
+- The collector manifest records the removal as a count per provider capture
+  (`redactedFieldCount`, 0 when there was nothing to remove), never a value.
+- Listed fields:
+  - SBI Shinsei `sbi-shinsei-balance-summary-v1`:
+    `responseParam.summary.responseParam.customerName`, `customerNameKanji`,
+    `customerNameKana` (`PERSON_NAME_FIELDS`). The other `Name` fields the
+    response schemas admit, `branchName` and `productName`, are not a person
+    and are kept; a test fails when a schema admits a new `Name` field that is
+    not classified.
+  - MyJCB statement pages: the `td` that follows a `th` whose whole text is
+    「口座名義」 (`PERSON_NAME_ROW_LABELS`). The other rows of the 「カード情報」
+    table (カード名称, カード発行会社, 金融機関名, 支店名, 科目・口座番号) are
+    class (b)/(c) or product text and are kept. A 口座名義 header without a
+    following `td` is a layout nobody has observed; the page is refused with
+    `artifact_name_redaction_invalid` rather than stored, and the shared
+    path's `assertRedactedHtml` refuses any page whose 口座名義 cell is not the
+    marker alone.
+- The sanitizing steps are recorded under new versions:
+  `sbi-shinsei-token-sanitizer` v2 and `myjcb-sanitizer` v2.
+
+### Consequences
+
+- An SBI Shinsei capture with a name is not serialized again: the marker is
+  written into the provider's own text as the string value of each redacted
+  key, so every other byte (numbers as written, spacing, escapes, key order)
+  stays the provider's. The result must parse, pass the same schema and equal
+  the original object with exactly the listed fields redacted; a listed key
+  that also appears elsewhere, or a name value that is not a JSON string, is
+  refused as an unknown shape (the closed `provider_response_invalid`)
+  rather than stored altered. Captures of the other datasets leave the
+  redaction as the provider's text byte for byte. Unchanged by this
+  amendment: on the shared path the token sanitizer (`sanitizeProviderCapture`
+  in `src/shared-collection.ts`, like the retired importer) parses every
+  provider capture and serializes it again to drop `header.newToken`, so what
+  reaches DATA there was never the provider's exact text. In memory the collector still holds the
+  provider's values for the length of the run.
+- **Objects already stored keep their names.** They are append-only and this
+  change does not rewrite them. Deleting or replacing them is the owner's
+  decision, not this change's. Known to carry names, by kind (counts from
+  read-only aggregates of CORE on 2026-09-27; no value read):
+  - SBI Shinsei `balance-summary-and-stage` captures registered from the
+    retired importer: 29 artifacts, 17 distinct objects in
+    `kogane-raw-evidence`.
+  - MyJCB `credit-detail` pages registered from the retired importer: 132
+    artifacts, 33 distinct objects. Whether every one of them has the
+    「カード情報」 table was checked on one stored page only.
+  - Shared-bucket runs written by the collectors themselves since U09 (not
+    catalogued in CORE, so not counted) and the per-source staging buckets of
+    the legacy path hold the same kinds of object.
+    The roadmap carries this as an open owner decision.
+- **Limits.** Only observed fields are removed. SBI Shinsei transaction
+  descriptions (`activityDetails[].description`) and MyJCB ledger text are
+  provider text that may name a counterparty; they are not person-name
+  fields of the account holder and are kept, unexamined. MyJCB exports
+  (CSV, PDF, OFX), which the surveyed connection does not offer, are not
+  redacted by this change. The national-id and branch/account request echoes
+  (`requestParam.nationalid`) are class (c) and are kept. The `requestParam`
+  echoes are the one part of the SBI Shinsei response schemas that is an open
+  object, so the test that every `Name` field is classified covers the exact
+  response objects only; a name in a request echo has not been observed and
+  would not be caught.
+
+### Verification
+
+- `services/collector-sbi-shinsei/test/name-redaction.test.ts`: the three
+  fields of a synthetic balance summary become the marker and every other
+  value is unchanged; the redacted object passes the schema; absent, null and
+  empty fields are not counted and keep the provider bytes; with balances
+  written as `1.50`, `1e3` and a 20-digit integer, indentation and an escaped
+  name, the stored text differs from the input only in the three values; a
+  name key found elsewhere or a non-string name is refused (also through the
+  handoff, as a closed failure); the redaction returns the other datasets byte for byte; every `name` field in the schemas (any case) is classified; the Chrome handoff and the local diagnostic collector both
+  produce redacted captures with their counts.
+- `services/collector-sbi-shinsei/test/shared-collection.test.ts` (Worker end
+  to end, synthetic container handoff): nothing in DATA and nothing logged
+  contains the placeholder names; the stored balance summary carries the
+  marker; the collector manifest carries `redactedFieldCount` 3 for it and 0
+  for the other captures; the redaction steps are v2.
+- `services/collector-myjcb/test/name-redaction.test.ts`: on a synthetic page
+  with the observed table structure, the 口座名義 cell becomes the marker and
+  金融機関名, 支店名, 科目・口座番号, カード名称 and カード発行会社 are kept;
+  the label must be the whole header text; a header with no value cell is
+  refused; `assertRedactedHtml` finds the header on the parsed tree the way
+  the redaction does and refuses an unredacted cell in any markup; the shared run
+  stores the marker, records the count on the page's manifest entry, and
+  nothing logged contains any page value.
+- `services/processor/test/account-connection-proof.test.ts`: a balance
+  summary carrying the marker still proves the account connection.
+- Not verified: the live pages were not fetched by this change; the list of
+  stored objects above counts registered artifacts, not objects whose bytes
+  were read.

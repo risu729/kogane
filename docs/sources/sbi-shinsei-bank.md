@@ -879,6 +879,42 @@ Deploy order, rollback, the artifact/role table and what the terminal states
 are in [`docs/collection.md`](../collection.md#sbi-shinsei-kogane-sbi-shinsei-collector-poc).
 Merged is not enabled: the var ships as `legacy`.
 
+## Person names in stored captures (2026-09-27)
+
+`getBalanceSummaryAndStage` answers with the account holder's name in
+`responseParam.summary.responseParam.customerName`, `customerNameKanji` and
+`customerNameKana`. Until this change the collector stored that response as
+it came (minus the rotating CSRF token), so every stored
+`raw-balance-summary-and-stage.json` carries the name.
+
+The collector now replaces each of the three values with `[redacted:name]`
+when it parses the handoff, before any artifact exists
+(`src/name-redaction.ts`, [ADR 0029's
+amendment](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)).
+The marker is written into the provider's own text as the string value of
+each of the three keys; the response is never serialized again, so every
+other byte, including `branchName` and the balances as the provider wrote
+them, is kept. The result must parse, validate against
+`sbi-shinsei-balance-summary-v1` and equal the original with exactly those
+three fields replaced; otherwise (a name key elsewhere, a name that is not a
+string) the response is refused as an unknown shape rather than stored.
+The collector manifest records `redactedFieldCount` for each provider capture
+(3 for a balance summary with all three names, 0 for the other datasets,
+which the redaction leaves as the provider's text; the shared path's token
+sanitizer serializes every capture again afterwards, as it did before), and the terminal's redaction step is
+`sbi-shinsei-token-sanitizer` v2. The local diagnostic collector applies the
+same redaction.
+
+The live page also keeps a user object with name and national-id fields in
+`sessionStorage` (`SFC_USER_INFO`). The collector never reads
+`sessionStorage`; its tokens come from the login response, so that object is
+not stored.
+
+**Limits.** Captures stored before this change keep the names; they are not
+rewritten, and removing them is the owner's decision. Transaction
+descriptions in `top-accounts-balance-and-activity` are provider text and are
+kept as they are.
+
 ## Exchange-rate board (parser `sbi-shinsei-exchange-rate`, 2026-09-26)
 
 The collector reads `IFCM_CommonAdapter/getExchangeRate` on every run and

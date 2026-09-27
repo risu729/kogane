@@ -29,6 +29,15 @@ the relevant rollout records.
 
 Concrete limits in the current code:
 
+- **Names in evidence stored before 2026-09-27.** The SBI Shinsei and MyJCB
+  collectors now replace the account holder's name before an object is
+  written ([ADR 0029's
+  amendment](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)).
+  Objects stored earlier are append-only and keep it: SBI Shinsei
+  `balance-summary-and-stage` captures and MyJCB `credit-detail` pages, in the
+  shared bucket and in the legacy staging buckets. Whether to delete them is
+  an open owner decision; nothing in the code removes them.
+
 - **Shared-R2 registration, 2026-09-12 onwards.** From U09 (#184) until the
   fixes below, no shared-R2 run of any source but Mizuho was catalogued into
   sealed, parseable evidence. Four blockers were found on 2026-09-26: the

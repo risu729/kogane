@@ -38,6 +38,9 @@ export async function describeArtifact(options: {
       mediaType: options.artifact.mediaType,
       sha256,
       bytes: bytes.byteLength,
+      ...(options.artifact.redactedFieldCount === undefined
+        ? {}
+        : { redactedFieldCount: options.artifact.redactedFieldCount }),
     },
     bytes,
   };
