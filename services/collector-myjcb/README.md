@@ -139,7 +139,7 @@ collectorは、おまとめ設定追加・解除、初期表示変更、支払�
 
 ## stop condition
 
-次を検出したconnectionはretryせず`human-required`または`failed`としてmanifestへ記録する。
+次を検出したconnectionはretryせずその場で止める。最初のクレジット月より前で止まったconnectionは何も保存せず、`human-required`または`failed`としてmanifestへ記録する。月の取得、状態判定、明細の月、ledger、exportで止まったconnectionは、それより前の月を保存して`partial`になる。どちらもmanifestとterminal unitには閉じた停止code（`CONNECTION_STOP_CODES`）、止まった月の位置、保存した月の数だけを書く（`docs/sources/myjcb.md`の「connectionの停止と取得済みの月」、ADR 0005のamendment）。
 
 - passkey、生体/PIN、QR、OTP、秘密の合い言葉、CAPTCHA、本人確認
 - Access Denied、401、403、429、account lock/risk warning
