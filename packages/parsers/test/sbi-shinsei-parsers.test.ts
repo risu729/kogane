@@ -370,6 +370,14 @@ describe("SBI Shinsei activity window whose end is not stated (0.1.2)", () => {
         const row = (activity["activityDetails"] as Record<string, unknown>[])[0]!;
         row["credit"] = "1";
       },
+      // Only an empty-string end was observed; an absent or null end beside a
+      // stated start is not read as "not stated".
+      (activity: Record<string, unknown>) => {
+        delete activity["toDate"];
+      },
+      (activity: Record<string, unknown>) => {
+        activity["toDate"] = null;
+      },
     ]) {
       const input = stored();
       mutate(topActivity(input));
@@ -715,6 +723,23 @@ describe("SBI Shinsei exchange-rate board: observed shape (1.0.1)", () => {
     const numeric = observed();
     information(numeric)["transactionTime"] = 20260512090000;
     expect(() => parse(numeric)).toThrow(/must be a string/u);
+  });
+
+  test("only the observed 22-character shape falls back; any other unrecognised form still fails", () => {
+    const time = information(observed())["transactionTime"] as string;
+    for (const other of [
+      "not a time",
+      `${time}0`,
+      `${time.slice(0, 20)}9`,
+      `${time.slice(0, 20)}AB`,
+      `${time.slice(0, 19)}_${time.slice(20)}`,
+      "2026-05-12T09:00:00",
+      "2026/05/12 09:00",
+    ]) {
+      const input = observed();
+      information(input)["transactionTime"] = other;
+      expect(() => parse(input), other).toThrow(/provider timestamp format is not recognized/u);
+    }
   });
 
   test("a board of JPY rows only has no quote and is refused", () => {

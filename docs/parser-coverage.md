@@ -84,8 +84,9 @@ quote row, one per `(currency, customerCategory)`, gives three rate cells, so
 its claim states `expectedCount = quote rows × 3`; an unreadable rate cell is
 a `row_unreadable` issue with impact `membership` and leaves the board
 partial; a JPY row is not a quote and is skipped with an `info`
-`row_unreadable` issue of impact `none`; an unrecognised `transactionTime` is
-an `info` `unknown_fields_preserved` issue of impact `field`; an empty board
+`row_unreadable` issue of impact `none`; a `transactionTime` of the observed
+22-character shape is an `info` `unknown_fields_preserved` issue of impact
+`field` (any other unrecognised form still fails); an empty board
 (or one with no quote row), an unknown field or a pair listed twice fails the
 artifact. Its policy row sets `replaces_previous_on_complete_empty = 0` and
 pins `required_parser_version`, which the selection matches exactly, so each

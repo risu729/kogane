@@ -64,8 +64,9 @@ or per 100 units.
 ## Decision
 
 - **`sbi-shinsei-top-balances-and-activity` 0.1.2.** A present `fromDate` with
-  an empty or absent `toDate` is a window whose end the provider did not
-  state. `fromDate` still bounds every posting date from below; no upper bound
+  `toDate` as an empty string is a window whose end the provider did not
+  state. An absent or null `toDate` beside a present `fromDate` was not
+  observed and stays refused. `fromDate` still bounds every posting date from below; no upper bound
   is checked and no end date is invented. Every observation of the activity
   block (its rows and `activity_current_balance`) records
   `_kogane.activityWindowEnd: "not-stated"`. The parser declares no requested
@@ -75,15 +76,19 @@ or per 100 units.
   `compactDate` already read `YYYY/MM/DD`; a test now proves it. Every other
   rule is unchanged.
 - **`sbi-shinsei-exchange-rate` 1.0.1.**
-  - A `transactionTime` in a form `providerTimestamp` does not recognise no
-    longer fails the board. The observations carry no provider time (`asOf` is
+  - A `transactionTime` of exactly the observed shape, 22 characters
+    `NNNN/NN/NN NN:NN:NN NN` with a digit in every `N` place, no longer fails
+    the board; it is matched as a shape and never parsed. Any other form
+    `providerTimestamp` does not recognise still fails, as in 1.0.0. The observations carry no provider time (`asOf` is
     absent), so every reader falls back to the artifact's fetch instant and
     marks it as the collector's (`priceEffectiveTime`, basis `collector`).
     Each observation records `_kogane.providerTimeBasis: "unrecognized"`, the
     text stays verbatim in `_kogane.providerContext`, and one `info` issue
     (`unknown_fields_preserved`, impact `field`) names the locator without the
     value. No part of the text is parsed. A recognised form with an impossible
-    calendar value, or a non-string, still fails.
+    calendar value, or a non-string, still fails. (If the trailing characters
+    turn out not to be digits on some board, that board stays refused and
+    shows as `parser_rejected`; nothing is guessed.)
   - A row's identity is `(currency, customerCategory)`, the category compared
     as the provider sent it. Every tier gives its own three observations with
     the category verbatim in `extra`; the duplicate check applies to the pair.
@@ -138,13 +143,14 @@ or per 100 units.
   `toDate`, 10 one-sided rows with slash posting dates) parses to 10
   transactions, each activity observation marked `activityWindowEnd:
 "not-stated"`; a posting date before `fromDate`, an unstated or impossible
-  start and a two-sided row still refuse; a stated `toDate` still bounds
-  above. The observed board (13 × 5 + CHF + JPY, 22-character time) gives 198
+  start, an absent or null `toDate` beside a stated start and a two-sided row
+  still refuse; a stated `toDate` still bounds above. The observed board (13 × 5 + CHF + JPY, 22-character time) gives 198
   observations, complete, `expectedCount` 198, issues exactly the time and
   the JPY row, no provider time and no timestamp text in any issue or
   warning; changing the trailing characters changes no value; a recognised
-  time still sets `asOf`; an impossible or non-string time, a JPY-only board
-  and a pair listed twice still refuse. New coverage-contract cases with a
+  time still sets `asOf`; an impossible or non-string time, any unrecognised
+  time of another shape (another length, a non-digit suffix, an ISO form), a
+  JPY-only board and a pair listed twice still refuse. New coverage-contract cases with a
   frozen expectations file (`sbi-shinsei-observed-shapes-expected.json`) and
   digests for the two bumped parsers only.
 - `packages/domain`: every tier is `unsupported_currency` with the production
@@ -153,7 +159,10 @@ or per 100 units.
 - `services/processor`: the lane over the parsed observed board promotes
   nothing with the production table (198 unsupported) and exactly the admitted
   tier's three cells with a synthetic admission, at the fetch instant marked
-  `collector`; every `coverage-v1` row that pins a version names a deployed
+  `collector`; a board whose tiers are numbers promotes under an admission of
+  the same number and nothing under its digits as text (the tier reaches the
+  rule through `json_extract` with its type); every `coverage-v1` row that
+  pins a version names a deployed
   parser; the migration pin is 0056.
 - `packages/read-model` and `experiments/observation-pipeline-local`: the
   migrated policy row requires 1.0.1.

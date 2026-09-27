@@ -934,7 +934,9 @@ per tier, and a JPY row was present.
 **Parser 1.0.1** (migration 0056 moves the `coverage-v1` policy row, whose
 `required_parser_version` is an exact match, from 1.0.0 to 1.0.1):
 
-- A `transactionTime` in a form not recognised no longer fails the board: the
+- A `transactionTime` of the observed 22-character shape
+  (`NNNN/NN/NN NN:NN:NN NN`, digits only in the `N` places) no longer fails
+  the board; any other unrecognised form still does. For that shape the
   observations carry no provider time, so readers use the fetch instant
   marked as the collector's; each records `_kogane.providerTimeBasis:
 "unrecognized"`, the text stays verbatim in its provider context, and one

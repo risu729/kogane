@@ -20,13 +20,13 @@
 //
 // The stored boards carry a 22-character `transactionTime`
 // (`NNNN/NN/NN NN:NN:NN NN`: a timestamp, a space and two more characters whose
-// meaning nobody has observed; ADR 0028, observed 2026-09-27). From 1.0.1 a
-// form that is not recognised no longer fails the board: the observations carry
-// no provider time (so the fetch instant stands in, marked as the collector's),
+// meaning nobody has observed; ADR 0028, observed 2026-09-27). From 1.0.1
+// exactly that shape no longer fails the board: the observations carry no
+// provider time (so the fetch instant stands in, marked as the collector's),
 // record `_kogane.providerTimeBasis: "unrecognized"`, and one `info` issue says
 // so without the value. The text is kept verbatim in the provider context and
-// no part of it is interpreted. A recognised form with an impossible calendar
-// value, or a non-string, still fails the board.
+// no part of it is interpreted. Any other unrecognised form, a recognised form
+// with an impossible calendar value, or a non-string, still fails the board.
 //
 // The payload names no base quantity for a quote: it does not say whether a
 // rate is per 1 unit or per 100 units of the currency. The parser therefore
@@ -76,8 +76,13 @@ const RATE_FIELDS = [
 ] as const;
 const TRANSACTION_TIME =
   "json:$.responseParam.exchangeRateInformation.responseParam.transactionTime";
-/** The one `providerTimestamp` refusal this parser falls back from instead of failing. */
-const UNRECOGNIZED_TIMESTAMP = "provider timestamp format is not recognized";
+/**
+ * The one unrecognised `transactionTime` shape the stored boards carry
+ * (ADR 0028): a slash timestamp, a space and two more digits. It is matched as
+ * a shape only; no part of it is read. Every other unrecognised form still
+ * fails in `providerTimestamp` (ADR 0004).
+ */
+const OBSERVED_UNRECOGNIZED_TIME = /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2} \d{2}$/u;
 /** A plain positive decimal: no sign, no grouping, no exponent. */
 const RATE_TEXT = /^(?:0|[1-9]\d*)(?:\.\d+)?$/u;
 
@@ -137,15 +142,12 @@ export const sbiShinseiExchangeRate: Parser = {
     );
     scalarFields(information, ["transactionTime"], `${DATASET}.exchangeRateInformation`);
     const diagnostics = new ParseDiagnostics();
-    let asOf: string | undefined;
-    let timeUnrecognized = false;
-    try {
-      asOf = providerTimestamp(information["transactionTime"]);
-    } catch (error) {
-      if (!(error instanceof Error) || error.message !== UNRECOGNIZED_TIMESTAMP) throw error;
+    const time = information["transactionTime"];
+    const timeUnrecognized = typeof time === "string" && OBSERVED_UNRECOGNIZED_TIME.test(time);
+    const asOf = timeUnrecognized ? undefined : providerTimestamp(time);
+    if (timeUnrecognized) {
       // The provider stated a time in a form nobody has verified. It is kept
       // verbatim below and never read; the observations carry no provider time.
-      timeUnrecognized = true;
       diagnostics.report({
         code: "unknown_fields_preserved",
         locator: TRANSACTION_TIME,

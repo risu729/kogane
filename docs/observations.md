@@ -46,7 +46,9 @@ What the releases do, and what they leave unknown:
 - **1.0.1** keeps each tier as its own observations (identity
   `(currency, customerCategory)`, the claim expecting rows × 3 over all
   tiers), skips a JPY row with an `info` `row_unreadable` issue of impact
-  `none`, and for an unrecognised `transactionTime` writes no provider time,
+  `none`, and for a `transactionTime` of the observed 22-character shape
+  (digits and separators only; any other unrecognised form still fails)
+  writes no provider time,
   marks `_kogane.providerTimeBasis: "unrecognized"` and records one `info`
   `unknown_fields_preserved` issue without the value. Readers use the fetch
   instant, marked as the collector's.

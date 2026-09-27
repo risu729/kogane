@@ -9,8 +9,9 @@
 // below, no upper bound is checked and no end date is invented, and every
 // observation of the activity block records `_kogane.activityWindowEnd:
 // "not-stated"`. The parser declares no requested range of its own, so that
-// marker is the whole record of it. A `toDate` without a `fromDate`, and rows
-// without a `fromDate`, stay refused: nobody has observed either.
+// marker is the whole record of it. A `toDate` without a `fromDate`, rows
+// without a `fromDate`, and a `fromDate` whose `toDate` is absent or null
+// rather than empty stay refused: nobody has observed any of them.
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
 import { containerClaim } from "./coverage.ts";
 import { decimalToMinorUnits, minorUnitExponent } from "./util.ts";
@@ -165,11 +166,15 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
       activity["fromDate"] !== "";
     const toPresent =
       activity["toDate"] !== undefined && activity["toDate"] !== null && activity["toDate"] !== "";
-    if (!fromPresent && (toPresent || details.length > 0)) {
+    // Only the observed shape relaxes the rule: a stated start with `toDate` as
+    // an empty string. An absent or null end beside a stated start has not been
+    // observed and stays refused (ADR 0004, ADR 0028).
+    const endNotStated = fromPresent && activity["toDate"] === "";
+    if (fromPresent ? !toPresent && !endNotStated : toPresent || details.length > 0) {
       throw new Error(`${DATASET}.activity.responseParam: incomplete activity window`);
     }
     // A stated start with an empty end: the end is unknown, not "today".
-    const windowEnd = fromPresent && !toPresent ? { activityWindowEnd: "not-stated" } : {};
+    const windowEnd = endNotStated ? { activityWindowEnd: "not-stated" } : {};
     const fromDate = fromPresent
       ? compactDate(activity["fromDate"], `${DATASET}.activity.responseParam.fromDate`)
       : undefined;

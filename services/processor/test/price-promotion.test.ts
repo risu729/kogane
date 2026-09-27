@@ -416,3 +416,73 @@ test("a tiered board with an unrecognised time: nothing promotes until an admiss
       tier: "SYNTHETIC-TIER-2",
     });
 }, 60000);
+
+test("a numeric tier promotes only under an admission of the same number, never of its digits as text", async () => {
+  // Adversarial: the lane reads the tier through json_extract, so a numeric
+  // category must reach the rule as a number. The observed board's tiers are
+  // rewritten as the numbers 1..5 (synthetic).
+  const fetchedMs = Date.parse("2026-09-09T00:02:00.000Z");
+  const text = new TextDecoder()
+    .decode(fixture("sbi-shinsei-parser-boundaries", "exchange-rate-observed-board.json"))
+    .replace(/"SYNTHETIC-TIER-(\d)"/gu, "$1");
+  expect(text).not.toContain("SYNTHETIC-TIER");
+  await seedArtifact(
+    env,
+    721,
+    "sbi-shinsei-bank",
+    "exchange-rate",
+    "raw-exchange-rate.json",
+    new TextEncoder().encode(text),
+    true,
+    fetchedMs,
+  );
+  await env.DB.prepare("UPDATE observation_scan_state SET cursor=0").run();
+  await sweep(env);
+  const run = (await env.DB.prepare(
+    "SELECT id FROM parse_runs WHERE fetch_artifact_id=721 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.1' AND status='ok'",
+  ).first<number>("id"))!;
+  expect(run).toBeGreaterThan(0);
+  expect(
+    await count(
+      `SELECT count(*) AS n FROM valuation_observations WHERE parse_run_id=${run} AND json_type(extra_json,'$.customerCategory')='integer'`,
+    ),
+  ).toBe(198);
+
+  const before = (await cursor("valuation"))!;
+  const asText: FxQuoteBasisTable = {
+    USD: { customerCategory: "2", baseQuantity: "1", evidence: "synthetic" },
+  };
+  expect(await pricePromotionSweep(env.DB, { now: NOW, fxQuoteBasis: asText })).toMatchObject({
+    scanned: 198,
+    promoted: 0,
+    written: 0,
+  });
+  await env.DB.prepare(
+    "UPDATE price_promotion_cursor SET last_observation_id=? WHERE claim_kind='valuation'",
+  )
+    .bind(before)
+    .run();
+  const asNumber: FxQuoteBasisTable = {
+    USD: { customerCategory: 2, baseQuantity: "1", evidence: "synthetic" },
+  };
+  expect(await pricePromotionSweep(env.DB, { now: NOW, fxQuoteBasis: asNumber })).toMatchObject({
+    scanned: 198,
+    promoted: 3,
+    unsupported_currency: 195,
+    written: 3,
+  });
+  const tiers = (
+    await env.DB.prepare(
+      `SELECT json_extract(v.extra_json,'$.customerCategory') AS tier, v.subject AS subject
+       FROM price_observation_claims c JOIN valuation_observations v ON v.id=c.observation_id
+       WHERE c.parse_run_id=?`,
+    )
+      .bind(run)
+      .all<{ tier: unknown; subject: string }>()
+  ).results;
+  expect(tiers).toEqual([
+    { tier: 2, subject: "USD" },
+    { tier: 2, subject: "USD" },
+    { tier: 2, subject: "USD" },
+  ]);
+}, 60000);
