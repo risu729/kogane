@@ -953,3 +953,18 @@ So no published SBI Shinsei transaction observation exists, and the card
 settlement adapter admits nothing until the activity parser accepts the stored
 captures. Why the parser rejects them is not investigated here; it is an open
 limit, and the parser's strict shapes are unchanged.
+
+**Limit: the rejection reason is not stored.** The parser throws, so CORE
+keeps only `parser_rejected` and no `parse_issues` row. Reading the code
+narrows it: the collector validator admits exactly the key sets the parser
+demands, and the sibling yen-deposit capture of the same runs passes the
+shared root, header and run checks, so the refusal is one of the parser's
+semantic checks on the overview or activity block (timestamp format, decimal
+and currency-scale checks, dates and the activity window, one debit or credit
+per row, duplicate identities, a wrapper `errorInfo` that is not an explicit
+success). Which one is found by replaying the stored captures with
+`replay-diagnostics.ts` ([operations: replaying a parser
+rejection](../operations.md#replaying-a-parser-rejection)), which prints a
+closed category and a shape summary per capture and no values. Until that is
+run, the cause stays unknown and the parser's rules stay as they are
+([ADR 0004](../adr/0004-payment-type-shapes-from-evidence.md)).

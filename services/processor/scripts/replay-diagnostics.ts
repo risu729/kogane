@@ -1,34 +1,53 @@
 // Read-only: fetch selected failed objects into memory, emit structural error
 // categories only. Never log raw payloads or provider error strings.
+//
+//   bun services/processor/scripts/replay-diagnostics.ts [parser] [maxReplays] [artifactId]
+//
+// `parser` is an exact registered parser name (filtered in SQL) or, as before,
+// a substring of one. Every wrangler call is a D1 SELECT or an R2 object read
+// through `wrangler.diagnostic.jsonc`; nothing is written anywhere. Each
+// rejection prints its closed category (scripts/parser-rejection.ts) and the
+// last line is a count per category.
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 import { parseCsv } from "../../../packages/parsers/src/parsers/util.ts";
 import { decimalText } from "../../../packages/parsers/src/parsers/util.ts";
+import {
+  classifyParserRejection,
+  replaySelectionSql,
+  topActivityShape,
+} from "./parser-rejection.ts";
 const cli = new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url).pathname;
+const processorDir = new URL("..", import.meta.url).pathname;
 async function command(args: string[]): Promise<Uint8Array> {
-  const child = Bun.spawn(["node", cli, ...args], { stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(["node", cli, ...args, "--config", "wrangler.diagnostic.jsonc"], {
+    cwd: processorDir,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const output = await new Response(child.stdout).bytes();
   if ((await child.exited) !== 0) throw new Error("read-only command failed");
   return output;
 }
-const sql = `WITH ranked AS (
- SELECT a.*,o.blob_key,o.byte_size,p.parser_name,
- row_number() OVER(PARTITION BY p.parser_name,a.sha256 ORDER BY p.fetch_artifact_id DESC) AS rank,
- (SELECT start_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' LIMIT 1) window_start,
- (SELECT end_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' LIMIT 1) window_end
- FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN raw_objects o ON o.sha256=a.sha256
- WHERE p.status='error' AND a.source_id IN ('sony-bank','sbi-shinsei-bank')
- AND NOT EXISTS(SELECT 1 FROM published_parse_runs success WHERE success.fetch_artifact_id=p.fetch_artifact_id AND success.parser_name=p.parser_name)
-) SELECT * FROM ranked WHERE rank=1 ORDER BY id DESC LIMIT 50`;
+const parserArgument = process.argv[2] || undefined;
+const sql = replaySelectionSql(
+  parserArgument === undefined
+    ? {}
+    : PARSERS.some((parser) => parser.name === parserArgument)
+      ? { parser: parserArgument }
+      : { substring: parserArgument },
+);
 const result = JSON.parse(
   new TextDecoder().decode(
     await command(["d1", "execute", "kogane-raw-evidence", "--remote", "--command", sql, "--json"]),
   ),
 );
+const summary: Record<string, number> = {};
+const selected: number = result[0].results.length;
+let parsedCount = 0;
 let replayed = 0;
 const maxReplays = Math.max(1, Math.min(50, Number(process.argv[3]) || 1));
 for (const row of result[0].results) {
-  if (process.argv[2] && !row.parser_name.includes(process.argv[2])) continue;
   if (process.argv[4] && row.id !== Number(process.argv[4])) continue;
   if (replayed++ >= maxReplays) break;
   const parser = PARSERS.find((p) => p.name === row.parser_name)!;
@@ -56,8 +75,12 @@ for (const row of result[0].results) {
     sha256: row.sha256,
     fetchedAt: row.fetched_at,
     url: null,
-    runStatus: "success",
-    runFailureCount: 0,
+    // As the processor's artifactMeta: the lane already admitted the artifact,
+    // so a run that is not a clean success was admitted by its unit.
+    runStatus: row.run_status,
+    runFailureCount: row.run_failure_count,
+    unitScopeEligibility:
+      row.run_status === "success" && row.run_failure_count === 0 ? null : "unit-independent-v1",
     statementState: row.statement_state,
     period: row.period,
     ...(row.window_start && row.window_end
@@ -110,6 +133,7 @@ for (const row of result[0].results) {
         observations: parsed.observations.length,
       }),
     );
+    parsedCount++;
   } catch (error) {
     const text = new TextDecoder().decode(bytes);
     if (row.parser_name === "sony-bank-wallet-history") {
@@ -212,36 +236,11 @@ for (const row of result[0].results) {
           ],
         }),
       );
-    if (row.source_id === "sbi-shinsei-bank") {
-      const wrapper = JSON.parse(text).responseParam?.overview;
-      const code = wrapper?.errorInfo?.statusID;
-      const message = String(wrapper?.errorInfo?.statusMessage ?? "");
-      console.log(
-        JSON.stringify({
-          artifact: row.id,
-          explicitSuccessCode: code === "00000",
-          exactSuccess: message.toLowerCase() === "success",
-        }),
-      );
-    }
-    const message = error instanceof Error ? error.message : "";
-    const labels = [
-      "media type",
-      "unknown field",
-      "missing field",
-      "expected an object",
-      "expected an array",
-      "cardinality",
-      "response was not successful",
-      "window",
-      "encoding",
-      "date",
-      "schema",
-      "balance",
-      "unsupported",
-    ];
-    const category = labels.find((label) => message.toLowerCase().includes(label)) ?? "other";
-    const field = message.match(/(?:unknown|missing) field ([A-Za-z][A-Za-z0-9_]{0,60})$/)?.[1];
+    if (row.dataset === "top-accounts-balance-and-activity")
+      console.log(JSON.stringify({ artifact: row.id, shape: topActivityShape(bytes) }));
+    const category = classifyParserRejection(parser.name, error);
+    const key = JSON.stringify([parser.name, category]);
+    summary[key] = (summary[key] ?? 0) + 1;
     const sites =
       error instanceof Error
         ? [...(error.stack ?? "").matchAll(/parsers\/([a-z0-9-]+\.ts:\d+:\d+)/g)].map((m) => m[1])
@@ -253,8 +252,18 @@ for (const row of result[0].results) {
         result: "rejected",
         category,
         sites,
-        ...(field ? { field } : {}),
       }),
     );
   }
 }
+console.log(
+  JSON.stringify({
+    selected,
+    replayed: Math.min(replayed, maxReplays),
+    parsed: parsedCount,
+    rejected: Object.entries(summary).map(([key, count]) => {
+      const [parser, category] = JSON.parse(key) as [string, unknown];
+      return { parser, category, count };
+    }),
+  }),
+);

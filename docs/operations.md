@@ -191,6 +191,73 @@ cd services/processor
 summarises the day. A row that could not be written is itself logged as
 `lane_tick_record_failed` with a code, and never changes what the lane did.
 
+### Replaying a parser rejection
+
+A parser that refuses an artifact throws, and the processor stores only the
+closed code: the parse run is `error` with `parser_rejected`, the job is
+`failed` with the same code, and no `parse_issues` row exists. Which check
+refused is therefore not in CORE. Two read-only scripts replay stored
+artifacts through the current parser registry in memory and print which
+check it was, as a closed category:
+
+- `services/processor/scripts/replay-diagnostics.ts` selects failed parses
+  (`sony-bank` and `sbi-shinsei-bank` only) with one D1 `SELECT` and reads
+  each raw object from R2 into memory. Both go through `wrangler` with
+  `services/processor/wrangler.diagnostic.jsonc`; nothing is written.
+- `services/processor/scripts/diagnose.ts` replays the oldest failed job of
+  each parser through `getPlatformProxy` remote bindings, with the same
+  classification.
+
+The owner runs it from the repository root, with wrangler signed in to the
+Cloudflare account (`mise exec -- node
+services/processor/node_modules/wrangler/bin/wrangler.js login`, or a
+`CLOUDFLARE_API_TOKEN` that can read D1 and R2):
+
+```sh
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts sbi-shinsei-top-balances-and-activity 50
+```
+
+The arguments are the parser, the most artifacts to replay (1 to 50, default
+
+1. and optionally one internal artifact id. An exact registered parser name is
+   filtered in SQL before the 50-row limit; any other text keeps the older
+   substring match. Selection takes the newest failed parse of each distinct raw
+   object that no parse of the same parser has published since, and the parent
+   run's status as the processor reads it (`observation_fetch_runs`), so the
+   replay meets the same precondition the lane did. The bytes are checked against
+   the stored SHA-256 and size before parsing.
+
+What it prints is JSON lines, one or two per replayed artifact and a summary
+last:
+
+| Line                                                                  | Content                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{artifact, parser, result: "ok", observations}`                      | the current parser accepts it; a count                                                                                                                                                                                                                                                         |
+| `{artifact, shape}` (top-accounts-balance-and-activity only)          | shape classes and counts of every value the parser checks: timestamp and date format classes, amount classes (`plain_integer`, `grouped`, `number_other`, `empty`, …), debit/credit side combinations, repeated account numbers and references as counts, what each wrapper's `errorInfo` says |
+| `{artifact, parser, result: "rejected", category, sites}`             | `category` is `{reason, label?, field?}`; `sites` are parser source positions                                                                                                                                                                                                                  |
+| `{selected, replayed, parsed, rejected: [{parser, category, count}]}` | the counts per category                                                                                                                                                                                                                                                                        |
+
+For the three SBI Shinsei parsers every throw site has its own category:
+`reason` is the site's fixed message text (for example `expected exactly one
+debit or credit`, `provider timestamp format is not recognized`, `not exactly
+representable in the currency`), `label` is the schema path the parser named
+with row positions folded to `[]`, and `field` is the schema field for
+`unknown field`, `missing field` and `expected a scalar`. A label that is not
+a plain schema path is refused whole (`label_unrecognized`), and a message no
+site produces is `unclassified`. Other parsers keep the coarser reasons the
+scripts printed before. The mapping and the proof that no value reaches it are
+`services/processor/scripts/parser-rejection.ts` and
+`services/processor/test/parser-rejection.test.ts`, which also runs the
+selection against the migrated CORE schema.
+
+The output is counts, closed categories, schema field names and internal
+artifact ids only: never bytes, an amount, a date, an account number, a
+reference, a description, a currency code the payload carried or an exception
+message. Limits: at most 50 artifacts per run, the parser version replayed is
+the one in the checkout (not necessarily the one that failed), and one
+category names only the first check that refused; the `shape` line is what
+shows the rest.
+
 ## 2. Load budgets and the D1 harness
 
 The review's design load is a shape, not a forecast:
