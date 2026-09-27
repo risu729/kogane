@@ -1,0 +1,486 @@
+{
+  "responseParam": {
+    "exchangeRateInformation": {
+      "requestParam": {},
+      "responseParam": {
+        "transactionTime": "2026/05/12 09:00:00 01",
+        "exchangeRates": [
+          {
+            "currency": "USD",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "9.50",
+            "sellRate": "10.50",
+            "midRate": "10.00"
+          },
+          {
+            "currency": "USD",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "9.60",
+            "sellRate": "10.40",
+            "midRate": "10.00"
+          },
+          {
+            "currency": "USD",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "9.70",
+            "sellRate": "10.30",
+            "midRate": "10.00"
+          },
+          {
+            "currency": "USD",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "9.80",
+            "sellRate": "10.20",
+            "midRate": "10.00"
+          },
+          {
+            "currency": "USD",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "9.90",
+            "sellRate": "10.10",
+            "midRate": "10.00"
+          },
+          {
+            "currency": "EUR",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "16.50",
+            "sellRate": "17.50",
+            "midRate": "17.00"
+          },
+          {
+            "currency": "EUR",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "16.60",
+            "sellRate": "17.40",
+            "midRate": "17.00"
+          },
+          {
+            "currency": "EUR",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "16.70",
+            "sellRate": "17.30",
+            "midRate": "17.00"
+          },
+          {
+            "currency": "EUR",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "16.80",
+            "sellRate": "17.20",
+            "midRate": "17.00"
+          },
+          {
+            "currency": "EUR",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "16.90",
+            "sellRate": "17.10",
+            "midRate": "17.00"
+          },
+          {
+            "currency": "GBP",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "23.50",
+            "sellRate": "24.50",
+            "midRate": "24.00"
+          },
+          {
+            "currency": "GBP",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "23.60",
+            "sellRate": "24.40",
+            "midRate": "24.00"
+          },
+          {
+            "currency": "GBP",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "23.70",
+            "sellRate": "24.30",
+            "midRate": "24.00"
+          },
+          {
+            "currency": "GBP",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "23.80",
+            "sellRate": "24.20",
+            "midRate": "24.00"
+          },
+          {
+            "currency": "GBP",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "23.90",
+            "sellRate": "24.10",
+            "midRate": "24.00"
+          },
+          {
+            "currency": "AUD",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "30.50",
+            "sellRate": "31.50",
+            "midRate": "31.00"
+          },
+          {
+            "currency": "AUD",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "30.60",
+            "sellRate": "31.40",
+            "midRate": "31.00"
+          },
+          {
+            "currency": "AUD",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "30.70",
+            "sellRate": "31.30",
+            "midRate": "31.00"
+          },
+          {
+            "currency": "AUD",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "30.80",
+            "sellRate": "31.20",
+            "midRate": "31.00"
+          },
+          {
+            "currency": "AUD",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "30.90",
+            "sellRate": "31.10",
+            "midRate": "31.00"
+          },
+          {
+            "currency": "NZD",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "37.50",
+            "sellRate": "38.50",
+            "midRate": "38.00"
+          },
+          {
+            "currency": "NZD",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "37.60",
+            "sellRate": "38.40",
+            "midRate": "38.00"
+          },
+          {
+            "currency": "NZD",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "37.70",
+            "sellRate": "38.30",
+            "midRate": "38.00"
+          },
+          {
+            "currency": "NZD",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "37.80",
+            "sellRate": "38.20",
+            "midRate": "38.00"
+          },
+          {
+            "currency": "NZD",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "37.90",
+            "sellRate": "38.10",
+            "midRate": "38.00"
+          },
+          {
+            "currency": "CAD",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "44.50",
+            "sellRate": "45.50",
+            "midRate": "45.00"
+          },
+          {
+            "currency": "CAD",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "44.60",
+            "sellRate": "45.40",
+            "midRate": "45.00"
+          },
+          {
+            "currency": "CAD",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "44.70",
+            "sellRate": "45.30",
+            "midRate": "45.00"
+          },
+          {
+            "currency": "CAD",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "44.80",
+            "sellRate": "45.20",
+            "midRate": "45.00"
+          },
+          {
+            "currency": "CAD",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "44.90",
+            "sellRate": "45.10",
+            "midRate": "45.00"
+          },
+          {
+            "currency": "HKD",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "51.50",
+            "sellRate": "52.50",
+            "midRate": "52.00"
+          },
+          {
+            "currency": "HKD",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "51.60",
+            "sellRate": "52.40",
+            "midRate": "52.00"
+          },
+          {
+            "currency": "HKD",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "51.70",
+            "sellRate": "52.30",
+            "midRate": "52.00"
+          },
+          {
+            "currency": "HKD",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "51.80",
+            "sellRate": "52.20",
+            "midRate": "52.00"
+          },
+          {
+            "currency": "HKD",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "51.90",
+            "sellRate": "52.10",
+            "midRate": "52.00"
+          },
+          {
+            "currency": "SGD",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "58.50",
+            "sellRate": "59.50",
+            "midRate": "59.00"
+          },
+          {
+            "currency": "SGD",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "58.60",
+            "sellRate": "59.40",
+            "midRate": "59.00"
+          },
+          {
+            "currency": "SGD",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "58.70",
+            "sellRate": "59.30",
+            "midRate": "59.00"
+          },
+          {
+            "currency": "SGD",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "58.80",
+            "sellRate": "59.20",
+            "midRate": "59.00"
+          },
+          {
+            "currency": "SGD",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "58.90",
+            "sellRate": "59.10",
+            "midRate": "59.00"
+          },
+          {
+            "currency": "CNY",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "65.50",
+            "sellRate": "66.50",
+            "midRate": "66.00"
+          },
+          {
+            "currency": "CNY",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "65.60",
+            "sellRate": "66.40",
+            "midRate": "66.00"
+          },
+          {
+            "currency": "CNY",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "65.70",
+            "sellRate": "66.30",
+            "midRate": "66.00"
+          },
+          {
+            "currency": "CNY",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "65.80",
+            "sellRate": "66.20",
+            "midRate": "66.00"
+          },
+          {
+            "currency": "CNY",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "65.90",
+            "sellRate": "66.10",
+            "midRate": "66.00"
+          },
+          {
+            "currency": "ZAR",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "72.50",
+            "sellRate": "73.50",
+            "midRate": "73.00"
+          },
+          {
+            "currency": "ZAR",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "72.60",
+            "sellRate": "73.40",
+            "midRate": "73.00"
+          },
+          {
+            "currency": "ZAR",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "72.70",
+            "sellRate": "73.30",
+            "midRate": "73.00"
+          },
+          {
+            "currency": "ZAR",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "72.80",
+            "sellRate": "73.20",
+            "midRate": "73.00"
+          },
+          {
+            "currency": "ZAR",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "72.90",
+            "sellRate": "73.10",
+            "midRate": "73.00"
+          },
+          {
+            "currency": "TRY",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "79.50",
+            "sellRate": "80.50",
+            "midRate": "80.00"
+          },
+          {
+            "currency": "TRY",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "79.60",
+            "sellRate": "80.40",
+            "midRate": "80.00"
+          },
+          {
+            "currency": "TRY",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "79.70",
+            "sellRate": "80.30",
+            "midRate": "80.00"
+          },
+          {
+            "currency": "TRY",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "79.80",
+            "sellRate": "80.20",
+            "midRate": "80.00"
+          },
+          {
+            "currency": "TRY",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "79.90",
+            "sellRate": "80.10",
+            "midRate": "80.00"
+          },
+          {
+            "currency": "MXN",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "86.50",
+            "sellRate": "87.50",
+            "midRate": "87.00"
+          },
+          {
+            "currency": "MXN",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "86.60",
+            "sellRate": "87.40",
+            "midRate": "87.00"
+          },
+          {
+            "currency": "MXN",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "86.70",
+            "sellRate": "87.30",
+            "midRate": "87.00"
+          },
+          {
+            "currency": "MXN",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "86.80",
+            "sellRate": "87.20",
+            "midRate": "87.00"
+          },
+          {
+            "currency": "MXN",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "86.90",
+            "sellRate": "87.10",
+            "midRate": "87.00"
+          },
+          {
+            "currency": "SEK",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "93.50",
+            "sellRate": "94.50",
+            "midRate": "94.00"
+          },
+          {
+            "currency": "SEK",
+            "customerCategory": "SYNTHETIC-TIER-2",
+            "buyRate": "93.60",
+            "sellRate": "94.40",
+            "midRate": "94.00"
+          },
+          {
+            "currency": "SEK",
+            "customerCategory": "SYNTHETIC-TIER-3",
+            "buyRate": "93.70",
+            "sellRate": "94.30",
+            "midRate": "94.00"
+          },
+          {
+            "currency": "SEK",
+            "customerCategory": "SYNTHETIC-TIER-4",
+            "buyRate": "93.80",
+            "sellRate": "94.20",
+            "midRate": "94.00"
+          },
+          {
+            "currency": "SEK",
+            "customerCategory": "SYNTHETIC-TIER-5",
+            "buyRate": "93.90",
+            "sellRate": "94.10",
+            "midRate": "94.00"
+          },
+          {
+            "currency": "CHF",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "150.50",
+            "sellRate": "151.50",
+            "midRate": "151.00"
+          },
+          {
+            "currency": "JPY",
+            "customerCategory": "SYNTHETIC-TIER-1",
+            "buyRate": "1.00",
+            "sellRate": "1.00",
+            "midRate": "1.00"
+          }
+        ]
+      },
+      "header": {},
+      "errorInfo": {}
+    }
+  },
+  "header": {
+    "adapterResultCode": "0"
+  }
+}

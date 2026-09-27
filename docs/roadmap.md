@@ -59,8 +59,14 @@ Concrete limits in the current code:
   ([bank adapters](card-settlements.md#bank-adapters)) through explicit
   operator decisions. Unknown ownership, stale evidence and occupied
   allocations block acceptance. Production holds no published SBI Shinsei
-  transaction yet (its parser rejected every stored activity capture), so that
-  adapter admits nothing today. A debit posted more than three days from the
+  transaction yet: 0.1.1 rejected every stored activity capture because the
+  provider leaves the window's end empty. 0.1.2 accepts that shape and records
+  the end as not stated
+  ([ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)); until the
+  repair lane has re-parsed the stored captures after deploy, the adapter
+  admits nothing. The same release lets the SBI Shinsei exchange-rate board
+  be parsed for the first time, every `customerCategory` tier kept, while no
+  FX row is promoted to a price until a tier and quote basis are admitted. A debit posted more than three days from the
   due date gets no candidate. Banks whose row ids are fingerprints (Mizuho,
   Sony Bank), partial payments, refunds and complete purchase recognition
   remain extensions; this is not complete event coverage.

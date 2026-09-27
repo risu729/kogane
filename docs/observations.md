@@ -17,6 +17,59 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## SBI Shinsei stored-capture shapes (activity parser 0.1.2, board parser 1.0.1)
+
+Observed on 2026-09-27 by the owner's local agent replaying stored captures
+through the deployed parsers, reporting structure and counts only
+([ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)):
+
+- `top-accounts-balance-and-activity` (two captures, one from the importer
+  era, one recent): the key sets match `sbi-shinsei-top-balances-and-activity`
+  0.1.1's exactly; `activity.responseParam.fromDate` is present as
+  `YYYY/MM/DD` and `toDate` is an empty string; `activityDetails` has 10 rows
+  in both. 0.1.1 throws `incomplete activity window`, which is the whole cause
+  of its 29 `parser_rejected` runs.
+- `exchange-rate`: 67 rows under
+  `responseParam.exchangeRateInformation.responseParam.exchangeRates`, each
+  `{currency, customerCategory, buyRate, sellRate, midRate}`: 13 currencies ×
+  5 `customerCategory` tiers, CHF in one row, JPY in one row.
+  `transactionTime` is 22 characters, `NNNN/NN/NN NN:NN:NN NN`. 1.0.0 rejects
+  the board: the time form is not recognised, a currency repeats (the tiers),
+  and a JPY row is present.
+
+What the releases do, and what they leave unknown:
+
+- **0.1.2** reads an empty `toDate` beside a stated `fromDate` as an end the
+  provider did not state. The start still bounds every posting date; no end
+  is checked or invented; every observation of the activity block carries
+  `_kogane.activityWindowEnd: "not-stated"`. Slash dates were already read.
+- **1.0.1** keeps each tier as its own observations (identity
+  `(currency, customerCategory)`, the claim expecting rows × 3 over all
+  tiers), skips a JPY row with an `info` `row_unreadable` issue of impact
+  `none`, and for a `transactionTime` of the observed 22-character shape
+  (digits and separators only; any other unrecognised form still fails)
+  writes no provider time,
+  marks `_kogane.providerTimeBasis: "unrecognized"` and records one `info`
+  `unknown_fields_preserved` issue without the value. Readers use the fetch
+  instant, marked as the collector's.
+- **Unknown, kept as reasons:** the window's end, the meaning of the two
+  trailing characters (so the board's own time), which tier applies to the
+  owner, and each currency's quote basis. The price rule promotes no board row
+  until an admission names the currency, its tier and its basis (ADR 0020
+  amendment).
+
+Deploying the parsers is enough to re-parse: the repair lane's cyclic scan
+creates a job per stored artifact for the new (parser, version) pair and
+drains them at its budget, and a replay plan per dataset does the same at
+once. The board's policy row pins its parser version exactly, so migration
+0056 moves it to 1.0.1; the activity dataset's row pins none. The earlier
+frozen coverage-contract outputs are unchanged, and new cases freeze the
+observed shapes on synthetic fixtures
+(`sbi-shinsei-parser-boundaries/top-accounts-balance-and-activity-window-end-not-stated.json`,
+`sbi-shinsei-parser-boundaries/exchange-rate-observed-board.json`). Whether
+every stored capture passes the checks after the first one is known only once
+the new version's jobs have run.
+
 ## MoneyForward description-template repair (monthly parser 2.0.2)
 
 Read-only, size/SHA-256-verified inspection of an affected monthly artifact found

@@ -56,11 +56,12 @@ const fxRow = (overrides: Partial<FxBoardRow> = {}): FxBoardRow => ({
   amountText: "146.00",
   asOf: "2026-09-07T09:01:00+09:00",
   fetchedAt: FETCHED,
+  customerCategory: "SYNTHETIC",
   ...overrides,
 });
 const VERIFIED: FxQuoteBasisTable = {
-  USD: { baseQuantity: "1", evidence: "synthetic" },
-  KRW: { baseQuantity: "100", evidence: "synthetic" },
+  USD: { customerCategory: "SYNTHETIC", baseQuantity: "1", evidence: "synthetic" },
+  KRW: { customerCategory: "SYNTHETIC", baseQuantity: "100", evidence: "synthetic" },
 };
 
 const domesticRow = (overrides: Partial<DomesticPriceRow> = {}): DomesticPriceRow => ({
@@ -153,6 +154,38 @@ describe("fx-sbi-shinsei-board-v1", () => {
       expect(fxBoardPrice(fxRow({ amountText }), VERIFIED).outcome).toBe("basis_unverified");
     expect(fxBoardPrice(fxRow({ metric: "bank_cash_rate" }), VERIFIED).outcome).toBe(
       "basis_unverified",
+    );
+  });
+
+  test("a board listing a currency once per tier promotes nothing until an admission names a tier", () => {
+    // The stored boards' shape (ADR 0028): one row per currency per tier.
+    const tiers = ["SYNTHETIC-TIER-1", "SYNTHETIC-TIER-2", "SYNTHETIC-TIER-3", 4, null];
+    for (const customerCategory of tiers) {
+      expect(fxBoardPrice(fxRow({ customerCategory })).outcome).toBe("unsupported_currency");
+      // An admission of the currency for another tier reads none of them.
+      expect(fxBoardPrice(fxRow({ customerCategory }), VERIFIED).outcome).toBe(
+        "unsupported_currency",
+      );
+    }
+    const tier2: FxQuoteBasisTable = {
+      USD: { customerCategory: "SYNTHETIC-TIER-2", baseQuantity: "1", evidence: "synthetic" },
+    };
+    expect(
+      tiers.map((customerCategory) => fxBoardPrice(fxRow({ customerCategory }), tier2).outcome),
+    ).toEqual([
+      "unsupported_currency",
+      "promoted",
+      "unsupported_currency",
+      "unsupported_currency",
+      "unsupported_currency",
+    ]);
+    // The tier is matched as the provider sent it: 4 is not "4".
+    const numeric: FxQuoteBasisTable = {
+      USD: { customerCategory: 4, baseQuantity: "1", evidence: "synthetic" },
+    };
+    expect(fxBoardPrice(fxRow({ customerCategory: 4 }), numeric).outcome).toBe("promoted");
+    expect(fxBoardPrice(fxRow({ customerCategory: "4" }), numeric).outcome).toBe(
+      "unsupported_currency",
     );
   });
 

@@ -1,3 +1,17 @@
+// Parser for the SBI Shinsei `top-accounts-balance-and-activity` dataset: the
+// overview's savings balances and the activity block's rows.
+//
+// The activity block states its window in `fromDate` and `toDate`. The stored
+// captures carry `fromDate` (`YYYY/MM/DD`) with `toDate` as an empty string
+// (observed 2026-09-27 by replaying stored captures; ADR 0028,
+// docs/observations.md). From 0.1.2 that is read as "the provider did not
+// state the window's end": `fromDate` still bounds every posting date from
+// below, no upper bound is checked and no end date is invented, and every
+// observation of the activity block records `_kogane.activityWindowEnd:
+// "not-stated"`. The parser declares no requested range of its own, so that
+// marker is the whole record of it. A `toDate` without a `fromDate`, rows
+// without a `fromDate`, and a `fromDate` whose `toDate` is absent or null
+// rather than empty stay refused: nobody has observed any of them.
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
 import { containerClaim } from "./coverage.ts";
 import { decimalToMinorUnits, minorUnitExponent } from "./util.ts";
@@ -23,7 +37,7 @@ const DATASET = "top-accounts-balance-and-activity";
 
 export const sbiShinseiTopBalancesAndActivity: Parser = {
   name: "sbi-shinsei-top-balances-and-activity",
-  version: "0.1.1",
+  version: "0.1.2",
   accepts: (artifact: ArtifactMeta) => acceptsSbiShinseiDataset(artifact, DATASET),
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
@@ -152,9 +166,15 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
       activity["fromDate"] !== "";
     const toPresent =
       activity["toDate"] !== undefined && activity["toDate"] !== null && activity["toDate"] !== "";
-    if (fromPresent !== toPresent || (details.length > 0 && !fromPresent)) {
+    // Only the observed shape relaxes the rule: a stated start with `toDate` as
+    // an empty string. An absent or null end beside a stated start has not been
+    // observed and stays refused (ADR 0004, ADR 0028).
+    const endNotStated = fromPresent && activity["toDate"] === "";
+    if (fromPresent ? !toPresent && !endNotStated : toPresent || details.length > 0) {
       throw new Error(`${DATASET}.activity.responseParam: incomplete activity window`);
     }
+    // A stated start with an empty end: the end is unknown, not "today".
+    const windowEnd = endNotStated ? { activityWindowEnd: "not-stated" } : {};
     const fromDate = fromPresent
       ? compactDate(activity["fromDate"], `${DATASET}.activity.responseParam.fromDate`)
       : undefined;
@@ -198,6 +218,7 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
             extra: providerExtra({}, context, {
               sourceView: "top_activity",
               balanceContext: "current",
+              ...windowEnd,
             }),
           }),
         );
@@ -247,9 +268,8 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
         decimal(row["balance"], `${locator}.balance`);
         const postingDate = compactDate(row["postingDate"], `${locator}.postingDate`);
         if (
-          fromDate !== undefined &&
-          toDate !== undefined &&
-          (postingDate < fromDate || postingDate > toDate)
+          (fromDate !== undefined && postingDate < fromDate) ||
+          (toDate !== undefined && postingDate > toDate)
         ) {
           throw new Error(`${locator}.postingDate: outside declared activity window`);
         }
@@ -269,6 +289,7 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
             sourceView: "top_activity",
             amountSignSource: sourceField,
             rowBalanceDisposition: "preserved_provider_value_semantics_unverified",
+            ...windowEnd,
           }),
         });
       });

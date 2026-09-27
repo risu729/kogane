@@ -65,13 +65,16 @@ const LABELLED = [
   "expected an unsigned side amount",
   "outside declared activity window",
   "the exchange-rate board is empty",
-  "a JPY row is not a quote",
+  "the exchange-rate board has no quote row",
 ] as const;
 const FIELD_PREFIXES = ["unknown field ", "missing field "] as const;
 /** Continuations that carry a payload value: the value is dropped. */
 const VALUE_SUFFIXED: readonly (readonly [RegExp, string])[] = [
   [/^not exactly representable in \S+$/u, "not exactly representable in the currency"],
-  [/^the board lists \S+ twice$/u, "the board lists a currency twice"],
+  [
+    /^the board lists \S+ twice in one customerCategory$/u,
+    "the board lists a currency twice in one customerCategory",
+  ],
 ];
 
 /**

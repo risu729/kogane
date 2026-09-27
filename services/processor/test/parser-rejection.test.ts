@@ -482,12 +482,16 @@ describe("SBI Shinsei yen deposit and exchange-rate throw sites", () => {
       reason: "the exchange-rate board is empty",
       label: X,
     });
-    expect(board((r) => (info(r)["exchangeRates"][0].currency = "JPY"))).toEqual({
-      reason: "a JPY row is not a quote",
-      label: `${RATES}[].currency`,
-    });
+    // A JPY row is skipped with an issue (1.0.1, ADR 0028); a board left with
+    // no quote row is refused, without naming the currency.
+    expect(
+      board((r) => {
+        for (const row of info(r)["exchangeRates"]) row.currency = "JPY";
+      }),
+    ).toEqual({ reason: "the exchange-rate board has no quote row", label: X });
+    // The pair (currency, customerCategory) listed twice; the code is dropped.
     expect(board((r) => (info(r)["exchangeRates"][1].currency = "USD"))).toEqual({
-      reason: "the board lists a currency twice",
+      reason: "the board lists a currency twice in one customerCategory",
       label: `${RATES}[].currency`,
     });
     expect(board((r) => (r["header"].adapterResultCode = "1"))).toEqual({

@@ -35,7 +35,9 @@ const FOREIGN = fixture(
 const DOMESTIC = fixture("sbi-parser-boundaries", "domestic-cash-positions.json");
 const BOARD = fixture("sbi-shinsei-parser-boundaries", "exchange-rate.json");
 /** Synthetic: the tests admit USD per 1 unit; production admits no currency yet. */
-const USD_PER_ONE: FxQuoteBasisTable = { USD: { baseQuantity: "1", evidence: "synthetic" } };
+const USD_PER_ONE: FxQuoteBasisTable = {
+  USD: { customerCategory: "SYNTHETIC", baseQuantity: "1", evidence: "synthetic" },
+};
 const FETCHED_MS = Date.parse("2026-09-07T00:02:00.000Z");
 const NOW = "2026-09-07T00:05:00.000Z";
 
@@ -334,4 +336,153 @@ test("a tampered row is refused, a pending parse holds the cursor, and a tick st
   });
   expect(await pricePromotionSweep(env.DB, { now: NOW })).toMatchObject({ scanned: 1 });
   expect(PRICE_PROMOTION_BATCH).toBe(500);
+}, 60000);
+
+test("a tiered board with an unrecognised time: nothing promotes until an admission names a tier", async () => {
+  // The stored boards' shape (ADR 0028): 13 currencies in 5 customerCategory
+  // tiers, CHF in one, a JPY row and a 22-character transactionTime. Parsed
+  // by the deployed 1.0.1 through the sweep.
+  const fetchedMs = Date.parse("2026-09-08T00:02:00.000Z");
+  await seedArtifact(
+    env,
+    720,
+    "sbi-shinsei-bank",
+    "exchange-rate",
+    "raw-exchange-rate.json",
+    fixture("sbi-shinsei-parser-boundaries", "exchange-rate-observed-board.json"),
+    true,
+    fetchedMs,
+  );
+  await env.DB.prepare("UPDATE observation_scan_state SET cursor=0").run();
+  await sweep(env);
+  const run = (await env.DB.prepare(
+    "SELECT id FROM parse_runs WHERE fetch_artifact_id=720 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.1' AND status='ok'",
+  ).first<number>("id"))!;
+  expect(run).toBeGreaterThan(0);
+  expect(
+    await count(`SELECT count(*) AS n FROM valuation_observations WHERE parse_run_id=${run}`),
+  ).toBe(198);
+  expect(
+    await count(
+      `SELECT count(*) AS n FROM valuation_observations WHERE parse_run_id=${run} AND as_of IS NULL`,
+    ),
+  ).toBe(198);
+
+  // Production admits nothing: every cell of every tier is unsupported.
+  const before = (await cursor("valuation"))!;
+  expect(await pricePromotionSweep(env.DB, { now: NOW })).toEqual({
+    scanned: 198,
+    promoted: 0,
+    basis_unverified: 0,
+    unsupported_currency: 198,
+    written: 0,
+  });
+
+  // An admission of USD that names one tier reads that tier's three cells
+  // only, at the fetch instant marked as the collector's.
+  await env.DB.prepare(
+    "UPDATE price_promotion_cursor SET last_observation_id=? WHERE claim_kind='valuation'",
+  )
+    .bind(before)
+    .run();
+  const tier2: FxQuoteBasisTable = {
+    USD: { customerCategory: "SYNTHETIC-TIER-2", baseQuantity: "1", evidence: "synthetic" },
+  };
+  expect(await pricePromotionSweep(env.DB, { now: NOW, fxQuoteBasis: tier2 })).toEqual({
+    scanned: 198,
+    promoted: 3,
+    basis_unverified: 0,
+    unsupported_currency: 195,
+    written: 3,
+  });
+  const written = (
+    await env.DB.prepare(
+      `SELECT po.base_instrument_ref AS base,json_extract(po.effective_time,'$.basis') AS basis,
+        json_extract(po.effective_time,'$.value') AS at,
+        json_extract(v.extra_json,'$.customerCategory') AS tier
+       FROM price_observations po JOIN price_observation_claims c ON c.price_id=po.id
+       JOIN valuation_observations v ON v.id=c.observation_id
+       WHERE c.parse_run_id=?`,
+    )
+      .bind(run)
+      .all<{ base: string; basis: string; at: string; tier: string }>()
+  ).results;
+  expect(written).toHaveLength(3);
+  for (const row of written)
+    expect(row).toEqual({
+      base: "USD",
+      basis: "collector",
+      at: new Date(fetchedMs).toISOString(),
+      tier: "SYNTHETIC-TIER-2",
+    });
+}, 60000);
+
+test("a numeric tier promotes only under an admission of the same number, never of its digits as text", async () => {
+  // Adversarial: the lane reads the tier through json_extract, so a numeric
+  // category must reach the rule as a number. The observed board's tiers are
+  // rewritten as the numbers 1..5 (synthetic).
+  const fetchedMs = Date.parse("2026-09-09T00:02:00.000Z");
+  const text = new TextDecoder()
+    .decode(fixture("sbi-shinsei-parser-boundaries", "exchange-rate-observed-board.json"))
+    .replace(/"SYNTHETIC-TIER-(\d)"/gu, "$1");
+  expect(text).not.toContain("SYNTHETIC-TIER");
+  await seedArtifact(
+    env,
+    721,
+    "sbi-shinsei-bank",
+    "exchange-rate",
+    "raw-exchange-rate.json",
+    new TextEncoder().encode(text),
+    true,
+    fetchedMs,
+  );
+  await env.DB.prepare("UPDATE observation_scan_state SET cursor=0").run();
+  await sweep(env);
+  const run = (await env.DB.prepare(
+    "SELECT id FROM parse_runs WHERE fetch_artifact_id=721 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.1' AND status='ok'",
+  ).first<number>("id"))!;
+  expect(run).toBeGreaterThan(0);
+  expect(
+    await count(
+      `SELECT count(*) AS n FROM valuation_observations WHERE parse_run_id=${run} AND json_type(extra_json,'$.customerCategory')='integer'`,
+    ),
+  ).toBe(198);
+
+  const before = (await cursor("valuation"))!;
+  const asText: FxQuoteBasisTable = {
+    USD: { customerCategory: "2", baseQuantity: "1", evidence: "synthetic" },
+  };
+  expect(await pricePromotionSweep(env.DB, { now: NOW, fxQuoteBasis: asText })).toMatchObject({
+    scanned: 198,
+    promoted: 0,
+    written: 0,
+  });
+  await env.DB.prepare(
+    "UPDATE price_promotion_cursor SET last_observation_id=? WHERE claim_kind='valuation'",
+  )
+    .bind(before)
+    .run();
+  const asNumber: FxQuoteBasisTable = {
+    USD: { customerCategory: 2, baseQuantity: "1", evidence: "synthetic" },
+  };
+  expect(await pricePromotionSweep(env.DB, { now: NOW, fxQuoteBasis: asNumber })).toMatchObject({
+    scanned: 198,
+    promoted: 3,
+    unsupported_currency: 195,
+    written: 3,
+  });
+  const tiers = (
+    await env.DB.prepare(
+      `SELECT json_extract(v.extra_json,'$.customerCategory') AS tier, v.subject AS subject
+       FROM price_observation_claims c JOIN valuation_observations v ON v.id=c.observation_id
+       WHERE c.parse_run_id=?`,
+    )
+      .bind(run)
+      .all<{ tier: unknown; subject: string }>()
+  ).results;
+  expect(tiers).toEqual([
+    { tier: 2, subject: "USD" },
+    { tier: 2, subject: "USD" },
+    { tier: 2, subject: "USD" },
+  ]);
 }, 60000);

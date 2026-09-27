@@ -758,6 +758,12 @@
       "statementCount": 2,
       "insertStatements": [],
       "sha256": "6405637a42ccda557e0a3708f57fe07ca38267846dbcb297c56ed20700a8fd36"
+    },
+    {
+      "file": "0056_sbi_shinsei_exchange_rate_policy_version.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "754decfb005229b96c6cc95770dc68c361ad335ce5b96ec5b326f60c756f4dd9"
     }
   ],
   "tables": [

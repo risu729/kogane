@@ -9,6 +9,8 @@
 //                                   `bank_sell_rate` `ask`; base the currency,
 //                                   quote JPY. Admitted only for a currency
 //                                   whose quote basis is verified as per 1 unit
+//                                   and only for the `customerCategory` tier
+//                                   its admission names
 //                                   (SBI_SHINSEI_FX_QUOTE_BASIS).
 //   sbi-domestic-current-price-v1   SBI Securities' domestic `current_price`,
 //                                   paired with its position and `market_value`
@@ -64,22 +66,29 @@ export type PricePromotionOutcome = (typeof PRICE_PROMOTION_OUTCOMES)[number];
 export const FX_POLICY_SBI_SHINSEI_MID = "fx-sbi-shinsei-mid-v1";
 
 /**
- * A currency's quote basis on the SBI Shinsei board: the quantity of the
- * currency one rate is quoted for. The payload never states it, so each entry
- * needs evidence (an aggregate survey of the stored boards and the owner's
- * confirmation, as ADR 0004 asks), and the rule admits only `"1"`.
+ * One admission on the SBI Shinsei board: a currency, the `customerCategory`
+ * tier whose rows are read, and the quantity of the currency one rate is
+ * quoted for. The board lists a currency once per tier and the payload states
+ * neither which tier applies to the owner nor the basis, so each entry needs
+ * evidence (an aggregate survey of the stored boards and the owner's
+ * confirmation, as ADR 0004 asks), and the rule admits only `"1"`. The tier is
+ * matched against the stored row's category exactly as the provider sent it; a
+ * row of any other tier, or with none, stays `unsupported_currency`
+ * (ADR 0020 amendment, ADR 0028).
  */
 export interface FxQuoteBasis {
+  customerCategory: string | number;
   baseQuantity: "1" | "100";
   evidence: string;
 }
 export type FxQuoteBasisTable = Readonly<Record<string, FxQuoteBasis>>;
 
 /**
- * Currencies whose quote basis on the SBI Shinsei board is verified. Empty:
- * the stored boards live in R2 and have not been surveyed, and nobody has
- * confirmed a basis, so no FX row is promoted yet (ADR 0020). A currency is
- * added here with its evidence, in a change that amends the ADR.
+ * Currencies admitted on the SBI Shinsei board, keyed by currency. Empty: the
+ * stored boards' shape is observed (ADR 0028) but nobody has confirmed a quote
+ * basis or which `customerCategory` tier applies to the owner, so no FX row is
+ * promoted yet (ADR 0020). A currency is added here with its tier, basis and
+ * evidence, in a change that amends the ADR.
  */
 export const SBI_SHINSEI_FX_QUOTE_BASIS: FxQuoteBasisTable = Object.freeze({});
 
@@ -169,6 +178,8 @@ export interface FxBoardRow {
   amountText: string | null;
   asOf: string | null;
   fetchedAt: string;
+  /** The row's `customerCategory` as stored in its `extra`, or null when it has none. */
+  customerCategory: string | number | null;
 }
 
 /** Whether a stored valuation row is one this rule reads at all. */
@@ -200,6 +211,10 @@ export function fxBoardPrice(
     return { outcome: "unsupported_currency", rule, claim };
   const basis = Object.hasOwn(quoteBasis, row.subject) ? quoteBasis[row.subject] : undefined;
   if (basis === undefined) return { outcome: "unsupported_currency", rule, claim };
+  // The board lists the currency once per tier; only the admitted tier's rows
+  // are read, so the rule itself never picks a tier.
+  if (row.customerCategory !== basis.customerCategory)
+    return { outcome: "unsupported_currency", rule, claim };
   // A per-100 quote (or any basis but 1) is refused; nothing is ever rescaled.
   if (basis.baseQuantity !== "1") return { outcome: "basis_unverified", rule, claim };
   const rate = positiveDecimal(row.amountText);

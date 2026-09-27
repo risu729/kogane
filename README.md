@@ -33,6 +33,7 @@ different rules.
 - [ADR 0025: the MyJCB metadata extractor reads both manifest shapes (proposed)](docs/adr/0025-myjcb-shared-manifest-metadata.md)
 - [ADR 0026: a collector's unit coverage is a claim about what the run set out to collect (proposed)](docs/adr/0026-collector-unit-coverage.md)
 - [ADR 0027: the MoneyForward collector derives the account identity the parser requires (proposed)](docs/adr/0027-moneyforward-collector-account-identity.md)
+- [ADR 0028: the SBI Shinsei parsers accept the stored captures' shapes, with the unknowns kept as reasons (proposed)](docs/adr/0028-sbi-shinsei-observed-capture-shapes.md)
 - [Next-milestone plan (proposed)](docs/plans/2026-09-next-milestone.md)
 - [Domain contracts (`packages/domain`)](docs/domain-contracts.md)
 - [Package layout and import boundaries](docs/package-layout.md)

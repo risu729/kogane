@@ -896,10 +896,11 @@ source `sbi-shinsei-bank` has 29 `exchange-rate` artifacts, all with
 declared media type `application/json` and a fetch unit, over 17 distinct
 payloads of nearly constant size (a 5-byte spread). The same 29 runs carry the
 yen-deposit artifact that `sbi-shinsei-yen-deposit-account` 0.1.1 parses
-successfully, so the runs are successful and failure-free. **Not surveyed:**
-the currency list, the `customerCategory` values and whether `transactionTime`
-is present. Those live only in the payload bytes, which are in R2, and D1
-holds none of them; no aggregate over them was possible from CORE.
+successfully, so the runs are successful and failure-free. **Not surveyed
+from CORE:** the currency list, the `customerCategory` values and whether
+`transactionTime` is present. Those live only in the payload bytes, which are
+in R2, and D1 holds none of them. The shape was observed on 2026-09-27 by
+replaying stored captures instead (below).
 
 **Parser 1.0.0** (`packages/parsers/src/parsers/sbi-shinsei-exchange-rate.ts`,
 `coverage-v1` from migration 0053):
@@ -920,19 +921,51 @@ holds none of them; no aggregate over them was possible from CORE.
   issue and the board is partial; an empty board, a duplicate currency and a
   JPY row fail the artifact.
 
-**Limits.** The board is a customer rate, possibly tiered by
-`customerCategory`, not a market reference; a board that lists one currency
-twice is refused rather than one tier being picked. No currency's quote basis
-is verified yet, so the price promotion lane promotes no FX row
-(`unsupported_currency`) until a currency is admitted with evidence in
-`SBI_SHINSEI_FX_QUOTE_BASIS` (`packages/domain/src/price-sources.ts`). The
-FX policy that will value with this board is named `fx-sbi-shinsei-mid-v1`
-so the caveat travels with every result that uses it.
+**Observed shape (2026-09-27).** The owner's local agent replayed stored
+boards through 1.0.0 and reported structure and counts only
+([ADR 0028](../adr/0028-sbi-shinsei-observed-capture-shapes.md)): 67 rows of
+`{currency, customerCategory, buyRate, sellRate, midRate}`, 13 currencies in
+5 `customerCategory` tiers each, CHF in one row and one JPY row; and a
+22-character `transactionTime`, `NNNN/NN/NN NN:NN:NN NN` (a timestamp, a
+space and two characters whose meaning nobody has observed). 1.0.0 rejected
+every such board: the time form was not recognised, a currency appeared once
+per tier, and a JPY row was present.
 
-**What admits a currency.** The owner confirms each currency's quote basis
-(per 1 unit) from the live board, or grants read access to the stored boards
-in R2 for an aggregate survey; either is then recorded as the currency's
-`evidence` in `SBI_SHINSEI_FX_QUOTE_BASIS`, in a change that amends ADR 0020.
+**Parser 1.0.1** (migration 0056 moves the `coverage-v1` policy row, whose
+`required_parser_version` is an exact match, from 1.0.0 to 1.0.1):
+
+- A `transactionTime` of the observed 22-character shape
+  (`NNNN/NN/NN NN:NN:NN NN`, digits only in the `N` places) no longer fails
+  the board; any other unrecognised form still does. For that shape the
+  observations carry no provider time, so readers use the fetch instant
+  marked as the collector's; each records `_kogane.providerTimeBasis:
+"unrecognized"`, the text stays verbatim in its provider context, and one
+  `info` `unknown_fields_preserved` issue names the field without its value.
+  The trailing characters are never read.
+- A row's identity is `(currency, customerCategory)`: every tier gives its own
+  three observations, the category verbatim in `extra`; a pair listed twice
+  fails the artifact. The claim expects rows × 3 over all tiers (198 for the
+  observed shape).
+- A JPY row is skipped with an `info` `row_unreadable` issue of impact `none`
+  and is not counted, so the board stays complete. A board with no quote row
+  left is refused like an empty one.
+
+**Limits.** The board is a customer rate tiered by `customerCategory`, not a
+market reference. Which tier applies to the owner is unobserved; the parser
+picks none, and the price rule reads a tier only when an admission names it.
+The board's own time is not known (the trailing characters' meaning is not),
+so the fetch instant stands in. No currency's quote basis is verified, so
+the price promotion lane promotes no FX row (`unsupported_currency`) until a
+currency is admitted with its tier, basis and evidence in
+`SBI_SHINSEI_FX_QUOTE_BASIS` (`packages/domain/src/price-sources.ts`). The FX
+policy that will value with this board is named `fx-sbi-shinsei-mid-v1` so
+the caveat travels with every result that uses it.
+
+**What admits a currency.** The owner confirms, from the live board or an
+aggregate survey of the stored boards, which `customerCategory` tier is the
+owner's and each currency's quote basis (per 1 unit); the pair is then
+recorded with its `evidence` in `SBI_SHINSEI_FX_QUOTE_BASIS`, in a change that
+amends ADR 0020.
 
 ## Parse status in production (2026-09-26)
 
@@ -949,24 +982,39 @@ the SBI Shinsei bank debit adapter to card settlement review
   `sbi-shinsei-yen-deposit-account` 0.1.1 (`ok`); the 25 earlier 0.1.0 runs
   ended in `error`.
 
-So no published SBI Shinsei transaction observation exists, and the card
-settlement adapter admits nothing until the activity parser accepts the stored
-captures. Why the parser rejects them is not investigated here; it is an open
-limit, and the parser's strict shapes are unchanged.
+So no published SBI Shinsei transaction observation existed, and the card
+settlement adapter admitted nothing.
 
-**Limit: the rejection reason is not stored.** The parser throws, so CORE
-keeps only `parser_rejected` and no `parse_issues` row. Reading the code
-narrows it: the collector validator admits exactly the key sets the parser
-demands, and the sibling yen-deposit capture of the same runs passes the
-shared root, header and run checks, so the refusal is one of the checks the
-parser makes beyond key sets and scalar types on the overview or activity
-block (timestamp format, row-count bounds the collector does not apply,
-non-empty identifiers, currency format, decimal and currency-scale checks,
-unsigned side amounts, dates and the activity window, one debit or credit per
-row, duplicate identities, a wrapper `errorInfo` that is not an explicit
-success). Which one is found by replaying the stored captures with
-`replay-diagnostics.ts` ([operations: replaying a parser
-rejection](../operations.md#replaying-a-parser-rejection)), which prints a
-closed category and a shape summary per capture and no values. Until that is
-run, the cause stays unknown and the parser's rules stay as they are
-([ADR 0004](../adr/0004-payment-type-shapes-from-evidence.md)).
+**Cause and release (2026-09-27).** The owner's local agent replayed two
+stored captures (one from the importer era, one recent) and reported
+structure and counts only
+([ADR 0028](../adr/0028-sbi-shinsei-observed-capture-shapes.md)): the key sets
+match 0.1.1's exactly, `activity.responseParam.fromDate` is present as
+`YYYY/MM/DD`, `toDate` is an empty string, and `activityDetails` has 10 rows
+in both. 0.1.1 demanded both window ends or neither, so the replay throws
+`incomplete activity window`; that is the whole cause of the 29 rejections.
+CORE itself still keeps only `parser_rejected` for a throw, never the reason.
+
+`sbi-shinsei-top-balances-and-activity` 0.1.2 reads a stated `fromDate` with
+`toDate` as an empty string as a window whose end the provider did not state:
+the start still bounds every posting date, no end is checked or invented, and
+every observation of the activity block records `_kogane.activityWindowEnd:
+"not-stated"`. An absent or null `toDate` beside a stated start was not
+observed and is still refused. Every other rule is unchanged. After deploy the
+repair lane's cyclic scan creates a 0.1.2 job for each stored capture and a
+1.0.1 job for each stored board with the `exchange-rate` dataset, so both are
+re-parsed without an operator step (or at once through a replay plan per
+dataset).
+
+**Limits.** The activity window's end is not known; only its start is
+enforced. The replay reported the first failing check only, so whether every
+stored capture passes the later checks is known only once the new version's
+jobs run; a remaining refusal shows as `parser_rejected` on them, and CORE
+stores no reason for it. Its cause is found the same way this one was: by
+replaying the stored captures with `replay-diagnostics.ts` ([operations:
+replaying a parser rejection](../operations.md#replaying-a-parser-rejection)),
+which prints a closed category and a shape summary per capture and no values.
+Until that is run for a remaining refusal, its cause stays unknown and the
+parser's rules stay as they are
+([ADR 0004](../adr/0004-payment-type-shapes-from-evidence.md)). Production was
+not read for this release.

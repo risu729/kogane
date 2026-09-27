@@ -65,7 +65,8 @@ const VALUATION_PARSERS = ["sbi-shinsei-exchange-rate", "sbi-domestic-cash-posit
 
 // ?1 cursor, ?2 upper bound (the table's max id read in the same batch), ?3 limit.
 const VALUATION_CANDIDATES_SQL = `SELECT v.id,v.parse_run_id,a.source_id,p.parser_name,v.source_account,
- v.subject,v.metric,v.currency,v.amount_text,v.as_of,v.raw_locator,a.fetched_at
+ v.subject,v.metric,v.currency,v.amount_text,v.as_of,v.raw_locator,a.fetched_at,
+ json_extract(v.extra_json,'$.customerCategory') AS customer_category
  FROM valuation_observations v
  JOIN parse_runs p ON p.id=v.parse_run_id
  JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
@@ -140,6 +141,8 @@ interface ValuationCandidate {
   as_of: string | null;
   raw_locator: string;
   fetched_at: string;
+  /** `$.customerCategory` of the row's extra: the board tier, null when absent. */
+  customer_category: string | number | null;
 }
 
 interface PositionCandidate {
@@ -246,6 +249,7 @@ async function valuationVerdicts(
         amountText: row.amount_text,
         asOf: row.as_of,
         fetchedAt: row.fetched_at,
+        customerCategory: row.customer_category,
       },
       fxQuoteBasis,
     );

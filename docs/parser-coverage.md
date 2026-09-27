@@ -76,15 +76,24 @@ the Sony contract fixes the container at 17 rows (`expectedCount: 17`) and an
 empty Sony container is a schema drift, not a complete-empty snapshot.
 
 Parsers written after the conversion emit contract v2 from their first
-version and start on `coverage-v1`. `sbi-shinsei-exchange-rate` 1.0.0
-(migration 0053, [ADR 0020](adr/0020-price-promotion-by-rule.md)) reads SBI
-Shinsei's `exchange-rate` artifact as one complete container: every board row
-gives three rate cells, so its claim states `expectedCount = rows × 3`; an
-unreadable rate cell is a `row_unreadable` issue with impact `membership` and
-leaves the board partial; an empty board, an unknown field, a duplicate
-currency or a JPY row fails the artifact. Its policy row sets
-`replaces_previous_on_complete_empty = 0`. Its frozen expectations live in
-`coverage-contract/sbi-shinsei-exchange-rate-expected.json`, beside the
+version and start on `coverage-v1`. `sbi-shinsei-exchange-rate` (1.0.0 from
+migration 0053, [ADR 0020](adr/0020-price-promotion-by-rule.md); 1.0.1 from
+migration 0056, [ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md))
+reads SBI Shinsei's `exchange-rate` artifact as one complete container: every
+quote row, one per `(currency, customerCategory)`, gives three rate cells, so
+its claim states `expectedCount = quote rows × 3`; an unreadable rate cell is
+a `row_unreadable` issue with impact `membership` and leaves the board
+partial; a JPY row is not a quote and is skipped with an `info`
+`row_unreadable` issue of impact `none`; a `transactionTime` of the observed
+22-character shape is an `info` `unknown_fields_preserved` issue of impact
+`field` (any other unrecognised form still fails); an empty board
+(or one with no quote row), an unknown field or a pair listed twice fails the
+artifact. Its policy row sets `replaces_previous_on_complete_empty = 0` and
+pins `required_parser_version`, which the selection matches exactly, so each
+release of this parser moves the row in a migration (0056: 1.0.1). Its frozen
+expectations live in `coverage-contract/sbi-shinsei-exchange-rate-expected.json`
+and, for the observed shapes of 2026-09-27,
+`coverage-contract/sbi-shinsei-observed-shapes-expected.json`, beside the
 historical `expected.json`.
 
 **Parser versions are unchanged.** The output contract gained fields, but
