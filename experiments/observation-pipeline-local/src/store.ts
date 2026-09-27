@@ -174,6 +174,17 @@ export function openStore(stateDir?: string): Store {
     if (policy === undefined) throw new Error("0053 names no snapshot policy row");
     db.transaction(() => db.exec(policy))();
   }
+  // 0056 moves that row's pinned parser version to 1.0.1 (ADR 0028). The
+  // UPDATE names the value 0053 wrote, so it is a no-op once applied.
+  db.exec(
+    readFileSync(
+      join(
+        EXPERIMENT_ROOT,
+        "../../packages/storage-d1/migrations/core/0056_sbi_shinsei_exchange_rate_policy_version.sql",
+      ),
+      "utf8",
+    ),
+  );
   if (found === 0) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   return { db, blobDir };
 }

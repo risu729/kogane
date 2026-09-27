@@ -24,18 +24,24 @@ import { FIXTURES_ROOT } from "./fixture-root.ts";
 type Frozen = { observations: Observation[]; warnings: string[] } | { error: true };
 // Historical expected.json remains byte-for-byte frozen. New source coverage
 // expectations live separately and cannot change the historical fixture hash.
-const FROZEN: Record<string, Record<string, Frozen>> = {
-  ...JSON.parse(readFileSync(join(FIXTURES_ROOT, "coverage-contract", "expected.json"), "utf8")),
-  ...JSON.parse(
-    readFileSync(join(FIXTURES_ROOT, "coverage-contract", "st-george-expected.json"), "utf8"),
-  ),
-  ...JSON.parse(
-    readFileSync(
-      join(FIXTURES_ROOT, "coverage-contract", "sbi-shinsei-exchange-rate-expected.json"),
-      "utf8",
-    ),
-  ),
-};
+// A later file adds cases to a parser an earlier file already names; it never
+// replaces them, and a case frozen twice is an error.
+const FROZEN: Record<string, Record<string, Frozen>> = {};
+for (const file of [
+  "expected.json",
+  "st-george-expected.json",
+  "sbi-shinsei-exchange-rate-expected.json",
+  "sbi-shinsei-observed-shapes-expected.json",
+]) {
+  const frozen = JSON.parse(
+    readFileSync(join(FIXTURES_ROOT, "coverage-contract", file), "utf8"),
+  ) as Record<string, Record<string, Frozen>>;
+  for (const [parser, byCase] of Object.entries(frozen))
+    for (const [name, entry] of Object.entries(byCase)) {
+      if (FROZEN[parser]?.[name] !== undefined) throw new Error(`${file}: ${parser}/${name} twice`);
+      (FROZEN[parser] ??= {})[name] = entry;
+    }
+}
 
 interface Expectation {
   completeness: Completeness;
@@ -114,6 +120,8 @@ const CLAIMS: Record<string, Record<string, Expectation>> = {
   "sbi-shinsei-top-balances-and-activity": {
     "complete-empty": complete(0),
     "complete-rows": complete(7),
+    // 0.1.2: the stored captures' window, whose end the provider does not state.
+    "window-end-not-stated": complete(13),
   },
   "sbi-shinsei-yen-deposit-account": {
     "complete-empty": complete(0),
@@ -122,6 +130,12 @@ const CLAIMS: Record<string, Record<string, Expectation>> = {
   "sbi-shinsei-exchange-rate": {
     "complete-rows": { ...complete(6), expected: 6 },
     "unreadable-rate": { ...partial(2, "row_unreadable", ["row_unreadable"]), expected: 3 },
+    // 1.0.1: the unrecognised time is an `info` field issue and the skipped JPY
+    // row an `info` issue of impact none, so the board stays complete.
+    "observed-board": {
+      ...complete(198, ["row_unreadable", "unknown_fields_preserved"]),
+      expected: 198,
+    },
   },
   "sony-bank-gross-balance": { "complete-rows": { ...complete(17), expected: 17 } },
   "smbc-direct-balance": { "complete-rows": { ...complete(1), expected: 1 } },

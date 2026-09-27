@@ -264,7 +264,8 @@ describe("SBI Shinsei top balances and activity", () => {
         activity["fromDate"] = "20260908";
       },
       (activity) => {
-        activity["toDate"] = "";
+        // An end without a start is a shape nobody has observed.
+        activity["fromDate"] = "";
       },
       (activity) => {
         (activity["activityDetails"] as Record<string, unknown>[])[0]!["postingDate"] = "20260831";
@@ -279,6 +280,100 @@ describe("SBI Shinsei top balances and activity", () => {
           artifact("top-accounts-balance-and-activity"),
         ),
       ).toThrow();
+    }
+  });
+});
+
+describe("SBI Shinsei activity window whose end is not stated (0.1.2)", () => {
+  // The stored captures' shape (ADR 0028, observed 2026-09-27): `fromDate` in
+  // `YYYY/MM/DD`, `toDate` an empty string, ten rows each with one side.
+  const stored = () => value("top-accounts-balance-and-activity-window-end-not-stated");
+  const parse = (input: unknown) =>
+    sbiShinseiTopBalancesAndActivity.parse(
+      encode(input),
+      artifact("top-accounts-balance-and-activity"),
+    );
+
+  test("the stored shape parses; every activity observation records the end as not stated", () => {
+    const result = sbiShinseiTopBalancesAndActivity.parse(
+      fixture("top-accounts-balance-and-activity-window-end-not-stated"),
+      artifact("top-accounts-balance-and-activity"),
+    );
+    expect(result.warnings).toEqual([]);
+    expect(result.issues).toEqual([]);
+    const transactions = result.observations.filter((entry) => entry.kind === "transaction");
+    expect(transactions).toHaveLength(10);
+    // `compactDate` reads the slash form of a posting date.
+    expect(transactions.map((entry) => entry.asOf)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `2026-05-${String(index + 2).padStart(2, "0")}`),
+    );
+    const activity = result.observations.filter(
+      (entry) =>
+        (entry.extra["_kogane"] as Record<string, unknown>)["sourceView"] === "top_activity",
+    );
+    expect(activity).toHaveLength(11);
+    for (const entry of activity)
+      expect((entry.extra["_kogane"] as Record<string, unknown>)["activityWindowEnd"]).toBe(
+        "not-stated",
+      );
+    // The overview is not about the window and carries no marker; no end date
+    // is invented anywhere.
+    for (const entry of result.observations.filter((row) => !activity.includes(row)))
+      expect(entry.extra["_kogane"] as Record<string, unknown>).not.toHaveProperty(
+        "activityWindowEnd",
+      );
+    expect(JSON.stringify(result)).not.toMatch(/toDate":"\d/u);
+    expect(result.coverage?.[0]).toMatchObject({ completeness: "complete", observedCount: 13 });
+  });
+
+  test("a stated window records no marker and keeps both bounds", () => {
+    const result = sbiShinseiTopBalancesAndActivity.parse(
+      fixture("top-accounts-balance-and-activity"),
+      artifact("top-accounts-balance-and-activity"),
+    );
+    for (const entry of result.observations)
+      expect(entry.extra["_kogane"] as Record<string, unknown>).not.toHaveProperty(
+        "activityWindowEnd",
+      );
+    const late = value("top-accounts-balance-and-activity");
+    (topActivity(late)["activityDetails"] as Record<string, unknown>[])[0]!["postingDate"] =
+      "20260908";
+    expect(() => parse(late)).toThrow(/outside declared activity window/u);
+  });
+
+  test("the start still bounds every posting date; a later date is accepted, not bounded", () => {
+    const early = stored();
+    (topActivity(early)["activityDetails"] as Record<string, unknown>[])[0]!["postingDate"] =
+      "2026/04/30";
+    expect(() => parse(early)).toThrow(/outside declared activity window/u);
+    const late = stored();
+    (topActivity(late)["activityDetails"] as Record<string, unknown>[])[9]!["postingDate"] =
+      "2026/12/31";
+    expect(parse(late).observations.filter((entry) => entry.kind === "transaction")).toHaveLength(
+      10,
+    );
+  });
+
+  test("an unstated start, a malformed start and one-sided rows stay refused", () => {
+    for (const mutate of [
+      (activity: Record<string, unknown>) => {
+        activity["fromDate"] = "";
+      },
+      (activity: Record<string, unknown>) => {
+        activity["fromDate"] = "2026/02/30";
+      },
+      (activity: Record<string, unknown>) => {
+        activity["toDate"] = null;
+        activity["fromDate"] = null;
+      },
+      (activity: Record<string, unknown>) => {
+        const row = (activity["activityDetails"] as Record<string, unknown>[])[0]!;
+        row["credit"] = "1";
+      },
+    ]) {
+      const input = stored();
+      mutate(topActivity(input));
+      expect(() => parse(input)).toThrow();
     }
   });
 });
@@ -408,6 +503,10 @@ function topActivity(input: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe("SBI Shinsei exchange-rate board", () => {
+  test("parser version 1.0.1 accepts the stored boards' observed shape", () => {
+    expect(sbiShinseiExchangeRate.version).toBe("1.0.1");
+  });
+
   const board = () => value("exchange-rate");
   const information = (input: Record<string, unknown>): Record<string, unknown> => {
     const response = input["responseParam"] as Record<string, unknown>;
@@ -505,13 +604,21 @@ describe("SBI Shinsei exchange-rate board", () => {
     }
   });
 
-  test("a duplicate currency, a JPY row or an unreadable cell is never guessed through", () => {
+  test("a duplicate (currency, tier) or an unreadable cell is never guessed through", () => {
     const duplicate = board();
     rows(duplicate)[1]!["currency"] = "USD";
-    expect(() => parse(duplicate)).toThrow(/lists USD twice/u);
-    const yen = board();
-    rows(yen)[1]!["currency"] = "JPY";
-    expect(() => parse(yen)).toThrow(/JPY row is not a quote/u);
+    expect(() => parse(duplicate)).toThrow(/lists USD twice in one customerCategory/u);
+    // Without a category the currency alone is the identity, as in 1.0.0.
+    const untiered = board();
+    for (const row of rows(untiered)) delete row["customerCategory"];
+    rows(untiered)[1]!["currency"] = "USD";
+    expect(() => parse(untiered)).toThrow(/lists USD twice/u);
+    // A number and the same digits as text are different tiers, never merged.
+    const typed = board();
+    rows(typed)[0]!["customerCategory"] = 1;
+    rows(typed)[1]!["customerCategory"] = "1";
+    rows(typed)[1]!["currency"] = "USD";
+    expect(parse(typed).observations).toHaveLength(6);
     for (const cell of ["-", "", "0", "0.00", "-1", "1,234.5", "1e2", 146]) {
       const input = board();
       rows(input)[0]!["midRate"] = cell;
@@ -520,5 +627,111 @@ describe("SBI Shinsei exchange-rate board", () => {
       expect(result.issues?.map((issue) => issue.code)).toEqual(["row_unreadable"]);
       expect(result.coverage?.[0]).toMatchObject({ completeness: "partial" });
     }
+  });
+});
+
+describe("SBI Shinsei exchange-rate board: observed shape (1.0.1)", () => {
+  // The stored boards' shape (ADR 0028, observed 2026-09-27): 13 currencies
+  // in 5 customerCategory tiers, CHF in one, one JPY row, and a 22-character
+  // transactionTime.
+  const observed = () => value("exchange-rate-observed-board");
+  const information = (input: Record<string, unknown>): Record<string, unknown> => {
+    const response = input["responseParam"] as Record<string, unknown>;
+    const wrapped = response["exchangeRateInformation"] as Record<string, unknown>;
+    return wrapped["responseParam"] as Record<string, unknown>;
+  };
+  const rows = (input: Record<string, unknown>) =>
+    information(input)["exchangeRates"] as Record<string, unknown>[];
+  const parse = (input: unknown) =>
+    sbiShinseiExchangeRate.parse(encode(input), artifact("exchange-rate"));
+  const kogane = (entry: { extra: Record<string, unknown> }) =>
+    entry.extra["_kogane"] as Record<string, unknown>;
+
+  test("every tier gives its own observations; the JPY row is skipped; the board is complete", () => {
+    const input = observed();
+    expect(rows(input)).toHaveLength(67);
+    const result = sbiShinseiExchangeRate.parse(
+      fixture("exchange-rate-observed-board"),
+      artifact("exchange-rate"),
+    );
+    // 13 × 5 + CHF 1 = 66 quote rows, three cells each.
+    expect(result.observations).toHaveLength(198);
+    const tiers = new Map<string, Set<unknown>>();
+    for (const entry of result.observations) {
+      if (entry.kind !== "valuation") throw new Error(entry.kind);
+      const set = tiers.get(entry.subject) ?? new Set<unknown>();
+      set.add(entry.extra["customerCategory"]);
+      tiers.set(entry.subject, set);
+    }
+    expect(tiers.size).toBe(14);
+    expect(tiers.has("JPY")).toBe(false);
+    expect(tiers.get("CHF")?.size).toBe(1);
+    for (const [code, set] of tiers) if (code !== "CHF") expect(set.size, code).toBe(5);
+    expect(result.coverage).toEqual([
+      expect.objectContaining({
+        completeness: "complete",
+        membershipComplete: true,
+        observedCount: 198,
+        expectedCount: 198,
+        failureCause: null,
+      }),
+    ]);
+    expect(result.issues?.map((issue) => [issue.code, issue.severity, issue.impact])).toEqual([
+      ["unknown_fields_preserved", "info", "field"],
+      ["row_unreadable", "info", "none"],
+    ]);
+  });
+
+  test("an unrecognised transactionTime leaves the provider time empty and says so, without the value", () => {
+    const result = parse(observed());
+    const time = information(observed())["transactionTime"] as string;
+    expect(time).toHaveLength(22);
+    for (const entry of result.observations) {
+      expect(entry).not.toHaveProperty("asOf");
+      expect(kogane(entry)["providerTimeBasis"]).toBe("unrecognized");
+      // Kept verbatim as provider context; no part of it is read.
+      expect(kogane(entry)["providerContext"]).toEqual({ transactionTime: time });
+    }
+    for (const issue of result.issues ?? []) expect(issue.message).not.toContain(time);
+    for (const warning of result.warnings) expect(warning).not.toContain(time);
+    // The two trailing characters change nothing: no value is read from them.
+    const other = observed();
+    information(other)["transactionTime"] = `${time.slice(0, 20)}99`;
+    const withoutContext = (entries: typeof result.observations) =>
+      entries.map((entry) => ({ ...entry, extra: { ...entry.extra, _kogane: null } }));
+    expect(withoutContext(parse(other).observations)).toEqual(withoutContext(result.observations));
+  });
+
+  test("a recognised time is still the provider's; an impossible or non-string one still fails", () => {
+    const recognised = observed();
+    information(recognised)["transactionTime"] = "2026/05/12 09:00:00";
+    const result = parse(recognised);
+    expect(result.observations[0]).toMatchObject({ asOf: "2026-05-12T09:00:00+09:00" });
+    expect(kogane(result.observations[0]!)).not.toHaveProperty("providerTimeBasis");
+    expect(result.issues?.map((issue) => issue.code)).toEqual(["row_unreadable"]);
+    const impossible = observed();
+    information(impossible)["transactionTime"] = "2026/02/30 09:00:00";
+    expect(() => parse(impossible)).toThrow(/provider timestamp is invalid/u);
+    const numeric = observed();
+    information(numeric)["transactionTime"] = 20260512090000;
+    expect(() => parse(numeric)).toThrow(/must be a string/u);
+  });
+
+  test("a board of JPY rows only has no quote and is refused", () => {
+    const input = observed();
+    information(input)["exchangeRates"] = rows(input).filter((row) => row["currency"] === "JPY");
+    expect(() => parse(input)).toThrow(/no quote row/u);
+  });
+
+  test("an unreadable cell in one tier breaks membership for the board, and only that cell is missing", () => {
+    const input = observed();
+    rows(input)[7]!["sellRate"] = "-";
+    const result = parse(input);
+    expect(result.observations).toHaveLength(197);
+    expect(result.coverage?.[0]).toMatchObject({
+      completeness: "partial",
+      failureCause: "row_unreadable",
+      expectedCount: 198,
+    });
   });
 });

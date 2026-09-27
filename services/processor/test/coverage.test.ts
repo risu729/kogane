@@ -8,6 +8,7 @@ import type { Miniflare } from "miniflare";
 import { parseJob, sweep } from "../src/worker.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import { SNAPSHOT_DATASETS, snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
@@ -69,6 +70,21 @@ test("the current production migration chain preserves legacy policies and adds 
     "coverage-v1",
   );
   expect(policies.every((row) => row.unit_scope === "run")).toBe(true);
+  // A coverage-v1 row that pins a version names one this build deploys: the
+  // selection matches it exactly, so a stale pin would adopt nothing (0056
+  // moves the SBI Shinsei board to 1.0.1).
+  const pinned = await all<{ parser_name: string; required_parser_version: string }>(
+    "SELECT parser_name,required_parser_version FROM dataset_snapshot_policies WHERE policy_id='coverage-v1' AND required_parser_version IS NOT NULL ORDER BY parser_name",
+  );
+  expect(pinned.map((row) => row.parser_name)).toContain("sbi-shinsei-exchange-rate");
+  for (const row of pinned)
+    expect(
+      PARSERS.some(
+        (parser) =>
+          parser.name === row.parser_name && parser.version === row.required_parser_version,
+      ),
+      `${row.parser_name}@${row.required_parser_version}`,
+    ).toBe(true);
 });
 
 test("a converted parser publishes its claim with the parse run; a legacy parser writes nothing", async () => {

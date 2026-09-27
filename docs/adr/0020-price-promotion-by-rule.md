@@ -11,6 +11,8 @@
   `packages/storage-d1/migrations/core/0053_price_promotion.sql`,
   `services/processor/src/price-promotion-job.ts`,
   `packages/read-model/src/price-selection.ts`
+- Amended by: [ADR 0028](0028-sbi-shinsei-observed-capture-shapes.md) (the
+  board is tiered; an admission names its tier; see the amendment below)
 
 ## Context
 
@@ -133,3 +135,28 @@ the FX policy.
   cursor, the budget, lane order, tick records and the migration pin.
 - The production counts in the docs are read-only aggregates (counts and
   shapes, no values), taken on 2026-09-26.
+
+## Amendment (2026-09-27, ADR 0028): an admission names its tier
+
+The stored boards were observed on 2026-09-27 (replay of stored captures by
+the owner's agent, counts only): 13 currencies are listed once in each of 5
+`customerCategory` tiers, CHF once, and a JPY row is present
+([ADR 0028](0028-sbi-shinsei-observed-capture-shapes.md)). Parser 1.0.1 keeps
+every tier as its own observations, so the decision above that "a board that
+lists one currency twice is refused rather than one tier being picked" now
+holds per `(currency, customerCategory)`: a pair listed twice is refused, and
+different tiers of one currency are kept side by side, none picked by the
+parser.
+
+The rule must not pick one either. **Admitting a currency names
+`(currency, customerCategory, basis)`**: an entry of
+`SBI_SHINSEI_FX_QUOTE_BASIS` carries the tier (`customerCategory`, compared
+with the stored row's category exactly as the provider sent it) beside the
+base quantity and the evidence, and `fx-sbi-shinsei-board-v1` promotes only
+rows of that tier; a row of any other tier, or with none, is counted
+`unsupported_currency`. The promotion lane reads each row's tier from its
+`extra`. The table stays empty: which tier applies to the owner is
+unobserved, as is every currency's basis, so a board with several tiers per
+currency promotes nothing. The board's own time is not stated in a
+recognised form on the stored boards, so a price admitted later takes the
+fetch instant with basis `collector` until the provider's form is understood.

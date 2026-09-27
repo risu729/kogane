@@ -293,6 +293,12 @@ export const SBI_SHINSEI: ContractParser[] = [
         ...shinseiTop,
         responseParam: { ...shinseiTopParam, unexpected: true },
       }),
+      // The stored captures' shape (ADR 0028, observed 2026-09-27): `fromDate`
+      // in slash form, `toDate` empty, ten one-sided rows.
+      "window-end-not-stated": fixture(
+        "sbi-shinsei-parser-boundaries",
+        "top-accounts-balance-and-activity-window-end-not-stated.json",
+      ),
     },
   ),
   cases(sbiShinseiYenDepositAccount, meta("sbi-shinsei-bank", "yen-deposit-account"), {
@@ -323,6 +329,16 @@ export const SBI_SHINSEI: ContractParser[] = [
     "empty-not-representable": shinseiBoard([]),
     "unknown-fields": shinseiBoard([boardRow], { unexpected: true }),
     "unknown-row-field": shinseiBoard([{ ...boardRow, unit: "100" }]),
+    // The stored boards' shape (ADR 0028, observed 2026-09-27): 13 currencies
+    // in 5 tiers, CHF in one, a JPY row and a 22-character transactionTime.
+    "observed-board": fixture("sbi-shinsei-parser-boundaries", "exchange-rate-observed-board.json"),
+    // A board whose only row is JPY quotes nothing.
+    "jpy-only-not-a-board": shinseiBoard([{ ...boardRow, currency: "JPY" }]),
+    // One currency twice within one tier is never resolved by picking a row.
+    "tier-duplicate": shinseiBoard([
+      { ...boardRow, customerCategory: "SYNTHETIC-TIER-1" },
+      { ...boardRow, customerCategory: "SYNTHETIC-TIER-1" },
+    ]),
   }),
 ];
 
