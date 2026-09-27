@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -6,12 +6,14 @@ import {
   extractCreditMenuLinkId,
   extractGeneralJsonDiscriminator,
   parseCardInventory,
-  parseCreditMenuMonths,
   parseCreditLedger,
   parsePastMonthAvailability,
   parseStatementPeriods,
+  readCreditMenuGroups,
   redactedStatementHtml,
 } from "../src/parsers";
+import { StopConditionError } from "../src/types";
+import { creditMenu, MENU_SCHEDULE_HEADING } from "./synthetic-myjcb";
 
 const fixture = (name: string): string =>
   readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
@@ -67,7 +69,9 @@ describe("MyJCB synthetic parsers", () => {
 
   test("enumerates only API-reported available older credit months", () => {
     expect(extractCreditMenuLinkId(fixture("credit-mypage.html"))).toBe("synthetic_credit_menu");
-    expect(parseCreditMenuMonths(fixture("credit-menu.html"))).toEqual([0, 1, 8]);
+    expect(readCreditMenuGroups(fixture("credit-menu.html")).months).toEqual([
+      0, 1, 2, 3, 4, 5, 6,
+    ]);
     const past = parsePastMonthAvailability(fixture("credit-past.json"));
     expect(past.filter((month) => month.available).map((month) => month.detailMonth)).toEqual([
       10, 13,
@@ -174,5 +178,99 @@ describe("MyJCB synthetic parsers", () => {
       "confirmed",
     );
     expect(empty?.rows).toEqual([]);
+  });
+});
+
+describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
+  /** The stop code, and every warning logged, when reading `html`. */
+  function read(html: string): { code: string | undefined; warnings: string[] } {
+    const warnings: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((value) => {
+      warnings.push(String(value));
+    });
+    try {
+      readCreditMenuGroups(html);
+      return { code: undefined, warnings };
+    } catch (error) {
+      return {
+        code: error instanceof StopConditionError ? error.code : "not-a-stop-condition",
+        warnings,
+      };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+  const link = (position: number) =>
+    `<a href="/iss-pc/member/details_inquiry/detail.html?detailMonth=${position}&amp;output=web">明細を見る</a>`;
+
+  test("the observed menu: nine links in DOM order 0, 1, 7, 8, 2-6 under three headings", () => {
+    const menu = fixture("credit-menu.html");
+    const positions = [...menu.matchAll(/detailMonth=(\d+)/gu)].map((match) => Number(match[1]));
+    expect(positions).toEqual([0, 1, 7, 8, 2, 3, 4, 5, 6]);
+    // Relative, root-relative and absolute hrefs are read alike; the menu's
+    // own link is not a month.
+    expect(readCreditMenuGroups(menu)).toEqual({
+      months: [0, 1, 2, 3, 4, 5, 6],
+      schedules: [7, 8],
+    });
+    expect(readCreditMenuGroups(creditMenu([0, 1, 2], [7, 8]))).toEqual({
+      months: [0, 1, 2],
+      schedules: [7, 8],
+    });
+  });
+
+  test("headings match after whitespace removal, with any digits in the bonus count", () => {
+    for (const heading of [
+      " 最新の\nご利用明細 ",
+      "<span>過去の</span> 明細",
+    ])
+      expect(readCreditMenuGroups(`<h2>${heading}</h2>${link(3)}`)).toEqual({
+        months: [3],
+        schedules: [],
+      });
+    for (const count of ["2", "12", "２"])
+      expect(
+        readCreditMenuGroups(
+          `<h2>最新のご利用明細</h2>${link(0)}<h2>ボーナス${count}回払い・ショッピングスキップ払い</h2>${link(8)}`,
+        ),
+      ).toEqual({ months: [0], schedules: [8] });
+  });
+
+  test("an unrecognised heading stops with the closed code and logs counts only", () => {
+    const { code, warnings } = read(
+      `<h2>最新のご利用明細</h2>${link(0)}<h2>架空の明細グループ</h2>${link(9)}`,
+    );
+    expect(code).toBe("credit-menu-group");
+    expect(warnings.map((line) => JSON.parse(line))).toEqual([
+      {
+        event: "myjcb-credit-menu-groups",
+        monthLinks: 1,
+        scheduleLinks: 0,
+        unrecognizedHeadingLinks: 1,
+        linksOutsideHeading: 0,
+        positionsInBothGroups: 0,
+      },
+    ]);
+    expect(warnings.join("")).not.toContain("架空");
+    // Near misses are not the observed headings: no digit, a different word.
+    for (const heading of [
+      "ボーナス回払い・ショッピングスキップ払い",
+      "ボーナス2回払い",
+      "最新のご利用明細一覧",
+    ])
+      expect(read(`<h2>${heading}</h2>${link(8)}`).code).toBe("credit-menu-group");
+  });
+
+  test("a link outside any heading, or a position in both groups, stops", () => {
+    expect(read(`${link(0)}<h2>最新のご利用明細</h2>${link(1)}`).code).toBe("credit-menu-group");
+    expect(
+      read(`<h2>最新のご利用明細</h2>${link(0)}<h2>${MENU_SCHEDULE_HEADING}</h2>${link(0)}`).code,
+    ).toBe("credit-menu-group");
+    // A link that opens no detail page is not grouped and stops nothing.
+    expect(
+      readCreditMenuGroups(
+        `<a href="/iss-pc/member/mypage.html">戻る</a><a href="https://example.invalid/iss-pc/member/details_inquiry/detail.html?detailMonth=1">x</a><h2>最新のご利用明細</h2>${link(0)}`,
+      ),
+    ).toEqual({ months: [0], schedules: [] });
   });
 });

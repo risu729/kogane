@@ -142,3 +142,38 @@ export function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   copy.set(bytes);
   return copy.buffer;
 }
+
+/** The three `h2` headings the credit menu was observed with; the digit is synthetic. */
+export const MENU_LATEST_HEADING = "最新のご利用明細";
+export const MENU_PAST_HEADING = "過去の明細";
+export const MENU_SCHEDULE_HEADING = "ボーナス2回払い・ショッピングスキップ払い";
+
+/**
+ * A credit menu (`detailMenu.html`) in the observed shape: every link is a
+ * 「明細を見る」 `detail.html?detailMonth=N` link in a card box under an `h2`,
+ * positions 0 and 1 under the latest heading, the schedule positions next, and
+ * the older months last (observed DOM order 0, 1, 7, 8, 2, 3, 4, 5, 6). The
+ * box texts are synthetic and name no date or amount.
+ */
+export function creditMenu(
+  months: readonly (number | string)[],
+  schedules: readonly (number | string)[] = [],
+): string {
+  const box = (position: number | string, text: string) =>
+    `<div class="box"><p>${text}</p><a href="/iss-pc/member/details_inquiry/detail.html?detailMonth=${position}&amp;output=web">明細を見る</a></div>`;
+  const section = (heading: string, positions: readonly (number | string)[], text: string) =>
+    positions.length === 0
+      ? ""
+      : `<section><h2>${heading}</h2>${positions.map((position) => box(position, text)).join("")}</section>`;
+  const latest = months.filter((month) => Number(month) < 2);
+  const past = months.filter((month) => Number(month) >= 2);
+  return `<!doctype html><html lang="ja"><body><h1>カードご利用明細</h1>${section(
+    MENU_LATEST_HEADING,
+    latest,
+    "未確定 お支払い分",
+  )}${section(MENU_SCHEDULE_HEADING, schedules, "未確定 ショッピングスキップ払い")}${section(
+    MENU_PAST_HEADING,
+    past,
+    "ご請求はありません",
+  )}</body></html>`;
+}

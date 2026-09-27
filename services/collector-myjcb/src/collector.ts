@@ -11,8 +11,8 @@ import {
   extractGeneralJsonDiscriminator,
   parseCardInventory,
   parseCreditLedger,
-  parseCreditMenuMonths,
   parsePastMonthAvailability,
+  readCreditMenuGroups,
   parseStatementPeriods,
   redactedStatementHtml,
   scheduledLedgerRowCount,
@@ -25,6 +25,7 @@ import type {
   ExportOffer,
   MyJcbCredential,
   RawArtifact,
+  SchedulePage,
   SessionCredential,
   UnreadMonth,
   UnreadMonthCode,
@@ -57,6 +58,7 @@ const STOP_CODE_BY_CONDITION: Readonly<Record<StopConditionCode, ConnectionStopC
   "collect-discovery": "discovery",
   "collect-credit": "unclassified",
   "collect-credit-menu": "credit_menu",
+  "credit-menu-group": "credit_menu_group_unrecognized",
   "collect-credit-first-detail": "credit_first_detail",
   "collect-credit-past-months": "credit_past_months",
   "collect-credit-month-fetch": "month_fetch",
@@ -111,6 +113,7 @@ export async function collectConnection(options: {
     let periodCount = 0;
     let unreadMonths: readonly UnreadMonth[] = [];
     let exportOffers: readonly ExportOffer[] = [];
+    let schedulePages: readonly SchedulePage[] = [];
     let stop: CreditStop | undefined;
 
     const creditLinkId = extractCreditMenuLinkId(login.mypageHtml);
@@ -123,6 +126,7 @@ export async function collectConnection(options: {
       periodCount += credit.periodCount;
       unreadMonths = credit.unreadMonths;
       exportOffers = credit.exportOffers;
+      schedulePages = credit.schedulePages;
       stop = credit.stop;
     }
     // A connection stops where its credit months stopped: nothing further is
@@ -167,7 +171,9 @@ export async function collectConnection(options: {
         bootstrapMode: options.credential.bootstrapMode,
         // A month whose rows are kept unread, or a stop that left months
         // unread, is missing from what this connection set out to collect,
-        // so it is `partial`, never `success` (ADR 0026, INV05).
+        // so it is `partial`, never `success` (ADR 0026, INV05). Schedule
+        // pages are not months: their outcome is recorded beside the months
+        // and never decides the status (ADR 0005's amendment (c)).
         status: unreadMonths.length === 0 && stop === undefined ? "success" : "partial",
         cardCount: Math.max(cards.length, 1),
         periodCount,
@@ -181,6 +187,14 @@ export async function collectConnection(options: {
             }),
         ...(unreadMonths.length === 0 ? {} : { unreadMonths }),
         ...(exportOffers.length === 0 ? {} : { exportOffers }),
+        ...(schedulePages.length === 0
+          ? {}
+          : {
+              schedulePages,
+              schedulePageCount: schedulePages.filter(
+                (page) => page.code === "scheduled_payments_page",
+              ).length,
+            }),
       },
       artifacts,
     };
@@ -287,6 +301,13 @@ export type CreditExportMode = "record" | "fetch";
  * detail page fetched without it was observed to be a different page (h1
  * `カードご利用明細一覧`, no ledger; docs/sources/myjcb.md). It is read once;
  * the months follow it in ascending order.
+ *
+ * The menu's headings say which positions are months and which are payment
+ * schedule pages (`readCreditMenuGroups`, ADR 0005's amendment (c)). Only
+ * the months are the connection's coverage. The schedule pages are read after
+ * every month, each stored whole as `credit-schedule-NN.html` evidence that
+ * no parser reads; a schedule page that cannot be fetched is recorded with a
+ * closed code and is not a stop.
  */
 export async function collectCredit(
   client: CreditReadClient,
@@ -306,6 +327,11 @@ export async function collectCredit(
   /** The export kinds each month's page offered for its own month. */
   readonly exportOffers: readonly ExportOffer[];
   /**
+   * Each schedule position the menu listed, with its outcome. Empty when
+   * the months stopped: no schedule page is read after a stop.
+   */
+  readonly schedulePages: readonly SchedulePage[];
+  /**
    * Set when a month's fetch, statement state, period, ledger or export
    * failed: the months before it are kept whole, that month keeps only its
    * redacted page when the page's own shape (state, period, ledger) stopped
@@ -316,15 +342,18 @@ export async function collectCredit(
   readonly stop?: CreditStop;
 }> {
   const exportMode = options.exports ?? "record";
-  const { menuHtml, initialMonths } = await collectionStage("collect-credit-menu", async () => {
-    const menu = await client.get("credit-menu", new URLSearchParams({ link_id: linkId }));
-    const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
-    const initialMonths = parseCreditMenuMonths(menuHtml);
-    if (initialMonths.length === 0) {
-      throw new Error("MyJCB credit menu did not enumerate detailMonth values");
-    }
-    return { menuHtml, initialMonths };
-  });
+  const { menuHtml, initialMonths, schedulePositions } = await collectionStage(
+    "collect-credit-menu",
+    async () => {
+      const menu = await client.get("credit-menu", new URLSearchParams({ link_id: linkId }));
+      const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
+      const groups = readCreditMenuGroups(menuHtml);
+      if (groups.months.length === 0) {
+        throw new Error("MyJCB credit menu did not enumerate detailMonth values");
+      }
+      return { menuHtml, initialMonths: groups.months, schedulePositions: groups.schedules };
+    },
+  );
   const artifacts: RawArtifact[] = [
     {
       dataset: "credit-menu",
@@ -370,6 +399,15 @@ export async function collectCredit(
       ...pastMonths.filter((month) => month.available).map((month) => month.detailMonth),
     ]),
   ].sort((left, right) => left - right);
+  // A position the menu shows as a schedule page cannot also be a month the
+  // past-months response offers; that has not been observed, so it is not
+  // resolved either way.
+  if (availableMonths.some((month) => schedulePositions.includes(month))) {
+    throw new StopConditionError(
+      "MyJCB past-months response offered a position the menu lists as a schedule page",
+      "collect-credit-past-months",
+    );
+  }
 
   const unreadMonths: UnreadMonth[] = [];
   const exportOffers: ExportOffer[] = [];
@@ -514,6 +552,7 @@ export async function collectCredit(
         artifacts,
         unreadMonths,
         exportOffers,
+        schedulePages: [],
         stop: { code, position: detailMonth, capturedMonthCount },
       };
     }
@@ -534,7 +573,41 @@ export async function collectCredit(
     if (offered.length > 0) exportOffers.push({ position: detailMonth, kinds: [...offered] });
     capturedMonthCount += 1;
   }
-  return { periodCount: availableMonths.length, artifacts, unreadMonths, exportOffers };
+  const schedulePages: SchedulePage[] = [];
+  for (const position of schedulePositions) {
+    try {
+      const detail = await fetchCreditDetail(client, position);
+      const html = decodeMyJcbHtml(detail.body, detail.contentType);
+      // Kept whole and unread: its rows are neither a month nor withheld from
+      // one, and what they mean is not confirmed (ADR 0004).
+      artifacts.push({
+        dataset: "credit-schedule",
+        filename: `credit-schedule-${String(position).padStart(2, "0")}.html`,
+        body: redactedStatementHtml(html),
+        mediaType: "text/html; charset=utf-8",
+        statementState: "unknown",
+        period: `detailMonth-${position}`,
+      });
+      schedulePages.push({ position, code: "scheduled_payments_page" });
+    } catch {
+      // Counts and codes only: neither the error nor the page reaches the log.
+      console.warn(
+        JSON.stringify({
+          event: "myjcb-credit-schedule-page-failed",
+          detailMonth: position,
+          code: "schedule_page_fetch",
+        }),
+      );
+      schedulePages.push({ position, code: "schedule_page_fetch" });
+    }
+  }
+  return {
+    periodCount: availableMonths.length,
+    artifacts,
+    unreadMonths,
+    exportOffers,
+    schedulePages,
+  };
 }
 
 async function fetchCreditDetail(

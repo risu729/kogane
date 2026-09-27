@@ -15,6 +15,7 @@ import { HumanRequiredError, StopConditionError } from "../src/types";
 import worker from "../src/worker";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { readTerminal } from "../../../packages/collection/src/index";
+import { creditMenu } from "./synthetic-myjcb";
 
 const CONFIRMED_HEAD = "ご利用日 ご利用先など 支払区分 今回のお支払い金額";
 const UNCONFIRMED_HEAD = "ご利用日 ご利用先など 支払区分 ご利用金額";
@@ -181,24 +182,22 @@ function response(text: string, contentType = "text/html; charset=utf-8"): ReadR
 }
 
 /**
- * A credit menu listing `months`, their pages, and an older-month API that
- * lists `past` (by default nothing available).
+ * A credit menu listing `pages` as months and `schedules` under the schedule
+ * heading, their pages, and an older-month API that lists `past` (by default
+ * nothing available).
  */
 function client(
   pages: Readonly<Record<number, string>>,
   past: readonly Record<string, unknown>[] = [],
+  schedules: Readonly<Record<number, string>> = {},
 ): CreditReadClient {
-  const menu = `<!doctype html><html><body>${Object.keys(pages)
-    .map(
-      (month) =>
-        `<a href="/iss-pc/member/details_inquiry/detail.html?detailMonth=${month}&amp;output=web">明細</a>`,
-    )
-    .join("")}</body></html>`;
+  const menu = creditMenu(Object.keys(pages), Object.keys(schedules));
   return {
     get: async (operation, query) => {
       if (operation === "credit-menu") return response(menu);
+      const position = Number(query?.get("detailMonth"));
       const html =
-        operation === "credit-detail" ? pages[Number(query?.get("detailMonth"))] : undefined;
+        operation === "credit-detail" ? (pages[position] ?? schedules[position]) : undefined;
       if (html === undefined) throw new Error(`unexpected synthetic read ${operation}`);
       return response(html);
     },
@@ -664,12 +663,7 @@ describe("ADR 0005 amendment: the Worker keeps a stopped connection's months", (
       1: closed("2026年3月"),
       2: closed("2026年2月"),
     };
-    const menu = `<!doctype html><html><body>${Object.keys(pages)
-      .map(
-        (month) =>
-          `<a href="/iss-pc/member/details_inquiry/detail.html?detailMonth=${month}&amp;output=web">明細</a>`,
-      )
-      .join("")}</body></html>`;
+    const menu = creditMenu(Object.keys(pages));
     const html = (text: string) =>
       new Response(text, { headers: { "content-type": "text/html; charset=utf-8" } });
     const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (input: unknown) => {
@@ -779,22 +773,18 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
   const closed = (month: string) =>
     page({ headings: [CONFIRMED_STATEMENT_HEADING], months: [month], rows: [confirmedRow] });
   const pages: Record<number, string> = { 0: mutable, 1: closed("2026年3月") };
-  const menu = `<!doctype html><html><body>${[0, 1, 2]
-    .map(
-      (month) =>
-        `<a href="/iss-pc/member/details_inquiry/detail.html?detailMonth=${month}&amp;output=web">明細</a>`,
-    )
-    .join("")}</body></html>`;
+  const menu = creditMenu([0, 1, 2]);
   const html = (text: string) =>
     new Response(text, { headers: { "content-type": "text/html; charset=utf-8" } });
 
   /**
    * Run the manual trigger with `fail` deciding, per request, whether the
    * provider misbehaves; return every byte stored, every log line and the
-   * HTTP response.
+   * HTTP response. `menuHtml` replaces the three-month menu.
    */
   async function run(
     fail: (url: URL) => Response | "throw" | undefined,
+    menuHtml = menu,
   ): Promise<{ stored: string; logs: string; response: string; status: number }> {
     const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (input: unknown) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
@@ -802,7 +792,7 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
       if (failure === "throw") throw new Error(leak);
       if (failure !== undefined) return failure;
       if (url.pathname.endsWith("/mypage.html")) return html(mypage);
-      if (url.pathname.endsWith("/detailMenu.html")) return html(menu);
+      if (url.pathname.endsWith("/detailMenu.html")) return html(menuHtml);
       if (url.pathname.endsWith("/detailPastJson.json")) {
         return Response.json({
           jsonrpc: "2.0",
@@ -938,6 +928,61 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
     expect(result.logs).not.toContain(LEAK_DIGITS);
     expect(result.logs).not.toContain(LEAK_WORD);
     expect(result.response).not.toContain(LEAK_DIGITS);
+  });
+
+  test("a skip page with rows leaves the unit complete: stored unread, recorded beside the months (ADR 0005's amendment (c))", async () => {
+    // Months 0 and 1 under their headings, positions 7 and 8 under the
+    // schedule heading: 8 shows rows under the third header, 7 fails with an
+    // error body that must reach nothing.
+    const skipPage = page({
+      headings: ["ショッピングスキップ払いご利用明細(未確定分)"],
+      head: '<div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div>',
+      rows: [row("お支払日", ["2026/03/10", "架空分割店", "2026/04/10", "3,000円"], "1円")],
+    });
+    const result = await run(
+      (url) =>
+        detail(8)(url)
+          ? html(skipPage)
+          : detail(7)(url)
+            ? new Response(leak, { status: 500 })
+            : undefined,
+      creditMenu([0, 1], [7, 8]),
+    );
+    expect(result.status).toBe(200);
+    expect(blockers(result)).toEqual([]);
+    // The unit covers the months, which were read whole.
+    expect(result.stored).toContain('"coverageStatus":"complete"');
+    expect(result.stored).not.toContain("safeErrorCode");
+    expect(result.stored).not.toContain("unreadMonths");
+    expect(result.stored).toContain('"failures":[]');
+    // The schedule pages are recorded with closed codes, and only the one
+    // that was fetched is stored.
+    expect(result.stored).toContain(
+      '"schedulePages":[{"position":7,"code":"schedule_page_fetch"},{"position":8,"code":"scheduled_payments_page"}],"schedulePageCount":1',
+    );
+    expect(result.stored).toContain('"periodCount":2');
+    expect(result.stored).toContain("account-one/credit-schedule-08.html");
+    expect(result.stored).not.toContain("credit-schedule-07");
+    expect(result.stored).not.toContain("credit-detail-08");
+    expect(result.stored).toContain('"dataset":"credit-schedule"');
+    expect(result.logs).toContain(
+      '{"event":"myjcb-credit-schedule-page-failed","detailMonth":7,"code":"schedule_page_fetch"}',
+    );
+    expectNoLeak(result);
+  });
+
+  test("a menu heading nobody observed stops before any month, with a code only", async () => {
+    const result = await run(
+      () => undefined,
+      creditMenu([0, 1]).replace("</body>", `<h2>${LEAK_WORD}</h2><a href="detail.html?detailMonth=2">x</a></body>`),
+    );
+    expect(result.status).toBe(502);
+    expect(blockers(result)).toEqual([
+      { connectionId: "account-one", code: "credit_menu_group_unrecognized" },
+    ]);
+    expect(result.stored).toContain('"safeErrorCode":"credit_menu_group_unrecognized"');
+    expect(result.logs).toContain('"event":"myjcb-credit-menu-groups"');
+    expectNoLeak(result);
   });
 
   test("a stop before the first month or at login leaves codes only", async () => {
@@ -1181,5 +1226,156 @@ describe("ADR 0005 second amendment: the three observed ledger headers", () => {
       "credit-detail",
       "credit-detail",
     ]);
+  });
+});
+
+describe("ADR 0005 amendment (c): the menu's schedule pages are not months", () => {
+  const closed = (month: string) =>
+    page({ headings: [CONFIRMED_STATEMENT_HEADING], months: [month], rows: [confirmedRow] });
+  // The ショッピングスキップ払い page as observed at position 8: its own h1
+  // and the third header with rows. Every value is synthetic.
+  const skipPage = page({
+    headings: ["ショッピングスキップ払いご利用明細(未確定分)"],
+    head: '<div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div>',
+    rows: [row("お支払日", ["2026/03/10", "架空分割店", "2026/04/10", "3,000円"], "2026/04/10")],
+  });
+  // Position 7 has not been observed with rows: any page is kept alike.
+  const bonusPage = page({ head: UNCONFIRMED_HEAD });
+
+  test("schedule pages are read after the months, stored unread, and never count as months", async () => {
+    const inner = client({ 0: mutable, 1: closed("2026年3月") }, [], { 7: bonusPage, 8: skipPage });
+    const reads: string[] = [];
+    const run = await collectCredit(
+      {
+        get: async (op, query) => {
+          reads.push(`${op}:${query?.get("detailMonth") ?? ""}`);
+          return await inner.get(op, query);
+        },
+        postCreditPastJson: async (input) => {
+          reads.push("credit-past-json");
+          return await inner.postCreditPastJson(input);
+        },
+      },
+      "x",
+    );
+    expect(reads).toEqual([
+      "credit-menu:",
+      "credit-detail:0",
+      "credit-past-json",
+      "credit-detail:1",
+      "credit-detail:7",
+      "credit-detail:8",
+    ]);
+    expect(run.stop).toBeUndefined();
+    expect(run.unreadMonths).toEqual([]);
+    expect(run.periodCount).toBe(2);
+    expect(run.schedulePages).toEqual([
+      { position: 7, code: "scheduled_payments_page" },
+      { position: 8, code: "scheduled_payments_page" },
+    ]);
+    expect(
+      run.artifacts.map((artifact) => [
+        artifact.dataset,
+        artifact.filename,
+        artifact.statementState ?? null,
+        artifact.period ?? null,
+      ]),
+    ).toEqual([
+      ["credit-menu", "credit-menu.html", null, null],
+      ["credit-past-months", "credit-past-months.json", null, null],
+      ["credit-detail", "credit-detail-00.html", "unconfirmed", "detailMonth-0"],
+      ["credit-ledger", "credit-ledger-00.json", "unconfirmed", "detailMonth-0"],
+      ["credit-detail", "credit-detail-01.html", "confirmed", "2026-03"],
+      ["credit-ledger", "credit-ledger-01.json", "confirmed", "2026-03"],
+      // Stored whole and redacted, with the relative label no reader resolves.
+      ["credit-schedule", "credit-schedule-07.html", "unknown", "detailMonth-7"],
+      ["credit-schedule", "credit-schedule-08.html", "unknown", "detailMonth-8"],
+    ]);
+  });
+
+  test("a schedule page that fails to fetch is recorded, not a stop, and the next one is read", async () => {
+    const inner = client({ 0: mutable, 1: closed("2026年3月") }, [], { 7: bonusPage, 8: skipPage });
+    const warnings: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((value) => {
+      warnings.push(String(value));
+    });
+    let run: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      run = await collectCredit(
+        {
+          get: async (op, query) => {
+            if (query?.get("detailMonth") === "7")
+              throw new Error("synthetic upstream failure 4829173");
+            return await inner.get(op, query);
+          },
+          postCreditPastJson: inner.postCreditPastJson,
+        },
+        "x",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(run.stop).toBeUndefined();
+    expect(run.schedulePages).toEqual([
+      { position: 7, code: "schedule_page_fetch" },
+      { position: 8, code: "scheduled_payments_page" },
+    ]);
+    expect(filenames(run.artifacts).filter((name) => name.startsWith("credit-schedule"))).toEqual([
+      "credit-schedule-08.html",
+    ]);
+    expect(warnings).toEqual([
+      '{"event":"myjcb-credit-schedule-page-failed","detailMonth":7,"code":"schedule_page_fetch"}',
+    ]);
+  });
+
+  test("a stopped month reads no schedule page", async () => {
+    const reads: string[] = [];
+    const inner = client({ 0: mutable, 1: page({ rows: [confirmedRow] }) }, [], { 8: skipPage });
+    const spy = spyOn(console, "warn").mockImplementation(() => {});
+    let run: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      run = await collectCredit(
+        {
+          get: async (op, query) => {
+            reads.push(`${op}:${query?.get("detailMonth") ?? ""}`);
+            return await inner.get(op, query);
+          },
+          postCreditPastJson: inner.postCreditPastJson,
+        },
+        "x",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(run.stop).toMatchObject({ code: "credit_statement_state", position: 1 });
+    expect(run.schedulePages).toEqual([]);
+    expect(reads).not.toContain("credit-detail:8");
+  });
+
+  test("an unrecognised menu heading, or a schedule position the past-months response offers, stops before any month", async () => {
+    const spy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const unrecognized: CreditReadClient = {
+        ...client({ 0: mutable }),
+        get: async (op, query) =>
+          op === "credit-menu"
+            ? response(
+                '<h2>最新のご利用明細</h2><a href="detail.html?detailMonth=0">明細を見る</a><h2>架空の明細</h2><a href="detail.html?detailMonth=8">明細を見る</a>',
+              )
+            : await client({ 0: mutable }).get(op, query),
+      };
+      const menuStop = collectCredit(unrecognized, "x");
+      await expect(menuStop).rejects.toMatchObject({ code: "credit-menu-group" });
+      expect(connectionStopCode(new StopConditionError("x", "credit-menu-group"))).toBe(
+        "credit_menu_group_unrecognized",
+      );
+      const pastStop = collectCredit(
+        client({ 0: mutable }, [{ detailMonth: "8", detailAvailableFlag: "1" }], { 8: skipPage }),
+        "x",
+      );
+      await expect(pastStop).rejects.toMatchObject({ code: "collect-credit-past-months" });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

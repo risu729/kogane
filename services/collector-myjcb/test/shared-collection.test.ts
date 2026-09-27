@@ -881,3 +881,100 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
     });
   });
 });
+
+describe("ADR 0005 amendment (c): schedule pages beside the months", () => {
+  /** A whole connection that also stored or failed the given schedule pages. */
+  function withSchedules(
+    schedulePages: readonly { position: number; code: string }[],
+    schedulePageCount: number | undefined,
+  ) {
+    const base = connection("account-one");
+    const stored = schedulePages.filter((page) => page.code === "scheduled_payments_page");
+    const artifacts = [
+      ...base.artifacts,
+      ...stored.map((page) => ({
+        dataset: "credit-schedule",
+        filename: `credit-schedule-0${page.position}.html`,
+        body: statementHtml.replace("MyJCB synthetic", `MyJCB synthetic ${page.position}`),
+        mediaType: "text/html; charset=utf-8",
+        statementState: "unknown" as const,
+        period: `detailMonth-${page.position}`,
+      })),
+    ];
+    return {
+      summary: {
+        ...base.summary,
+        artifactCount: artifacts.length,
+        schedulePages: schedulePages as never,
+        ...(schedulePageCount === undefined ? {} : { schedulePageCount }),
+      },
+      artifacts,
+    };
+  }
+
+  test("stored and failed schedule pages keep the unit complete and are named in the manifest", async () => {
+    const plan = await myJcbRunPlan(
+      input({
+        connections: [
+          withSchedules(
+            [
+              { position: 7, code: "schedule_page_fetch" },
+              { position: 8, code: "scheduled_payments_page" },
+            ],
+            1,
+          ),
+        ],
+      }),
+    );
+    expect(plan.run.units).toEqual([
+      { unitKey: "account-one", unitKind: "connection", artifactCount: 4, coverageStatus: "complete" },
+    ]);
+    expect(plan.run.providerOutcome).toBe("success");
+    expect(plan.run).not.toHaveProperty("safeErrorCode");
+    // A sanitized capture like any page, redacted and re-checked.
+    expect(
+      plan.artifacts
+        .filter((artifact) => artifact.artifactKey.includes("credit-schedule"))
+        .map((artifact) => [artifact.artifactKey, artifact.role]),
+    ).toEqual([["account-one/credit-schedule-08.html", "sanitized_provider_capture"]]);
+    const entry = plan.artifacts.find((artifact) => artifact.artifactKey === "manifest.json")!;
+    const manifest = JSON.parse(
+      new TextDecoder().decode((entry.body as { bytes: Uint8Array }).bytes),
+    ) as { connections: Record<string, unknown>[]; failures: unknown[]; artifacts: unknown[] };
+    expect(manifest.connections[0]).toMatchObject({
+      status: "success",
+      periodCount: 2,
+      schedulePages: [
+        { position: 7, code: "schedule_page_fetch" },
+        { position: 8, code: "scheduled_payments_page" },
+      ],
+      schedulePageCount: 1,
+    });
+    expect(manifest.connections[0]).not.toHaveProperty("unreadMonths");
+    expect(manifest.failures).toEqual([]);
+    expect(manifest.artifacts).toContainEqual(
+      expect.objectContaining({
+        dataset: "credit-schedule",
+        statementState: "unknown",
+        period: "detailMonth-8",
+      }),
+    );
+  });
+
+  test("a schedule code, position or count outside the closed values refuses the plan", async () => {
+    const plan = (pages: readonly { position: number; code: string }[], count?: number) =>
+      myJcbRunPlan(input({ connections: [withSchedules(pages, count)] }));
+    await expect(plan([{ position: 8, code: "upstream said no" }], 0)).rejects.toThrow(
+      "manifest_schedule_code_invalid",
+    );
+    await expect(plan([{ position: 18, code: "scheduled_payments_page" }], 1)).rejects.toThrow(
+      "manifest_stop_position_invalid",
+    );
+    await expect(plan([{ position: 8, code: "scheduled_payments_page" }], 2)).rejects.toThrow(
+      "manifest_schedule_count_invalid",
+    );
+    await expect(plan([{ position: 8, code: "scheduled_payments_page" }])).rejects.toThrow(
+      "manifest_schedule_count_invalid",
+    );
+  });
+});
