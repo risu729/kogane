@@ -30,9 +30,11 @@ chose to accept it only when the page proves it
 The proof has two parts. Every row's combined 「ご利用先など／支払区分」 cell must
 be one single payment by recognition's own grammar (`myjcbSinglePayment`).
 The exact sum of the row amounts (`sumQuantities`) must equal the page's
-「…お支払い金額合計」. Otherwise the page stays a conflict. The log names one
-closed reason: `usage_header_payment_type_unproven`,
-`usage_header_total_missing` or `usage_header_total_mismatch`.
+「…お支払い金額合計」. All rows must be in the first `detail-list-01`, the one
+ledger the collector stores. Otherwise the page stays a conflict. The log
+names one closed reason: `usage_header_rows_outside_first_ledger`,
+`usage_header_payment_type_unproven`, `usage_header_total_missing` or
+`usage_header_total_mismatch`.
 
 - **Collector.** A proven page is `confirmed`. Its ledger stores the header
   the page shows and a confirmed page's expanded labels.

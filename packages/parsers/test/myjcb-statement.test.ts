@@ -254,6 +254,40 @@ describe("a confirmed page under the usage header, proven by the page (1.2.0, AD
       ._kogane;
     expect(kogane["statementStateBasis"]).toBe("page-heading");
     expect(Object.keys(kogane)).not.toContain("ledgerAmountLabel");
+    // The whole 1.1.0 result, key order included, as the 1.1.0 source built it.
+    expect(JSON.stringify(parse(confirmed))).toBe(
+      JSON.stringify({
+        observations: [
+          {
+            kind: "balance",
+            sourceAccount: "myjcb:connection-a:root",
+            metric: "credit_statement_payment_amount",
+            amountMinor: 1234,
+            amountText: "1234",
+            amountScale: 0,
+            instrument: "JPY",
+            asOf: "2026-06-15",
+            observedAt: artifact.fetchedAt,
+            rawLocator: "html:dt[exact-statement-payment-total]+dd",
+            extra: {
+              _kogane: {
+                canonicalDataset: "credit-detail",
+                period: "2026-06",
+                statementMonth: "202606",
+                paymentDate: "2026-06-15",
+                statementState: "confirmed",
+                statementStateBasis: "page-heading",
+                manifestStatementState: "confirmed",
+                sourceAccountScope: "root-statement-aggregate",
+                amountSign: "provider-statement-total",
+                snapshotSemantics: "provider-reported-monthly-payment-amount",
+              },
+            },
+          },
+        ],
+        warnings: [],
+      }),
+    );
   });
 
   test("an unproven page still fails as a conflict", () => {
@@ -268,6 +302,11 @@ describe("a confirmed page under the usage header, proven by the page (1.2.0, AD
       usagePage(rows, ""),
       // No rows: nothing proves a non-zero total.
       usagePage([]),
+      // Rows in a second ledger, which the stored ledger artifact would not hold.
+      usagePage(
+        [rows[0]!],
+        `<div class="detail-list-01"><div class="head">${USAGE_HEAD}</div>${rows[1]!}</div>${total}`,
+      ),
     ])
       expect(() => parse(content)).toThrow(/confirmation conflicts/u);
   });

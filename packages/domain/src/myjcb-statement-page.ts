@@ -40,6 +40,10 @@ const STATEMENT_TOTAL_LABEL = "お支払い金額合計";
  * codes, safe to log; the checks run in this order, so a page always reports
  * the same code:
  *
+ * - `usage_header_rows_outside_first_ledger`: a `detail-list-01` other than
+ *   the first has rows. The collector stores the first ledger only
+ *   (`parseCreditLedger`), so a proof over rows it does not store would
+ *   accept a month whose stored rows are incomplete;
  * - `usage_header_payment_type_unproven`: a row whose payment type is not one
  *   single payment by the recognition grammar (`myjcbSinglePayment` on the
  *   combined ご利用先など／支払区分 cell), an empty or unreadable cell, or a row
@@ -50,6 +54,7 @@ const STATEMENT_TOTAL_LABEL = "お支払い金額合計";
  *   exact JPY amount, or row amounts whose exact sum is not the total.
  */
 export const USAGE_HEADER_REFUSALS = [
+  "usage_header_rows_outside_first_ledger",
   "usage_header_payment_type_unproven",
   "usage_header_total_missing",
   "usage_header_total_mismatch",
@@ -144,7 +149,8 @@ export function readMyJcbStatementPage(document: StatementPageNode): StatementPa
  * from its own content that those amounts are also this statement's payment
  * (ADR 0005, amendment d). For an installment, revolving or bonus row the
  * usage amount and this statement's payment differ, so the label alone never
- * says so. Both must hold:
+ * says so. The rows must all be in the first ledger, the one the collector
+ * stores, and both of these must hold:
  *
  * 1. every row's payment type is one single payment, by the grammar card
  *    purchase recognition reads the same cell with (`myjcbSinglePayment` on
@@ -162,6 +168,10 @@ function provenUsageHeader(
   document: StatementPageNode,
   ledgers: readonly StatementPageNode[],
 ): "proven" | UsageHeaderRefusal {
+  // The proof is over the rows the collector stores, which are the first
+  // ledger's; rows anywhere else leave the stored ledger incomplete.
+  if (ledgers.slice(1).some((ledger) => ledgerRows(ledger).length > 0))
+    return "usage_header_rows_outside_first_ledger";
   const rows = ledgers.flatMap((ledger) => ledgerRows(ledger));
   const cells = rows.map((row) => {
     const itemCell = elements(row, (element) => hasClass(element, "item-cell"))[0];

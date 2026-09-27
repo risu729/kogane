@@ -336,8 +336,9 @@ function statementText(node: StatementNode): string {
  *
  * - exactly one `(確定分)` h1, over a confirmed or no amount header: `confirmed`;
  * - exactly one `(確定分)` h1, over the unconfirmed amount header, when the
- *   page proves its usage amounts are this statement's payment (every row one
- *   single payment and their exact sum equal to the page's total; 1.2.0, ADR
+ *   page proves its usage amounts are this statement's payment (every row in
+ *   the first ledger, one single payment, and their exact sum equal to the
+ *   page's total; 1.2.0, ADR
  *   0005 amendment d): `confirmed`, recorded with
  *   `statementStateBasis: "page-heading-usage-total-proof"` and the ledger's
  *   `ledgerAmountLabel` 「ご利用金額」;

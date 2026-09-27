@@ -335,7 +335,8 @@ export function parseCreditLedger(
  *   a position-0 page that shows the heading stops the collection;
  * - the heading, with a confirmed (or no) amount header: `confirmed`;
  * - the heading, with the unconfirmed amount header, when the page proves its
- *   usage amounts are this statement's payment (every row one single payment,
+ *   usage amounts are this statement's payment (every row in the first
+ *   ledger, the one `parseCreditLedger` stores, every row one single payment,
  *   and the rows' exact sum equal to the page's 「お支払い金額合計」;
  *   `readMyJcbStatementPage` `usageHeader: "proven"`, ADR 0005 amendment d):
  *   `confirmed`, and its ledger is stored under the header it shows;

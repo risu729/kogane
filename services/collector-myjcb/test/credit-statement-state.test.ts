@@ -1232,6 +1232,13 @@ describe("ADR 0005 amendment (d): a confirmed page under the usage header", () =
     expect(creditStatementState(usagePage(provenRows, [total(" ３，５００ 円 ")]), 1)).toBe(
       "confirmed",
     );
+    // A second ledger without rows leaves the stored first ledger complete.
+    const secondEmpty = usagePage(provenRows, [
+      `<div class="detail-list-01"><div class="head">${UNCONFIRMED_HEAD}</div></div>`,
+      total("3,500円"),
+    ]);
+    expect(creditStatementState(secondEmpty, 1)).toBe("confirmed");
+    expect(parseCreditLedger(secondEmpty, "confirmed")?.rows).toHaveLength(3);
     // The stored ledger carries the header the page shows, and the expanded
     // labels of a confirmed page; nothing records a row's 今回のお支払い金額.
     expect(parseCreditLedger(proven, "confirmed")).toEqual({
@@ -1300,6 +1307,23 @@ describe("ADR 0005 amendment (d): a confirmed page under the usage header", () =
       ],
       // An empty usage-header ledger proves only a zero total.
       [usagePage([]), "usage_header_total_mismatch"],
+      // Rows in a second ledger, even ones that complete the sum: the
+      // collector stores the first ledger only, so the stored rows would be
+      // incomplete.
+      [
+        usagePage(provenRows.slice(0, 2), [
+          `<div class="detail-list-01"><div class="head">${UNCONFIRMED_HEAD}</div>${provenRows[2]}</div>`,
+          total("3,500円"),
+        ]),
+        "usage_header_rows_outside_first_ledger",
+      ],
+      [
+        usagePage(provenRows, [
+          `<div class="detail-list-01"><div class="head">架空見出し</div>${provenRows[2]}</div>`,
+          total("3,500円"),
+        ]),
+        "usage_header_rows_outside_first_ledger",
+      ],
     ] as const) {
       const { code, logs } = refusal(html);
       expect(code).toBe("credit-statement-state");
