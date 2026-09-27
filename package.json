@@ -11,7 +11,7 @@
   "devDependencies": {
     "dependency-cruiser": "18.4.0",
     "knip": "6.38.0",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vitest": "4.1.11",
     "wrangler": "4.138.0"
   },
