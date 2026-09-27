@@ -30,8 +30,9 @@
 // summary block carries the customer's names (class d in ADR 0029: avoided in
 // CORE) and balances the top page already reports (INV06), and the branch
 // block is read by the account-connection review from the artifact itself.
-// The category block's other fields (transfer and ATM allowances) are kept
-// verbatim in the observation's provider context.
+// The category block's other fields (transfer and ATM allowances, the ATM
+// fee) are validated only: the observation carries the category and nothing
+// else from the page.
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
 import { containerClaim } from "./coverage.ts";
 import {
@@ -150,9 +151,6 @@ export const sbiShinseiBalanceSummaryAndStage: Parser = {
     }
 
     const value = stageCategory(category["customerCategory"]);
-    const context = Object.fromEntries(
-      Object.entries(category).filter(([key]) => key !== "customerCategory"),
-    );
     const observations: Observation[] = [
       {
         kind: "valuation",
@@ -161,11 +159,15 @@ export const sbiShinseiBalanceSummaryAndStage: Parser = {
         metric: SBI_SHINSEI_STAGE_METRIC,
         currency: SBI_SHINSEI_STAGE_CURRENCY,
         rawLocator: LOCATOR,
-        extra: providerExtra({ customerCategory: value }, context, {
-          attribute: "stage-category",
-          valueType: typeof value,
-          amountDisposition: "not-an-amount",
-        }),
+        extra: providerExtra(
+          { customerCategory: value },
+          {},
+          {
+            attribute: "stage-category",
+            valueType: typeof value,
+            amountDisposition: "not-an-amount",
+          },
+        ),
       },
     ];
     return {

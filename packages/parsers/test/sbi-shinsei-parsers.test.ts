@@ -820,12 +820,7 @@ describe("SBI Shinsei balance summary and stage (ADR 0031)", () => {
         extra: {
           customerCategory: "SYNTHETIC",
           _kogane: {
-            providerContext: {
-              freeTransferCount: "1",
-              atmFee: "0",
-              allowedAtmWithFreeCnt: "1",
-              balanceAtmWithFreeCnt: "1",
-            },
+            providerContext: {},
             attribute: "stage-category",
             valueType: "string",
             amountDisposition: "not-an-amount",
@@ -838,7 +833,7 @@ describe("SBI Shinsei balance summary and stage (ADR 0031)", () => {
     ]);
   });
 
-  test("names, balances and the branch never leave the artifact", () => {
+  test("names, balances, the branch and the other category fields never leave the artifact", () => {
     const text = JSON.stringify(
       sbiShinseiBalanceSummaryAndStage.parse(
         fixture("balance-summary-and-stage"),
@@ -852,6 +847,10 @@ describe("SBI Shinsei balance summary and stage (ADR 0031)", () => {
       "300000",
       "branchCode",
       "SYNTHETIC BRANCH",
+      "freeTransferCount",
+      "atmFee",
+      "allowedAtmWithFreeCnt",
+      "balanceAtmWithFreeCnt",
     ])
       expect(text).not.toContain(field);
   });
