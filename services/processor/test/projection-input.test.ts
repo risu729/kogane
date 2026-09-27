@@ -583,9 +583,12 @@ test("G2-11/G2-12/G2-13: the CORE side completes only after the read model, and 
     last_error_code: null,
   });
 
-  // No build is in progress, so no writer lease is held: the lease is the one
-  // piece of state on this path that runs on the real clock, and a live one
-  // would make the poll below `retryable:writer_lease_unavailable`.
+  // No build is in progress. A leftover `building` snapshot is the only state
+  // an earlier case could leave that turns the poll below retryable without a
+  // thrown error: the build step would continue it and answer
+  // `writer_lease_unavailable` (its lease runs on the real clock),
+  // `projection_input_missing`, `projection_input_unreadable` or
+  // `projection_build_in_progress`. A fresh build's own lease starts empty.
   expect(await buildingSnapshots()).toBe(0);
 
   // The build cannot finish inside this tick: still pending, and the CORE side
@@ -667,6 +670,7 @@ test("G2-13: an unregistered processor blocks the row and never publishes the re
   });
   // A blocked row is not claimed again until an operator clears it.
   const retry = await dispatchDecisionOutbox(local.DB, { now: t0 + 300_000 });
+  expect(retry.outcomes).toEqual({});
   expect(retry.claimed).toBe(0);
 }, 60000);
 
@@ -689,7 +693,9 @@ test("a failing build step and a live writer lease are retryable: the row neithe
     expect(flagOff.outcomes).toEqual({ "pending:projection_flag_off": 1 });
     // A pending poll is due again exactly 30 s later and not before, so a
     // delivery at or after that instant always claims it.
-    expect((await dispatchDecisionOutbox(target.DB, { now: t0 + 29_999 })).claimed).toBe(0);
+    const early = await dispatchDecisionOutbox(target.DB, { now: t0 + 29_999 });
+    expect(early.outcomes).toEqual({});
+    expect(early.claimed).toBe(0);
 
     // The input store refuses the write, so the build step throws. The
     // dispatcher records the error's class as a retryable code and backs off.
@@ -701,7 +707,7 @@ test("a failing build step and a live writer lease are retryable: the row neithe
     };
     const failing = { ...on(target), DATA: failingStore } as unknown as Env;
     const failed = await dispatchDecisionOutbox(target.DB, {
-      now: t0 + 60_000,
+      now: t0 + 30_000,
       processors: {
         "balance-projection": balanceProjectionOutboxProcessor(failing, { writeBudget: 1 }),
       },
@@ -718,11 +724,16 @@ test("a failing build step and a live writer lease are retryable: the row neithe
     // The input is written before the build exists, so no build was started.
     expect(await buildingSnapshots(target)).toBe(0);
 
+    // The second attempt backs off 60 s: not due a millisecond before that.
+    const backingOff = await dispatchDecisionOutbox(target.DB, { now: t0 + 89_999 });
+    expect(backingOff.outcomes).toEqual({});
+    expect(backingOff.claimed).toBe(0);
+
     // After its backoff the row is due again: a delivery with no processor
     // handed in blocks it together with a row of its own.
     const other = await seedDecision(target);
     await seedOperation("op_blocked_2", other, target);
-    const unregistered = await dispatchDecisionOutbox(target.DB, { now: t0 + 240_000 });
+    const unregistered = await dispatchDecisionOutbox(target.DB, { now: t0 + 90_000 });
     expect(unregistered.outcomes).toEqual({ "blocked:no_processor": 2 });
     expect(unregistered.blocked).toBe(2);
 
@@ -752,8 +763,15 @@ test("a failing build step and a live writer lease are retryable: the row neithe
     expect(leased).toMatchObject({ claimed: 1, processed: 0, waiting: 0, failed: 1, blocked: 0 });
     expect(await outboxState("op_lease_1", target)).toMatchObject({
       processed_at: null,
+      blocked_code: null,
       last_error_code: "writer_lease_unavailable",
     });
+    // Its first attempt backs off 30 s, and then it is claimed again.
+    const leaseEarly = await dispatchDecisionOutbox(target.DB, { now: t0 + 329_999 });
+    expect(leaseEarly.outcomes).toEqual({});
+    expect(leaseEarly.claimed).toBe(0);
+    const leaseAgain = await dispatchDecisionOutbox(target.DB, { now: t0 + 330_000 });
+    expect(leaseAgain.outcomes).toEqual({ "blocked:no_processor": 1 });
   } finally {
     await own.mf.dispose();
   }

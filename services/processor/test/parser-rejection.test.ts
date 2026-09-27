@@ -715,7 +715,10 @@ describe("replay selection against the migrated CORE schema", () => {
     await publishParse(db, Number(ok.meta.last_row_id));
     await run(4, "sony-bank-gross-balance", "1.0.0", "error");
     await run(5, "smbc-direct-balance", "1.0.0", "error");
-  });
+    // Starting Miniflare and applying every CORE migration in order is a
+    // one-time cost that grows with each migration and crossed the 5 s default
+    // hook budget; the budget matches every other schema hook in this suite.
+  }, 30_000);
   afterAll(async () => {
     await mf?.dispose();
   });

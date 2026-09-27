@@ -309,7 +309,8 @@ A failing build step is covered by injection only: in
 `projection-input.test.ts` an input store whose write throws makes the outbox
 poll `retryable:Error`, and a build held under another writer's live lease
 makes it `retryable:writer_lease_unavailable`; either way the row neither waits
-nor completes, backs off, and is claimed again by the next due delivery.
+nor completes, is not claimed a millisecond before its backoff ends, and is
+claimed again by the first delivery due after it.
 
 Not verified: production data volumes, a real concurrent second Worker (the
 lease and the fence are exercised by simulating the displaced writer), R2
