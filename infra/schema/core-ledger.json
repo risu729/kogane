@@ -834,7 +834,7 @@
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "696480e16a84b9dfb7fee9e7463ec70f16af642fefc2ca4bf0439f409612312a"
+      "sha256": "de91bfafd827a7288e8b465fc0ef3fe403b76b1cb133331d76a9e8b4d1950d37"
     }
   ],
   "tables": [
@@ -7563,7 +7563,7 @@
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
       "appendOnly": false,
-      "sqlSha256": "5d04bc070266e1d4"
+      "sqlSha256": "acc79cd00fea4c81"
     },
     {
       "name": "identity_vpass_bindings",
@@ -17811,6 +17811,6 @@
       "0058_identity_crosswalk.sql",
       "0062_identity_value_rewrite_staging.sql"
     ],
-    "schemaSha256": "aa182c15a920b7f143c7e9d3d489f2f308db6a029c0708e69bcc2a33eba32a1e"
+    "schemaSha256": "98d19c35677615b3122ed8e78dbbc89422d93812a934cc61e3e075eb813e7d48"
   }
 }

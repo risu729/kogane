@@ -275,8 +275,8 @@ their entities.
 ## One-time identity-value rewrite
 
 The retired importer's Vpass tokens and MoneyForward identities were derived
-under a key that is lost, so a collector's value for the same card or account
-differs and resolves to a second account entity. The owner decided to
+under the importer's key, which no deployed component holds any more, so a
+collector's value for the same card or account differs and resolves to a second account entity. The owner decided to
 replace each importer-era (`v1`) value by its collector-era (`v2`) value in
 the stored rows, once
 ([ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)).
@@ -305,7 +305,7 @@ SELECT count(*) AS crosswalk_rows FROM account_identity_crosswalk;
 **1. Preflight after 0062.** What the migration staged, and whether
 anything outside the rewrite's scope carries a MoneyForward `v1` value (0063
 rewrites the MoneyForward value in transaction observations only; every
-count below must be 0):
+count of the second query must be 0):
 
 ```sql
 SELECT source_id, basis, count(*) AS pairs FROM identity_value_rewrites GROUP BY 1, 2;
@@ -329,9 +329,12 @@ DELETE FROM identity_value_rewrites WHERE source_id='moneyforward-me' AND old_va
 ```
 
 **2. Stage the Vpass pairs.** No collector-era Vpass statement row is parsed,
-so the rows cannot pair Vpass tokens; the owner states each card's pair,
-the importer's `vpass-card-v1-` token and the collector's `vpass-card-v2-`
-token, in one statement (all rows or none):
+so the rows cannot pair Vpass tokens. The owner recomputes each card's pair
+on their own machine from the card's tuple: the importer's `vpass-card-v1-`
+token as the importer's HMAC under the importer's key (which the owner holds
+outside the platform) and the collector's `vpass-card-v2-` token as the
+unkeyed digest of ADR 0029. The pairs go in one statement (all rows or
+none):
 
 ```sql
 INSERT INTO identity_value_rewrites (source_id, old_value, new_value, basis) VALUES
@@ -347,9 +350,10 @@ new token, or the importer carries it), `identity_value_rewrite_not_one_to_one`
 (either token is already staged). A shape error (`v1` and `v2` swapped,
 upper-case hex, wrong length) fails the table's CHECK.
 
-**3. Confirm.** Expected: `moneyforward-me` `shared-rows` 4 and `vpass`
-`owner-recomputed` 6, each with as many distinct old and new values as
-pairs; and 0 held mappings (a manual or protected mapping on a collector
+**3. Confirm.** The owner's reports of 2026-09-28 expect `moneyforward-me`
+`shared-rows` 4 and `vpass` `owner-recomputed` 6 (an expectation to compare
+against, not a count this repository verifies), each with as many distinct
+old and new values as pairs; and 0 held mappings (a manual or protected mapping on a collector
 source account of a staged new value, which 0063 would refuse to re-point):
 
 ```sql

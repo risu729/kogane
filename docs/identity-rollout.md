@@ -161,8 +161,8 @@ No temporary public Worker, database, bucket or new financial login was created.
 
 ## 2026-09-28: the importer-era Vpass tokens are to be replaced once
 
-The Vpass counts above are importer-era `vpass-card-v1-` tokens. The
-importer's key is lost, so the collector's `vpass-card-v2-` token of the same
+The Vpass counts above are importer-era `vpass-card-v1-` tokens. No deployed
+component holds the importer's key any more, so the collector's `vpass-card-v2-` token of the same
 card is a different value and account entity.
 [ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)
 decides to replace each staged v1 token by its v2 token in the stored rows

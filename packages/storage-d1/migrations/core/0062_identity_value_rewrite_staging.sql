@@ -25,12 +25,12 @@
 --    stated for the crosswalk proposals, restricted to `moneyforward-me` and
 --    to the one-to-one (`unique`) pairs of a `v1` old value and a `v2` new
 --    value. Vpass pairs are not derivable this way (no collector-era Vpass row
---    is parsed yet, ADR 0023) and are inserted by the owner, with basis
---    `owner-recomputed`, between this migration and the rewrite
+--    is parsed yet, ADR 0023): the owner recomputes both values of each card
+--    from its tuple and inserts them, with basis `owner-recomputed`, between this migration and the rewrite
 --    (docs/identity-operations.md).
 -- 5. The crosswalk table is dropped (its two triggers go with it). Migration
 --    0058 stays as history. The retired command kind
---    `identity.crosswalk.accept` stays admitted by the kind CHECKKs of
+--    `identity.crosswalk.accept` stays admitted by the kind CHECK constraints of
 --    `change_plans` and `operation_receipts`: removing it would rebuild four
 --    command tables for no row, and the application's closed vocabulary
 --    already refuses it, so no plan of it can be created.
@@ -48,8 +48,10 @@ CREATE TABLE identity_value_rewrites (
  old_value TEXT NOT NULL,
  new_value TEXT NOT NULL,
  -- How the pair is known: `shared-rows`, the stored overlap (MoneyForward,
- -- staged below); `owner-recomputed`, a pair the owner established outside
- -- the stored rows and inserted by hand (Vpass).
+ -- staged below); `owner-recomputed`, a pair the owner computed from the
+ -- provider's account tuple on their own machine, the old value with the
+ -- importer's key (which the platform no longer holds) and the new value with
+ -- the collectors' unkeyed digest, and inserted by hand (Vpass).
  basis TEXT NOT NULL CHECK(basis IN ('shared-rows','owner-recomputed')),
  CHECK(CASE source_id
   WHEN 'vpass' THEN old_value GLOB 'vpass-card-v1-*' AND length(old_value)=78

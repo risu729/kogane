@@ -360,7 +360,12 @@ basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
 - **Between the migrations, the owner** runs read-only preflight counts,
   inserts the Vpass pairs (basis `owner-recomputed`; no collector-era Vpass
   row is parsed, so the shared-rows rule cannot see them) and confirms the
-  stage ([identity operations](../identity-operations.md#one-time-identity-value-rewrite)).
+  stage. The owner recomputes each Vpass pair on their own machine from the
+  card's tuple: the `v1` token as the importer's HMAC under the importer's
+  key, which the owner still holds outside the platform (no deployed
+  component has it), and the `v2` token as the collectors' unkeyed digest
+  (ADR 0029). The trigger checks only that both values are stored where
+  their era says, not how they were derived ([identity operations](../identity-operations.md#one-time-identity-value-rewrite)).
   A staged MoneyForward pair is a proposal (INV07): the owner deletes a row
   that is wrong before the rewrite, and nothing adopted changes until the
   owner has confirmed the stage and the change carrying 0063 is merged.
@@ -381,7 +386,7 @@ basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
   proposal script, the `identity.crosswalk.accept` kind (contract, commit,
   targets, subject ref, planner registration, confirmation label) and the
   crosswalk branch of `accountEntityId` are removed; migration 0058 stays as
-  history. The retired kind stays admitted by the kind CHECKKs of
+  history. The retired kind stays admitted by the kind CHECK constraints of
   `change_plans` and `operation_receipts`: removing it would rebuild four
   command tables for no row, and the closed vocabulary in
   `packages/application/src/command/contract.ts` refuses it before any row
@@ -413,9 +418,8 @@ basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
   does for one value read by two producers.
 - **What stays.** The collector-era entity `E_n` stays in `accounts`
   (append-only) with no current mapping. A value that is not staged stays as
-  it is: an unpaired `v2` value keeps its own entity, and a Vpass token the
-  owner does not pair (six pairs are expected; a seventh collector token
-  stays separate) is its own account.
+  it is: an unpaired `v2` value keeps its own entity, and so does a collector
+  Vpass token with no staged pair.
 - **Coincidental rows.** The shared-rows limit of the crosswalk proposals
   holds for the staged MoneyForward pairs: an identical row in another
   account makes a real pair not `unique` (not staged), and coincidental rows
@@ -424,8 +428,10 @@ basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
   the validation trigger, 0062 aborts as a whole and the deploy stops; it
   never stages part of the evidence silently.
 - **Production.** Nothing here reads production. The owner runs the
-  preflight and confirms the stage (MoneyForward 4, Vpass 6 expected) before
-  the rewrite is merged.
+  preflight and confirms the stage before the rewrite is merged. The owner's
+  reports of 2026-09-28 expect MoneyForward 4 and Vpass 6 pairs; that is the
+  expectation the confirmation is read against, not a count this change
+  verifies.
 
 ### Verification
 
