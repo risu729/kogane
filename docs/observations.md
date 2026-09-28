@@ -51,8 +51,9 @@ its payment month and goes on to the later months. The repair lane
 re-parses the stored MyJCB artifacts under the new releases; ledgers,
 past-month summaries and pages with the undated heading publish identical
 observations, and a stored confirmed page with the dated heading, in a run
-eligible for parsing, publishes its total (how many exist was not counted). Amendment (d)'s unobserved
-path is still in the code. Tests:
+eligible for parsing, publishes its total when the heading's day is the
+total's payment date (how many exist was not counted). Amendment (d)'s
+unobserved path is still in the code. Tests:
 `services/collector-myjcb/test/credit-statement-state.test.ts`,
 `packages/parsers/test/myjcb-statement.test.ts`.
 
