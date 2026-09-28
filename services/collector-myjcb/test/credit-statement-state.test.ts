@@ -1601,3 +1601,91 @@ describe("ADR 0005 amendment (d): a confirmed page under the usage header", () =
     expect(refused.stop).toMatchObject({ code: "credit_statement_state", position: 1 });
   });
 });
+
+describe("ADR 0005 amendment (f): ledger labels match across line breaks", () => {
+  // The head as every stored confirmed page shows it (round-5 survey,
+  // 2026-09-28, structure only): three cells, the middle one two `span.row`,
+  // the amount label broken by a `br` that only narrow screens render.
+  const OBSERVED_CONFIRMED_HEAD =
+    '<div class="cell">ご利用日</div><div class="cell"><span class="row">ご利用先など</span><span class="row">支払区分</span></div><div class="cell">今回の<br class="pc-none">お支払い金額</div>';
+  const observedRow =
+    '<div class="content"><div class="item-cell"><div class="cell">2026/01/05</div><div class="cell"><span class="row wb-bw">架空商店</span><span class="row">1回払い</span></div><div class="cell">1,000円</div><button class="cell toggle" type="button">詳細</button></div><div class="item-more"><ul class="list"><li><span>ご利用金額</span><span>1,000円</span></li><li><span>摘要</span><span>架空摘要</span></li></ul></div></div>';
+  const confirmedPage = (head: string) =>
+    page({
+      headings: [CONFIRMED_STATEMENT_HEADING],
+      months: ["2026年2月"],
+      head,
+      rows: [observedRow],
+    });
+
+  test("a confirmed page whose amount label has a <br> is confirmed and its ledger is read", () => {
+    const html = confirmedPage(OBSERVED_CONFIRMED_HEAD);
+    expect(creditStatementState(html, 1)).toBe("confirmed");
+    const ledger = parseCreditLedger(html, "confirmed");
+    expect(ledger).toEqual({
+      state: "confirmed",
+      headers: ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"],
+      rows: [
+        {
+          // Cell values keep their space-joined text: only labels are compacted.
+          summaryCells: ["2026/01/05", "架空商店 1回払い", "1,000円", "詳細"],
+          expanded: { ご利用金額: "1,000円", 摘要: "架空摘要" },
+        },
+      ],
+    });
+  });
+
+  test("a <br> inside 「ご利用先など」 or 「支払区分」 is matched the same way", () => {
+    for (const head of [
+      OBSERVED_CONFIRMED_HEAD.replace("ご利用先など", "ご利用<br>先など"),
+      OBSERVED_CONFIRMED_HEAD.replace("支払区分", '支払<br class="pc-none">区分'),
+      OBSERVED_CONFIRMED_HEAD.replace("ご利用日", "ご利用<br>\n日"),
+    ]) {
+      expect(stopCode(() => parseCreditLedger(confirmedPage(head), "confirmed"))).toBeUndefined();
+    }
+  });
+
+  test("only whitespace is ignored: a different label still stops", () => {
+    for (const head of [
+      OBSERVED_CONFIRMED_HEAD.replace("お支払い金額", "ご請求金額"),
+      OBSERVED_CONFIRMED_HEAD.replace("今回の<br", "今回<br"),
+      OBSERVED_CONFIRMED_HEAD.replace("支払区分", "支払<b>・</b>区分"),
+    ]) {
+      expect(stopCode(() => parseCreditLedger(confirmedPage(head), "confirmed"))).toBe(
+        "credit-ledger-headers",
+      );
+    }
+  });
+
+  test("collectCredit stores the observed confirmed month instead of stopping at position 1", async () => {
+    const { artifacts, stop } = await collectCredit(
+      client({ 0: mutable, 1: confirmedPage(OBSERVED_CONFIRMED_HEAD) }),
+      "x",
+    );
+    expect(stop).toBeUndefined();
+    const states = Object.fromEntries(
+      artifacts.map((artifact) => [artifact.filename, artifact.statementState ?? null]),
+    );
+    expect(states).toMatchObject({
+      "credit-detail-01.html": "confirmed",
+      "credit-ledger-01.json": "confirmed",
+    });
+  });
+
+  // The empty schedule pages as stored (positions 7 and 8): the head, then
+  // one row of one `w-100per` cell with the provider's empty marker.
+  const OBSERVED_SKIP_HEAD =
+    '<div class="cell">ご利用日</div><div class="cell"><span class="row">ご利用先など</span><span class="row">お支払日</span></div><div class="cell">今後のお支払い金額</div>';
+  const markerRow =
+    '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はございません。</div></div></div>';
+  const scheduledRow =
+    '<div class="content"><div class="item-cell"><div class="cell">2026/03/10</div><div class="cell"><span class="row">架空分割店</span><span class="row">2026/04/10</span></div><div class="cell">3,000円</div></div></div>';
+
+  test("an empty schedule ledger (the marker row alone) counts zero scheduled rows", () => {
+    expect(scheduledLedgerRowCount(page({ head: OBSERVED_SKIP_HEAD, rows: [markerRow] }))).toBe(0);
+    // The marker row never hides a real row next to it.
+    expect(
+      scheduledLedgerRowCount(page({ head: OBSERVED_SKIP_HEAD, rows: [markerRow, scheduledRow] })),
+    ).toBe(1);
+  });
+});

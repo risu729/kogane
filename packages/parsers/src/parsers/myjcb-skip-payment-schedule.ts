@@ -44,7 +44,10 @@ const ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-skip-payment-(0[0-9]|1[
  */
 export const myJcbSkipPaymentSchedule: Parser = {
   name: "myjcb-skip-payment-schedule",
-  version: "0.1.0",
+  // 0.1.1: the empty row is zero rows only when it is the ledger's one
+  // `content` row and shows exactly the observed label; beside other rows it
+  // is refused (ADR 0005 amendment f). 0.1.0 is registered but parsed nothing.
+  version: "0.1.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (

@@ -207,6 +207,19 @@ describe("the statement state is the page's own (1.1.0)", () => {
     }
   });
 
+  test("the shared page reading already matches a head label broken by a <br> (ADR 0005 amendment f)", () => {
+    // Every stored confirmed page shows 「今回の<br class="pc-none">お支払い金額」;
+    // the page reading compares head labels with whitespace removed, so it
+    // reads the page as confirmed, as the collector now does too.
+    const observedHead =
+      '<div class="cell">ご利用日</div><div class="cell"><span class="row">ご利用先など</span><span class="row">支払区分</span></div><div class="cell">今回の<br class="pc-none">お支払い金額</div>';
+    const result = parse(statementPage([HEADING], [observedHead]), misStated);
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations[0]).toMatchObject({
+      extra: { _kogane: { statementState: "confirmed", statementStateBasis: "page-heading" } },
+    });
+  });
+
   test("position 0 is never finalized, even when its page states it is closed", () => {
     expect(() =>
       parse(statementPage([HEADING], [CONFIRMED_HEAD]), {

@@ -17,6 +17,63 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MyJCB: confirmed months stopped on a line break in the ledger header (schedule parser 0.1.1)
+
+2026-09-28. Observed by the owner's agent in the stored MyJCB pages (round
+5, structure and counts only, no values) and the collector's stop logs
+([ADR 0005's amendment (f)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks)):
+
+- **The nightly stop at position 1** (`ledger_parse`, sub-code
+  `credit-ledger-headers`, three nights in a row) was the collector's own
+  header match. Every stored confirmed page (8 distinct pages) shows its
+  third head cell as `今回の<br class="pc-none">お支払い金額`; the collector's
+  text joins nodes with a space, so the header read 「今回の お支払い金額」
+  and never contained 「今回のお支払い金額」. The collector now compares
+  labels with all whitespace removed, as the shared page reading already
+  did. Cell values are read as before.
+- **Correction of the entry below on the usage header.** No stored
+  `(確定分)` page has a 「ご利用金額」 head. The 11 「ご利用金額」 counted on
+  that page are the labels of its rows' expanded `item-more` lists, and the
+  0 「今回のお支払い金額」 is the `br` splitting the head label. The pages
+  really show: h1 「カードご利用代金明細(確定分)」, a three-cell head
+  「ご利用日」 / 「ご利用先など」+「支払区分」 (two `span.row`) / `今回の<br>お支払い金額`,
+  rows of four cells (date, the two-line middle cell, amount, a toggle
+  button), each with an `item-more`. The variant the 1.2.0 releases accept
+  is unobserved; their code is kept (removing it would re-release all four
+  MyJCB parsers for no observation change) and nothing in production took
+  it.
+- **Empty schedule pages.** The stored skip-payment page (position 8) and
+  ボーナス払い page (position 7) show one `detail-list-01`, a three-cell head
+  and one `content` row: one `item-cell` with one `div.cell.w-100per`
+  「ご利用明細はございません。」, no `item-more`. The bonus page's h1 is
+  「ボーナス#回払いご利用代金明細(未確定分)」 (# one digit) and its head
+  「ご利用日」 / 「ご利用先など」+「支払区分」 / 「ご利用金額」; it stays unread
+  (`credit-schedule-07.html`, never observed with rows).
+  `myjcb-skip-payment-schedule@0.1.1` reads a ledger as empty only when that
+  row is its one `content` row, with exactly that shape and label; beside
+  real rows it is refused (`schedule_row_shape_unobserved`). Every
+  observation is as in 0.1.0. 0.1.0 is registered in `parser_releases`
+  with no parse run, so the change is a new version (migration 0028).
+
+Deploying rewrites nothing. The next night's run stores the confirmed months
+and the schedule pages it stopped before. Tests:
+`services/collector-myjcb/test/credit-statement-state.test.ts`,
+`packages/parsers/test/myjcb-statement.test.ts`,
+`packages/parsers/test/myjcb-skip-payment-schedule.test.ts`.
+
+## No stored object carries the `[redacted:name]` marker
+
+2026-09-28, read-only counts by the owner's agent. No artifact was stored
+between #333's merge (2026-09-27 18:21Z) and #340's (20:06Z): no artifact
+was fetched from 17:00Z to 21:00Z that day. The
+13 SBI Shinsei and SBI Securities objects stored after 21:00Z carry no
+`[redacted:…]` marker, and the SBI Shinsei balance summary keeps its three
+customer-name keys as #340 intends. The recorded transform steps agree:
+`myjcb-sanitizer` and `sbi-shinsei-token-sanitizer` have `redacted` steps
+at v1 and v3 only, none at v2 (the #333 step). So no stored object carries the marker,
+and ADR 0029 amendment 2's rule for objects written under v2 applies to
+none ([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)).
+
 ## MyJCB: the skip-payment schedule page is read as scheduled payments (schedule parser 0.1.0)
 
 2026-09-27. The owner chose to read the ショッピングスキップ払い schedule
@@ -114,6 +171,10 @@ is left for a later change, for pages observed with rows. Tests:
 `services/processor/test/myjcb-shared-r2.test.ts`.
 
 ## MyJCB: a confirmed page under the usage header (ledger and statement parsers 1.2.0)
+
+Corrected on 2026-09-28 ([above](#myjcb-confirmed-months-stopped-on-a-line-break-in-the-ledger-header-schedule-parser-011)):
+the observation below was a string-matching artifact. No stored confirmed
+page has the usage header; the code described here is kept, unobserved.
 
 2026-09-27. A position-1 page an earlier run stored carries the `(確定分)`
 heading over the unconfirmed ledger header
