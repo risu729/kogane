@@ -18,7 +18,7 @@
 // terminal request cannot be reopened, and that a completed stage cannot be
 // turned back into pending.
 import type { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { coreDrizzle } from "../src/drizzle/client.ts";
 import {
@@ -29,7 +29,14 @@ import {
   rawObjects,
 } from "../src/drizzle/schema/core.ts";
 import { CLIENT, OBJECT_SHA256, RUN_ID, pilotDatabase } from "./core-fixture.ts";
-import { sqliteD1 } from "./sqlite.ts";
+import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const OPERATION_ID = `op_${"1".repeat(64)}`;
 const ACCEPTED_AT = "2026-09-07T00:00:00Z";

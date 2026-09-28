@@ -6,7 +6,7 @@
 // not exist yet must all leave the operation short of `completed`.
 //
 // Synthetic throughout: `kogane-synthetic`, no amount, no account, no token.
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import {
   d1CommandStore,
   type CommandStore,
@@ -19,7 +19,7 @@ import {
   requestProjectionRebuild,
 } from "../../../packages/application/src/operations/requests.ts";
 import { RegistrationBudget } from "../../../packages/application/src/collection/index.ts";
-import { sqliteD1 } from "../../../packages/storage-d1/test/sqlite.ts";
+import { fullCoreDatabase, sqliteD1 } from "../../../packages/storage-d1/test/sqlite.ts";
 import { dispatchOperations, opsDispatchEnabled } from "../src/operations/dispatch.ts";
 import {
   collectionHarness,
@@ -27,6 +27,13 @@ import {
   SOURCE,
   type CollectionHarness,
 } from "./collection-harness.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const PRINCIPAL: Principal = {
   id: "operator-1",

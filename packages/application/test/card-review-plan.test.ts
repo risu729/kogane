@@ -2,7 +2,7 @@
 // payload contract, but no planner is registered yet (ADR 0017). Planning one
 // is refused before anything is stored, and a plan row that reached the table
 // by any other path still commits nothing. Real migrations, synthetic ids.
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
   approve,
   CARD_REVIEW_KINDS,
@@ -14,6 +14,13 @@ import {
   resolveAndSimulate,
 } from "../src/index.ts";
 import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite-store.ts).
+beforeAll(() => {
+  migratedDatabase().close();
+}, 60_000);
 
 const hex = (digit: string) => digit.repeat(64);
 const reason = "Reviewed the statement row";

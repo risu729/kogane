@@ -4,7 +4,7 @@
 // G1-15 are each named in a test below. Everything is synthetic: the source is
 // `kogane-synthetic`, which the financial views already exclude, and no
 // amount, account, credential or provider text appears anywhere.
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import {
   collectionScan,
   handleTerminalNotification,
@@ -23,7 +23,15 @@ import {
   SOURCE,
   type CollectionHarness,
 } from "./collection-harness.ts";
+import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
 import { objectKey, terminalKey } from "../../../packages/collection/src/keys.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 interface RunRow {
   id: number;

@@ -18,7 +18,9 @@ export function migratedDatabase(): Database {
   // Every migration runs once per process and each call gets its own copy of
   // the resulting file image, as `fullCoreDatabase` does in packages/storage-d1.
   // Replaying CORE per call (about 0.6 s locally) took most of a test's 5 s
-  // budget on a loaded CI runner.
+  // budget on a loaded CI runner. The first call still migrates, so a suite
+  // that uses this builds it in `beforeAll` with its own timeout rather than
+  // inside its first test.
   migratedImage ??= migrate();
   const db = Database.deserialize(migratedImage);
   db.exec("PRAGMA foreign_keys=ON");

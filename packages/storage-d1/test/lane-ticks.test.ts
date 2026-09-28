@@ -2,7 +2,7 @@
 // counts, flags and closed codes — never text — and what the writer keeps is
 // the latest day per lane. Synthetic rows only.
 import { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import {
   LANE_TICK_RETENTION,
   latestLaneTicks,
@@ -16,6 +16,13 @@ import {
   splitSqlStatements,
 } from "../src/migrations.ts";
 import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const MIGRATION_0049 = "0049_processor_lane_ticks.sql";
 

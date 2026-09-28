@@ -18,7 +18,7 @@
 //   * the scan continues staged registrations on the next tick.
 //
 // Synthetic throughout: `kogane-synthetic`, no amount, no account, no token.
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import {
   ARTIFACT_STEP_BASE,
   AUDIT_RESERVE,
@@ -70,6 +70,14 @@ import {
   SOURCE,
   type CollectionHarness,
 } from "./collection-harness.ts";
+import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 interface Shape {
   runId?: string;

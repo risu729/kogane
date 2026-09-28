@@ -5,13 +5,20 @@
 // lookup. The proposal and the commit's re-measurement are one-time reads;
 // they are pinned to reach observations through the identity lookup index and
 // rows by key, not by scanning the observation tables.
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import {
   CROSSWALK_FROM_SQL,
   CROSSWALK_PAIR_SQL,
   CROSSWALK_PROPOSALS_SQL,
 } from "../src/core/identity-crosswalk.ts";
 import { fullCoreDatabase } from "./sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 function plan(sql: string): string[] {
   const db = fullCoreDatabase();

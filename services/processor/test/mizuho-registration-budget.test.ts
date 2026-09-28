@@ -4,7 +4,7 @@
 // per-invocation operation budget (#250). A partial run, with a failed unit
 // for each account past that limit, persists and registers too. Synthetic
 // HTML only.
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import {
   REGISTRATION_OPERATION_BUDGET,
   RegistrationBudget,
@@ -20,6 +20,14 @@ import {
 import type { MizuhoArtifact } from "../../collector-mizuho/src/client.ts";
 import { mizuhoRunPlan } from "../../collector-mizuho/src/storage.ts";
 import { CLIENT, collectionHarness } from "./collection-harness.ts";
+import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const ACCOUNTS = 10;
 const account = (index: number) => String(1_234_560 + index);

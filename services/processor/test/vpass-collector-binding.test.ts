@@ -20,7 +20,7 @@
 //
 // Everything is synthetic: the card tuple, the card names, the merchants and
 // the amounts are placeholders in the observed shapes.
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -51,6 +51,13 @@ import {
   type UsageRow,
 } from "./card-purchase-world.ts";
 import { publishParse } from "./harness.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 afterEach(disposeWorlds);
 
