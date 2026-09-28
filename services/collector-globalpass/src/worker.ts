@@ -27,7 +27,12 @@ import {
   type StoredArtifact,
 } from "./model";
 import { activityPageState, uncapturedPagesCode } from "./pagination";
-import { sanitizeGlobalPassActivityHtml, sanitizerCode } from "./sanitize";
+import {
+  globalPassRefusalShape,
+  sanitizeGlobalPassActivityHtml,
+  sanitizerCode,
+  sanitizerExpectation,
+} from "./sanitize";
 import {
   dataBucket,
   persistSharedRun,
@@ -393,15 +398,21 @@ async function collectWithContainer(
       try {
         sanitizedHtml = sanitizeGlobalPassActivityHtml(record.html);
       } catch (error) {
-        diagnostics.failure("artifact-write", error);
-        failures.push(
-          collectionFailure(
+        // Counts, booleans and closed codes only: which expectation failed and
+        // what the refused page's markup looked like, never its text.
+        diagnostics.failure("artifact-write", error, {
+          shape: globalPassRefusalShape(record.html, error),
+        });
+        const expectation = sanitizerExpectation(error);
+        failures.push({
+          ...collectionFailure(
             "sanitization",
             error,
             sanitizerCode(error) ?? "html_sanitization_failed",
             artifactKey,
           ),
-        );
+          ...(expectation ? { expectationCode: expectation } : {}),
+        });
         if (pagesFailure) failures.push(pagesFailure);
         continue;
       }

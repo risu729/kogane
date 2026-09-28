@@ -13,8 +13,20 @@ export const SKIP_HEAD =
   '<div class="head"><div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div></div>';
 export const FOUR_CELL_HEAD =
   '<div class="head"><div class="cell">ご利用日</div><div class="cell">ご利用先など</div><div class="cell">お支払日</div><div class="cell">今後のお支払い金額</div></div>';
+/**
+ * The empty row as every stored skip-payment page shows it (round-5 survey,
+ * 2026-09-28): one `div.cell.w-100per` with the provider's empty label.
+ */
 export const EMPTY_ROW =
-  '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はありません。</div></div></div>';
+  '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はございません。</div></div></div>';
+/** The observed head with its middle cell as two `span.row`, as stored pages show it. */
+export const SPAN_SKIP_HEAD =
+  '<div class="head"><div class="cell">ご利用日</div><div class="cell"><span class="row">ご利用先など</span><span class="row">お支払日</span></div><div class="cell">今後のお支払い金額</div></div>';
+/** The ボーナス払い page's head (round-5 survey): a statement-like head, not the schedule's. */
+export const BONUS_HEAD =
+  '<div class="head"><div class="cell">ご利用日</div><div class="cell"><span class="row">ご利用先など</span><span class="row">支払区分</span></div><div class="cell">ご利用金額</div></div>';
+/** The ボーナス払い page's h1 shape, the one-digit count invented. */
+export const BONUS_HEADING = "ボーナス2回払いご利用代金明細(未確定分)";
 
 export function skipRow(usage: string, middle: string, amount: string): string {
   return `<div class="content"><div class="item-cell"><div class="cell">${usage}</div><div class="cell">${middle}</div><div class="cell">${amount}</div></div></div>`;
@@ -180,6 +192,27 @@ export const REFUSAL_CASES: readonly {
       ledgers: [
         `<div class="detail-list-01">${SKIP_HEAD}${EMPTY_ROW}<div class="note">x</div></div>`,
       ],
+    }),
+    meta: skipMeta(),
+  },
+  // The empty row beside real rows is a mix nobody has observed: refused,
+  // never read as the rows alone.
+  {
+    code: "schedule_row_shape_unobserved",
+    html: skipPage({ ledgers: [ledger(SKIP_HEAD, [EMPTY_ROW, ...ROWS])] }),
+    meta: skipMeta(),
+  },
+  {
+    code: "schedule_row_shape_unobserved",
+    html: skipPage({ ledgers: [ledger(SKIP_HEAD, [...ROWS, EMPTY_ROW])] }),
+    meta: skipMeta(),
+  },
+  // A lone one-cell row whose label is not the observed one is a row, and not
+  // a readable one.
+  {
+    code: "schedule_row_shape_unobserved",
+    html: skipPage({
+      ledgers: [ledger(SKIP_HEAD, [EMPTY_ROW.replace("ございません", "ありません")])],
     }),
     meta: skipMeta(),
   },

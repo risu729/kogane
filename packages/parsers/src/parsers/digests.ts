@@ -17,7 +17,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "packages/domain/src/myjcb-amounts.ts":
       "072dc5fc2570fc8257343d85d53e93cf9fa9036f61a1648390a8d8845303ea3e",
     "packages/domain/src/myjcb-skip-payment-schedule.ts":
-      "fbdf98ddddc8d3b6ab75e5d10fff2c40ddcf2b1af569b5802bbbd61bbb9457c6",
+      "5eb00bc2a0d0921c794d21914e7a199060a867f62646bfdc33b17ff5f1551265",
     "packages/domain/src/myjcb-statement-page.ts":
       "e5f382ed90b5f133ed794b479aebb4c5e42e27477198030d2d00e64972984587",
     "packages/domain/src/values.ts":
@@ -43,7 +43,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
       "00f80782d205b967c6c7d9719d18b7800a0ff9b0a6dd992b0991cd840a564815",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
-      "f0959940c760e3a3301201ceac45879827161157211e6813cc2d34411ca8fd97",
+      "d0699817ff34ab5876b9b1d206de30a54b8fa2f61feb8193d9ab389e1392611a",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
       "68eed341fea07b8abba8c61478ba7512033b68fb59124f1ab93472b64bc54176",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
@@ -262,8 +262,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-skip-payment-schedule": {
-      version: "0.1.0",
-      codeDigest: "2d0d453e977ef90fe017d5c1781ce2b6fa1aa20e09b2cbb7cd2bf81981905741",
+      version: "0.1.1",
+      codeDigest: "0bdababc1660abedf619a51593b62288465b9294a26e44a471821fba748302cf",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

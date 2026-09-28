@@ -254,9 +254,13 @@ Concrete limits in the current code:
   than ten statements is observed to have a second page; such a month is
   marked `activity_pages_unwalked`. Walking the pages is not implemented. No
   GLOBAL PASS run has stored a page since at least the week before
-  2026-09-27: the sanitizer refused every page, and which check refuses them
-  is recorded as a closed code only from this release on
-  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes)). A Vpass card run is `partial` the same
+  2026-09-27: the sanitizer refused every page, and still does
+  (`globalpass_html_contract_invalid` every night since the code was
+  recorded, ADR 0026's amendment of 2026-09-27). A refusal now also logs
+  which expectation failed and a counts-only shape of the page
+  ([ADR 0026 amendment of 2026-09-28](adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape));
+  the next step is reading that shape from the next night's log and
+  correcting the contract from it. A Vpass card run is `partial` the same
   way unless every month's captured rows equal the provider's stated total
   (ADR 0026's amendment). Both stated totals were seen on the live site
   (`allCnt` a string, `total` a number) and are read as exact counts, but the
@@ -291,19 +295,18 @@ Concrete limits in the current code:
   matched against statements or settlements. The bonus schedule page stays
   `credit-schedule-NN.html` and unread until it is observed with rows
   ([ADR 0005's amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
-  The MyJCB runs of 2026-09-25 and 09-26 stopped at position 1 on its ledger
-  header (`credit-ledger-headers`) and kept nothing; the live position-1 page
-  was the confirmed form on 09-27, so its shape varies by time or session. The
-  cause is not confirmed because the page was not stored; an earlier stored
-  position-1 page with the `(確定分)` heading but no `今回のお支払い金額`
-  label is the likely one. Such a page is now read `confirmed` only when it
-  proves itself: every row one single payment (`1回払`) and the rows' exact
-  sum equal to the page's own total. Otherwise it still stops. Its rows are
-  kept as usage amounts and are not recognised as purchases
-  (`payment_split_unknown`). Its total is the statement's payment
-  ([ADR 0005's amendment (d)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-d-a-confirmed-page-under-the-usage-header-proven-by-the-page)).
-  Why the provider shows that label on a closed month on some nights is
-  unknown. A later stop on a page's own shape now stores that page. The site's 「通信エラーが発生しました」
+  The nightly MyJCB runs of 2026-09-25 to 09-27 (UTC) stopped at position 1 on its ledger
+  header (`credit-ledger-headers`): every confirmed page breaks its amount
+  label with a `br` (`今回の<br>お支払い金額`), and the collector matched the
+  label on space-joined text. It now compares labels with all whitespace
+  removed, as the shared page reading already did
+  ([ADR 0005's amendment (f)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks)).
+  A `(確定分)` page under the 「ご利用金額」 header, which amendment (d) accepts
+  when the page proves itself, was a misreading of the same `br` and has
+  never been observed; that code is kept, unobserved, until the MyJCB
+  parsers are next released. The empty skip-payment page reads as zero rows
+  only when its one row is the provider's empty row; beside real rows it is
+  refused. A later stop on a page's own shape now stores that page. The site's 「通信エラーが発生しました」
   page, served after many consecutive fetches, is not recognised; after the
   first month it would be kept as a month with no ledger. MyJCB export links
   are recorded, not fetched, because the shared bucket refuses the export
