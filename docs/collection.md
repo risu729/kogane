@@ -953,13 +953,19 @@ first_page_only`): the container sends `page.content()` once per month and
   it, and gets the failure `pagination` / `activity_pages_unwalked` (or
   `activity_pager_unreadable` when its pagers or totals disagree), which makes
   the run `partial`. Walking Next is not implemented.
-- Failure entries keep four keys: `operation`, `errorType`, `errorCode`,
-  `artifactKey`. A page the sanitizer refuses is `sanitization` /
-  `GlobalPassSanitizerError` with the check's closed code:
-  `globalpass_html_contract_invalid`, `globalpass_html_redaction_failed`,
-  `globalpass_html_shape_unreviewed` or `globalpass_html_utf8_invalid`. The
-  same code is the `artifact-write` diagnostic line's `code`, and the first
-  failure's code is the terminal's and the unit's `safeErrorCode`.
+- Failure entries have the keys `operation`, `errorType`, `errorCode`,
+  `artifactKey`, and on a sanitizer refusal also `expectationCode`. A page
+  the sanitizer refuses is `sanitization` / `GlobalPassSanitizerError` with
+  the check's closed code: `globalpass_html_contract_invalid`,
+  `globalpass_html_redaction_failed`, `globalpass_html_shape_unreviewed` or
+  `globalpass_html_utf8_invalid`, and `expectationCode` names which
+  expectation failed (one of `GLOBALPASS_SANITIZER_EXPECTATIONS` in
+  `src/sanitize.ts`). The same code is the `artifact-write` diagnostic line's
+  `code`, and the first failure's code is the terminal's and the unit's
+  `safeErrorCode`. That line also carries a `shape` object: the expectation,
+  phase, element and attribute class as closed codes, and counts and
+  booleans describing the refused page's markup, never its text
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape)).
 - `transformations`: one `redacted` step per page
   (`globalpass-activity-sanitizer`); the unredacted page is never retained, so
   it has no artifact key.

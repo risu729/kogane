@@ -252,9 +252,13 @@ Concrete limits in the current code:
   than ten statements is observed to have a second page; such a month is
   marked `activity_pages_unwalked`. Walking the pages is not implemented. No
   GLOBAL PASS run has stored a page since at least the week before
-  2026-09-27: the sanitizer refused every page, and which check refuses them
-  is recorded as a closed code only from this release on
-  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes)). A Vpass card run is `partial` the same
+  2026-09-27: the sanitizer refused every page, and still does
+  (`globalpass_html_contract_invalid` every night since the code was
+  recorded, ADR 0026's amendment of 2026-09-27). A refusal now also logs
+  which expectation failed and a counts-only shape of the page
+  ([ADR 0026 amendment of 2026-09-28](adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape));
+  the next step is reading that shape from the next night's log and
+  correcting the contract from it. A Vpass card run is `partial` the same
   way unless every month's captured rows equal the provider's stated total
   (ADR 0026's amendment). Both stated totals were seen on the live site
   (`allCnt` a string, `total` a number) and are read as exact counts, but the

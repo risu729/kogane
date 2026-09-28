@@ -511,8 +511,9 @@ test("prestia-globalpass: the run manifest belongs to the run and the account un
 test("prestia-globalpass: a run with a sanitizer code and an unwalked page registers partial with the code", async () => {
   // One month refused by the sanitizer (its closed code), one month stored
   // whose page states a second page (ADR 0026's 2026-09-27 amendment). The
-  // manifest's failure entries keep their fixed four keys; the run's first
-  // code becomes the unit's safe failure code.
+  // manifest's sanitization entry carries the optional `expectationCode`
+  // (ADR 0026's 2026-09-28 amendment), which the Processor does not read; the
+  // run's first code becomes the unit's safe failure code.
   const html = "<!doctype html><html><body>synthetic</body></html>";
   const months = ["2099-01", "2098-12"];
   const manifest: GlobalPassManifest = {
@@ -543,6 +544,7 @@ test("prestia-globalpass: a run with a sanitizer code and an unwalked page regis
         errorType: "GlobalPassSanitizerError",
         errorCode: "globalpass_html_shape_unreviewed",
         artifactKey: "activity-2099-01.html",
+        expectationCode: "variant_unmatched",
       },
       {
         operation: "pagination",

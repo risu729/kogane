@@ -426,3 +426,140 @@ no row, and a schedule page with rows no longer makes it `partial`. A menu
 link under any other heading, or before any heading, stops the connection
 before its first month (`credit_menu_group_unrecognized`), so a unit never
 claims coverage over a grouping nobody observed.
+
+## Amendment 2026-09-28: GLOBAL PASS sanitizer refusals log a counts-only shape
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-28
+- Carried by: `services/collector-globalpass/src/sanitize.ts`
+  (`GLOBALPASS_SANITIZER_EXPECTATIONS`, `GlobalPassSanitizerError.detail`,
+  `globalPassRefusalShape`, `sanitizerExpectation`),
+  `services/collector-globalpass/src/worker.ts`,
+  `services/collector-globalpass/src/model.ts` (`expectationCode`),
+  `packages/collector-diagnostics/src/index.ts` (`safeShape`,
+  `failure(stage, error, { shape })`),
+  [collection: GLOBAL PASS](../collection.md#prestia-globalpass-kogane-globalpass-collector-poc),
+  [PRESTIA / GLOBAL PASS source note](../sources/prestia.md#global-pass-refusal-shape-diagnostic-2026-09-28),
+  `services/collector-globalpass/test/sanitize.test.ts`,
+  `services/collector-globalpass/test/worker-collection.test.ts`,
+  `packages/collector-diagnostics/test/diagnostics.test.ts`
+- Approved by the owner on 2026-09-28 (a counts-only structure diagnostic on
+  the refusal).
+
+### Context
+
+The amendment of 2026-09-27 made the refusal's code visible. Since then the
+production runs log `artifact-write` failed with
+`code: globalpass_html_contract_invalid`, `errorType:
+GlobalPassSanitizerError`, `category: response`; seven nights running the
+collector has stored no GLOBAL PASS page. (The `terminal` line's
+`errorType: UnknownError` is not a second failure: `finish("failed")` emits
+error details with no error, which reads as `UnknownError` for every
+collector.) `globalpass_html_contract_invalid` is thrown by seventeen
+different checks of the sanitizer: a missing doctype, a missing activity
+heading, a forbidden token, a login field, an unreviewed hidden name, an
+unreviewed URL or event handler, and so on. The log could not say which, nor
+what the refused page looked like, so the contract could not be corrected
+without someone fetching the page by hand.
+
+### Options considered
+
+- **A. Fetch the page by hand each time.** Works once per incident, needs the
+  owner's login and a person's time, and says nothing about the next night.
+  Rejected as the standing answer.
+- **B. Store the refused HTML** (in R2 or a quarantine bucket). Rejected: the
+  page is refused precisely because it may hold unsanitized provider text,
+  credentials or a session marker; storing it would put unreviewed provider
+  text into storage, against the invariant that logs and stored operational
+  records carry counts and closed codes only.
+- **C. Log a counts-only shape of the refused page with the refusal.**
+  Closed codes for which expectation failed, booleans for the contract's
+  landmarks, and counts of markup; no text, attribute value, URL or number
+  read from the page. **Chosen.**
+
+### Decision
+
+**Option C.**
+
+- Each check of `sanitizeGlobalPassActivityHtml` throws with a closed
+  expectation code (`GLOBALPASS_SANITIZER_EXPECTATIONS`, 22 codes), the
+  phase (`input`, the page as received, or `output`, the redacted page), and
+  where applicable the element (a closed list of tag names, else `other`)
+  and the attribute class (`href`, `src`, `action`, `http_equiv`,
+  `event_handler`, `url_attribute`, `name`, `id`, `type`, `value`). The four
+  top-level codes are unchanged. The expectation is the first failed check,
+  not every failure on the page.
+- On a refusal the Worker computes `globalPassRefusalShape(html, error)` and
+  passes it to the existing `artifact-write` `collector-diagnostic` line as a
+  new `shape` object: the expectation, phase, element and attribute; whether
+  the counts were computed (`summarized`); the number of decimal digits of
+  the page's byte length and of its visible text length; opening-tag counts
+  (`table`, `tr`, `th`, `td`, `form`, `input`, `select`, `button`, `script`,
+  `style`, `a`, `link`, `img`, `meta`, `title`, and `blocked` for the refused
+  network elements); the counts the two reviewed variants are defined by
+  (forms, forms with the static action, hidden inputs, hidden inputs with an
+  unlisted name, and each allowed hidden name, with non-empty
+  `nablarch_hidden`); landmark booleans (doctype, activity heading, a
+  `<title>`, the activity heading inside it, the login field `usrId`, a
+  password field, a `<select>`, the redaction sentinel); and the occurrences
+  of each forbidden token, keyed by the sanitizer's own token list.
+- `packages/collector-diagnostics` keeps a shape only as `safeShape` allows:
+  two levels of objects whose keys are in a closed key list (the shape's own
+  field names above), values that are non-negative safe integers, booleans,
+  or strings from a closed allowlist (the expectation, element, attribute and
+  phase codes). Any other key or value is dropped; the line never carries
+  more than the two allowlists permit, whatever a caller passes.
+- The manifest's sanitization failure entry gains an optional fifth key,
+  `expectationCode`, the same closed code. The terminal's `safeErrorCode`
+  is unchanged (the four top-level codes); the Processor reads nothing new.
+- The page's error banner is not a landmark: no error-banner markup has been
+  observed or reviewed on GLOBAL PASS, and a guessed selector would be
+  provider semantics nobody has observed ([ADR 0004](0004-payment-type-shapes-from-evidence.md)).
+
+### Consequences
+
+- The `artifact-write` diagnostic line of a refused page may now contain the
+  `shape` object above: closed codes, booleans and counts. It still contains
+  no provider text, no attribute value, no URL and no number read from the
+  page. Exact tag counts can say roughly how many rows a page had; the
+  owner approved counts, and lengths are reduced to their number of digits.
+- The manifest's failure entry may have five keys. Nothing downstream reads
+  it besides the first failure's `errorCode`.
+- The next production night's log says which expectation refused the pages
+  and what they looked like. Fixing the contract is a later change made from
+  that shape; this amendment changes no check, so every page refused before
+  is refused the same way now.
+- The invariant stays: nothing of a refused page is stored, and logs carry
+  counts and closed codes only.
+- **Limits.** The shape is computed with the sanitizer's own regular
+  expressions, not an HTML parser: a tag inside a script string or comment is
+  counted. Only the first failed expectation is named; a page that fails
+  several checks shows the rest only through the counts. The expectation
+  `redacted_value_unexpected` and `variant_changed` are output-only guards no
+  test input reaches while the redaction is correct.
+
+### Verification
+
+- `test/sanitize.test.ts`: a synthetic page for each of the 20 reachable
+  expectations gives its top-level code, expectation, element and attribute;
+  the shape of each passes `safeShape` unchanged; the cases plus the two
+  output-only guards equal `GLOBALPASS_SANITIZER_EXPECTATIONS`; a page with a
+  table, a title, a login field and an iframe gives exact counts and
+  landmarks; every expectation, element, attribute and phase code survives
+  the diagnostics allowlist; adversarial synthetic pages (text in tag names,
+  attribute names and values, a 1000-entry class list) give a shape under
+  1 KiB with none of that text.
+- `test/worker-collection.test.ts`: the four refusals driven through the
+  Worker carry `expectationCode` in the manifest and `shape.expectation` in
+  the diagnostic line; a refused synthetic statement page (table rows with a
+  synthetic merchant, amounts, a date and a card-like number) logs its
+  counts, and neither the logs nor the manifest contain any of those strings,
+  the page heading, or any 12-character run of the page; every string in the
+  logged shape is a closed code. The existing no-provider-text assertions
+  (no `private-` marker, password field or heading in logs, manifest or DATA)
+  still pass.
+- `packages/collector-diagnostics/test/diagnostics.test.ts`: `safeShape`
+  drops text, negative and fractional numbers, unknown strings, keys outside
+  its closed key list, arrays and a third level; the diagnostic line carries a kept shape on a failure and no
+  `shape` when none is passed.
+- No production data was read for this amendment.

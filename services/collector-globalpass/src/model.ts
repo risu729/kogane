@@ -1,5 +1,5 @@
 import type { ActivityPaginationCode } from "./pagination";
-import type { GlobalPassSanitizerCode } from "./sanitize";
+import type { GlobalPassSanitizerCode, GlobalPassSanitizerExpectation } from "./sanitize";
 
 export type CollectionMode = "daily" | "backfill";
 
@@ -60,6 +60,11 @@ export interface CollectionFailure {
     | "artifact_store_failed"
     | "selected_month_missing";
   artifactKey?: string;
+  /**
+   * On a sanitizer refusal only: which expectation of the sanitizer's
+   * contract failed (ADR 0026's amendment of 2026-09-28). A closed code.
+   */
+  expectationCode?: GlobalPassSanitizerExpectation;
 }
 
 export interface CollectionManifest {
