@@ -213,6 +213,20 @@ repair lane re-parses the stored boards after deploy. The letters' meaning,
 the owner's tier and the board's own time stay unknown; no FX price is
 admitted.
 
+## GLOBAL PASS refusals log a counts-only shape (collector, no parser release)
+
+2026-09-28. The GLOBAL PASS collector has stored no page for seven nights:
+since 2026-09-27 every month is refused with
+`globalpass_html_contract_invalid`, a code seventeen sanitizer checks share.
+With the owner's approval, a refusal now logs which expectation failed and a
+counts-only shape of the refused page in the `artifact-write` diagnostic line
+(closed codes, booleans and counts; no text), and the manifest's failure entry
+carries the expectation as `expectationCode`
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape),
+[source note](sources/prestia.md#global-pass-refusal-shape-diagnostic-2026-09-28)).
+No check changed, so the pages are refused as before; which expectation
+refuses them has not been observed yet. No parser changed.
+
 ## GLOBAL PASS activity pages paginate; the collector keeps page 1 (collector, no parser release)
 
 Observed on 2026-09-27 by the owner's agent on the live Account Activities

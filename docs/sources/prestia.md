@@ -919,3 +919,26 @@ month whose page states more pages `activity_pages_unwalked`
 Open: which check refuses production pages; the pager's markup and a paged
 page's form shape (neither reviewed from a capture); whether `Found N Result`
 appears for a month of ten or fewer.
+
+## GLOBAL PASS refusal shape diagnostic (2026-09-28)
+
+Since 2026-09-27 the production runs log the refusal code
+`globalpass_html_contract_invalid` for every month, which seventeen checks of
+the sanitizer share. From this change on, the `artifact-write` diagnostic
+line of a refused page also carries a `shape` object: which expectation
+failed (a closed code such as `forbidden_token`, `activity_heading_missing`,
+`credential_field` or `hidden_name_unallowed`), on which element and
+attribute class, and counts of the page's markup (tables, rows, cells, forms,
+scripts, links, the reviewed hidden inputs), landmark booleans (doctype,
+activity heading, title, login field, password field, month select) and
+forbidden-token occurrences, with the byte and text lengths reduced to their
+number of digits. It carries no text, attribute value, URL or number read
+from the page. The manifest's failure entry carries the same expectation as
+`expectationCode`
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape)).
+
+No error-banner landmark is recorded: no error-banner markup has been
+observed on GLOBAL PASS.
+
+Open: the shape of the pages production refuses, to be read from the next
+night's log; the contract change it calls for.

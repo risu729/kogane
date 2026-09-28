@@ -122,6 +122,116 @@ const SAFE_CODES = new Set([
   "globalpass_html_utf8_invalid",
 ]);
 
+// The closed strings a failure's `shape` may carry (GLOBAL PASS: which
+// sanitizer expectation refused a page, on which element and attribute class,
+// in which phase; ADR 0026's amendment of 2026-09-28). Any other string in a
+// shape is dropped, so a shape can carry nothing but these, booleans and counts.
+const SAFE_SHAPE_STRINGS = new Set([
+  "unknown",
+  "input",
+  "output",
+  // expectations
+  "utf8_invalid",
+  "doctype_missing",
+  "activity_heading_missing",
+  "forbidden_token",
+  "sentinel_present",
+  "size_out_of_range",
+  "css_url",
+  "blocked_element",
+  "duplicate_attribute",
+  "http_equiv_unallowed",
+  "url_attribute",
+  "action_unallowed",
+  "href_unallowed",
+  "src_unallowed",
+  "event_handler_unallowed",
+  "credential_field",
+  "hidden_name_unallowed",
+  "hidden_value_missing",
+  "variant_unmatched",
+  "redaction_count_mismatch",
+  "redacted_value_unexpected",
+  "variant_changed",
+  // elements
+  "a",
+  "button",
+  "form",
+  "img",
+  "link",
+  "meta",
+  "script",
+  "select",
+  "style",
+  "applet",
+  "audio",
+  "base",
+  "embed",
+  "fencedframe",
+  "frame",
+  "frameset",
+  "iframe",
+  "object",
+  "portal",
+  "source",
+  "svg",
+  "track",
+  "video",
+  "other",
+  // attribute classes
+  "action",
+  "event_handler",
+  "href",
+  "http_equiv",
+  "id",
+  "name",
+  "src",
+  "type",
+  "value",
+]);
+const SHAPE_KEY = /^[A-Za-z][A-Za-z0-9]{0,39}$/u;
+const MAX_SHAPE_KEYS = 64;
+
+type ShapeScalar = number | boolean | string;
+export type SafeShape = Record<string, ShapeScalar | Record<string, ShapeScalar>>;
+
+/**
+ * Keeps only what a diagnostic `shape` may carry: at most two levels of
+ * objects whose keys are short identifiers and whose values are non-negative
+ * safe integers, booleans or strings from `SAFE_SHAPE_STRINGS`. Everything
+ * else is dropped. Returns `undefined` when nothing is left.
+ */
+export function safeShape(value: unknown): SafeShape | undefined {
+  try {
+    const outer = safeShapeLevel(value, true);
+    return outer && Object.keys(outer).length > 0 ? (outer as SafeShape) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeShapeLevel(
+  value: unknown,
+  nested: boolean,
+): Record<string, ShapeScalar | Record<string, ShapeScalar>> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const result: Record<string, ShapeScalar | Record<string, ShapeScalar>> = {};
+  for (const [key, entry] of Object.entries(value).slice(0, MAX_SHAPE_KEYS)) {
+    if (!SHAPE_KEY.test(key)) continue;
+    if (typeof entry === "boolean") result[key] = entry;
+    else if (typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 0) {
+      result[key] = entry;
+    } else if (typeof entry === "string" && SAFE_SHAPE_STRINGS.has(entry)) result[key] = entry;
+    else if (nested) {
+      const inner = safeShapeLevel(entry, false);
+      if (inner && Object.keys(inner).length > 0) {
+        result[key] = inner as Record<string, ShapeScalar>;
+      }
+    }
+  }
+  return result;
+}
+
 export interface SafeErrorDetails {
   category:
     | "http"
@@ -196,7 +306,14 @@ export function createDiagnostics(source: string, runId: string) {
     )
       ? runId
       : "unknown";
-  function emit(stage: string, outcome: string, durationMs: number, error?: unknown): void {
+  function emit(
+    stage: string,
+    outcome: string,
+    durationMs: number,
+    error?: unknown,
+    shape?: unknown,
+  ): void {
+    const kept = outcome === "failed" && shape !== undefined ? safeShape(shape) : undefined;
     const record = {
       event: "collector-diagnostic",
       source: safeSource,
@@ -205,6 +322,7 @@ export function createDiagnostics(source: string, runId: string) {
       outcome,
       durationMs: Math.max(0, durationMs),
       ...(outcome === "failed" ? safeErrorDetails(error) : {}),
+      ...(kept ? { shape: kept } : {}),
     };
     // Observability must not change the result of a provider or storage operation.
     try {
@@ -243,8 +361,12 @@ export function createDiagnostics(source: string, runId: string) {
         /* Logging must not prevent the existing retry from being scheduled. */
       }
     },
-    failure(stage: string, error: unknown): void {
-      emit(stage, "failed", Date.now() - startedAt, error);
+    /**
+     * `context.shape` is kept only as `safeShape` allows: closed strings,
+     * booleans and counts, never text.
+     */
+    failure(stage: string, error: unknown, context?: { shape?: unknown }): void {
+      emit(stage, "failed", Date.now() - startedAt, error, context?.shape);
     },
     finish(status: "success" | "partial" | "failed"): void {
       emit("terminal", status, Date.now() - startedAt);

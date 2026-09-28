@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { createDiagnostics, safeErrorDetails } from "../src/index";
+import { createDiagnostics, safeErrorDetails, safeShape } from "../src/index";
 
 const runId = "00000000-0000-4000-8000-000000000001";
 afterEach(() => {
@@ -150,5 +150,50 @@ describe("safe collector diagnostics", () => {
       }),
     ).rejects.toBe(error);
     diagnostic.finish("failed");
+  });
+});
+
+describe("a failure's shape keeps closed codes, booleans and counts only", () => {
+  test("drops text, negative or fractional numbers, unknown strings and deep nesting", () => {
+    expect(
+      safeShape({
+        expectation: "forbidden_token",
+        summarized: true,
+        byteMagnitude: 5,
+        merchant: "SYNTHETIC MERCHANT",
+        amount: -12,
+        ratio: 0.5,
+        "bad key": 1,
+        elements: { table: 1, label: "private-text", deeper: { tr: 2 } },
+        list: [1, 2],
+      }),
+    ).toEqual({
+      expectation: "forbidden_token",
+      summarized: true,
+      byteMagnitude: 5,
+      elements: { table: 1 },
+    });
+    expect(safeShape("private-text")).toBeUndefined();
+    expect(safeShape({ text: "private-text" })).toBeUndefined();
+  });
+
+  test("the diagnostic line carries the kept shape on a failure only", () => {
+    const records = capture();
+    const diagnostic = createDiagnostics("prestia-globalpass", runId);
+    const error = Object.assign(new Error("globalpass_html_contract_invalid"), {
+      name: "GlobalPassSanitizerError",
+      code: "globalpass_html_contract_invalid",
+    });
+    diagnostic.failure("artifact-write", error, {
+      shape: { expectation: "credential_field", element: "input", note: "private-text" },
+    });
+    diagnostic.failure("artifact-write", error);
+    expect(records[0]).toMatchObject({
+      stage: "artifact-write",
+      code: "globalpass_html_contract_invalid",
+      shape: { expectation: "credential_field", element: "input" },
+    });
+    expect(records[1]).not.toHaveProperty("shape");
+    expect(JSON.stringify(records)).not.toContain("private-text");
   });
 });

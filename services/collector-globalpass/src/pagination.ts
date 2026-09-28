@@ -59,7 +59,8 @@ export function uncapturedPagesCode(state: ActivityPageState): ActivityPaginatio
   return state.pageCount > 1 ? "activity_pages_unwalked" : undefined;
 }
 
-function visibleText(html: string): string {
+/** The page's visible text: tags, scripts, styles and comments removed. */
+export function visibleText(html: string): string {
   return html
     .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, " ")
     .replace(/<!--[\s\S]*?-->/gu, " ")

@@ -58,6 +58,8 @@ WebSocket TCP relayは非hibernating接続である。対応するupstream TCP s
 
 sanitizerが拒否したpageのfailureは`errorCode`にどの検査で拒否したかを閉じたcodeで記録する（`globalpass_html_contract_invalid`、`globalpass_html_redaction_failed`、`globalpass_html_shape_unreviewed`、`globalpass_html_utf8_invalid`）。同じcodeは`artifact-write`のdiagnostic行の`code`にも出る。providerの文字列や一致した値は出さない。
 
+どの期待（expectation）に反したかは閉じたcode（`src/sanitize.ts`の`GLOBALPASS_SANITIZER_EXPECTATIONS`、例: `forbidden_token`、`activity_heading_missing`、`credential_field`、`hidden_name_unallowed`）として、manifestのfailureの`expectationCode`と、同じdiagnostic行の`shape`に記録する。`shape`は拒否したpageの構造だけを表す: expectation、phase（`input`/`output`）、要素と属性の分類（閉じたcode）、tag数（`table`、`tr`、`th`、`td`、`form`、`input`、`select`、`script`、`a`など）、reviewed variantを決めるform数とhidden input数、landmarkの有無（doctype、利用明細の見出し、title、`usrId`、password field、`select`、sentinel）、forbidden tokenごとの出現数、byte長とtext長の桁数。page内の文字列、属性値、URL、pageから読んだ数値は含めない。`packages/collector-diagnostics`の`safeShape`が閉じたcode、真偽値、非負整数以外を落とす（ADR 0026の2026-09-28 amendment）。error bannerは観測されたmarkupがないため記録しない。
+
 Containerは月を選択した後の`page.content()`を1回だけ保存し、`Next`を辿らない。明細が10件を超える月は`Found N Result [p/Ppage] Back Next`を表示する（2026-09-27の実画面観察）。Workerは保存前のpage本文からこの件数とpage番号だけを読み、`globalpass-activity-pages`行（run内の月の位置、`statedTotal`、`pageIndex`、`pageCount`）に記録する。2page以上あると示すpageは保存するが、`operation: "pagination"`、`errorCode: "activity_pages_unwalked"`のfailureを付けてrunを`partial`にする。pagerの表示が矛盾する場合は`activity_pager_unreadable`。pagerが見つからないpageが1か月分すべてを含むことは証明されていない（[ADR 0026](../../docs/adr/0026-collector-unit-coverage.md)）。
 
 保存前には35件の既存HTML監査で確認した2種類の画面shapeだけを許可する。変動する非空の`nablarch_hidden`だけを`__KOGANE_REDACTED_DYNAMIC_VALUE__`へ置換し、空値は空のまま、明細選択に必要な`W131301.referenceDate`などは保持する。これとは別に、current-document fragmentの`href`は`#`へ、許可された`onclick`/`onchange`の値全体は`return false;`へ固定し、元fragmentやhandler引数をR2へ残さない。hidden field、inputの`id/name/type/value`重複、form action重複、URL-bearing attribute、inline event handlerは監査済みのexact inventoryだけを許可する。query付きURL、未知host/path/scheme、`formaction`、data URL、`srcset`、`ping`、CSSの`url()`/`@import`、meta refresh、SVG URL属性、`base`/`object`/`embed`/`iframe`などの未監査network/navigation sink、未知event属性・関数、ログイン画面、session/token文字列、UTF-8不整合を検出した場合はfail closedとし、そのHTMLをR2へ保存しない。保存したpageはterminalへ`redacted` transformation（`globalpass-activity-sanitizer`）として記録する。
@@ -295,3 +297,10 @@ navigation, month discovery and statement reads; HTTP failures contain status on
 Relay errors include the same vetted run ID, a relay ID and whether its peer had closed,
 so disconnects can be compared with the teardown boundary without treating each log as a failed run.
 New diagnostic logs omit exception text, stack traces, request URLs, credentials and statement bodies.
+A page the sanitizer refuses logs its closed code and a `shape` object on the `artifact-write`
+line: which expectation failed, and counts and booleans describing the page's markup (tags,
+reviewed hidden inputs, landmarks, forbidden-token occurrences, lengths as digit counts), never
+its text, attribute values, URLs or numbers read from it
+([ADR 0026 amendment of 2026-09-28](../../docs/adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape)).
+The `terminal` line of a failed run reads `errorType: UnknownError` because it is emitted
+without an error; it is not a second failure.

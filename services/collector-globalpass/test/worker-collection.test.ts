@@ -171,9 +171,10 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
 // Each of the sanitizer's four refusals, driven through the Worker from the
 // container stream. The pages carry `private-` markers where a provider value
 // would be; none may reach a log line, the manifest or DATA.
-const refusals: Array<{ code: string; html: () => string }> = [
+const refusals: Array<{ code: string; expectation: string; html: () => string }> = [
   {
     code: "globalpass_html_contract_invalid",
+    expectation: "credential_field",
     html: () =>
       fixtureHtml().replace(
         "</body>",
@@ -182,6 +183,7 @@ const refusals: Array<{ code: string; html: () => string }> = [
   },
   {
     code: "globalpass_html_redaction_failed",
+    expectation: "redaction_count_mismatch",
     // A `nablarch_hidden` input without `type="hidden"`: redacted, but not
     // counted by the shape, so the counts disagree.
     html: () =>
@@ -192,10 +194,12 @@ const refusals: Array<{ code: string; html: () => string }> = [
   },
   {
     code: "globalpass_html_shape_unreviewed",
+    expectation: "variant_unmatched",
     html: () => fixtureHtml().replace('<input type="hidden" name="nablarch_submit" value="1">', ""),
   },
   {
     code: "globalpass_html_utf8_invalid",
+    expectation: "utf8_invalid",
     html: () => fixtureHtml().replace("</body>", "\ud800</body>"),
   },
 ];
@@ -216,6 +220,8 @@ describe("GLOBAL PASS sanitizer refusals carry their closed code", () => {
           errorType: "GlobalPassSanitizerError",
           errorCode: refusal.code as CollectionManifest["failures"][number]["errorCode"],
           artifactKey: "activity-2099-02.html",
+          expectationCode:
+            refusal.expectation as CollectionManifest["failures"][number]["expectationCode"],
         },
       ]);
       const events = r.logs.map((line) => JSON.parse(line) as Record<string, unknown>);
@@ -227,6 +233,7 @@ describe("GLOBAL PASS sanitizer refusals carry their closed code", () => {
         category: "response",
         errorType: "GlobalPassSanitizerError",
         code: refusal.code,
+        shape: { expectation: refusal.expectation, summarized: true },
       });
       // The run's terminal carries the code as its safe error code.
       const stored = [...r.stored.values()].map((bytes) => new TextDecoder().decode(bytes));
@@ -309,9 +316,9 @@ describe("GLOBAL PASS pages that state more pages are not a whole month", () => 
       },
       { ...artifact, month: "2099-01" },
     ]);
-    expect(r.manifest?.failures.map((f) => [f.operation, f.errorCode])).toEqual([
-      ["sanitization", "globalpass_html_shape_unreviewed"],
-      ["pagination", "activity_pages_unwalked"],
+    expect(r.manifest?.failures.map((f) => [f.operation, f.errorCode, f.expectationCode])).toEqual([
+      ["sanitization", "globalpass_html_shape_unreviewed", "variant_unmatched"],
+      ["pagination", "activity_pages_unwalked", undefined],
     ]);
   });
 
@@ -323,5 +330,84 @@ describe("GLOBAL PASS pages that state more pages are not a whole month", () => 
     ]);
     expect(r.manifest?.status).toBe("success");
     expect(r.manifest?.failures).toEqual([]);
+  });
+});
+
+describe("GLOBAL PASS refusal shape is counts and closed codes only", () => {
+  // A synthetic page shaped like a statement table, with merchant names,
+  // amounts, dates and a card-like number where a provider's values would be.
+  const merchant = "SYNTHETIC MERCHANT KOGANEYA";
+  const tokens = [merchant, "KOGANEYA", "12,345", "98765", "2099/01/15", "4980-1234-5678-9012"];
+  const refusedPage = () =>
+    fixtureHtml()
+      .replace("<h1>ご利用明細</h1>", "<title>ご利用明細</title><h1>ご利用明細</h1>")
+      .replace(
+        "</body>",
+        '<table class="private-table-class"><tr><th>日付</th><th>店名</th><th>金額</th></tr>' +
+          `<tr><td>2099/01/15</td><td>${merchant}</td><td>12,345</td></tr>` +
+          `<tr><td data-ref="98765">4980-1234-5678-9012</td><td>x</td><td>y</td></tr></table>` +
+          '<script>var session = "private-script";</script></body>',
+      );
+
+  test("the logged shape says which expectation failed and carries no page text", async () => {
+    const r = await run([
+      metadata,
+      { type: "artifact", month: "2099-02", html: refusedPage() },
+      { ...artifact, month: "2099-01" },
+    ]);
+    const failed = r.logs
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((e) => e.stage === "artifact-write" && e.outcome === "failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatchObject({
+      code: "globalpass_html_contract_invalid",
+      shape: {
+        expectation: "forbidden_token",
+        phase: "input",
+        summarized: true,
+        elements: { table: 1, tr: 3, th: 3, td: 6, form: 5, script: 1, a: 0, title: 1 },
+        contract: {
+          forms: 5,
+          staticActionForms: 0,
+          hiddenInputs: 11,
+          hiddenUnlisted: 0,
+          nablarchHidden: 4,
+          nablarchHiddenNonempty: 3,
+          nablarchSubmit: 4,
+          referenceDate: 0,
+        },
+        landmarks: {
+          doctype: true,
+          activityHeading: true,
+          title: true,
+          activityHeadingInTitle: true,
+          loginForm: false,
+          passwordField: false,
+          monthSelect: false,
+          sentinel: false,
+        },
+        forbiddenTokens: { session: 1, token: 0, turnstile: 0 },
+      },
+    });
+    expect(r.manifest?.failures[0]).toMatchObject({ expectationCode: "forbidden_token" });
+    const serialized = [r.logs.join("\n"), JSON.stringify(r.manifest)].join("\n");
+    for (const token of [...tokens, "private-", "ご利用明細", "日付", "var "]) {
+      expect(serialized).not.toContain(token);
+    }
+    // No run of 12 characters of the refused page appears in the logged shape.
+    const shapeJson = JSON.stringify(failed[0]!.shape);
+    const input = refusedPage();
+    for (let index = 0; index + 12 <= input.length; index++) {
+      expect(shapeJson).not.toContain(input.slice(index, index + 12));
+    }
+    // Every string in the logged shape is a closed code of at most 32 characters.
+    const strings: string[] = [];
+    const walk = (value: unknown): void => {
+      if (typeof value === "string") strings.push(value);
+      else if (value && typeof value === "object") Object.values(value).forEach(walk);
+    };
+    walk(failed[0]!.shape);
+    expect(strings.length).toBeGreaterThan(0);
+    for (const value of strings) expect(value).toMatch(/^[a-z0-9_]{1,32}$/u);
   });
 });

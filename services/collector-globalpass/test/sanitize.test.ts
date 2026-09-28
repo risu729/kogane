@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { safeShape } from "../../../packages/collector-diagnostics/src/index";
 import {
+  GLOBALPASS_SANITIZER_ATTRIBUTES,
   GLOBALPASS_SANITIZER_CODES,
+  GLOBALPASS_SANITIZER_ELEMENTS,
+  GLOBALPASS_SANITIZER_EXPECTATIONS,
   GlobalPassSanitizerError,
+  globalPassRefusalShape,
   NABLARCH_HIDDEN_SENTINEL,
   sanitizeGlobalPassActivityHtml,
   sanitizerCode,
+  sanitizerExpectation,
 } from "../src/sanitize";
 
 describe("GLOBAL PASS HTML sanitizer", () => {
@@ -132,6 +138,257 @@ describe("GLOBAL PASS HTML sanitizer", () => {
     expect(() =>
       sanitizeGlobalPassActivityHtml(valid.replace('name="cc"', 'id="one" id="two" name="cc"')),
     ).toThrow("globalpass_html_contract_invalid");
+  });
+});
+
+describe("GLOBAL PASS sanitizer refusals name the failed expectation", () => {
+  const append = (markup: string) => fixture("a").replace("</body>", `${markup}</body>`);
+  // [expectation, page, code, element, attribute]
+  const cases: Array<[string, () => string, string, string?, string?]> = [
+    ["utf8_invalid", () => fixture("a") + "\ud800", "globalpass_html_utf8_invalid"],
+    [
+      "doctype_missing",
+      () => fixture("a").replace("<!DOCTYPE html>", ""),
+      "globalpass_html_contract_invalid",
+    ],
+    [
+      "activity_heading_missing",
+      () => fixture("a").replace("ご利用明細", "Account"),
+      "globalpass_html_contract_invalid",
+    ],
+    ["forbidden_token", () => append("<p>csrf</p>"), "globalpass_html_contract_invalid"],
+    [
+      "sentinel_present",
+      () => append(`<p>${NABLARCH_HIDDEN_SENTINEL}</p>`),
+      "globalpass_html_contract_invalid",
+    ],
+    [
+      "size_out_of_range",
+      () => append(`<p>${"x".repeat(2 * 1024 * 1024)}</p>`),
+      "globalpass_html_contract_invalid",
+    ],
+    [
+      "css_url",
+      () => append('<div style="background:url(x)"></div>'),
+      "globalpass_html_contract_invalid",
+    ],
+    [
+      "blocked_element",
+      () => append("<iframe></iframe>"),
+      "globalpass_html_contract_invalid",
+      "iframe",
+    ],
+    [
+      "duplicate_attribute",
+      () => append('<a href="#one" href="#two">x</a>'),
+      "globalpass_html_contract_invalid",
+      "a",
+      "href",
+    ],
+    [
+      "http_equiv_unallowed",
+      () => append('<meta http-equiv="refresh" content="0">'),
+      "globalpass_html_contract_invalid",
+      "meta",
+      "http_equiv",
+    ],
+    [
+      "url_attribute",
+      () => append('<img src="/en/01006/img/logo.jpg" srcset="x 1x">'),
+      "globalpass_html_contract_invalid",
+      "img",
+      "url_attribute",
+    ],
+    [
+      "action_unallowed",
+      () => append('<form action="https://example.invalid/write"></form>'),
+      "globalpass_html_contract_invalid",
+      "form",
+      "action",
+    ],
+    [
+      "href_unallowed",
+      () => append('<a href="https://example.invalid/">x</a>'),
+      "globalpass_html_contract_invalid",
+      "a",
+      "href",
+    ],
+    [
+      "src_unallowed",
+      () => append('<script src="/js/other.js"></script>'),
+      "globalpass_html_contract_invalid",
+      "script",
+      "src",
+    ],
+    [
+      "event_handler_unallowed",
+      () => append('<a href="#" onclick="fetch()">x</a>'),
+      "globalpass_html_contract_invalid",
+      "a",
+      "event_handler",
+    ],
+    [
+      "credential_field",
+      () => append('<input type="password" id="password">'),
+      "globalpass_html_contract_invalid",
+      "input",
+    ],
+    [
+      "hidden_name_unallowed",
+      () => fixture("a").replace('name="cc"', 'name="unknown_state"'),
+      "globalpass_html_contract_invalid",
+      "input",
+      "name",
+    ],
+    [
+      "hidden_value_missing",
+      () => append('<input type="hidden" name="nablarch_hidden">'),
+      "globalpass_html_contract_invalid",
+      "input",
+      "value",
+    ],
+    [
+      "variant_unmatched",
+      () => fixture("a").replace('<input type="hidden" name="nablarch_submit" value="1">', ""),
+      "globalpass_html_shape_unreviewed",
+    ],
+    [
+      "redaction_count_mismatch",
+      () => append('<input name="nablarch_hidden" value="opaque-x">'),
+      "globalpass_html_redaction_failed",
+    ],
+  ];
+  // Checks of the redacted output that no input can reach while the
+  // redaction and canonicalisation are correct; they stay as fail-closed guards.
+  const defensive = ["redacted_value_unexpected", "variant_changed"];
+
+  for (const [expectation, page, code, element, attribute] of cases) {
+    test(expectation, () => {
+      let error: unknown;
+      try {
+        sanitizeGlobalPassActivityHtml(page());
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(GlobalPassSanitizerError);
+      expect(sanitizerCode(error)).toBe(code as (typeof GLOBALPASS_SANITIZER_CODES)[number]);
+      expect(sanitizerExpectation(error)).toBe(
+        expectation as (typeof GLOBALPASS_SANITIZER_EXPECTATIONS)[number],
+      );
+      const detail = (error as GlobalPassSanitizerError).detail;
+      expect(detail.element).toBe(element as never);
+      expect(detail.attribute).toBe(attribute as never);
+      const shape = globalPassRefusalShape(page(), error);
+      // The redaction count is checked after redaction, on the output.
+      const phase = expectation === "redaction_count_mismatch" ? "output" : "input";
+      expect(shape).toMatchObject({ expectation, phase, summarized: true });
+      // The shape survives the diagnostics allowlist unchanged: every value in
+      // it is closed or a count.
+      expect(safeShape(shape)).toEqual(JSON.parse(JSON.stringify(shape)));
+    });
+  }
+
+  test("the cases cover every expectation except the output-only guards", () => {
+    expect([...cases.map(([expectation]) => expectation), ...defensive].sort()).toEqual(
+      [...GLOBALPASS_SANITIZER_EXPECTATIONS].sort(),
+    );
+  });
+
+  test("counts the page's markup and landmarks, not its text", () => {
+    const page = fixture("a")
+      .replace("<head>", "<head><title>ご利用明細</title>")
+      .replace(
+        "</body>",
+        "<table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table>" +
+          '<input type="text" id="usrId"><iframe></iframe></body>',
+      );
+    const shape = globalPassRefusalShape(
+      page,
+      new GlobalPassSanitizerError("globalpass_html_contract_invalid", {
+        expectation: "blocked_element",
+        phase: "input",
+        element: "iframe",
+      }),
+    );
+    expect(shape).toEqual({
+      expectation: "blocked_element",
+      phase: "input",
+      element: "iframe",
+      summarized: true,
+      byteMagnitude: String(new TextEncoder().encode(page).byteLength).length,
+      textMagnitude: 2,
+      elements: {
+        table: 1,
+        tr: 2,
+        th: 2,
+        td: 2,
+        form: 6,
+        input: 17,
+        select: 1,
+        button: 0,
+        script: 1,
+        style: 0,
+        a: 1,
+        link: 1,
+        img: 0,
+        meta: 0,
+        title: 1,
+        blocked: 1,
+      },
+      contract: {
+        forms: 6,
+        staticActionForms: 1,
+        hiddenInputs: 16,
+        hiddenUnlisted: 0,
+        cc: 1,
+        engUseFlg: 1,
+        nablarchHidden: 6,
+        nablarchHiddenNonempty: 4,
+        nablarchNeedsHiddenEncryption: 1,
+        nablarchSubmit: 6,
+        referenceDate: 1,
+      },
+      landmarks: {
+        doctype: true,
+        activityHeading: true,
+        title: true,
+        activityHeadingInTitle: true,
+        loginForm: true,
+        passwordField: false,
+        monthSelect: true,
+        sentinel: false,
+      },
+      forbiddenTokens: {
+        jsessionid: 0,
+        token: 0,
+        csrf: 0,
+        turnstile: 0,
+        session: 0,
+        localStorage: 0,
+      },
+    });
+  });
+
+  test("an error that is not a sanitizer refusal gives an unknown expectation", () => {
+    expect(globalPassRefusalShape(fixture("a"), new Error("private-text"))).toMatchObject({
+      expectation: "unknown",
+      phase: "unknown",
+      summarized: true,
+    });
+    expect(sanitizerExpectation(new Error("globalpass_html_contract_invalid"))).toBeUndefined();
+  });
+
+  test("every closed code the shape can carry passes the diagnostics allowlist", () => {
+    for (const value of [
+      ...GLOBALPASS_SANITIZER_EXPECTATIONS,
+      ...GLOBALPASS_SANITIZER_ELEMENTS,
+      ...GLOBALPASS_SANITIZER_ATTRIBUTES,
+      "input",
+      "output",
+      "unknown",
+    ]) {
+      expect(safeShape({ value })).toEqual({ value });
+    }
   });
 });
 
