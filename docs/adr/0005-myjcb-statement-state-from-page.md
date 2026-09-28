@@ -10,6 +10,10 @@
   [amendment (d)](#amendment-2026-09-27-d-a-confirmed-page-under-the-usage-header-proven-by-the-page)
   is accepted (#336); the
   [amendment (e)](#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)
+  is accepted (#338); the
+  [amendment (f)](#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks)
+  is accepted (#358); the
+  [amendment (g)](#amendment-2026-09-28-g-the-statement-heading-may-carry-its-payment-day)
   is proposed
 - Date: 2026-09-25
 - Implemented by: #248
@@ -1122,7 +1126,7 @@ statement months), not rows of a confirmed statement, and not a balance.
 
 ## Amendment 2026-09-28 (f): ledger labels match across line breaks
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#358); the MyJCB statement parser releases are amended by (g)
 - Date: 2026-09-28
 - Carried by: `compactText` and `parseCreditLedger` in
   `services/collector-myjcb/src/parsers.ts`; `ledgerRows`,
@@ -1290,3 +1294,152 @@ kept, and recorded as unobserved.
   MyJCB parsers (names, versions, digest prefixes, times). The findings in
   the context are the owner's agent's structure-only survey; every test
   value is synthetic.
+
+## Amendment 2026-09-28 (g): the statement heading may carry its payment day
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-28
+- Carried by: `readMyJcbStatementHeading` in
+  `packages/domain/src/myjcb-statement-heading.ts`; `statedPaymentMonths`
+  and `creditStatementPeriod` in `services/collector-myjcb/src/parsers.ts`;
+  `myjcb-credit-statement-total@1.3.0` in
+  `packages/parsers/src/parsers/myjcb.ts`;
+  [MyJCB source note](../sources/myjcb.md),
+  [observations](../observations.md#myjcb-confirmed-months-stopped-on-a-dated-statement-heading-statement-parser-130)
+
+### Context
+
+1. **The run after amendment (f) stopped one step later.** The nightly run
+   of 2026-09-28 21:01Z, the first after amendment (f) deployed, stopped at
+   credit position 1 with `credit_statement_period`. The night before, it
+   had stopped at the same position with `ledger_parse`, which amendment (f)
+   fixed. The ledger header now matches, and the page's month is the next
+   check.
+2. **The confirmed page's heading carries a day.** The owner's round-5
+   structure survey (the stored position-1 page of the 09-27 run, structure
+   only, no values) shows the confirmed page's `h2` as
+   「YYYY年MM月DD日(曜)お支払い分のカードご利用明細」: the payment day and a
+   one-character weekday in parentheses before お支払い分. The stored
+   ボーナス払い schedule page's `h2` has the same dated form. The collector
+   and the statement parser matched only
+   「YYYY年M月お支払い分のカードご利用明細」, so the collector found no stated
+   month. Position 1 has no past-months `settlementYM`, so
+   `creditStatementPeriod` stopped the connection
+   (`credit-statement-period`), and `myjcb-credit-statement-total@1.2.0`
+   would have failed the page ("statement period missing or ambiguous").
+3. **The undated heading exists too.** Production has 24 `ok` parses of
+   `myjcb-credit-statement-total@1.2.0` with no warning. Each of them passed
+   the undated heading match, so earlier stored confirmed pages show the
+   undated form. Both forms have been observed.
+4. **The page's own total label is already dated.** The parser reads the
+   total as 「YYYY年M月D日(曜)お支払い金額合計」 (ASCII parentheses, one of
+   月火水木金土日, no NFKC), and the skip-payment page's as-of heading
+   (amendment (e)) is written the same way.
+5. **All four MyJCB statement parsers share one module.**
+   `myjcb-credit-ledger`, `myjcb-credit-statement-total`,
+   `myjcb-credit-past-month-balances` and
+   `myjcb-canonical-evidence-boundary` are defined in
+   `packages/parsers/src/parsers/myjcb.ts`, so they have one source closure
+   and one code digest. Any change to the statement parser changes all four
+   digests, and migration 0028 refuses a changed digest under a registered
+   version.
+
+### Options considered
+
+1. **A: read both forms, and compare the day with the total.** One shared
+   reading (`readMyJcbStatementHeading`) accepts exactly the undated form and
+   the dated form written like the total label. The collector records the
+   month. The parser also requires the heading's day to be the total's
+   payment date. Chosen.
+2. **B: match the month prefix and ignore the rest.** Rejected: any text
+   after 「YYYY年M月」 would name a month, including shapes nobody has
+   observed (ADR 0004).
+3. **C: normalize with NFKC and accept full-width parentheses and digits.**
+   Rejected: neither the heading nor the total label has been observed with
+   them, and the total label is matched without NFKC. A full-width form
+   stops, as any unobserved form does.
+4. **D: move the statement parser into its own module** so the other three
+   parsers keep their digests. Rejected for this change: removing it from
+   `myjcb.ts` changes that module, and with it all four digests, in the same
+   way. Keeping a stale copy in `myjcb.ts` so its bytes stay the same would
+   leave a second, unregistered `myjcb-credit-statement-total` in the code.
+
+### Decision
+
+- `readMyJcbStatementHeading` (domain) reads a heading's text with all
+  whitespace removed, as the collector's `compactText` and the parser's
+  heading text already are. It accepts exactly
+  - 「YYYY年M月お支払い分のカードご利用明細」, and
+  - 「YYYY年M月D日(W)お支払い分のカードご利用明細」, where W is one of
+    月火水木金土日 in ASCII parentheses.
+
+  The month must be 1 to 12 and the day a real day of that month
+  (`parseLocalDate`). It returns the month `YYYY-MM` and, for the dated
+  form, the date `YYYY-MM-DD`. Any other text is not a statement heading.
+  The weekday's shape is checked, not its agreement with the date, as for
+  the total label.
+
+- The collector (`statedPaymentMonths`) records the heading's month as
+  before. A confirmed page that names no month, or more than one (a dated
+  and an undated heading together count as two), still stops with
+  `credit-statement-period`. The past-months label must still agree with
+  the page's month.
+- `myjcb-credit-statement-total@1.3.0` requires exactly one statement
+  heading, as before. When the heading is dated, its date must equal the
+  total label's payment date, or the parse fails ("myjcb statement heading
+  date and payment date conflict"). A page with the undated heading is
+  recorded exactly as by 1.2.0.
+- Because the module is shared, the other three MyJCB parsers are released
+  with a patch bump and no behaviour change: `myjcb-credit-ledger@1.2.1`,
+  `myjcb-credit-past-month-balances@1.1.4`,
+  `myjcb-canonical-evidence-boundary@1.1.4`. `myjcb-skip-payment-schedule`
+  and every other parser keep their digests.
+- Amendment (d)'s unobserved acceptance path is not removed in this
+  release. Amendment (f) planned to remove it at the next MyJCB release;
+  doing so here would widen a stop fix into a behaviour change of the
+  shared page reading, which the collector also uses. It stays unobserved
+  and is removed separately.
+
+### Consequences
+
+- The first night after deployment reads position 1 with the dated heading
+  as a confirmed month with its payment month as the period, and goes on
+  to the later months and the schedule pages.
+- The repair lane re-parses the stored MyJCB artifacts under the four new
+  releases. Pages with the undated heading, ledgers and past-month
+  summaries publish identical observations. A stored confirmed page with
+  the dated heading, in a run eligible for parsing, now publishes its
+  total; how many exist was not counted.
+- A dated heading whose day is not the total's payment date fails the
+  parse. That page states two payment dates, and neither is chosen.
+- Limits: a heading in full-width parentheses or digits, with another
+  weekday form, or with any other wording still stops the collection. The
+  weekday is not checked against the date. The collector does not compare
+  the heading's day with anything; only the parser does. The bonus page's
+  dated `h2` is not read: that page stays `credit-schedule-07.html`, unread.
+
+### Verification
+
+- `services/collector-myjcb/test/credit-statement-state.test.ts`
+  (「ADR 0005 amendment (g)」): the dated heading (with or without a leading
+  zero, with whitespace and markup inside) names its month at any position;
+  the undated heading still does; a past-months label must agree with it;
+  a wrong weekday character, a multi-character weekday, missing or
+  full-width parentheses, no weekday, an impossible day or month, a
+  three-digit day, and two headings (dated and undated, or two dated) stop
+  with `credit-statement-period`; `collectCredit` stores the dated page at
+  position 1 with period `YYYY-MM` and no stop. Without the change, all
+  three tests fail, the first and last with the production stop.
+- `packages/parsers/test/myjcb-statement.test.ts` (1.3.0): a dated heading
+  whose day is the total's date gives the same result as the undated
+  heading; another day fails with the heading date conflict, another month
+  with the month conflict; the malformed shapes above and two headings fail
+  as a missing or ambiguous period; a dated page with no total is
+  `statement_total_missing` as before.
+- `mise run //packages/parsers:digests`: only the four MyJCB statement
+  parsers change digest.
+- `packages/read-model/test/card-usage.test.ts`: the pin names
+  `myjcb-credit-ledger@1.2.1`; every other column is unchanged.
+- Production was read only as counts by the caller: the stop code of the
+  run and the 24 `ok` parses of 1.2.0. The heading shape is the owner's
+  structure-only survey; every test value is synthetic.

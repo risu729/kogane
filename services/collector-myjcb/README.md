@@ -177,7 +177,7 @@ position 2以降を停止にしないのは、productionのposition 7と8がh1�
 月のperiodは明細自身の名前にする（`src/parsers.ts`の`creditStatementPeriod`）。ledger parserはperiodを行のexternal idに入れるので、明細がposition 1から2へ移ってもperiodが変わらなければ行のidも変わらない。
 
 - 過去月APIがlabelする月: `settlementYM`をそのまま記録する。確定pageが月を名乗るなら同じ月でなければ停止する
-- それ以外の確定page: `<h2>YYYY年M月お支払い分のカードご利用明細</h2>`が名乗る月を`YYYY-MM`で記録する。名乗らない、または二つ以上なら`credit-statement-period`で停止する
+- それ以外の確定page: `<h2>YYYY年M月お支払い分のカードご利用明細</h2>`、または支払日つきの`<h2>YYYY年M月D日(曜)お支払い分のカードご利用明細</h2>`（ADR 0005 amendment (g)）が名乗る月を`YYYY-MM`で記録する。名乗らない、または二つ以上なら`credit-statement-period`で停止する
 - 未確定と`unknown`のpage: `detailMonth-N`（月を名乗らないため）
 
 停止log（`myjcb-credit-statement-period`）には`detailMonth`、名乗った月の個数、API labelの有無だけを出す。詳細は`docs/sources/myjcb.md`の「明細の月」にある。
