@@ -17,6 +17,25 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Identity values: the crosswalk is retired and the one-time rewrite is staged (migration 0062, no parser release)
+
+2026-09-28. The owner decided that the retired importer's `v1` identity
+values (Vpass `vpass-card-v1-`, MoneyForward `moneyforward-account-v1-`) are
+replaced once by the collectors' `v2` values in the stored rows, instead of
+being joined by a crosswalk record
+([ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)).
+Migration 0062 adds the staging table `identity_value_rewrites`, stages the
+MoneyForward pairs whose current transaction rows overlap one-to-one
+(compared by the selected month, date, description, amount and occurrence,
+since the external id carries the identity), validates every staged pair by
+trigger, and drops the unused crosswalk table. No observation, parse run or
+parser changes: the rewrite of the five identity columns, including
+`transaction_observations.source_account` of the MoneyForward importer
+parses, is migration 0063, not in the repository yet. Until then a value
+read under both identities is still two source accounts and two entities.
+Tests: `packages/storage-d1/test/identity-value-rewrite-migration.test.ts`,
+`services/processor/test/moneyforward-producer-switch.test.ts`.
+
 ## MyJCB: confirmed months stopped on a line break in the ledger header (schedule parser 0.1.1)
 
 2026-09-28. Observed by the owner's agent in the stored MyJCB pages (round

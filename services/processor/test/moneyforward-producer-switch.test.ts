@@ -15,8 +15,9 @@
 //   (`accountEntityId`).
 // - The importer's v1 value and the collector's v2 value of the same account
 //   are different identities: the months both captured are read under two
-//   source accounts and two entities. That is the stated limit until a
-//   reviewed crosswalk joins them, pinned here so a change to it is seen.
+//   source accounts and two entities. That is the stated limit until the
+//   one-time identity-value rewrite of ADR 0030 pairs them, pinned here so a
+//   change to it is seen.
 //
 // Everything is synthetic: the pages are the anonymous observation-pipeline
 // fixtures, and the v1 value is made up (the importer's key is gone).
@@ -359,7 +360,8 @@ test("the importer's v1 and the collector's v2 identity of one account differ: t
   // Nothing merges a different identity: February shows once per identity.
   // The identity check in docs/identity-operations.md is how the owner sees it
   // (identities not known to the importer) before relying on the read; a
-  // reviewed crosswalk, not this change, is what may join them (ADR 0029).
+  // one-time identity-value rewrite (ADR 0030), not this code, is what may
+  // join them.
   expect(
     (await transactions(env)).map((row) => [row.producer, row.source_account, row.as_of]),
   ).toEqual([
@@ -373,4 +375,18 @@ test("the importer's v1 and the collector's v2 identity of one account differ: t
   const mappings = await all<{ account_id: string }>(env, MAPPINGS);
   expect(mappings).toHaveLength(2);
   expect(mappings[0]!.account_id).not.toBe(mappings[1]!.account_id);
+
+  // Migration 0062's staging statement (ADR 0030 amendment), run on this
+  // store through the real current-identity view, pairs exactly these two
+  // values: the February rows both producers captured are the shared rows.
+  // The store applied 0062 when it was empty, so its stage is empty until now.
+  const staging = splitSqlStatements(
+    migrationSql(CORE_MIGRATIONS_URL, "0062_identity_value_rewrite_staging.sql"),
+  ).filter((sql) => sql.startsWith("INSERT INTO identity_value_rewrites"));
+  expect(staging).toHaveLength(1);
+  expect(await all(env, "SELECT * FROM identity_value_rewrites")).toEqual([]);
+  await env.DB.prepare(staging[0]!).run();
+  expect(await all(env, "SELECT * FROM identity_value_rewrites")).toEqual([
+    { source_id: "moneyforward-me", old_value: V1, new_value: V2, basis: "shared-rows" },
+  ]);
 }, 60_000);

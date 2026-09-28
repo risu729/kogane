@@ -16,7 +16,8 @@
 // ADR 0029: the collector's token is the unkeyed `vpass-card-v2-` digest of
 // the card tuple. Migration 0057 admits it in the view and the identity pin;
 // the importer's `vpass-card-v1-` tokens stay valid, and a v1 and a v2 token
-// are different account entities until a reviewed crosswalk joins them.
+// are different account entities until the one-time identity-value rewrite
+// of ADR 0030 replaces the v1 value with the v2 one in the stored evidence.
 //
 // Everything is synthetic: the card tuple, the card names, the merchants and
 // the amounts are placeholders in the observed shapes.
@@ -622,7 +623,7 @@ describe("ADR 0023 purchase recognition moves to the collector's binding", () =>
   test.each([
     ["a v1 token derived under another key", TOKEN_B],
     // ADR 0029: the collector's v2 token of the importer's v1 card, even with
-    // the same hex, is another entity until a reviewed crosswalk joins them.
+    // the same hex, is another entity unless the ADR 0030 rewrite pairs them.
     ["the v2 token of the importer's v1 card", TOKEN_A_V2],
   ])(
     "%s is another account entity: nothing carries over, nothing is counted twice",

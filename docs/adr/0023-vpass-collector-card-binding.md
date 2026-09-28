@@ -470,7 +470,10 @@ and the owner action above are removed. Migration 0057 recreates the trusted
 view and rebuilds `identity_vpass_bindings` so both admit `vpass-card-v1-` and
 `vpass-card-v2-` tokens and nothing else. A card's v1 and v2 tokens are
 different values and so different account entities; joining them is a
-separate, reviewed crosswalk. The text above is left as it was decided.
+separate decision, now the one-time identity-value rewrite of
+[ADR 0030's amendment](0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)
+(2026-09-28), which replaced the crosswalk first decided there. The text
+above is left as it was decided.
 
 ## Note (2026-09-27): both stated-total fields are on the live site
 

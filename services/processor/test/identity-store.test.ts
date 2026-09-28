@@ -113,13 +113,6 @@ ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
     for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
       await db.prepare(sql).run();
   }
-  // The identity store reads 0058's crosswalk (ADR 0030); its command-table
-  // rebuild needs migrations this store does not carry, so only the table
-  // and its guards are applied.
-  for (const sql of splitSql(
-    readFileSync(new URL("0058_identity_crosswalk.sql", migrationDir), "utf8"),
-  ).filter((statement) => statement.includes("account_identity_crosswalk")))
-    await db.prepare(sql).run();
   await db.batch([
     db.prepare(
       "INSERT INTO sources VALUES('smbc-bank','synthetic'),('v-point','synthetic'),('mizuho-bank','synthetic')",
