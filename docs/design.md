@@ -100,6 +100,13 @@ written while names were replaced carry the marker `[redacted:name]` and are
 not rewritten
 ([ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)).
 
+[ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)
+proposes one declared exception to the immutable class: a single migration that replaces the
+retired importer's identity values (platform-derived digests, not provider
+claims) by the collector's in five columns; that migration is not in the
+repository yet, and this table gains the exception when it lands. No other
+migration may rewrite evidence without a new ADR.
+
 Evidence is not "the truth" — providers correct their own data. Evidence is a
 record of _what a source claimed at a point in time_. That is why nothing
 overwrites it, and why multiple conflicting claims can coexist.

@@ -207,4 +207,6 @@ Collector は保存前の account detail HTML から旧 importer と同じ検証
 `parser_rejected` にする。ログは固定 code（`identity`）だけを持ち、識別値は
 出力しない。旧 importer の HMAC identity（`moneyforward-account-v1-`）も parser は
 受け付けるが、その key は失われており、同じ account の v1 と v2 は別 account になる
-（対応付けは別途レビューされる crosswalk が決めるまで追加しない）。
+（ADR 0030 の修正により、owner が確認した v1→v2 の組を一度だけ保存値に上書きする
+rewrite で対応付ける。組を staging する migration 0062 はあるが、上書きする 0063 は
+まだない。[identity operations](../identity-operations.md#one-time-identity-value-rewrite)）。

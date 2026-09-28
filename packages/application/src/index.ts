@@ -40,7 +40,6 @@ export {
   type GrantConfigProblem,
   type GrantLoader,
   type IdentityAssignPayload,
-  type IdentityCrosswalkPayload,
   type IdentityReleasePayload,
   type IdentitySubject,
   IDENTITY_SUBJECTS,
@@ -107,11 +106,6 @@ export {
 } from "./command/simulate.ts";
 export { commit, type CommitInput, type CommitOutput, getReceipt } from "./command/commit.ts";
 export { relationMutation } from "./operations/relation-writes.ts";
-export {
-  crosswalkProposalDigest,
-  identityCrosswalkMutation,
-  identityCrosswalkPlan,
-} from "./operations/identity-crosswalk.ts";
 export { d1CommandStore, type D1Like } from "./operations/store.ts";
 export {
   currentRevisionsSql,

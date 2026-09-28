@@ -17,8 +17,10 @@
 - Amends: [ADR 0023](0023-vpass-collector-card-binding.md) and
   [ADR 0027](0027-moneyforward-collector-account-identity.md) (each carries a
   dated amendment note)
-- Related: the one-time crosswalk that joins each account's v1 and v2
-  identity is a separate, later decision and is not made here
+- Related: joining each account's v1 and v2 identity is a separate, later
+  decision and is not made here: [ADR 0030](0030-identity-crosswalk.md),
+  first a crosswalk, amended on 2026-09-28 to a one-time identity-value
+  rewrite
 - Amended: 2026-09-27, class (d) applies to stored evidence (see
   [Amendment](#amendment-2026-09-27-names-are-removed-from-stored-evidence));
   merged in [#333](https://github.com/risu729/kogane/pull/333) and withdrawn
@@ -154,9 +156,11 @@ confirmed the field shapes.
 - **No secret and no owner action.** The two "owner sets the key" items leave
   the roadmap. A secret set earlier is no longer read; the collectors'
   READMEs say how to delete it.
-- **v1 and v2 are separate entities until a crosswalk.** The importer's key
-  is lost, so no equal value links a v1 identity to its v2 successor. Until
-  the separate, reviewed crosswalk decision joins them:
+- **v1 and v2 are separate entities until ADR 0030's rewrite.** The
+  importer's key is lost, so no equal value links a v1 identity to its v2
+  successor. Until the separate decision joins them (ADR 0030, amended on
+  2026-09-28 from a crosswalk to a one-time rewrite of the stored v1 values;
+  the rewrite migration is not shipped yet):
   - MoneyForward: collector runs parse as soon as they register, and the
     transactions read ranks snapshots per unit key and month, so a month both
     the importer and the collector captured is listed under two source

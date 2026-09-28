@@ -195,9 +195,9 @@ is recognised, and nothing is counted twice.
 **The v1 and v2 tokens of one card are two entities.** The collector derives
 only v2 tokens, and the importer's key that made the v1 tokens is lost, so no
 equal value links a card's importer-era account to its collector-era account.
-Until a reviewed crosswalk
-([below](#joining-importer-era-and-collector-era-identities-one-time)) joins
-them, a card read under both is two account
+Until the one-time identity-value rewrite
+([below](#one-time-identity-value-rewrite)) replaces a card's v1 token by
+its v2 token, a card read under both is two account
 entities with nothing carried over; its purchases are recognised again on the
 new account (the importer's event is retired, so the captured total is not
 doubled). No owner action or secret is needed any more. After the next
@@ -240,8 +240,8 @@ current monthly snapshot per unit key and month, so for a month both
 producers captured the importer's v1 snapshot and the collector's v2 snapshot
 are both current: the same provider rows are listed under two source accounts
 and two account entities, and nothing maps one to the other. That is a known
-limit until a reviewed crosswalk joins the two identities of each account
-([below](#joining-importer-era-and-collector-era-identities-one-time)).
+limit until the one-time identity-value rewrite replaces each account's v1
+identity by its v2 identity ([below](#one-time-identity-value-rewrite)).
 The runs are parsed as soon as they register (MoneyForward's datasets are not
 withheld). No owner action or secret is needed any more. After the next
 collection, count identities per producer and version (read-only, counts only):
@@ -272,96 +272,105 @@ importer's source account is not followed, and account connection reviews,
 keyed by producer, do not carry over. A v1 and a v2 identity differ, and so do
 their entities.
 
-## Joining importer-era and collector-era identities (one-time)
+## One-time identity-value rewrite
 
 The retired importer's Vpass tokens and MoneyForward identities were derived
 under a key that is lost, so a collector's value for the same card or account
-differs and resolves to a second account entity. Where both producers
-captured the same provider rows, an operator can record, once per card or
-account, that the new value continues the old one
-([ADR 0030](adr/0030-identity-crosswalk.md)).
+differs and resolves to a second account entity. The owner decided to
+replace each importer-era (`v1`) value by its collector-era (`v2`) value in
+the stored rows, once
+([ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)).
+The earlier crosswalk command and its proposal script are removed. The
+rewrite takes two migrations:
 
-**1. Proposals (read-only, counts only).** From the repository root, with
-D1 read access through `wrangler.diagnostic.jsonc`:
+- **0062 (in the repository)** creates `identity_value_rewrites`, stages the
+  MoneyForward pairs the stored rows prove (basis `shared-rows`), and drops
+  the crosswalk table. It aborts, and the deploy stops, if the crosswalk table
+  holds a row.
+- **0063 (not in the repository yet)** rewrites the staged values and drops the
+  staging table. It is merged only after the steps below.
 
-```sh
-bun services/processor/scripts/identity-crosswalk-proposals.ts
-```
+Every query here is read-only and returns counts only, except the one
+`INSERT` of step 2, which writes only the staging table. Run them from the
+D1 console of the CORE database, or with
+`wrangler d1 execute kogane-raw-evidence --remote --config services/processor/wrangler.jsonc --command "<sql>"`.
 
-One line per collector-era value and importer-era candidate, then a summary:
-
-```json
-{"source":"moneyforward-me","newKeyRef":"moneyforward-account-v2-<64 hex>","oldKeyRef":"moneyforward-account-v1-<64 hex>","sharedRows":12,"newOnlyRows":3,"oldOnlyRows":40,"months":2,"verdict":"unique"}
-{"summary":{"unique":1,"ambiguous":0,"none":0}}
-```
-
-The key refs are the identity values (opaque hashes); nothing else but
-counts is printed. The rows compared are current transaction observations
-filed under a value. A Vpass row is its external id; a MoneyForward row is
-the selected month, date, description and amount text plus the occurrence
-counter, because its external id carries the identity itself. `unique`: the
-new value shares rows with exactly one old value, which shares rows with no
-other new value. `ambiguous`: anything else shared. `none`: nothing shared
-(`oldKeyRef` and `oldOnlyRows` are null). Only a `unique` line can be
-recorded; `ambiguous` and `none` stay split. A verdict is a proposal, not
-proof: an identical row in another account (same month, date, description,
-amount and occurrence) makes a real match `ambiguous`, and coincidental rows
-alone can make an unrelated pair `unique`, so read `sharedRows` against the
-only-rows before recording one. Collector Vpass statement pages are not
-parsed today, so Vpass lines are `none` or absent until they are.
-
-**2. Record one crosswalk (operator only).** Through the command routes of
-the evidence browser (`POST /api/command/v1/plan`, then `simulate`,
-`approve`, `commit`; [change lifecycle](change-lifecycle.md)), with the
-line's values copied as they are:
-
-```json
-{
-  "kind": "identity.crosswalk.accept",
-  "payload": {
-    "source": "moneyforward-me",
-    "fromRef": "<oldKeyRef>",
-    "toRef": "<newKeyRef>",
-    "sharedRows": 12,
-    "newOnlyRows": 3,
-    "oldOnlyRows": 40,
-    "months": 2,
-    "reason": "Reviewed proposal: the same rows under both values"
-  }
-}
-```
-
-The server measures the pair again and refuses the plan when the counts
-differ (`stale_context`, run the script again), when either value is already
-in a crosswalk or the overlap is not one-to-one (`target_ambiguous`), or
-when nothing is shared (`incomplete_evidence`). An agent may plan it; only
-the operator in `OPERATOR_SUBJECTS` approves and commits. The commit measures
-once more inside its write, so rows parsed after the plan make it
-`stale_context` with nothing written.
-
-**What the commit writes.** An `accept` decision, one
-`account_identity_crosswalk` row (counts and a digest), and, for each
-collector source account of the new value whose current mapping is
-automatic, a new rule revision pointing at the importer-era entity. From
-then on `accountEntityId` resolves the new value to that entity. Nothing is
-deleted; a manual decision on the collector's source account stays; the
-MoneyForward months both producers captured are still listed under two
-source accounts in the transactions read (ADR 0027), now of one entity.
-There is no command that undoes a crosswalk.
-
-**Check (read-only, counts only).**
+**0. Before the release with 0062 (optional).** It must be 0, or 0062
+aborts:
 
 ```sql
-SELECT x.source_id, count(DISTINCT x.id) AS crosswalks,
-       count(m.source_account_id) AS collector_source_accounts
-FROM account_identity_crosswalk x
-LEFT JOIN source_accounts s ON s.source_id=x.source_id
- AND s.producer_id<>'collector-r2-importer'
- AND s.reference_json IN (json_array('vpass:card',x.to_account_ref),
-                          json_array('moneyforward-me:'||x.to_account_ref))
-LEFT JOIN current_account_mappings m ON m.source_account_id=s.id
-GROUP BY x.source_id;
+SELECT count(*) AS crosswalk_rows FROM account_identity_crosswalk;
 ```
+
+**1. Preflight after 0062.** What the migration staged, and whether
+anything outside the rewrite's scope carries a MoneyForward `v1` value (0063
+rewrites the MoneyForward value in transaction observations only; every
+count below must be 0):
+
+```sql
+SELECT source_id, basis, count(*) AS pairs FROM identity_value_rewrites GROUP BY 1, 2;
+
+SELECT
+ (SELECT count(*) FROM balance_observations WHERE source_account GLOB 'moneyforward-me:moneyforward-account-v1-*') AS balance,
+ (SELECT count(*) FROM position_observations WHERE source_account GLOB 'moneyforward-me:moneyforward-account-v1-*') AS position,
+ (SELECT count(*) FROM valuation_observations WHERE source_account GLOB 'moneyforward-me:moneyforward-account-v1-*') AS valuation,
+ (SELECT count(*) FROM scheduled_payment_observations WHERE source_account GLOB 'moneyforward-me:moneyforward-account-v1-*') AS scheduled_payment;
+```
+
+A staged MoneyForward pair is a proposal from shared rows (the selected
+month, date, description, amount and occurrence of current transaction
+observations, compared across the two values): only a one-to-one overlap is
+staged, and coincidental rows in another account can make a real pair not
+one-to-one or, in principle, stage an unrelated one. If a staged pair is
+wrong, remove that row before 0063 (the table is operational, not evidence):
+
+```sql
+DELETE FROM identity_value_rewrites WHERE source_id='moneyforward-me' AND old_value='<v1 value>';
+```
+
+**2. Stage the Vpass pairs.** No collector-era Vpass statement row is parsed,
+so the rows cannot pair Vpass tokens; the owner states each card's pair,
+the importer's `vpass-card-v1-` token and the collector's `vpass-card-v2-`
+token, in one statement (all rows or none):
+
+```sql
+INSERT INTO identity_value_rewrites (source_id, old_value, new_value, basis) VALUES
+ ('vpass', 'vpass-card-v1-<64 hex>', 'vpass-card-v2-<64 hex>', 'owner-recomputed'),
+ ('vpass', 'vpass-card-v1-<64 hex>', 'vpass-card-v2-<64 hex>', 'owner-recomputed');
+```
+
+One row per card. The trigger refuses the statement with a closed code:
+`identity_value_rewrite_old_unknown` (no importer source account with that
+token, or no importer fetch unit keyed by it),
+`identity_value_rewrite_new_unknown` (no collector fetch unit keyed by the
+new token, or the importer carries it), `identity_value_rewrite_not_one_to_one`
+(either token is already staged). A shape error (`v1` and `v2` swapped,
+upper-case hex, wrong length) fails the table's CHECK.
+
+**3. Confirm.** Expected: `moneyforward-me` `shared-rows` 4 and `vpass`
+`owner-recomputed` 6, each with as many distinct old and new values as
+pairs; and 0 held mappings (a manual or protected mapping on a collector
+source account of a staged new value, which 0063 would refuse to re-point):
+
+```sql
+SELECT source_id, basis, count(*) AS pairs,
+       count(DISTINCT old_value) AS old_values, count(DISTINCT new_value) AS new_values
+FROM identity_value_rewrites GROUP BY 1, 2 ORDER BY 1;
+
+SELECT count(*) AS held
+FROM identity_value_rewrites x
+JOIN source_accounts s ON s.source_id=x.source_id AND s.producer_id<>'collector-r2-importer'
+ AND s.reference_json=CASE x.source_id WHEN 'vpass' THEN json_array('vpass:card', x.new_value)
+  ELSE json_array('moneyforward-me:'||x.new_value) END
+JOIN current_account_mappings m ON m.source_account_id=s.id
+WHERE m.method<>'rule'
+   OR EXISTS(SELECT 1 FROM protected_mapping_subjects p
+             WHERE p.subject_kind='account_mapping' AND p.subject_ref=s.id);
+```
+
+Report these counts (counts only) on the pull request that carries 0063.
+Until 0063 applies, nothing reads the staging table and every value keeps
+its current entity.
 
 ## Policy 2: Mizuho rule re-identification
 

@@ -24,7 +24,6 @@ import {
   type Principal,
   PLAN_TTL_SECONDS_DEFAULT,
   APPROVAL_TTL_SECONDS_DEFAULT,
-  identityCrosswalkMutation,
   relationMutation,
   simulate,
   statusForCommandError,
@@ -119,7 +118,6 @@ export function changeMutationPlanners(db: D1Database): MutationPlanners {
     "card-refund.withdraw": cardReviewMutation,
     "card-installment.link": cardReviewMutation,
     "card-installment.unlink": cardReviewMutation,
-    "identity.crosswalk.accept": identityCrosswalkMutation,
   };
 }
 

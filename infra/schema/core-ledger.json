@@ -820,6 +820,21 @@
       "statementCount": 4,
       "insertStatements": [],
       "sha256": "e2376a044a7af9d9fe12c17c97fa3e7fbdb85ad7709a63a8eb39599bda34df29"
+    },
+    {
+      "file": "0062_identity_value_rewrite_staging.sql",
+      "statementCount": 9,
+      "insertStatements": [
+        {
+          "table": "identity_value_rewrite_0062_guard",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "identity_value_rewrites",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "696480e16a84b9dfb7fee9e7463ec70f16af642fefc2ca4bf0439f409612312a"
     }
   ],
   "tables": [
@@ -993,114 +1008,6 @@
       ],
       "appendOnly": true,
       "sqlSha256": "e423fd2791084cc9"
-    },
-    {
-      "name": "account_identity_crosswalk",
-      "classification": "core-keep",
-      "planRow": "decisions and relations",
-      "strict": true,
-      "withoutRowid": false,
-      "columns": [
-        {
-          "name": "id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 1
-        },
-        {
-          "name": "source_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "from_account_ref",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "to_account_ref",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "evidence_json",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "decision_revision_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "operation_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "actor_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        }
-      ],
-      "primaryKey": [
-        "id"
-      ],
-      "foreignKeys": [
-        {
-          "column": "decision_revision_id",
-          "references": "decision_revisions(id)",
-          "onDelete": "NO ACTION",
-          "onUpdate": "NO ACTION"
-        },
-        {
-          "column": "operation_id",
-          "references": "decision_operations(operation_id)",
-          "onDelete": "NO ACTION",
-          "onUpdate": "NO ACTION"
-        },
-        {
-          "column": "source_id",
-          "references": "sources(id)",
-          "onDelete": "NO ACTION",
-          "onUpdate": "NO ACTION"
-        }
-      ],
-      "indexes": [],
-      "triggers": [
-        "account_identity_crosswalk_no_delete",
-        "account_identity_crosswalk_no_update"
-      ],
-      "noUpdateTriggers": [
-        "account_identity_crosswalk_no_update"
-      ],
-      "noDeleteTriggers": [
-        "account_identity_crosswalk_no_delete"
-      ],
-      "appendOnly": true,
-      "sqlSha256": "50fe9a150e59ce5b"
     },
     {
       "name": "account_mappings",
@@ -7608,6 +7515,55 @@
       ],
       "appendOnly": true,
       "sqlSha256": "8aa6794535c30f0a"
+    },
+    {
+      "name": "identity_value_rewrites",
+      "classification": "operational-mutable",
+      "planRow": "one-time identity-value rewrite staging (dropped by the rewrite)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "old_value",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "new_value",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "basis",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [
+        "identity_value_rewrites_new_known",
+        "identity_value_rewrites_old_known",
+        "identity_value_rewrites_one_to_one"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "5d04bc070266e1d4"
     },
     {
       "name": "identity_vpass_bindings",
@@ -14189,20 +14145,6 @@
       "sqlSha256": "bab0607b3a2e4a2f"
     },
     {
-      "name": "account_identity_crosswalk_no_delete",
-      "table": "account_identity_crosswalk",
-      "timing": "BEFORE",
-      "event": "DELETE",
-      "sqlSha256": "b8b8623e99683422"
-    },
-    {
-      "name": "account_identity_crosswalk_no_update",
-      "table": "account_identity_crosswalk",
-      "timing": "BEFORE",
-      "event": "UPDATE",
-      "sqlSha256": "8578f019ad92660a"
-    },
-    {
       "name": "account_mapping_revision",
       "table": "account_mappings",
       "timing": "BEFORE",
@@ -15902,6 +15844,27 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "04f2ba02af58424c"
+    },
+    {
+      "name": "identity_value_rewrites_new_known",
+      "table": "identity_value_rewrites",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "9627f77c99082508"
+    },
+    {
+      "name": "identity_value_rewrites_old_known",
+      "table": "identity_value_rewrites",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "c2b3f5b14ed01990"
+    },
+    {
+      "name": "identity_value_rewrites_one_to_one",
+      "table": "identity_value_rewrites",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "fc74f214af4e4491"
     },
     {
       "name": "identity_vpass_binding_provenance",
@@ -17628,12 +17591,11 @@
   "summary": {
     "tableCount": 117,
     "viewCount": 39,
-    "triggerCount": 412,
+    "triggerCount": 413,
     "explicitIndexCount": 117,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
-        "account_identity_crosswalk",
         "account_mappings",
         "accounts",
         "acquisition_sessions",
@@ -17740,6 +17702,7 @@
         "card_purchase_scan_cursor",
         "card_settlement_scan_cursor",
         "collection_scan_state",
+        "identity_value_rewrites",
         "observation_lane_state",
         "observation_parse_jobs",
         "observation_replay_plans",
@@ -17771,6 +17734,7 @@
       "decision_outbox",
       "economic_event_revisions",
       "http_scope_rules",
+      "identity_value_rewrites",
       "ingest_client_producers",
       "ingest_client_routes",
       "ingest_clients",
@@ -17844,8 +17808,9 @@
       "0051_card_purchase_review_commands.sql",
       "0053_price_promotion.sql",
       "0057_vpass_card_token_v2.sql",
-      "0058_identity_crosswalk.sql"
+      "0058_identity_crosswalk.sql",
+      "0062_identity_value_rewrite_staging.sql"
     ],
-    "schemaSha256": "16a646b7951c02da66139198b2d8e28fb90f2ef789e0dd55097b6c6df9de88b2"
+    "schemaSha256": "aa182c15a920b7f143c7e9d3d489f2f308db6a029c0708e69bcc2a33eba32a1e"
   }
 }

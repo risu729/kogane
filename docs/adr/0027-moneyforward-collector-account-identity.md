@@ -277,5 +277,8 @@ The parsers (`moneyforward-monthly-transactions` 2.0.3,
 transactions read accept both `moneyforward-account-v1-` and
 `moneyforward-account-v2-` unit keys. An account's v1 and v2 identities are
 different values and so different account entities, and the months both
-producers captured are listed under both until a separate, reviewed crosswalk
-joins them. The text above is left as it was decided.
+producers captured are listed under both until the one-time identity-value
+rewrite of
+[ADR 0030's amendment](0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)
+(2026-09-28; it replaced the crosswalk first decided there) puts the `v2`
+value in place of the `v1` value. The text above is left as it was decided.

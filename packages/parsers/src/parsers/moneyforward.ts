@@ -30,8 +30,8 @@ const MAX_HTML_BYTES = 8 * 1024 * 1024;
 const MAX_TABLES = 1_000;
 const MAX_ROWS_PER_TABLE = 1_000;
 // The importer's HMAC identity (v1, historical) or the unkeyed digest the
-// collector derives (v2, ADR 0029); the two are different accounts until a
-// crosswalk decides otherwise.
+// collector derives (v2, ADR 0029); the two are different accounts unless the
+// one-time identity-value rewrite of ADR 0030 pairs them.
 const ACCOUNT_IDENTITY = /^moneyforward-account-v[12]-[0-9a-f]{64}$/u;
 // The provider emits an escaped dialog template alongside the empty calendar.
 // Compare only audited tag/attribute-name structure, never provider text or values.

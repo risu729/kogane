@@ -148,7 +148,8 @@ Concrete limits in the current code:
   collector capture would retire the importer-era purchases of its card-month
   and its rows would be skipped as `account_not_resolved`. A card's v2 token
   is never its importer-era v1 token, so the two are different account
-  entities until a reviewed crosswalk joins them. The collector's statement
+  entities until the one-time identity-value rewrite (below) replaces the v1
+  token. The collector's statement
   pages are registered without a parser dataset, so none is parsed today;
   releasing them is a later change, made once the v1 and v2 entities of each
   card are decided
@@ -163,22 +164,23 @@ Concrete limits in the current code:
   shared-R2 run were before ADR 0027. The importer's v1 identities are never
   equal to the collector's v2 identities, so every collector account is a new
   source account and account entity, and the months both producers captured
-  are listed under two source accounts in the transactions read until a
-  reviewed crosswalk joins them. Whether the provider's detail pages still
-  carry the tuple has not been observed since the importer was retired
+  are listed under two source accounts in the transactions read until the
+  one-time identity-value rewrite (below) replaces the v1 identity. Whether
+  the provider's detail pages still carry the tuple has not been observed since the importer was retired
   ([ADR 0027](adr/0027-moneyforward-collector-account-identity.md)).
 - A Vpass card or MoneyForward account whose collector value differs from the
-  importer's is a second account entity until the operator records a
-  one-time crosswalk (`identity.crosswalk.accept`,
-  [ADR 0030](adr/0030-identity-crosswalk.md)); a read-only script proposes
-  them from rows both producers captured. Only a one-to-one overlap can be
-  recorded: a card or account whose collector capture shares no stored row
-  with the importer's, or shares rows with more than one value, stays split,
-  and no command undoes a recorded crosswalk. It joins entities only: the
-  MoneyForward months both producers captured are still listed twice in the
-  transactions read, now under one entity. No collector Vpass row is parsed
-  yet, so no Vpass crosswalk can be proposed until the statement pages are
-  released. No proposal has been run against production.
+  importer's is a second account entity until a one-time identity-value
+  rewrite replaces the importer's `v1` value by the collector's `v2` value in
+  the stored rows
+  ([ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk),
+  which retired the crosswalk command). Migration 0062 stages the pairs:
+  the MoneyForward pairs whose current transaction rows overlap one-to-one,
+  and the Vpass pairs the owner inserts
+  ([identity operations](identity-operations.md#one-time-identity-value-rewrite)).
+  The rewrite itself (migration 0063, which also makes the identity store
+  find a source account by its natural key) is not in the repository yet, so
+  every value is still its own entity today. A card or account that is not
+  staged stays split. No staging count has been read from production.
 - Vpass, MyJCB, Sony Bank, Money Forward ME, V Point (and its V Point Pay
   email route), V Point Pay and GLOBAL PASS had no registered collector run
   between 2026-09-12 and the release that carries
