@@ -159,9 +159,15 @@ version = "1.5.7"
 backend = "aqua:tombi-toml/tombi"
 
 [tools.tombi."platforms.linux-x64"]
+checksum = "sha256:9695859dd6aca07c11dcf1b8a8dab70c23427d420fc231aac49371f9d3ec0754"
+url = "https://github.com/tombi-toml/tombi/releases/download/v1.5.7/tombi-cli-1.5.7-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/594191084"
 provenance = "github-attestations"
 
 [tools.tombi."platforms.windows-x64"]
+checksum = "sha256:938b012abf29a30c5856cffd2eedbd03728c9b62450dd93388241ed840fd9daf"
+url = "https://github.com/tombi-toml/tombi/releases/download/v1.5.7/tombi-cli-1.5.7-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/594191083"
 provenance = "github-attestations"
 
 [[tools.typos]]
