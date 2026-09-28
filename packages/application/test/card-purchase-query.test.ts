@@ -2,7 +2,7 @@
 // CORE migration, with purchases written by the guarded recognition builder
 // and statements, bank debits and settlement reviews seeded the way their own
 // writers store them (card-purchase-world.ts). Synthetic values only.
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import {
   classifyCardUsage,
@@ -21,6 +21,14 @@ import {
   queryCardPurchases,
 } from "../src/query/card-purchases.ts";
 import { PurchaseWorld, recognise } from "./card-purchase-world.ts";
+import { migratedDatabase } from "./sqlite-store.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite-store.ts).
+beforeAll(() => {
+  migratedDatabase().close();
+}, 60_000);
 
 const worlds: { close(): void }[] = [];
 function world(): PurchaseWorld {

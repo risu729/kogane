@@ -20,7 +20,7 @@
 // `D1Like` each half is handed, so the plan compared is the plan of the SQL
 // that actually ran, and nothing can drift between the test and the code.
 import type { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as drizzledArtifacts from "../src/drizzle/artifacts.ts";
 import * as drizzledRuns from "../src/drizzle/fetch-runs.ts";
 import * as drizzledRegistry from "../src/drizzle/ingest-registry.ts";
@@ -39,7 +39,14 @@ import {
   EMPTY_RUN_ID,
   pilotDatabase,
 } from "./core-fixture.ts";
-import { sqliteD1 } from "./sqlite.ts";
+import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 interface Issued {
   sql: string;

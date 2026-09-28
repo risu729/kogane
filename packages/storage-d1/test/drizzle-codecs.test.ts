@@ -14,14 +14,21 @@
 // `CivilDate` and writes back the same bytes, and a value the column cannot
 // hold raises instead of being rounded into one it can.
 import type { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
 import { decodeDecimal } from "../src/codecs/decimal.ts";
 import { coreDrizzle } from "../src/drizzle/client.ts";
 import { observationDecimalValues, observationReplayPlans } from "../src/drizzle/schema/core.ts";
 import { BIG_COEFFICIENT, SOURCE, pilotDatabase } from "./core-fixture.ts";
-import { sqliteD1 } from "./sqlite.ts";
+import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 let database: Database;
 let db: ReturnType<typeof coreDrizzle>;

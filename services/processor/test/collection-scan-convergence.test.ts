@@ -15,7 +15,7 @@
 // `provider_run_failed`) and with a producer the Processor has no route for
 // (retryable `inactive_ingest_route`), which are the shapes of the refusals
 // observed, not their contents.
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import {
   meterBucket,
   meterD1,
@@ -43,6 +43,14 @@ import {
   SOURCE,
   type CollectionHarness,
 } from "./collection-harness.ts";
+import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const UNROUTED_PRODUCER = "synthetic-unrouted-collector";
 const START_MS = Date.parse("2026-09-20T00:00:00.000Z");

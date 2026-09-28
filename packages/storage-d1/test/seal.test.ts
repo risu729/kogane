@@ -7,7 +7,7 @@
 //
 // Synthetic only: a source called "seal-source", one artifact of three bytes.
 import { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   inventoryItemStatements,
   sealRunStatements,
@@ -15,6 +15,13 @@ import {
   type SealRunInput,
 } from "../src/atomic/seal.ts";
 import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const RUN_ID = 1;
 const CLIENT = "seal-client";

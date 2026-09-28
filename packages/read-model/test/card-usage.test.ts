@@ -4,7 +4,7 @@
 // card-usage-fixture.ts); every value is synthetic.
 import { Database } from "bun:sqlite";
 import { fromTemplate } from "./schema-template";
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -107,6 +107,13 @@ function productionSchema(): Database {
     return db;
   });
 }
+
+// The first build of the migrated template runs every CORE migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./schema-template).
+beforeAll(() => {
+  productionSchema().close();
+}, 60_000);
 
 const ids = (rows: readonly { observation_id: number }[]): number[] =>
   rows.map((row) => row.observation_id);

@@ -4,7 +4,9 @@
 // migrating inside each test crosses the 5 s default timeout under load. A
 // deserialized copy is the same schema, views, triggers and rows, never
 // analyzed; connection settings such as `PRAGMA foreign_keys` are not part of
-// the bytes, so a caller that needs one sets it on the copy.
+// the bytes, so a caller that needs one sets it on the copy. The first build
+// still migrates, so a suite whose template is the full CORE schema builds it
+// in `beforeAll` with its own timeout rather than inside its first test.
 import { Database } from "bun:sqlite";
 
 const templates = new Map<string, Uint8Array>();

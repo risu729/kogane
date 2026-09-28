@@ -2,7 +2,7 @@
 // identified, what a stage list means, and what a session policy grants. The
 // SQL half is exercised against the real migrations in
 // services/app/test/ops-api.test.ts.
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import {
   OPERATION_KINDS,
   OPERATION_STAGES,
@@ -122,6 +122,13 @@ test("a session refresh needs a person unless the deployment says otherwise (G3-
 import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
 import { recordDispatch, requestCollection, requestReplay } from "../src/index.ts";
 import type { CommandStore, Principal } from "../src/command/contract.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite-store.ts).
+beforeAll(() => {
+  migratedDatabase().close();
+}, 60_000);
 
 const OPERATOR: Principal = {
   id: "ops-operator",

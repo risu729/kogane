@@ -17,7 +17,7 @@
 //
 // Everything is synthetic. No amount, merchant, account label or date here is
 // a production value; the bodies are placeholders in the observed shapes.
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { fullCoreDatabase, sqliteD1 } from "../../../packages/storage-d1/test/sqlite.ts";
@@ -56,6 +56,13 @@ import { vpassCardRunPlan } from "../../collector-vpass/src/shared-collection.ts
 import { vPointPayRunPlan } from "../../collector-vpoint-pay/src/shared-run.ts";
 import { vPointPayEmailRunPlan, vPointRunPlan } from "../../collector-vpoint/src/shared-run.ts";
 import type { PreparedVPointPayEmail } from "../../collector-vpoint/src/vpoint-pay-email.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const CLIENT = "processor-shared-r2";
 const RUN_ID = "00000000-0000-4000-8000-000000000000";

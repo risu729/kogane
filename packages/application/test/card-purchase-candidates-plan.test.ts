@@ -13,9 +13,11 @@ import { loadPendingPostedCandidates } from "../src/query/card-purchase-candidat
 import { migratedDatabase } from "./sqlite-store.ts";
 
 let db: Database;
+// The first build of the migrated CORE image runs every migration (see
+// ./sqlite-store.ts); a hook's default budget is the same 5 s as a test's.
 beforeAll(() => {
   db = migratedDatabase();
-});
+}, 60_000);
 afterAll(() => db.close());
 
 /** The statement and arguments the loader sends, captured without a result. */

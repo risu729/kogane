@@ -20,7 +20,7 @@ import {
   REGISTRATION_OPERATION_BUDGET,
 } from "../../../packages/application/src/collection/index.ts";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket.ts";
-import { sqliteD1 } from "../../../packages/storage-d1/test/sqlite.ts";
+import { fullCoreDatabase, sqliteD1 } from "../../../packages/storage-d1/test/sqlite.ts";
 import {
   invocationContext,
   invocationProbe,
@@ -37,6 +37,13 @@ import {
   type CollectionHarness,
 } from "./collection-harness.ts";
 import { startPipeline } from "./harness.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 let mf: Miniflare;
 let pipelineEnv: Env;

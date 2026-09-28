@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { fromTemplate } from "./schema-template";
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -47,6 +47,13 @@ function migratedDatabase(): Database {
     return db;
   });
 }
+
+// The first build of the migrated template runs every CORE migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./schema-template).
+beforeAll(() => {
+  migratedDatabase().close();
+}, 60_000);
 
 /** A second implementation of the executor contract: the reader is not tied to D1. */
 function sqliteExecutor(db: Database): SqlExecutor {
