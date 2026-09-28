@@ -591,7 +591,7 @@ round 5 の構造調査（保存された R2 object を構造と件数だけ読�
 
 中央の cell は `span.row` 二つである。空の行は `div.content > div.item-cell > div.cell.w-100per` 「ご利用明細はございません。」 で、`item-more` はない。確定月の page の `detail-list-01` は一つだけで、HTML に二度出る文字列の一つは一括表示 button（`ul.list-btn-double.js-toggle-detail-list-01`）の class 名である。
 
-- **停止の原因。** 2026-09-25〜27（UTC）の三夜の run は position 1 で `ledger_parse`（`credit-ledger-headers`）により止まった。collector の `nodeText` は子 node を空白でつなぐので、確定月の header は 「今回の お支払い金額」 と読まれ、`今回のお支払い金額` を含まなかった。collector は label（ledger header、menu と明細月の h2）を、空白をすべて除いた文字列（`compactText`）で比べるようにした。共有の page 読み取り（`readMyJcbStatementPage`）と `myjcb-credit-statement-total` は以前から空白を除いて比べていたので、同じ page を確定と読んでいた。空白以外の違いは従来どおり停止する。cell の値は従来どおり空白でつないだ文字列で保存する。
+- **停止の原因。** 2026-09-25〜27（UTC）の三夜の run は position 1 で `ledger_parse`（`credit-ledger-headers`）により止まった。collector の `nodeText` は子 node を空白でつなぐので、確定月の header は 「今回の お支払い金額」 と読まれ、`今回のお支払い金額` を含まなかった。collector は label（ledger header、menu と明細月の h2）を、空白をすべて除いた文字列（`compactText`）で比べるようにした。共有の page 読み取り（`readMyJcbStatementPage`）と `myjcb-credit-statement-total` は以前から空白を除いて比べていたので、同じ page を確定と読んでいた。空白以外の違いは従来どおり停止する。ただし `nodeText` は要素の境目に空白を入れるので、境目も除かれ、要素（head の隣り合う cell を含む）をまたいで分かれた label も一致する（共有の page 読み取りと同じ）。cell の値は従来どおり空白でつないだ文字列で保存する。
 - **空の支払予定 page。** `myjcb-skip-payment-schedule@0.1.1` は上の空の行だけの ledger を 0 行と読む。collector の行数（`scheduledLedgerRowCount`）も空の行を数えない。ボーナス払いの page は行のある状態で観測されていないので、従来どおり `credit-schedule-07.html` として保存し、読まない。
 - **release。** `myjcb-skip-payment-schedule` 0.1.0 は production の `parser_releases` に登録済み（parse run はない）で、同じ version で digest を変えると migration 0028 が登録を拒否するので 0.1.1 とした。MyJCB の四つの parser の digest は変わらない。
 

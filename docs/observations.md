@@ -68,7 +68,9 @@ between #333's merge (2026-09-27 18:21Z) and #340's (20:06Z): no artifact
 was fetched from 17:00Z to 21:00Z that day. The
 13 SBI Shinsei and SBI Securities objects stored after 21:00Z carry no
 `[redacted:…]` marker, and the SBI Shinsei balance summary keeps its three
-customer-name keys as #340 intends. So no stored object carries the marker,
+customer-name keys as #340 intends. The recorded transform steps agree:
+`myjcb-sanitizer` and `sbi-shinsei-token-sanitizer` have `redacted` steps
+at v1 and v3 only, none at v2 (the #333 step). So no stored object carries the marker,
 and ADR 0029 amendment 2's rule for objects written under v2 applies to
 none ([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)).
 

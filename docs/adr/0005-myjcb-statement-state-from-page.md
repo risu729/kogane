@@ -1185,7 +1185,9 @@ no values) and read the collector's stop logs for the three nightly runs of
 1. **A: compare labels with all whitespace removed.** The collector matches
    header labels (and headings) on text with every whitespace character
    removed, as the shared page reading already does. Chosen. Only
-   whitespace is ignored; a different word still stops.
+   whitespace is ignored; a different word still stops. Because `nodeText`
+   puts a space at every element boundary, the boundaries are ignored too:
+   a label split over elements matches.
 2. **B: read text the way a browser's `innerText` does** (a `br` becomes a
    newline, CSS decides which elements break). Rejected: it needs layout
    rules the collector does not have (`pc-none` is a CSS class), and
@@ -1251,7 +1253,11 @@ kept, and recorded as unobserved.
   whose empty row is not the one observed (another wording, a second cell,
   another element) is a row, and fails its parse with a closed code instead
   of reading as empty (INV05).
-- Limits: whether a skip page with rows also shows the empty row is not
+- Limits: labels are matched with `includes` on the whole head's compacted
+  text, so a label split over two adjacent head cells matches as one label,
+  exactly as `readMyJcbStatementPage` already reads it. The per-row checks
+  (four summary cells, `credit-ledger-cell-count`) are unchanged. Whether a
+  skip page with rows also shows the empty row is not
   observed (refused if it does). The live skip page with rows (round 4) was
   not stored, so its body cells are still unobserved (amendment (e)).
 

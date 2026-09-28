@@ -356,7 +356,9 @@ export function parseCreditLedger(
   // every stored confirmed page splits its amount label over a line break,
   // 「今回の<br class="pc-none">お支払い金額」, and `nodeText` puts a space on
   // each side of the `br`, so a match on space-collapsed text failed on every
-  // confirmed month. Nothing beyond whitespace is ignored.
+  // confirmed month. Only whitespace is ignored, and that includes the space
+  // `nodeText` puts at every element boundary: a label split over elements
+  // (even over two head cells) matches too, as in the shared page reading.
   const headerText = header ? compactText(header) : "";
   // A ledger with rows must display the whole header set of its state: the
   // fourth label says which amount the summary cell holds, so `headers` in the
