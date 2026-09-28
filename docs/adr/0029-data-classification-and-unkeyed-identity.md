@@ -500,8 +500,12 @@ In code:
   `[redacted:name]` where the name was, its manifest entry carries
   `redactedFieldCount`, and its `redacted` step says v2. They are append-only
   and are not rewritten; the names were never retained, so there is nothing
-  to restore. Whether any such object exists depends on whether a collector
-  ran from that build; production was not read for this change. Every reader
+  to restore. When this amendment was written, whether any such object
+  existed depended on whether a collector ran from that build. A read-only
+  count on 2026-09-28 found none: no artifact was stored between #333's merge
+  and #340's, and no stored object read since carries the marker
+  ([observations](../observations.md#no-stored-object-carries-the-redactedname-marker)).
+  This rule therefore applies to no object today. Every reader
   that meets one behaves as with a name: the SBI Shinsei response schema and
   the account-connection proof accept the marker (a scalar), and the MyJCB
   card-information reader never reads the 口座名義 value.

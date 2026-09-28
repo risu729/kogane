@@ -1,4 +1,4 @@
-// `myjcb-skip-payment-schedule` 0.1.0 (ADR 0005 amendment e) on synthetic
+// `myjcb-skip-payment-schedule` 0.1.1 (ADR 0005 amendments e and f) on synthetic
 // pages only: the observed three-cell head is read, every other shape is
 // refused with a closed code, and nothing is a transaction or a balance.
 import { describe, expect, test } from "bun:test";
@@ -6,10 +6,13 @@ import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-sche
 import { SKIP_PAYMENT_SCHEDULE_PARSER_CODES } from "../src/parsers/myjcb-skip-payment-schedule.ts";
 import { PARSERS, PARSER_DIGESTS } from "../src/parsers/registry.ts";
 import {
+  BONUS_HEAD,
+  BONUS_HEADING,
   EMPTY_ROW,
   REFUSAL_CASES,
   ROWS,
   SKIP_HEAD,
+  SPAN_SKIP_HEAD,
   bytes,
   ledger,
   skipMeta,
@@ -21,10 +24,12 @@ const parse = (html: string, meta = skipMeta()) =>
   myJcbSkipPaymentSchedule.parse(bytes(html), meta);
 
 describe("myjcb-skip-payment-schedule", () => {
-  test("is registered at 0.1.0 with a recorded digest, and accepts only MyJCB credit-schedule HTML", () => {
+  test("is registered at 0.1.1 with a recorded digest, and accepts only MyJCB credit-schedule HTML", () => {
     expect(PARSERS).toContain(myJcbSkipPaymentSchedule);
-    expect(myJcbSkipPaymentSchedule.version).toBe("0.1.0");
-    expect(PARSER_DIGESTS.releases["myjcb-skip-payment-schedule"]?.version).toBe("0.1.0");
+    // 0.1.0 is registered in production with its own digest, so the changed
+    // empty-row rule is a new version (migration 0028's digest trigger).
+    expect(myJcbSkipPaymentSchedule.version).toBe("0.1.1");
+    expect(PARSER_DIGESTS.releases["myjcb-skip-payment-schedule"]?.version).toBe("0.1.1");
     expect(myJcbSkipPaymentSchedule.accepts(skipMeta())).toBe(true);
     expect(myJcbSkipPaymentSchedule.accepts(skipMeta({ mime: "text/html; charset=utf-8" }))).toBe(
       true,
@@ -79,7 +84,7 @@ describe("myjcb-skip-payment-schedule", () => {
     );
   });
 
-  test("0.1.0's whole observation is frozen: a change to it is a new release", () => {
+  test("0.1.1's whole observation is frozen (unchanged from 0.1.0): a change to it is a new release", () => {
     expect(parse(skipPage()).observations[0]).toEqual({
       kind: "scheduled_payment",
       sourceAccount: "myjcb:synthetic-conn:root",
@@ -162,6 +167,16 @@ describe("myjcb-skip-payment-schedule", () => {
       observations: [],
       warnings: [],
     });
+    // The stored empty page's shape: the head's middle cell as two span.row,
+    // the lone empty row, no item-more (ADR 0005 amendment f).
+    expect(parse(skipPage({ ledgers: [ledger(SPAN_SKIP_HEAD, [EMPTY_ROW])] }))).toEqual({
+      observations: [],
+      warnings: [],
+    });
+    expect(parse(skipPage({ asOf: [], ledgers: [ledger(SPAN_SKIP_HEAD, [EMPTY_ROW])] }))).toEqual({
+      observations: [],
+      warnings: [],
+    });
     expect(parse(skipPage({ asOf: [], ledgers: [ledger(SKIP_HEAD, [])] }))).toEqual({
       observations: [],
       warnings: [],
@@ -197,6 +212,13 @@ describe("myjcb-skip-payment-schedule", () => {
     expect(() =>
       parse(
         skipPage({ h1: ["ボーナス払いご利用明細(未確定分)"], ledgers: [ledger(SKIP_HEAD, ROWS)] }),
+      ),
+    ).toThrow(/^schedule_kind_unobserved$/u);
+    // The bonus page as stored: its own h1 and head, the lone empty row. Its
+    // kind is unobserved with rows, so even the empty page is not read.
+    expect(() =>
+      parse(
+        skipPage({ h1: [BONUS_HEADING], asOf: [], ledgers: [ledger(BONUS_HEAD, [EMPTY_ROW])] }),
       ),
     ).toThrow(/^schedule_kind_unobserved$/u);
   });

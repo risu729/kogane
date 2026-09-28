@@ -275,7 +275,10 @@ shapes, no values). Four findings bear on this ADR.
    `(確定分)` heading but no `今回のお支払い金額` label anywhere, only
    `ご利用金額`; the rule of this ADR stops on such a page with rows (a
    confirmed ledger must show the confirmed header set, `ledger_parse`), so
-   a page of that shape is the likely cause, not a confirmed one. Also observed: a detail
+   a page of that shape is the likely cause, not a confirmed one.
+   (Reinterpreted by [amendment (f)](#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks):
+   the count was a string-matching artifact, and the stops were the
+   collector's own header match.) Also observed: a detail
    page fetched without visiting `detailMenu.html` first in the session is a
    different page (h1 `カードご利用明細一覧`, no ledger), and after many
    consecutive fetches the site served a 「通信エラーが発生しました」 page.
@@ -632,7 +635,9 @@ code }]` with a code from `SCHEDULE_PAGE_CODES`:
 
 ## Amendment 2026-09-27 (d): a confirmed page under the usage header, proven by the page
 
-- Status: accepted (#336)
+- Status: accepted (#336); its premise is withdrawn by
+  [amendment (f)](#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks):
+  no stored page has shown the variant it accepts. The code stays, unobserved
 - Date: 2026-09-27
 - Decision owner: the owner chose option 3 below on 2026-09-27; this record
   carries it into the repository.
@@ -885,7 +890,8 @@ amount check and be recognised with one live holder per recognition key
 
 ## Amendment 2026-09-27 (e): the skip-payment schedule page is read as scheduled payments
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#338); the empty-row rule and the parser version are
+  amended by (f)
 - Date: 2026-09-27
 - Decision owner: the owner chose option B of amendment (c), after option A,
   on 2026-09-27, only for pages observed with rows; this record carries it
@@ -1113,3 +1119,168 @@ statement months), not rows of a confirmed statement, and not a balance.
 - `services/processor/test/lanes.test.ts`: the migration list ends at 0061.
 - No production data was read for this amendment. The findings above are the
   owner's agent's structure-only survey; every test value is synthetic.
+
+## Amendment 2026-09-28 (f): ledger labels match across line breaks
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-28
+- Carried by: `compactText` and `parseCreditLedger` in
+  `services/collector-myjcb/src/parsers.ts`; `ledgerRows`,
+  `isEmptyLedgerRow` and `EMPTY_LEDGER_LABEL` in
+  `packages/domain/src/myjcb-skip-payment-schedule.ts`;
+  `myjcb-skip-payment-schedule@0.1.1` in
+  `packages/parsers/src/parsers/myjcb-skip-payment-schedule.ts`;
+  [MyJCB source note](../sources/myjcb.md),
+  [observations](../observations.md#myjcb-confirmed-months-stopped-on-a-line-break-in-the-ledger-header-schedule-parser-011)
+
+### Context
+
+The owner's agent surveyed the stored MyJCB pages on 2026-09-28 (round 5:
+R2 objects read through the evidence browser, structure and counts only,
+no values) and read the collector's stop logs for the three nightly runs of
+2026-09-25 to 09-27 (UTC; the mornings of 09-26 to 09-28 in Japan).
+
+1. **Why every night stopped at position 1.** Each of the three nights
+   stopped with `ledger_parse` and the sub-code `credit-ledger-headers` at
+   position 1. Every stored confirmed page (8 distinct pages over the stored
+   runs) shows its third head cell as
+   `今回の<br class="pc-none">お支払い金額`: the label broken by a line
+   break that only narrow screens render. The collector's `nodeText` joins
+   child nodes with a space, and `parseCreditLedger` collapsed whitespace to
+   one space before `includes("今回のお支払い金額")`. The header read
+   「今回の お支払い金額」, the check failed, and every confirmed month
+   stopped the connection. Position 0's 「ご利用金額」 has no `br`, so it
+   passed. The shared page reading (`readMyJcbStatementPage`) and
+   `myjcb-credit-statement-total` already compare head labels with all
+   whitespace removed, so they read the same pages as confirmed; the ledger
+   parser reads the collector's JSON, whose `headers` are the collector's
+   constant set, and never compares page text.
+2. **The 「ご利用金額」 header on a confirmed page was never there.**
+   Amendment (b) finding 3 and amendment (d) counted 「今回のお支払い金額」 0
+   times and 「ご利用金額」 11 times on a stored `(確定分)` page. The 11 were
+   the label of each row's expanded `item-more` list, and the 0 was the
+   `br`. No stored confirmed page has a 「ご利用金額」 head. The variant
+   amendment (d) accepts is unobserved.
+3. **Empty schedule pages.** The stored skip-payment page (position 8, 12
+   nights) and the ボーナス払い page (position 7, the same bytes on 12
+   nights) both show one `div.detail-list-01` with a three-cell head and
+   exactly one `content` row: one `item-cell` holding one
+   `div.cell.w-100per` with the provider's empty label
+   「ご利用明細はございません。」, and no `item-more`. The bonus page's h1 is
+   「ボーナス#回払いご利用代金明細(未確定分)」 (# one digit), and its head
+   cells are 「ご利用日」 / 「ご利用先など」+「支払区分」 (two `span.row` in one
+   cell) / 「ご利用金額」. The skip-payment reader of amendment (e) read this
+   page as zero rows, but by a loose rule shared with the statement reading:
+   an empty wording anywhere in the ledger, and any row with one `w-100per`
+   cell, was dropped, so the empty row beside real rows would have hidden
+   nothing but read the rest.
+4. **`myjcb-skip-payment-schedule@0.1.0` is registered.** Production has no
+   parse run or job of it (no skip page was fetched after it deployed,
+   because every night stopped at position 1), but `parser_releases` holds
+   0.1.0 with its digest. Migration 0028 refuses the same name and version
+   with a different digest, so any change to its sources is a new version.
+
+### Options considered
+
+1. **A: compare labels with all whitespace removed.** The collector matches
+   header labels (and headings) on text with every whitespace character
+   removed, as the shared page reading already does. Chosen. Only
+   whitespace is ignored; a different word still stops.
+2. **B: read text the way a browser's `innerText` does** (a `br` becomes a
+   newline, CSS decides which elements break). Rejected: it needs layout
+   rules the collector does not have (`pc-none` is a CSS class), and
+   the labels would still need whitespace-insensitive matching.
+3. **C: keep failing.** Rejected: every night stops at the first confirmed
+   month and the connection keeps only position 0.
+
+For amendment (d)'s acceptance path: removing it touches
+`packages/domain/src/myjcb-statement-page.ts`, which is in the digest
+closure of all four released MyJCB parsers (`myjcb-credit-ledger@1.2.0`,
+`myjcb-credit-statement-total@1.2.0`, `myjcb-credit-past-month-balances@1.1.3`,
+`myjcb-canonical-evidence-boundary@1.1.3`). Removing it means four new
+releases and a repair-lane re-parse of every stored MyJCB artifact, with no
+change in any observation, because no stored page takes the path. It is
+kept, and recorded as unobserved.
+
+### Decision
+
+- The collector compares every provider label it matches (the ledger header
+  labels, the menu's `h2` headings, the statement-month `h2`) on the node's
+  text with all whitespace removed (`compactText`). `nodeText` is
+  unchanged, and cell values keep their space-joined text
+  (`normalizeText`), so a stored ledger row reads exactly as before. The
+  expanded-label lookup (`findLabelValue`) is unchanged: its observed labels
+  have no line break.
+- `packages/domain/src/myjcb-statement-page.ts` is not changed: it already
+  removes whitespace before it compares a head label.
+- The skip-payment reader treats a ledger as empty only when its one
+  `content` row is the observed empty row: the row's only element child an
+  `item-cell`, whose only element child is one `div.cell.w-100per` showing
+  exactly 「ご利用明細はございません。」 after whitespace removal. In every
+  other ledger each `content` row is a row, the empty row included, so the
+  empty row beside real rows fails the row check
+  (`schedule_row_shape_unobserved`), a mix nobody has observed. The release
+  is `myjcb-skip-payment-schedule@0.1.1`; every observation it writes is the
+  same as 0.1.0's.
+- The collector's row counts (`scheduledLedgerRowCount`,
+  `creditPageRowCount`) keep the shared page reading: the observed empty
+  row counts zero, and beside real rows it is dropped while the real rows
+  are counted, so the page is kept unread, never read as empty.
+- The ボーナス払い page stays `credit-schedule-07.html`, unread
+  (`schedule_kind_unobserved` if it reached the parser): it has been
+  observed only empty.
+- Amendment (d)'s acceptance path stays in code, unobserved: no stored page
+  has a `(確定分)` heading over a 「ご利用金額」 head.
+
+### Consequences
+
+- The first night after deployment reads position 1 and later confirmed
+  months as `confirmed` and stores their ledgers under the confirmed header
+  set, as the ledger parser has always expected. Months 2 to 6 and the
+  schedule pages are fetched again.
+- Amendment (d)'s premise is withdrawn. Its code accepts a variant that has
+  not been observed; it never ran on a stored page, and nothing it records
+  (`confirmed-usage`, `page-heading-usage-total-proof`) exists in
+  production. Under ADR 0004 it would not be written today. It is removed
+  the next time the MyJCB parsers are released for another reason.
+- Amendment (b)'s finding 3 is reinterpreted: the stops of the three runs
+  were this `br`, not a page that varies between nights. The 09-25 and 09-26
+  pages were not stored; their stop code is the same, and every stored
+  confirmed page has the `br`.
+- The stored skip-payment and bonus pages still read as empty. A stored page
+  whose empty row is not the one observed (another wording, a second cell,
+  another element) is a row, and fails its parse with a closed code instead
+  of reading as empty (INV05).
+- Limits: whether a skip page with rows also shows the empty row is not
+  observed (refused if it does). The live skip page with rows (round 4) was
+  not stored, so its body cells are still unobserved (amendment (e)).
+
+### Verification
+
+- `services/collector-myjcb/test/credit-statement-state.test.ts`
+  (「ADR 0005 amendment (f)」): a confirmed page whose head is the observed
+  three cells with `今回の<br class="pc-none">お支払い金額` is `confirmed`,
+  its ledger is read under the confirmed header set with cell values
+  space-joined as before, and `collectCredit` stores it at position 1 with
+  no stop; a `br` inside 「ご利用先など」, 「支払区分」 or 「ご利用日」 is matched
+  the same way; a different word, or a missing character, still stops with
+  `credit-ledger-headers`; the observed empty schedule ledger counts zero
+  scheduled rows and the empty row beside a real row counts one. Without
+  the collector change, three of these fail with the production stop.
+- `packages/parsers/test/myjcb-statement.test.ts`: the statement parser
+  (1.2.0, unchanged) reads the observed head as confirmed.
+- `packages/parsers/test/myjcb-skip-payment-schedule.test.ts`: the stored
+  empty shape (head with `span.row`, the lone empty row) is zero rows with
+  or without the as-of heading; the empty row before or after real rows,
+  and a lone one-cell row with another wording, are refused with
+  `schedule_row_shape_unobserved`; the bonus page as stored (its h1 and
+  head, the lone empty row) is `schedule_kind_unobserved`; 0.1.1's whole
+  observation equals 0.1.0's frozen one.
+- `mise run //packages/parsers:digests`: only `myjcb-skip-payment-schedule`
+  changes digest (0.1.1); the four MyJCB statement parsers keep theirs.
+- `services/processor/test/myjcb-shared-r2.test.ts`: the skip page job runs
+  under 0.1.1.
+- Production was read only as metadata: the `parser_releases` rows of the
+  MyJCB parsers (names, versions, digest prefixes, times). The findings in
+  the context are the owner's agent's structure-only survey; every test
+  value is synthetic.

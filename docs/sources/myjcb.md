@@ -360,16 +360,16 @@ collectorは状態をpage自身から決める（`services/collector-myjcb/src/p
 
 `(確定分)` h1だけが「締め済み明細である」というpage自身の表明である。h1、ledger行、金額labelの読み取りは`packages/domain/src/myjcb-statement-page.ts`の`readMyJcbStatementPage`一か所にあり、collectorと明細total parser（`myjcb-credit-statement-total`、1.1.0以降）が共用する。position規則はcollectorだけが加える。
 
-| `(確定分)` h1 | ledger                                          | 記録する状態                                                                                                                                                   |
-| ------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1個           | 金額labelが`今回のお支払い金額`／なし           | `confirmed`                                                                                                                                                    |
-| 1個           | 金額labelが`ご利用金額`                         | pageが証明すれば`confirmed`、しなければ停止（`credit-statement-state`、[amendment (d)](#確定分の見出しとご利用金額のheader2026-09-27adr-0005-の-amendment-d)） |
-| なし          | ledgerなし                                      | `unknown`                                                                                                                                                      |
-| なし          | 行のないledger（labelは問わない）               | `unknown`（ledger artifactは作らない）                                                                                                                         |
-| なし          | 行があり、金額labelが`ご利用金額`               | position 1は`unconfirmed`、position 2以降は`unknown`                                                                                                           |
-| なし          | 行があり、金額labelが`今回のお支払い金額`／なし | position 1は停止、position 2以降は`unknown`                                                                                                                    |
-| 2個以上       | 任意                                            | 停止                                                                                                                                                           |
-| 任意          | 一つのheaderに両label、またはledger間で不一致   | 停止                                                                                                                                                           |
+| `(確定分)` h1 | ledger                                          | 記録する状態                                                                                                                                                                          |
+| ------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1個           | 金額labelが`今回のお支払い金額`／なし           | `confirmed`                                                                                                                                                                           |
+| 1個           | 金額labelが`ご利用金額`                         | pageが証明すれば`confirmed`、しなければ停止（`credit-statement-state`、[amendment (d)](#確定分の見出しとご利用金額のheader2026-09-27adr-0005-の-amendment-d)。未観測、amendment (f)） |
+| なし          | ledgerなし                                      | `unknown`                                                                                                                                                                             |
+| なし          | 行のないledger（labelは問わない）               | `unknown`（ledger artifactは作らない）                                                                                                                                                |
+| なし          | 行があり、金額labelが`ご利用金額`               | position 1は`unconfirmed`、position 2以降は`unknown`                                                                                                                                  |
+| なし          | 行があり、金額labelが`今回のお支払い金額`／なし | position 1は停止、position 2以降は`unknown`                                                                                                                                           |
+| 2個以上       | 任意                                            | 停止                                                                                                                                                                                  |
+| 任意          | 一つのheaderに両label、またはledger間で不一致   | 停止                                                                                                                                                                                  |
 
 `detailMonth=0`は常に`unconfirmed`である。position 0のpageが確定を示した場合は停止する。`unknown`のpageはHTMLだけをevidenceとして保存し、ledger artifactを作らない。position 2以降でh1のないpageを停止にしない理由は、production evidenceにある（read-only、件数だけの集計で、値は記録していない）。各runで取得したposition 7と8は、h1のない行0件のledgerを持っていた（manifestは`confirmed`、`myjcb-credit-statement-total@1.0.1`は12 runすべてで`statement_total_not_confirmed`）。これらを停止にすれば日次runが毎回止まる。`unconfirmed`として保存すれば、同じrunでposition 0より後に記録されるため、当時のread modelではconnectionで一つの未確定snapshot slotを空のcaptureが占め、position 0の保留行がcurrentでなくなっていた。締め済み明細はすべてposition 1を通り、そこでh1を持つ（production evidenceでは12 run中12 run）。そのためposition 1では、h1なしで確定labelの行があるpageを停止にする。一方、古いpage一つで日次runを止めることはしない。停止または`unknown`のlogにはh1の個数、ledger数、行数、label codeだけを出し、page本文は出さない。
 
@@ -494,6 +494,8 @@ registration と eligibility は変えない。停止 code 付きの `partial` u
 | 7             | あり、空     | `ご利用日 / ご利用先など / 支払区分 / ご利用金額`         | なし                       | `unknown`、page だけ（欠落なし）              |
 | 8             | あり、空     | `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`   | なし                       | `unknown`、page だけ（欠落なし）              |
 
+確定月（1、2）の 4 番目の label は、保存された確定 page のすべてで `今回の<br class="pc-none">お支払い金額` と `br` で分かれている（round 5、2026-09-28。下の amendment (f)）。position 7 と 8 の「空」は、`content` 行が一つだけで、その `item-cell` に `div.cell.w-100per` 「ご利用明細はございません。」 が一つだけある形である。
+
 同じ日の二度目の構造調査（round 4）で、position 7 と 8 が月ではないと分かった。menu の 9 link はすべて文言 「明細を見る」 で、DOM 順は 0、1、7、8、2、3、4、5、6。月名は link ではなく同じ box の見出しにある。0 と 1 は h2 「最新のご利用明細」、2〜6 は 「過去の明細」 の下にあり、これが月である。7 と 8 は h2 「ボーナス#回払い・ショッピングスキップ払い」 の下にあり、7 は ボーナス払い、8 は ショッピングスキップ払い（box に月名なし）の支払予定 page である。position 8 の page は h1 「ショッピングスキップ払いご利用明細(未確定分)」 を持つ。ledger はどの page でも `div.detail-list-01` の grid で、`<table>` ではない（collector も `<table>` に依存しない）。三つ目の header の live の `div.head` は 3 cell で、2 番目の cell が 「ご利用先など」 と 「お支払日」 を二行で持つ。最初の調査はこれを 4 label と書いた。
 
 amendment (b) の時点の collector は `detailMonth` の position を数え、月と支払予定 page を区別しなかった。7 と 8 も月として取得、保存され、`periodCount` と `capturedMonthCount` に数えられ、読まなければ `unreadMonths` に入った。現在は menu の見出しで区別する（下の「credit menu の group と支払予定 page」、amendment (c)）。period は `detailMonth-7`／`detailMonth-8` の相対 label で、どの reader も暦月に解決しない（解決するのは `detailMonth-0` と `-1` だけ）。
@@ -520,7 +522,7 @@ Worker は見つけた export を取得しない。共通 bucket は `credit-csv
 
 制限：
 
-- 2026-09-25 と 09-26 の run は position 1 で `credit-ledger-headers` により止まり、artifact を残さなかった（最初の amendment の前）。09-27 の live の position 1 は確定の形で、通るはずである。position 1 の page の形は時刻か session によって変わる。その夜の page は保存されていないので、原因は確かめられない。以前の run が保存した position 1 の page（round 4 で label の数だけを数えた）は `(確定分)` の見出しを持つが `今回のお支払い金額` をどこにも持たず、`ご利用金額` だけを持つ。この ADR の規則は、行のあるこの形の page で停止する（確定の ledger は確定 header 一式を表示しなければならない、`ledger_parse`）ので、これが最も考えられる原因だが、確認はされていない。次に同じ停止が起きれば、停止した page が保存される。
+- 2026-09-25 と 09-26 の run は position 1 で `credit-ledger-headers` により止まり、artifact を残さなかった（最初の amendment の前）。09-27 の live の position 1 は確定の形で、通るはずである。position 1 の page の形は時刻か session によって変わる。その夜の page は保存されていないので、原因は確かめられない。以前の run が保存した position 1 の page（round 4 で label の数だけを数えた）は `(確定分)` の見出しを持つが `今回のお支払い金額` をどこにも持たず、`ご利用金額` だけを持つ。この ADR の規則は、行のあるこの形の page で停止する（確定の ledger は確定 header 一式を表示しなければならない、`ledger_parse`）ので、これが最も考えられる原因だが、確認はされていない。次に同じ停止が起きれば、停止した page が保存される。**訂正（2026-09-28、amendment (f)）：** この数え方は文字列一致の誤りだった。`ご利用金額` は各行の展開部（`item-more`）の label で、`今回のお支払い金額` が 0 回だったのは head の label が `br` で分かれていたためである。停止の原因は collector の header 照合（下の amendment (f)）だった。
 - 三つ目の header の行の意味、export の中身（2026-08-31 に確認、保存はしない）、menu を月ごとに読み直す必要があるかは未確認である。
 
 ### credit menu の group と支払予定 page（2026-09-27、ADR 0005 の amendment (c)）
@@ -543,6 +545,8 @@ round 4 の構造調査で、credit menu（`detailMenu.html`）の 9 link は三
 制限：支払予定 page の行の意味は未確認で、amendment (c) の時点ではどの parser も読まなかった（ショッピングスキップ払いの page は amendment (e) で独自の dataset として読む）。position 7（ボーナス払い）は行のある状態では観測されていない。保存される menu は redact で `href` を除くので、保存された menu からはどの link がどの position かは読めない。見出しが変われば、新しい見出しを観測して記録するまで connection は最初の月の前で止まり、何も保存しない。
 
 ### 確定分の見出しとご利用金額のheader（2026-09-27、ADR 0005 の amendment (d)）
+
+**訂正（2026-09-28、amendment (f)）：** 次の段落の観測は文字列一致の誤りだった。保存されたどの確定 page も head は `今回の<br class="pc-none">お支払い金額` で、`ご利用金額` の head を持つ確定 page は観測されていない（ADR 0004 では未観測の形）。この節の受け入れ規則は code に残るが、production のどの page も通っていない。残す理由は、削除すると共有 module（`myjcb-statement-page.ts`）の digest が変わり、観測を何も変えずに MyJCB の四つの parser すべての新 release と再 parse が必要になるためである。次に MyJCB の parser を別の理由で release するときに削除する。
 
 round 4 の構造調査（label の数だけ、値は記録しない）で、以前の run が保存した position 1 の page は `(確定分)` の見出しの下に未確定の header 一式（`ご利用日 / ご利用先など / 支払区分 / ご利用金額`）を持ち、`今回のお支払い金額` は 0 回だった。同じ日の live の同じ position は確定の header だった。どちらの label を出すかは夜か session によって変わり、その理由は分からない。page 自身は合計を `div.detail-box-price-01 dl` の dt 「YYYY年M月D日(曜)お支払い金額合計」 と dd 「#,###円」 で示す。
 
@@ -568,11 +572,30 @@ round 4 の構造調査で、position 8 の page は h1 「ショッピングス
 
 - **保存名。** collector は支払予定 page の h1 だけを見る（`schedulePageKind`）。空白を除いて 「ショッピングスキップ払いご利用明細(未確定分)」 に一致する h1 がちょうど一つなら `credit-skip-payment-NN.html`、それ以外（ボーナス払いの page、見出しがない・二つある・全角括弧など）は従来どおり `credit-schedule-NN.html` として保存する。manifest、code、coverage は変わらない。
 - **registration。** `credit-skip-payment-NN.html` だけが dataset `credit-schedule` を得る。`credit-schedule-NN.html` は dataset なしで、parse job は作られない。
-- **parser。** `myjcb-skip-payment-schedule@0.1.0` は観測された形だけを読む。h1、行がある場合の as-of 見出し（一つ、暦上の日付と月）、行のある ledger が一つ以下、head が観測どおりの 3 cell、ledger の子要素が head とそれに続く `content` 行だけ（ほかの入れ子の行は空の ledger と読まずに拒否する）、各行が 3 cell の `item-cell` 一つで中央の cell がちょうど 2 行（1 行目がご利用先など、2 行目がお支払日）、日付が `YYYY/MM/DD`、金額が exact な円。本文の配置は記録されていないので、head と同じ配置だけを読む。それ以外は閉じた code（`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`）で拒否し、message はその code だけである。行のない ledger は 0 行で、失敗ではない。kind が `types.ts` の外で宣言されているので、processor が書き込む前に `scheduled_payment` の行を検査する（`scheduledPaymentRows`: このパーサー以外からの行、宣言外の key、暦上でない日付、正準でない整数の金額などは `parse_contract_invalid`）。
+- **parser。** `myjcb-skip-payment-schedule@0.1.1`（amendment (f)、観測は 0.1.0 と同じ）は観測された形だけを読む。h1、行がある場合の as-of 見出し（一つ、暦上の日付と月）、行のある ledger が一つ以下、head が観測どおりの 3 cell、ledger の子要素が head とそれに続く `content` 行だけ（ほかの入れ子の行は空の ledger と読まずに拒否する）、各行が 3 cell の `item-cell` 一つで中央の cell がちょうど 2 行（1 行目がご利用先など、2 行目がお支払日）、日付が `YYYY/MM/DD`、金額が exact な円。本文の配置は記録されていないので、head と同じ配置だけを読む。それ以外は閉じた code（`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`）で拒否し、message はその code だけである。行のない ledger は 0 行で、失敗ではない。空の ledger は、`content` 行が一つだけで、それが観測された空の行（`item-cell` 一つ、その中に `div.cell.w-100per` 一つ、空白を除いて 「ご利用明細はございません。」）の場合に限る。空の行がほかの行と並べば、未観測の組み合わせとして `schedule_row_shape_unobserved` で拒否する。kind が `types.ts` の外で宣言されているので、processor が書き込む前に `scheduled_payment` の行を検査する（`scheduledPaymentRows`: このパーサー以外からの行、宣言外の key、暦上でない日付、正準でない整数の金額などは `parse_contract_invalid`）。
 - **観測。** 各行は `scheduled_payment` の観測として `scheduled_payment_observations`（migration 0061、append-only）に入る：ご利用日、お支払日（`due_date`）、今後のお支払い金額（exact な整数の decimal 文字列、表示の符号）、ご利用先など（`counterparty`）、page の as-of 日付、`extra_json` に表示 cell と 「YYYY年M月以降のお支払い分」 の月。external id は表示 cell の fingerprint と出現順で、as-of 日付を含まない。
 - **読むもの。** 取引でも残高でもないので、read path、card purchase recognition、settlement の候補、identity はこの table を読まない。二重計上はない（INV06）。
 
 制限：行の金額が何を表すか（一回分か残額か）、行の支払いが後の明細月に現れるかは未確認で、明細や支払いと突き合わせない。read model、API、UI はまだ表示しない。この変更の前に保存された skip page は `credit-schedule-NN.html` のままで読まれない。本文の配置が違えば（行ごとの展開 list、4 cell、お支払日が別 cell など）最初の production の parse が `schedule_row_shape_unobserved` で失敗し、構造だけの調査の後に新しい release を出す。position 7（ボーナス払い）は行のある状態で観測されるまで読まない（ADR 0004）。
+
+### ledger header の改行と空の支払予定 page（2026-09-28、ADR 0005 の amendment (f)）
+
+round 5 の構造調査（保存された R2 object を構造と件数だけ読んだ。値は記録しない）と collector の停止 log で、次が分かった。
+
+| page                                          | h1                                                       | head（3 cell）                                                                          | 本文                                                                     |
+| --------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 確定月（保存 8 page すべて）                  | 「カードご利用代金明細(確定分)」                         | 「ご利用日」 / 「ご利用先など」+「支払区分」 / `今回の<br class="pc-none">お支払い金額` | 4 cell（日付、中央の 2 行、金額、toggle button）の行、全行に `item-more` |
+| 未確定月（position 0）                        | 「…(未確定分)」                                          | 「ご利用日」 / 「ご利用先など」+「支払区分」 / 「ご利用金額」（`br` なし）              | 確定月と同じ形                                                           |
+| ボーナス払い（position 7、12 夜同一）         | 「ボーナス#回払いご利用代金明細(未確定分)」（# は 1 桁） | 「ご利用日」 / 「ご利用先など」+「支払区分」 / 「ご利用金額」                           | 空の行だけ                                                               |
+| ショッピングスキップ払い（position 8、12 夜） | 「ショッピングスキップ払いご利用明細(未確定分)」         | 「ご利用日」 / 「ご利用先など」+「お支払日」 / 「今後のお支払い金額」                   | 空の行だけ                                                               |
+
+中央の cell は `span.row` 二つである。空の行は `div.content > div.item-cell > div.cell.w-100per` 「ご利用明細はございません。」 で、`item-more` はない。確定月の page の `detail-list-01` は一つだけで、HTML に二度出る文字列の一つは一括表示 button（`ul.list-btn-double.js-toggle-detail-list-01`）の class 名である。
+
+- **停止の原因。** 2026-09-25〜27（UTC）の三夜の run は position 1 で `ledger_parse`（`credit-ledger-headers`）により止まった。collector の `nodeText` は子 node を空白でつなぐので、確定月の header は 「今回の お支払い金額」 と読まれ、`今回のお支払い金額` を含まなかった。collector は label（ledger header、menu と明細月の h2）を、空白をすべて除いた文字列（`compactText`）で比べるようにした。共有の page 読み取り（`readMyJcbStatementPage`）と `myjcb-credit-statement-total` は以前から空白を除いて比べていたので、同じ page を確定と読んでいた。空白以外の違いは従来どおり停止する。cell の値は従来どおり空白でつないだ文字列で保存する。
+- **空の支払予定 page。** `myjcb-skip-payment-schedule@0.1.1` は上の空の行だけの ledger を 0 行と読む。collector の行数（`scheduledLedgerRowCount`）も空の行を数えない。ボーナス払いの page は行のある状態で観測されていないので、従来どおり `credit-schedule-07.html` として保存し、読まない。
+- **release。** `myjcb-skip-payment-schedule` 0.1.0 は production の `parser_releases` に登録済み（parse run はない）で、同じ version で digest を変えると migration 0028 が登録を拒否するので 0.1.1 とした。MyJCB の四つの parser の digest は変わらない。
+
+制限：行のあるショッピングスキップ払い page の本文は保存されておらず、未観測のままである（amendment (e)）。行と空の行が並ぶ page は観測されていない（並べば拒否する）。
 
 ## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
 

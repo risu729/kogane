@@ -159,7 +159,7 @@ export function readCreditMenuGroups(html: string): CreditMenuPositions {
   let heading: string | undefined;
   const visit = (node: HtmlNode): void => {
     // A link inside a heading belongs to that heading.
-    if (isElement(node) && node.tagName === "h2") heading = nodeText(node).replace(/\s+/gu, "");
+    if (isElement(node) && node.tagName === "h2") heading = compactText(node);
     if (isElement(node) && node.tagName === "a") {
       const position = creditDetailLinkPosition(node);
       if (position !== undefined) {
@@ -333,7 +333,10 @@ export function discoverCreditExports(
  * payment (`usageHeader: "proven"`, ADR 0005 amendment d), the unconfirmed set
  * (「ご利用金額」). The stored `headers` are the set the page shows, so the
  * ledger parser reads the amount cell as the usage amount it is labelled as,
- * and nothing records a row's 「今回のお支払い金額」.
+ * and nothing records a row's 「今回のお支払い金額」. No stored page has shown
+ * that second variant: amendment (d)'s premise was a string-matching artifact,
+ * and the acceptance path stays only because removing it would re-release
+ * every MyJCB parser (ADR 0005 amendment f).
  */
 export function parseCreditLedger(
   html: string,
@@ -349,7 +352,12 @@ export function parseCreditLedger(
   const usageHeader =
     state === "unconfirmed" || readMyJcbStatementPage(document).usageHeader === "proven";
   const headers = usageHeader ? UNCONFIRMED_LEDGER_HEADERS : CONFIRMED_LEDGER_HEADERS;
-  const headerText = header ? normalizeText(nodeText(header)) : "";
+  // Labels are matched with all whitespace removed (ADR 0005 amendment f):
+  // every stored confirmed page splits its amount label over a line break,
+  // 「今回の<br class="pc-none">お支払い金額」, and `nodeText` puts a space on
+  // each side of the `br`, so a match on space-collapsed text failed on every
+  // confirmed month. Nothing beyond whitespace is ignored.
+  const headerText = header ? compactText(header) : "";
   // A ledger with rows must display the whole header set of its state: the
   // fourth label says which amount the summary cell holds, so `headers` in the
   // stored ledger is a checked fact about the page, not an assumption. An
@@ -358,9 +366,9 @@ export function parseCreditLedger(
   if (requiredHeaders.some((label) => !headerText.includes(label))) {
     throw new StopConditionError(`MyJCB ${state} ledger headers changed`, "credit-ledger-headers");
   }
-  // A confirmed page's expanded labels are read whichever amount header it
-  // shows: the stored page with the usage header shows 「ご利用金額」 and no
-  // 「今回のお支払い金額」 anywhere (counted by label, 2026-09-27).
+  // A confirmed page's expanded rows (`item-more`) label the usage amount
+  // 「ご利用金額」, once per row; its head shows 「今回のお支払い金額」 across a
+  // `br` (round-5 survey, 2026-09-28; ADR 0005 amendment f).
   const expandedLabels =
     state === "unconfirmed"
       ? ["今回のお支払い金額", "摘要", "今回回数", "備考", "訂正サイン"]
@@ -440,7 +448,8 @@ export function parseCreditLedger(
  *   ledger, the one `parseCreditLedger` stores, every row one single payment,
  *   and the rows' exact sum equal to the page's 「お支払い金額合計」;
  *   `readMyJcbStatementPage` `usageHeader: "proven"`, ADR 0005 amendment d):
- *   `confirmed`, and its ledger is stored under the header it shows;
+ *   `confirmed`, and its ledger is stored under the header it shows. No
+ *   stored page has shown this variant (amendment f);
  * - no heading and no ledger: `unknown`, as before;
  * - no heading and a ledger without rows: `unknown`. Production captures of
  *   older closed months (positions 7 and 8 of the surveyed connection) are
@@ -546,7 +555,7 @@ export function scheduledLedgerRowCount(html: string): number | undefined {
     hasClass(element, "detail-list-01"),
   ).filter((ledger) => {
     const head = findElements(ledger, (element) => hasClass(element, "head"))[0];
-    const label = head ? nodeText(head).replace(/\s+/gu, "") : "";
+    const label = head ? compactText(head) : "";
     return (
       SCHEDULED_LEDGER_LABELS.every((part) => label.includes(part)) &&
       !READ_LEDGER_LABELS.some((part) => label.includes(part))
@@ -579,7 +588,7 @@ const STATEMENT_MONTH_HEADING = /^(\d{4})年(\d{1,2})月お支払い分のカー
 /** Every payment month (`YYYY-MM`) a page's `h2` headings state: normally none or one. */
 export function statedPaymentMonths(html: string): string[] {
   return findElements(parse(html), (element) => element.tagName === "h2").flatMap((element) => {
-    const match = STATEMENT_MONTH_HEADING.exec(nodeText(element).replace(/\s+/gu, ""));
+    const match = STATEMENT_MONTH_HEADING.exec(compactText(element));
     return match ? yearMonth(match[1]!, match[2]!) : [];
   });
 }
@@ -829,6 +838,16 @@ function hasClass(element: HtmlElement, className: string): boolean {
 function nodeText(node: HtmlNode): string {
   if ("value" in node) return node.value;
   return childNodes(node).map(nodeText).join(" ");
+}
+
+/**
+ * A node's text with all whitespace removed, the form every provider label
+ * (headings, ledger header labels) is compared in. `nodeText` joins nodes
+ * with a space, so a label the page breaks with a `br` or splits over
+ * elements reads as one word only here. Cell values keep `normalizeText`.
+ */
+function compactText(node: HtmlNode): string {
+  return nodeText(node).replace(/\s+/gu, "");
 }
 
 function findLabelValue(root: HtmlElement, label: string): string | undefined {

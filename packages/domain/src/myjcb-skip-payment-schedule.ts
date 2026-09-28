@@ -15,6 +15,13 @@
 // a closed code, never guessed (ADR 0004). The ボーナス払い page has never been
 // observed with rows and is not read at all.
 //
+// An empty page (every stored skip-payment page, round-5 survey 2026-09-28)
+// shows the same head and exactly one `content` row whose one `item-cell`
+// holds one `div.cell.w-100per` with the provider's empty label
+// (`EMPTY_LEDGER_LABEL`). That lone row is zero rows; the label next to any
+// other row is a mix nobody has observed and is refused (ADR 0005
+// amendment f).
+//
 // The input is a parse5 document; only the structural fields are named here,
 // so this module needs no HTML parser of its own.
 import { myjcbDisplayInteger } from "./myjcb-amounts.ts";
@@ -70,7 +77,8 @@ export const SKIP_PAYMENT_SCHEDULE_ROW_LIMIT = 1_000;
  *   `head` followed only by `content` rows, so that rows in any other
  *   nesting are refused instead of reading as an empty ledger (INV05); or a
  *   row that is not one `item-cell` of exactly three `cell`s whose middle
- *   cell is exactly two non-empty lines;
+ *   cell is exactly two non-empty lines (the empty row beside other rows
+ *   included);
  * - `schedule_date_invalid`: a usage date or payment date that is not
  *   `YYYY/MM/DD` on the calendar;
  * - `schedule_amount_invalid`: an amount cell that does not read as an exact
@@ -91,7 +99,7 @@ export type SkipPaymentScheduleRefusal = (typeof SKIP_PAYMENT_SCHEDULE_REFUSALS)
 
 /** One row as the page shows it. Text stays text; the amount is an exact decimal. */
 export interface SkipPaymentScheduleRow {
-  /** 0-based position among the ledger's rows (the empty-ledger row excluded). */
+  /** 0-based position among the ledger's `content` rows. */
   readonly index: number;
   /** The three cells, whitespace collapsed, as displayed. */
   readonly cells: readonly [string, string, string];
@@ -225,28 +233,37 @@ function onlyHeadAndRows(ledger: SchedulePageNode): boolean {
   );
 }
 
-/** The provider's empty-ledger wording, as the statement reading detects it. */
-const EMPTY_LEDGER_MARKER = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u;
+/**
+ * The provider's empty-ledger label, as the stored skip-payment and ボーナス払い
+ * pages show it (a provider label, compared after whitespace removal).
+ */
+const EMPTY_LEDGER_LABEL = "ご利用明細はございません。";
 
 /**
- * The `.content` rows of a ledger, without the structurally known empty-ledger
- * row (one `w-100per` cell under the empty marker), by the same rule as
- * `readMyJcbStatementPage`. A row of any other shape counts.
+ * The `.content` rows of a ledger. A ledger whose only `content` row is the
+ * observed empty row has none; in every other ledger each `content` row
+ * counts, the empty row included, so it is refused by the row-shape check
+ * instead of hiding the rows beside it.
  */
 function ledgerRows(ledger: SchedulePageNode): SchedulePageNode[] {
-  const hasEmptyMarker = EMPTY_LEDGER_MARKER.test(text(ledger));
-  return children(ledger)
-    .filter((element) => hasClass(element, "content"))
-    .filter((row) => !(hasEmptyMarker && isEmptyLedgerRow(row)));
+  const rows = children(ledger).filter((element) => hasClass(element, "content"));
+  return rows.length === 1 && isEmptyLedgerRow(rows[0]!) ? [] : rows;
 }
 
+/**
+ * The observed empty row: its only element child an `item-cell`, whose only
+ * element child is one `div.cell.w-100per` showing exactly `EMPTY_LEDGER_LABEL`.
+ */
 function isEmptyLedgerRow(row: SchedulePageNode): boolean {
-  const itemCell = elements(row, (element) => hasClass(element, "item-cell"))[0];
-  if (!itemCell) return false;
-  const cells = children(itemCell);
+  const rowChildren = children(row);
+  if (rowChildren.length !== 1 || !hasClass(rowChildren[0]!, "item-cell")) return false;
+  const cells = children(rowChildren[0]!);
   return (
-    cells.filter((element) => hasClass(element, "cell")).length === 1 &&
-    cells.some((element) => hasClass(element, "w-100per"))
+    cells.length === 1 &&
+    cells[0]!.tagName === "div" &&
+    hasClass(cells[0]!, "cell") &&
+    hasClass(cells[0]!, "w-100per") &&
+    compact(text(cells[0]!)) === EMPTY_LEDGER_LABEL
   );
 }
 
