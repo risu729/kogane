@@ -189,7 +189,66 @@ const SAFE_SHAPE_STRINGS = new Set([
   "type",
   "value",
 ]);
-const SHAPE_KEY = /^[A-Za-z][A-Za-z0-9]{0,39}$/u;
+// The closed keys a failure's `shape` may carry, at either level. Any other
+// key is dropped, so no key can be built from what a page says.
+const SAFE_SHAPE_KEYS = new Set([
+  // the refusal
+  "expectation",
+  "phase",
+  "element",
+  "attribute",
+  "summarized",
+  "byteMagnitude",
+  "textMagnitude",
+  "elements",
+  "contract",
+  "landmarks",
+  "forbiddenTokens",
+  // elements: opening tags counted by name
+  "table",
+  "tr",
+  "th",
+  "td",
+  "form",
+  "input",
+  "select",
+  "button",
+  "script",
+  "style",
+  "a",
+  "link",
+  "img",
+  "meta",
+  "title",
+  "blocked",
+  // contract: the counts the reviewed variants are defined by
+  "forms",
+  "staticActionForms",
+  "hiddenInputs",
+  "hiddenUnlisted",
+  "cc",
+  "engUseFlg",
+  "nablarchHidden",
+  "nablarchHiddenNonempty",
+  "nablarchNeedsHiddenEncryption",
+  "nablarchSubmit",
+  "referenceDate",
+  // landmarks
+  "doctype",
+  "activityHeading",
+  "activityHeadingInTitle",
+  "loginForm",
+  "passwordField",
+  "monthSelect",
+  "sentinel",
+  // forbiddenTokens
+  "jsessionid",
+  "token",
+  "csrf",
+  "turnstile",
+  "session",
+  "localStorage",
+]);
 const MAX_SHAPE_KEYS = 64;
 
 type ShapeScalar = number | boolean | string;
@@ -197,7 +256,7 @@ export type SafeShape = Record<string, ShapeScalar | Record<string, ShapeScalar>
 
 /**
  * Keeps only what a diagnostic `shape` may carry: at most two levels of
- * objects whose keys are short identifiers and whose values are non-negative
+ * objects whose keys are in `SAFE_SHAPE_KEYS` and whose values are non-negative
  * safe integers, booleans or strings from `SAFE_SHAPE_STRINGS`. Everything
  * else is dropped. Returns `undefined` when nothing is left.
  */
@@ -217,7 +276,7 @@ function safeShapeLevel(
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const result: Record<string, ShapeScalar | Record<string, ShapeScalar>> = {};
   for (const [key, entry] of Object.entries(value).slice(0, MAX_SHAPE_KEYS)) {
-    if (!SHAPE_KEY.test(key)) continue;
+    if (!SAFE_SHAPE_KEYS.has(key)) continue;
     if (typeof entry === "boolean") result[key] = entry;
     else if (typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 0) {
       result[key] = entry;

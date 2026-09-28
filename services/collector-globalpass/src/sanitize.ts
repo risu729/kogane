@@ -310,9 +310,9 @@ function inspectShape(html: string, sanitized: boolean): Shape {
         refuse(contract, "duplicate_attribute", phase, tag, name);
       }
     }
-    const type = attributeValue(attributes, "type")?.toLowerCase();
-    const name = attributeValue(attributes, "name")?.toLowerCase();
-    const id = attributeValue(attributes, "id")?.toLowerCase();
+    const type = attributeValue(attributes, "type", phase)?.toLowerCase();
+    const name = attributeValue(attributes, "name", phase)?.toLowerCase();
+    const id = attributeValue(attributes, "id", phase)?.toLowerCase();
     if (
       type === "password" ||
       name === "password" ||
@@ -329,7 +329,7 @@ function inspectShape(html: string, sanitized: boolean): Shape {
     hiddenCounts.set(name, (hiddenCounts.get(name) ?? 0) + 1);
     if (name !== "nablarch_hidden") continue;
     dynamicCount += 1;
-    const value = attributeValue(attributes, "value");
+    const value = attributeValue(attributes, "value", phase);
     if (value === undefined) refuse(contract, "hidden_value_missing", phase, tag, "value");
     if (value !== "") {
       nonemptyDynamicCount += 1;
@@ -353,7 +353,7 @@ function inspectShape(html: string, sanitized: boolean): Shape {
     if (attributes.filter((attribute) => attribute.name === "action").length > 1) {
       refuse(contract, "duplicate_attribute", phase, tag, "action");
     }
-    const action = attributeValue(attributes, "action") ?? "";
+    const action = attributeValue(attributes, "action", phase) ?? "";
     if (action === "") continue;
     if (action !== STATIC_ACTION) refuse(contract, "action_unallowed", phase, tag, "action");
     staticActionCount += 1;
@@ -636,10 +636,14 @@ function parseAttributes(tag: string): Attribute[] {
   return attributes;
 }
 
-function attributeValue(attributes: Attribute[], name: string): string | undefined {
+function attributeValue(
+  attributes: Attribute[],
+  name: "action" | "id" | "name" | "type" | "value",
+  phase: GlobalPassSanitizerPhase = "input",
+): string | undefined {
   const matches = attributes.filter((attribute) => attribute.name === name);
   if (matches.length > 1) {
-    refuse("globalpass_html_contract_invalid", "duplicate_attribute", "input", undefined, "name");
+    refuse("globalpass_html_contract_invalid", "duplicate_attribute", phase, undefined, name);
   }
   return matches[0]?.value;
 }

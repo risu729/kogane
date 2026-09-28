@@ -504,11 +504,11 @@ without someone fetching the page by hand.
   password field, a `<select>`, the redaction sentinel); and the occurrences
   of each forbidden token, keyed by the sanitizer's own token list.
 - `packages/collector-diagnostics` keeps a shape only as `safeShape` allows:
-  two levels of objects with short identifier keys, values that are
-  non-negative safe integers, booleans, or strings from a closed allowlist
-  (the expectation, element, attribute and phase codes). Any other value is
-  dropped; the line never carries more than the allowlist permits, whatever
-  a caller passes.
+  two levels of objects whose keys are in a closed key list (the shape's own
+  field names above), values that are non-negative safe integers, booleans,
+  or strings from a closed allowlist (the expectation, element, attribute and
+  phase codes). Any other key or value is dropped; the line never carries
+  more than the two allowlists permit, whatever a caller passes.
 - The manifest's sanitization failure entry gains an optional fifth key,
   `expectationCode`, the same closed code. The terminal's `safeErrorCode`
   is unchanged (the four top-level codes); the Processor reads nothing new.
@@ -546,7 +546,9 @@ without someone fetching the page by hand.
   output-only guards equal `GLOBALPASS_SANITIZER_EXPECTATIONS`; a page with a
   table, a title, a login field and an iframe gives exact counts and
   landmarks; every expectation, element, attribute and phase code survives
-  the diagnostics allowlist.
+  the diagnostics allowlist; adversarial synthetic pages (text in tag names,
+  attribute names and values, a 1000-entry class list) give a shape under
+  1 KiB with none of that text.
 - `test/worker-collection.test.ts`: the four refusals driven through the
   Worker carry `expectationCode` in the manifest and `shape.expectation` in
   the diagnostic line; a refused synthetic statement page (table rows with a
@@ -557,7 +559,7 @@ without someone fetching the page by hand.
   (no `private-` marker, password field or heading in logs, manifest or DATA)
   still pass.
 - `packages/collector-diagnostics/test/diagnostics.test.ts`: `safeShape`
-  drops text, negative and fractional numbers, unknown strings, arrays and a
-  third level; the diagnostic line carries a kept shape on a failure and no
+  drops text, negative and fractional numbers, unknown strings, keys outside
+  its closed key list, arrays and a third level; the diagnostic line carries a kept shape on a failure and no
   `shape` when none is passed.
 - No production data was read for this amendment.

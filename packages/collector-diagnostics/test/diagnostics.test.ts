@@ -173,6 +173,8 @@ describe("a failure's shape keeps closed codes, booleans and counts only", () =>
       byteMagnitude: 5,
       elements: { table: 1 },
     });
+    // A key outside the closed key list is dropped even with a safe value.
+    expect(safeShape({ SYNTHETICMERCHANT: 1, elements: { SYNTHETICLABEL: true } })).toBeUndefined();
     expect(safeShape("private-text")).toBeUndefined();
     expect(safeShape({ text: "private-text" })).toBeUndefined();
   });

@@ -387,7 +387,37 @@ describe("GLOBAL PASS sanitizer refusals name the failed expectation", () => {
       "output",
       "unknown",
     ]) {
-      expect(safeShape({ value })).toEqual({ value });
+      expect(safeShape({ expectation: value })).toEqual({ expectation: value });
+    }
+  });
+
+  test("an adversarial page gives a bounded shape of closed codes and counts", () => {
+    // Synthetic: text placed in tag names, attribute names, attribute values,
+    // a class list of 1000 entries, a title and the visible text.
+    const marker = "SYNTHETICMARKER";
+    const classes = Array.from({ length: 1000 }, (_, i) => `c${i}${marker}`).join(" ");
+    const pages = [
+      `<!doctype html><html><head><title>${marker} ご利用明細</title></head><body>` +
+        `<div ${marker}="1" data-${marker}=x class="${classes}"><${marker}x a=${marker}></${marker}x>` +
+        `<iframe ${marker}></iframe><input type="hidden" name="${marker}" value="${marker}">` +
+        `<p>${marker} 12,345 2099-01-01</p></div></body></html>`,
+      `<!doctype html><${marker} on${marker}="${marker}">ご利用明細`,
+      `<!doctype html><body>ご利用明細<a href="https://${marker}.example.invalid/">x</a></body>`,
+    ];
+    for (const page of pages) {
+      let error: unknown;
+      try {
+        sanitizeGlobalPassActivityHtml(page);
+      } catch (caught) {
+        error = caught;
+      }
+      const shape = globalPassRefusalShape(page, error);
+      const logged = JSON.stringify(safeShape(shape));
+      expect(logged).toBe(JSON.stringify(shape));
+      expect(logged).not.toContain(marker);
+      expect(logged).not.toContain("12,345");
+      expect(logged).not.toContain("2099");
+      expect(logged.length).toBeLessThan(1024);
     }
   });
 });
