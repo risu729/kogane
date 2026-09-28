@@ -10,7 +10,7 @@
     "@cloudflare/vitest-plugin": "1.2.7",
     "@types/bun": "1.4.2",
     "@types/node": "26.6.2",
-    "devtools-protocol": "0.0.1704034",
+    "devtools-protocol": "0.0.1704684",
     "typescript": "7.0.2",
     "vitest": "4.1.11",
     "wrangler": "4.140.0"
