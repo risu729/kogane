@@ -1689,3 +1689,60 @@ describe("ADR 0005 amendment (f): ledger labels match across line breaks", () =>
     ).toBe(1);
   });
 });
+
+describe("ADR 0005 amendment (g): the statement heading may carry its payment day", () => {
+  // The confirmed page's h2 as the round-5 survey shows it (structure only):
+  // 「YYYY年MM月DD日(曜)お支払い分のカードご利用明細」. Earlier stored pages show
+  // the undated 「YYYY年M月お支払い分のカードご利用明細」; both are read.
+  const closed = (months: readonly string[]) =>
+    page({ headings: [CONFIRMED_STATEMENT_HEADING], months, rows: [confirmedRow] });
+  const period = (html: string, detailMonth: number, settlementYM?: string) =>
+    creditStatementPeriod({
+      html,
+      detailMonth,
+      state: creditStatementState(html, detailMonth),
+      settlementYM,
+    });
+
+  test("a dated heading names its payment month", () => {
+    expect(period(closed(["2026年02月27日(金)"]), 1)).toBe("2026-02");
+    expect(period(closed(["2026年2月27日(金)"]), 3)).toBe("2026-02");
+    expect(period(closed(["2026年 10月 <span>5日</span>\n(月) "]), 1)).toBe("2026-10");
+    // The undated heading is read as before.
+    expect(period(closed(["2026年2月"]), 1)).toBe("2026-02");
+    // A labelled month must agree with the dated heading's month.
+    expect(period(closed(["2026年2月27日(金)"]), 10, "202602")).toBe("202602");
+    expect(stopCode(() => period(closed(["2026年2月27日(金)"]), 10, "202603"))).toBe(
+      "credit-statement-period",
+    );
+  });
+
+  test("any other shape names no month, and a confirmed page stops", () => {
+    for (const months of [
+      ["2026年2月27日(祝)"],
+      ["2026年2月27日(金曜)"],
+      ["2026年2月27日金"],
+      ["2026年2月27日(金"],
+      ["2026年2月27日（金）"],
+      ["2026年2月27日"],
+      ["2026年2月30日(金)"],
+      ["2026年2月0日(金)"],
+      ["2026年2月123日(金)"],
+      ["2026年13月1日(金)"],
+      ["2026年2月27日(金)", "2026年2月"],
+      ["2026年2月27日(金)", "2026年3月27日(金)"],
+    ])
+      expect(stopCode(() => period(closed(months), 1))).toBe("credit-statement-period");
+  });
+
+  test("collectCredit stores a dated confirmed month at position 1 instead of stopping", async () => {
+    const { artifacts, stop } = await collectCredit(
+      client({ 0: mutable, 1: closed(["2026年02月27日(金)"]) }),
+      "x",
+    );
+    expect(stop).toBeUndefined();
+    const ledger = artifacts.find((artifact) => artifact.filename === "credit-ledger-01.json");
+    expect(ledger?.statementState).toBe("confirmed");
+    expect(JSON.parse(String(ledger?.body))).toMatchObject({ detailMonth: 1, period: "2026-02" });
+  });
+});

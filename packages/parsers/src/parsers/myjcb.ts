@@ -2,6 +2,7 @@ import { parse, type DefaultTreeAdapterMap } from "parse5";
 import type { ArtifactMeta, BalanceObservation, Parser, ParseResult } from "../types.ts";
 import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import { readMyJcbStatementPage } from "../../../../packages/domain/src/myjcb-statement-page.ts";
+import { readMyJcbStatementHeading } from "../../../../packages/domain/src/myjcb-statement-heading.ts";
 import {
   exactKeys,
   normalizedDate,
@@ -49,7 +50,7 @@ const PAST_ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-past-months\.json$
  */
 export const myJcbCreditLedger: Parser = {
   name: "myjcb-credit-ledger",
-  version: "1.2.0",
+  version: "1.2.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -204,7 +205,7 @@ export const myJcbCreditLedger: Parser = {
 
 export const myJcbPastMonthBalances: Parser = {
   name: "myjcb-credit-past-month-balances",
-  version: "1.1.3",
+  version: "1.1.4",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -371,10 +372,17 @@ function statementPageState(document: StatementNode): {
  * so a closed statement the collector's manifest recorded as `unconfirmed`
  * (every position-1 page before the collector decided from the page) is read
  * as the confirmed statement it is.
+ *
+ * Since 1.3.0 the page's `h2` may name its payment with the day,
+ * 「YYYY年M月D日(曜)お支払い分のカードご利用明細」, beside the undated
+ * 「YYYY年M月お支払い分のカードご利用明細」 (ADR 0005 amendment g,
+ * `readMyJcbStatementHeading`). A dated heading must state the total's own
+ * payment date, or the parse fails. A page with the undated heading is
+ * recorded exactly as in 1.2.0.
  */
 export const myJcbCreditStatement: Parser = {
   name: "myjcb-credit-statement-total",
-  version: "1.2.0",
+  version: "1.3.0",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.dataset === "credit-detail" &&
@@ -405,11 +413,10 @@ export const myJcbCreditStatement: Parser = {
       return { observations: [], warnings: ["statement_total_not_confirmed", ...stateWarnings] };
     if (/\/credit-detail-00\.html$/u.test(artifact.artifactKey ?? ""))
       throw new Error("myjcb detailMonth 0 cannot be finalized");
-    const periods = headings.flatMap((text) => {
-      const match = /^(\d{4})年(\d{1,2})月お支払い分のカードご利用明細$/u.exec(text);
-      return match ? [`${match[1]}-${match[2]!.padStart(2, "0")}`] : [];
-    });
-    if (periods.length !== 1) throw new Error("myjcb statement period missing or ambiguous");
+    // Since 1.3.0 the heading may carry the payment day (ADR 0005 amendment g).
+    const statedHeadings = headings.flatMap((text) => readMyJcbStatementHeading(text) ?? []);
+    if (statedHeadings.length !== 1) throw new Error("myjcb statement period missing or ambiguous");
+    const heading = statedHeadings[0]!;
     const totals = statementNodes(document, "dt").filter((node) =>
       statementText(node).includes("お支払い金額合計"),
     );
@@ -427,7 +434,9 @@ export const myJcbCreditStatement: Parser = {
       "myjcb statement payment date",
     );
     const period = paymentDate.slice(0, 7);
-    if (period !== periods[0]) throw new Error("myjcb statement date and month conflict");
+    if (period !== heading.month) throw new Error("myjcb statement date and month conflict");
+    if (heading.date !== null && heading.date !== paymentDate)
+      throw new Error("myjcb statement heading date and payment date conflict");
     if (artifact.period != null) {
       const metadataMonth = providerYearMonth(artifact.period, "myjcb statement metadata period");
       if (metadataMonth !== undefined && metadataMonth.slice(0, 7) !== period)
@@ -485,7 +494,7 @@ export const myJcbCreditStatement: Parser = {
 
 export const myJcbEvidenceOnly: Parser = {
   name: "myjcb-canonical-evidence-boundary",
-  version: "1.1.3",
+  version: "1.1.4",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (

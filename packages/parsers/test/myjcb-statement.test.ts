@@ -400,3 +400,63 @@ describe("the credit ledger under the usage header (1.2.0)", () => {
     ).toThrow(/expanded is invalid/u);
   });
 });
+
+describe("the statement heading may carry its payment day (1.3.0, ADR 0005 amendment g)", () => {
+  // The confirmed page's h2 as the round-5 survey shows it (structure only):
+  // 「YYYY年MM月DD日(曜)お支払い分のカードご利用明細」. Pages parsed by 1.2.0
+  // show the undated 「YYYY年M月お支払い分のカードご利用明細」.
+  const UNDATED = "<h2>2026年6月お支払い分のカードご利用明細</h2>";
+  const withHeadings = (...headings: readonly string[]) =>
+    html().replace(UNDATED, headings.map((text) => `<h2>${text}</h2>`).join(""));
+
+  test("a dated heading whose day is the total's payment date yields the same total", () => {
+    const undated = parse(html());
+    expect(undated.observations).toHaveLength(1);
+    for (const heading of [
+      "2026年06月15日(月)お支払い分のカードご利用明細",
+      "2026年6月15日(月)お支払い分のカードご利用明細",
+      "2026年 6月 <span>15日</span>\n(月) お支払い分の カードご利用明細",
+    ])
+      expect(parse(withHeadings(heading))).toEqual(undated);
+  });
+
+  test("a dated heading whose day is not the total's payment date fails the parse", () => {
+    for (const heading of [
+      "2026年6月16日(火)お支払い分のカードご利用明細",
+      "2026年6月5日(金)お支払い分のカードご利用明細",
+    ])
+      expect(() => parse(withHeadings(heading))).toThrow(/heading date and payment date conflict/u);
+    // Another month is the month conflict it always was.
+    expect(() => parse(withHeadings("2026年7月15日(水)お支払い分のカードご利用明細"))).toThrow(
+      /date and month conflict/u,
+    );
+  });
+
+  test("any other shape, or two headings, is a missing or ambiguous period", () => {
+    for (const headings of [
+      ["2026年6月15日(祝)お支払い分のカードご利用明細"],
+      ["2026年6月15日(月曜)お支払い分のカードご利用明細"],
+      ["2026年6月15日月お支払い分のカードご利用明細"],
+      ["2026年6月15日(月お支払い分のカードご利用明細"],
+      ["2026年6月15日（月）お支払い分のカードご利用明細"],
+      ["2026年6月15日お支払い分のカードご利用明細"],
+      ["2026年6月31日(月)お支払い分のカードご利用明細"],
+      ["2026年13月15日(月)お支払い分のカードご利用明細"],
+      ["2026年6月15日(月)お支払い分のカードご利用明細書"],
+      ["2026年6月15日(月)お支払い分のカードご利用明細", "2026年6月お支払い分のカードご利用明細"],
+      [
+        "2026年6月15日(月)お支払い分のカードご利用明細",
+        "2026年6月15日(月)お支払い分のカードご利用明細",
+      ],
+    ])
+      expect(() => parse(withHeadings(...headings))).toThrow(
+        /statement period missing or ambiguous/u,
+      );
+  });
+
+  test("a dated page with no total still reads as a missing total, as before", () => {
+    expect(
+      parse(withHeadings("2026年6月15日(月)お支払い分のカードご利用明細").replace(total, "")),
+    ).toEqual({ observations: [], warnings: ["statement_total_missing"] });
+  });
+});

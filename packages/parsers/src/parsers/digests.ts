@@ -18,8 +18,12 @@ export const PARSER_DIGESTS: ParserDigests = {
       "072dc5fc2570fc8257343d85d53e93cf9fa9036f61a1648390a8d8845303ea3e",
     "packages/domain/src/myjcb-skip-payment-schedule.ts":
       "5eb00bc2a0d0921c794d21914e7a199060a867f62646bfdc33b17ff5f1551265",
+    "packages/domain/src/myjcb-statement-heading.ts":
+      "cc3b16e3df6274bb2cbaf86275a30ec2fa836fc8160052115a2ee5b1b12248ca",
     "packages/domain/src/myjcb-statement-page.ts":
       "e5f382ed90b5f133ed794b479aebb4c5e42e27477198030d2d00e64972984587",
+    "packages/domain/src/time.ts":
+      "1bde32f526bd4bf2e4036cdcee83ce87b64cffb79aa4cd343f965817e91d2795",
     "packages/domain/src/values.ts":
       "8dbd56b587a436b5c6809b399e6b444e08835f89d176f3bcd0a03a170068c987",
     "packages/observation-shared/src/normalized-decimal.ts":
@@ -45,7 +49,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
       "d0699817ff34ab5876b9b1d206de30a54b8fa2f61feb8193d9ab389e1392611a",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
-      "68eed341fea07b8abba8c61478ba7512033b68fb59124f1ab93472b64bc54176",
+      "030ff3acc9e5c05b351066a94077c5edc57e5faa706c19ff4995bcdde2a975ed",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
       "a89829e4856c7baa3abcda2e25762b7debf4a22fddc777756adb920ed8951621",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
@@ -194,13 +198,15 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-canonical-evidence-boundary": {
-      version: "1.1.3",
-      codeDigest: "4f14b6d986a9b335d96576da62cbb2d92fd04733e58be12b869804e97e1265f6",
+      version: "1.1.4",
+      codeDigest: "f88edc6ebd1a46f91cc55eb1389165c9119466dc2a79b4145916ef3790287b12",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-statement-heading.ts",
         "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/time.ts",
         "packages/domain/src/values.ts",
         "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
@@ -211,13 +217,15 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-ledger": {
-      version: "1.2.0",
-      codeDigest: "4f14b6d986a9b335d96576da62cbb2d92fd04733e58be12b869804e97e1265f6",
+      version: "1.2.1",
+      codeDigest: "f88edc6ebd1a46f91cc55eb1389165c9119466dc2a79b4145916ef3790287b12",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-statement-heading.ts",
         "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/time.ts",
         "packages/domain/src/values.ts",
         "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
@@ -228,13 +236,15 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-past-month-balances": {
-      version: "1.1.3",
-      codeDigest: "4f14b6d986a9b335d96576da62cbb2d92fd04733e58be12b869804e97e1265f6",
+      version: "1.1.4",
+      codeDigest: "f88edc6ebd1a46f91cc55eb1389165c9119466dc2a79b4145916ef3790287b12",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-statement-heading.ts",
         "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/time.ts",
         "packages/domain/src/values.ts",
         "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
@@ -245,13 +255,15 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-statement-total": {
-      version: "1.2.0",
-      codeDigest: "4f14b6d986a9b335d96576da62cbb2d92fd04733e58be12b869804e97e1265f6",
+      version: "1.3.0",
+      codeDigest: "f88edc6ebd1a46f91cc55eb1389165c9119466dc2a79b4145916ef3790287b12",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-statement-heading.ts",
         "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/time.ts",
         "packages/domain/src/values.ts",
         "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",

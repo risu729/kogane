@@ -387,7 +387,7 @@ release noteと再parse手順は`docs/observations.md`の「MyJCB statement stat
 
 providerは最新の締め済み明細をposition 1に置き、次の明細が締まるとposition 2へ移す。collectorは過去月APIがlabelしない月のperiodを`detailMonth-N`（position）で記録していた。periodはledger parserの行fingerprint、つまりexternal idとcard purchase recognitionのkeyに入るため、同じ明細の行が毎月新しいkeyになり、purchase laneは同じ購入をretireして認識し直していた。また、read modelは確定captureをperiodごとのslotに分けていたため、同じ明細がposition 1とposition 2の両方のslotでcurrentになり得た（二重計上）。
 
-collectorは確定明細pageが名乗る月をperiodにする（`services/collector-myjcb/src/parsers.ts`の`creditStatementPeriod`）。確定明細pageは`(確定分)` h1を持ち、`<h2>YYYY年M月お支払い分のカードご利用明細</h2>`で支払月を名乗る（`myjcb-credit-statement-total`が読むのと同じh2）。collectorはその月を`YYYY-MM`としてdetail、ledger、exportのperiodに記録する。positionはartifact keyとledgerの`detailMonth`に残る。相対labelを収集時に解決するのではなく、page自身が述べる絶対月を記録する。
+collectorは確定明細pageが名乗る月をperiodにする（`services/collector-myjcb/src/parsers.ts`の`creditStatementPeriod`）。確定明細pageは`(確定分)` h1を持ち、`<h2>YYYY年M月お支払い分のカードご利用明細</h2>`、または支払日つきの`<h2>YYYY年M月D日(曜)お支払い分のカードご利用明細</h2>`で支払月を名乗る（`myjcb-credit-statement-total`が読むのと同じh2。下の「支払日つきの明細見出し」）。collectorはその月を`YYYY-MM`としてdetail、ledger、exportのperiodに記録する。positionはartifact keyとledgerの`detailMonth`に残る。相対labelを収集時に解決するのではなく、page自身が述べる絶対月を記録する。
 
 - 過去月APIがlabelする月は、従来どおり`settlementYM`をそのまま使う。pageも月を名乗る場合は同じ月でなければ停止する（`credit-statement-period`）。
 - それ以外の確定pageは、名乗る月がない、または二つ以上ある場合に停止する（`credit-statement-period`）。statement parserも同じpageを拒否する。
@@ -596,6 +596,17 @@ round 5 の構造調査（保存された R2 object を構造と件数だけ読�
 - **release。** `myjcb-skip-payment-schedule` 0.1.0 は production の `parser_releases` に登録済み（parse run はない）で、同じ version で digest を変えると migration 0028 が登録を拒否するので 0.1.1 とした。MyJCB の四つの parser の digest は変わらない。
 
 制限：行のあるショッピングスキップ払い page の本文は保存されておらず、未観測のままである（amendment (e)）。行と空の行が並ぶ page は観測されていない（並べば拒否する）。
+
+### 支払日つきの明細見出し（2026-09-28、ADR 0005 の amendment (g)）
+
+amendment (f) の後の最初の夜間 run（2026-09-28 21:01Z）は、position 1 で `credit_statement_period` により止まった。round 5 の構造調査（値は記録しない）では、確定月の page の h2 は 「YYYY年MM月DD日(曜)お支払い分のカードご利用明細」 で、お支払い分の前に支払日と括弧つきの曜日一文字がある。ボーナス払い page の h2 も同じ日付つきの形である。collector と明細 total parser は 「YYYY年M月お支払い分のカードご利用明細」 だけを読んでいたので、page は月を名乗らないと読まれ、過去月 API の label がない position 1 で停止した。それ以前に保存された確定 page は日付のない形である（`myjcb-credit-statement-total@1.2.0` の 24 件の `ok` parse はすべてこの形で通った）。二つの形が両方観測されている。
+
+- **読み取り。** `packages/domain/src/myjcb-statement-heading.ts` の `readMyJcbStatementHeading` を collector と parser が共用する。空白をすべて除いた h2 の文字列が、日付のない形か、`YYYY年M月D日(W)お支払い分のカードご利用明細`（W は 月火水木金土日 の一文字、ASCII の括弧）に完全一致する場合だけ見出しとする。page の total label（「YYYY年M月D日(曜)お支払い金額合計」）と同じく NFKC はかけない。月は 1〜12、日はその月に実在する日でなければならない。曜日は形だけを見て、日付との一致は確かめない。全角の括弧、曜日の別表記、ほかの文言は見出しではなく、確定 page なら従来どおり停止する。
+- **collector。** 見出しの月を `YYYY-MM` として period に記録する。日付は記録しない。見出しが二つ（日付つきと日付なしを含む）なら停止する。
+- **明細 total（`myjcb-credit-statement-total@1.3.0`）。** 日付つきの見出しなら、その日付が total の支払日と一致しなければ parse を失敗させる。日付のない見出しの page は 1.2.0 と同じに記録する。
+- **release。** 四つの MyJCB parser は `packages/parsers/src/parsers/myjcb.ts` を共有しているので、ほかの三つも digest だけが変わる：`myjcb-credit-ledger@1.2.1`、`myjcb-credit-past-month-balances@1.1.4`、`myjcb-canonical-evidence-boundary@1.1.4`。観測は変わらない。amendment (d) の未観測の経路はこの release でも残す。
+
+制限：ボーナス払い page の日付つき h2 は読まない（page は `credit-schedule-07.html` のまま）。collector は見出しの日付を何とも比べない。
 
 ## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
 

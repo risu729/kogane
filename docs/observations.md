@@ -17,6 +17,46 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MyJCB: confirmed months stopped on a dated statement heading (statement parser 1.3.0)
+
+2026-09-28. The nightly MyJCB run of 2026-09-28 21:01Z, the first after the
+line-break fix below, stopped at credit position 1 with
+`credit_statement_period`
+([ADR 0005's amendment (g)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-g-the-statement-heading-may-carry-its-payment-day)):
+
+- **The heading carries the payment day.** The owner's round-5 structure
+  survey shows the confirmed page's `h2` as
+  「YYYY年MM月DD日(曜)お支払い分のカードご利用明細」, and the bonus schedule
+  page's `h2` in the same dated form. The collector and the statement
+  parser read only 「YYYY年M月お支払い分のカードご利用明細」, so the page named no
+  month, and position 1 has no past-months label to fall back on. Earlier
+  pages show the undated form: the 24 `ok` parses of
+  `myjcb-credit-statement-total@1.2.0` all passed that match.
+- **Both forms are read** by one shared reading,
+  `readMyJcbStatementHeading` (`packages/domain/src/myjcb-statement-heading.ts`):
+  the undated form, and the dated form with one of 月火水木金土日 in ASCII
+  parentheses, as the page's total label writes it. The day must exist in
+  that month. Any other shape, full-width parentheses included, names no
+  month, and a confirmed page stops as before. The collector records the
+  month.
+- **`myjcb-credit-statement-total@1.3.0`** also requires a dated heading's
+  day to equal the total's payment date, and fails the parse otherwise. A
+  page with the undated heading is recorded exactly as in 1.2.0.
+- **`myjcb-credit-ledger@1.2.1`, `myjcb-credit-past-month-balances@1.1.4`
+  and `myjcb-canonical-evidence-boundary@1.1.4`** change digest only: the
+  four parsers share `packages/parsers/src/parsers/myjcb.ts`.
+
+Deploying rewrites nothing. The next night's run records position 1 under
+its payment month and goes on to the later months. The repair lane
+re-parses the stored MyJCB artifacts under the new releases; ledgers,
+past-month summaries and pages with the undated heading publish identical
+observations, and a stored confirmed page with the dated heading, in a run
+eligible for parsing, publishes its total when the heading's day is the
+total's payment date (how many exist was not counted). Amendment (d)'s
+unobserved path is still in the code. Tests:
+`services/collector-myjcb/test/credit-statement-state.test.ts`,
+`packages/parsers/test/myjcb-statement.test.ts`.
+
 ## Identity values: the crosswalk is retired and the one-time rewrite is staged (migration 0062, no parser release)
 
 2026-09-28. The owner decided that the retired importer's `v1` identity

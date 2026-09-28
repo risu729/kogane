@@ -303,8 +303,15 @@ Concrete limits in the current code:
   ([ADR 0005's amendment (f)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks)).
   A `(確定分)` page under the 「ご利用金額」 header, which amendment (d) accepts
   when the page proves itself, was a misreading of the same `br` and has
-  never been observed; that code is kept, unobserved, until the MyJCB
-  parsers are next released. The empty skip-payment page reads as zero rows
+  never been observed; that code is still in the MyJCB parsers after their
+  1.3.0 statement release, unobserved. The run of 2026-09-28 21:01Z then
+  stopped at position 1 on the page's month (`credit-statement-period`):
+  the confirmed page's heading carries the payment day
+  (「YYYY年MM月DD日(曜)お支払い分…」). The collector and
+  `myjcb-credit-statement-total@1.3.0` read that form and the undated one,
+  and the parser requires the heading's day to be the total's payment date
+  ([ADR 0005's amendment (g)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-g-the-statement-heading-may-carry-its-payment-day)).
+  The empty skip-payment page reads as zero rows
   only when its one row is the provider's empty row; beside real rows it is
   refused. A later stop on a page's own shape now stores that page. The site's 「通信エラーが発生しました」
   page, served after many consecutive fetches, is not recognised; after the

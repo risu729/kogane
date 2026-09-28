@@ -7,6 +7,7 @@ import {
   readMyJcbStatementPage,
 } from "../../../packages/domain/src/myjcb-statement-page";
 import { myjcbSchedulePageKind } from "../../../packages/domain/src/myjcb-skip-payment-schedule";
+import { readMyJcbStatementHeading } from "../../../packages/domain/src/myjcb-statement-heading";
 
 type HtmlNode = DefaultTreeAdapterMap["node"];
 type HtmlElement = DefaultTreeAdapterMap["element"];
@@ -580,18 +581,20 @@ export function schedulePageKind(html: string): "skip-payment" | "unobserved" {
 }
 
 /**
- * The heading a closed statement page names its payment month in, compared
- * after whitespace removal. `myjcb-credit-statement-total` reads the same
- * heading (packages/parsers/src/parsers/myjcb.ts), so the month the collector
- * records and the month the statement total carries are one reading.
+ * Every payment month (`YYYY-MM`) a page's `h2` headings state: normally none
+ * or one. A closed statement page names its payment in an `h2`, undated
+ * (「YYYY年M月お支払い分のカードご利用明細」) or dated
+ * (「YYYY年M月D日(曜)お支払い分のカードご利用明細」, ADR 0005 amendment g),
+ * compared after whitespace removal. `readMyJcbStatementHeading` is the
+ * reading `myjcb-credit-statement-total` uses too, so the month the collector
+ * records and the month the statement total carries are one reading. The day
+ * is not recorded here; the statement parser compares it with the total's
+ * payment date.
  */
-const STATEMENT_MONTH_HEADING = /^(\d{4})年(\d{1,2})月お支払い分のカードご利用明細$/u;
-
-/** Every payment month (`YYYY-MM`) a page's `h2` headings state: normally none or one. */
 export function statedPaymentMonths(html: string): string[] {
   return findElements(parse(html), (element) => element.tagName === "h2").flatMap((element) => {
-    const match = STATEMENT_MONTH_HEADING.exec(compactText(element));
-    return match ? yearMonth(match[1]!, match[2]!) : [];
+    const heading = readMyJcbStatementHeading(compactText(element));
+    return heading ? [heading.month] : [];
   });
 }
 
