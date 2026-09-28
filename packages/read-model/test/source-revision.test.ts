@@ -8,7 +8,7 @@
 // the old identity wrong. Every row below is synthetic.
 import { Database } from "bun:sqlite";
 import { fromTemplate } from "./schema-template";
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -35,6 +35,13 @@ function migratedDatabase(): Database {
     return db;
   });
 }
+
+// The first build of the migrated template runs every CORE migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./schema-template).
+beforeAll(() => {
+  migratedDatabase().close();
+}, 60_000);
 
 const revision = (db: Database): CoreRevisionRow =>
   db.query(CORE_REVISION_SQL).get() as CoreRevisionRow;
