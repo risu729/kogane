@@ -89,12 +89,16 @@ producer read it
 ([identity operations](identity-operations.md#collector-vpass-runs-bind-in-their-own-run)).
 
 A card's importer-era v1 token and its collector-era v2 token are different
-values and so, in this repository today, different account entities until a
-reviewed crosswalk joins the two tokens of each card. The collector's
+values and so, in this repository today, different account entities until the
+one-time identity-value rewrite of ADR 0030's amendment replaces each card's
+v1 token by its v2 token
+([identity operations](identity-operations.md#one-time-identity-value-rewrite);
+the owner stages the Vpass pairs, and the rewrite migration is not in the
+repository yet). The collector's
 statement pages are not parsed today (ADR 0022), so no card-month is read
 under both yet; once they are, purchase recognition retires the importer-era
 event of a card-month and recognises the collector's on the new entity, so
-the captured total is not doubled. That crosswalk is not part of ADR 0029.
+the captured total is not doubled. That rewrite is not part of ADR 0029.
 The operations below describe the retired importer.
 
 ## Operations

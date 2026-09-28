@@ -46,12 +46,18 @@ describe("payloads", () => {
       "card-refund.withdraw",
       "card-installment.link",
       "card-installment.unlink",
-      "identity.crosswalk.accept",
     ]);
-    // The review kinds are exactly what the 0051 CHECK added (ADR 0017).
-    expect<readonly string[]>([...CARD_REVIEW_KINDS]).toEqual(CHANGE_KINDS.slice(7, 13));
+    // The review kinds are exactly the tail the 0051 CHECK added (ADR 0017).
+    expect<readonly string[]>([...CARD_REVIEW_KINDS]).toEqual(CHANGE_KINDS.slice(7));
     expect(CHANGE_KINDS.filter(isCardReviewKind)).toEqual([...CARD_REVIEW_KINDS]);
-    for (const kind of ["card-purchase.delete", "card-refund", "card-installment.relink"])
+    // `identity.crosswalk.accept` (0058) is retired (ADR 0030 amendment): the
+    // CORE CHECK still admits it for history, the vocabulary does not.
+    for (const kind of [
+      "card-purchase.delete",
+      "card-refund",
+      "card-installment.relink",
+      "identity.crosswalk.accept",
+    ])
       expect(isChangeKind(kind)).toBe(false);
     expect(
       CHANGE_KINDS.some((kind) => /^(?:payment|transfer|order|withdrawal|send)\./u.test(kind)),
@@ -114,63 +120,6 @@ describe("payloads", () => {
     expect(validPayload("relation.accept", { ...relation, toRef: relation.fromRef })).toBe(false);
     expect(validPayload("relation.accept", { ...relation, relationKind: "same_as" })).toBe(false);
     expect(validPayload("relation.accept", { ...relation, evidenceRefs: ["a", "a"] })).toBe(false);
-  });
-});
-
-describe("identity crosswalk payloads (ADR 0030)", () => {
-  const value = (source: "vpass" | "mf", version: number, fill: string) =>
-    source === "vpass"
-      ? `vpass-card-v${version}-${fill.repeat(64)}`
-      : `moneyforward-account-v${version}-${fill.repeat(64)}`;
-  const crosswalk = {
-    source: "vpass",
-    fromRef: value("vpass", 1, "a"),
-    toRef: value("vpass", 2, "b"),
-    sharedRows: 3,
-    newOnlyRows: 1,
-    oldOnlyRows: 0,
-    months: 2,
-    reason: "The same statement lines under both values",
-  };
-
-  test("a crosswalk names two identity values of its source and the counts reviewed", () => {
-    expect(validPayload("identity.crosswalk.accept", crosswalk)).toBe(true);
-    // Either derivation on either side: the values are opaque.
-    expect(
-      validPayload("identity.crosswalk.accept", { ...crosswalk, toRef: value("vpass", 1, "c") }),
-    ).toBe(true);
-    expect(
-      validPayload("identity.crosswalk.accept", {
-        ...crosswalk,
-        source: "moneyforward-me",
-        fromRef: value("mf", 1, "a"),
-        toRef: value("mf", 2, "b"),
-      }),
-    ).toBe(true);
-  });
-
-  test("anything else is refused before a plan exists", () => {
-    for (const changed of [
-      { source: "mizuho-bank" },
-      { source: "moneyforward-me" },
-      { toRef: value("mf", 2, "b") },
-      { toRef: crosswalk.fromRef },
-      { fromRef: value("vpass", 3, "a") },
-      { fromRef: value("vpass", 1, "A") },
-      { sharedRows: 0 },
-      { months: 0 },
-      { newOnlyRows: -1 },
-      { oldOnlyRows: 1.5 },
-      { oldOnlyRows: "0" },
-      { reason: " " },
-      // A caller cannot hand the server its own impact or entity.
-      { accountId: "account_1" },
-      { verdict: "unique" },
-      { expectedRevisions: {} },
-    ])
-      expect(validPayload("identity.crosswalk.accept", { ...crosswalk, ...changed })).toBe(false);
-    const { months: _months, ...missing } = crosswalk;
-    expect(validPayload("identity.crosswalk.accept", missing)).toBe(false);
   });
 });
 

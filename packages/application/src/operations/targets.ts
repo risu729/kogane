@@ -25,7 +25,6 @@ import {
 } from "./sql.ts";
 
 import { cardSettlementPlan } from "./card-settlement-target.ts";
-import { identityCrosswalkPlan } from "./identity-crosswalk.ts";
 
 import { ownershipReviewRequested } from "../../../domain/src/ownership-review.ts";
 import {
@@ -128,7 +127,6 @@ export async function resolveAndSimulate(
     return planner ? planner(store, kind, payload) : commandError("unsupported_semantics", [kind]);
   }
   if (kind.startsWith("card-settlement.")) return cardSettlementPlan(store, kind, payload);
-  if (kind === "identity.crosswalk.accept") return identityCrosswalkPlan(store, kind, payload);
   if (kind === "relation.accept" || kind === "relation.reject") {
     const relation = relationPayload(payload);
     const linkReview = pendingPostedReviewRequested(relation.evidenceRefs);

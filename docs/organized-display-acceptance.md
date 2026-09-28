@@ -110,6 +110,14 @@ following real UI paths were checked:
   are intentionally not created. Manual names take precedence.
 - The production free-text transaction search still searches original observation
   fields; it is not a new cross-page search index for organized names.
+- 2026-09-28: an MF connection review is keyed by the fetch unit key of the
+  run it reviewed (`account_connection_reviews.connection_key`).
+  [ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)
+  decides a one-time rewrite that replaces a staged importer-era
+  `moneyforward-account-v1-` identity by the collector's v2 identity in the
+  importer's rows, including that key where it is such an identity; review
+  ids, revisions and decisions stay. Only the staging migration (0062) exists so far; the
+  reviews are unchanged today.
 - Raw evidence/parsed-row panels intentionally retain original identifiers and text.
   The display layer does not rewrite malformed provider text or acquisition history.
 

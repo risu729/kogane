@@ -1,28 +1,37 @@
-# ADR 0030: A one-time, operator-accepted crosswalk from importer-era to collector-era account identities
+# ADR 0030: A one-time identity-value rewrite from importer-era to collector-era account identities (first decided as a crosswalk)
 
-- Status: proposed
-- Date: 2026-09-27
-- Carried by:
+- Status: the crosswalk decision (2026-09-27, merged in
+  [#279](https://github.com/risu729/kogane/pull/279)) is superseded by the
+  [amendment of 2026-09-28](#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk),
+  which is proposed and accepted when the amending PR merges. The file keeps
+  its name so that links to it stay valid.
+- Date: 2026-09-27; amended 2026-09-28
+- Carried by (amendment):
+  `packages/storage-d1/migrations/core/0062_identity_value_rewrite_staging.sql`,
+  `scripts/core-schema-ledger.ts` (`identity_value_rewrites`),
+  [identity operations](../identity-operations.md#one-time-identity-value-rewrite),
+  `packages/storage-d1/test/identity-value-rewrite-migration.test.ts`,
+  `services/processor/test/moneyforward-producer-switch.test.ts`,
+  `packages/application/test/command.test.ts`
+- Carried by (crosswalk, removed by the amendment):
   `packages/storage-d1/src/core/identity-crosswalk.ts`,
-  `packages/storage-d1/migrations/core/0058_identity_crosswalk.sql`,
-  `packages/storage-d1/src/core/identity-store.ts` (`accountEntityId`),
   `packages/application/src/operations/identity-crosswalk.ts`,
-  `packages/application/src/command/contract.ts` (`identity.crosswalk.accept`),
-  `services/processor/src/change-commands.ts`,
-  `services/processor/scripts/identity-crosswalk-proposals.ts`,
-  [identity operations](../identity-operations.md#joining-importer-era-and-collector-era-identities-one-time),
-  [change lifecycle](../change-lifecycle.md),
-  `packages/storage-d1/test/identity-crosswalk.test.ts`,
-  `packages/storage-d1/test/identity-crosswalk-migration.test.ts`,
-  `packages/application/test/command.test.ts`,
-  `services/processor/test/identity-crosswalk.test.ts`
+  `services/processor/scripts/identity-crosswalk-proposals.ts`, the
+  `identity.crosswalk.accept` kind and its tests;
+  `packages/storage-d1/migrations/core/0058_identity_crosswalk.sql` stays as
+  history.
 - Related: [ADR 0023](0023-vpass-collector-card-binding.md) and
   [ADR 0027](0027-moneyforward-collector-account-identity.md) (the importer's
   entity for an identity value, whichever producer read it),
   [ADR 0017](0017-card-purchase-review-commands.md) (the last widening of the
   command vocabulary, which 0058 repeats),
   [ADR 0029](0029-data-classification-and-unkeyed-identity.md) (collectors
-  that derive their identity values without the lost key)
+  that derive their identity values without the lost key),
+  [mutation policy](../design.md#mutation-policy)
+
+The sections from Context to Verification are the crosswalk decision as it
+was made on 2026-09-27. The code they name no longer exists; what replaced it
+is the [amendment](#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk).
 
 ## Context
 
@@ -255,3 +264,199 @@ reason}` (`fromRef` the old value, `toRef` the new; both values of the
   key (no caller-supplied entity, verdict or revisions).
 - `services/processor/test/lanes.test.ts` pins migrations through 0058;
   `infra/schema/core-ledger.*` regenerated with the table classified.
+
+## Amendment (2026-09-28): a one-time identity-value rewrite replaces the crosswalk
+
+- Status: proposed; accepted when the amending PR merges. It is carried out
+  by two migrations in two changes: 0062 (this change) stages the pairs and
+  retires the crosswalk; 0063 (the next change) performs the rewrite and is
+  not in the repository yet.
+- Date: 2026-09-28
+- Supersedes: the crosswalk decision above (options 3 and 5, the Decision,
+  and the Consequences that follow from them)
+
+### Context
+
+The owner decided on 2026-09-28 that the importer-era and collector-era
+values of one card or account are not joined by a crosswalk record at all:
+the old identifier is overwritten by the new one, once, as a declared special
+case. The crosswalk works, but it leaves the old value as the identity
+everywhere in stored rows, adds a table read to every account resolution
+for good, needs one reviewed command per value, and still lists the
+MoneyForward months both producers captured under two source accounts,
+because the transactions read ranks snapshots per unit key and month. No
+crosswalk has been recorded: the roadmap says no proposal has been run
+against production, and 0062 refuses to proceed if one has.
+
+What the value is inside the store decides how it can be rewritten:
+
+- The value is text in a few columns: the importer runs' fetch unit key
+  (`fetch_units.unit_key`, both sources), the Vpass identity pin
+  (`identity_vpass_bindings.card_token`), the importer's source-account
+  reference (`source_accounts.reference_json`, `["vpass:card", <token>]` or
+  `["moneyforward-me:<identity>"]`), the MoneyForward importer parses'
+  `transaction_observations.source_account`, and the importer's account
+  connection reviews (`account_connection_reviews.connection_key`).
+- The value is also hashed into ids: a source account's id is
+  `identityKey("sa", [source, producer, key])`, the account entity of an
+  identity value is derived from the importer producer's source-account id
+  for it (ADR 0023, ADR 0027), and a mapping id from the source-account id.
+  D1's SQL has no SHA-256, so no migration can recompute them, and they are
+  referenced from about ten append-only tables.
+- A Vpass pin is valid only while its token equals the trusted view's token,
+  which is the binding run's fetch unit key (`eligible_identity_runs`,
+  migration 0057), so the pin and the unit key must change together.
+- After a swap, re-identifying an importer parse would hash a new
+  source-account id for a (source, producer, reference) that already exists
+  under the old id, which `UNIQUE(source_id, producer_id, reference_json)`
+  and `source_accounts_no_replace` refuse. The identity store must find the
+  existing source account by that natural key before it hashes one.
+
+### Options considered
+
+1. **Keep the crosswalk.** Rejected by the owner: a record and a command per
+   value, a lookup on every resolution from then on, and the old value stays
+   the identity in every stored row.
+2. **Rewrite the value in place and keep the importer-era entity.** Chosen.
+   The text columns above take the new value; every hashed id stays, so the
+   importer-era source account keeps its id, mappings and decisions, and its
+   entity (`E_o`) is the account's entity from then on.
+3. **Rekey everything: recompute every id from the new value.** Rejected:
+   there is no SHA-256 in D1's SQL, and a new source-account id cascades
+   through about ten append-only tables (mappings, identity observations,
+   decisions, connection reviews, purchase recognitions and their keys).
+4. **Assign each collector source account by hand (`identity.assign`).**
+   Rejected: one manual decision per source account and per future producer,
+   the values stay different, and the MoneyForward months are still listed
+   twice.
+5. **A runtime job in the Processor.** Rejected: the rewritten tables are
+   append-only by trigger, so the rewrite has to drop and recreate triggers,
+   and schema changes belong in migrations, which D1 applies atomically.
+
+### Decision
+
+- **Two migrations and a staging table.** Migration 0062 (this change):
+  1. aborts if `account_identity_crosswalk` holds any row;
+  2. creates `identity_value_rewrites(source_id, old_value, new_value,
+basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
+     shape and `new_value` of the `v2` shape of that source (prefix and 64
+     lowercase hex); `basis` `shared-rows` or `owner-recomputed`; UNIQUE per
+     (source, old) and per (source, new); classified `operational-mutable`;
+  3. validates every insert by trigger: the old value is importer-era
+     (exactly one `collector-r2-importer` source account carries it and at
+     least one importer fetch unit is keyed by it,
+     `identity_value_rewrite_old_unknown` otherwise); the new value is
+     collector-era (no importer source account carries it and a fetch unit of
+     another producer is keyed by it, `identity_value_rewrite_new_unknown`);
+     neither value is staged yet on either side
+     (`identity_value_rewrite_not_one_to_one`), so no pair is many-to-one and
+     no chain can form;
+  4. stages the MoneyForward pairs the stored evidence proves, with basis
+     `shared-rows`: the rule of the crosswalk proposals above, moved into the
+     migration and restricted to `moneyforward-me` and to `unique` pairs of a
+     `v1` old value and a `v2` new value (uniqueness is measured over every
+     pair before that shape filter);
+  5. drops `account_identity_crosswalk`.
+- **Between the migrations, the owner** runs read-only preflight counts,
+  inserts the Vpass pairs (basis `owner-recomputed`; no collector-era Vpass
+  row is parsed, so the shared-rows rule cannot see them) and confirms the
+  stage. The owner recomputes each Vpass pair on their own machine from the
+  card's tuple: the `v1` token as the importer's HMAC under the importer's
+  key, which the owner still holds outside the platform (no deployed
+  component has it), and the `v2` token as the collectors' unkeyed digest
+  (ADR 0029). The trigger checks only that both values are stored where
+  their era says, not how they were derived ([identity operations](../identity-operations.md#one-time-identity-value-rewrite)).
+  A staged MoneyForward pair is a proposal (INV07): the owner deletes a row
+  that is wrong before the rewrite, and nothing adopted changes until the
+  owner has confirmed the stage and the change carrying 0063 is merged.
+- **Migration 0063 (the next change)**, in one atomic migration: checks
+  that every staged pair is still valid; drops the `*_no_update` triggers of
+  the five tables above; updates the five columns for the importer's rows of
+  each staged old value; appends, for each collector source account of a
+  staged new value, a `rule` mapping revision to `E_o` with the same policy
+  version, label and status and the reason `identity-value-rewrite`
+  (aborting when that source account's mapping is manual or protected);
+  checks that no staged old value remains; recreates the dropped triggers
+  with their exact text; drops `identity_value_rewrites`. An empty stage
+  changes nothing but the drop. With it, the identity store resolves a
+  source account by its natural key before it hashes one, so the importer's
+  source account (old id, new reference) keeps being found and its entity
+  stays `E_o`.
+- **The crosswalk is retired.** Its store module, application planner,
+  proposal script, the `identity.crosswalk.accept` kind (contract, commit,
+  targets, subject ref, planner registration, confirmation label) and the
+  crosswalk branch of `accountEntityId` are removed; migration 0058 stays as
+  history. The retired kind stays admitted by the kind CHECK constraints of
+  `change_plans` and `operation_receipts`: removing it would rebuild four
+  command tables for no row, and the closed vocabulary in
+  `packages/application/src/command/contract.ts` refuses it before any row
+  is written.
+
+### Consequences
+
+- **One declared exception to "evidence is never rewritten".** 0063 will be
+  the only migration that updates evidence rows, and only the
+  platform-derived identity value (a digest the platform computed, not a
+  claim of the provider) in the five columns above, of the importer's rows
+  of the staged pairs, once. No other migration may do this without a new
+  ADR; [the mutation policy](../design.md#mutation-policy) points here and
+  gains the exception itself with 0063.
+- **What stays immutable.** Raw objects in R2 and their digests; every
+  observation column other than the MoneyForward importer rows'
+  `source_account`, including external ids (a MoneyForward external id keeps
+  the fingerprint of the old value), amounts, dates and `extra_json`; every
+  hashed id (source accounts, entities, mappings, identity runs and
+  observations); the identity run policies' dependency JSON and digest;
+  `accounts`; every decision, mapping revision (new ones are appended) and
+  audit row. Only rows with the old value change; collector rows and
+  unstaged values are untouched.
+- **What joins.** After 0063 the importer's source account carries the new
+  value and keeps `E_o`; the collector's source accounts of that value map to
+  `E_o`; every later capture of the value resolves there. For MoneyForward
+  the importer's and the collector's snapshots of a month share one unit key,
+  so the months both captured are read once (the newer capture), as ADR 0027
+  does for one value read by two producers.
+- **What stays.** The collector-era entity `E_n` stays in `accounts`
+  (append-only) with no current mapping. A value that is not staged stays as
+  it is: an unpaired `v2` value keeps its own entity, and so does a collector
+  Vpass token with no staged pair.
+- **Coincidental rows.** The shared-rows limit of the crosswalk proposals
+  holds for the staged MoneyForward pairs: an identical row in another
+  account makes a real pair not `unique` (not staged), and coincidental rows
+  alone could stage an unrelated pair. The owner confirms the stage before 0063.
+- **Abort instead of a partial stage.** If a pair the rule proposes fails
+  the validation trigger, 0062 aborts as a whole and the deploy stops; it
+  never stages part of the evidence silently.
+- **Production.** Nothing here reads production. The owner runs the
+  preflight and confirms the stage before the rewrite is merged. The owner's
+  reports of 2026-09-28 expect MoneyForward 4 and Vpass 6 pairs; that is the
+  expectation the confirmation is read against, not a count this change
+  verifies.
+
+### Verification
+
+- `packages/storage-d1/test/identity-value-rewrite-migration.test.ts`
+  (CORE migrations through 0061 over the Layer A stub; the current-identity
+  view replaced by a table the test fills): 0062 stages exactly one
+  MoneyForward pair from importer and collector histories with made-up
+  values, and not an ambiguous pair (one old value, two new), a value that
+  shares nothing, or a Vpass pair whose rows are shared; a competitor of
+  another shape or an importer that carries the new value stages nothing;
+  staging changes no source account, fetch unit or observation; an empty
+  store stages nothing; with a crosswalk row the migration aborts and the
+  schema is unchanged. The trigger admits the owner's valid Vpass pair and
+  refuses a bad shape, source or basis, an unknown old value (no importer
+  source account, or no importer fetch unit), an unknown or importer-carried
+  new value, a many-to-one pair in either direction and a chain; the table
+  and trigger SQL digests equal the committed CORE ledger, which no longer
+  lists the crosswalk.
+- `services/processor/test/moneyforward-producer-switch.test.ts` (whole
+  CORE schema, Miniflare, runs registered through the pipeline): the
+  staging statement of 0062, run against the real current-identity view,
+  stages exactly the importer's `v1` and the collector's `v2` identity of the
+  split account.
+- `packages/application/test/command.test.ts`: the closed kind list without
+  `identity.crosswalk.accept`, which `isChangeKind` refuses.
+- `services/processor/test/lanes.test.ts` pins migrations through 0062;
+  `infra/schema/core-ledger.*` regenerated.
+- The rewrite (0063) and its verification are the next change.
