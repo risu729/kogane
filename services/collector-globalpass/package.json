@@ -7,12 +7,12 @@
     "@cloudflare/puppeteer": "1.4.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.2.6",
+    "@cloudflare/vitest-plugin": "1.2.7",
     "@types/bun": "1.4.2",
     "@types/node": "26.6.2",
     "typescript": "6.0.3",
     "vitest": "4.1.11",
-    "wrangler": "4.139.0",
+    "wrangler": "4.140.0",
     "ws": "8.21.3"
   }
 }
