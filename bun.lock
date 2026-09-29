@@ -199,7 +199,7 @@
         "typescript": "6.0.3",
         "vitest": "4.1.11",
         "wrangler": "4.141.0",
-        "ws": "8.21.3",
+        "ws": "8.22.0",
       },
     },
     "services/collector-mizuho": {
@@ -280,7 +280,7 @@
         "typescript": "7.0.2",
         "vitest": "4.1.11",
         "wrangler": "4.141.0",
-        "ws": "8.21.3",
+        "ws": "8.22.0",
       },
     },
     "services/collector-sbi-vc-trade": {
@@ -328,7 +328,7 @@
         "typescript": "7.0.2",
         "vitest": "4.1.11",
         "wrangler": "4.141.0",
-        "ws": "8.21.3",
+        "ws": "8.22.0",
       },
     },
     "services/collector-vpass": {
@@ -1354,7 +1354,7 @@
 
     "wrappy": ["wrappy@1.0.2", "", {}, "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=="],
 
-    "ws": ["ws@8.21.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw=="],
+    "ws": ["ws@8.22.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg=="],
 
     "y18n": ["y18n@5.0.8", "", {}, "sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA=="],
 
