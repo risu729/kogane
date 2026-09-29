@@ -466,7 +466,12 @@ but never parsed. The manifest records each one as
 `schedulePages: [{ position, code }]` (`scheduled_payments_page` when stored,
 `schedule_page_fetch` when its fetch failed, which is not a stop) and
 `schedulePageCount`; schedule pages never count in `periodCount` or
-`capturedMonthCount` and never change the unit's coverage.
+`capturedMonthCount` and never change the unit's coverage. A month
+position whose page has that one h1 is stored and listed the same way, and
+is not a month; a `credit-detail` page read as `unknown` carries no period
+in the manifest, and one page's bytes at two positions must state one state
+and period
+([amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)).
 A month can be kept unread: a page kept as `unknown` that shows ledger rows
 (no heading, position 2 or later; `rows_unstated`), or a month page whose
 ledger shows rows under the observed third header
@@ -485,8 +490,10 @@ stops at that month ([ADR 0005's amendment](adr/0005-myjcb-statement-state-from-
 it keeps the credit menu, the past-months response, the months before it and
 `discovery.json`, reads nothing further, and is `partial`. Its unit is
 `partial` with the stage's stop code (`month_fetch`, `month_parse`,
-`credit_statement_state`, `credit_statement_period`, `ledger_parse`, and
-`export_fetch` only on the fetch path the Worker does not use), and its
+`credit_statement_state`, `credit_statement_period`, `credit_page_repeated`
+(the same page bytes as an earlier position's page read as another state or
+period, [ADR 0005's amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)),
+`ledger_parse`, and `export_fetch` only on the fetch path the Worker does not use), and its
 manifest entry records the code, the position and the count of months kept.
 On `credit_statement_state`, `credit_statement_period` and `ledger_parse` the
 page it stopped on is also kept, redacted, as an `unknown` `credit-detail`

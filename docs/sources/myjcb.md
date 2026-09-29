@@ -457,20 +457,21 @@ unit の coverage は「この run が集めようとしたものを、この un
 
 停止 code は閉じた一覧（`services/collector-myjcb/src/types.ts` の `CONNECTION_STOP_CODES`）である。
 
-| code                                                       | 段階                                               | 保存するもの                              |
-| ---------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------- |
-| `human_required`                                           | 人の操作が必要                                     | なし（unit は `unknown`）                 |
-| `login`                                                    | login、passkey、session 復元                       | なし                                      |
-| `discovery`                                                | mypage の card 列挙                                | なし                                      |
-| `credit_menu`、`credit_first_detail`、`credit_past_months` | credit menu、最初の明細 page（識別子）、過去月 API | なし                                      |
-| `credit_menu_group_unrecognized`                           | credit menu の見出しが観測した三つのどれでもない   | なし                                      |
-| `month_fetch`、`month_parse`                               | 月の page の取得、page の読み取り                  | 止まった月より前の月（unit は `partial`） |
-| `credit_statement_state`、`credit_statement_period`        | 状態の矛盾、明細の月                               | 同上                                      |
-| `ledger_parse`                                             | ledger header、行の cell                           | 同上                                      |
-| `export_fetch`                                             | CSV／PDF／OFX の取得と検証                         | 同上                                      |
-| `debit`                                                    | デビット明細                                       | なし（共通 bucket はデビットを拒否）      |
-| `no_route`                                                 | mypage に credit もデビットもない                  | なし                                      |
-| `unclassified`                                             | 段階を名乗らない error                             | なし                                      |
+| code                                                       | 段階                                                 | 保存するもの                              |
+| ---------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------- |
+| `human_required`                                           | 人の操作が必要                                       | なし（unit は `unknown`）                 |
+| `login`                                                    | login、passkey、session 復元                         | なし                                      |
+| `discovery`                                                | mypage の card 列挙                                  | なし                                      |
+| `credit_menu`、`credit_first_detail`、`credit_past_months` | credit menu、最初の明細 page（識別子）、過去月 API   | なし                                      |
+| `credit_menu_group_unrecognized`                           | credit menu の見出しが観測した三つのどれでもない     | なし                                      |
+| `month_fetch`、`month_parse`                               | 月の page の取得、page の読み取り                    | 止まった月より前の月（unit は `partial`） |
+| `credit_statement_state`、`credit_statement_period`        | 状態の矛盾、明細の月                                 | 同上                                      |
+| `credit_page_repeated`                                     | 前の position と同じ page が違う状態か period になる | 同上（その page は保存しない）            |
+| `ledger_parse`                                             | ledger header、行の cell                             | 同上                                      |
+| `export_fetch`                                             | CSV／PDF／OFX の取得と検証                           | 同上                                      |
+| `debit`                                                    | デビット明細                                         | なし（共通 bucket はデビットを拒否）      |
+| `no_route`                                                 | mypage に credit もデビットもない                    | なし                                      |
+| `unclassified`                                             | 段階を名乗らない error                               | なし                                      |
 
 各停止条件（`StopConditionCode`）は `connectionStopCode` の `Record` で一つの段階に対応する。新しい条件は段階を決めない限り compile できない。manifest の connection と failure は閉じた field だけから組み立て直し、一覧外の code（`manifest_stop_code_invalid`）や `detailMonth` でない位置（`manifest_stop_position_invalid`）は plan を拒否する。error message、HTTP body、provider の文言、金額は保存も log もしない。停止 log（`myjcb-credit-month-failed`）は `detailMonth`、条件 code、停止 code、保存した月の数だけを出す。
 
@@ -630,6 +631,8 @@ collector は page が述べることだけを記録する（`collectCredit`）�
 3. live の `detailMenu.html`：`detail.html?detailMonth=N` の各 link について、N、文書順でその前にある最後の `h2` が三つの観測済み見出しのどれか（code で。文字列は記録しない）、その link の box の見出し要素の tag 名（`h2`、`h3`、`p` など）。支払予定の box の見出しが `h2` かどうか。
 
 1 で通信エラー page なら、その page を認識する規則を決める（amendment (b) の制限）。2、3 で 7 と 8 が月になった経路が分かれば、menu の読み取りを直す。
+
+重複の確認は月の `credit-detail` page だけが対象である。支払予定 page の entry は position の label を period に持つ（`myjcb-skip-payment-schedule` が key と比べる）ので、同じスキップ払い page の bytes が二つの position（月の position 二つ、または月の position と menu の支払予定 position）で保存されると period が二つになり、extractor は両方を `manifest_artifact_ambiguous` で拒否する。観測されていない（position 8 の digest は保存された run ごとに違う）。
 
 ## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
 

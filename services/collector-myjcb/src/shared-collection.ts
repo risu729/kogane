@@ -154,7 +154,8 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * as `credit-skip-payment-NN.html` (the ショッピングスキップ払い page, amendment
  * (e)) or `credit-schedule-NN.html` (any other) and never part of the
  * coverage, whether they show rows or failed to fetch (ADR 0005's amendment
- * (c)).
+ * (c)). A month position whose page carries the ショッピングスキップ払い h1 is
+ * that schedule page and not a month either (amendment (h)).
  */
 function coverage(status: ConnectionSummary["status"]): CoverageStatus {
   if (status === "success") return "complete";

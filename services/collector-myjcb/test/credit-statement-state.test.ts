@@ -1982,4 +1982,35 @@ describe("ADR 0005 amendment (h): a stored page states only what the page states
     expect(stopped.schedulePages).toEqual([{ position: 2, code: "scheduled_payments_page" }]);
     expect(filenames(stopped.artifacts)).toContain("credit-skip-payment-02.html");
   });
+
+  test("a stop page is not kept when an earlier position kept its bytes stating something else", async () => {
+    // A confirmed page naming no month: position 2 has a past-months label
+    // and is kept as that month; position 3 shows the same bytes without a
+    // label and stops (`credit_statement_period`). Keeping it as `unknown`
+    // would give the one object two readings. Every value is synthetic.
+    const unnamed = page({ headings: [CONFIRMED_STATEMENT_HEADING], rows: [confirmedRow] });
+    const spy = spyOn(console, "warn").mockImplementation(() => {});
+    let run: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      run = await collectCredit(
+        client({ 0: mutable, 1: closed("2026年3月"), 2: unnamed, 3: unnamed }, [
+          { detailMonth: "2", detailAvailableFlag: "1", settlementYM: "2026年2月お支払い分" },
+        ]),
+        "x",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(run.stop).toEqual({
+      code: "credit_statement_period",
+      position: 3,
+      capturedMonthCount: 3,
+    });
+    const pages = run.artifacts.filter((artifact) => artifact.dataset === "credit-detail");
+    expect(pages.map((artifact) => [artifact.filename, artifact.statementState])).toEqual([
+      ["credit-detail-00.html", "unconfirmed"],
+      ["credit-detail-01.html", "confirmed"],
+      ["credit-detail-02.html", "confirmed"],
+    ]);
+  });
 });

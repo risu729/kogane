@@ -322,7 +322,9 @@ Concrete limits in the current code:
   no period, and one page read as two different things stops the
   connection (`credit_page_repeated`). That run also stored the
   ショッピングスキップ払い page as a month, for a reason not yet known; a month
-  position whose page carries that h1 is now stored as the schedule page.
+  position whose page carries that h1 is now stored as the schedule page;
+  the same skip-payment bytes stored at two positions would still carry two
+  position labels and be refused as ambiguous (not observed).
   Whether the repeated page is the no-bill page or the error page below has
   not been read
   ([ADR 0005's amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)).

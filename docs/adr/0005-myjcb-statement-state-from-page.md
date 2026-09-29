@@ -1597,7 +1597,14 @@ five ledgers parsed. Production was read only with aggregate queries
   provider's no-bill page, and not the 「通信エラーが発生しました」 page
   (which the collector does not recognise, amendment (b)), rests on the
   pattern in context 3. Why the menu gave positions 7 and 8 to the months
-  is not known (context 4). The observation that settles both is in the
+  is not known (context 4). The repeated-page check covers `credit-detail`
+  month pages only: a schedule page's entry keeps its position's label
+  (`myjcb-skip-payment-schedule` requires it), so the same skip-payment
+  bytes stored at two positions (two month positions, or a month position
+  and a menu schedule position) would state two periods and the extractor
+  would refuse both with `manifest_artifact_ambiguous`. That has not been
+  observed: position 8's digest differed in every stored run. The
+  observation that settles the first two is in the
   [source note](../sources/myjcb.md#同じ-page-を示す複数の-position-と月として読まれたスキップ払い-page2026-09-29adr-0005-の-amendment-h).
 
 ### Verification
@@ -1611,7 +1618,9 @@ five ledgers parsed. Production was read only with aggregate queries
   codes only; the skip page at a month position is stored as
   `credit-skip-payment-08.html`, listed in `schedulePages` and not counted
   as a month; a skip page at a month position is listed beside the menu's
-  schedule page, and is kept when a later month stops. Tests that expected
+  schedule page, and is kept when a later month stops; a stop page whose
+  bytes an earlier position kept as a confirmed month is not kept again as
+  `unknown`. Tests that expected
   an `unknown` page's position label now expect none.
 - `services/processor/test/myjcb-shared-r2.test.ts`: four entries for one
   page with position labels (the shape before this amendment) fail with
