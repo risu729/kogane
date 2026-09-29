@@ -241,14 +241,6 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "bounded card purchase scan progress",
   },
-  // 0062 (ADR 0030 amendment): the staged importer-era to collector-era
-  // identity-value pairs the one-time rewrite consumes. A work list, not
-  // evidence: the owner inserts rows between the two migrations and the
-  // rewrite migration drops the table once it has applied them.
-  identity_value_rewrites: {
-    classification: "operational-mutable",
-    planRow: "one-time identity-value rewrite staging (dropped by the rewrite)",
-  },
   // The Processor's last ticks per lane (0049): diagnosis bookkeeping pruned
   // to one day per lane, never evidence.
   processor_lane_ticks: {

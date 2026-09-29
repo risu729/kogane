@@ -10,14 +10,14 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `98d19c35677615b3122ed8e78dbbc89422d93812a934cc61e3e075eb813e7d48`
+Schema digest: `9912706b9c19164e45352159d1fdebe961a9372996f6814ff3ae8cd895795a76`
 
 ## Summary
 
-- Migrations applied: 61
-- Tables: 117 (all `STRICT`: yes)
+- Migrations applied: 62
+- Tables: 116 (all `STRICT`: yes)
 - Views: 39
-- Triggers: 413
+- Triggers: 410
 - Explicit indexes: 117
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
@@ -25,13 +25,13 @@ Schema digest: `98d19c35677615b3122ed8e78dbbc89422d93812a934cc61e3e075eb813e7d48
 | --- | --- | --- |
 | `core-keep` | 101 | account_connection_reviews, account_mappings, accounts, acquisition_sessions, active_releases, allocations, approvals, artifact_email_metadata, artifact_file_metadata, artifact_http_metadata, artifact_ranges, artifact_relations, artifact_storage_metadata, artifact_transform_steps, balance_observations, calculation_policies, calculation_results, calculation_runs, card_debit_account_statement, card_purchase_recognition_keys, card_purchase_recognitions, card_settlement_allocation_withdrawals, card_settlement_candidates, card_settlement_debit_account_evidence, card_settlement_decisions, change_plans, collection_run_stages, collection_runs, conversion_offers, core_source_revision, decision_operations, decision_outbox, decision_revisions, economic_event_revisions, economic_legs, entity_relations, evidence_use_restrictions, expiry_rules, fetch_artifacts, fetch_page_groups, fetch_run_ranges, fetch_run_reports, fetch_run_seals, fetch_runs, fetch_unit_reports, fetch_units, http_scope_rules, identity_instrument_uses, identity_observations, identity_run_policies, identity_run_seals, identity_runs, identity_vpass_bindings, ingest_client_producers, ingest_client_routes, ingest_clients, ingestion_attempts, instrument_identifiers, instrument_mappings, instruments, membership_state_claims, metadata_projection_inputs, metadata_projections, obligation_revisions, observation_decimal_values, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_coverage_claims, parse_input_references, parse_run_candidates, parse_runs, parser_releases, position_observations, price_observation_claims, price_observations, producer_sources, producers, projection_input_records, publication_events, published_parse_runs, raw_object_verification_events, raw_objects, reconciliation_proposals, release_activation_events, release_comparisons, report_artifacts, report_events, retention_classes, reward_bucket_claims, reward_programs, run_inventories, run_inventory_items, scheduled_payment_observations, settlement_relations, source_accounts, source_external_ids, sources, transaction_observations, valuation_observations |
 | `read-candidate` | 0 | — |
-| `operational-mutable` | 11 | card_purchase_scan_cursor, card_settlement_scan_cursor, collection_scan_state, identity_value_rewrites, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_work_items, price_promotion_cursor, processor_lane_ticks, reconciliation_scan_cursor |
+| `operational-mutable` | 10 | card_purchase_scan_cursor, card_settlement_scan_cursor, collection_scan_state, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_work_items, price_promotion_cursor, processor_lane_ticks, reconciliation_scan_cursor |
 | `unclassified-keep` | 5 | dataset_snapshot_policies, fetch_run_annotations, observation_artifact_metadata, observation_scan_state, parse_issues |
 
 Tables without both an append-only `*_no_update` and `*_no_delete` guard (mutable by design —
 pointers, checkpoints, leases, configuration, and the READ-side projections):
 
-active_releases, allocations, approvals, calculation_runs, card_purchase_scan_cursor, card_settlement_scan_cursor, change_plans, collection_runs, collection_scan_state, core_source_revision, dataset_snapshot_policies, decision_outbox, economic_event_revisions, http_scope_rules, identity_value_rewrites, ingest_client_producers, ingest_client_routes, ingest_clients, obligation_revisions, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_scan_state, observation_work_items, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_run_candidates, parse_runs, price_promotion_cursor, processor_lane_ticks, producer_sources, producers, published_parse_runs, reconciliation_proposals, reconciliation_scan_cursor, retention_classes, settlement_relations, source_external_ids, sources
+active_releases, allocations, approvals, calculation_runs, card_purchase_scan_cursor, card_settlement_scan_cursor, change_plans, collection_runs, collection_scan_state, core_source_revision, dataset_snapshot_policies, decision_outbox, economic_event_revisions, http_scope_rules, ingest_client_producers, ingest_client_routes, ingest_clients, obligation_revisions, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_scan_state, observation_work_items, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_run_candidates, parse_runs, price_promotion_cursor, processor_lane_ticks, producer_sources, producers, published_parse_runs, reconciliation_proposals, reconciliation_scan_cursor, retention_classes, settlement_relations, source_external_ids, sources
 
 ## Tables
 
@@ -94,7 +94,6 @@ active_releases, allocations, approvals, calculation_runs, card_purchase_scan_cu
 | `identity_run_policies` | core-keep | identity and mappings | yes | no | yes | identity_run_policies_no_update | identity_run_policies_no_delete | 6 | 2 | 0 | 4 |
 | `identity_run_seals` | core-keep | identity and mappings | yes | no | yes | identity_run_seals_no_update | identity_run_seals_no_delete | 3 | 1 | 0 | 9 |
 | `identity_runs` | core-keep | identity and mappings | yes | no | yes | identity_runs_no_update | identity_runs_no_delete | 4 | 1 | 0 | 6 |
-| `identity_value_rewrites` | operational-mutable | one-time identity-value rewrite staging (dropped by the rewrite) | yes | no | no | — | — | 4 | 0 | 0 | 3 |
 | `identity_vpass_bindings` | core-keep | identity and mappings | yes | no | yes | identity_vpass_bindings_no_update | identity_vpass_bindings_no_delete | 4 | 3 | 0 | 4 |
 | `ingest_client_producers` | core-keep | sources, producers and routes | yes | yes | no | — | — | 3 | 2 | 0 | 0 |
 | `ingest_client_routes` | core-keep | sources, producers and routes | yes | yes | no | — | — | 4 | 4 | 0 | 0 |
@@ -245,5 +244,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0057_vpass_card_token_v2.sql` | 12 | identity_vpass_bindings, identity_vpass_bindings_0057_copy |
 | `0058_identity_crosswalk.sql` | 37 | approvals_expanded, change_plans_expanded, decision_outbox_expanded, operation_receipts_expanded |
 | `0062_identity_value_rewrite_staging.sql` | 9 | identity_value_rewrite_0062_guard, identity_value_rewrites |
+| `0063_identity_value_rewrite_apply.sql` | 23 | account_mappings, identity_value_rewrite_0063_check, identity_value_rewrite_0063_guard |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql

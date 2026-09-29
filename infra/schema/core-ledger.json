@@ -835,6 +835,25 @@
         }
       ],
       "sha256": "de91bfafd827a7288e8b465fc0ef3fe403b76b1cb133331d76a9e8b4d1950d37"
+    },
+    {
+      "file": "0063_identity_value_rewrite_apply.sql",
+      "statementCount": 23,
+      "insertStatements": [
+        {
+          "table": "identity_value_rewrite_0063_guard",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "account_mappings",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "identity_value_rewrite_0063_check",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "19892d24a2169c319dea1af2d98dbaa8ce255307a3f743395303e24c3d505110"
     }
   ],
   "tables": [
@@ -7515,55 +7534,6 @@
       ],
       "appendOnly": true,
       "sqlSha256": "8aa6794535c30f0a"
-    },
-    {
-      "name": "identity_value_rewrites",
-      "classification": "operational-mutable",
-      "planRow": "one-time identity-value rewrite staging (dropped by the rewrite)",
-      "strict": true,
-      "withoutRowid": false,
-      "columns": [
-        {
-          "name": "source_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "old_value",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "new_value",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "basis",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        }
-      ],
-      "primaryKey": [],
-      "foreignKeys": [],
-      "indexes": [],
-      "triggers": [
-        "identity_value_rewrites_new_known",
-        "identity_value_rewrites_old_known",
-        "identity_value_rewrites_one_to_one"
-      ],
-      "noUpdateTriggers": [],
-      "noDeleteTriggers": [],
-      "appendOnly": false,
-      "sqlSha256": "acc79cd00fea4c81"
     },
     {
       "name": "identity_vpass_bindings",
@@ -15846,27 +15816,6 @@
       "sqlSha256": "04f2ba02af58424c"
     },
     {
-      "name": "identity_value_rewrites_new_known",
-      "table": "identity_value_rewrites",
-      "timing": "BEFORE",
-      "event": "INSERT",
-      "sqlSha256": "9627f77c99082508"
-    },
-    {
-      "name": "identity_value_rewrites_old_known",
-      "table": "identity_value_rewrites",
-      "timing": "BEFORE",
-      "event": "INSERT",
-      "sqlSha256": "c2b3f5b14ed01990"
-    },
-    {
-      "name": "identity_value_rewrites_one_to_one",
-      "table": "identity_value_rewrites",
-      "timing": "BEFORE",
-      "event": "INSERT",
-      "sqlSha256": "fc74f214af4e4491"
-    },
-    {
       "name": "identity_vpass_binding_provenance",
       "table": "identity_vpass_bindings",
       "timing": "BEFORE",
@@ -17589,9 +17538,9 @@
     }
   ],
   "summary": {
-    "tableCount": 117,
+    "tableCount": 116,
     "viewCount": 39,
-    "triggerCount": 413,
+    "triggerCount": 410,
     "explicitIndexCount": 117,
     "byClassification": {
       "core-keep": [
@@ -17702,7 +17651,6 @@
         "card_purchase_scan_cursor",
         "card_settlement_scan_cursor",
         "collection_scan_state",
-        "identity_value_rewrites",
         "observation_lane_state",
         "observation_parse_jobs",
         "observation_replay_plans",
@@ -17734,7 +17682,6 @@
       "decision_outbox",
       "economic_event_revisions",
       "http_scope_rules",
-      "identity_value_rewrites",
       "ingest_client_producers",
       "ingest_client_routes",
       "ingest_clients",
@@ -17809,8 +17756,9 @@
       "0053_price_promotion.sql",
       "0057_vpass_card_token_v2.sql",
       "0058_identity_crosswalk.sql",
-      "0062_identity_value_rewrite_staging.sql"
+      "0062_identity_value_rewrite_staging.sql",
+      "0063_identity_value_rewrite_apply.sql"
     ],
-    "schemaSha256": "98d19c35677615b3122ed8e78dbbc89422d93812a934cc61e3e075eb813e7d48"
+    "schemaSha256": "9912706b9c19164e45352159d1fdebe961a9372996f6814ff3ae8cd895795a76"
   }
 }

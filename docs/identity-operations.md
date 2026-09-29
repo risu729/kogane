@@ -287,8 +287,18 @@ rewrite takes two migrations:
   MoneyForward pairs the stored rows prove (basis `shared-rows`), and drops
   the crosswalk table. It aborts, and the deploy stops, if the crosswalk table
   holds a row.
-- **0063 (not in the repository yet)** rewrites the staged values and drops the
-  staging table. It is merged only after the steps below.
+- **0063 (in the repository)** rewrites the staged values and drops the
+  staging table: it replaces each staged old value by its new value in the
+  importer's rows of five columns (fetch unit keys, Vpass pins, the
+  importer's source-account references, the MoneyForward importer parses'
+  `transaction_observations.source_account`, connection review keys),
+  appends a `rule` mapping revision (reason `identity-value-rewrite`) that
+  points each collector source account of a staged new value to the
+  importer-era entity, and recreates the append-only guards with their exact
+  text. It aborts, and the deploy stops, if a staged pair is no longer valid,
+  a held mapping exists, or an old value would remain; nothing of it applies
+  then. With an empty stage it only drops the staging table. It is merged
+  only after the steps below; step 4 is read after it applies.
 
 Every query here is read-only and returns counts only, except the one
 `INSERT` of step 2, which writes only the staging table. Run them from the
@@ -374,7 +384,58 @@ WHERE m.method<>'rule'
 
 Report these counts (counts only) on the pull request that carries 0063.
 Until 0063 applies, nothing reads the staging table and every value keeps
-its current entity.
+its current entity. Adding or deleting a staged row after the counts are
+reported changes what 0063 rewrites; report the counts again if it happens.
+
+**4. After 0063 applies.** Read-only, counts only. The staging table is gone
+and the five guards exist (expected `0` and `5`):
+
+```sql
+SELECT
+ (SELECT count(*) FROM sqlite_schema WHERE name='identity_value_rewrites') AS staging_tables,
+ (SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND name IN
+   ('fetch_units_no_update','identity_vpass_bindings_no_update','source_accounts_no_update',
+    'transaction_observations_no_update','account_connection_no_update')) AS guards;
+```
+
+The importer's source accounts by era: the `v2` rows are the rewritten ones
+(expected as many as the staged pairs of each source), and each `v1` row
+left is a value that was not staged:
+
+```sql
+SELECT source_id,
+       CASE WHEN reference_json GLOB '*-v1-*' THEN 'v1' WHEN reference_json GLOB '*-v2-*' THEN 'v2' ELSE 'other' END AS era,
+       count(*) AS source_accounts
+FROM source_accounts WHERE producer_id='collector-r2-importer' AND source_id IN ('vpass','moneyforward-me')
+GROUP BY 1, 2 ORDER BY 1, 2;
+```
+
+The appended mapping revisions (one per collector source account of a
+staged value; no Vpass one while no collector-era Vpass statement is
+parsed), and the collector source accounts of a rewritten value that do not
+map to the importer's entity (expected `0`):
+
+```sql
+SELECT count(*) AS repointed FROM account_mappings WHERE reason='identity-value-rewrite';
+
+SELECT count(*) AS split
+FROM source_accounts o
+JOIN source_accounts c ON c.source_id=o.source_id AND c.reference_json=o.reference_json
+ AND c.producer_id<>'collector-r2-importer'
+JOIN current_account_mappings m ON m.source_account_id=c.id
+WHERE o.producer_id='collector-r2-importer' AND o.source_id IN ('vpass','moneyforward-me')
+  AND o.reference_json GLOB '*-v2-*'
+  AND m.account_id<>(SELECT e.account_id FROM account_mappings e
+                     WHERE e.source_account_id=o.id AND e.method='rule'
+                     ORDER BY e.revision DESC LIMIT 1);
+```
+
+What stays as recorded: every id, the importer's manifests and raw objects
+in R2, the external ids, the Vpass identity run policies' dependency JSON
+(which names the `v1` token) and the importer's run registration labels
+(`fetch_unit_reports.report_key`, `fetch_run_ranges.range_key`). The
+collector-era entity of a rewritten value stays in `accounts` with no
+current mapping.
 
 ## Policy 2: Mizuho rule re-identification
 

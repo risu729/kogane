@@ -116,8 +116,8 @@ following real UI paths were checked:
   decides a one-time rewrite that replaces a staged importer-era
   `moneyforward-account-v1-` identity by the collector's v2 identity in the
   importer's rows, including that key where it is such an identity; review
-  ids, revisions and decisions stay. Only the staging migration (0062) exists so far; the
-  reviews are unchanged today.
+  ids, revisions and decisions stay. Migration 0063 applies it to the importer's reviews
+  of a staged value; other reviews are unchanged.
 - Raw evidence/parsed-row panels intentionally retain original identifiers and text.
   The display layer does not rewrite malformed provider text or acquisition history.
 

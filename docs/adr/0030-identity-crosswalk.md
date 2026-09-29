@@ -3,12 +3,16 @@
 - Status: the crosswalk decision (2026-09-27, merged in
   [#279](https://github.com/risu729/kogane/pull/279)) is superseded by the
   [amendment of 2026-09-28](#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk),
-  which is proposed and accepted when the amending PR merges. The file keeps
-  its name so that links to it stay valid.
-- Date: 2026-09-27; amended 2026-09-28
+  accepted for its staging migration 0062
+  ([#357](https://github.com/risu729/kogane/pull/357)); its rewrite migration
+  0063 is proposed and accepted when the change that carries it merges. The
+  file keeps its name so that links to it stay valid.
+- Date: 2026-09-27; amended 2026-09-28; 0063 recorded 2026-09-29
 - Carried by (amendment):
   `packages/storage-d1/migrations/core/0062_identity_value_rewrite_staging.sql`,
-  `scripts/core-schema-ledger.ts` (`identity_value_rewrites`),
+  `packages/storage-d1/migrations/core/0063_identity_value_rewrite_apply.sql`,
+  `packages/storage-d1/src/core/identity-store.ts` (`sourceAccountId`),
+  `scripts/core-schema-ledger.ts`,
   [identity operations](../identity-operations.md#one-time-identity-value-rewrite),
   `packages/storage-d1/test/identity-value-rewrite-migration.test.ts`,
   `services/processor/test/moneyforward-producer-switch.test.ts`,
@@ -267,10 +271,11 @@ reason}` (`fromRef` the old value, `toRef` the new; both values of the
 
 ## Amendment (2026-09-28): a one-time identity-value rewrite replaces the crosswalk
 
-- Status: proposed; accepted when the amending PR merges. It is carried out
-  by two migrations in two changes: 0062 (this change) stages the pairs and
-  retires the crosswalk; 0063 (the next change) performs the rewrite and is
-  not in the repository yet.
+- Status: accepted for 0062 ([#357](https://github.com/risu729/kogane/pull/357));
+  0063 proposed, accepted when the change that carries it merges. It is
+  carried out by two migrations in two changes: 0062 stages the pairs and
+  retires the crosswalk; 0063 performs the rewrite
+  ([as implemented](#0063-as-implemented-2026-09-29)).
 - Date: 2026-09-28
 - Supersedes: the crosswalk decision above (options 3 and 5, the Decision,
   and the Consequences that follow from them)
@@ -335,7 +340,7 @@ What the value is inside the store decides how it can be rewritten:
 
 ### Decision
 
-- **Two migrations and a staging table.** Migration 0062 (this change):
+- **Two migrations and a staging table.** Migration 0062:
   1. aborts if `account_identity_crosswalk` holds any row;
   2. creates `identity_value_rewrites(source_id, old_value, new_value,
 basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
@@ -369,7 +374,7 @@ basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
   A staged MoneyForward pair is a proposal (INV07): the owner deletes a row
   that is wrong before the rewrite, and nothing adopted changes until the
   owner has confirmed the stage and the change carrying 0063 is merged.
-- **Migration 0063 (the next change)**, in one atomic migration: checks
+- **Migration 0063**, in one atomic migration: checks
   that every staged pair is still valid; drops the `*_no_update` triggers of
   the five tables above; updates the five columns for the importer's rows of
   each staged old value; appends, for each collector source account of a
@@ -394,7 +399,7 @@ basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
 
 ### Consequences
 
-- **One declared exception to "evidence is never rewritten".** 0063 will be
+- **One declared exception to "evidence is never rewritten".** 0063 is
   the only migration that updates evidence rows, and only the
   platform-derived identity value (a digest the platform computed, not a
   claim of the provider) in the five columns above, of the importer's rows
@@ -459,4 +464,100 @@ basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
   `identity.crosswalk.accept`, which `isChangeKind` refuses.
 - `services/processor/test/lanes.test.ts` pins migrations through 0062;
   `infra/schema/core-ledger.*` regenerated.
-- The rewrite (0063) and its verification are the next change.
+- The rewrite (0063) is verified below.
+
+### 0063 as implemented (2026-09-29)
+
+- Status: proposed; accepted when the change that carries 0063 merges.
+- Production preconditions the owner reported before it (counts only, read
+  with the queries of [identity operations](../identity-operations.md#one-time-identity-value-rewrite)):
+  `moneyforward-me` / `shared-rows` 4 pairs (4 distinct old and 4 distinct
+  new values), `vpass` / `owner-recomputed` 6 (6 and 6), 0 held mappings,
+  and 0 MoneyForward `v1` values in balance, position, valuation and
+  scheduled-payment observations. This repository does not verify them.
+
+`packages/storage-d1/migrations/core/0063_identity_value_rewrite_apply.sql`
+does what the Decision states, with these choices the Decision left open:
+
+- **`E_o`** is the account of the importer's source account's `rule`
+  revisions (every one of them names the same entity, since the identity
+  store derives it from that source account's id; the guard aborts with
+  `identity_value_rewrite_entity_ambiguous` otherwise). A manual mapping of
+  the importer's own source account does not change `E_o`, as it does not
+  change what the identity store derives.
+- **"The same policy version, label and status"** are those of the
+  collector source account's current revision, which the new revision
+  supersedes: only the entity changes, and a later capture under the same
+  policy version appends nothing. The id is that revision's id base with
+  `-r<revision>`, the form the identity store gives a later automatic
+  revision.
+- **Guards** are named CHECK constraints, so an abort names its closed code:
+  `identity_value_rewrite_stage_invalid`, `identity_value_rewrite_entity_ambiguous`,
+  `identity_value_rewrite_mapping_held` before the rewrite;
+  `identity_value_rewrite_old_value_remains`, `identity_value_rewrite_importer_unmoved`,
+  `identity_value_rewrite_collector_unjoined` after it. The "no old value
+  remains" check covers the five columns in every producer's rows and the
+  MoneyForward `source_account` of balance, position, valuation and
+  scheduled-payment observations.
+- **Rows it updates** are the importer's only: fetch units of the importer's
+  runs of the pair's source; Vpass pins whose financial unit is an importer
+  unit; the importer's source account; transaction observations of parses of
+  the importer's MoneyForward artifacts; the importer's connection reviews.
+- **`fetch_units_no_update`** (Layer A, 0001) is dropped with `IF EXISTS`:
+  the test stubs of Layer A declare `fetch_units` without its guards yet run
+  every CORE migration. Every deployed CORE database has it, and the
+  recreated text is 0001's. The other four guards are dropped without
+  `IF EXISTS`, so a missing one aborts the migration.
+- **What else keeps the old value.** Besides what the Consequences list, the
+  importer's MoneyForward runs carry the `v1` value in two Layer A
+  registration labels, `fetch_unit_reports.report_key` and
+  `fetch_run_ranges.range_key`, and each Vpass identity run policy carries its
+  token in `dependency_set_json` (and so its digest). None is read as an
+  account identity, and all stay as recorded; the importer's manifests in R2
+  keep the `v1` value too.
+- **The identity store** resolves a source account by
+  `(source_id, producer_id, reference_json)` before it hashes one
+  (`sourceAccountId`), both for the source account a row is filed under and
+  for the importer's source account an entity is derived from. For every
+  source account the store wrote itself the two ids agree, so nothing
+  changes except for the rewritten importer source accounts.
+
+Verification:
+
+- `packages/storage-d1/test/identity-value-rewrite-migration.test.ts`
+  (CORE migrations through 0062 over the Layer A stub with 0001's
+  `fetch_units` guard added; a Vpass card through the real trusted binding,
+  pin and identity run, a MoneyForward account of both eras with its
+  connection reviews, an unpaired collector value; synthetic values): with
+  both pairs staged, every table keeps its row count and rowids except
+  `account_mappings` (+2) and the dropped staging table; a changed cell is one
+  of the five columns and equals the old cell with the old value replaced;
+  the importer's references equal `JSON.stringify` of the new keys; the two
+  appended revisions are exactly the expected rows; no old value remains but
+  in `identity_run_policies.dependency_set_json`; every schema object other
+  than the staging table (the recreated guards included) has the same SQL
+  text; `eligible_identity_runs`, `current_identity_observations`, the
+  trusted binding (token aside) and the aggregate identity audit are
+  unchanged; every current observation of a pair resolves to `E_o`, the
+  unpaired value to its own entity; integrity and foreign-key checks pass.
+  An empty stage changes nothing but the staging table. A manual mapping, or
+  an active override under a later rule revision, on a collector source
+  account of a staged new value aborts with `identity_value_rewrite_mapping_held`;
+  a pair invalidated after staging aborts with `identity_value_rewrite_stage_invalid`;
+  a MoneyForward balance row under an old value aborts with
+  `identity_value_rewrite_old_value_remains`; each abort leaves every row and
+  the schema unchanged. On the whole CORE schema, the five guards' SQL equals
+  their defining migrations' text and the committed ledger.
+- `services/processor/test/moneyforward-producer-switch.test.ts` (whole CORE
+  schema through 0062, Miniflare, runs registered through the pipeline, the
+  pair staged by 0062's own statement, then 0063): the importer's source
+  account keeps its id and entity and both source accounts carry the `v2`
+  reference and map to `E_o`; the month both producers captured is read once
+  (INV06); a new collector capture adds no mapping revision and every current
+  observation resolves to `E_o`; re-identifying the importer's parses under a
+  newer policy reuses the importer's source account (before `sourceAccountId`
+  it aborted with `identity replacement is forbidden`), and re-identifying the
+  collector's parse appends a revision to `E_o`; an unpaired `v2` value keeps
+  its own entity.
+- `services/processor/test/lanes.test.ts` pins migrations through 0063;
+  `infra/schema/core-ledger.*` regenerated without `identity_value_rewrites`.

@@ -57,6 +57,24 @@ unobserved path is still in the code. Tests:
 `services/collector-myjcb/test/credit-statement-state.test.ts`,
 `packages/parsers/test/myjcb-statement.test.ts`.
 
+## Identity values: the one-time rewrite (migration 0063, no parser release)
+
+2026-09-29. Migration 0063 applies the staged pairs of 0062: in the
+importer's rows it replaces each staged `v1` value by its `v2` value in the
+fetch unit keys, Vpass pins, source-account references, MoneyForward
+`transaction_observations.source_account` and connection review keys,
+appends a `rule` mapping revision pointing each collector source account of
+a staged value at the importer-era entity, recreates the append-only guards
+with their exact text and drops the staging table
+([ADR 0030's amendment](adr/0030-identity-crosswalk.md#0063-as-implemented-2026-09-29)).
+No parser, parse run, external id, amount or raw object changes. After it, a
+MoneyForward month both producers captured is read once (the newer capture),
+and the identity store resolves a source account by its natural key, so
+re-identifying an importer parse reuses the importer's source account. The
+owner's production counts before it: MoneyForward 4 pairs, Vpass 6, held 0.
+Tests: `packages/storage-d1/test/identity-value-rewrite-migration.test.ts`,
+`services/processor/test/moneyforward-producer-switch.test.ts`.
+
 ## Identity values: the crosswalk is retired and the one-time rewrite is staged (migration 0062, no parser release)
 
 2026-09-28. The owner decided that the retired importer's `v1` identity
@@ -71,8 +89,8 @@ since the external id carries the identity), validates every staged pair by
 trigger, and drops the unused crosswalk table. No observation, parse run or
 parser changes: the rewrite of the five identity columns, including
 `transaction_observations.source_account` of the MoneyForward importer
-parses, is migration 0063, not in the repository yet. Until then a value
-read under both identities is still two source accounts and two entities.
+parses, is migration 0063 (above). Until it applies a value read under
+both identities is still two source accounts and two entities.
 Tests: `packages/storage-d1/test/identity-value-rewrite-migration.test.ts`,
 `services/processor/test/moneyforward-producer-switch.test.ts`.
 

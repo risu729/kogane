@@ -617,10 +617,10 @@ responses it was read from are stored only redacted, so it registers as
 
 No secret is needed. The retired importer's tokens are `vpass-card-v1-` HMACs
 under a key that is lost, so a card's collector token is never equal to its
-importer token: the two are different account entities until the one-time
+importer token: the two are different account entities unless the one-time
 identity-value rewrite
 ([identity operations](identity-operations.md#one-time-identity-value-rewrite))
-replaces the importer's token. Without the tuple or when a check fails, the card run is
+replaced the importer's token (migration 0063). Without the tuple or when a check fails, the card run is
 stored exactly as before with no binding, and the persist diagnostic carries a
 closed `binding` code (`bound`, `binding_tuple_absent`,
 `binding_tuple_invalid`, `binding_selection_mismatch`,
