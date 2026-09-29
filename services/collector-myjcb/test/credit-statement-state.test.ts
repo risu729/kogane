@@ -11,6 +11,7 @@ import {
   scheduledLedgerRowCount,
   settlementMonth,
 } from "../src/parsers";
+import { myJcbRunPlan } from "../src/shared-collection";
 import { HumanRequiredError, StopConditionError } from "../src/types";
 import worker from "../src/worker";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
@@ -251,7 +252,15 @@ describe("collectCredit", () => {
   });
 
   test("an unconfirmed position-1 page stays unconfirmed", async () => {
-    const { artifacts } = await collectCredit(client({ 0: mutable, 1: mutable }), "x");
+    // Two pending cycles show different rows; the same page at both
+    // positions is a repeated page (amendment (h)), tested on its own.
+    const closedPending = page({
+      head: UNCONFIRMED_HEAD,
+      rows: [
+        row("今回のお支払い金額", ["2026/01/20", "架空予約B", "一回払い", "4,000円"], "4,000円"),
+      ],
+    });
+    const { artifacts } = await collectCredit(client({ 0: mutable, 1: closedPending }), "x");
     expect(
       artifacts
         .filter((artifact) => artifact.filename.endsWith("-01.html"))
@@ -303,7 +312,12 @@ describe("collectCredit", () => {
         0: mutable,
         1: closedWithoutExports,
         7: page({ rows: [confirmedRow] }),
-        8: page({ head: UNCONFIRMED_HEAD, rows: [pendingRow] }),
+        8: page({
+          head: UNCONFIRMED_HEAD,
+          rows: [
+            row("今回のお支払い金額", ["2025/08/03", "架空旧店", "一回払い", "700円"], "700円"),
+          ],
+        }),
       }),
       "x",
     );
@@ -336,10 +350,9 @@ describe("collectCredit", () => {
       "credit-ledger-00.json",
       "credit-detail-01.html",
     ]);
-    expect(run.artifacts.at(-1)).toMatchObject({
-      statementState: "unknown",
-      period: "detailMonth-1",
-    });
+    // An `unknown` page states no period (amendment (h)).
+    expect(run.artifacts.at(-1)).toMatchObject({ statementState: "unknown" });
+    expect(run.artifacts.at(-1)?.period).toBeUndefined();
   });
 
   test("export links on a page that is not a confirmed statement stop the collection", async () => {
@@ -1125,10 +1138,11 @@ describe("ADR 0005 second amendment: the three observed ledger headers", () => {
       "credit-detail-07.html": "unknown",
       "credit-detail-08.html": "unknown",
     });
-    // The unread month states no statement month: it keeps its relative label.
+    // The unread month is read as `unknown`: it states no period
+    // (amendment (h)); its position stays in its file name.
     expect(
-      run.artifacts.find((artifact) => artifact.filename === "credit-detail-02.html"),
-    ).toMatchObject({ period: "detailMonth-2" });
+      run.artifacts.find((artifact) => artifact.filename === "credit-detail-02.html")?.period,
+    ).toBeUndefined();
   });
 
   test("third-header rows in the four-cell form are kept unread, never read", async () => {
@@ -1195,8 +1209,8 @@ describe("ADR 0005 second amendment: the three observed ledger headers", () => {
     expect(run.artifacts.at(-1)).toMatchObject({
       dataset: "credit-detail",
       statementState: "unknown",
-      period: "detailMonth-1",
     });
+    expect(run.artifacts.at(-1)?.period).toBeUndefined();
     expect(warnings.map((line) => JSON.parse(line))).toEqual([
       {
         event: "myjcb-credit-month-failed",
@@ -1744,5 +1758,228 @@ describe("ADR 0005 amendment (g): the statement heading may carry its payment da
     const ledger = artifacts.find((artifact) => artifact.filename === "credit-ledger-01.json");
     expect(ledger?.statementState).toBe("confirmed");
     expect(JSON.parse(String(ledger?.body))).toMatchObject({ detailMonth: 1, period: "2026-02" });
+  });
+});
+
+describe("ADR 0005 amendment (h): a stored page states only what the page states", () => {
+  const closed = (month: string) =>
+    page({ headings: [CONFIRMED_STATEMENT_HEADING], months: [month], rows: [confirmedRow] });
+  // A past position with no bill, in the shape a production run showed at
+  // four positions: no heading, no ledger, no month, the same bytes at each.
+  // Every value is synthetic.
+  const noBill = page({ head: null });
+  // The past-months response labels each position, available or not.
+  const labels = [3, 4, 5, 6].map((position) => ({
+    detailMonth: String(position),
+    detailAvailableFlag: "0",
+    settlementYM: `2026年${9 - position}月お支払い分`,
+  }));
+  const skipPage = page({
+    headings: ["ショッピングスキップ払いご利用明細(未確定分)"],
+    head: '<div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div>',
+    rows: [row("お支払日", ["2026/03/10", "架空分割店", "2026/04/10", "3,000円"], "2026/04/10")],
+  });
+
+  test("one page at several positions is kept at each, stating one state and no period", async () => {
+    const run = await collectCredit(
+      client(
+        {
+          0: mutable,
+          1: closed("2026年3月"),
+          2: closed("2026年2月"),
+          3: noBill,
+          4: noBill,
+          5: noBill,
+          6: noBill,
+        },
+        labels,
+      ),
+      "x",
+    );
+    expect(run.stop).toBeUndefined();
+    expect(run.unreadMonths).toEqual([]);
+    expect(run.periodCount).toBe(7);
+    const repeated = run.artifacts.filter((artifact) =>
+      /^credit-detail-0[3-6]\.html$/u.test(artifact.filename),
+    );
+    expect(repeated.map((artifact) => artifact.filename)).toEqual([
+      "credit-detail-03.html",
+      "credit-detail-04.html",
+      "credit-detail-05.html",
+      "credit-detail-06.html",
+    ]);
+    expect(new Set(repeated.map((artifact) => artifact.body)).size).toBe(1);
+    for (const artifact of repeated) {
+      expect(artifact.statementState).toBe("unknown");
+      // Neither the position's label nor the past-months label is the page's.
+      expect(artifact.period).toBeUndefined();
+    }
+    // A page with a state keeps its period as before.
+    expect(
+      run.artifacts
+        .filter((artifact) => artifact.dataset === "credit-detail")
+        .slice(0, 3)
+        .map((artifact) => artifact.period),
+    ).toEqual(["detailMonth-0", "2026-03", "2026-02"]);
+
+    // The shared manifest names the page by its bytes: its four entries state
+    // the same, so the metadata extractor has one reading to use.
+    const plan = await myJcbRunPlan({
+      schemaVersion: "myjcb-worker-poc-v1",
+      runId: "00000000-0000-4000-8000-0000000000a8",
+      startedAt: "2026-09-29T21:00:00.000Z",
+      completedAt: "2026-09-29T21:05:00.000Z",
+      status: "success",
+      trigger: "scheduled",
+      connections: [
+        {
+          summary: {
+            connectionId: "synthetic-conn",
+            bootstrapMode: "password",
+            status: "success",
+            cardCount: 1,
+            periodCount: run.periodCount,
+            artifactCount: run.artifacts.length,
+          },
+          artifacts: run.artifacts,
+        },
+      ],
+      failures: [],
+    });
+    const manifest = plan.artifacts.find((artifact) => artifact.artifactKey === "manifest.json");
+    const body = manifest?.body;
+    if (body?.kind !== "bytes") throw new Error("manifest bytes expected");
+    const entries = (
+      JSON.parse(new TextDecoder().decode(body.bytes)) as {
+        artifacts: Record<string, unknown>[];
+      }
+    ).artifacts;
+    const sha = plan.artifacts.find(
+      (artifact) => artifact.artifactKey === "synthetic-conn/credit-detail-03.html",
+    )?.sha256;
+    const named = entries.filter((entry) => entry["sha256"] === sha);
+    expect(named).toHaveLength(4);
+    expect(new Set(named.map((entry) => JSON.stringify(entry))).size).toBe(1);
+    expect(named[0]).toMatchObject({ dataset: "credit-detail", statementState: "unknown" });
+    expect(named[0]).not.toHaveProperty("period");
+  });
+
+  test("one page read as two different things stops the connection and is not kept again", async () => {
+    const warnings: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((value) => {
+      warnings.push(String(value));
+    });
+    let run: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      // The same pending page at positions 0 and 1 would be two pending
+      // statements, `detailMonth-0` and `detailMonth-1`: not observed, and
+      // which one it is is not chosen (ADR 0004).
+      run = await collectCredit(client({ 0: mutable, 1: mutable, 2: closed("2026年2月") }), "x");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(run.stop).toEqual({ code: "credit_page_repeated", position: 1, capturedMonthCount: 1 });
+    expect(filenames(run.artifacts)).toEqual([
+      "credit-menu.html",
+      "credit-past-months.json",
+      "credit-detail-00.html",
+      "credit-ledger-00.json",
+    ]);
+    expect(connectionStopCode(new StopConditionError("x", "credit-page-repeated"))).toBe(
+      "credit_page_repeated",
+    );
+    // Counts and codes only.
+    expect(warnings.map((line) => JSON.parse(line))).toEqual([
+      {
+        event: "myjcb-credit-month-failed",
+        detailMonth: 1,
+        code: "credit-page-repeated",
+        stopCode: "credit_page_repeated",
+        capturedMonthCount: 1,
+        stopPageKept: false,
+      },
+    ]);
+  });
+
+  test("a month position showing the ショッピングスキップ払い page is stored as that schedule page, not a month", async () => {
+    const warnings: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((value) => {
+      warnings.push(String(value));
+    });
+    let run: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      // The menu lists positions 7 and 8 as months (the synthetic client puts
+      // every page under a month heading); the page's own h1 says what it is.
+      run = await collectCredit(
+        client({ 0: mutable, 1: closed("2026年3月"), 7: page({ head: null }), 8: skipPage }),
+        "x",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(run.stop).toBeUndefined();
+    expect(run.unreadMonths).toEqual([]);
+    expect(run.periodCount).toBe(3);
+    expect(run.schedulePages).toEqual([{ position: 8, code: "scheduled_payments_page" }]);
+    expect(
+      run.artifacts
+        .filter((artifact) => artifact.filename.endsWith("-08.html"))
+        .map((artifact) => [
+          artifact.dataset,
+          artifact.filename,
+          artifact.statementState ?? null,
+          artifact.period ?? null,
+        ]),
+    ).toEqual([["credit-schedule", "credit-skip-payment-08.html", "unknown", "detailMonth-8"]]);
+    expect(filenames(run.artifacts)).not.toContain("credit-detail-08.html");
+    expect(warnings).toContain(
+      '{"event":"myjcb-credit-month-schedule-page","detailMonth":8,"code":"scheduled_payments_page"}',
+    );
+  });
+
+  test("a schedule page found at a month position is listed beside the menu's, and kept after a later stop", async () => {
+    const spy = spyOn(console, "warn").mockImplementation(() => {});
+    let whole: Awaited<ReturnType<typeof collectCredit>>;
+    let stopped: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      whole = await collectCredit(
+        client({ 0: mutable, 1: closed("2026年3月"), 6: skipPage }, [], {
+          7: page({ head: null }),
+        }),
+        "x",
+      );
+      // Position 3 stops the connection by its own shape (a heading over an
+      // unproven usage header), after the skip page at position 2.
+      stopped = await collectCredit(
+        client({
+          0: mutable,
+          1: closed("2026年3月"),
+          2: skipPage,
+          3: page({ headings: [CONFIRMED_STATEMENT_HEADING], head: UNCONFIRMED_HEAD }),
+        }),
+        "x",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(whole.stop).toBeUndefined();
+    expect(whole.periodCount).toBe(2);
+    expect(whole.schedulePages).toEqual([
+      { position: 6, code: "scheduled_payments_page" },
+      { position: 7, code: "scheduled_payments_page" },
+    ]);
+    expect(
+      filenames(whole.artifacts).filter(
+        (name) => name.startsWith("credit-schedule") || name.startsWith("credit-skip-payment"),
+      ),
+    ).toEqual(["credit-skip-payment-06.html", "credit-schedule-07.html"]);
+    expect(stopped.stop).toEqual({
+      code: "credit_statement_state",
+      position: 3,
+      capturedMonthCount: 2,
+    });
+    expect(stopped.periodCount).toBe(3);
+    expect(stopped.schedulePages).toEqual([{ position: 2, code: "scheduled_payments_page" }]);
+    expect(filenames(stopped.artifacts)).toContain("credit-skip-payment-02.html");
   });
 });

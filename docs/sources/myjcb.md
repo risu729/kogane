@@ -391,7 +391,7 @@ collectorは確定明細pageが名乗る月をperiodにする（`services/collec
 
 - 過去月APIがlabelする月は、従来どおり`settlementYM`をそのまま使う。pageも月を名乗る場合は同じ月でなければ停止する（`credit-statement-period`）。
 - それ以外の確定pageは、名乗る月がない、または二つ以上ある場合に停止する（`credit-statement-period`）。statement parserも同じpageを拒否する。
-- 未確定と`unknown`のpageは月を名乗らないため、`detailMonth-N`のままである。
+- 未確定のpageは月を名乗らないため、`detailMonth-N`のままである。`unknown`のpageも月を名乗らず、amendment (h)以降はperiodを書かない（下の「同じ page を示す複数の position」）。
 - 停止logには`detailMonth`、名乗った月の個数、API labelの有無だけを出し、月そのものは出さない。
 
 ledger parserは変更しない（version bumpなし）。同じ明細の行はどのpositionでも同じexternal idになる。read modelは確定captureのslotを明細（支払月）にする（`packages/read-model/src/sql.ts`の`myjcbStatementMonth`）。絶対period（`YYYY-MM`、`YYYYMM`、`YYYY年M月お支払い分`）はその月、`detailMonth-0`／`detailMonth-1`は`relative-statement-period-v1`で`fetched_at`から解決した月になる。一つの明細のcaptureは一つのslotに入り、最新のものだけがcurrentになる。規則が置けない確定`detailMonth-N`（N ≥ 2）はpositionであって明細を名指さないため、currentにしない。
@@ -506,7 +506,7 @@ Worker は見つけた export を取得しない。共通 bucket は `credit-csv
 
 **三つ目の header。** `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` は、読む二種の金額 label のどちらも持たない。ショッピングスキップ払いの支払予定 page でだけ観測されたので、code は `scheduled_payments_page` とした。行の意味は確認されていないので、statement としては読まない（ADR 0004）。header の文字列から空白を除いたものに `ご利用日`、`ご利用先など`、`お支払日`、`今後のお支払い金額` がすべてあり、`支払区分`、`今回のお支払い金額`、`ご利用金額` のどれもない header をこの型とみなす（`scheduledLedgerRowCount`）。cell 単位では比べないので、観測された 3 cell の形も 4 cell の形も同じく読む（どちらも行は読まない）。
 
-- 行があれば、どの position でもその position を「取得したが読まない」ものにする。状態を読む前に判定し、page を `unknown` の evidence として（API label か `detailMonth-N` の period で）保存し、ledger を作らず、export も取得せず、次の月へ進む。以前は、position 0 では未確定 header 一式がないので `ledger_parse`、position 1 では見出しなしなら `credit_statement_state`、見出しがあればどの position でも確定 header 一式がないので `ledger_parse` で停止し、見出しのない position 2 以降だけは状態を示さない行として読まずに進んだ（現在の `rows_unstated`）。
+- 行があれば、どの position でもその position を「取得したが読まない」ものにする。状態を読む前に判定し、page を `unknown` の evidence として（amendment (h) 以降は period なしで）保存し、ledger を作らず、export も取得せず、次の月へ進む。以前は、position 0 では未確定 header 一式がないので `ledger_parse`、position 1 では見出しなしなら `credit_statement_state`、見出しがあればどの position でも確定 header 一式がないので `ledger_parse` で停止し、見出しのない position 2 以降だけは状態を示さない行として読まずに進んだ（現在の `rows_unstated`）。
 - 同じ page に別の ledger があっても、月全体を読まない。
 - 空なら何も欠けないので、従来どおり読む（position 8 の観測どおり）。
 - 三種のどれでもない header で行があれば、従来どおり停止する。
@@ -514,7 +514,7 @@ Worker は見つけた export を取得しない。共通 bucket は `credit-csv
 
 読まない月は manifest の connection に `unreadMonths: [{ position, code }]` として書く。code は閉じた一覧（`UNREAD_MONTH_CODES`）で、`scheduled_payments_page`（三つ目の header）と `rows_unstated`（position 2 以降で状態を示さない page の行。以前から数えていたが名前がなかった）である。読まない月のある connection は `partial` になる。読まない月がすべて `scheduled_payments_page` で、connection が止まっていなければ unit の `safeErrorCode` は `scheduled_payments_page`、それ以外は従来どおり `collector_partial` である。manifest の `failures` には書かない（停止ではない）。log は `myjcb-credit-month-unread` に position と code だけを出す。registration と eligibility は変えない。unit report は `failed`、run は `partial`、`not_eligible` で、読まない page は catalogue と seal はされるが、どの parser も読まない。
 
-**停止した page。** `credit_statement_state`、`credit_statement_period`、`ledger_parse` で止まった場合、止まった月の page を redact して `credit-detail`（状態 `unknown`、ledger なし、export なし）として保存する。redaction は script や属性を除くが本文は残すので、保存した他の明細 page と同じく、ledger の後の 「カード情報」 の表も残る。`capturedMonthCount` はそれより前の月の数のままで、`stopPosition` がその page の月を示す。停止 log には `stopPageKept` を加えた。statement page として読めなかった page（`month_parse`）は従来どおり保存しない。
+**停止した page。** `credit_statement_state`、`credit_statement_period`、`ledger_parse` で止まった場合、止まった月の page を redact して `credit-detail`（状態 `unknown`、ledger なし、export なし。amendment (h) 以降は period なし）として保存する。redaction は script や属性を除くが本文は残すので、保存した他の明細 page と同じく、ledger の後の 「カード情報」 の表も残る。`capturedMonthCount` はそれより前の月の数のままで、`stopPosition` がその page の月を示す。停止 log には `stopPageKept` を加えた。statement page として読めなかった page（`month_parse`）は従来どおり保存しない。
 
 **menu が先。** `detailMenu.html` を経ずに `detail.html?detailMonth=N` を取得すると別の page（h1 `カードご利用明細一覧`、ledger なし）が返り、menu を経ると明細 page が返ることが観測された。`collectCredit` は同じ session で `detailMenu.html` を一度読み、最初の月、過去月 API、残りの月の順に読む。この順序は以前からで、test で固定した。
 
@@ -607,6 +607,29 @@ amendment (f) の後の最初の夜間 run（2026-09-28 21:01Z）は、position 
 - **release。** 四つの MyJCB parser は `packages/parsers/src/parsers/myjcb.ts` を共有しているので、ほかの三つも digest だけが変わる：`myjcb-credit-ledger@1.2.1`、`myjcb-credit-past-month-balances@1.1.4`、`myjcb-canonical-evidence-boundary@1.1.4`。観測は変わらない。amendment (d) の未観測の経路はこの release でも残す。
 
 制限：ボーナス払い page の日付つき h2 は読まない（page は `credit-schedule-07.html` のまま）。collector は見出しの日付を何とも比べない。
+
+### 同じ page を示す複数の position と月として読まれたスキップ払い page（2026-09-29、ADR 0005 の amendment (h)）
+
+amendment (g) の後の最初の夜間 run（collection run 561、fetch run 908、2026-09-29 21:03Z）は全月を読み、unit は `success`、ledger 5 件はすべて parse された。production は集計の query だけで読んだ（件数、SQL 内での digest の比較、閉じた code、position 番号。値は記録しない）。
+
+- **四つの position が同じ page。** `credit-detail-NN.html` 11 件の digest は 8 種で、position 3、4、5、6 の page は byte 単位で同じ object だった。`myjcb-credit-statement-total@1.3.0` はこの 4 artifact で `manifest_artifact_ambiguous` の `error` になった（4 artifact × 3 回で 12 件。ほかの 7 page は `ok`）。共通 R2 の manifest は page を bytes で名指す（ADR 0025）。collector は各 page を `unknown`（`(確定分)` の見出しも行もない）と読み、period に position の label（`settlementYM ?? detailMonth-N`）を書いたので、同じ bytes の 4 entry の period が食い違い、extractor は選ばずに止めた。
+- **provider が同じ page を示している。** 以前の 12 run（fetch run 215–719、importer 形の manifest は entry を file 名で名指すので曖昧にならなかった）では、どの run でも position 2–6 が一つの object だった（60 artifact、12 run を通じて digest 一つ、状態 `unknown`、period は各 position の label）。run 908 では position 2 が別の確定明細になり、group は 3–6 になった。締まった明細が移ってきた position だけが抜けている。collector は各 position を menu の後に同じ session で、それぞれの `detailMonth` で取得し、同じ run で group の後に読んだ position（7、8、11、14）は別々の page で、11 と 14 は ledger のある確定明細だった。round 4 の調査は position 3–6 を ledger なしと記録し、menu の 「過去の明細」 の box は 「… お支払い分 #円」 か 「ご請求はありません」 だった。したがって collector の遷移の誤りではなく、請求のない過去の position に provider が示す page で、page 自身は月を名乗らない。
+- **スキップ払い page が月として読まれた。** MyJCB の `credit-schedule-NN.html`／`credit-skip-payment-NN.html` は一件も登録されていない（0 行）。run 908 では position 7 と 8 が `credit-detail-07.html`／`credit-detail-08.html`（月）として保存され、`credit-schedule` dataset も `myjcb-skip-payment-schedule` の parse run もない。どちらも行のない `unknown` と読まれたので unit は `success` のままで、明細 parser は両方に `statement_total_not_confirmed` を記録した。position 8 は保存された 13 run すべてで digest が違い（スキップ払い page の時点見出しは日付を持つ）、position 7 は以前の 12 run で digest 一つ（ボーナス払い page、amendment (f)）である。deploy された Worker は `readCreditMenuGroups` を含み、menu の group の読み取りも過去月 API との重複の確認も止まらなかった。したがって、その夜の menu が 7 と 8 の link を月の見出しの下に置いた（たとえば支払予定の見出しが `h2` でなく、観測された DOM 順 0、1、7、8、2–6 で前にある 「最新のご利用明細」 の下に入った）か、menu が 7 と 8 を示さず過去月 API が available とした、のどちらかである。保存される menu には `href` がなく、manifest と過去月 response は R2 の bytes で読んでいないので、どちらかは分からない。
+
+collector は page が述べることだけを記録する（`collectCredit`）。
+
+- **`unknown` の page は period を書かない。** `unknown` と記録する `credit-detail`（状態を示さない月、読まない月、停止で保存する page）の manifest entry には `period` がない。position は artifact key に、過去月 API の label は `credit-past-months.json` に残る。状態のある page の period（未確定は `detailMonth-0`／`-1`、確定は名乗る月か過去月 API の label）と ledger は変わらない。`unknown` の page の period を読むものはない（read model は ledger だけを読み、明細 parser は確定 page でだけ period を比べる）。同じ bytes はどの position でも同じことを述べるので、extractor はそのまま読む。
+- **一つの page は一つのことを述べる。** connection の中で、前の position で保存した page と redact 後の bytes が同じ月の page は、同じ状態と period でなければならない。違えば（たとえば同じ未確定 page が position 0 と 1 にあり、二つの未確定明細になる場合。観測されていない）その position で `credit_page_repeated`（condition `credit-page-repeated`）により停止し、その page は保存しない。それより前の月は保存する。log は position と code だけを出す。
+- **月の position のスキップ払い page。** 月の page の状態を読む前に `schedulePageKind`（amendment (e)）を見る。h1 が観測された 「ショッピングスキップ払いご利用明細(未確定分)」 ちょうど一つなら、menu の支払予定 page と同じく `credit-skip-payment-NN.html`（dataset `credit-schedule`、状態 `unknown`、period `detailMonth-N`）として保存し、`schedulePages` に `scheduled_payments_page` として書き、`schedulePageCount` に数える。月ではないので `periodCount`、`capturedMonthCount`、`unreadMonths` に入らない。log は `myjcb-credit-month-schedule-page` に position と code だけを出す。`schedulePages` は position の昇順で、停止した場合は停止より前の月の position で見つけた支払予定 page を含む（menu の支払予定 position は従来どおり停止の後に読まない）。
+- **変えないもの。** metadata extractor、menu の読み取り、ボーナス払い page（月の position では `credit-detail` の `unknown` の月のまま）、すべての parser。保存済みの run は書き換えない。run 908 の 12 件の `error` は履歴として残る（manifest は固定の evidence なので、再 parse しても同じ）。
+
+制限と、owner の agent に頼む観測（構造と件数、真偽値だけ。値は記録しない）：
+
+1. run 908 の保存済み `credit-detail-03.html`（03–06 は同じ bytes）：h1 の数と、各 h1 が 「カードご利用明細一覧」、「カードご利用代金明細(確定分)」、それ以外のどれか。本文に 「ご請求はありません」、「通信エラーが発生しました」、「ご利用明細はございません」 があるか（真偽値）。`detail-list-01` の数。h2 の数と、`readMyJcbStatementHeading` が読む形の h2 があるか（真偽値）。これで請求のない page か通信エラー page かが決まる。
+2. run 908 の保存済み `credit-past-months.json`：`detailPastJsonInfo` の件数、`detailMonth` 7 と 8 の item があるか、ある場合の `detailAvailableFlag` と `payAmountDispFlag`（真偽値）。
+3. live の `detailMenu.html`：`detail.html?detailMonth=N` の各 link について、N、文書順でその前にある最後の `h2` が三つの観測済み見出しのどれか（code で。文字列は記録しない）、その link の box の見出し要素の tag 名（`h2`、`h3`、`p` など）。支払予定の box の見出しが `h2` かどうか。
+
+1 で通信エラー page なら、その page を認識する規則を決める（amendment (b) の制限）。2、3 で 7 と 8 が月になった経路が分かれば、menu の読み取りを直す。
 
 ## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
 

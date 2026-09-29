@@ -70,6 +70,7 @@ const STOP_CODE_BY_CONDITION: Readonly<Record<StopConditionCode, ConnectionStopC
   "credit-ledger-cell-count": "ledger_parse",
   "credit-statement-state": "credit_statement_state",
   "credit-statement-period": "credit_statement_period",
+  "credit-page-repeated": "credit_page_repeated",
   "collect-debit": "debit",
   "collect-route": "no_route",
 };
@@ -311,6 +312,14 @@ export type CreditExportMode = "record" | "fetch";
  * `myjcb-skip-payment-schedule` reads (amendment (e)), and every other one as
  * `credit-schedule-NN.html` evidence that no parser reads; a schedule page
  * that cannot be fetched is recorded with a closed code and is not a stop.
+ *
+ * What a stored page states is what the page itself states (ADR 0005's
+ * amendment (h)). A month position whose page carries the ショッピングスキップ払い
+ * h1 is that schedule page, stored and recorded as one and not a month. An
+ * `unknown` page's manifest entry states no period. The shared manifest
+ * names a page by its bytes, so the same bytes kept at two positions must
+ * state one state and one period; a page that would state another stops the
+ * connection (`credit_page_repeated`) and is not kept again.
  */
 export async function collectCredit(
   client: CreditReadClient,
@@ -330,8 +339,10 @@ export async function collectCredit(
   /** The export kinds each month's page offered for its own month. */
   readonly exportOffers: readonly ExportOffer[];
   /**
-   * Each schedule position the menu listed, with its outcome. Empty when
-   * the months stopped: no schedule page is read after a stop.
+   * Each schedule page, ascending by position, with its outcome: the
+   * positions the menu listed, and the month positions whose page is the
+   * ショッピングスキップ払い page by its h1 (amendment (h)). After a stop only
+   * the latter read before it: no schedule position is read after a stop.
    */
   readonly schedulePages: readonly SchedulePage[];
   /**
@@ -414,6 +425,14 @@ export async function collectCredit(
 
   const unreadMonths: UnreadMonth[] = [];
   const exportOffers: ExportOffer[] = [];
+  // Month positions whose page is the ショッピングスキップ払い schedule by its
+  // own h1: stored as schedule pages, never months (amendment (h)).
+  const monthSchedulePages: SchedulePage[] = [];
+  // Each kept statement page's redacted bytes and the state and period its
+  // manifest entry states. The shared manifest names a page by its bytes, so
+  // one page must state one thing wherever it was shown (amendment (h)).
+  const keptPages = new Map<string, string>();
+  const months = () => availableMonths.length - monthSchedulePages.length;
   let capturedMonthCount = 0;
   for (const detailMonth of availableMonths) {
     // A month is kept whole or not at all: its page, ledger and exports join
@@ -426,6 +445,8 @@ export async function collectCredit(
     let pageHtml: string | undefined;
     let unread: UnreadMonthCode | undefined;
     let offered: readonly CreditExportKind[] = [];
+    // The page this month keeps and what its entry states, once it is read.
+    let keptPage: { readonly body: string; readonly stated: string } | undefined;
     try {
       const detail = await collectionStage(
         "collect-credit-month-fetch",
@@ -435,6 +456,23 @@ export async function collectCredit(
         decodeMyJcbHtml(detail.body, detail.contentType),
       );
       pageHtml = html;
+      // A page whose h1 is the observed ショッピングスキップ払い heading is
+      // that schedule page, whatever position showed it: the page says what
+      // it is, and it names no statement month (amendment (h)). It is stored
+      // as the menu's schedule pages are, and is not a month.
+      if (schedulePageKind(html) === "skip-payment") {
+        artifacts.push(schedulePageArtifact(html, detailMonth, "skip-payment"));
+        monthSchedulePages.push({ position: detailMonth, code: "scheduled_payments_page" });
+        // Counts and codes only: the page's text never reaches the log.
+        console.warn(
+          JSON.stringify({
+            event: "myjcb-credit-month-schedule-page",
+            detailMonth,
+            code: "scheduled_payments_page",
+          }),
+        );
+        continue;
+      }
       const month = await collectionStage("collect-credit-month-parse", async () => {
         const exports = discoverCreditExports(html, detailMonth);
         const hasLedgerContainer = /\bdetail-list-01\b/u.test(html);
@@ -489,14 +527,32 @@ export async function collectCredit(
       const { ledger, state, period } = month;
       unread = month.unread;
       offered = month.exports;
+      const body = redactedStatementHtml(html);
+      // An `unknown` page states no statement and no month, so its entry
+      // states no period: a position's label is not the page's, and the
+      // position stays in the artifact key (amendment (h)). A page with a
+      // state keeps the period it was read with, as before.
+      const pagePeriod = state === "unknown" ? undefined : period;
+      const stated = JSON.stringify([state, pagePeriod ?? null]);
+      const earlier = keptPages.get(body);
+      if (earlier !== undefined && earlier !== stated) {
+        // The same bytes at another position, read as another state or
+        // month: which one they are is not chosen (ADR 0004). Counts and
+        // codes only in the stop log.
+        throw new StopConditionError(
+          "MyJCB showed one statement page at two positions read differently",
+          "credit-page-repeated",
+        );
+      }
       monthArtifacts.push({
         dataset: "credit-detail",
         filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,
-        body: redactedStatementHtml(html),
+        body,
         mediaType: "text/html; charset=utf-8",
         statementState: state,
-        period,
+        ...(pagePeriod === undefined ? {} : { period: pagePeriod }),
       });
+      keptPage = { body, stated };
       if (ledger) {
         monthArtifacts.push({
           dataset: "credit-ledger",
@@ -528,15 +584,23 @@ export async function collectCredit(
       // not a captured month: `capturedMonthCount` stays the months before
       // it, and `stopPosition` names it. A page that could not be read as a
       // statement page at all (`month_parse`) is not kept.
-      const keepStopPage = pageHtml !== undefined && STOP_PAGE_CODES.has(code);
-      if (keepStopPage && pageHtml !== undefined) {
+      // Like every `unknown` page it states no period (amendment (h)), and it
+      // is not kept when an earlier position kept the same bytes stating
+      // something else.
+      const stopBody =
+        pageHtml !== undefined && STOP_PAGE_CODES.has(code)
+          ? redactedStatementHtml(pageHtml)
+          : undefined;
+      const earlierStop = stopBody === undefined ? undefined : keptPages.get(stopBody);
+      const keepStopPage =
+        stopBody !== undefined && (earlierStop === undefined || earlierStop === UNKNOWN_STATED);
+      if (keepStopPage && stopBody !== undefined) {
         artifacts.push({
           dataset: "credit-detail",
           filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,
-          body: redactedStatementHtml(pageHtml),
+          body: stopBody,
           mediaType: "text/html; charset=utf-8",
           statementState: "unknown",
-          period: settlementYM ?? `detailMonth-${detailMonth}`,
         });
       }
       console.warn(
@@ -551,15 +615,16 @@ export async function collectCredit(
       );
       // The connection stops at this month and keeps the months before it.
       return {
-        periodCount: availableMonths.length,
+        periodCount: months(),
         artifacts,
         unreadMonths,
         exportOffers,
-        schedulePages: [],
+        schedulePages: monthSchedulePages,
         stop: { code, position: detailMonth, capturedMonthCount },
       };
     }
     artifacts.push(...monthArtifacts);
+    if (keptPage !== undefined) keptPages.set(keptPage.body, keptPage.stated);
     if (unread !== undefined) {
       unreadMonths.push({ position: detailMonth, code: unread });
       if (unread === "scheduled_payments_page") {
@@ -576,7 +641,7 @@ export async function collectCredit(
     if (offered.length > 0) exportOffers.push({ position: detailMonth, kinds: [...offered] });
     capturedMonthCount += 1;
   }
-  const schedulePages: SchedulePage[] = [];
+  const schedulePages: SchedulePage[] = [...monthSchedulePages];
   for (const position of schedulePositions) {
     try {
       const detail = await fetchCreditDetail(client, position);
@@ -587,15 +652,7 @@ export async function collectCredit(
       // the parser dataset (ADR 0005 amendment e); every other schedule page
       // (the ボーナス払い page, never observed with rows) stays
       // `credit-schedule-NN.html` and unread (ADR 0004).
-      const kind = schedulePageKind(html);
-      artifacts.push({
-        dataset: "credit-schedule",
-        filename: `${kind === "skip-payment" ? "credit-skip-payment" : "credit-schedule"}-${String(position).padStart(2, "0")}.html`,
-        body: redactedStatementHtml(html),
-        mediaType: "text/html; charset=utf-8",
-        statementState: "unknown",
-        period: `detailMonth-${position}`,
-      });
+      artifacts.push(schedulePageArtifact(html, position, schedulePageKind(html)));
       schedulePages.push({ position, code: "scheduled_payments_page" });
     } catch {
       // Counts and codes only: neither the error nor the page reaches the log.
@@ -610,11 +667,37 @@ export async function collectCredit(
     }
   }
   return {
-    periodCount: availableMonths.length,
+    periodCount: months(),
     artifacts,
     unreadMonths,
     exportOffers,
-    schedulePages,
+    schedulePages: schedulePages.sort((left, right) => left.position - right.position),
+  };
+}
+
+/** What a kept `unknown` page's manifest entry states (amendment (h)). */
+const UNKNOWN_STATED = JSON.stringify(["unknown", null]);
+
+/**
+ * A schedule page as it is stored, whole and redacted, with state `unknown`
+ * and its position's relative label, which `myjcb-skip-payment-schedule`
+ * checks against the key: `credit-skip-payment-NN.html` when its h1 is the
+ * observed ショッピングスキップ払い heading, which registration gives the
+ * parser dataset (ADR 0005 amendment e), otherwise `credit-schedule-NN.html`,
+ * which nothing reads.
+ */
+function schedulePageArtifact(
+  html: string,
+  position: number,
+  kind: "skip-payment" | "unobserved",
+): RawArtifact {
+  return {
+    dataset: "credit-schedule",
+    filename: `${kind === "skip-payment" ? "credit-skip-payment" : "credit-schedule"}-${String(position).padStart(2, "0")}.html`,
+    body: redactedStatementHtml(html),
+    mediaType: "text/html; charset=utf-8",
+    statementState: "unknown",
+    period: `detailMonth-${position}`,
   };
 }
 

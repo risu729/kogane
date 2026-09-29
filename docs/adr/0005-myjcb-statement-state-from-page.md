@@ -14,6 +14,8 @@
   [amendment (f)](#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks)
   is accepted (#358); the
   [amendment (g)](#amendment-2026-09-28-g-the-statement-heading-may-carry-its-payment-day)
+  is accepted (#360); the
+  [amendment (h)](#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)
   is proposed
 - Date: 2026-09-25
 - Implemented by: #248
@@ -1297,7 +1299,7 @@ kept, and recorded as unobserved.
 
 ## Amendment 2026-09-28 (g): the statement heading may carry its payment day
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#360)
 - Date: 2026-09-28
 - Carried by: `readMyJcbStatementHeading` in
   `packages/domain/src/myjcb-statement-heading.ts`; `statedPaymentMonths`
@@ -1443,3 +1445,177 @@ kept, and recorded as unobserved.
 - Production was read only as counts by the caller: the stop code of the
   run and the 24 `ok` parses of 1.2.0. The heading shape is the owner's
   structure-only survey; every test value is synthetic.
+
+## Amendment 2026-09-29 (h): a stored page states only what the page states
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-09-29
+- Carried by: `collectCredit` and `schedulePageArtifact` in
+  `services/collector-myjcb/src/collector.ts`; the stop code
+  `credit_page_repeated` (condition `credit-page-repeated`) and the
+  `SchedulePage` notes in `services/collector-myjcb/src/types.ts`;
+  [MyJCB source note](../sources/myjcb.md),
+  [observations](../observations.md#myjcb-one-page-at-four-positions-and-the-skip-payment-page-read-as-a-month-collector-no-parser-release).
+  The metadata extractor ([ADR 0025](0025-myjcb-shared-manifest-metadata.md))
+  and every parser are unchanged.
+
+### Context
+
+The first nightly run after amendment (g) (collection run 561, fetch run
+908, 2026-09-29 21:03Z) read every month: the unit is `success` and all
+five ledgers parsed. Production was read only with aggregate queries
+(counts, digests compared inside SQL, closed codes, position numbers):
+
+1. **One page at four positions.** The run stored 11
+   `credit-detail-NN.html` pages with 8 distinct digests: positions 3, 4, 5
+   and 6 are one object, byte for byte. `myjcb-credit-statement-total@1.3.0`
+   failed on those four artifacts with `manifest_artifact_ambiguous` (12
+   `error` parse runs: 4 artifacts × 3 attempts); the 7 other pages parsed
+   `ok`.
+2. **Why the extractor refused.** The shared manifest names a page by its
+   bytes (ADR 0025), and the four entries naming this object disagreed. The
+   collector read each page as `unknown` (no `(確定分)` heading, no rows)
+   and gave it the period `settlementYM ?? detailMonth-N`: a label of the
+   position, from the past-months response or the position number, not
+   anything the page states. The same bytes therefore carried four periods.
+   The extractor refuses rather than choose, as ADR 0025 decided.
+3. **The provider shows this page at several positions; the collector's
+   navigation did not repeat it.** In the 12 earlier runs that stored
+   positions 0–8, 10 and 13 (fetch runs 215–719, with importer-era manifests that
+   name each entry by file, so nothing was ambiguous), positions 2–6 were
+   one object in every run (60 artifacts, one digest across all 12 runs,
+   state `unknown`, each period its own position's label). In run 908
+   position 2 is a distinct confirmed statement and the group is positions
+   3–6: it lost exactly the position a closed statement moved into. The
+   collector requests each position with its own `detailMonth`, after the
+   menu, in one session, and positions read after the group in the same
+   run (7, 8, 11 and 14) returned distinct pages, 11 and 14 confirmed
+   statements with ledgers. The round-4 survey recorded positions 3–6 with
+   no ledger and the menu's 「過去の明細」 boxes as 「… お支払い分 #円」 or
+   「ご請求はありません」. The page is what the provider shows for a past
+   position with no bill, and it names no month. Its text was not read for
+   this amendment (limits below).
+4. **The ショッピングスキップ払い page was read as a month.** No
+   `credit-schedule-NN.html` or `credit-skip-payment-NN.html` artifact has
+   ever been registered for MyJCB (0 rows). In run 908 positions 7 and 8
+   were stored as `credit-detail-07.html` and `credit-detail-08.html`: the
+   collector took them as months, so no skip-payment page, no
+   `credit-schedule` dataset and no `myjcb-skip-payment-schedule` parse run
+   exist. Both were read `unknown` with no rows, so the unit stayed
+   `success`; the statement parser recorded `statement_total_not_confirmed`
+   for both. Position 8 had a distinct digest in each of the 13 runs that
+   stored it (the skip page's as-of heading carries the day), and position 7
+   one digest across the 12 earlier runs (the bonus page, amendment (f)).
+   The deployed Worker contains `readCreditMenuGroups`, and neither the
+   menu grouping nor the past-months overlap check stopped the run. So
+   either the menu that night put the links of 7 and 8 under a month
+   heading (for instance a schedule heading that is not an `h2`, leaving
+   them under 「最新のご利用明細」, which precedes them in the observed DOM
+   order 0, 1, 7, 8, 2–6), or the menu did not list them and the
+   past-months response offered them. The stored menu has no `href`s, and
+   the manifest and the past-months response are R2 bytes that were not
+   read, so which of the two is not known.
+
+### Options considered
+
+1. **A: the extractor picks a value for repeated bytes** (the first entry,
+   or the entry at the artifact's position). Rejected: the shared manifest
+   has no position to match, and choosing is what ADR 0025 refused
+   (ADR 0004, INV07).
+2. **B: the collector records what a page states, from the page.** An
+   `unknown` page states no month, so its entry states no period, and the
+   same bytes state the same thing at every position. A page that would
+   still state two things (the same bytes read as two states or two
+   periods) stops the connection rather than choosing. A month position
+   whose page carries the observed ショッピングスキップ払い h1 is that
+   schedule page. Chosen.
+3. **C: store a repeated page once.** Rejected: that a position showed the
+   page is evidence, and the artifact key is the only record of the
+   position; dropping it would also make the month look unread.
+4. **D: make the stored bytes differ per position** (a marker in the page).
+   Rejected: stored evidence is the redacted provider bytes; adding
+   collector text to them makes the page claim something the provider did
+   not send.
+5. **E: fix only the menu reading.** Not possible from the evidence: which
+   menu shape put 7 and 8 among the months is unobserved (context 4).
+
+### Decision
+
+- **An `unknown` page's entry states no period.** Every `credit-detail`
+  page the collector records as `unknown` (a read month with no stated
+  state, a month kept unread, and the page a stop keeps) has no `period`
+  in the collector manifest. The position stays in the artifact key, and a
+  past-months label stays in `credit-past-months.json`. Pages with a state
+  keep the period they had (`detailMonth-0`/`-1` for unconfirmed pages, the
+  stated month or the past-months label for confirmed ones), and ledgers
+  are unchanged. Nothing downstream reads an `unknown` page's period: the
+  read model reads ledgers only, and the statement parser compares the
+  period only on a confirmed page.
+- **One page states one thing.** Within a connection, a month page whose
+  redacted bytes equal a page kept at an earlier position must state the
+  same state and period. Otherwise the connection stops at that position
+  with the closed code `credit_page_repeated` (condition
+  `credit-page-repeated`), and the page is not kept again; the months
+  before it are kept, as for every stop. This has not been observed (it
+  would be, for example, one pending page at positions 0 and 1, which
+  would otherwise be two pending statements). The stop log carries the
+  position and codes only.
+- **The page's h1 decides a schedule page at a month position.** Before a
+  month page's state is read, `schedulePageKind` (amendment (e)) is
+  applied. When the page's one h1 is the observed
+  「ショッピングスキップ払いご利用明細(未確定分)」, it is stored exactly as the
+  menu's schedule pages are: `credit-skip-payment-NN.html`, dataset
+  `credit-schedule`, state `unknown`, period `detailMonth-N` (which
+  `myjcb-skip-payment-schedule` checks against the key). It is listed in
+  `schedulePages` with `scheduled_payments_page` and counted in
+  `schedulePageCount`, and it is not a month: not in `periodCount`,
+  `capturedMonthCount` or `unreadMonths`. The log
+  `myjcb-credit-month-schedule-page` carries the position and code only.
+  `schedulePages` is ascending by position; after a stop it lists the
+  schedule pages found at month positions before the stop (the menu's
+  schedule positions are still not read after a stop).
+- **Unchanged.** The metadata extractor still refuses repeated bytes whose
+  entries disagree (also across connections, which has not been
+  observed). The menu reading, the bonus page and every parser are
+  unchanged. Stored runs are not rewritten.
+
+### Consequences
+
+- From the next night, the no-bill page at several positions registers
+  with one reading (`unknown`, no period), and the statement parser records
+  `statement_total_not_confirmed` for each instead of an error. The 12
+  `error` rows of run 908 stay as history: its manifest is fixed evidence,
+  and a re-parse reads the same manifest.
+- A night whose month list includes the ショッピングスキップ払い page stores it
+  as `credit-skip-payment-NN.html`, and `myjcb-skip-payment-schedule@0.1.1`
+  parses it (an empty page is zero rows, amendment (f)).
+- The bonus page at a month position stays a `credit-detail` month read
+  `unknown`: its h1 was surveyed, but it has not been observed with rows,
+  and recognising it would change the domain module that every MyJCB
+  parser's digest covers.
+- Limits: the repeated page's text was not read, so that it is the
+  provider's no-bill page, and not the 「通信エラーが発生しました」 page
+  (which the collector does not recognise, amendment (b)), rests on the
+  pattern in context 3. Why the menu gave positions 7 and 8 to the months
+  is not known (context 4). The observation that settles both is in the
+  [source note](../sources/myjcb.md#同じ-page-を示す複数の-position-と月として読まれたスキップ払い-page2026-09-29adr-0005-の-amendment-h).
+
+### Verification
+
+- `services/collector-myjcb/test/credit-statement-state.test.ts`
+  (「ADR 0005 amendment (h)」): one no-bill page at positions 3–6, with
+  distinct past-months labels, is kept at each position as `unknown` with
+  no period, and the manifest `myJcbRunPlan` writes has four identical
+  entries for its digest; the same pending page at positions 0 and 1 stops
+  at position 1 with `credit_page_repeated`, keeps position 0 and logs
+  codes only; the skip page at a month position is stored as
+  `credit-skip-payment-08.html`, listed in `schedulePages` and not counted
+  as a month; a skip page at a month position is listed beside the menu's
+  schedule page, and is kept when a later month stops. Tests that expected
+  an `unknown` page's position label now expect none.
+- `services/processor/test/myjcb-shared-r2.test.ts`: four entries for one
+  page with position labels (the shape before this amendment) fail with
+  `manifest_artifact_ambiguous`; the same pages as the collector now writes
+  them parse `done`, and the observation view shows state `unknown` and
+  period null.
+- No parser file changed, so there is no parser release and no migration.

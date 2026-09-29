@@ -918,3 +918,109 @@ test("ADR 0005 amendment (e): a scheduled payment is checked at the persist boun
       JSON.stringify(broken),
     ).toThrow(/^parse_contract_invalid$/u);
 });
+
+test("ADR 0005 amendment (h): one page at four positions parses once its entries state one thing", async () => {
+  // A no-bill page, the same bytes at positions 3 to 6. Before amendment (h)
+  // the collector gave each entry its position's label, so the entries naming
+  // the one object disagreed and the extractor refused every one of them
+  // (`manifest_artifact_ambiguous`, ADR 0025). Since (h) an `unknown` page's
+  // entry states no period (collectCredit, tested in the collector), and the
+  // unchanged extractor reads the one thing they all state.
+  const noBill = statementPage("");
+  const repeated = (period: (position: number) => string | undefined): RawArtifact[] =>
+    [3, 4, 5, 6].map((position) => {
+      const label = period(position);
+      return {
+        dataset: "credit-detail",
+        filename: `credit-detail-0${position}.html`,
+        body: noBill,
+        mediaType: HTML,
+        statementState: "unknown" as const,
+        ...(label === undefined ? {} : { period: label }),
+      };
+    });
+  const plan = (runId: string, kept: RawArtifact[]) =>
+    myJcbRunPlan({
+      schemaVersion: "myjcb-worker-poc-v1",
+      runId,
+      startedAt: "2026-09-29T21:00:00.000Z",
+      completedAt: "2026-09-29T21:05:00.000Z",
+      status: "success",
+      trigger: "scheduled",
+      connections: [
+        {
+          summary: {
+            connectionId: "synthetic-repeat",
+            bootstrapMode: "password",
+            status: "success",
+            cardCount: 1,
+            periodCount: 4,
+            artifactCount: kept.length,
+          },
+          artifacts: kept,
+        },
+      ],
+      failures: [],
+    });
+  const outcomes = async (runId: string) =>
+    (
+      await env.DB.prepare(
+        "SELECT a.artifact_key,j.status,j.last_error_code AS code FROM observation_parse_jobs j JOIN fetch_artifacts a ON a.id=j.fetch_artifact_id WHERE a.fetch_run_id=? ORDER BY a.artifact_key",
+      )
+        .bind(await fetchRun(runId))
+        .all()
+    ).results;
+
+  const before = "00000000-0000-4000-8000-00000000a0f1";
+  expect(
+    (
+      await persistRun(
+        env.EVIDENCE,
+        await plan(
+          before,
+          repeated((p) => `detailMonth-${p}`),
+        ),
+      )
+    ).outcome,
+  ).toBe("persisted");
+  expect(await registerCollectionRun(env, { source: "myjcb", runId: before })).toMatchObject({
+    outcome: "registered",
+  });
+  await sweep(env);
+  const refused = await outcomes(before);
+  expect(refused).toHaveLength(4);
+  for (const job of refused) expect(job).toMatchObject({ code: "manifest_artifact_ambiguous" });
+
+  const after = "00000000-0000-4000-8000-00000000a0f2";
+  expect(
+    (
+      await persistRun(
+        env.EVIDENCE,
+        await plan(
+          after,
+          repeated(() => undefined),
+        ),
+      )
+    ).outcome,
+  ).toBe("persisted");
+  expect(await registerCollectionRun(env, { source: "myjcb", runId: after })).toMatchObject({
+    outcome: "registered",
+  });
+  await sweep(env);
+  expect(await outcomes(after)).toEqual(
+    [3, 4, 5, 6].map((position) => ({
+      artifact_key: `synthetic-repeat/credit-detail-0${position}.html`,
+      status: "done",
+      code: null,
+    })),
+  );
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT statement_state,period,COUNT(*) AS n FROM observation_fetch_artifacts WHERE fetch_run_id=? AND dataset='credit-detail' GROUP BY 1,2",
+      )
+        .bind(await fetchRun(after))
+        .all()
+    ).results,
+  ).toEqual([{ statement_state: "unknown", period: null, n: 4 }]);
+}, 60000);

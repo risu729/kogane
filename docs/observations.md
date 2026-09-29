@@ -17,6 +17,46 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MyJCB: one page at four positions, and the skip-payment page read as a month (collector, no parser release)
+
+2026-09-29. The nightly MyJCB run of 2026-09-29 21:03Z (fetch run 908), the
+first after the dated-heading fix below, read every month and parsed its
+five ledgers, but `myjcb-credit-statement-total@1.3.0` failed on 4 of its
+11 statement pages with `manifest_artifact_ambiguous` (12 `error` parse
+runs, 7 pages `ok`)
+([ADR 0005's amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)):
+
+- **One page, four positions.** The 11 pages had 8 distinct digests:
+  positions 3–6 are one object. The provider shows one page, with no
+  heading, rows or month, at past positions without a bill: positions 2–6
+  were one object in each of the 12 earlier runs that stored them, and
+  position 2 left the group when a closed statement moved into it, while
+  positions read later in the same run returned their own pages. The
+  collector gave each copy its position's label as the period, so the
+  shared manifest's entries for one object disagreed and the extractor
+  refused, as ADR 0025 decided.
+- **The collector now records what the page states.** An `unknown` page's
+  manifest entry has no period (its position stays in the artifact key), so
+  the copies state the same thing and parse. The same bytes read as two
+  different states or periods (not observed) stop the connection with
+  `credit_page_repeated` instead of being stored twice.
+- **The skip-payment page was stored as a month.** No MyJCB
+  `credit-schedule` or `credit-skip-payment` artifact has ever been
+  registered: run 908 stored positions 7 and 8 as `credit-detail` months
+  (read `unknown`, no rows), so `myjcb-skip-payment-schedule` had nothing
+  to read. Why the menu reading gave them to the months is not known (the
+  menu shape and the past-months flags were not read). A month position
+  whose page carries the ショッピングスキップ払い h1 is now stored as
+  `credit-skip-payment-NN.html` and listed as a schedule page, not a month.
+
+No parser file changed. Stored runs are not rewritten; run 908's error
+rows stay. The observation that settles the two open questions (whether the
+repeated page is the no-bill page or the 「通信エラーが発生しました」 page, and
+how the menu listed positions 7 and 8) is in the
+[source note](sources/myjcb.md#同じ-page-を示す複数の-position-と月として読まれたスキップ払い-page2026-09-29adr-0005-の-amendment-h).
+Tests: `services/collector-myjcb/test/credit-statement-state.test.ts`,
+`services/processor/test/myjcb-shared-r2.test.ts`.
+
 ## GLOBAL PASS activity pages are English; the sanitizer accepts both languages (collector, no parser release)
 
 2026-09-29. The refusal shape logged on the night of 2026-09-28 named the

@@ -315,6 +315,17 @@ Concrete limits in the current code:
   `myjcb-credit-statement-total@1.3.0` read that form and the undated one,
   and the parser requires the heading's day to be the total's payment date
   ([ADR 0005's amendment (g)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-g-the-statement-heading-may-carry-its-payment-day)).
+  The run of 2026-09-29 21:03Z read every month, but the provider shows
+  one identical page at several past positions without a bill, and the
+  collector gave each copy its position's label, so the metadata extractor
+  refused them (`manifest_artifact_ambiguous`). An `unknown` page now states
+  no period, and one page read as two different things stops the
+  connection (`credit_page_repeated`). That run also stored the
+  ショッピングスキップ払い page as a month, for a reason not yet known; a month
+  position whose page carries that h1 is now stored as the schedule page.
+  Whether the repeated page is the no-bill page or the error page below has
+  not been read
+  ([ADR 0005's amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)).
   The empty skip-payment page reads as zero rows
   only when its one row is the provider's empty row; beside real rows it is
   refused. A later stop on a page's own shape now stores that page. The site's 「通信エラーが発生しました」

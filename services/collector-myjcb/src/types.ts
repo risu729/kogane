@@ -102,8 +102,10 @@ export interface ConnectionSummary {
   /**
    * The menu positions grouped under 「ボーナス#回払い・ショッピングスキップ払い」
    * (payment schedule pages, not statement months), each with its closed
-   * outcome (ADR 0005's amendment (c)). They never count in `periodCount`,
-   * `capturedMonthCount` or `unreadMonths`. Absent when the menu listed none.
+   * outcome (ADR 0005's amendment (c)), and the month positions whose page
+   * carries the ショッピングスキップ払い h1 (amendment (h)), ascending. They
+   * never count in `periodCount`, `capturedMonthCount` or `unreadMonths`.
+   * Absent when there is none.
    */
   readonly schedulePages?: readonly SchedulePage[];
   /** The schedule pages stored (entries coded `scheduled_payments_page`); set with `schedulePages`. */
@@ -141,7 +143,8 @@ export interface UnreadMonth {
 
 /**
  * What became of one schedule page the credit menu listed (ADR 0005's
- * amendment (c)):
+ * amendment (c)), or one a month position showed (amendment (h), always
+ * `scheduled_payments_page`):
  *
  * - `scheduled_payments_page`: fetched and stored, redacted, with state
  *   `unknown`: as `credit-skip-payment-NN.html` when its h1 is the observed
@@ -186,6 +189,7 @@ export const CONNECTION_STOP_CODES = [
   "month_parse",
   "credit_statement_state",
   "credit_statement_period",
+  "credit_page_repeated",
   "ledger_parse",
   "export_fetch",
   "debit",
@@ -251,6 +255,7 @@ export type StopConditionCode =
   | "credit-ledger-cell-count"
   | "credit-statement-state"
   | "credit-statement-period"
+  | "credit-page-repeated"
   | "collect-debit"
   | "collect-route"
   | "login";
