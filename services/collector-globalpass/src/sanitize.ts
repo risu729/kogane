@@ -169,7 +169,20 @@ export function sanitizerExpectation(error: unknown): GlobalPassSanitizerExpecta
 
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const DOCTYPE = /^\s*<!doctype\s+html\b/iu;
-const ACTIVITY_HEADING = /ご利用明細|利用明細/u;
+/**
+ * The activity statement's name, in either language GLOBAL PASS serves. The
+ * collector's session is English (`engUseFlg`): every production refusal of
+ * 2026-09-28 was `activity_heading_missing` on a logged-in page with the month
+ * select, and a live survey of the same pages (2026-09-29) found the title
+ * `Account Activities`, the heading `Viewing Monthly Account Activities`, and
+ * no 「ご利用明細」 or 「利用明細」 anywhere. A Japanese session names the
+ * statement 「ご利用明細」/「利用明細」. Either one marks the activity page. The
+ * same survey found the English page differs from the reviewed contract in two
+ * more places only, both admitted exactly (`isStaticAction`,
+ * `MENU_TOGGLE_ONCLICK`); forms, hidden inputs and every other URL are as
+ * reviewed.
+ */
+const ACTIVITY_HEADING = /ご利用明細|利用明細|Account Activities/u;
 const FORBIDDEN_TOKEN = /\b(?:jsessionid|token|csrf|turnstile|session|localStorage)\b/iu;
 const CSS_URL = /\burl\s*\(|@import\b/iu;
 const INPUT = /<input\b[^>]*>/giu;
@@ -183,8 +196,35 @@ const ALLOWED_HIDDEN_NAMES = new Set([
   "nablarch_submit",
   "w131301.referencedate",
 ]);
-const STATIC_ACTION = "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301";
 const SAME_HOST = "https://www.debit.vpass.ne.jp";
+/**
+ * The one form with an action, the statement download form. The retained pages
+ * write it absolute; the English pages the collector receives write the same
+ * path relative (live survey 2026-09-29). Both name one resource on one host.
+ */
+const STATIC_ACTION_PATH = "/p/statementInquiry/RW1313010301";
+const STATIC_ACTION = `${SAME_HOST}${STATIC_ACTION_PATH}`;
+
+function isStaticAction(value: string | undefined): boolean {
+  return value === STATIC_ACTION || value === STATIC_ACTION_PATH;
+}
+
+/**
+ * The English pages' `Manage Services` menu toggle, exactly as the live survey
+ * of 2026-09-29 found it. It is the only handler outside the reviewed call
+ * grammar (it starts with `if`), and, like every handler, it is stored as
+ * `return false;`. Attribute values are compared as written, so both
+ * spellings of its `<` are listed: the literal the provider sends and the
+ * `&lt;` a DOM serializer (`page.content()`) may write.
+ */
+const MENU_TOGGLE_ONCLICK = new Set(
+  ["<", "&lt;"].map(
+    (lessThan) =>
+      `if (window.innerWidth ${lessThan} 640) { $(this.parentNode).toggleClass('closed'); } ` +
+      "else { $('#chgAccountSettingMenu')[0].click(); } return false;",
+  ),
+);
+
 const ALLOWED_LINK_HREF_PATHS = new Set([
   "/en//01006/css/master.css",
   "/en//01006/css/nablarch.css",
@@ -355,7 +395,7 @@ function inspectShape(html: string, sanitized: boolean): Shape {
     }
     const action = attributeValue(attributes, "action", phase) ?? "";
     if (action === "") continue;
-    if (action !== STATIC_ACTION) refuse(contract, "action_unallowed", phase, tag, "action");
+    if (!isStaticAction(action)) refuse(contract, "action_unallowed", phase, tag, "action");
     staticActionCount += 1;
   }
   return {
@@ -474,7 +514,7 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
         refuse(contract, "url_attribute", phase, tag, "url_attribute");
       }
       if (attribute.name === "action") {
-        if (element !== "form" || (value !== "" && value !== STATIC_ACTION)) {
+        if (element !== "form" || (value !== "" && !isStaticAction(value))) {
           refuse(contract, "action_unallowed", phase, tag, "action");
         }
       } else if (attribute.name === "href") {
@@ -571,6 +611,7 @@ function allowedEventHandler(name: string, value: string, canonical: boolean): b
   if (canonical) {
     return (name === "onclick" || name === "onchange") && value === "return false;";
   }
+  if (name === "onclick" && MENU_TOGGLE_ONCLICK.has(value)) return true;
   if (
     /https?:|javascript:|data:|fetch|xmlhttprequest|document|cookie|storage|eval|function|=>/iu.test(
       value,
@@ -784,7 +825,7 @@ function countShape(html: string) {
       attributes.find((attribute) => attribute.name === name)?.value?.toLowerCase();
     if (element === "form") {
       contract.forms += 1;
-      if (attributes.some((a) => a.name === "action" && a.value === STATIC_ACTION)) {
+      if (attributes.some((a) => a.name === "action" && isStaticAction(a.value))) {
         contract.staticActionForms += 1;
       }
       continue;

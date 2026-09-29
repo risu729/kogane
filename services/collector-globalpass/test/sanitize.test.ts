@@ -30,6 +30,91 @@ describe("GLOBAL PASS HTML sanitizer", () => {
     expect(await sha256(output)).not.toBe(await sha256(input));
   });
 
+  test("accepts the activity page in English as well as in Japanese", () => {
+    // The collector's session is English: the live page's title is
+    // `Account Activities` and its heading `Viewing Monthly Account
+    // Activities`, with no Japanese statement name anywhere.
+    const english = fixture("a")
+      .replace("<head>", "<head><title>Account Activities</title>")
+      .replace("<h1>ご利用明細</h1>", "<h2>Viewing Monthly Account Activities</h2>")
+      .replace(">明細</a>", ">Account Activities</a>");
+    expect(english).not.toMatch(/明細/u);
+    const output = sanitizeGlobalPassActivityHtml(english);
+    expect(output.match(new RegExp(NABLARCH_HIDDEN_SENTINEL, "gu"))).toHaveLength(4);
+    expect(output).toContain("<title>Account Activities</title>");
+    expect(sanitizeGlobalPassActivityHtml(fixture("a"))).toContain("ご利用明細");
+    // The refusal diagnostic reads the same landmark in either language.
+    const shape = globalPassRefusalShape(
+      english,
+      new GlobalPassSanitizerError("globalpass_html_contract_invalid", {
+        expectation: "forbidden_token",
+        phase: "input",
+      }),
+    ) as { landmarks: { activityHeading: boolean; activityHeadingInTitle: boolean } };
+    expect(shape.landmarks.activityHeading).toBe(true);
+    expect(shape.landmarks.activityHeadingInTitle).toBe(true);
+    // The English name in the title alone is enough, as 「ご利用明細」 alone is.
+    const titleOnly = fixture("a")
+      .replace("<head>", "<head><title>Account Activities</title>")
+      .replace("<h1>ご利用明細</h1>", "");
+    expect(() => sanitizeGlobalPassActivityHtml(titleOnly)).not.toThrow();
+    // Neither name, nor a near miss: still refused.
+    for (const heading of ["Account", "Activities", "account activities"]) {
+      const page = fixture("a").replace("<h1>ご利用明細</h1>", `<h1>${heading}</h1>`);
+      expect(sanitizerExpectation(captured(() => sanitizeGlobalPassActivityHtml(page)))).toBe(
+        "activity_heading_missing",
+      );
+    }
+  });
+
+  test("accepts the English page's relative download action and menu toggle, exactly", () => {
+    // What the live English page (2026-09-29) writes where the reviewed pages
+    // differ: the download form's action as a relative path, and the
+    // `Manage Services` menu toggle, whose `<` a DOM serializer may write as
+    // `&lt;`.
+    const toggle = (lessThan: string) =>
+      `if (window.innerWidth ${lessThan} 640) { $(this.parentNode).toggleClass('closed'); } ` +
+      "else { $('#chgAccountSettingMenu')[0].click(); } return false;";
+    const english = (lessThan: string) =>
+      fixture("a")
+        .replace("<head>", "<head><title>Account Activities</title>")
+        .replace("<h1>ご利用明細</h1>", "<h2>Viewing Monthly Account Activities</h2>")
+        .replace(
+          'action="https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301"',
+          'action="/p/statementInquiry/RW1313010301"',
+        )
+        .replace("</body>", `<a href="#" onclick="${toggle(lessThan)}">x</a></body>`);
+    for (const lessThan of ["<", "&lt;"]) {
+      const output = sanitizeGlobalPassActivityHtml(english(lessThan));
+      // Variant A still: the relative action is the one static-action form.
+      expect(output.match(new RegExp(NABLARCH_HIDDEN_SENTINEL, "gu"))).toHaveLength(4);
+      expect(output).toContain('action="/p/statementInquiry/RW1313010301"');
+      // Every handler is stored as `return false;`, the toggle included.
+      expect(output).not.toContain("innerWidth");
+      expect(output).not.toContain("chgAccountSettingMenu");
+      expect(sanitizeGlobalPassActivityHtml(english(lessThan))).toBe(output);
+    }
+
+    // Anything else is still refused.
+    const page = english("<");
+    const refusedAs = (html: string) =>
+      sanitizerExpectation(captured(() => sanitizeGlobalPassActivityHtml(html)));
+    for (const action of ["/p/statementInquiry/RW1313010201", "p/statementInquiry/RW1313010301"]) {
+      expect(
+        refusedAs(page.replace('action="/p/statementInquiry/RW1313010301"', `action="${action}"`)),
+      ).toBe("action_unallowed");
+    }
+    for (const handler of [
+      toggle("<").replace("closed", "open"),
+      toggle("<").replace("#chgAccountSettingMenu", "#other"),
+      toggle("<").replace("return false;", "fetch(); return false;"),
+      toggle("&gt;"),
+      "if (true) { click(); }",
+    ]) {
+      expect(refusedAs(page.replace(toggle("<"), handler))).toBe("event_handler_unallowed");
+    }
+  });
+
   test("accepts the reviewed no-reference-date variant B", () => {
     const output = sanitizeGlobalPassActivityHtml(fixture("b"));
     expect(output.match(new RegExp(NABLARCH_HIDDEN_SENTINEL, "gu"))).toHaveLength(3);
@@ -458,6 +543,15 @@ function fixture(variant: "a" | "b"): string {
     forms +
     "</body></html>"
   );
+}
+
+function captured(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
 }
 
 async function sha256(value: string): Promise<string> {
