@@ -974,9 +974,10 @@ which are admitted exactly and nothing else:
 The survey found nothing else outside the contract on that page: every link,
 script and image path, hidden input name and count, and form count matched.
 
-The Japanese pages stay accepted as before: the reviewed contract, including
-the absolute download action and the reviewed handler grammar, comes from the
-audited captures, which carry 「ご利用明細」.
+A page named 「ご利用明細」 or 「利用明細」 is accepted as before, and the
+absolute download action and the reviewed handler grammar stay accepted; every
+other check is unchanged
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-09-29-global-pass-activity-pages-in-english)).
 
 Open: whether the pages the Container captures (`page.content()`) match the
 live DOM in every other respect, which the next night's run shows.

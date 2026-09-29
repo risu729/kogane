@@ -99,7 +99,22 @@ describe("GLOBAL PASS HTML sanitizer", () => {
     const page = english("<");
     const refusedAs = (html: string) =>
       sanitizerExpectation(captured(() => sanitizeGlobalPassActivityHtml(html)));
-    for (const action of ["/p/statementInquiry/RW1313010201", "p/statementInquiry/RW1313010301"]) {
+    for (const action of [
+      "/p/statementInquiry/RW1313010201",
+      "p/statementInquiry/RW1313010301",
+      // Only the exact path: no other host, scheme-relative host, query,
+      // fragment, trailing slash, dot segment, case change or padding.
+      "//www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301",
+      "//example.com/p/statementInquiry/RW1313010301",
+      "https://example.com/p/statementInquiry/RW1313010301",
+      "http://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301",
+      "/p/statementInquiry/RW1313010301?next=1",
+      "/p/statementInquiry/RW1313010301#x",
+      "/p/statementInquiry/RW1313010301/",
+      "/p/statementInquiry/../statementInquiry/RW1313010301",
+      "/P/statementInquiry/RW1313010301",
+      " /p/statementInquiry/RW1313010301",
+    ]) {
       expect(
         refusedAs(page.replace('action="/p/statementInquiry/RW1313010301"', `action="${action}"`)),
       ).toBe("action_unallowed");
@@ -109,10 +124,20 @@ describe("GLOBAL PASS HTML sanitizer", () => {
       toggle("<").replace("#chgAccountSettingMenu", "#other"),
       toggle("<").replace("return false;", "fetch(); return false;"),
       toggle("&gt;"),
+      `${toggle("<")} `,
+      ` ${toggle("<")}`,
+      toggle("<").replaceAll("'", "&#39;"),
       "if (true) { click(); }",
     ]) {
       expect(refusedAs(page.replace(toggle("<"), handler))).toBe("event_handler_unallowed");
     }
+    // The toggle is admitted as an onclick only, not as any other handler.
+    expect(
+      refusedAs(page.replace(`onclick="${toggle("<")}"`, `onmouseover="${toggle("<")}"`)),
+    ).toBe("event_handler_unallowed");
+    expect(refusedAs(page.replace(`onclick="${toggle("<")}"`, `onchange="${toggle("<")}"`))).toBe(
+      "event_handler_unallowed",
+    );
   });
 
   test("accepts the reviewed no-reference-date variant B", () => {
