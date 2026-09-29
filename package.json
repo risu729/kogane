@@ -13,7 +13,7 @@
     "knip": "6.38.0",
     "typescript": "6.0.3",
     "vitest": "4.1.11",
-    "wrangler": "4.140.0"
+    "wrangler": "4.141.0"
   },
   "packageManager": "bun@1.4.2"
 }
