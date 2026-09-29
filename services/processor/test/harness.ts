@@ -222,6 +222,8 @@ export interface SeededUnit {
   /** Layer A unit id and unit key; MyJCB uses one unit per card connection. */
   id: number;
   key: string;
+  /** Default `connection`; a Vpass statement unit is a `card`. */
+  kind?: string;
   outcome: "success" | "partial" | "failed" | "human_required";
   failureCode?: string;
   artifacts: { id: number; key: string; payload: unknown }[];
@@ -270,8 +272,8 @@ export async function seedUnitRun(
   for (const unit of run.units) {
     statements.push(
       env.DB.prepare(
-        "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'connection')",
-      ).bind(unit.id, run.id, unit.key),
+        "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,?)",
+      ).bind(unit.id, run.id, unit.key, unit.kind ?? "connection"),
       env.DB.prepare(
         "INSERT INTO fetch_unit_reports(fetch_unit_id,report_kind,normalized_outcome,safe_failure_code) VALUES(?,'terminal',?,?)",
       ).bind(unit.id, unit.outcome, unit.failureCode ?? null),

@@ -15,9 +15,13 @@
 //   (`accountEntityId`).
 // - The importer's v1 value and the collector's v2 value of the same account
 //   are different identities: the months both captured are read under two
-//   source accounts and two entities. That is the stated limit until the
-//   one-time identity-value rewrite of ADR 0030 pairs them, pinned here so a
-//   change to it is seen.
+//   source accounts and two entities, until the one-time identity-value
+//   rewrite of ADR 0030's amendment (migrations 0062 and 0063) pairs them.
+// - After 0063 the pair reads as one account: the importer's rows carry the
+//   v2 value, the months both captured are read once, both source accounts
+//   map to the importer-era entity, a new collector capture adds no mapping
+//   revision, re-identifying an importer parse reuses the importer's source
+//   account, and an unpaired v2 value keeps its own entity.
 //
 // Everything is synthetic: the pages are the anonymous observation-pipeline
 // fixtures, and the v1 value is made up (the importer's key is gone).
@@ -38,10 +42,12 @@ import { transactionsSql } from "../../../packages/read-model/src/sql.ts";
 import { moneyForwardRunPlan } from "../../collector-moneyforward/src/shared-collection.ts";
 import type { RawArtifact } from "../../collector-moneyforward/src/types.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
-import { identitySweep } from "../src/identity-store.ts";
+import { identifyParse, identitySweep } from "../src/identity-store.ts";
 import { sweep } from "../src/worker.ts";
 
 const IMPORTER = "collector-r2-importer";
+/** The rewrite migration; stores that stage a pair stop before it. */
+const REWRITE = "0063_identity_value_rewrite_apply.sql";
 const COLLECTOR = "collector-moneyforward-me";
 /** What the collector derives from the fixture's detail page (ADR 0029). */
 const V2 = `moneyforward-account-v2-${createHash("sha256")
@@ -88,7 +94,8 @@ afterEach(async () => {
   mf = undefined;
 });
 
-async function store(): Promise<Env> {
+/** A store with every CORE migration before `before` applied (all by default). */
+async function store(before = "9999"): Promise<Env> {
   mf = new Miniflare(
     convertV4MiniflareOptions({
       modules: true,
@@ -100,7 +107,7 @@ async function store(): Promise<Env> {
   );
   const db = await mf.getD1Database("DB");
   const read = await mf.getD1Database("READ");
-  for (const file of migrationFiles(CORE_MIGRATIONS_URL))
+  for (const file of migrationFiles(CORE_MIGRATIONS_URL).filter((name) => name < before))
     for (const sql of splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, file)))
       await db.prepare(sql).run();
   const bootstrap = readFileSync(
@@ -220,13 +227,13 @@ async function importerRun(env: Env, identity: string): Promise<number> {
 }
 
 /** The collector's September capture of February, under `identity`. */
-async function collectorRun(env: Env, identity: string): Promise<number> {
-  return registeredRun(env, {
-    runId: "00000000-0000-4000-8000-00000000c027",
-    identity,
-    at: "2026-09-20T00:00:00.000Z",
-    months: [["2099-02", FEBRUARY]],
-  });
+async function collectorRun(
+  env: Env,
+  identity: string,
+  runId = "00000000-0000-4000-8000-00000000c027",
+  at = "2026-09-20T00:00:00.000Z",
+): Promise<number> {
+  return registeredRun(env, { runId, identity, at, months: [["2099-02", FEBRUARY]] });
 }
 
 async function all<T = Record<string, unknown>>(
@@ -347,8 +354,8 @@ test.each([
   60_000,
 );
 
-test("the importer's v1 and the collector's v2 identity of one account differ: the months both captured are read under two source accounts (the stated limit)", async () => {
-  const env = await store();
+test("the importer's v1 and the collector's v2 identity of one account differ until the rewrite: the months both captured are read under two source accounts", async () => {
+  const env = await store(REWRITE);
   const importer = `moneyforward-me:${V1}`;
   const collector = `moneyforward-me:${V2}`;
   await importerRun(env, V1);
@@ -389,4 +396,206 @@ test("the importer's v1 and the collector's v2 identity of one account differ: t
   expect(await all(env, "SELECT * FROM identity_value_rewrites")).toEqual([
     { source_id: "moneyforward-me", old_value: V1, new_value: V2, basis: "shared-rows" },
   ]);
+}, 60_000);
+
+/** Applies `file` statement by statement, as D1 applies a migration. */
+async function migrate(env: Env, file: string): Promise<void> {
+  for (const sql of splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, file)))
+    await env.DB.prepare(sql).run();
+}
+
+/**
+ * The split account of the test above on a store migrated through 0062, the
+ * pair staged by 0062's own statement, then 0063 applied: what production
+ * runs, in order.
+ */
+async function rewritten() {
+  const env = await store(REWRITE);
+  await importerRun(env, V1);
+  expect(await sweep(env)).toMatchObject({ parsed: 4, error: 0 });
+  await collectorRun(env, V2);
+  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  await identitySweep(env.DB, resolveIdentity, 40);
+  const staging = splitSqlStatements(
+    migrationSql(CORE_MIGRATIONS_URL, "0062_identity_value_rewrite_staging.sql"),
+  ).filter((sql) => sql.startsWith("INSERT INTO identity_value_rewrites"));
+  await env.DB.prepare(staging[0]!).run();
+  const byProducer = async () =>
+    Object.fromEntries(
+      (
+        await all<{ producer_id: string; id: string; account_id: string }>(
+          env,
+          `SELECT s.producer_id,s.id,m.account_id FROM source_accounts s
+            JOIN current_account_mappings m ON m.source_account_id=s.id
+           WHERE s.source_id='moneyforward-me'`,
+        )
+      ).map((row) => [row.producer_id, row]),
+    );
+  const before = await byProducer();
+  await migrate(env, REWRITE);
+  return { env, before, after: await byProducer() };
+}
+
+test("after the rewrite the importer's rows carry the v2 value, each provider row is read once and both producers map to the importer-era entity", async () => {
+  const { env, before, after } = await rewritten();
+  const account = `moneyforward-me:${V2}`;
+  const importerEntity = before[IMPORTER]!.account_id;
+  expect(before[COLLECTOR]!.account_id).not.toBe(importerEntity);
+  // Hashed ids stay: the importer's source account keeps its id and entity.
+  expect(after[IMPORTER]).toEqual(before[IMPORTER]);
+  expect(after[COLLECTOR]).toEqual({ ...before[COLLECTOR]!, account_id: importerEntity });
+  // February, captured by both, is read once (the collector's newer capture);
+  // January, only the importer's, stays current: INV06 across the pair.
+  expect(await transactions(env)).toEqual([
+    { producer: IMPORTER, source_account: account, as_of: "2099-01-03", amount_minor: "-1234" },
+    { producer: IMPORTER, source_account: account, as_of: "2099-01-03", amount_minor: "500" },
+    { producer: COLLECTOR, source_account: account, as_of: "2099-02-03", amount_minor: "-1234" },
+    { producer: COLLECTOR, source_account: account, as_of: "2099-02-03", amount_minor: "500" },
+  ]);
+  expect(await all(env, MAPPINGS)).toEqual([
+    {
+      producer_id: COLLECTOR,
+      reference_json: JSON.stringify([account]),
+      account_id: importerEntity,
+      status: "provider-local",
+    },
+    {
+      producer_id: IMPORTER,
+      reference_json: JSON.stringify([account]),
+      account_id: importerEntity,
+      status: "provider-local",
+    },
+  ]);
+  expect(
+    await all(
+      env,
+      "SELECT method,reason FROM current_account_mappings WHERE source_account_id=?",
+      before[COLLECTOR]!.id,
+    ),
+  ).toEqual([{ method: "rule", reason: "identity-value-rewrite" }]);
+  // The collector-era entity stays (append-only), with no current mapping.
+  expect(
+    await all(
+      env,
+      "SELECT count(*) AS n FROM current_account_mappings WHERE account_id=?",
+      before[COLLECTOR]!.account_id,
+    ),
+  ).toEqual([{ n: 0 }]);
+  expect(await all(env, "SELECT count(*) AS n FROM accounts")).toEqual([{ n: 2 }]);
+  expect(
+    await all(env, "SELECT count(*) AS n FROM sqlite_schema WHERE name='identity_value_rewrites'"),
+  ).toEqual([{ n: 0 }]);
+}, 60_000);
+
+test("after the rewrite a new collector capture maps to the importer-era entity with no new mapping revision", async () => {
+  const { env, before } = await rewritten();
+  const revisions = async () =>
+    all(env, "SELECT id,revision,account_id FROM account_mappings ORDER BY id");
+  const mappings = await revisions();
+  await collectorRun(env, V2, "00000000-0000-4000-8000-00000000c028", "2026-09-27T00:00:00.000Z");
+  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  await identitySweep(env.DB, resolveIdentity, 40);
+  expect(await revisions()).toEqual(mappings);
+  expect(
+    await all(env, "SELECT count(*) AS n FROM source_accounts WHERE source_id='moneyforward-me'"),
+  ).toEqual([{ n: 2 }]);
+  // Every current MoneyForward observation resolves to the importer-era entity.
+  expect(
+    await all(
+      env,
+      `SELECT DISTINCT m.account_id FROM current_identity_observations o
+        JOIN current_account_mappings m ON m.source_account_id=o.source_account_id`,
+    ),
+  ).toEqual([{ account_id: before[IMPORTER]!.account_id }]);
+  // February is still read once: the newest capture replaced the older two.
+  expect(
+    (await transactions(env))
+      .filter((row) => row.as_of === "2099-02-03")
+      .map((row) => row.producer),
+  ).toEqual([COLLECTOR, COLLECTOR]);
+}, 60_000);
+
+test("after the rewrite re-identifying an importer parse reuses the importer's source account", async () => {
+  const { env, before } = await rewritten();
+  const parses = await all<{
+    id: number;
+    artifact_id: number;
+    source_id: string;
+    producer_id: string;
+    fetch_run_id: number;
+  }>(
+    env,
+    `SELECT p.id,a.id AS artifact_id,a.source_id,f.producer_id,a.fetch_run_id FROM parse_runs p
+      JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN fetch_runs f ON f.id=a.fetch_run_id
+     WHERE f.producer_id=? AND a.dataset='monthly-transactions' ORDER BY p.id`,
+    IMPORTER,
+  );
+  expect(parses).toHaveLength(2);
+  const accounts = await all(env, "SELECT * FROM source_accounts ORDER BY id");
+  // An explicit newer policy version is a new identity run over the same rows.
+  for (const parse of parses)
+    expect(await identifyParse(env.DB, parse, resolveIdentity, 3)).toBe(2);
+  expect(await all(env, "SELECT * FROM source_accounts ORDER BY id")).toEqual(accounts);
+  expect(
+    await all(
+      env,
+      `SELECT DISTINCT o.source_account_id FROM identity_observations o
+        JOIN identity_runs r ON r.id=o.identity_run_id WHERE r.policy_version=3`,
+    ),
+  ).toEqual([{ source_account_id: before[IMPORTER]!.id }]);
+  expect(
+    await all(
+      env,
+      "SELECT account_id,policy_version FROM current_account_mappings WHERE source_account_id=?",
+      before[IMPORTER]!.id,
+    ),
+  ).toEqual([{ account_id: before[IMPORTER]!.account_id, policy_version: 3 }]);
+  // A newer policy over the collector's parse appends a revision, and it
+  // derives the importer-era entity from the importer's stored source
+  // account, not from a digest of the v2 reference (the collector-era one).
+  const [collectorParse] = await all<{
+    id: number;
+    artifact_id: number;
+    source_id: string;
+    producer_id: string;
+    fetch_run_id: number;
+  }>(
+    env,
+    `SELECT p.id,a.id AS artifact_id,a.source_id,f.producer_id,a.fetch_run_id FROM parse_runs p
+      JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN fetch_runs f ON f.id=a.fetch_run_id
+     WHERE f.producer_id=? AND a.dataset='monthly-transactions'`,
+    COLLECTOR,
+  );
+  expect(await identifyParse(env.DB, collectorParse!, resolveIdentity, 3)).toBe(2);
+  expect(
+    await all(
+      env,
+      "SELECT account_id,policy_version FROM current_account_mappings WHERE source_account_id=?",
+      before[COLLECTOR]!.id,
+    ),
+  ).toEqual([{ account_id: before[IMPORTER]!.account_id, policy_version: 3 }]);
+}, 60_000);
+
+test("after the rewrite a v2 value that was not staged keeps its own entity", async () => {
+  const { env, before } = await rewritten();
+  const other = `moneyforward-account-v2-${"6b".repeat(32)}`;
+  await collectorRun(
+    env,
+    other,
+    "00000000-0000-4000-8000-00000000c029",
+    "2026-09-28T00:00:00.000Z",
+  );
+  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  await identitySweep(env.DB, resolveIdentity, 40);
+  const [unpaired] = await all<{ account_id: string }>(
+    env,
+    `SELECT m.account_id FROM source_accounts s JOIN current_account_mappings m ON m.source_account_id=s.id
+      WHERE s.reference_json=?`,
+    JSON.stringify([`moneyforward-me:${other}`]),
+  );
+  expect(unpaired!.account_id).not.toBe(before[IMPORTER]!.account_id);
+  expect(unpaired!.account_id).not.toBe(before[COLLECTOR]!.account_id);
+  expect(
+    await all(env, "SELECT count(*) AS n FROM source_accounts WHERE producer_id=?", IMPORTER),
+  ).toEqual([{ n: 1 }]);
 }, 60_000);

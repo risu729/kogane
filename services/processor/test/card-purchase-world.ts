@@ -277,14 +277,19 @@ export class World {
       fetchedAtMs: Date.parse(input.fetchedAt),
       producer: input.producer ?? PRODUCER,
       units: [
-        { id: unit, key: card, outcome: "success", artifacts: [{ id: artifact, key, payload }] },
+        {
+          id: unit,
+          key: card,
+          kind: "card",
+          outcome: "success",
+          artifacts: [{ id: artifact, key, payload }],
+        },
       ],
     });
     await this.db.batch([
       this.db
         .prepare("UPDATE acquisition_sessions SET producer_id=?,external_id_namespace=? WHERE id=?")
         .bind(input.producer ?? PRODUCER, collector ? "shared-r2" : VPASS_NAMESPACE, run),
-      this.db.prepare("UPDATE fetch_units SET unit_kind='card' WHERE id=?").bind(unit),
       ...(collector
         ? [
             this.db

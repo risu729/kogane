@@ -171,5 +171,6 @@ once: in the importer's fetch unit keys, identity pins
 every id and the importer-era account entity. Migration 0062 only stages the
 pairs (the owner inserts the Vpass ones,
 [identity operations](identity-operations.md#one-time-identity-value-rewrite));
-the rewrite migration is not in the repository yet, so the pins and counts
-recorded above are unchanged today.
+migration 0063 rewrites them. The counts recorded above were read before it:
+after it, a staged card's importer rows carry its v2 token, with the same
+ids, pins and account entity.

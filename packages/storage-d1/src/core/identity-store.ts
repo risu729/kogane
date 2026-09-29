@@ -84,19 +84,26 @@ const MONEYFORWARD_ACCOUNT_REFERENCE = /^moneyforward-me:moneyforward-account-v[
  *   `-v2-` form, ADR 0029), which the parser takes only from the unit key of a
  *   registered run.
  *
- * For those the entity is derived from the reference the importer's producer
- * gives the same value. The importer-era entity ids are therefore unchanged,
- * and a collector's source account for the same value maps to that same
- * entity. A value the importer never registered (a new account, or any v2
- * value) gets an entity no importer reference names, and every producer that
- * reads that value reaches the same one. The v1 and the v2 value of one
- * account are different values and so different entities; nothing here joins
- * them (ADR 0030 retires the crosswalk that once did and stages a one-time
- * rewrite of the stored values instead). Nothing else is shared: the
- * collector's source account is its own subject, with its own mapping
- * revisions and manual decisions.
+ * For those the entity is derived from the importer producer's source account
+ * for the same value: the one stored under that natural key when it exists,
+ * else the id that source account would be given. The importer-era entity ids
+ * are therefore unchanged, and a collector's source account for the same value
+ * maps to that same entity. A value the importer never registered (a new
+ * account, or an unpaired v2 value) gets an entity no importer reference
+ * names, and every producer that reads that value reaches the same one.
+ *
+ * The one-time identity-value rewrite (ADR 0030 amendment, migration 0063)
+ * replaced each staged importer-era v1 value by its collector-era v2 value in
+ * the importer's source-account reference, keeping that source account's id
+ * (a digest of the v1 reference). Looking the importer's source account up by
+ * its natural key is what makes a staged v2 value reach that importer-era
+ * entity (`E_o`); a v2 value that was not staged has no importer source
+ * account and keeps its own entity. Nothing else is shared: the collector's
+ * source account is its own subject, with its own mapping revisions and
+ * manual decisions.
  */
 async function accountEntityId(
+  db: D1Like,
   input: IdentityInput,
   account: AccountIdentity,
   ref: string,
@@ -110,7 +117,7 @@ async function accountEntityId(
     key[1] === input.trustedVpassBinding.cardToken
   ) {
     return identityKey("account", [
-      await identityKey("sa", [input.sourceId, VPASS_TOKEN_ENTITY_PRODUCER, key]),
+      await sourceAccountId(db, input.sourceId, VPASS_TOKEN_ENTITY_PRODUCER, key),
     ]);
   }
   if (
@@ -119,10 +126,35 @@ async function accountEntityId(
     MONEYFORWARD_ACCOUNT_REFERENCE.test(key[0]!)
   ) {
     return identityKey("account", [
-      await identityKey("sa", [input.sourceId, MONEYFORWARD_IDENTITY_ENTITY_PRODUCER, key]),
+      await sourceAccountId(db, input.sourceId, MONEYFORWARD_IDENTITY_ENTITY_PRODUCER, key),
     ]);
   }
   return identityKey("account", [ref]);
+}
+
+/**
+ * The id of the source account for (source, producer, key): the stored one
+ * when `UNIQUE(source_id, producer_id, reference_json)` already holds that
+ * reference, else the digest a new source account is given. The two agree for
+ * every source account the store wrote itself; they differ only for the
+ * importer's source accounts whose reference the one-time identity-value
+ * rewrite (ADR 0030 amendment, migration 0063) moved to the collector-era
+ * value while keeping the id, which re-identifying an importer parse must
+ * reuse rather than insert again.
+ */
+async function sourceAccountId(
+  db: D1Like,
+  sourceId: string,
+  producerId: string,
+  key: readonly string[],
+): Promise<string> {
+  const stored = await db
+    .prepare(
+      "SELECT id FROM source_accounts WHERE source_id=? AND producer_id=? AND reference_json=?",
+    )
+    .bind(sourceId, producerId, JSON.stringify(key))
+    .first<{ id: string }>();
+  return stored?.id ?? identityKey("sa", [sourceId, producerId, key]);
 }
 
 /** Appends an automatic decision only when no effective manual decision
@@ -134,8 +166,8 @@ async function accountMapping(
   account: AccountIdentity,
   version: number,
 ) {
-  const ref = await identityKey("sa", [input.sourceId, input.producerId, account.key]);
-  const entity = await accountEntityId(input, account, ref);
+  const ref = await sourceAccountId(db, input.sourceId, input.producerId, account.key);
+  const entity = await accountEntityId(db, input, account, ref);
   await db.batch([
     db
       .prepare(
