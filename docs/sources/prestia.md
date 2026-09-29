@@ -940,5 +940,44 @@ from the page. The manifest's failure entry carries the same expectation as
 No error-banner landmark is recorded: no error-banner markup has been
 observed on GLOBAL PASS.
 
-Open: the shape of the pages production refuses, to be read from the next
-night's log; the contract change it calls for.
+## GLOBAL PASS activity pages in English (2026-09-29)
+
+The night of 2026-09-28 logged the shape of both refused months: expectation
+`activity_heading_missing` on a logged-in page (title present, month select
+present, no login or password field, no forbidden token), one with no table
+(a month without transactions) and one with 21 tables. A live survey of the
+same pages the next day found why. GLOBAL PASS serves the statement pages in
+the language of the session, and the collector's session is English
+(`engUseFlg` 1): the pages are titled `Account Activities`, the month page
+(`/p/statementInquiry/RW1313010101`) is headed `Viewing Monthly Account
+Activities`, the selected month (`RW1313010201`) is headed with the month,
+and the table headings are English (`Transaction Date`, `Transaction Detail`,
+`Transaction Currency and Amount`, … — the ones the activity parser already
+reads). 「ご利用明細」 and 「利用明細」 appear nowhere on them. A language link
+(`Change language to Japanese`) is offered; the collector does not use it.
+
+The sanitizer now takes the activity page in either language: its heading
+landmark is 「ご利用明細」, 「利用明細」 or `Account Activities`. Read against the
+reviewed contract, the live English month page differed in two more places,
+which are admitted exactly and nothing else:
+
+- the download form's action is written relative,
+  `/p/statementInquiry/RW1313010301`, instead of the absolute URL of the same
+  path on the same host; it still counts as the one static-action form of
+  variant A;
+- the `Manage Services` menu link carries one handler outside the reviewed
+  call grammar,
+  `if (window.innerWidth < 640) { $(this.parentNode).toggleClass('closed'); } else { $('#chgAccountSettingMenu')[0].click(); } return false;`,
+  admitted with its `<` literal or as `&lt;` (a DOM serializer may write
+  either). Like every handler it is stored as `return false;`.
+
+The survey found nothing else outside the contract on that page: every link,
+script and image path, hidden input name and count, and form count matched.
+
+A page named 「ご利用明細」 or 「利用明細」 is accepted as before, and the
+absolute download action and the reviewed handler grammar stay accepted; every
+other check is unchanged
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-09-29-global-pass-activity-pages-in-english)).
+
+Open: whether the pages the Container captures (`page.content()`) match the
+live DOM in every other respect, which the next night's run shows.

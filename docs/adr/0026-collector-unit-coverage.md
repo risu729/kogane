@@ -563,3 +563,115 @@ without someone fetching the page by hand.
   its closed key list, arrays and a third level; the diagnostic line carries a kept shape on a failure and no
   `shape` when none is passed.
 - No production data was read for this amendment.
+
+## Amendment 2026-09-29: GLOBAL PASS activity pages in English
+
+- Status: proposed; accepted when #366 merges
+- Date: 2026-09-29
+- Carried by: `services/collector-globalpass/src/sanitize.ts`
+  (`ACTIVITY_HEADING`, `isStaticAction`, `MENU_TOGGLE_ONCLICK`),
+  [PRESTIA / GLOBAL PASS source note](../sources/prestia.md#global-pass-activity-pages-in-english-2026-09-29),
+  `services/collector-globalpass/README.md`,
+  `services/collector-globalpass/test/sanitize.test.ts`
+- Approved by the owner on 2026-09-29 (accept the activity page in Japanese
+  and in English).
+
+### Context
+
+The shape diagnostic of the 2026-09-28 amendment named the refusal on the
+next night: every month was refused with `activity_heading_missing` on a
+logged-in page (title present, month select present, no login or password
+field, no forbidden token). The sanitizer's heading landmark was
+「ご利用明細」 or 「利用明細」. The owner's live survey of the same pages
+(labels and structure only, no values) found them in English, because the
+collector's session is English (the hidden input `engUseFlg`):
+
+- the pages are titled `Account Activities`;
+- before a month is selected, the page has no table and is headed
+  `Viewing Monthly Account Activities`;
+- the page of a selected month has no H2; its H3 is the month, and its table
+  headers are English (`Transaction Date`, `Transaction Detail`, …,
+  `Applicable Rate`, twelve in all);
+- 「ご利用明細」 and 「利用明細」 appear nowhere.
+
+Read against the rest of the contract, the English month page differed in two
+more places only: the download form's action is the relative path
+`/p/statementInquiry/RW1313010301` instead of the absolute URL of that path on
+`www.debit.vpass.ne.jp`, and the `Manage Services` menu link has one onclick
+handler outside the reviewed call grammar (it starts with `if` and reads
+`window.innerWidth`). Every link, script and image path, hidden input name and
+count, and form count matched.
+
+### Options considered
+
+- **A. Switch the session to Japanese** (the page offers a language link).
+  Rejected: it adds a navigation step and a provider behaviour (how long the
+  language choice persists) nobody has observed, and the activity parser
+  already reads the English table headers.
+- **B. Accept the English name only.** Rejected: the owner asked that both
+  languages be accepted, and nothing observed says the session stays English.
+- **C. Accept either name, and admit the two observed English differences
+  exactly.** **Chosen.**
+- **D. Relax the action and handler checks by pattern** (any same-host
+  relative path; any handler without network or storage words). Rejected:
+  the sanitizer is the boundary for what reaches R2, and only what was
+  observed is admitted ([ADR 0004](0004-payment-type-shapes-from-evidence.md)).
+
+### Decision
+
+**Option C.**
+
+- The activity heading landmark (the input check and the diagnostic's
+  `activityHeading`/`activityHeadingInTitle`) is 「ご利用明細」, 「利用明細」 or
+  `Account Activities`, matched case-sensitively anywhere in the page, as the
+  Japanese names already were.
+- A form's action is accepted when it is exactly the absolute URL reviewed
+  before or exactly the relative path `/p/statementInquiry/RW1313010301`;
+  either counts as the one static-action form of variant A. Nothing else is
+  accepted: no other path, host, scheme-relative form, query, fragment or dot
+  segment. `<base>` stays a blocked element, so the relative path resolves to
+  the page's own host.
+- One onclick value is admitted by exact string comparison: the observed
+  `Manage Services` toggle, with its `<` written literally or as `&lt;` (a
+  DOM serializer may write either). Like every handler, it is stored as
+  `return false;`.
+- No other check changes: the variants, hidden names and counts, credential
+  and forbidden-token checks, URL allowlists and the diagnostic's closed codes
+  are as before.
+
+### Consequences
+
+- The English pages the collector receives pass the sanitizer, so the
+  nightly run can store GLOBAL PASS months again; whether the whole
+  `page.content()` capture matches the surveyed live DOM in every other
+  respect is shown only by the next night's run.
+- `Account Activities` is a weaker landmark than a page heading: like the
+  Japanese names, it is matched anywhere in the page, including a menu link
+  on another logged-in page. The landmark alone never admits a page; the
+  variant, hidden-input, credential and URL checks still have to pass.
+- The stored page keeps the relative action as written; nothing reads it.
+- **Limits.** The two English differences were read from the live DOM, not
+  from a stored capture. A Japanese page may carry the same differences; they
+  are admitted whatever the language. The `&lt;` spelling was not observed; it
+  is listed because a serializer may produce it.
+
+### Verification
+
+- `test/sanitize.test.ts`: a variant A page with the Japanese names replaced
+  by the English title and heading is accepted, keeps the variant's four
+  sentinels and its title, and its refusal shape reports both heading
+  landmarks; the English name in the title alone is enough; `Account`,
+  `Activities` and `account activities` are refused as
+  `activity_heading_missing`. The English page with the relative action and
+  the toggle (either spelling) is accepted as variant A, stores the toggle as
+  `return false;`, and is sanitized idempotently. Other actions (another
+  path, no leading slash, a scheme-relative or other host, `http:`, a query,
+  a fragment, a trailing slash, a dot segment, a case change, leading
+  whitespace) are refused as `action_unallowed`; altered toggles (another
+  class, selector or statement, `>`, surrounding whitespace, entity-encoded
+  quotes, a different `if`) and the toggle as `onmouseover` or `onchange` are
+  refused as `event_handler_unallowed`.
+- On the code of `main` before this change, the two new tests fail
+  (reproducing the English page's refusal); on this change they pass.
+- No production data was read for this amendment; the survey's labels and
+  counts come from the owner.

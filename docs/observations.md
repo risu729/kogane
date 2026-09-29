@@ -17,6 +17,24 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## GLOBAL PASS activity pages are English; the sanitizer accepts both languages (collector, no parser release)
+
+2026-09-29. The refusal shape logged on the night of 2026-09-28 named the
+expectation: every month was refused with `activity_heading_missing` on a
+logged-in page with the month select and no login field. The owner's live
+survey (labels only) found the pages in English, because the collector's
+session is English: titled `Account Activities`, headed `Viewing Monthly
+Account Activities` before a month is selected, with English table headers
+and no 「ご利用明細」 or 「利用明細」. The sanitizer now takes either language's
+name as the heading landmark, and admits exactly the two other differences the
+survey found on the English month page: a relative download action and one
+menu-toggle onclick, stored as `return false;`
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-29-global-pass-activity-pages-in-english),
+[source note](sources/prestia.md#global-pass-activity-pages-in-english-2026-09-29)).
+Whether the stored capture matches the surveyed DOM elsewhere is shown only by
+the next night's run. No parser changed: `global-pass-activity` already reads
+the English headers.
+
 ## MyJCB: confirmed months stopped on a dated statement heading (statement parser 1.3.0)
 
 2026-09-28. The nightly MyJCB run of 2026-09-28 21:01Z, the first after the
