@@ -61,7 +61,7 @@
     "experiments/observation-pipeline-local": {
       "name": "@kogane/observation-pipeline-local",
       "dependencies": {
-        "hono": "4.13.9",
+        "hono": "4.13.10",
       },
       "devDependencies": {
         "@types/bun": "1.4.2",
@@ -174,7 +174,7 @@
     "services/app": {
       "name": "@kogane/evidence-browser",
       "dependencies": {
-        "hono": "4.13.9",
+        "hono": "4.13.10",
         "jose": "6.2.12",
         "zod": "4.6.5",
       },
@@ -1026,7 +1026,7 @@
 
     "hast-util-whitespace": ["hast-util-whitespace@3.0.0", "", { "dependencies": { "@types/hast": "^3.0.0" } }, "sha512-88JUN06ipLwsnv+dVn+OIYOvAuvBMy/Qoi6O7mQHxdPXpjy+Cd6xRkWwux7DKO+4sYILtLBRIKgsdpS2gQc7qw=="],
 
-    "hono": ["hono@4.13.9", "", {}, "sha512-7dMkQmZoC4E6F7AtaQSPhlWAdnBti+j7rreMZl8QB4jFiEhP9TWbGWUMi8WYzBCgmgulxuvLQupKqo+Co6Omyg=="],
+    "hono": ["hono@4.13.10", "", {}, "sha512-dQuLsa5oO+47QVMVMaaD9cIv8ctmVtK1iRvwWngkfloFJMeFeuoUFDswIqZGxmGX3hrRzREgEArjkK9OgsQEhA=="],
 
     "html-void-elements": ["html-void-elements@3.0.0", "", {}, "sha512-bEqo66MRXsUGxWHV5IP0PUiAWwoEjba4VCzg0LjFJBpchPaTfyfCKTG6bc5F8ucKec3q5y6qOdGyYTSBEvhCrg=="],
 
