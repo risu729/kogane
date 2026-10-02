@@ -330,7 +330,13 @@ Concrete limits in the current code:
   ([ADR 0005's amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)).
   The empty skip-payment page reads as zero rows
   only when its one row is the provider's empty row; beside real rows it is
-  refused. A later stop on a page's own shape now stores that page. The site's 「通信エラーが発生しました」
+  refused. The first stored skip-payment page (run of 2026-10-02 21:00Z,
+  position 8) was nonetheless refused by `myjcb-skip-payment-schedule@0.1.1`
+  (`parser_rejected`); its size says it is the empty page, and which of the
+  reader's structural checks refused it is not known until the owner runs the
+  counts-only replay, which now covers MyJCB and prints the page's structure
+  ([ADR 0005's amendment (i)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-02-i-the-first-stored-skip-payment-page-was-refused)).
+  No skip-payment observation exists yet. A later stop on a page's own shape now stores that page. The site's 「通信エラーが発生しました」
   page, served after many consecutive fetches, is not recognised; after the
   first month it would be kept as a month with no ledger. MyJCB export links
   are recorded, not fetched, because the shared bucket refuses the export

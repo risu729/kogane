@@ -201,9 +201,15 @@ artifacts through the current parser registry in memory and print which
 check it was, as a closed category:
 
 - `services/processor/scripts/replay-diagnostics.ts` selects failed parses
-  (`sony-bank` and `sbi-shinsei-bank` only) with one D1 `SELECT` and reads
-  each raw object from R2 into memory. Both go through `wrangler` with
-  `services/processor/wrangler.diagnostic.jsonc`; nothing is written.
+  (`sony-bank`, `sbi-shinsei-bank` and `myjcb` only) with one D1 `SELECT`
+  and reads each raw object from R2 into memory. Both go through `wrangler`
+  with `services/processor/wrangler.diagnostic.jsonc`; nothing is written.
+  A MyJCB replay hands the parser the statement state and period of the
+  artifact's newest completed (`ok` or `absent`) metadata projection under
+  the extractor release the processor reads (`active_releases`, else
+  `legacy-metadata-v1`); without one, and for every other source, the
+  artifact row's
+  ([ADR 0005's amendment (i)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-02-i-the-first-stored-skip-payment-page-was-refused)).
 - `services/processor/scripts/diagnose.ts` replays the oldest failed job of
   each parser through `getPlatformProxy` remote bindings, with the same
   classification.
@@ -215,6 +221,7 @@ services/processor/node_modules/wrangler/bin/wrangler.js login`, or a
 
 ```sh
 mise exec -- bun services/processor/scripts/replay-diagnostics.ts sbi-shinsei-top-balances-and-activity 50
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts myjcb-skip-payment-schedule 1
 ```
 
 The arguments are the parser, the most artifacts to replay (from 1 to 50; one
@@ -231,12 +238,13 @@ parsing.
 What it prints is JSON lines, one or two per replayed artifact and a summary
 last:
 
-| Line                                                                  | Content                                                                                                                                                                                                                                                                                        |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `{artifact, parser, result: "ok", observations}`                      | the current parser accepts it; a count                                                                                                                                                                                                                                                         |
-| `{artifact, shape}` (top-accounts-balance-and-activity only)          | shape classes and counts of every value the parser checks: timestamp and date format classes, amount classes (`plain_integer`, `grouped`, `number_other`, `empty`, …), debit/credit side combinations, repeated account numbers and references as counts, what each wrapper's `errorInfo` says |
-| `{artifact, parser, result: "rejected", category, sites}`             | `category` is `{reason, label?, field?}`; `sites` are parser source positions                                                                                                                                                                                                                  |
-| `{selected, replayed, parsed, rejected: [{parser, category, count}]}` | the counts per category                                                                                                                                                                                                                                                                        |
+| Line                                                                  | Content                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{artifact, parser, result: "ok", observations}`                      | the current parser accepts it; a count                                                                                                                                                                                                                                                                                                               |
+| `{artifact, shape}` (top-accounts-balance-and-activity only)          | shape classes and counts of every value the parser checks: timestamp and date format classes, amount classes (`plain_integer`, `grouped`, `number_other`, `empty`, …), debit/credit side combinations, repeated account numbers and references as counts, what each wrapper's `errorInfo` says                                                       |
+| `{artifact, shape}` (myjcb-skip-payment-schedule only)                | the page's structure as the reader checks it: h1 counts, as-of heading count, and per `detail-list-01` its children, its head's children, whether the head is the three expected cells, and each `content` row's structure with a count. Tags from a closed list, only the reader's own class names, booleans and counts; no text or attribute value |
+| `{artifact, parser, result: "rejected", category, sites}`             | `category` is `{reason, label?, field?}`; `sites` are parser source positions                                                                                                                                                                                                                                                                        |
+| `{selected, replayed, parsed, rejected: [{parser, category, count}]}` | the counts per category                                                                                                                                                                                                                                                                                                                              |
 
 For the four SBI Shinsei parsers (the balance-summary stage parser of
 [ADR 0031](adr/0031-sbi-shinsei-stage-category-fx-tier.md) included) every
