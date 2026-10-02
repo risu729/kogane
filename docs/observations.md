@@ -17,6 +17,39 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MyJCB: the first stored skip-payment page was refused (no parser release)
+
+2026-10-02. The nightly MyJCB run of 2026-10-02 21:00Z (collection run 612,
+fetch run 956), the first after amendment (h), succeeded with 19 artifacts,
+and `myjcb-credit-statement-total@1.3.0` parsed all 10 statement pages
+`ok`. It also registered the first `credit-schedule` artifact,
+`credit-skip-payment-08.html` (the ショッピングスキップ払い page at a month
+position), and `myjcb-skip-payment-schedule@0.1.1` refused it: one `error`
+parse run with `parser_rejected`, one `failed` job, no `parse_issues` rows
+([ADR 0005's amendment (i)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-02-i-the-first-stored-skip-payment-page-was-refused)).
+Aggregate queries only:
+
+- **The metadata is what the parser requires.** Key shape, state `unknown`
+  and period equal to the key's `detailMonth-N`, in both the metadata
+  projection and the artifact row; media type accepted; run `success` with
+  no failure. The month-position and menu paths write the same entry.
+- **The boundary passed before.** The parser's HTML boundary is the
+  statement parser's, check for check, and the statement parser passed it on
+  all 15 earlier position-8 pages (the same provider page, stored as a month
+  before amendment (h)).
+- **It is the empty page.** Its size is within 2 bytes of each of those 15
+  pages, which the round-5 survey recorded as empty.
+
+So one of the reader's structural checks refused the stored empty page, and
+which one is in the R2 bytes, which this change did not read. No parser,
+collector or extractor changed. The counts-only replay now covers MyJCB,
+hands the parser the metadata projection the processor reads, and prints the
+skip page's structure (counts, booleans, closed names); the owner runs it
+([operations](operations.md#replaying-a-parser-rejection)), and the next
+amendment changes the reader for the shape it reports. Until then no
+`scheduled_payment` observation exists; the months are unaffected. Tests:
+`services/processor/test/parser-rejection.test.ts`.
+
 ## MyJCB: one page at four positions, and the skip-payment page read as a month (collector, no parser release)
 
 2026-09-29. The nightly MyJCB run of 2026-09-29 21:03Z (fetch run 908), the

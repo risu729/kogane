@@ -15,6 +15,8 @@ import { decimalText } from "../../../packages/parsers/src/parsers/util.ts";
 import {
   classifyParserRejection,
   replaySelectionSql,
+  replayStatementMetadata,
+  skipScheduleShape,
   throwSites,
   topActivityShape,
 } from "./parser-rejection.ts";
@@ -82,8 +84,9 @@ for (const row of result[0].results) {
     runFailureCount: row.run_failure_count,
     unitScopeEligibility:
       row.run_status === "success" && row.run_failure_count === 0 ? null : "unit-independent-v1",
-    statementState: row.statement_state,
-    period: row.period,
+    // What the processor handed the parser: for MyJCB, the newest metadata
+    // projection; otherwise the artifact row, as before.
+    ...replayStatementMetadata(row),
     ...(row.window_start && row.window_end
       ? { runWindow: { from: row.window_start, to: row.window_end } }
       : {}),
@@ -239,6 +242,8 @@ for (const row of result[0].results) {
       );
     if (row.dataset === "top-accounts-balance-and-activity")
       console.log(JSON.stringify({ artifact: row.id, shape: topActivityShape(bytes) }));
+    if (row.parser_name === "myjcb-skip-payment-schedule")
+      console.log(JSON.stringify({ artifact: row.id, shape: skipScheduleShape(bytes) }));
     const category = classifyParserRejection(parser.name, error);
     const key = JSON.stringify([parser.name, category]);
     summary[key] = (summary[key] ?? 0) + 1;

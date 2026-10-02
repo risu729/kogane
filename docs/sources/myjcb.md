@@ -634,6 +634,26 @@ collector は page が述べることだけを記録する（`collectCredit`）�
 
 重複の確認は月の `credit-detail` page だけが対象である。支払予定 page の entry は position の label を period に持つ（`myjcb-skip-payment-schedule` が key と比べる）ので、同じスキップ払い page の bytes が二つの position（月の position 二つ、または月の position と menu の支払予定 position）で保存されると period が二つになり、extractor は両方を `manifest_artifact_ambiguous` で拒否する。観測されていない（position 8 の digest は保存された run ごとに違う）。
 
+### 最初に保存されたスキップ払い page の拒否（2026-10-02、ADR 0005 の amendment (i)）
+
+amendment (h) の後の最初の夜間 run（collection run 612、fetch run 956、2026-10-02 21:00Z）は 19 artifact で `success`、`myjcb-credit-statement-total@1.3.0` は 10 page すべて `ok` だった。初めて `credit-schedule` の artifact（月の position 8 の `credit-skip-payment-08.html`）が登録され、`myjcb-skip-payment-schedule@0.1.1` は `parser_rejected` の `error` になった（parse run 1 件、job は `failed`、`parse_issues` なし）。production は集計の query だけで読んだ。
+
+- **metadata は parser の要求どおり。** key の形、状態 `unknown`、period が key の `detailMonth-N` と一致（metadata projection と artifact の行の両方）、media type、run の `success`。月の position と menu の経路は同じ関数（`schedulePageArtifact`）で同じ entry を書く。collector の不一致ではない。
+- **HTML の境界は以前に通っている。** parser の境界の検査は明細 parser と一字一句同じで、明細 parser は以前の position 8 の 15 page（amendment (h) の前に月として保存された同じ page）すべてでそれを通した。
+- **空の page である。** 大きさがその 15 page のそれぞれと 2 byte 以内（3 件とは同じ）で、round 5 の調査はそれらを空の page と記録している。
+
+したがって、保存された空の page を reader の構造の検査のどれか（`schedule_head_unobserved`、`schedule_row_shape_unobserved`、空の行が認められない場合の `schedule_as_of_invalid` か `schedule_ledger_ambiguous`）が拒否した。どれかは R2 の bytes にあり、この変更では読んでいない。parser、collector、extractor は変えない（ADR 0004）。
+
+counts-only の replay は MyJCB も選び、processor と同じく metadata projection の状態と period を parser に渡し、スキップ払い page の構造（h1 の数、時点見出しの数、各 `detail-list-01` の子要素、head の子要素と三つの cell が期待どおりか、各 `content` 行の構造と件数。tag は閉じた一覧、class は reader が見るものだけ、文字列と属性値は出さない）を出す。
+
+owner に頼む観測（一回の実行。出力は code、真偽値、件数、閉じた名前だけ）：
+
+```sh
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts myjcb-skip-payment-schedule 1
+```
+
+出力の `category.reason`（閉じた code）と `shape` の行をそのまま共有してもらう。それで reader を観測された形に合わせる次の amendment（`myjcb-skip-payment-schedule` 0.1.2 と parser release の migration）を書く。それまでスキップ払いの `scheduled_payment` 観測はない。月には影響しない。
+
 ## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
 
 round 4 の観測（構造と件数のみ）: 確定明細（`detail.html?detailMonth=N`）とショッピングスキップ払いの頁（位置 8）には「カード・お振替情報」という見出しはなく、引落口座は明細グリッドの後の `h3.hdg-H3`「カード情報」の下、`div.detail-lyt-02.border-01 > div.col-01 > table.table-data`（th/td の縦表）にある。行は カード名称、カード発行会社、金融機関名（銀行名）、支店名（支店名。支店番号はない）、科目・口座番号（「普通 ####\*\*\*」の形: 科目、空白、口座番号の**先頭** 4 桁、残りは `*`）、口座名義（一部 `*` の名義）。同じ表は保存済みの redacted HTML（`credit-detail-NN.html`）にも同じ形で残っている。

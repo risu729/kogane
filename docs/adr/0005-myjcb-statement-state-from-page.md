@@ -16,6 +16,8 @@
   [amendment (g)](#amendment-2026-09-28-g-the-statement-heading-may-carry-its-payment-day)
   is accepted (#360); the
   [amendment (h)](#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)
+  is accepted (#372); the
+  [amendment (i)](#amendment-2026-10-02-i-the-first-stored-skip-payment-page-was-refused)
   is proposed
 - Date: 2026-09-25
 - Implemented by: #248
@@ -1448,7 +1450,7 @@ kept, and recorded as unobserved.
 
 ## Amendment 2026-09-29 (h): a stored page states only what the page states
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#372); its first night is recorded in amendment (i)
 - Date: 2026-09-29
 - Carried by: `collectCredit` and `schedulePageArtifact` in
   `services/collector-myjcb/src/collector.ts`; the stop code
@@ -1628,3 +1630,154 @@ five ledgers parsed. Production was read only with aggregate queries
   them parse `done`, and the observation view shows state `unknown` and
   period null.
 - No parser file changed, so there is no parser release and no migration.
+
+## Amendment 2026-10-02 (i): the first stored skip-payment page was refused
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-10-02
+- Carried by: `skipScheduleShape`, `replayStatementMetadata`,
+  `REPLAY_SOURCES` and `replaySelectionSql` in
+  `services/processor/scripts/parser-rejection.ts`;
+  `services/processor/scripts/replay-diagnostics.ts`;
+  [operations: replaying a parser rejection](../operations.md#replaying-a-parser-rejection);
+  [MyJCB source note](../sources/myjcb.md),
+  [observations](../observations.md#myjcb-the-first-stored-skip-payment-page-was-refused-no-parser-release).
+  No parser, collector or extractor file changed.
+
+### Context
+
+The first nightly run after amendment (h) (collection run 612, fetch run
+956, first fetch 2026-10-02 21:00Z) succeeded with 19 artifacts.
+`myjcb-credit-statement-total@1.3.0` parsed all 10 statement pages `ok`, so
+the repeated no-bill page now registers as amendment (h) intended. For the
+first time a `credit-schedule` artifact was registered: position 8, a month
+position, stored as `credit-skip-payment-08.html`. Its one parse run of
+`myjcb-skip-payment-schedule@0.1.1` is `error` with `parser_rejected`, its
+job `failed` with the same code (a rejection is not retried at the same
+version), and there are no `parse_issues` rows: the processor keeps only
+the closed stage code, never the parser's message (operations).
+
+Production was read only with aggregate queries (counts, booleans, closed
+codes, sizes compared inside SQL, timestamps). What they rule out:
+
+1. **Not the metadata.** The parser's own metadata check
+   (`schedule_artifact_metadata_invalid`) passes on what the processor
+   handed it: the key has the shape `<connection>/credit-skip-payment-NN.html`
+   (connection characters and position inside the parser's pattern), the
+   metadata projection (`legacy-metadata-v1`, status `ok`) states `unknown`
+   and exactly the key's `detailMonth-N`, and the artifact row states the
+   same. The media type `text/html` is accepted. The collector's
+   month-position path writes the same entry as the menu path (one
+   function, `schedulePageArtifact`), so the suspected mismatch between the
+   two paths does not exist.
+2. **Not the run.** The fetch run is `success` with no failure, so
+   `schedule_run_ineligible` cannot be thrown.
+3. **Not the HTML boundary.** `schedule_html_boundary` applies the same size
+   limit, UTF-8 decoding and document, active-content, card-number and
+   form-value checks as `myjcb-credit-statement-total`, character for
+   character. That parser ran those checks `ok` on the 15 earlier position-8
+   pages (the same provider page, stored as `credit-detail-08.html` before
+   amendment (h), redacted by the same unchanged `redactedStatementHtml`).
+4. **Not after the parser.** The processor sets the stage to
+   `parser_rejected` only for the call to `parse`; the checks that follow it
+   throw their own codes (`parse_contract_invalid`,
+   `observation_limit_exceeded`).
+5. **It is the empty page.** Its size is within 2 bytes of each of the 15
+   earlier position-8 pages (equal to 3 of them), which the round-5 survey
+   (amendment (f)) recorded as the empty page: the h1, the three-cell head
+   and the one empty row. A row would add far more than 2 bytes; the
+   difference is the as-of heading's date digits.
+
+So the reader refused the stored empty page on one of its structural checks:
+`schedule_head_unobserved`, `schedule_row_shape_unobserved`,
+`schedule_as_of_invalid` or `schedule_ledger_ambiguous` (the last two only if
+the empty row is not the one `isEmptyLedgerRow` admits, which makes it a
+row). `schedule_kind_unobserved` is unlikely (the collector named the page
+by the same h1 reading). Which one is in the bytes, and production R2 cannot
+be read from this session: the counts-only replay needs wrangler signed in
+to the owner's Cloudflare account. The round-5 survey did not record what
+these checks rely on beyond its summary: whether the head's three cells are
+its direct element children, whether the ledger's element children are only
+the head followed by `content` rows, and whether the empty row's `item-cell`
+has exactly one element child.
+
+The replay diagnostic could not have answered it either: it selected only
+`sony-bank` and `sbi-shinsei-bank` failures, handed the parser the artifact
+row's state and period rather than the projection the processor reads, and
+printed only the first failing code.
+
+### Options considered
+
+1. **A: change the reader to accept a guessed shape** (cells one level
+   down, extra ledger children, a looser empty row). Rejected: which shape
+   the page has is unobserved, and ADR 0004 forbids reading a shape nobody
+   has seen. A guess that is wrong costs a further release and still reads
+   nothing.
+2. **B: change the collector's entry.** Rejected: the metadata passes
+   (context 1); there is nothing to fix there.
+3. **C: make the counts-only replay able to answer, and stop there until
+   the owner runs it.** Chosen. One run gives the closed code and every
+   structure the reader checks, as counts, booleans and closed names.
+4. **D: store the parser's message in CORE.** Rejected here: the
+   processor's rule (never store parser exception text) stays; this
+   parser's messages are closed codes, but widening what the processor
+   stores is a separate decision.
+
+### Decision
+
+- `replay-diagnostics.ts` replays MyJCB failures too (`REPLAY_SOURCES`).
+  Every MyJCB parser throws fixed messages; `myjcb-skip-payment-schedule`'s
+  are its closed codes, and the others pass through `legacySafeReason`,
+  which prints only closed reasons.
+- For MyJCB, the replay hands the parser the statement state and period of
+  the artifact's newest completed metadata projection, as the processor
+  does (`hydrateMeta`); a projection with an `errorCode`, or none, falls
+  back to the artifact row. Other sources are unchanged.
+- For a `myjcb-skip-payment-schedule` failure the replay prints
+  `skipScheduleShape`: the number of h1s and of exact skip-payment h1s, the
+  number of h1–h6 that contain the as-of heading's fixed words, and for
+  each `detail-list-01`: its element children as signatures (tag from a
+  closed list or `other`, plus only the reader's own class names), the
+  number of `head` elements, the first head's children, whether they are
+  exactly the three expected cells, whether the head's whole text is the
+  three labels, and each `content` row's structure (its children, the
+  `item-cell`'s children, whether a lone cell shows the empty label, the
+  middle cell's `br` count and children) with a count. No text, attribute
+  value or provider class name is printed.
+- The reader, the parser and its version are unchanged. Once the owner's
+  replay names the check and the shape, the next amendment changes the
+  reader for that observed shape only, as `myjcb-skip-payment-schedule`
+  0.1.2 with its parser-release migration, and the repair lane re-parses
+  the stored page.
+
+### Consequences
+
+- Until then, every night's skip-payment page fails the same way and no
+  `scheduled_payment` observation exists. Nothing that reads transactions,
+  balances or statements depends on the page (amendment (e)), and the unit
+  stays `success`; the months are unaffected.
+- The owner's run is one command (operations); its output is the closed
+  code, the shape line and the summary, all safe to paste.
+- Limits: the cause is narrowed to the reader's structural checks by
+  inference from metadata, sizes and the statement parser's identical
+  boundary checks, not by reading the page; the replay settles it. If the
+  replay instead reports `schedule_html_boundary` or the metadata code, the
+  inference in context 1–3 was wrong and the replay's code stands.
+
+### Verification
+
+- `services/processor/test/parser-rejection.test.ts`
+  (「myjcb-skip-payment-schedule: the page's structure in counts and closed
+  names」): the stored empty shape (span-row head, lone empty row) reads as
+  three direct cells, `textAsExpected`, and one `emptyLabel=true` row; a
+  page with rows shows each row's structure and none of its synthetic dates,
+  merchants, amounts or labels; a head whose cells sit inside an
+  `item-cell`, and an extra ledger child with a provider-chosen class, are
+  shown as `div.item-cell` and `div` with the class name withheld; non-UTF-8
+  bytes print only `utf8: false`; `replayStatementMetadata` uses the
+  projection for MyJCB only, and falls back on an errored or missing one.
+- The replay-selection test against the migrated CORE schema selects a
+  MyJCB skip-payment failure with its newest projection, alongside the
+  existing SBI Shinsei and Sony rows; other sources stay out.
+- Production was read only with aggregate queries; every test input is
+  synthetic.

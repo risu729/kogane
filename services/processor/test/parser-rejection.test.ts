@@ -10,11 +10,19 @@ import { sbiShinseiTopBalancesAndActivity } from "../../../packages/parsers/src/
 import { sbiShinseiYenDepositAccount } from "../../../packages/parsers/src/parsers/sbi-shinsei-yen-deposit-account.ts";
 import type { ArtifactMeta, Parser } from "../../../packages/parsers/src/types.ts";
 import { myJcbSkipPaymentSchedule } from "../../../packages/parsers/src/parsers/myjcb-skip-payment-schedule.ts";
-import { REFUSAL_CASES as SKIP_PAYMENT_REFUSAL_CASES } from "../../../packages/parsers/test/myjcb-skip-payment-fixture.ts";
+import {
+  EMPTY_ROW,
+  REFUSAL_CASES as SKIP_PAYMENT_REFUSAL_CASES,
+  SPAN_SKIP_HEAD,
+  ledger as skipLedger,
+  skipPage,
+} from "../../../packages/parsers/test/myjcb-skip-payment-fixture.ts";
 import {
   classifyParserRejection,
   classifySbiShinseiMessage,
   replaySelectionSql,
+  replayStatementMetadata,
+  skipScheduleShape,
   throwSites,
   topActivityShape,
   type RejectionCategory,
@@ -619,6 +627,99 @@ describe("myjcb-skip-payment-schedule: every throw site is its own closed code (
   });
 });
 
+describe("myjcb-skip-payment-schedule: the page's structure in counts and closed names (ADR 0005 amendment i)", () => {
+  const shapeOf = (html: string) => skipScheduleShape(new TextEncoder().encode(html));
+
+  test("the stored empty shape reads as the reader expects it", () => {
+    const shape = shapeOf(skipPage({ ledgers: [skipLedger(SPAN_SKIP_HEAD, [EMPTY_ROW])] }));
+    expect(shape).toEqual({
+      utf8: true,
+      h1: 2,
+      skipH1: 1,
+      asOfLikeHeadings: 1,
+      ledgers: [
+        {
+          children: ["div.head", "div.content"],
+          headElements: 1,
+          head: {
+            children: ["div.cell×3"],
+            cellsAsExpected: true,
+            textAsExpected: true,
+          },
+          rows: { "item-cell>div.cell.w-100per emptyLabel=true": 1 },
+        },
+      ],
+    });
+  });
+
+  test("rows show their structure and never their text", () => {
+    const shape = shapeOf(skipPage());
+    expect(shape.ledgers[0]!.rows).toEqual({
+      "item-cell>div.cell×3 middleBr=1 middle>br": 2,
+    });
+    const printed = JSON.stringify(shape);
+    for (const value of ["架空", "12,000", "3,400", "2026", "ご利用", "スキップ"])
+      expect(printed).not.toContain(value);
+  });
+
+  test("a head whose cells sit one level down, and a ledger child the reader does not admit, are visible", () => {
+    const wrappedHead = SPAN_SKIP_HEAD.replace(
+      '<div class="head">',
+      '<div class="head"><div class="item-cell">',
+    ).replace(/<\/div>$/u, "</div></div>");
+    const shape = shapeOf(
+      skipPage({
+        ledgers: [
+          `<div class="detail-list-01">${wrappedHead}${EMPTY_ROW}<div class="provider-chosen-name">x</div></div>`,
+        ],
+      }),
+    );
+    expect(shape.ledgers[0]).toEqual({
+      children: ["div.head", "div.content", "div"],
+      headElements: 1,
+      head: { children: ["div.item-cell"], cellsAsExpected: false, textAsExpected: true },
+      rows: { "item-cell>div.cell.w-100per emptyLabel=true": 1 },
+    });
+    expect(JSON.stringify(shape)).not.toContain("provider-chosen-name");
+  });
+
+  test("bytes that are not UTF-8 are only that", () => {
+    expect(skipScheduleShape(new Uint8Array([0xff, 0xfe]))).toEqual({
+      utf8: false,
+      h1: 0,
+      skipH1: 0,
+      asOfLikeHeadings: 0,
+      ledgers: [],
+    });
+  });
+
+  test("a replay hands a MyJCB parser the projection's metadata, and other sources the row's", () => {
+    const row = { statement_state: null, period: null };
+    const projection = '{"period":"detailMonth-8","statementState":"unknown"}';
+    expect(
+      replayStatementMetadata({ ...row, source_id: "myjcb", metadata_projection_json: projection }),
+    ).toEqual({ statementState: "unknown", period: "detailMonth-8" });
+    expect(
+      replayStatementMetadata({
+        ...row,
+        source_id: "sony-bank",
+        metadata_projection_json: projection,
+      }),
+    ).toEqual({ statementState: null, period: null });
+    expect(
+      replayStatementMetadata({
+        source_id: "myjcb",
+        statement_state: "unknown",
+        period: "detailMonth-8",
+        metadata_projection_json: '{"errorCode":"manifest_artifact_ambiguous","period":null}',
+      }),
+    ).toEqual({ statementState: "unknown", period: "detailMonth-8" });
+    expect(
+      replayStatementMetadata({ ...row, source_id: "myjcb", metadata_projection_json: null }),
+    ).toEqual({ statementState: null, period: null });
+  });
+});
+
 describe("throw sites", () => {
   test("stack frames only: a frame-shaped provider key in the message is not printed", () => {
     const root = fixture(TOP);
@@ -711,6 +812,7 @@ describe("replay selection against the migrated CORE schema", () => {
       [4, "sony-bank", "balance", "c".repeat(64)],
       [5, "smbc-bank", "balance", "d".repeat(64)],
       [6, "sbi-shinsei-bank", TOP, "e".repeat(64)],
+      [7, "myjcb", "credit-schedule", "f".repeat(64)],
     ];
     for (const [id, source, dataset, sha] of artifacts)
       await db.batch([
@@ -748,6 +850,18 @@ describe("replay selection against the migrated CORE schema", () => {
     await publishParse(db, Number(ok.meta.last_row_id));
     await run(4, "sony-bank-gross-balance", "1.0.0", "error");
     await run(5, "smbc-direct-balance", "1.0.0", "error");
+    // A MyJCB skip page: two projections, the newer one is what the replay reads.
+    for (const [id, json] of [
+      [1, '{"period":null,"statementState":null}'],
+      [2, '{"period":"detailMonth-8","statementState":"unknown"}'],
+    ] as const)
+      await db
+        .prepare(
+          "INSERT INTO metadata_projections(id,fetch_artifact_id,extractor_release,input_digest,output_json,output_digest,status,created_at) VALUES(?,7,'legacy-metadata-v1',?,?,'d','ok','2026-09-10T00:00:00Z')",
+        )
+        .bind(id, `i${id}`, json)
+        .run();
+    await run(7, "myjcb-skip-payment-schedule", "0.1.1", "error");
     // Starting Miniflare and applying every CORE migration in order is a
     // one-time cost that grows with each migration and crossed the 5 s default
     // hook budget; the budget matches every other schema hook in this suite.
@@ -775,11 +889,23 @@ describe("replay selection against the migrated CORE schema", () => {
   test("a published parse removes its failures; other sources stay out", async () => {
     expect(await select({ parser: "sbi-shinsei-yen-deposit-account" })).toEqual([]);
     expect((await select({})).map((row) => [row["id"], row["parser_name"]])).toEqual([
+      [7, "myjcb-skip-payment-schedule"],
       [6, "sbi-shinsei-top-balances-and-activity"],
       [4, "sony-bank-gross-balance"],
       [3, "sbi-shinsei-top-balances-and-activity"],
     ]);
     expect((await select({ substring: "sony" })).map((row) => row["id"])).toEqual([4]);
+  });
+  test("a MyJCB failure is selected with its newest metadata projection (ADR 0005 amendment i)", async () => {
+    const [row] = await select({ parser: "myjcb-skip-payment-schedule" });
+    expect(row).toMatchObject({ id: 7, source_id: "myjcb", dataset: "credit-schedule" });
+    expect(row!["metadata_projection_json"]).toBe(
+      '{"period":"detailMonth-8","statementState":"unknown"}',
+    );
+    expect(replayStatementMetadata(row as Parameters<typeof replayStatementMetadata>[0])).toEqual({
+      statementState: "unknown",
+      period: "detailMonth-8",
+    });
   });
   test("the filter refuses anything but parser-name characters", () => {
     expect(() => replaySelectionSql({ parser: "x' OR '1'='1" })).toThrow(/parser name/u);
