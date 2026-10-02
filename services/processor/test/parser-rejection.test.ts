@@ -683,6 +683,54 @@ describe("myjcb-skip-payment-schedule: the page's structure in counts and closed
     expect(JSON.stringify(shape)).not.toContain("provider-chosen-name");
   });
 
+  test("provider text, attribute values, ids, provider classes and unknown tags never reach the line", () => {
+    // Synthetic, sensitive-looking values in every place a page can carry them.
+    const secrets = [
+      "架空商店",
+      "12,345",
+      "2026/09/30",
+      "4980-12",
+      "https://shop.example/merchant",
+      "acct-9876",
+      "data-amount",
+      "merchant-name",
+      "x-provider",
+      "山田",
+    ];
+    const row = (inner: string) =>
+      `<div class="content" id="acct-9876"><div class="item-cell" data-amount="12,345">${inner}</div></div>`;
+    const html = skipPage({
+      h1: ["ショッピングスキップ払いご利用明細(未確定分)", "架空商店 12,345"],
+      asOf: ["2026/09/30時点のショッピングスキップ払いご利用明細 山田"],
+      ledgers: [
+        `<div class="detail-list-01 merchant-name" title="架空商店">${SPAN_SKIP_HEAD}${row(
+          `<div class="cell" title="2026/09/30">2026/09/30</div><div class="cell merchant-name"><a href="https://shop.example/merchant">架空商店</a><br><x-provider data-amount="12,345">4980-12</x-provider></div><div class="cell"><input value="12,345">12,345円</div>`,
+        )}${row(`<div class="cell w-100per" data-amount="12,345">山田 架空商店</div>`)}<x-provider class="merchant-name">12,345</x-provider><!-- 架空商店 12,345 --></div>`,
+      ],
+    });
+    const shape = shapeOf(html);
+    const printed = JSON.stringify(shape);
+    for (const secret of secrets) expect(printed).not.toContain(secret);
+    // Every word in the line is a field name, a closed tag or reader class,
+    // a closed row label, a boolean or a count.
+    const closed = new Set([
+      ...["utf8", "h1", "skipH1", "asOfLikeHeadings", "ledgers", "children"],
+      ...["headElements", "head", "cellsAsExpected", "textAsExpected", "rows"],
+      ...["item-cell", "emptyLabel", "middleBr", "middle", "true", "false", "other"],
+      ...["div", "span", "p", "ul", "ol", "li", "dl", "dt", "dd", "br", "a", "button"],
+      ...["table", "tr", "td", "th", "form", "input", "h1", "h2", "h3", "h4", "h5", "h6"],
+      ...["detail-list-01", "content", "cell", "w-100per", "row", "item-more"],
+    ]);
+    const words = printed.split(/[{}[\]":,.>×=\s]+/u).filter((word) => word !== "");
+    expect(words.filter((word) => !closed.has(word) && !/^\d+$/u.test(word))).toEqual([]);
+    // The structure is still visible.
+    expect(shape.ledgers[0]!.children).toEqual(["div.head", "div.content×2", "other"]);
+    expect(shape.ledgers[0]!.rows).toEqual({
+      "item-cell>div.cell×3 middleBr=1 middle>a,br,other": 1,
+      "item-cell>div.cell.w-100per emptyLabel=false": 1,
+    });
+  });
+
   test("bytes that are not UTF-8 are only that", () => {
     expect(skipScheduleShape(new Uint8Array([0xff, 0xfe]))).toEqual({
       utf8: false,
@@ -850,16 +898,31 @@ describe("replay selection against the migrated CORE schema", () => {
     await publishParse(db, Number(ok.meta.last_row_id));
     await run(4, "sony-bank-gross-balance", "1.0.0", "error");
     await run(5, "smbc-direct-balance", "1.0.0", "error");
-    // A MyJCB skip page: two projections, the newer one is what the replay reads.
-    for (const [id, json] of [
-      [1, '{"period":null,"statementState":null}'],
-      [2, '{"period":"detailMonth-8","statementState":"unknown"}'],
+    // A MyJCB skip page: the newest completed projection under the release
+    // the processor reads (no `active_releases` row: `legacy-metadata-v1`) is
+    // what the replay reads. A newer `error` row and a newer row of another
+    // extractor release (a bounded re-extraction) are not the parser's input.
+    for (const [id, release, json, status] of [
+      [1, "legacy-metadata-v1", '{"period":null,"statementState":null}', "absent"],
+      [2, "legacy-metadata-v1", '{"period":"detailMonth-8","statementState":"unknown"}', "ok"],
+      [
+        3,
+        "manifest-metadata-v2",
+        '{"mime":null,"period":"detailMonth-9","statementState":"unknown"}',
+        "ok",
+      ],
+      [
+        4,
+        "legacy-metadata-v1",
+        '{"errorCode":"metadata_extraction_failed","mime":null,"period":null,"statementState":null}',
+        "error",
+      ],
     ] as const)
       await db
         .prepare(
-          "INSERT INTO metadata_projections(id,fetch_artifact_id,extractor_release,input_digest,output_json,output_digest,status,created_at) VALUES(?,7,'legacy-metadata-v1',?,?,'d','ok','2026-09-10T00:00:00Z')",
+          "INSERT INTO metadata_projections(id,fetch_artifact_id,extractor_release,input_digest,output_json,output_digest,status,created_at) VALUES(?,7,?,?,?,'d',?,'2026-09-10T00:00:00Z')",
         )
-        .bind(id, `i${id}`, json)
+        .bind(id, release, `i${id}`, json, status)
         .run();
     await run(7, "myjcb-skip-payment-schedule", "0.1.1", "error");
     // Starting Miniflare and applying every CORE migration in order is a
@@ -896,7 +959,7 @@ describe("replay selection against the migrated CORE schema", () => {
     ]);
     expect((await select({ substring: "sony" })).map((row) => row["id"])).toEqual([4]);
   });
-  test("a MyJCB failure is selected with its newest metadata projection (ADR 0005 amendment i)", async () => {
+  test("a MyJCB failure is selected with the newest completed projection of the release the processor reads (ADR 0005 amendment i)", async () => {
     const [row] = await select({ parser: "myjcb-skip-payment-schedule" });
     expect(row).toMatchObject({ id: 7, source_id: "myjcb", dataset: "credit-schedule" });
     expect(row!["metadata_projection_json"]).toBe(
@@ -906,6 +969,21 @@ describe("replay selection against the migrated CORE schema", () => {
       statementState: "unknown",
       period: "detailMonth-8",
     });
+    // Once the dataset's active release reads another extractor release, the
+    // replay reads that release's projection, as the worker's
+    // `extractorRelease(active?.metadata_extractor_release)` does.
+    await db.batch([
+      db.prepare(
+        "INSERT INTO parser_releases(release_id,parser_name,semantic_version,code_digest,input_contract_version,output_contract_version,metadata_extractor_release,dependency_digests_json,registered_at) VALUES('r-skip','myjcb-skip-payment-schedule','0.1.1','c','i','o','manifest-metadata-v2','{}','2026-09-10T00:00:00Z')",
+      ),
+      db.prepare(
+        "INSERT INTO active_releases(source_id,dataset,parser_name,release_id,metadata_extractor_release,activated_at) VALUES('myjcb','credit-schedule','myjcb-skip-payment-schedule','r-skip','manifest-metadata-v2','2026-09-10T00:00:00Z')",
+      ),
+    ]);
+    const [active] = await select({ parser: "myjcb-skip-payment-schedule" });
+    expect(
+      replayStatementMetadata(active as Parameters<typeof replayStatementMetadata>[0]),
+    ).toEqual({ statementState: "unknown", period: "detailMonth-9" });
   });
   test("the filter refuses anything but parser-name characters", () => {
     expect(() => replaySelectionSql({ parser: "x' OR '1'='1" })).toThrow(/parser name/u);

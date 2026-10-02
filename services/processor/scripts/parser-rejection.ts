@@ -700,9 +700,14 @@ export const REPLAY_SOURCES = ["sony-bank", "sbi-shinsei-bank", "myjcb"] as cons
  * of other parsers. `parser` is an exact registered name; `substring` keeps the
  * earlier `includes` behaviour. Both are restricted to parser-name characters
  * because the text is passed to `wrangler d1 execute --command`. Each row
- * also carries the artifact's newest metadata projection
- * (`metadata_projection_json`), the statement state and period the
- * processor handed the parser; `replayMeta` uses it for MyJCB.
+ * also carries `metadata_projection_json`: the artifact's newest completed
+ * (`ok` or `absent`) projection under the extractor release the processor
+ * reads for that parser (`active_releases`, else `legacy-metadata-v1`, as
+ * `extractorRelease` in the worker), so an `error` row or another release's
+ * row from a bounded re-extraction is never taken for the parser's input.
+ * A failed parse records no `parse_input_references`, so this is the
+ * projection a normal (non-candidate) run reads today, not a recorded link;
+ * `replayStatementMetadata` uses it for MyJCB.
  */
 export function replaySelectionSql(filter: { parser?: string; substring?: string } = {}): string {
   const clauses: string[] = [];
@@ -715,7 +720,7 @@ export function replaySelectionSql(filter: { parser?: string; substring?: string
   return `WITH ranked AS (
  SELECT a.*,o.blob_key,o.byte_size,p.parser_name,
  r.status AS run_status,r.failure_count AS run_failure_count,
- (SELECT m.output_json FROM metadata_projections m WHERE m.fetch_artifact_id=a.id ORDER BY m.id DESC LIMIT 1) AS metadata_projection_json,
+ (SELECT m.output_json FROM metadata_projections m WHERE m.fetch_artifact_id=a.id AND m.status IN ('ok','absent') AND m.extractor_release=coalesce((SELECT x.metadata_extractor_release FROM active_releases x WHERE x.source_id=a.source_id AND x.dataset=a.dataset AND x.parser_name=p.parser_name),'legacy-metadata-v1') ORDER BY m.id DESC LIMIT 1) AS metadata_projection_json,
  row_number() OVER(PARTITION BY p.parser_name,a.sha256 ORDER BY p.fetch_artifact_id DESC,p.id DESC) AS rank,
  coalesce((SELECT start_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' ORDER BY q.id LIMIT 1),r.window_start) AS window_start,
  coalesce((SELECT end_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' ORDER BY q.id LIMIT 1),r.window_end) AS window_end
@@ -729,11 +734,14 @@ export function replaySelectionSql(filter: { parser?: string; substring?: string
 
 /**
  * The statement state and period a replay hands the parser. The processor
- * hands every parser its metadata projection (`hydrateMeta`); for MyJCB the
- * projection reads the collector manifest (ADR 0025) and can differ from the
- * artifact row, so a MyJCB replay uses the newest projection when it is a
- * completed one. Every other source keeps the artifact row's values, as
- * before.
+ * hands every parser its metadata projection (`hydrateMeta`). Under
+ * `legacy-metadata-v1` that equals the artifact row (both come from
+ * `observation_artifact_metadata`); under `manifest-metadata-v2` the MyJCB
+ * projection reads the collector manifest (ADR 0025) and can differ, so a
+ * MyJCB replay uses the projection `replaySelectionSql` selected (newest
+ * completed one of the release the processor reads). Without one, or with an
+ * `errorCode`, and for every other source, the artifact row's values stand,
+ * as before.
  */
 export function replayStatementMetadata(row: {
   source_id: string;

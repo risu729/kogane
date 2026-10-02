@@ -205,8 +205,10 @@ check it was, as a closed category:
   and reads each raw object from R2 into memory. Both go through `wrangler`
   with `services/processor/wrangler.diagnostic.jsonc`; nothing is written.
   A MyJCB replay hands the parser the statement state and period of the
-  artifact's newest completed metadata projection, as the processor does;
-  every other source gets the artifact row's
+  artifact's newest completed (`ok` or `absent`) metadata projection under
+  the extractor release the processor reads (`active_releases`, else
+  `legacy-metadata-v1`); without one, and for every other source, the
+  artifact row's
   ([ADR 0005's amendment (i)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-02-i-the-first-stored-skip-payment-page-was-refused)).
 - `services/processor/scripts/diagnose.ts` replays the oldest failed job of
   each parser through `getPlatformProxy` remote bindings, with the same

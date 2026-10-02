@@ -644,7 +644,7 @@ amendment (h) の後の最初の夜間 run（collection run 612、fetch run 956�
 
 したがって、保存された空の page を reader の構造の検査のどれか（`schedule_head_unobserved`、`schedule_row_shape_unobserved`、空の行が認められない場合の `schedule_as_of_invalid` か `schedule_ledger_ambiguous`）が拒否した。どれかは R2 の bytes にあり、この変更では読んでいない。parser、collector、extractor は変えない（ADR 0004）。
 
-counts-only の replay は MyJCB も選び、processor と同じく metadata projection の状態と period を parser に渡し、スキップ払い page の構造（h1 の数、時点見出しの数、各 `detail-list-01` の子要素、head の子要素と三つの cell が期待どおりか、各 `content` 行の構造と件数。tag は閉じた一覧、class は reader が見るものだけ、文字列と属性値は出さない）を出す。
+counts-only の replay は MyJCB も選び、processor が読む extractor release（`active_releases` の行、なければ `legacy-metadata-v1`）の最新の完了した（`ok` か `absent`）metadata projection の状態と period を parser に渡し、スキップ払い page の構造（h1 の数、時点見出しの数、各 `detail-list-01` の子要素、head の子要素と三つの cell が期待どおりか、各 `content` 行の構造と件数。tag は閉じた一覧、class は reader が見るものだけ、文字列と属性値は出さない）を出す。
 
 owner に頼む観測（一回の実行。出力は code、真偽値、件数、閉じた名前だけ）：
 

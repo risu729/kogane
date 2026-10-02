@@ -1702,9 +1702,13 @@ the head followed by `content` rows, and whether the empty row's `item-cell`
 has exactly one element child.
 
 The replay diagnostic could not have answered it either: it selected only
-`sony-bank` and `sbi-shinsei-bank` failures, handed the parser the artifact
-row's state and period rather than the projection the processor reads, and
-printed only the first failing code.
+`sony-bank` and `sbi-shinsei-bank` failures, and printed only the first
+failing code. It also handed every parser the artifact row's state and
+period. Under `legacy-metadata-v1`, the release this dataset reads (no
+`active_releases` row), that is the same value the processor hands the
+parser, since both come from `observation_artifact_metadata`; under
+`manifest-metadata-v2` the projection reads the collector manifest and can
+differ.
 
 ### Options considered
 
@@ -1730,9 +1734,14 @@ printed only the first failing code.
   are its closed codes, and the others pass through `legacySafeReason`,
   which prints only closed reasons.
 - For MyJCB, the replay hands the parser the statement state and period of
-  the artifact's newest completed metadata projection, as the processor
-  does (`hydrateMeta`); a projection with an `errorCode`, or none, falls
-  back to the artifact row. Other sources are unchanged.
+  the artifact's newest completed (`ok` or `absent`) metadata projection
+  under the extractor release the processor reads for that parser (the
+  `active_releases` row's, else `legacy-metadata-v1`, as the worker's
+  `extractorRelease`); an `error` projection or another release's
+  projection is never taken. Without one the artifact row stands. A failed
+  parse records no `parse_input_references`, so this is the projection a
+  normal (non-candidate) run reads now, not a recorded link to the failed
+  attempt. Other sources are unchanged.
 - For a `myjcb-skip-payment-schedule` failure the replay prints
   `skipScheduleShape`: the number of h1s and of exact skip-payment h1s, the
   number of h1–h6 that contain the as-of heading's fixed words, and for
@@ -1774,10 +1783,18 @@ printed only the first failing code.
   merchants, amounts or labels; a head whose cells sit inside an
   `item-cell`, and an extra ledger child with a provider-chosen class, are
   shown as `div.item-cell` and `div` with the class name withheld; non-UTF-8
-  bytes print only `utf8: false`; `replayStatementMetadata` uses the
-  projection for MyJCB only, and falls back on an errored or missing one.
+  bytes print only `utf8: false`; a page carrying synthetic merchant,
+  amount, date, URL, id, attribute and provider-class values in text,
+  attributes, comments and unknown tags prints none of them, and every word
+  of its line is a field name, a closed tag or reader class, a boolean or a
+  count; `replayStatementMetadata` uses the projection for MyJCB only, and
+  falls back on an errored or missing one.
 - The replay-selection test against the migrated CORE schema selects a
-  MyJCB skip-payment failure with its newest projection, alongside the
-  existing SBI Shinsei and Sony rows; other sources stay out.
+  MyJCB skip-payment failure with the newest completed projection of the
+  release the processor reads: a newer `error` row and a newer
+  `manifest-metadata-v2` row are skipped under `legacy-metadata-v1`, and
+  the `manifest-metadata-v2` row is read once an `active_releases` row
+  names that release; the existing SBI Shinsei and Sony rows are selected as
+  before and other sources stay out.
 - Production was read only with aggregate queries; every test input is
   synthetic.
