@@ -149,6 +149,7 @@ collectorは、おまとめ設定追加・解除、初期表示変更、支払�
 - response size上限8 MiB、未知charset、seq範囲外、cookie domain/count/size異常
 - クレジット明細pageの`(確定分)` h1とledger headerの状態が矛盾する、または確定明細でないpageにexport linkがある（`credit-statement-state`、次節）
 - 確定明細pageが支払月を名乗らない、二つ以上名乗る、または過去月APIの`settlementYM`と違う月を名乗る（`credit-statement-period`、次節）
+- 前のpositionで保存したpageとredact後のbytesが同じ月のpageが、違う状態またはperiodになる（`credit-page-repeated`、停止code `credit_page_repeated`。ADR 0005のamendment (h)）
 - token/cookie/credentialを保存しそうな状態
 
 scheduled runは同じconnectionを自動再試行しない。次回の日次runは新規browser/loginで開始する。
@@ -159,7 +160,7 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 
 デビットはmenuに実在する`seq=0..14`だけを列挙する。parse不能時は停止し、0〜14をblind走査しない。
 
-クレジット初期menuは各linkの前にある最後の`h2`見出しで分ける。「最新のご利用明細」と「過去の明細」の下が月、「ボーナス#回払い・ショッピングスキップ払い」の下が支払予定pageで、それ以外の見出し（または見出しの前のlink）は`credit_menu_group_unrecognized`で停止する。支払予定pageは月の後に取得して保存し、manifestの`schedulePages`に記録する。h1が観測済みの「ショッピングスキップ払いご利用明細(未確定分)」ちょうど1つのpageだけを`credit-skip-payment-NN.html`として保存し、登録時にdataset `credit-schedule`が付いて`myjcb-skip-payment-schedule`が読む（ADR 0005のamendment (e)）。それ以外（ボーナス払いpageなど）は`credit-schedule-NN.html`として読まずに保存する。月のcoverageには入らない（ADR 0005のamendment (c)）。観測された月だけを取得し、`detailPastJson`の9〜17候補は`detailAvailableFlag=true`だけを追加する。例ではolder 9候補中10/13だけがavailableだったため、全offset総当たりをしない。API failureやhidden `generalJsonShikibetuId`欠落時は停止する。JSON-RPCは`method=execute`、`params=[{generalJsonShikibetuId}]`、official JSと同じ`0301006`＋2桁counter形のIDを使う。
+クレジット初期menuは各linkの前にある最後の`h2`見出しで分ける。「最新のご利用明細」と「過去の明細」の下が月、「ボーナス#回払い・ショッピングスキップ払い」の下が支払予定pageで、それ以外の見出し（または見出しの前のlink）は`credit_menu_group_unrecognized`で停止する。支払予定pageは月の後に取得して保存し、manifestの`schedulePages`に記録する。h1が観測済みの「ショッピングスキップ払いご利用明細(未確定分)」ちょうど1つのpageだけを`credit-skip-payment-NN.html`として保存し、登録時にdataset `credit-schedule`が付いて`myjcb-skip-payment-schedule`が読む（ADR 0005のamendment (e)）。それ以外（ボーナス払いpageなど）は`credit-schedule-NN.html`として読まずに保存する。月のcoverageには入らない（ADR 0005のamendment (c)）。月のpositionのpageでも、h1がその見出しちょうど1つなら同じく`credit-skip-payment-NN.html`として保存し、`schedulePages`に記録し、月には数えない（ADR 0005のamendment (h)）。観測された月だけを取得し、`detailPastJson`の9〜17候補は`detailAvailableFlag=true`だけを追加する。例ではolder 9候補中10/13だけがavailableだったため、全offset総当たりをしない。API failureやhidden `generalJsonShikibetuId`欠落時は停止する。JSON-RPCは`method=execute`、`params=[{generalJsonShikibetuId}]`、official JSと同じ`0301006`＋2桁counter形のIDを使う。
 
 `detailMonth=0`はmutable `unconfirmed` snapshotで、exportなしの`.detail-list-01`をHTML＋parsed JSONとして保存する。確定月も同ledger componentを持つ。export link（確定月は`detailMonth`を名乗らない相対hrefで持つ）はdetail page自身のURLに対して解決し、そのpageのCSV/PDF/OFX linkをその月のexportとして数える（別の`detailMonth`を名乗るlinkは数えない）。notice PDFは除外する。Workerはexportを取得せず、manifestの`exportOffers`に記録するだけである（共通bucketがexport datasetを拒否するため。ADR 0005のamendment (b)）。`collectCredit`の`exports: "fetch"`でだけ取得し、CSVはmetadata行の後に現れるexact 12-column headerを探してCP932 bytesをそのまま保存する。ledger headerが`ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`（ショッピングスキップ払いの支払予定pageで観測。live DOMは3 cell）で行があるpositionは、pageだけを`unknown`として保存し、行を読まずに次の月へ進む（`scheduled_payments_page`）。
 
