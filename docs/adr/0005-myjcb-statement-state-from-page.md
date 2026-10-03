@@ -485,7 +485,8 @@ and sealed, and no parser reads it.
 
 ## Amendment 2026-09-27 (c): the menu's schedule pages are not months
 
-- Status: accepted (#337)
+- Status: accepted (#337); the heading level it groups by (the last `h2`)
+  is amended by (j): the schedule heading is an `h3`
 - Date: 2026-09-27
 - Carried by: `readCreditMenuGroups` in
   `services/collector-myjcb/src/parsers.ts`; `collectCredit` and
@@ -1303,7 +1304,8 @@ kept, and recorded as unobserved.
 
 ## Amendment 2026-09-28 (g): the statement heading may carry its payment day
 
-- Status: accepted (#360)
+- Status: accepted (#360); its limit on the bonus page's dated `h2` is
+  corrected by (j): the page was stored as a month, and 1.4.0 refuses it
 - Date: 2026-09-28
 - Carried by: `readMyJcbStatementHeading` in
   `packages/domain/src/myjcb-statement-heading.ts`; `statedPaymentMonths`
