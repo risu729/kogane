@@ -5,7 +5,7 @@
   "dependencies": {
     "cheerio": "1.2.0",
     "iconv-lite": "0.7.3",
-    "postal-mime": "4.0.1",
+    "postal-mime": "4.0.2",
     "set-cookie-parser": "3.1.2"
   },
   "devDependencies": {
