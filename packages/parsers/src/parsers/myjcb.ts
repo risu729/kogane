@@ -3,6 +3,7 @@ import type { ArtifactMeta, BalanceObservation, Parser, ParseResult } from "../t
 import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import { readMyJcbStatementPage } from "../../../../packages/domain/src/myjcb-statement-page.ts";
 import { readMyJcbStatementHeading } from "../../../../packages/domain/src/myjcb-statement-heading.ts";
+import { myjcbSchedulePageHeadingKind } from "../../../../packages/domain/src/myjcb-schedule-page-kind.ts";
 import {
   exactKeys,
   normalizedDate,
@@ -50,7 +51,7 @@ const PAST_ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-past-months\.json$
  */
 export const myJcbCreditLedger: Parser = {
   name: "myjcb-credit-ledger",
-  version: "1.2.1",
+  version: "1.2.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -205,7 +206,7 @@ export const myJcbCreditLedger: Parser = {
 
 export const myJcbPastMonthBalances: Parser = {
   name: "myjcb-credit-past-month-balances",
-  version: "1.1.4",
+  version: "1.1.5",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -379,10 +380,20 @@ function statementPageState(document: StatementNode): {
  * `readMyJcbStatementHeading`). A dated heading must state the total's own
  * payment date, or the parse fails. A page with the undated heading is
  * recorded exactly as in 1.2.0.
+ *
+ * Since 1.4.0 a page whose h1 is a menu schedule page's (the observed
+ * 「ショッピングスキップ払いご利用明細(未確定分)」 or
+ * 「ボーナス#回払いご利用代金明細(未確定分)」, `myjcbSchedulePageHeadingKind`)
+ * is not a statement, whatever its `h2` says: the ボーナス払い page's `h2` has
+ * the dated heading's form (ADR 0005 amendment j). Such a page is parsed `ok`
+ * with no observation and the closed warning `schedule_page_not_statement`,
+ * before its state is read, so that the new run supersedes an earlier
+ * version's run of the same stored page; a thrown error would leave that run
+ * published. Every other page is read exactly as in 1.3.0.
  */
 export const myJcbCreditStatement: Parser = {
   name: "myjcb-credit-statement-total",
-  version: "1.3.0",
+  version: "1.4.0",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.dataset === "credit-detail" &&
@@ -394,6 +405,9 @@ export const myJcbCreditStatement: Parser = {
     if (bytes.byteLength > 3_000_000) throw new Error("myjcb statement HTML is too large");
     validateSanitizedHtml(bytes, artifact, true);
     const document = parse(decodeUtf8(bytes));
+    // Since 1.4.0 a schedule page is never a statement (ADR 0005 amendment j).
+    if (myjcbSchedulePageHeadingKind(document) !== "unobserved")
+      return { observations: [], warnings: ["schedule_page_not_statement"] };
     const headings = statementNodes(document, "h2").map((node) =>
       statementText(node).replace(/\s+/gu, ""),
     );
@@ -494,7 +508,7 @@ export const myJcbCreditStatement: Parser = {
 
 export const myJcbEvidenceOnly: Parser = {
   name: "myjcb-canonical-evidence-boundary",
-  version: "1.1.4",
+  version: "1.1.5",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (

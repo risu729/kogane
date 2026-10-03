@@ -203,7 +203,16 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
     `<a href="/iss-pc/member/details_inquiry/detail.html?detailMonth=${position}&amp;output=web">明細を見る</a>`;
 
   test("the observed menu: nine links in DOM order 0, 1, 7, 8, 2-6 under three headings", () => {
+    // Round 9 (ADR 0005's amendment (j)): h2, h3 (the schedule heading), h2,
+    // then guidance h2/h3 after every link.
     const menu = fixture("credit-menu.html");
+    expect([...menu.matchAll(/<(h[23])\b/gu)].map((match) => match[1])).toEqual([
+      "h2",
+      "h3",
+      "h2",
+      "h2",
+      "h3",
+    ]);
     const positions = [...menu.matchAll(/detailMonth=(\d+)/gu)].map((match) => Number(match[1]));
     expect(positions).toEqual([0, 1, 7, 8, 2, 3, 4, 5, 6]);
     // Relative, root-relative and absolute hrefs are read alike; the menu's
@@ -216,6 +225,46 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
       months: [0, 1, 2],
       schedules: [7, 8],
     });
+  });
+
+  test("the schedule heading as an h3 takes 7 and 8 from the h2 before it (amendment (j))", () => {
+    const menu = (schedule: "h2" | "h3", guidance = "") =>
+      `<h2>最新のご利用明細</h2>${link(0)}${link(1)}<${schedule}>${MENU_SCHEDULE_HEADING}</${schedule}>${link(7)}${link(8)}<h2>過去の明細</h2>${[2, 3, 4, 5, 6].map(link).join("")}${guidance}`;
+    const expected = { months: [0, 1, 2, 3, 4, 5, 6], schedules: [7, 8] };
+    // The observed levels, with unrecognised guidance headings after every
+    // link: a heading with no link under it decides nothing.
+    expect(
+      readCreditMenuGroups(menu("h3", "<h2>架空の案内</h2><h3>架空の注意</h3><h2>架空の窓口</h2>")),
+    ).toEqual(expected);
+    // The all-h2 shape amendment (c) was written for still reads the same.
+    expect(readCreditMenuGroups(menu("h2"))).toEqual(expected);
+    // An h3 schedule heading matches after whitespace removal too.
+    expect(
+      readCreditMenuGroups(
+        `<h2>最新のご利用明細</h2>${link(0)}<h3 class="hdg-H3">ボーナス２回払い・<br />ショッピングスキップ払い</h3>${link(8)}`,
+      ),
+    ).toEqual({ months: [0], schedules: [8] });
+  });
+
+  test("an unrecognised h3 before a link stops, as an unrecognised h2 does", () => {
+    const { code, warnings } = read(
+      `<h2>最新のご利用明細</h2>${link(0)}<h3>架空の小見出し</h3>${link(1)}`,
+    );
+    expect(code).toBe("credit-menu-group");
+    expect(warnings.map((line) => JSON.parse(line))).toEqual([
+      {
+        event: "myjcb-credit-menu-groups",
+        monthLinks: 1,
+        scheduleLinks: 0,
+        unrecognizedHeadingLinks: 1,
+        linksOutsideHeading: 0,
+        positionsInBothGroups: 0,
+      },
+    ]);
+    expect(warnings.join("")).not.toContain("架空");
+    // A link before any h2 or h3 stops too; an h1 or h4 is not a section.
+    expect(read(`<h1>カードご利用明細一覧</h1>${link(0)}`).code).toBe("credit-menu-group");
+    expect(read(`<h4>最新のご利用明細</h4>${link(0)}`).code).toBe("credit-menu-group");
   });
 
   test("headings match after whitespace removal, with any digits in the bonus count", () => {
@@ -273,21 +322,25 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
   });
 
   test("other headings inside a card box never move a link to another group", () => {
-    // Each box names its month in a heading of its own; only `h2` decides the
-    // group, so an `h3` in a box leaves the link under its section's `h2`.
+    // Each observed box has a `p.hdg` before it, and other elements beside
+    // the link; only `h2` and `h3` decide the group, so the link stays under
+    // its section's heading.
     const box = (position: number) =>
-      `<div class="box"><h3>お支払い分</h3><p>明細</p>${link(position)}</div>`;
+      `<p class="hdg">お支払い分</p><div class="box"><h4>明細</h4><p>明細</p>${link(position)}</div>`;
     expect(
       readCreditMenuGroups(
-        `<h1>カードご利用明細</h1><h2>最新のご利用明細</h2>${box(0)}${box(1)}<h2>${MENU_SCHEDULE_HEADING}</h2>${box(7)}${box(8)}<h2>過去の明細</h2>${box(2)}${box(3)}`,
+        `<h1>カードご利用明細</h1><h2>最新のご利用明細</h2>${box(0)}${box(1)}<h3>${MENU_SCHEDULE_HEADING}</h3>${box(7)}${box(8)}<h2>過去の明細</h2>${box(2)}${box(3)}`,
       ),
     ).toEqual({ months: [0, 1, 2, 3], schedules: [7, 8] });
-    // An `h2` inside a box that is not one of the observed three is not taken
-    // as a sub-heading of the section: the link under it stops the reading.
-    expect(
-      read(`<h2>${MENU_SCHEDULE_HEADING}</h2><div class="box"><h2>お支払い分</h2>${link(8)}</div>`)
-        .code,
-    ).toBe("credit-menu-group");
+    // An `h2` or `h3` inside a box that is not one of the observed three is
+    // not taken as a sub-heading of the section: the link under it stops the
+    // reading.
+    for (const level of ["h2", "h3"])
+      expect(
+        read(
+          `<h3>${MENU_SCHEDULE_HEADING}</h3><div class="box"><${level}>お支払い分</${level}>${link(8)}</div>`,
+        ).code,
+      ).toBe("credit-menu-group");
   });
 
   test("the bonus count accepts half- and full-width digits only", () => {

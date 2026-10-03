@@ -18,6 +18,8 @@
   [amendment (h)](#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)
   is accepted (#372); the
   [amendment (i)](#amendment-2026-10-02-i-the-first-stored-skip-payment-page-was-refused)
+  is accepted (#394); the
+  [amendment (j)](#amendment-2026-10-04-j-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-known-by-its-h1)
   is proposed
 - Date: 2026-09-25
 - Implemented by: #248
@@ -483,7 +485,8 @@ and sealed, and no parser reads it.
 
 ## Amendment 2026-09-27 (c): the menu's schedule pages are not months
 
-- Status: accepted (#337)
+- Status: accepted (#337); the heading level it groups by (the last `h2`)
+  is amended by (j): the schedule heading is an `h3`
 - Date: 2026-09-27
 - Carried by: `readCreditMenuGroups` in
   `services/collector-myjcb/src/parsers.ts`; `collectCredit` and
@@ -1301,7 +1304,8 @@ kept, and recorded as unobserved.
 
 ## Amendment 2026-09-28 (g): the statement heading may carry its payment day
 
-- Status: accepted (#360)
+- Status: accepted (#360); its limit on the bonus page's dated `h2` is
+  corrected by (j): the page was stored as a month, and 1.4.0 refuses it
 - Date: 2026-09-28
 - Carried by: `readMyJcbStatementHeading` in
   `packages/domain/src/myjcb-statement-heading.ts`; `statedPaymentMonths`
@@ -1450,7 +1454,8 @@ kept, and recorded as unobserved.
 
 ## Amendment 2026-09-29 (h): a stored page states only what the page states
 
-- Status: accepted (#372); its first night is recorded in amendment (i)
+- Status: accepted (#372); its first night is recorded in amendment (i),
+  and amendment (j) settles its two open questions
 - Date: 2026-09-29
 - Carried by: `collectCredit` and `schedulePageArtifact` in
   `services/collector-myjcb/src/collector.ts`; the stop code
@@ -1633,7 +1638,7 @@ five ledgers parsed. Production was read only with aggregate queries
 
 ## Amendment 2026-10-02 (i): the first stored skip-payment page was refused
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#394)
 - Date: 2026-10-02
 - Carried by: `skipScheduleShape`, `replayStatementMetadata`,
   `REPLAY_SOURCES` and `replaySelectionSql` in
@@ -1798,3 +1803,221 @@ differ.
   before and other sources stay out.
 - Production was read only with aggregate queries; every test input is
   synthetic.
+
+## Amendment 2026-10-04 (j): the menu's schedule heading is an h3, and the bonus page is known by its h1
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-10-04
+- Carried by: `readCreditMenuGroups` and `schedulePageKind` in
+  `services/collector-myjcb/src/parsers.ts`; `collectCredit` and
+  `schedulePageArtifact` in `services/collector-myjcb/src/collector.ts`;
+  `myjcbSchedulePageHeadingKind` and `BONUS_SCHEDULE_HEADING` in
+  `packages/domain/src/myjcb-schedule-page-kind.ts`;
+  `myjcb-credit-statement-total@1.4.0` in
+  `packages/parsers/src/parsers/myjcb.ts`;
+  [MyJCB source note](../sources/myjcb.md),
+  [observations](../observations.md#myjcb-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-not-a-statement-statement-parser-140).
+
+### Context
+
+The owner observed the live MyJCB pages after login (round 9, 2026-10-04;
+shapes, counts, fixed labels and booleans only, no values) and read
+production with aggregate queries only (round 7). They settle the two open
+questions of amendment (h).
+
+1. **The menu's schedule heading is an `h3`.** The credit menu
+   (`detailMenu.html`) has nine `detail.html?detailMonth=N` links, in DOM
+   order 0, 1, 7, 8, 2, 3, 4, 5, 6. Its headings in document order are
+   `h2.hdg-H2` 「最新のご利用明細」, `h3.hdg-H3`
+   「ボーナス#回払い・ショッピングスキップ払い」 (# a digit), `h2.hdg-H2`
+   「過去の明細」, and then guidance `h2`s and `h3`s at the bottom of the page,
+   after every link. Each card box has a `p.hdg` before it. Amendment (c)
+   recorded three `h2`s; `readCreditMenuGroups` grouped each link under the
+   last `h2` before it, so links 7 and 8 fell under 「最新のご利用明細」 and
+   were read as months. That is the path amendment (h) could not choose
+   between: fetch run 908 (2026-09-29) stored `credit-detail-07.html` and
+   `credit-detail-08.html` and no schedule page, and
+   `myjcb-credit-statement-total@1.3.0` parsed both `ok`.
+2. **The bonus page's `h2` has the dated statement heading's form.** Position
+   7 shows `h1.hdg-H1` 「ボーナス#回払いご利用代金明細(未確定分)」 (# a digit),
+   three `h2`s, one of which (`hdg-H2`) matches
+   「YYYY年M月D日(曜)お支払い分のカードご利用明細」 exactly, the form
+   amendment (g) reads; one `detail-list-01`, three tables, the phrase
+   「ご利用明細はございません」, and one `form` (method `get`, action path
+   `/iss-pc/member/details_inquiry/detail.html`, no hidden input). So by its
+   `h2` alone a statement reader cannot tell it from a month. Position 8
+   shows 「ショッピングスキップ払いご利用明細(未確定分)」 and an `h2` of the form
+   「YYYY年M月D日(曜)時点のショッピングスキップ払いご利用明細(YYYY年M月以降のお支払い分)」,
+   which does not match the dated heading. Amendment (h) recognises the skip
+   page by its h1 at a month position; the bonus page was left a month.
+3. **Positions 3–6 are one empty-month page.** Their responses are byte for
+   byte the same (one SHA-256) and name no month anywhere: `h1.hdg-H1`
+   「カードご利用代金明細」 (without 「(確定分)」, and not
+   「カードご利用明細一覧」), the phrase 「当該月の請求はございません」, no `h2`,
+   no `detail-list-01`, no table, no form. 「ご請求はありません」,
+   「通信エラーが発生しました」 and 「ご利用明細はございません」 are all absent, so
+   it is not the error page amendment (b) does not recognise. This is the page
+   amendment (h) inferred; its identical bytes caused
+   `manifest_artifact_ambiguous` on 03–06 in fetch runs 908, 921 and 940
+   (60 `error` parse runs in all), and the run of 2026-10-02 (956), the first
+   after amendment (h), parsed all ten statement pages `done`.
+4. **What 1.3.0 made of the bonus page.** The bonus page has no
+   「カードご利用代金明細(確定分)」 h1, so `readMyJcbStatementPage` reads it
+   `unknown` (its one ledger shows only the provider's empty row), and 1.3.0
+   records it `ok` with no observation and `statement_total_not_confirmed`,
+   as amendment (h) recorded for run 908. No statement total was published
+   from it. The `h2` collision is a reading that depends on the h1 alone
+   keeping the page out: a bonus page that also carried the `(確定分)` h1, or
+   whose state reading changed, would reach the `h2` and could be read as a
+   month's total.
+5. **The empty-month page under 1.3.0.** The same reading gives `unknown`
+   (no `(確定分)` h1, no ledger): `ok`, no observation,
+   `statement_total_not_confirmed`. No zero total is emitted, so INV05 holds
+   without a change.
+
+### Options considered
+
+1. **A: read the schedule heading at any level (`h1`–`h6`).** Rejected:
+   only `h2` and `h3` were observed as section headings; each box's own
+   heading is a `p.hdg`, and admitting `h4`–`h6` would group links under
+   elements nobody has seen there (ADR 0004).
+2. **B: the group boundary is the last `h2` or `h3`.** With the observed menu
+   it gives 0, 1, 2–6 to the months and 7, 8 to the schedules; the trailing
+   guidance headings have no link under them and decide nothing. An `h3`
+   that is not one of the three observed headings, before a link, stops the
+   connection, as an unrecognised `h2` does. Chosen.
+3. **C: recognise the bonus page by its menu position (7).** Rejected: the
+   menu's positions move (amendment (h) context 3), and the page names what
+   it is.
+4. **D: recognise the bonus page by its h1, as the skip page is.** The h1
+   form is fixed text with one digit run. Chosen, for the collector and as a
+   refusal in the statement parser.
+5. **E: refuse a schedule page in the statement parser by throwing.**
+   Rejected: an `error` parse run never supersedes
+   ([observations: versioning and supersession](../observations.md#versioning-and-supersession)),
+   so the 1.3.0 `ok` run of every stored `credit-detail-07.html` would stay
+   the published reading of that page. An `ok` run with no observation and a
+   closed warning supersedes it.
+6. **F: read the bonus page.** Rejected: it has never been observed with
+   rows (ADR 0004).
+
+### Decision
+
+- **Menu.** `readCreditMenuGroups` groups each link under the last `h2` or
+  `h3` before it in document order. The three headings, their groups and
+  their comparison (whitespace removed, any run of ASCII or full-width digits
+  for #, every other character exact) are unchanged, at either level. A link
+  before any `h2` or `h3`, a link under any other `h2` or `h3`, and a
+  position in both groups stop with `credit-menu-group`, logging counts
+  only. The all-`h2` shape of amendment (c) groups the same.
+- **The bonus page by its h1.** `myjcbSchedulePageHeadingKind`
+  (`packages/domain/src/myjcb-schedule-page-kind.ts`) returns `skip-payment`
+  when amendment (e)'s reading does (exactly one skip h1; checked first,
+  unchanged), else `bonus` when exactly one h1, whitespace removed, matches
+  `ボーナス[0-9０-９]+回払いご利用代金明細\(未確定分\)`, else `unobserved`. It
+  lives in its own module so that `myjcb-skip-payment-schedule`'s digest
+  does not move; `schedulePageKind` in the collector reads it.
+- **Collector.** A `bonus` page is stored as `credit-schedule-NN.html`
+  (dataset `credit-schedule`, state `unknown`, period `detailMonth-N`), the
+  name registration gives no parser dataset, so nothing reads it. At a menu
+  schedule position that is what amendment (c) already did. At a month
+  position it is now handled exactly as the skip page is since amendment
+  (h): before the state is read, stored as that schedule page, listed in
+  `schedulePages` with `scheduled_payments_page`, counted in
+  `schedulePageCount`, not in `periodCount`, `capturedMonthCount` or
+  `unreadMonths`, and logged as `myjcb-credit-month-schedule-page` with the
+  position and code only.
+- **`myjcb-credit-statement-total@1.4.0`.** After the HTML boundary and
+  before the state is read, a page whose `myjcbSchedulePageHeadingKind` is
+  `skip-payment` or `bonus` is parsed `ok` with no observation and the
+  closed warning `schedule_page_not_statement`, whatever its `h2`s, `(確定分)`
+  h1 or total say. Every other page reads exactly as in 1.3.0; the
+  empty-month page still yields `statement_total_not_confirmed` and no
+  total (context 5). `myjcb-credit-ledger@1.2.2`,
+  `myjcb-credit-past-month-balances@1.1.5` and
+  `myjcb-canonical-evidence-boundary@1.1.5` change digest only: the four
+  parsers share `myjcb.ts`. `myjcb-skip-payment-schedule@0.1.1` is
+  unchanged, digest included.
+- **No migration.** The processor registers each deployed release in
+  `parser_releases` itself, and no migration pins a MyJCB parser version (as
+  for 1.3.0), so this release needs none; the migration pin is unchanged.
+- **Unchanged.** The metadata extractor, the empty-month page's handling
+  (one `unknown` page with no period at each position, amendment (h)), the
+  skip-payment parser and its open refusal (amendment (i)). Stored runs are
+  not rewritten.
+
+### Consequences
+
+- From the next night the menu gives 7 and 8 to the schedules: the bonus
+  page is stored as `credit-schedule-07.html` and unread, and the skip page
+  as `credit-skip-payment-08.html`, read by the skip parser (which still
+  refuses it, amendment (i)). The amendment (h) and (j) month-position paths
+  stay as a defence for a menu that lists a schedule page as a month.
+- **Production exposure, as a limit.** Every stored `credit-detail-07.html`
+  is the bonus page registered as a month: in the 12 runs 215–719 that
+  stored position 7 (amendment (h)), in run 908, and in every later run
+  until this deploys (run 956's ten statement pages include it; runs 921
+  and 940 were not broken down by position). Each was parsed `ok` with no
+  observation and `statement_total_not_confirmed`, by 1.3.0 since
+  2026-09-29 and by earlier versions before. The same holds for
+  `credit-detail-08.html` (the skip page) until amendment (h) deployed;
+  run 956 stored it as `credit-skip-payment-08.html`. No total came from
+  either, because neither has the `(確定分)` h1 (context 4); but the
+  published reading of those artifacts is a statement reading, and only
+  that h1 rule stood between the bonus page's dated `h2` and a total.
+- **How 1.4.0 supersedes it.** The repair lane re-parses the stored
+  `credit-detail` pages under the new release, as it did for 1.3.0. For each
+  bonus or skip page stored as a month, 1.4.0 writes an `ok` run with
+  `schedule_page_not_statement`; it is a newer version than the live 1.3.0
+  `ok` run of the same artifact, so the processor's publish batch
+  (`publishBatch` in `packages/storage-d1/src/atomic/publication.ts`) marks
+  that run superseded by the new one and moves the artifact's
+  `published_parse_runs` pointer to it. Nothing
+  observable changes in the read model (both runs have no observation); the
+  warning now says what the page is. A run not eligible for parsing is not
+  re-parsed, as before. The `manifest_artifact_ambiguous` artifacts of runs
+  908, 921 and 940 stay failed under 1.4.0: their manifest is fixed evidence
+  (amendment (h)). How many artifacts the re-parse touches was not counted.
+- Stored pages are not reclassified: a `credit-detail-07.html` stays a
+  `credit-detail` artifact; only its published reading changes.
+- Limits: the round-9 menu is one connection on one night; a menu whose
+  schedule heading moves to another level, or whose guidance headings move
+  above a link, stops the connection before its first month (nothing is
+  guessed). The bonus page has still not been observed with rows. The
+  empty-month page is recognised by no rule of its own: it is an `unknown`
+  page because it has no `(確定分)` h1 and no ledger, and a change to it that
+  adds rows would be read as before (`rows_unstated`).
+
+### Verification
+
+- `services/collector-myjcb/test/parsers.test.ts`
+  (「readCreditMenuGroups」): the fixture menu in the observed levels (`h2`,
+  `h3`, `h2`, then guidance `h2`/`h3` after every link) groups 0–6 as months
+  and 7, 8 as schedules; the all-`h2` shape groups the same; an `h3` schedule
+  heading matches after whitespace removal with a full-width digit; an
+  unrecognised `h3` before a link, or inside a box, stops with
+  `credit-menu-group` and logs counts only; a link after only an `h1` or
+  `h4` stops; a `p.hdg` or `h4` inside a box moves nothing.
+- `services/collector-myjcb/test/credit-statement-state.test.ts`
+  (「ADR 0005 amendment (j)」): the bonus h1 with ASCII, full-width and
+  multi-digit counts is `bonus`, near misses (no digit, kanji numeral,
+  full-width parentheses, `(確定分)`, two bonus h1s) and a statement page are
+  `unobserved`; with the observed menu, 7 is stored as
+  `credit-schedule-07.html` and 8 as `credit-skip-payment-08.html`; the bonus
+  page at a month position, with its dated `h2`, is stored as
+  `credit-schedule-07.html`, listed in `schedulePages`, not counted as a
+  month, and logged with codes only; the same page under a near-miss h1 is a
+  `credit-detail` month read `unknown`, as before; the empty-month page at
+  positions 3–6 is kept at each as `unknown` with no period.
+- `packages/parsers/test/myjcb-statement.test.ts` (1.4.0): the bonus page,
+  whose `h2` matches the dated heading, and the skip page stored as a month
+  are `ok` with no observation and `schedule_page_not_statement`, whatever
+  the manifest states; a schedule h1 beside a `(確定分)` h1, a dated `h2` and
+  a total is still refused; near misses of the bonus h1 read as 1.3.0 did
+  (`statement_total_not_confirmed`); a confirmed statement yields its total;
+  the empty-month page yields `statement_total_not_confirmed` and no
+  observation.
+- `packages/parsers/test/parser-digests.test.ts` checks the regenerated
+  digests; the read-model pin names `myjcb-credit-ledger@1.2.2`.
+- Production was read only by the owner, with aggregate queries and a
+  counts-only survey; every test input is synthetic.

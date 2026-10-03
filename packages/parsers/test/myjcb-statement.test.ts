@@ -460,3 +460,107 @@ describe("the statement heading may carry its payment day (1.3.0, ADR 0005 amend
     ).toEqual({ observations: [], warnings: ["statement_total_missing"] });
   });
 });
+
+describe("a schedule page is never a statement (1.4.0, ADR 0005 amendment j)", () => {
+  // The round-9 survey's shapes, synthetic text: the ボーナス払い page's h1
+  // 「ボーナス#回払いご利用代金明細(未確定分)」 (# a digit) over three h2s, one of
+  // them in the dated statement heading's exact form, one empty
+  // `detail-list-01` and three tables; the ショッピングスキップ払い page's h1
+  // 「ショッピングスキップ払いご利用明細(未確定分)」. No date, amount or label
+  // here is a provider value.
+  const DATED = "<h2>2026年6月15日(月)お支払い分のカードご利用明細</h2>";
+  const emptyLedger =
+    '<div class="detail-list-01"><div class="head"><div class="cell">ご利用日</div></div><div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はございません</div></div></div></div>';
+  const schedulePage = (h1: string, extra = "") =>
+    `<!doctype html><html><body><h1>MyJCB</h1><h1>${h1}</h1>${extra}<h2>架空の見出し</h2>${DATED}<h2>架空の案内</h2>${emptyLedger}<table></table><table></table><table></table></body></html>`;
+  const position7: ArtifactMeta = {
+    ...artifact,
+    artifactKey: "connection-a/credit-detail-07.html",
+    statementState: "unknown",
+    period: null,
+  };
+  const refused = { observations: [], warnings: ["schedule_page_not_statement"] };
+  const notConfirmed = { observations: [], warnings: ["statement_total_not_confirmed"] };
+
+  test("the bonus page, whose h2 matches the dated heading, is refused with the closed code", () => {
+    for (const count of ["2", "12", "２", "１２"])
+      expect(
+        parse(schedulePage(`ボーナス${count}回払いご利用代金明細(未確定分)`), position7),
+      ).toEqual(refused);
+    // Whitespace inside the h1 is removed before the comparison.
+    expect(
+      parse(schedulePage("ボーナス 2 回払い<span>ご利用代金明細</span>\n(未確定分)"), position7),
+    ).toEqual(refused);
+    // The manifest's state and period are not inputs to the decision.
+    expect(
+      parse(schedulePage("ボーナス2回払いご利用代金明細(未確定分)"), {
+        ...position7,
+        statementState: null,
+        period: "detailMonth-7",
+      }),
+    ).toEqual(refused);
+  });
+
+  test("the skip-payment page stored as a month is refused the same way", () => {
+    expect(
+      parse(schedulePage("ショッピングスキップ払いご利用明細(未確定分)"), {
+        ...position7,
+        artifactKey: "connection-a/credit-detail-08.html",
+      }),
+    ).toEqual(refused);
+  });
+
+  test("the schedule h1 wins over a confirmed heading, a dated h2 and a total", () => {
+    // Not observed: a page that also claims to be a closed statement. It is
+    // never read as one while a schedule h1 is on it.
+    const both = schedulePage(
+      "ボーナス2回払いご利用代金明細(未確定分)",
+      "<h1>カードご利用代金明細(確定分)</h1>",
+    ).replace("</body>", `${total}</body>`);
+    expect(parse(both, { ...artifact, artifactKey: "connection-a/credit-detail-07.html" })).toEqual(
+      refused,
+    );
+  });
+
+  test("near misses of the bonus h1 are not schedule pages and read as before", () => {
+    for (const h1 of [
+      "ボーナス回払いご利用代金明細(未確定分)",
+      "ボーナス二回払いご利用代金明細(未確定分)",
+      "ボーナス2回払いご利用代金明細（未確定分）",
+      "ボーナス2回払いご利用代金明細(確定分)",
+      "ボーナス2回払いご利用代金明細",
+      "架空ボーナス2回払いご利用代金明細(未確定分)",
+    ])
+      expect(parse(schedulePage(h1), position7)).toEqual(notConfirmed);
+    // Two bonus h1s are not exactly one.
+    expect(
+      parse(
+        schedulePage(
+          "ボーナス2回払いご利用代金明細(未確定分)",
+          "<h1>ボーナス2回払いご利用代金明細(未確定分)</h1>",
+        ),
+        position7,
+      ),
+    ).toEqual(notConfirmed);
+  });
+
+  test("a confirmed statement is read exactly as in 1.3.0", () => {
+    const result = parse(html());
+    expect(result.observations).toHaveLength(1);
+    expect(result.warnings).toEqual([]);
+  });
+
+  test("the empty-month page states no total: a reason, never a zero (INV05)", () => {
+    // The page positions 3–6 showed byte for byte (round 9): h1
+    // 「カードご利用代金明細」 without 「(確定分)」, no h2, no ledger, no table,
+    // no form, the phrase 「当該月の請求はございません」. The second paragraph is
+    // synthetic and stands for the page's other text.
+    const emptyMonth =
+      "<!doctype html><html><body><h1>MyJCB</h1><h1>カードご利用代金明細</h1><p>当該月の請求はございません</p><p>架空のお支払い案内</p></body></html>";
+    for (const meta of [
+      { ...artifact, statementState: "unknown", period: null },
+      { ...artifact, statementState: null, period: null },
+    ] satisfies ArtifactMeta[])
+      expect(parse(emptyMonth, meta)).toEqual(notConfirmed);
+  });
+});

@@ -9,6 +9,7 @@ import {
   creditStatementState,
   parseCreditLedger,
   scheduledLedgerRowCount,
+  schedulePageKind,
   settlementMonth,
 } from "../src/parsers";
 import { myJcbRunPlan } from "../src/shared-collection";
@@ -2012,5 +2013,167 @@ describe("ADR 0005 amendment (h): a stored page states only what the page states
       ["credit-detail-01.html", "confirmed"],
       ["credit-detail-02.html", "confirmed"],
     ]);
+  });
+});
+
+describe("ADR 0005 amendment (j): the menu's h3 schedule heading and the ボーナス払い page", () => {
+  const closed = (month: string) =>
+    page({ headings: [CONFIRMED_STATEMENT_HEADING], months: [month], rows: [confirmedRow] });
+  // The ボーナス払い page in the round-9 shape: its own h1
+  // 「ボーナス#回払いご利用代金明細(未確定分)」 (# a digit), an h2 in the dated
+  // statement heading's exact form, and an empty ledger. Every value is
+  // synthetic.
+  const BONUS_H1 = "ボーナス2回払いご利用代金明細(未確定分)";
+  const bonusPage = (h1 = BONUS_H1) =>
+    page({ headings: [h1], months: ["2026年6月15日(月)"], head: UNCONFIRMED_HEAD });
+  const skipPage = page({
+    headings: ["ショッピングスキップ払いご利用明細(未確定分)"],
+    head: '<div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div>',
+  });
+  const stored = (run: Awaited<ReturnType<typeof collectCredit>>) =>
+    run.artifacts.map((artifact) => [
+      artifact.dataset,
+      artifact.filename,
+      artifact.statementState ?? null,
+      artifact.period ?? null,
+    ]);
+
+  test("the bonus h1 names a schedule page; the h2 alone does not", () => {
+    expect(schedulePageKind(bonusPage())).toBe("bonus");
+    for (const count of ["12", "２", "１２"])
+      expect(schedulePageKind(bonusPage(`ボーナス${count}回払いご利用代金明細(未確定分)`))).toBe(
+        "bonus",
+      );
+    expect(schedulePageKind(skipPage)).toBe("skip-payment");
+    for (const h1 of [
+      "ボーナス回払いご利用代金明細(未確定分)",
+      "ボーナス二回払いご利用代金明細(未確定分)",
+      "ボーナス2回払いご利用代金明細（未確定分）",
+      "ボーナス2回払いご利用代金明細(確定分)",
+      "カードご利用代金明細",
+    ])
+      expect(schedulePageKind(bonusPage(h1))).toBe("unobserved");
+    // Two bonus h1s are not exactly one.
+    expect(
+      schedulePageKind(page({ headings: [BONUS_H1, BONUS_H1], months: ["2026年6月15日(月)"] })),
+    ).toBe("unobserved");
+    // A statement page is not a schedule page.
+    expect(schedulePageKind(closed("2026年3月"))).toBe("unobserved");
+  });
+
+  test("the observed menu reads 7 and 8 as schedule pages: the bonus page is stored as one", async () => {
+    // `client` builds the menu in the observed levels: the schedule heading
+    // is an h3 between the two month h2s.
+    const warnings: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((value) => {
+      warnings.push(String(value));
+    });
+    let run: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      run = await collectCredit(
+        client({ 0: mutable, 1: closed("2026年3月") }, [], { 7: bonusPage(), 8: skipPage }),
+        "x",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(run.stop).toBeUndefined();
+    expect(run.periodCount).toBe(2);
+    expect(run.schedulePages).toEqual([
+      { position: 7, code: "scheduled_payments_page" },
+      { position: 8, code: "scheduled_payments_page" },
+    ]);
+    expect(stored(run).slice(-2)).toEqual([
+      ["credit-schedule", "credit-schedule-07.html", "unknown", "detailMonth-7"],
+      ["credit-schedule", "credit-skip-payment-08.html", "unknown", "detailMonth-8"],
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
+  test("a month position showing the bonus page is stored as that schedule page, not a month", async () => {
+    const warnings: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((value) => {
+      warnings.push(String(value));
+    });
+    let run: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      // The synthetic menu lists 7 as a month, as the h2-only reading did;
+      // the page's own h1 says what it is.
+      run = await collectCredit(
+        client({ 0: mutable, 1: closed("2026年3月"), 2: closed("2026年2月"), 7: bonusPage() }),
+        "x",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(run.stop).toBeUndefined();
+    expect(run.unreadMonths).toEqual([]);
+    expect(run.periodCount).toBe(3);
+    expect(run.schedulePages).toEqual([{ position: 7, code: "scheduled_payments_page" }]);
+    expect(stored(run).filter(([, filename]) => String(filename).endsWith("-07.html"))).toEqual([
+      ["credit-schedule", "credit-schedule-07.html", "unknown", "detailMonth-7"],
+    ]);
+    expect(filenames(run.artifacts)).not.toContain("credit-detail-07.html");
+    expect(filenames(run.artifacts)).not.toContain("credit-ledger-07.json");
+    // Counts and codes only.
+    expect(warnings).toEqual([
+      '{"event":"myjcb-credit-month-schedule-page","detailMonth":7,"code":"scheduled_payments_page"}',
+    ]);
+    expect(warnings.join("")).not.toContain("ボーナス");
+  });
+
+  test("without the bonus h1 the same page is a month read as unknown, as before", async () => {
+    // The h2 alone has the dated statement heading's form; only the h1 tells
+    // the schedule page apart. A near miss of the h1 is not recognised.
+    const spy = spyOn(console, "warn").mockImplementation(() => {});
+    let run: Awaited<ReturnType<typeof collectCredit>>;
+    try {
+      run = await collectCredit(
+        client({
+          0: mutable,
+          1: closed("2026年3月"),
+          7: bonusPage("ボーナス回払いご利用代金明細(未確定分)"),
+        }),
+        "x",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(run.schedulePages).toEqual([]);
+    expect(stored(run).filter(([, filename]) => String(filename).endsWith("-07.html"))).toEqual([
+      ["credit-detail", "credit-detail-07.html", "unknown", null],
+    ]);
+  });
+
+  test("the empty-month page at several past positions is still kept at each as unknown", async () => {
+    // Round 9: positions 3–6 are one byte-identical page, h1
+    // 「カードご利用代金明細」 (no 「(確定分)」), no h2, no ledger, no table, and
+    // the phrase 「当該月の請求はございません」. It is not a schedule page.
+    const emptyMonth =
+      '<!doctype html><html lang="ja"><body><h1>MyJCB</h1><h1>カードご利用代金明細</h1><p>当該月の請求はございません</p></body></html>';
+    expect(schedulePageKind(emptyMonth)).toBe("unobserved");
+    const run = await collectCredit(
+      client({
+        0: mutable,
+        1: closed("2026年3月"),
+        2: closed("2026年2月"),
+        3: emptyMonth,
+        4: emptyMonth,
+        5: emptyMonth,
+        6: emptyMonth,
+      }),
+      "x",
+    );
+    expect(run.stop).toBeUndefined();
+    expect(run.unreadMonths).toEqual([]);
+    expect(run.periodCount).toBe(7);
+    expect(stored(run).filter(([, filename]) => /-0[3-6]\./u.test(String(filename)))).toEqual(
+      [3, 4, 5, 6].map((position) => [
+        "credit-detail",
+        `credit-detail-0${position}.html`,
+        "unknown",
+        null,
+      ]),
+    );
   });
 });
