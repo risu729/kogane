@@ -67,6 +67,48 @@ describe("GLOBAL PASS HTML sanitizer", () => {
     }
   });
 
+  test("accepts a Japanese month page with its pager and table labels (2026-10-04)", () => {
+    // The display language is a browser cookie the collector does not set, so
+    // a run may receive the Japanese page: title 利用明細照会, the month as an
+    // h3, the twelve Japanese th labels in either line-break notation, and the
+    // pager in Japanese with the same markup as in English.
+    const labels = [
+      "お取引日",
+      "お取引内容",
+      "お取引通貨<br>金額",
+      "お取引手数料",
+      "ATM手数料",
+      "為替手数料",
+      "確定状態",
+      "承認番号",
+      "備考",
+      "ご利用通貨<br>金額",
+      "ご利用手数料",
+      "換算レート",
+    ];
+    const pager =
+      '<div class="nablarch_paging"><div class="resultCountHeader">検索結果 16件</div>' +
+      '<div class="nablarch_currentPageNumber">[1/2ページ]</div>' +
+      '<div class="nablarch_prevSubmit">前へ</div><div class="nablarch_nextSubmit">' +
+      '<a class="nablarch_nextSubmit" name="nextSubmit" href="/p/statementInquiry/RW1313010201" ' +
+      'onclick="return window.nablarch_submit(event, this);" tabindex="0">次へ</a></div></div>';
+    const japanese = fixture("b")
+      .replace("<head>", "<head><title>利用明細照会</title>")
+      .replace("<h1>ご利用明細</h1>", "<h1></h1><h3>2099年2月</h3>")
+      .replace(
+        "</body>",
+        `${pager}<table class="tableStyle4"><tr>${labels.map((label) => `<th>${label}</th>`).join("")}</tr></table>` +
+          `<table class="tableStyle4"><tr><td>SYNTHETIC</td></tr></table>${pager}</body>`,
+      );
+    const output = sanitizeGlobalPassActivityHtml(japanese);
+    expect(output).toContain("<title>利用明細照会</title>");
+    expect(output).toContain("[1/2ページ]");
+    expect(output).toContain("ご利用通貨<br>金額");
+    // The pager link keeps its path; its handler is stored as `return false;`.
+    expect(output).toContain('href="/p/statementInquiry/RW1313010201" onclick="return false;"');
+    expect(output.match(new RegExp(NABLARCH_HIDDEN_SENTINEL, "gu"))).toHaveLength(3);
+  });
+
   test("accepts the English page's relative download action and menu toggle, exactly", () => {
     // What the live English page (2026-09-29) writes where the reviewed pages
     // differ: the download form's action as a relative path, and the
