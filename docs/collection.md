@@ -447,12 +447,15 @@ recorded in the manifest (`exportOffers: [{ position, kinds }]`) and not
 fetched: the datasets are refused here (above), so a fetched export would fail
 the run's plan
 ([ADR 0005's amendment (b)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page)).
-The months are the credit menu's links under the `h2` headings
-「最新のご利用明細」 and 「過去の明細」 and the past-months response's
-available positions; the links under
-「ボーナス#回払い・ショッピングスキップ払い」 are payment schedule pages
-([ADR 0005's amendment (c)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months)).
-A link under any other heading, or before any heading, stops the connection
+A menu link belongs to the last `h2` or `h3` before it. The months are the
+credit menu's links under the `h2` headings 「最新のご利用明細」 and
+「過去の明細」 and the past-months response's available positions; the links
+under the `h3` 「ボーナス#回払い・ショッピングスキップ払い」 are payment
+schedule pages
+([ADR 0005's amendment (c)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months);
+the heading levels are
+[amendment (j)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-04-j-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-known-by-its-h1)'s).
+A link under any other `h2` or `h3`, or before any, stops the connection
 before its first month (`credit_menu_group_unrecognized`). After the last
 month each schedule page is fetched and stored whole, redacted (state
 `unknown`, period `detailMonth-N`). The page whose one h1 is
@@ -460,15 +463,17 @@ month each schedule page is fetched and stored whole, redacted (state
 `credit-skip-payment-NN.html`, which registration gives the dataset
 `credit-schedule` and `myjcb-skip-payment-schedule` reads
 ([amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments));
-every other schedule page is stored as `credit-schedule-NN.html`, which no
-registration rule gives a parser dataset, so it is catalogued and sealed
-but never parsed. The manifest records each one as
+every other schedule page, the ボーナス払い page (one h1
+「ボーナス#回払いご利用代金明細(未確定分)」) included, is stored as
+`credit-schedule-NN.html`, which no registration rule gives a parser
+dataset, so it is catalogued and sealed but never parsed. The manifest records each one as
 `schedulePages: [{ position, code }]` (`scheduled_payments_page` when stored,
 `schedule_page_fetch` when its fetch failed, which is not a stop) and
 `schedulePageCount`; schedule pages never count in `periodCount` or
 `capturedMonthCount` and never change the unit's coverage. A month
-position whose page has that one h1 is stored and listed the same way, and
-is not a month; a `credit-detail` page read as `unknown` carries no period
+position whose page has the skip-payment h1 (amendment (h)) or the
+ボーナス払い h1 (amendment (j)) is stored and listed the same way, and is not
+a month; a `credit-detail` page read as `unknown` carries no period
 in the manifest, and one page's bytes at two positions must state one state
 and period
 ([amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)).

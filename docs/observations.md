@@ -17,6 +17,50 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MyJCB: the menu's schedule heading is an h3, and the bonus page is not a statement (statement parser 1.4.0)
+
+2026-10-04. The owner's live survey of the MyJCB pages (round 9; shapes,
+counts, fixed labels and booleans only) settles how positions 7 and 8 became
+months
+([ADR 0005's amendment (j)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-04-j-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-known-by-its-h1)):
+
+- **The menu's schedule heading is an `h3`.** The credit menu's headings are
+  `h2` 「最新のご利用明細」, `h3` 「ボーナス#回払い・ショッピングスキップ払い」,
+  `h2` 「過去の明細」, then guidance `h2`/`h3` after every link. The collector
+  grouped links by the last `h2`, so 7 and 8 were months. It now groups by
+  the last `h2` or `h3`; an unrecognised heading at either level before a
+  link still stops the connection (`credit_menu_group_unrecognized`).
+- **The bonus page is known by its h1.** Its h1 is
+  「ボーナス#回払いご利用代金明細(未確定分)」 (# a digit), and one of its `h2`s
+  has exactly the dated statement heading's form. The collector stores it as
+  `credit-schedule-NN.html` (read by nothing) at a schedule position and at a
+  month position alike, as it stores the skip page since amendment (h).
+- **`myjcb-credit-statement-total@1.4.0`** parses a page whose h1 is the
+  bonus or the skip-payment schedule heading `ok` with no observation and the
+  closed warning `schedule_page_not_statement`, whatever its `h2`s say. Every
+  other page reads as in 1.3.0. `myjcb-credit-ledger@1.2.2`,
+  `myjcb-credit-past-month-balances@1.1.5` and
+  `myjcb-canonical-evidence-boundary@1.1.5` change digest only (shared
+  module); `myjcb-skip-payment-schedule@0.1.1` keeps its digest. No migration:
+  the processor registers releases itself.
+- **The empty-month page.** Positions 3–6 are one byte-identical page with
+  h1 「カードご利用代金明細」, no `h2`, no ledger and the phrase
+  「当該月の請求はございません」. It is read `unknown`, and the statement parser
+  records `statement_total_not_confirmed` with no observation, under 1.3.0 and
+  1.4.0 alike: a reason, never a zero total (INV05).
+
+Production exposure, a limit: every stored `credit-detail-07.html` (the
+bonus page, from the 12 runs 215–719 to the last run before this deploy) and
+every `credit-detail-08.html` stored before amendment (h) was registered as a
+month and parsed `ok` with no observation and `statement_total_not_confirmed`.
+No total came from them (neither page has the `(確定分)` h1). Deploying
+rewrites nothing; the repair lane re-parses the stored pages under 1.4.0, and
+its `ok` run supersedes the 1.3.0 run of each and takes the publication
+pointer (an `error` run would not have). The count of affected artifacts was
+not taken. Tests: `services/collector-myjcb/test/parsers.test.ts`,
+`services/collector-myjcb/test/credit-statement-state.test.ts`,
+`packages/parsers/test/myjcb-statement.test.ts`.
+
 ## MyJCB: the first stored skip-payment page was refused (no parser release)
 
 2026-10-02. The nightly MyJCB run of 2026-10-02 21:00Z (collection run 612,
@@ -1283,6 +1327,9 @@ second interpretation of the same provider HTML. A fourth route,
 payment date from credit detail HTML. Since 1.1.0 it takes the statement state
 from the page itself, not from the manifest
 ([release note](#myjcb-statement-state-from-the-page-statement-parser-110)).
+Since 1.4.0 a page whose h1 is a menu schedule page's (ボーナス払い or
+ショッピングスキップ払い) is never read as a statement
+([release note](#myjcb-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-not-a-statement-statement-parser-140)).
 
 Every artifact is bound to its manifest-relative
 `<connection-id>/<filename>`, statement state, and period before bytes are

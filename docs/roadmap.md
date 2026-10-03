@@ -299,6 +299,15 @@ Concrete limits in the current code:
   matched against statements or settlements. The bonus schedule page stays
   `credit-schedule-NN.html` and unread until it is observed with rows
   ([ADR 0005's amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
+  The menu's schedule heading is an `h3`, which the collector read past
+  until amendment (j), so runs read positions 7 and 8 as months (8 is stored
+  as the skip page since amendment (h)); it now groups by the last `h2` or `h3`, and stores the bonus page, known by
+  its h1, as a schedule page at any position. The bonus page's `h2` has the
+  dated statement heading's form, so `myjcb-credit-statement-total@1.4.0`
+  never reads a page with a schedule h1 as a statement
+  (`schedule_page_not_statement`); its re-parse supersedes the 1.3.0
+  readings of the stored pages, which published no total
+  ([ADR 0005's amendment (j)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-04-j-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-known-by-its-h1)).
   The nightly MyJCB runs of 2026-09-25 to 09-27 (UTC) stopped at position 1 on its ledger
   header (`credit-ledger-headers`): every confirmed page breaks its amount
   label with a `br` (`今回の<br>お支払い金額`), and the collector matched the
@@ -321,13 +330,15 @@ Concrete limits in the current code:
   refused them (`manifest_artifact_ambiguous`). An `unknown` page now states
   no period, and one page read as two different things stops the
   connection (`credit_page_repeated`). That run also stored the
-  ショッピングスキップ払い page as a month, for a reason not yet known; a month
+  ショッピングスキップ払い page as a month (the `h3` above); a month
   position whose page carries that h1 is now stored as the schedule page;
   the same skip-payment bytes stored at two positions would still carry two
   position labels and be refused as ambiguous (not observed).
-  Whether the repeated page is the no-bill page or the error page below has
-  not been read
-  ([ADR 0005's amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)).
+  The repeated page is the provider's no-bill page (h1
+  「カードご利用代金明細」, no `h2`, no ledger, 「当該月の請求はございません」), not
+  the error page below; it is read `unknown` and yields no total, never a
+  zero
+  ([ADR 0005's amendments (h) and (j)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)).
   The empty skip-payment page reads as zero rows
   only when its one row is the provider's empty row; beside real rows it is
   refused. The first stored skip-payment page (run of 2026-10-02 21:00Z,
