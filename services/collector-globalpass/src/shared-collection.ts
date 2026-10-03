@@ -127,7 +127,11 @@ export function sharedOutcome(manifest: CollectionManifest): {
   safeErrorCode?: string;
 } {
   if (manifest.status === "success") {
-    return { providerOutcome: "success", coverageStatus: "partial", unitCoverageStatus: "complete" };
+    return {
+      providerOutcome: "success",
+      coverageStatus: "partial",
+      unitCoverageStatus: "complete",
+    };
   }
   const coverageStatus = manifest.status === "partial" ? "partial" : "unknown";
   return {

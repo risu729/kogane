@@ -260,8 +260,18 @@ type Language = "en" | "ja";
 function pagerHtml(total: number, index: number, count: number, language: Language): string {
   const labels =
     language === "en"
-      ? { found: `Found ${total} Result`, page: `[${index}/${count}page]`, back: "Back", next: "Next" }
-      : { found: `検索結果 ${total}件`, page: `[${index}/${count}ページ]`, back: "前へ", next: "次へ" };
+      ? {
+          found: `Found ${total} Result`,
+          page: `[${index}/${count}page]`,
+          back: "Back",
+          next: "Next",
+        }
+      : {
+          found: `検索結果 ${total}件`,
+          page: `[${index}/${count}ページ]`,
+          back: "前へ",
+          next: "次へ",
+        };
   const link = (kind: "prev" | "next", label: string, enabled: boolean) =>
     enabled
       ? `<a class="nablarch_${kind}Submit" name="${kind}Submit" href="/p/statementInquiry/RW1313010201" onclick="return window.nablarch_submit(event, this);" tabindex="0">${label}</a>`
@@ -480,7 +490,10 @@ describe("GLOBAL PASS months are walked page by page", () => {
         "2099-02",
         2,
         2,
-        pagedHtml(16, 2, 2, 6).replace('<input type="hidden" name="nablarch_submit" value="1">', ""),
+        pagedHtml(16, 2, 2, 6).replace(
+          '<input type="hidden" name="nablarch_submit" value="1">',
+          "",
+        ),
       ),
       emptyMonth("2099-01"),
     ]);
@@ -497,23 +510,38 @@ describe("GLOBAL PASS months are walked page by page", () => {
   const contractCases: Array<[string, Record<string, unknown>[]]> = [
     [
       "page 2 before page 1",
-      [pageRecord("2099-02", 2, 2, pagedHtml(16, 2, 2, 6)), pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10))],
+      [
+        pageRecord("2099-02", 2, 2, pagedHtml(16, 2, 2, 6)),
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+      ],
     ],
     [
       "a skipped page",
-      [pageRecord("2099-02", 1, 3, pagedHtml(26, 1, 3, 10)), pageRecord("2099-02", 3, 3, pagedHtml(26, 3, 3, 6))],
+      [
+        pageRecord("2099-02", 1, 3, pagedHtml(26, 1, 3, 10)),
+        pageRecord("2099-02", 3, 3, pagedHtml(26, 3, 3, 6)),
+      ],
     ],
     [
       "a repeated page",
-      [pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)), pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10))],
+      [
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+      ],
     ],
     [
       "a page count that changes within the month",
-      [pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)), pageRecord("2099-02", 2, 3, pagedHtml(16, 2, 2, 6))],
+      [
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+        pageRecord("2099-02", 2, 3, pagedHtml(16, 2, 2, 6)),
+      ],
     ],
     [
       "a page beyond the page count",
-      [pageRecord("2099-02", 1, 1, pagedHtml(7, 1, 1, 7)), pageRecord("2099-02", 2, 1, pagedHtml(7, 1, 1, 7))],
+      [
+        pageRecord("2099-02", 1, 1, pagedHtml(7, 1, 1, 7)),
+        pageRecord("2099-02", 2, 1, pagedHtml(7, 1, 1, 7)),
+      ],
     ],
     [
       "the next month before the last page",
@@ -521,14 +549,14 @@ describe("GLOBAL PASS months are walked page by page", () => {
     ],
     [
       "page 2 of another month",
-      [pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)), pageRecord("2099-01", 2, 2, pagedHtml(16, 2, 2, 6))],
+      [
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+        pageRecord("2099-01", 2, 2, pagedHtml(16, 2, 2, 6)),
+      ],
     ],
     ["a page number beyond the cap", [pageRecord("2099-02", 6, 7, pagedHtml(70, 6, 7, 10))]],
     ["a page number of zero", [pageRecord("2099-02", 0, 1, fixtureHtml())]],
-    [
-      "a record without its page",
-      [{ type: "artifact", month: "2099-02", html: fixtureHtml() }],
-    ],
+    ["a record without its page", [{ type: "artifact", month: "2099-02", html: fixtureHtml() }]],
   ];
   for (const [name, records] of contractCases) {
     test(`out-of-order page records break the contract: ${name}`, async () => {

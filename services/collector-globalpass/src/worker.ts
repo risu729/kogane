@@ -414,7 +414,12 @@ async function collectWithContainer(
           throw new CollectionContractError();
         }
         attemptedMonths.add(month);
-        walk = { month, monthIndex: attemptedMonths.size - 1, pageCount: record.pageCount, pages: [] };
+        walk = {
+          month,
+          monthIndex: attemptedMonths.size - 1,
+          pageCount: record.pageCount,
+          pages: [],
+        };
       } else if (
         !walk ||
         walk.month !== month ||

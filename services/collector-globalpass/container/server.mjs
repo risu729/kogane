@@ -283,10 +283,9 @@ async function readActivityPager(page) {
     if (!top) {
       return { pagers: 0, total: null, index: null, count: null, nextEnabled: false, tables };
     }
-    const total =
-      /(?:\bFound\s+(\d{1,5})\s+Results?\b|検索結果\s*(\d{1,5})\s*件)/iu.exec(
-        text(top.querySelector("div.resultCountHeader")),
-      );
+    const total = /(?:\bFound\s+(\d{1,5})\s+Results?\b|検索結果\s*(\d{1,5})\s*件)/iu.exec(
+      text(top.querySelector("div.resultCountHeader")),
+    );
     const pager = /\[\s*(\d{1,4})\s*\/\s*(\d{1,4})\s*(?:pages?|ページ)\s*\]/iu.exec(
       text(top.querySelector("div.nablarch_currentPageNumber")),
     );

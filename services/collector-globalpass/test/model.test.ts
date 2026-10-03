@@ -91,11 +91,7 @@ describe("GLOBAL PASS collection model", () => {
       ),
     ).toEqual({ status: "success", captureComplete: true });
     expect(() =>
-      strictCollectionStatus(
-        [stored("2026-09", 2), stored("2026-09")],
-        [],
-        ["2026-09", "2026-08"],
-      ),
+      strictCollectionStatus([stored("2026-09", 2), stored("2026-09")], [], ["2026-09", "2026-08"]),
     ).toThrow("duplicate GLOBAL PASS artifact page");
     expect(() =>
       strictCollectionStatus(

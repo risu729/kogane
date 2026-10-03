@@ -190,7 +190,10 @@ export function strictCollectionStatus(
   // A month's pages are contiguous in the list, distinct and in walk order. A
   // page refused by the sanitizer leaves a gap, never a repeat.
   for (const month of months) {
-    const pages = artifacts.slice(artifactMonths.indexOf(month), artifactMonths.lastIndexOf(month) + 1);
+    const pages = artifacts.slice(
+      artifactMonths.indexOf(month),
+      artifactMonths.lastIndexOf(month) + 1,
+    );
     if (pages.some((artifact) => artifact.month !== month)) {
       throw new Error("GLOBAL PASS artifacts are not in selected month order");
     }

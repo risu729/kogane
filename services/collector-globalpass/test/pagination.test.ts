@@ -19,8 +19,18 @@ type Language = "en" | "ja";
 function pager(total: number, index: number, count: number, language: Language = "en"): string {
   const labels =
     language === "en"
-      ? { found: `Found ${total} Result`, page: `[${index}/${count}page]`, back: "Back", next: "Next" }
-      : { found: `検索結果 ${total}件`, page: `[${index}/${count}ページ]`, back: "前へ", next: "次へ" };
+      ? {
+          found: `Found ${total} Result`,
+          page: `[${index}/${count}page]`,
+          back: "Back",
+          next: "Next",
+        }
+      : {
+          found: `検索結果 ${total}件`,
+          page: `[${index}/${count}ページ]`,
+          back: "前へ",
+          next: "次へ",
+        };
   const link = (kind: "prev" | "next", label: string, enabled: boolean) =>
     enabled
       ? `<a class="nablarch_${kind}Submit" name="${kind}Submit" href="/p/statementInquiry/RW1313010201" onclick="return window.nablarch_submit(event, this);" tabindex="0">${label}</a>`
@@ -136,9 +146,7 @@ describe("GLOBAL PASS month coverage", () => {
   test("an empty month: no Found line, no pager, no block", () => {
     expect(monthCoverageCode([captured(page("<h3>2099/02</h3>"), 1, 1)])).toBeUndefined();
     // Blocks without a pager, or a Found line without a pager, are unobserved.
-    expect(monthCoverageCode([captured(page(blocks(1)), 1, 1)])).toBe(
-      "activity_pager_unreadable",
-    );
+    expect(monthCoverageCode([captured(page(blocks(1)), 1, 1)])).toBe("activity_pager_unreadable");
     expect(monthCoverageCode([captured(page("Found 1 Result"), 1, 1)])).toBe(
       "activity_pager_unreadable",
     );
@@ -175,7 +183,11 @@ describe("GLOBAL PASS month coverage", () => {
     expect(
       monthCoverageCode([
         captured(listPage(16, 1, 2, 10), 1, 2),
-        captured(listPage(16, 2, 2, 6).replace("</form>", '<table class="tableStyle4"></table></form>'), 2, 2),
+        captured(
+          listPage(16, 2, 2, 6).replace("</form>", '<table class="tableStyle4"></table></form>'),
+          2,
+          2,
+        ),
       ]),
     ).toBe("activity_total_mismatch");
   });
@@ -200,12 +212,15 @@ describe("GLOBAL PASS month coverage", () => {
       "activity_pager_unreadable",
     );
     expect(
-      monthCoverageCode([captured(listPage(16, 1, 2, 10), 1, 2), captured(listPage(16, 2, 3, 6), 2, 2)]),
+      monthCoverageCode([
+        captured(listPage(16, 1, 2, 10), 1, 2),
+        captured(listPage(16, 2, 3, 6), 2, 2),
+      ]),
     ).toBe("activity_pager_unreadable");
     // Conflicting pagers on one page.
-    expect(
-      monthCoverageCode([captured(page(`${pager(16, 1, 2)}${pager(16, 2, 2)}`), 1, 2)]),
-    ).toBe("activity_pager_unreadable");
+    expect(monthCoverageCode([captured(page(`${pager(16, 1, 2)}${pager(16, 2, 2)}`), 1, 2)])).toBe(
+      "activity_pager_unreadable",
+    );
     expect(monthCoverageCode([captured(page("Found 0 Result [0/0page]"), 1, 1)])).toBe(
       "activity_pager_unreadable",
     );

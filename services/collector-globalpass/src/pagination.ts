@@ -69,7 +69,9 @@ const CLASS_ATTRIBUTE = /\sclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/iu
 
 export function activityPageState(html: string): ActivityPageState {
   const text = visibleText(html);
-  const totals = new Set([...text.matchAll(STATED_TOTAL)].map((match) => Number(match[1] ?? match[2])));
+  const totals = new Set(
+    [...text.matchAll(STATED_TOTAL)].map((match) => Number(match[1] ?? match[2])),
+  );
   const pagers = [...text.matchAll(PAGER)].map((match) => [Number(match[1]), Number(match[2])]);
   const distinctPagers = new Set(pagers.map(([index, count]) => `${index}/${count}`));
   const [total] = totals;
