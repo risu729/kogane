@@ -17,6 +17,7 @@ import {
   redactedStatementHtml,
   scheduledLedgerRowCount,
   schedulePageKind,
+  type MyJcbSchedulePageKind,
 } from "./parsers";
 import { allowedUrl, MYJCB_ORIGIN } from "./policy";
 import type {
@@ -305,17 +306,19 @@ export type CreditExportMode = "record" | "fetch";
  * the months follow it in ascending order.
  *
  * The menu's headings say which positions are months and which are payment
- * schedule pages (`readCreditMenuGroups`, ADR 0005's amendment (c)). Only
- * the months are the connection's coverage. The schedule pages are read after
- * every month, each stored whole: the ショッピングスキップ払い page, known by
- * its h1, as `credit-skip-payment-NN.html`, which
- * `myjcb-skip-payment-schedule` reads (amendment (e)), and every other one as
- * `credit-schedule-NN.html` evidence that no parser reads; a schedule page
- * that cannot be fetched is recorded with a closed code and is not a stop.
+ * schedule pages (`readCreditMenuGroups`, ADR 0005's amendments (c) and (j)).
+ * Only the months are the connection's coverage. The schedule pages are read
+ * after every month, each stored whole: the ショッピングスキップ払い page, known
+ * by its h1, as `credit-skip-payment-NN.html`, which
+ * `myjcb-skip-payment-schedule` reads (amendment (e)), and every other one
+ * (the ボーナス払い page included) as `credit-schedule-NN.html` evidence that
+ * no parser reads; a schedule page that cannot be fetched is recorded with a
+ * closed code and is not a stop.
  *
  * What a stored page states is what the page itself states (ADR 0005's
  * amendment (h)). A month position whose page carries the ショッピングスキップ払い
- * h1 is that schedule page, stored and recorded as one and not a month. An
+ * h1 (amendment (h)) or the ボーナス払い h1 (amendment (j)) is that schedule
+ * page, stored and recorded as one and not a month. An
  * `unknown` page's manifest entry states no period. The shared manifest
  * names a page by its bytes, so the same bytes kept at two positions must
  * state one state and one period; a page that would state another stops the
@@ -341,8 +344,9 @@ export async function collectCredit(
   /**
    * Each schedule page, ascending by position, with its outcome: the
    * positions the menu listed, and the month positions whose page is the
-   * ショッピングスキップ払い page by its h1 (amendment (h)). After a stop only
-   * the latter read before it: no schedule position is read after a stop.
+   * ショッピングスキップ払い page (amendment (h)) or the ボーナス払い page
+   * (amendment (j)) by its h1. After a stop only the latter read before it:
+   * no schedule position is read after a stop.
    */
   readonly schedulePages: readonly SchedulePage[];
   /**
@@ -425,8 +429,9 @@ export async function collectCredit(
 
   const unreadMonths: UnreadMonth[] = [];
   const exportOffers: ExportOffer[] = [];
-  // Month positions whose page is the ショッピングスキップ払い schedule by its
-  // own h1: stored as schedule pages, never months (amendment (h)).
+  // Month positions whose page is the ショッピングスキップ払い (amendment (h))
+  // or ボーナス払い (amendment (j)) schedule by its own h1: stored as schedule
+  // pages, never months.
   const monthSchedulePages: SchedulePage[] = [];
   // Each kept statement page's redacted bytes and the state and period its
   // manifest entry states. The shared manifest names a page by its bytes, so
@@ -456,12 +461,16 @@ export async function collectCredit(
         decodeMyJcbHtml(detail.body, detail.contentType),
       );
       pageHtml = html;
-      // A page whose h1 is the observed ショッピングスキップ払い heading is
-      // that schedule page, whatever position showed it: the page says what
-      // it is, and it names no statement month (amendment (h)). It is stored
-      // as the menu's schedule pages are, and is not a month.
-      if (schedulePageKind(html) === "skip-payment") {
-        artifacts.push(schedulePageArtifact(html, detailMonth, "skip-payment"));
+      // A page whose h1 is the observed ショッピングスキップ払い heading
+      // (amendment (h)) or ボーナス払い heading (amendment (j)) is that
+      // schedule page, whatever position showed it: the page says what it
+      // is, and it names no statement month. It is stored as the menu's
+      // schedule pages are, and is not a month. The ボーナス払い page's h2
+      // has the dated statement heading's form, so it must never reach the
+      // month reading below.
+      const kind = schedulePageKind(html);
+      if (kind !== "unobserved") {
+        artifacts.push(schedulePageArtifact(html, detailMonth, kind));
         monthSchedulePages.push({ position: detailMonth, code: "scheduled_payments_page" });
         // Counts and codes only: the page's text never reaches the log.
         console.warn(
@@ -650,7 +659,8 @@ export async function collectCredit(
       // the page whose h1 is the observed ショッピングスキップ払い heading is
       // named `credit-skip-payment-NN.html`, the one name registration gives
       // the parser dataset (ADR 0005 amendment e); every other schedule page
-      // (the ボーナス払い page, never observed with rows) stays
+      // (the ボーナス払い page, recognised by its h1 since amendment (j) and
+      // never observed with rows, and any page of another kind) stays
       // `credit-schedule-NN.html` and unread (ADR 0004).
       artifacts.push(schedulePageArtifact(html, position, schedulePageKind(html)));
       schedulePages.push({ position, code: "scheduled_payments_page" });
@@ -684,12 +694,13 @@ const UNKNOWN_STATED = JSON.stringify(["unknown", null]);
  * checks against the key: `credit-skip-payment-NN.html` when its h1 is the
  * observed ショッピングスキップ払い heading, which registration gives the
  * parser dataset (ADR 0005 amendment e), otherwise `credit-schedule-NN.html`,
- * which nothing reads.
+ * which nothing reads: the ボーナス払い page (amendment j) and any page of
+ * another kind.
  */
 function schedulePageArtifact(
   html: string,
   position: number,
-  kind: "skip-payment" | "unobserved",
+  kind: MyJcbSchedulePageKind,
 ): RawArtifact {
   return {
     dataset: "credit-schedule",

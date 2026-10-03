@@ -6,8 +6,13 @@ import {
   CONFIRMED_STATEMENT_HEADING,
   readMyJcbStatementPage,
 } from "../../../packages/domain/src/myjcb-statement-page";
-import { myjcbSchedulePageKind } from "../../../packages/domain/src/myjcb-skip-payment-schedule";
+import {
+  myjcbSchedulePageHeadingKind,
+  type MyJcbSchedulePageKind,
+} from "../../../packages/domain/src/myjcb-schedule-page-kind";
 import { readMyJcbStatementHeading } from "../../../packages/domain/src/myjcb-statement-heading";
+
+export type { MyJcbSchedulePageKind };
 
 type HtmlNode = DefaultTreeAdapterMap["node"];
 type HtmlElement = DefaultTreeAdapterMap["element"];
@@ -117,8 +122,11 @@ const CREDIT_MENU_PAGE_URL = `${MYJCB_ORIGIN}/iss-pc/member/details_inquiry/deta
 /**
  * The menu's section headings, compared after whitespace removal, and the
  * group each one names (observed 2026-09-27, round 4; ADR 0005's amendment
- * (c)). The `#` in the observed 「ボーナス#回払い」 is a digit, so any run of
- * digits is accepted there; every other character must match exactly.
+ * (c)). Round 9 (2026-10-04, amendment (j)) observed their levels: the two
+ * month headings are `h2.hdg-H2`, the schedule heading is `h3.hdg-H3`. The
+ * level does not decide the group; the text does. The `#` in the observed
+ * 「ボーナス#回払い」 is a digit, so any run of digits is accepted there;
+ * every other character must match exactly.
  */
 const CREDIT_MENU_GROUP_HEADINGS: readonly {
   readonly pattern: RegExp;
@@ -141,16 +149,21 @@ export interface CreditMenuPositions {
 
 /**
  * The credit menu's `detail.html?detailMonth=N` links, grouped by the section
- * heading each falls under: the last `h2` before the link in document order.
- * The observed menu puts its nine 「明細を見る」 links in card boxes under
- * three `h2` headings, in DOM order 0, 1, 7, 8, 2, 3, 4, 5, 6; the link text
- * names no month, so only the heading tells a statement month from a
- * schedule page.
+ * heading each falls under: the last `h2` or `h3` before the link in document
+ * order. The observed menu (round 9, ADR 0005's amendment (j)) puts its nine
+ * 「明細を見る」 links in card boxes, in DOM order 0, 1, 7, 8, 2, 3, 4, 5, 6,
+ * under three section headings: `h2` 「最新のご利用明細」 (0, 1), `h3`
+ * 「ボーナス#回払い・ショッピングスキップ払い」 (7, 8) and `h2` 「過去の明細」
+ * (2–6); guidance `h2`s and `h3`s follow every link at the bottom of the
+ * page. The link text names no month, so only the heading tells a statement
+ * month from a schedule page. Before amendment (j) only `h2` counted, which
+ * put 7 and 8 under 「最新のご利用明細」 as months.
  *
- * A link before any `h2`, a link under a heading that is not one of the
- * observed three, or a position listed under both groups stops the collection
- * (`credit-menu-group`): the grouping is never guessed (ADR 0004). The stop
- * log carries counts only, never the heading text.
+ * A link before any `h2` or `h3`, a link under a heading that is not one of
+ * the observed three (at either level), or a position listed under both
+ * groups stops the collection (`credit-menu-group`): the grouping is never
+ * guessed (ADR 0004). The stop log carries counts only, never the heading
+ * text.
  */
 export function readCreditMenuGroups(html: string): CreditMenuPositions {
   const months = new Set<number>();
@@ -160,7 +173,8 @@ export function readCreditMenuGroups(html: string): CreditMenuPositions {
   let heading: string | undefined;
   const visit = (node: HtmlNode): void => {
     // A link inside a heading belongs to that heading.
-    if (isElement(node) && node.tagName === "h2") heading = compactText(node);
+    if (isElement(node) && (node.tagName === "h2" || node.tagName === "h3"))
+      heading = compactText(node);
     if (isElement(node) && node.tagName === "a") {
       const position = creditDetailLinkPosition(node);
       if (position !== undefined) {
@@ -569,15 +583,18 @@ export function scheduledLedgerRowCount(html: string): number | undefined {
 }
 
 /**
- * The kind of a menu schedule page, read from its h1 only (ADR 0005 amendment
- * e): `skip-payment` when exactly one h1 is the observed
- * 「ショッピングスキップ払いご利用明細(未確定分)」, otherwise `unobserved`. The
- * collector names the stored page by it, so that only the skip-payment page
- * gets a parser dataset at registration. Its rows are read by the parser, not
- * here.
+ * The kind of a menu schedule page, read from its h1 only: `skip-payment`
+ * when exactly one h1 is the observed 「ショッピングスキップ払いご利用明細(未確定分)」
+ * (ADR 0005 amendment e); otherwise `bonus` when exactly one h1 is the
+ * observed 「ボーナス#回払いご利用代金明細(未確定分)」, # any run of ASCII or
+ * full-width digits (amendment j); otherwise `unobserved`. The collector
+ * names the stored page by it, so that only the skip-payment page gets a
+ * parser dataset at registration, and stores a page of either observed kind
+ * as a schedule page at a month position too. Its rows are read by the
+ * parser, not here; the bonus page's by nothing (ADR 0004).
  */
-export function schedulePageKind(html: string): "skip-payment" | "unobserved" {
-  return myjcbSchedulePageKind(parse(html));
+export function schedulePageKind(html: string): MyJcbSchedulePageKind {
+  return myjcbSchedulePageHeadingKind(parse(html));
 }
 
 /**
