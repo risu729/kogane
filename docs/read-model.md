@@ -116,6 +116,18 @@ parse, whatever the family), with the membership predicates
 `MYJCB_LEDGER_MEMBER` and `VPASS_SNAPSHOT_MEMBER`. `listTransactions` composes
 them unchanged.
 
+GLOBAL PASS activity pages follow the Vpass rule:
+`GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES` (`current_global_pass_snapshots`) takes,
+per source and month (the month in `activity-YYYY-MM.html` or
+`activity-YYYY-MM-pN.html`), the newest fetch run whose activity pages of that
+month all have an active parse, and every page of that run. A walked month is
+one snapshot, so a page a newer run no longer shows is not current beside the
+newer page 1 that shows its rows again. With one page per month and run, which
+every run stored before 2026-10-04 has, it selects exactly what the earlier
+per-artifact-key ranking selected; `test/global-pass-snapshots.test.ts`
+compares a frozen copy of that ranking on hand-built and random stores
+([ADR 0026's amendment of 2026-10-04](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)).
+
 `currentCardUsageSql({ afterId, limit })` (`src/card-usage.ts`) composes the
 same CTEs for purchase recognition: every current Vpass and MyJCB usage row with
 its recognition key (the `bank_key` shape of migration 0044), resolved account,

@@ -17,6 +17,60 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## GLOBAL PASS walked months and page-qualified external ids (activity parser 1.1.0)
+
+2026-10-04. Production (fetch_run 903, 2026-09-29) stored both selected
+months' pages and ended its account unit `failed` with
+`activity_pages_unwalked`: the collector kept only page 1, so no GLOBAL PASS
+run has been parsed. The owner then observed the pager live in English and
+Japanese ([source note](sources/prestia.md#global-pass-pager-and-page-walk-2026-10-04)),
+and the collector now walks it
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)):
+page 1 of a month keeps `activity-YYYY-MM.html`, page N is
+`activity-YYYY-MM-pN.html` (N 2..5 from the collector; the parser and the
+registration descriptor accept 2..9), and a run is `success`, its unit
+`complete` and its pages parse-eligible only when every selected month is
+proven whole against the pager's stated total.
+
+`global-pass-activity@1.1.0`:
+
+- **Keys.** Accepts both key forms; the key's month must be the selected
+  month (as before) and a page's pager (`div.nablarch_currentPageNumber`,
+  `[p/Ppage]` or 「[p/Pページ]」) must name the key's page. A later page with no
+  pager, a pager naming another page, or an unreadable pager fails the parse.
+  `-p1` and two-digit pages are refused.
+- **Identity.** Page 1 keeps every 1.0.0 output. A row on page N ≥ 2 names
+  its page before the occurrence counter, as
+  [Vpass 1.2.0](#vpass-page-qualified-external-ids-statement-parser-120) does:
+  `global-pass:<fingerprint>:pN:<occurrence>`, raw locator
+  `html:activity-page=N;activity-record=M`, `_kogane.identityOrigin`
+  `all-provider-fields+page+occurrence`. Two identical rows on different
+  pages are two ids; nothing else changes. The same cost as Vpass: a row that
+  moves across a page boundary between captures changes its id.
+- **Currentness.** The Transactions read ranked each activity key on its own,
+  which would have kept a page a newer run no longer shows (a month that
+  shrank to one page) current beside the new page 1 that shows its rows
+  again. `GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES` (`packages/read-model/src/sql.ts`)
+  now takes per (source, month) the newest run whose every page of the month
+  has an active parse, and all its pages; with one page per month and run,
+  which is every stored run, it selects exactly what the per-key ranking did
+  (`packages/read-model/test/global-pass-snapshots.test.ts` compares a frozen
+  copy on hand-built and random stores). `experiments/observation-pipeline-local`
+  keeps the per-key ranking; it reads no walked month.
+
+Deploying rewrites nothing. Maintenance registers the 1.1.0 release and job
+creation adds 1.1.0 jobs for every eligible artifact the parser accepts:
+the importer-era artifacts 1.0.0 already read are re-read with the same
+output (all page-1 keys; a page whose pager names another page than 1 would
+now fail), and no shared GLOBAL PASS run is eligible until the first
+`success` run after deploy. No migration is needed: no `active_releases` row
+names this dataset. Limits: no walked page has been stored or parsed; the
+parser reads only the English table labels (the Japanese labels are recorded
+in the source note), so a Japanese page would fail its parse; and whether the
+parser's table model fits the production month page is shown only by the
+first parse (the 2026-09-08 investigation below found stored pages it
+refused). Tests: `packages/parsers/test/global-pass-parser.test.ts`.
+
 ## MyJCB: the first stored skip-payment page was refused (no parser release)
 
 2026-10-02. The nightly MyJCB run of 2026-10-02 21:00Z (collection run 612,
@@ -472,7 +526,8 @@ it sees no shared GLOBAL PASS run, whose unit stays `partial`. Separately,
 in each of the seven nightly runs before 2026-09-27 both months were refused by the
 sanitizer; the refusal is now recorded as one of four closed codes, and which
 one it is has not been observed yet. A stored capture stating 16 results with
-16 rows and no pager is not reconciled with the live behaviour.
+16 rows and no pager is not reconciled with the live behaviour. (Superseded on 2026-10-04: the collector walks every page;
+[above](#global-pass-walked-months-and-page-qualified-external-ids-activity-parser-110).)
 
 ## Vpass stated-total fields on the live site (collector, no parser release)
 
