@@ -322,6 +322,57 @@ export const VPASS_STATEMENT_SNAPSHOT_CTES = `eligible_vpass_snapshots AS (
          WHERE snapshot_rank = 1
        )`;
 
+/** The month an activity key names: `activity-YYYY-MM.html` or `activity-YYYY-MM-pN.html`. */
+const GLOBAL_PASS_MONTH = (alias: string): string => `substr(${alias}.artifact_key, 10, 7)`;
+
+/**
+ * GLOBAL PASS activity pages: per (source, month) the newest fetch run in
+ * which every `globalpass-activity` artifact of that month has an active
+ * parse, and all of that run's pages of the month. A walked month is one
+ * snapshot of several pages (`activity-YYYY-MM.html`, `-p2`, ...; ADR 0026's
+ * amendment of 2026-10-04), so a page a newer run no longer shows stops being
+ * current with the rest of its month instead of staying current under its own
+ * key. With one page per month and run (every run before the collector walked
+ * pages) this selects exactly what ranking each artifact key alone selected:
+ * the newest active page by `fetched_at`, then artifact id. Defines
+ * `current_global_pass_snapshots(fetch_artifact_id)`.
+ */
+export const GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES = `eligible_global_pass_snapshots AS (
+         SELECT fa.fetch_run_id, fa.source_id,
+                ${GLOBAL_PASS_MONTH("fa")} AS activity_month,
+                MAX(fa.fetched_at) AS fetched_at,
+                MAX(fa.id) AS newest_artifact_id
+         FROM ${PARSE_CHAIN}
+         WHERE ${ACTIVE}
+           AND p.parser_name = 'global-pass-activity'
+           AND fa.dataset = 'globalpass-activity'
+         GROUP BY fa.fetch_run_id, fa.source_id, activity_month
+         HAVING COUNT(DISTINCT fa.id) = (
+           SELECT COUNT(*)
+           FROM ${visibleEvidence.fetchArtifacts} expected_fa
+           WHERE expected_fa.fetch_run_id = fa.fetch_run_id
+             AND expected_fa.source_id = fa.source_id
+             AND expected_fa.dataset = 'globalpass-activity'
+             AND ${GLOBAL_PASS_MONTH("expected_fa")} = ${GLOBAL_PASS_MONTH("fa")}
+         )
+       ), ranked_global_pass_snapshots AS (
+         SELECT fetch_run_id, source_id, activity_month,
+                ROW_NUMBER() OVER (
+                  PARTITION BY source_id, activity_month
+                  ORDER BY fetched_at DESC, newest_artifact_id DESC
+                ) AS snapshot_rank
+         FROM eligible_global_pass_snapshots
+       ), current_global_pass_snapshots AS (
+         SELECT member_fa.id AS fetch_artifact_id
+         FROM ranked_global_pass_snapshots snapshot
+         JOIN ${visibleEvidence.fetchArtifacts} member_fa
+           ON member_fa.fetch_run_id = snapshot.fetch_run_id
+          AND member_fa.source_id = snapshot.source_id
+          AND member_fa.dataset = 'globalpass-activity'
+          AND ${GLOBAL_PASS_MONTH("member_fa")} = snapshot.activity_month
+         WHERE snapshot.snapshot_rank = 1
+       )`;
+
 /**
  * The artifact `fa` belongs to `snapshot`, a `current_vpass_snapshots` row:
  * the current snapshot of the artifact's own card-month.
@@ -349,21 +400,7 @@ const TRANSACTION_CTES = `${MYJCB_LEDGER_SNAPSHOT_CTES}, ranked_smbc_direct_snap
          SELECT fetch_artifact_id
          FROM ranked_smbc_direct_snapshots
          WHERE snapshot_rank = 1
-       ), ranked_global_pass_snapshots AS (
-         SELECT p.fetch_artifact_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY fa.source_id, fa.artifact_key
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
-                ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'global-pass-activity'
-           AND fa.dataset = 'globalpass-activity'
-       ), current_global_pass_snapshots AS (
-         SELECT fetch_artifact_id
-         FROM ranked_global_pass_snapshots
-         WHERE snapshot_rank = 1
-       ), ranked_moneyforward_snapshots AS (
+       ), ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}, ranked_moneyforward_snapshots AS (
          SELECT p.fetch_artifact_id,
                 ROW_NUMBER() OVER (
                   PARTITION BY fa.source_id, fa.fetch_unit_key, substr(fa.artifact_key, -12, 7)
