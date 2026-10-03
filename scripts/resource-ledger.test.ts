@@ -43,9 +43,13 @@ const ledger = buildResourceLedger(REPO_ROOT);
  * Worker name, the crons, the Email route, the Durable Object classes and
  * tags, the per-source buckets — still may not move, and a diff that changes
  * any of those is the failure this list exists to catch.
+ *
+ * The GLOBAL PASS line's digest was refreshed on 2026-10-04 (#408): its
+ * `COLLECTOR_SCHEMA_VERSION` value moved to `globalpass-browser-poc-v3` with
+ * the page walk. `vars=` lists names only, so only `sha256=` moved.
  */
 const COLLECTOR_IDENTITIES_BEFORE_THE_PROMOTIONS = [
-  "kogane-globalpass-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=17 18 * * * d1=- r2=DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=COLLECTOR_CONTAINER>GlobalPassCollectorContainer do-migrations=v1[sqlite:GlobalPassCollectorContainer] do-exports=- containers=GlobalPassCollectorContainer:./Dockerfile:basic:2 browser=BROWSER vpc=MESH>tunnel:6b0ccf30-68b2-494e-baa8-f4f9f3e46b33,CF_EGRESS>network:cf1:network services=- assets=- vars=COLLECTOR_SCHEMA_VERSION,RELAY_PUBLIC_URL secrets=- sha256=d6238296fff7add165d86f928c8b5850de776e23f2c74a885f234c51b6638fd3",
+  "kogane-globalpass-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=17 18 * * * d1=- r2=DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=COLLECTOR_CONTAINER>GlobalPassCollectorContainer do-migrations=v1[sqlite:GlobalPassCollectorContainer] do-exports=- containers=GlobalPassCollectorContainer:./Dockerfile:basic:2 browser=BROWSER vpc=MESH>tunnel:6b0ccf30-68b2-494e-baa8-f4f9f3e46b33,CF_EGRESS>network:cf1:network services=- assets=- vars=COLLECTOR_SCHEMA_VERSION,RELAY_PUBLIC_URL secrets=- sha256=00ef0da412f179aea8658058140ead34ec5e2ab02759d773c97b8d7b6a87ff91",
   "kogane-mobile-suica-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=10 21 * * * d1=- r2=DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=BROWSER vpc=- services=- assets=- vars=COLLECTOR_SCHEMA_VERSION secrets=ADMIN_TRIGGER_TOKEN,JRE_ID_CREDENTIAL_JSON sha256=d9e58fe9d1580f55cf2cde6cebc938ea9985c822177b45f4532327013dd8b5cb",
   "kogane-moneyforward-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=15 21 * * * d1=- r2=DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=- vars=COLLECTOR_SCHEMA_VERSION secrets=- sha256=ddf3fadd51c43c4fd6f4b782f1ab4257dd9a2789eedad6b11bb2732a1c6a8d85",
   "kogane-myjcb-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=0 21 * * * d1=- r2=DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=BROWSER vpc=- services=- assets=- vars=COLLECTOR_SCHEMA_VERSION secrets=- sha256=045f964708753b046a6613bc918bf989b307a8ae9df96662e1a15198c42b9826",
