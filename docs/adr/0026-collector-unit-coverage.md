@@ -244,7 +244,9 @@ exact counts; the walk's stops and what stays unobserved are in
 
 ## Amendment 2026-09-27: GLOBAL PASS pagination observed; sanitizer refusals get closed codes
 
-- Status: proposed; accepted when #281 merges
+- Status: proposed; accepted when #281 merges. Its page-1-only decision, and
+  its note that a month of ten or fewer shows no pager, are superseded by the
+  [amendment of 2026-10-04](#amendment-2026-10-04-global-pass-walks-every-page-of-a-month).
 - Date: 2026-09-27
 - Carried by: `services/collector-globalpass/src/sanitize.ts`
   (`GlobalPassSanitizerError`, `GLOBALPASS_SANITIZER_CODES`),
@@ -679,7 +681,7 @@ count, and form count matched.
 
 ## Amendment 2026-10-04: GLOBAL PASS walks every page of a month
 
-- Status: proposed; accepted when the amending PR merges
+- Status: proposed; accepted when #408 merges
 - Date: 2026-10-04
 - Carried by: `services/collector-globalpass/container/server.mjs`
   (`walkActivityPages`, `clickActivityNext`, `readActivityPager`,
@@ -813,7 +815,9 @@ source note has the detail):
   newest run whose activity pages of that month all have an active parse,
   and all its pages, instead of ranking each key alone. Otherwise a page a
   newer run no longer shows would stay current beside the newer page 1 that
-  shows its rows again.
+  shows its rows again. A run with any page of the month unparsed (pending
+  or failed) is passed over for that month as a whole: the month shows the
+  newest earlier whole snapshot, or nothing while no run qualifies.
 
 ### Consequences
 
@@ -882,9 +886,13 @@ source note has the detail):
   label set in both notations parses.
 - `packages/read-model/test/global-pass-snapshots.test.ts`: identical to a
   frozen copy of the per-key ranking on single-page stores (hand-built and 40
-  random); a walked month's pages current together; a page a newer run no
-  longer shows is not current; a newer run with an unparsed page keeps the
-  older whole month.
+  random) and on a scaled store with the complete CORE schema and no table
+  statistics, where walked months also match an independently written model;
+  a walked month's pages current together; a page a newer run no longer shows
+  is not current; a newer run with an unparsed page keeps the older whole
+  month; the Transactions plan reads the artifacts once, as the per-key
+  ranking did, and reaches each run's pages through
+  `idx_fetch_artifacts_run_role`.
 - `services/processor/test/collector-plans.test.ts`: the collector's real
   plan for a walked two-page month plus an empty month registers `success`
   with every page in `globalpass-activity`; the last case lists

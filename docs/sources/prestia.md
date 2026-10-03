@@ -1017,8 +1017,8 @@ switched back afterwards, in Japanese:
   behaviour are the same in both languages; only these texts differ.
 - **Links.** An enabled Next is `a.nablarch_nextSubmit` inside its div, with
   exactly the attributes `class`, `name`, `href`, `onclick`, `tabindex`:
-  `name` is `nextSubmit` on the top pager and a Nablarch automatic name of
-  the `nablarch_form5_2` form on the bottom one, `href` is the same path with
+  `name` is `nextSubmit` on the top pager and `nablarch_form5_2` (Nablarch's
+  automatic numbering) on the bottom one, `href` is the same path with
   no query or fragment, `onclick` is `return
 window.nablarch_submit(event, this);`. Back is the same with `prevSubmit`.
   A disabled link is its label as plain text in the div, no `a`, still shown.
@@ -1068,6 +1068,11 @@ captured, and the blocks add up to N. The pager is read in both languages.
 
 Limits:
 
+- No run has walked a page yet. Whether `page.content()` after a Next POST
+  matches the surveyed DOM, and whether page 2 passes the sanitizer (its form
+  and hidden-input counts were not reported), is shown by the first run.
+- Whether page 2 keeps the month selected in its month select was not
+  reported; the activity parser requires it and fails the page otherwise.
 - Whether the server stores the language choice is not verified. The
   collector logs in with a fresh browser each run and sets no language
   cookie, so the owner's browser does not change what it receives; nightly
