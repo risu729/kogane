@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   artifactFilename,
+  GLOBALPASS_SCHEMA_VERSION,
   assertCanonicalMonths,
   CONTAINER_PROBE_VARIANTS,
   parseContainerProbeVariant,
@@ -12,6 +15,12 @@ import {
 } from "../src/model";
 
 describe("GLOBAL PASS collection model", () => {
+  test("the deployed Worker reports the schema version its manifests carry", () => {
+    // `/health` answers with the `COLLECTOR_SCHEMA_VERSION` var.
+    const wrangler = readFileSync(join(import.meta.dir, "../wrangler.jsonc"), "utf8");
+    expect(wrangler).toContain(`"COLLECTOR_SCHEMA_VERSION": "${GLOBALPASS_SCHEMA_VERSION}"`);
+  });
+
   test("defaults to the bounded daily mode", () => {
     expect(parseMode(null)).toBe("daily");
     expect(parseMode("daily")).toBe("daily");
