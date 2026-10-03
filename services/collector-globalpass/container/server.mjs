@@ -24,6 +24,17 @@ const RELAY_HOSTS = new Set([
 ]);
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
+// The most pages walked in one month. The largest month observed stated 20
+// results (two pages of ten); five pages is fifty statements. A month stating
+// more is sent as its first five pages, and the Worker records it
+// `activity_pages_unwalked`. `src/pagination.ts` (`ACTIVITY_PAGE_CAP`) holds
+// the same number.
+const ACTIVITY_PAGE_CAP = 5;
+// Account Activities of a selected month. Month selection, Next and Back all
+// POST to this path (observed 2026-10-04, in English and in Japanese).
+const ACTIVITY_PATH = "/p/statementInquiry/RW1313010201";
+const PAGER_POST_TIMEOUT_MS = 10_000;
+const PAGER_SETTLE_TIMEOUT_MS = 15_000;
 const DAILY_MONTHS = 2;
 const RUNTIME_REVISION = "timezone-collector-v7";
 const ACTIVITY_LABEL =
@@ -251,6 +262,137 @@ async function selectMonth(page, index, value) {
   const selected = await page.locator("select").nth(index).inputValue();
   if (selected !== value) {
     throw new Error("GLOBAL PASS month selection did not stick");
+  }
+}
+
+/**
+ * The counts the top pager states, read in the page: numbers and booleans
+ * only, never provider text. The pager is `div.nablarch_paging` (two per
+ * page, identical, observed 2026-10-04) with `div.resultCountHeader`
+ * (`Found N Result` / `検索結果 N件`) and `div.nablarch_currentPageNumber`
+ * (`[p/Ppage]` / `[p/Pページ]`); an enabled Next is `a.nablarch_nextSubmit`
+ * inside `div.nablarch_nextSubmit`, a disabled one is text with no link. A
+ * month with no statement shows no pager.
+ */
+async function readActivityPager(page) {
+  return page.evaluate(() => {
+    const text = (element) => (element?.textContent ?? "").replace(/\s+/gu, " ").trim();
+    const pagers = [...document.querySelectorAll("div.nablarch_paging")];
+    const tables = document.querySelectorAll("table.tableStyle4").length;
+    const top = pagers[0];
+    if (!top) {
+      return { pagers: 0, total: null, index: null, count: null, nextEnabled: false, tables };
+    }
+    const total = /(?:\bFound\s+(\d{1,5})\s+Results?\b|検索結果\s*(\d{1,5})\s*件)/iu.exec(
+      text(top.querySelector("div.resultCountHeader")),
+    );
+    const pager = /\[\s*(\d{1,4})\s*\/\s*(\d{1,4})\s*(?:pages?|ページ)\s*\]/iu.exec(
+      text(top.querySelector("div.nablarch_currentPageNumber")),
+    );
+    return {
+      pagers: pagers.length,
+      total: total ? Number(total[1] ?? total[2]) : null,
+      index: pager ? Number(pager[1]) : null,
+      count: pager ? Number(pager[2]) : null,
+      nextEnabled:
+        top.querySelectorAll("div.nablarch_nextSubmit a.nablarch_nextSubmit").length === 1,
+      tables,
+    };
+  });
+}
+
+/**
+ * Clicks the top pager's enabled Next and waits for its POST to the activity
+ * path and the page it renders. One retry when no POST is seen: plain
+ * robustness. (A first click that did not navigate was seen once with a
+ * browser extension's coordinate click; with in-page click events Next
+ * navigated on the first click every time, so it is not site behaviour.) A
+ * retry that lands two pages on is caught by the index check in
+ * `walkActivityPages`.
+ */
+async function clickActivityNext(page, expectedIndex) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const next = page
+      .locator("div.nablarch_paging")
+      .first()
+      .locator("div.nablarch_nextSubmit a.nablarch_nextSubmit");
+    if ((await next.count()) !== 1) {
+      throw new Error("GLOBAL PASS pager Next is not enabled");
+    }
+    const post = page
+      .waitForResponse(
+        (response) => {
+          const url = new URL(response.url());
+          return (
+            url.hostname === GLOBALPASS_HOST &&
+            url.pathname === ACTIVITY_PATH &&
+            response.request().method() === "POST"
+          );
+        },
+        { timeout: PAGER_POST_TIMEOUT_MS },
+      )
+      .then(() => true)
+      .catch(() => false);
+    await next.click();
+    if (!(await post)) continue;
+    await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+    await page
+      .waitForFunction(
+        (index) => {
+          const current = document.querySelector(
+            "div.nablarch_paging div.nablarch_currentPageNumber",
+          );
+          const match = /\[\s*(\d{1,4})\s*\//u.exec(current?.textContent ?? "");
+          return match !== null && Number(match[1]) >= index;
+        },
+        expectedIndex,
+        { timeout: PAGER_SETTLE_TIMEOUT_MS },
+      )
+      .catch(() => undefined);
+    return;
+  }
+  throw new Error("GLOBAL PASS pager Next did not POST");
+}
+
+/**
+ * Sends every page of the month the page shows, page 1 first: one
+ * `{type: "artifact", month, page, pageCount, html}` line per page. A month
+ * with no pager is one page with `pageCount: 1`. After each Next the new page
+ * must state the next index, the same page count and the same total, and show
+ * at least one statement block; otherwise the walk throws, which ends the run
+ * as a container error. The Worker decides whether the pages are the whole
+ * month.
+ */
+async function walkActivityPages(page, response, month) {
+  let state = await readActivityPager(page);
+  if (state.pagers > 0 && (state.index !== 1 || state.count === null || state.total === null)) {
+    throw new Error("GLOBAL PASS pager does not read as page one of the month");
+  }
+  const pageCount = state.pagers > 0 ? state.count : 1;
+  if (!Number.isInteger(pageCount) || pageCount < 1) {
+    throw new Error("GLOBAL PASS pager states no page count");
+  }
+  const total = state.total;
+  const pagesToSend = Math.min(pageCount, ACTIVITY_PAGE_CAP);
+  for (let index = 1; index <= pagesToSend; index += 1) {
+    if (index > 1) {
+      if (!state.nextEnabled) throw new Error("GLOBAL PASS pager Next is not enabled");
+      await clickActivityNext(page, index);
+      state = await readActivityPager(page);
+      if (
+        state.index !== index ||
+        state.count !== pageCount ||
+        state.total !== total ||
+        state.tables < 2
+      ) {
+        throw new Error("GLOBAL PASS pager did not advance by one page");
+      }
+    }
+    const html = await page.content();
+    if (Buffer.byteLength(html) > MAX_HTML_BYTES) {
+      throw new Error(`${month} activity HTML exceeded byte limit`);
+    }
+    await writeLine(response, { type: "artifact", month, page: index, pageCount, html });
   }
 }
 
@@ -940,12 +1082,10 @@ async function collectBrowser(payload, response, diagnostics) {
     });
     for (const month of selectedMonths) {
       await diagnostics.step("statement-read", async () => {
+        // Selecting a month renders its page 1 (switching month resets the
+        // pager, observed 2026-10-04); the walk sends that page and the rest.
         await selectMonth(page, selector.index, byMonth.get(month));
-        const html = await page.content();
-        if (Buffer.byteLength(html) > MAX_HTML_BYTES) {
-          throw new Error(`${month} activity HTML exceeded byte limit`);
-        }
-        await writeLine(response, { type: "artifact", month, html });
+        await walkActivityPages(page, response, month);
       });
     }
     await diagnostics.step("logout", () => signOut(page));

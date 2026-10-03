@@ -164,6 +164,23 @@ const SAMPLES: readonly Sample[] = [
   },
   {
     source: "prestia-globalpass",
+    artifactKey: "activity-2026-01-p2.html",
+    role: "sanitized_provider_capture",
+    mediaType: html,
+    dataset: "globalpass-activity",
+    unitKey: "account",
+  },
+  // Page 1 is never page-qualified, and the collector walks at most five pages.
+  ...["activity-2026-01-p1.html", "activity-2026-01-p10.html"].map((artifactKey) => ({
+    source: "prestia-globalpass",
+    artifactKey,
+    role: "sanitized_provider_capture",
+    mediaType: html,
+    dataset: null,
+    unitKey: "account",
+  })),
+  {
+    source: "prestia-globalpass",
     artifactKey: "manifest.json",
     role: "collector_manifest",
     mediaType: json,

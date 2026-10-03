@@ -37,7 +37,7 @@ const metadata = {
   selectedMonths: ["2099-02", "2099-01"],
   browserVersion: "synthetic",
 };
-const artifact = { type: "artifact", month: "2099-02", html: fixtureHtml() };
+const artifact = { type: "artifact", month: "2099-02", page: 1, pageCount: 1, html: fixtureHtml() };
 
 async function run(
   records: unknown[],
@@ -117,7 +117,7 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
       },
     ]);
     expect(r.response.status).toBe(502);
-    expect(r.manifest?.schemaVersion).toBe("globalpass-browser-poc-v2");
+    expect(r.manifest?.schemaVersion).toBe("globalpass-browser-poc-v3");
     expect(r.manifest?.status).toBe("partial");
     expect(r.manifest?.artifacts).toHaveLength(1);
     expect(r.manifest?.failures.map((f) => f.errorCode)).toEqual([
@@ -163,7 +163,7 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
     expect(r.response.status).toBe(200);
     expect(r.manifest?.status).toBe("success");
     expect(r.manifest?.captureComplete).toBe(true);
-    expect(r.manifest?.paginationStatus).toBe("first_page_only");
+    expect(r.manifest?.paginationStatus).toBe("pages_walked");
     expect(r.destroyed).toBe(1);
   });
 });
@@ -209,7 +209,7 @@ describe("GLOBAL PASS sanitizer refusals carry their closed code", () => {
     test(refusal.code, async () => {
       const r = await run([
         metadata,
-        { type: "artifact", month: "2099-02", html: refusal.html() },
+        { type: "artifact", month: "2099-02", page: 1, pageCount: 1, html: refusal.html() },
         { ...artifact, month: "2099-01" },
       ]);
       expect(r.manifest?.status).toBe("partial");
@@ -252,84 +252,331 @@ describe("GLOBAL PASS sanitizer refusals carry their closed code", () => {
   }
 });
 
-describe("GLOBAL PASS pages that state more pages are not a whole month", () => {
-  const paged = (pager: string) =>
-    fixtureHtml().replace(
-      "</body>",
-      `<div>Found 16 Result</div><div>${pager} <a href="javascript:void(0);">Back</a> <a href="javascript:void(0);">Next</a></div></body>`,
-    );
+// Synthetic pages in the observed Nablarch pager shape (2026-10-04): two
+// identical pagers per page, an enabled link is `a.nablarch_nextSubmit` /
+// `a.nablarch_prevSubmit` posting to the activity path, a disabled one is
+// text; two `table.tableStyle4` per statement block. Counts are placeholders.
+type Language = "en" | "ja";
+function pagerHtml(total: number, index: number, count: number, language: Language): string {
+  const labels =
+    language === "en"
+      ? {
+          found: `Found ${total} Result`,
+          page: `[${index}/${count}page]`,
+          back: "Back",
+          next: "Next",
+        }
+      : {
+          found: `検索結果 ${total}件`,
+          page: `[${index}/${count}ページ]`,
+          back: "前へ",
+          next: "次へ",
+        };
+  const link = (kind: "prev" | "next", label: string, enabled: boolean) =>
+    enabled
+      ? `<a class="nablarch_${kind}Submit" name="${kind}Submit" href="/p/statementInquiry/RW1313010201" onclick="return window.nablarch_submit(event, this);" tabindex="0">${label}</a>`
+      : label;
+  return (
+    '<div class="nablarch_paging">' +
+    `<div class="resultCountHeader">${labels.found}</div>` +
+    `<div class="nablarch_currentPageNumber">${labels.page}</div>` +
+    `<div class="nablarch_prevSubmit">${link("prev", labels.back, index > 1)}</div>` +
+    `<div class="nablarch_nextSubmit">${link("next", labels.next, index < count)}</div>` +
+    "</div>"
+  );
+}
+function pagedHtml(
+  total: number,
+  index: number,
+  count: number,
+  blocks: number,
+  language: Language = "en",
+): string {
+  const pager = pagerHtml(total, index, count, language);
+  const block =
+    '<table class="tableStyle4"><tr><td>SYNTHETIC</td></tr></table>' +
+    '<table class="tableStyle4"><tr><td>SYNTHETIC</td></tr></table>';
+  return fixtureHtml().replace("</body>", `${pager}${block.repeat(blocks)}${pager}</body>`);
+}
+function pageRecord(
+  month: string,
+  page: number,
+  pageCount: number,
+  html: string,
+): Record<string, unknown> {
+  return { type: "artifact", month, page, pageCount, html };
+}
+const emptyMonth = (month: string) => pageRecord(month, 1, 1, fixtureHtml());
+function events(r: { logs: string[] }, name: string): Record<string, unknown>[] {
+  return r.logs
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((e) => e.event === name);
+}
 
-  test("page 1 of 2 is kept, and the month and run are partial with a closed code", async () => {
+describe("GLOBAL PASS months are walked page by page", () => {
+  for (const language of ["en", "ja"] as const) {
+    test(`a two-page month walked whole is success, one artifact per page (${language})`, async () => {
+      const r = await run([
+        metadata,
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10, language)),
+        pageRecord("2099-02", 2, 2, pagedHtml(16, 2, 2, 6, language)),
+        emptyMonth("2099-01"),
+      ]);
+      expect(r.response.status).toBe(200);
+      expect(r.manifest?.status).toBe("success");
+      expect(r.manifest?.failures).toEqual([]);
+      expect(r.manifest?.artifacts.map((a) => [a.month, a.page, a.key.split("/").at(-1)])).toEqual([
+        ["2099-02", 1, "activity-2099-02.html"],
+        ["2099-02", 2, "activity-2099-02-p2.html"],
+        ["2099-01", 1, "activity-2099-01.html"],
+      ]);
+      const terminal = [...r.stored.values()]
+        .map((bytes) => new TextDecoder().decode(bytes))
+        .find((body) => body.includes('"units"'));
+      expect(terminal).toContain('"coverageStatus":"complete"');
+      expect(terminal).toContain('"artifactKey":"activity-2099-02-p2.html"');
+      expect(events(r, "globalpass-activity-pages")).toEqual([
+        {
+          event: "globalpass-activity-pages",
+          runId: r.manifest!.runId,
+          monthIndex: 0,
+          page: 1,
+          walkPageCount: 2,
+          statedTotal: 16,
+          pageIndex: 1,
+          pageCount: 2,
+          statementBlocks: 10,
+        },
+        {
+          event: "globalpass-activity-pages",
+          runId: r.manifest!.runId,
+          monthIndex: 0,
+          page: 2,
+          walkPageCount: 2,
+          statedTotal: 16,
+          pageIndex: 2,
+          pageCount: 2,
+          statementBlocks: 6,
+        },
+        {
+          event: "globalpass-activity-pages",
+          runId: r.manifest!.runId,
+          monthIndex: 1,
+          page: 1,
+          walkPageCount: 1,
+          statedTotal: null,
+          pageIndex: null,
+          pageCount: null,
+          statementBlocks: 0,
+        },
+      ]);
+      expect(events(r, "globalpass-activity-coverage")).toEqual([
+        {
+          event: "globalpass-activity-coverage",
+          runId: r.manifest!.runId,
+          monthIndex: 0,
+          pagesCaptured: 2,
+          walkPageCount: 2,
+        },
+        {
+          event: "globalpass-activity-coverage",
+          runId: r.manifest!.runId,
+          monthIndex: 1,
+          pagesCaptured: 1,
+          walkPageCount: 1,
+        },
+      ]);
+      // The log lines name a month by its position only, and carry no page text.
+      const logs = r.logs.join("\n");
+      expect(logs).not.toContain("2099-");
+      expect(logs).not.toContain("SYNTHETIC");
+      expect(logs).not.toContain("Found");
+      expect(logs).not.toContain("検索結果");
+    });
+  }
+
+  test("a [1/1page] month and an empty month are both whole", async () => {
     const r = await run([
       metadata,
-      { type: "artifact", month: "2099-02", html: paged("[1/2page]") },
-      { ...artifact, month: "2099-01" },
-    ]);
-    expect(r.response.status).toBe(502);
-    expect(r.manifest?.status).toBe("partial");
-    expect(r.manifest?.captureComplete).toBe(false);
-    expect(r.manifest?.artifacts.map((a) => a.month)).toEqual(["2099-02", "2099-01"]);
-    expect(r.manifest?.failures).toEqual([
-      {
-        operation: "pagination",
-        errorType: "PaginationError",
-        errorCode: "activity_pages_unwalked",
-        artifactKey: "activity-2099-02.html",
-      },
-    ]);
-    const pages = r.logs
-      .map((line) => JSON.parse(line) as Record<string, unknown>)
-      .filter((e) => e.event === "globalpass-activity-pages");
-    expect(pages).toEqual([
-      {
-        event: "globalpass-activity-pages",
-        runId: r.manifest!.runId,
-        monthIndex: 0,
-        statedTotal: 16,
-        pageIndex: 1,
-        pageCount: 2,
-        errorCode: "activity_pages_unwalked",
-      },
-      {
-        event: "globalpass-activity-pages",
-        runId: r.manifest!.runId,
-        monthIndex: 1,
-        statedTotal: null,
-        pageIndex: null,
-        pageCount: null,
-      },
-    ]);
-    // The log lines name a month by its position only.
-    expect(r.logs.join("\n")).not.toContain("2099-");
-  });
-
-  test("a refused page still reports that it was one of several", async () => {
-    const r = await run([
-      metadata,
-      {
-        type: "artifact",
-        month: "2099-02",
-        html: paged("[1/2page]").replace(
-          '<input type="hidden" name="nablarch_submit" value="1">',
-          "",
-        ),
-      },
-      { ...artifact, month: "2099-01" },
-    ]);
-    expect(r.manifest?.failures.map((f) => [f.operation, f.errorCode, f.expectationCode])).toEqual([
-      ["sanitization", "globalpass_html_shape_unreviewed", "variant_unmatched"],
-      ["pagination", "activity_pages_unwalked", undefined],
-    ]);
-  });
-
-  test("a one-page pager states no further page", async () => {
-    const r = await run([
-      metadata,
-      { type: "artifact", month: "2099-02", html: paged("[1/1page]") },
-      { ...artifact, month: "2099-01" },
+      pageRecord("2099-02", 1, 1, pagedHtml(7, 1, 1, 7)),
+      emptyMonth("2099-01"),
     ]);
     expect(r.manifest?.status).toBe("success");
     expect(r.manifest?.failures).toEqual([]);
+  });
+
+  const failureOf = (code: string): CollectionManifest["failures"] => [
+    {
+      operation: "pagination",
+      errorType: "PaginationError",
+      errorCode: code as CollectionManifest["failures"][number]["errorCode"],
+      artifactKey: "activity-2099-02.html",
+    },
+  ];
+
+  test("pages the container did not send (a stop) leave the month unwalked", async () => {
+    const r = await run([
+      metadata,
+      pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+      {
+        type: "error",
+        operation: "browser-collection",
+        errorType: "Error",
+        errorCode: "browser_collection_failed",
+      },
+    ]);
+    expect(r.manifest?.status).toBe("partial");
+    expect(r.manifest?.artifacts.map((a) => a.page)).toEqual([1]);
+    expect(r.manifest?.failures.map((f) => f.errorCode)).toEqual([
+      "browser_collection_failed",
+      "activity_pages_unwalked",
+      "selected_month_missing",
+    ]);
+  });
+
+  test("a month stating more pages than the cap is sent capped and is unwalked", async () => {
+    const records = [1, 2, 3, 4, 5].map((page) =>
+      pageRecord("2099-02", page, 7, pagedHtml(70, page, 7, 10)),
+    );
+    const r = await run([metadata, ...records, emptyMonth("2099-01")]);
+    expect(r.manifest?.artifacts).toHaveLength(6);
+    expect(r.manifest?.failures).toEqual(failureOf("activity_pages_unwalked"));
+    expect(r.manifest?.status).toBe("partial");
+  });
+
+  test("a total that differs between pages is unreadable", async () => {
+    const r = await run([
+      metadata,
+      pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+      pageRecord("2099-02", 2, 2, pagedHtml(17, 2, 2, 7)),
+      emptyMonth("2099-01"),
+    ]);
+    expect(r.manifest?.artifacts).toHaveLength(3);
+    expect(r.manifest?.failures).toEqual(failureOf("activity_pager_unreadable"));
+    expect(r.manifest?.status).toBe("partial");
+  });
+
+  test("blocks that do not add up to the total are a mismatch", async () => {
+    const r = await run([
+      metadata,
+      pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+      pageRecord("2099-02", 2, 2, pagedHtml(16, 2, 2, 5)),
+      emptyMonth("2099-01"),
+    ]);
+    expect(r.manifest?.failures).toEqual(failureOf("activity_total_mismatch"));
+    expect(r.manifest?.status).toBe("partial");
+    const terminal = [...r.stored.values()]
+      .map((bytes) => new TextDecoder().decode(bytes))
+      .find((body) => body.includes('"units"'));
+    expect(terminal).toContain('"safeErrorCode":"activity_total_mismatch"');
+  });
+
+  test("a page whose pager names another page than its walk position is unreadable", async () => {
+    // Next did not advance: the container sent page 1's state as page 2.
+    const r = await run([
+      metadata,
+      pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+      pageRecord("2099-02", 2, 2, pagedHtml(16, 1, 2, 10)),
+      emptyMonth("2099-01"),
+    ]);
+    expect(r.manifest?.failures).toEqual(failureOf("activity_pager_unreadable"));
+  });
+
+  test("a refused page leaves its month's other pages stored and the month undecided", async () => {
+    const r = await run([
+      metadata,
+      pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+      pageRecord(
+        "2099-02",
+        2,
+        2,
+        pagedHtml(16, 2, 2, 6).replace(
+          '<input type="hidden" name="nablarch_submit" value="1">',
+          "",
+        ),
+      ),
+      emptyMonth("2099-01"),
+    ]);
+    expect(r.manifest?.artifacts.map((a) => [a.month, a.page])).toEqual([
+      ["2099-02", 1],
+      ["2099-01", 1],
+    ]);
+    expect(r.manifest?.failures.map((f) => [f.operation, f.errorCode, f.artifactKey])).toEqual([
+      ["sanitization", "globalpass_html_shape_unreviewed", "activity-2099-02-p2.html"],
+    ]);
+    expect(r.manifest?.status).toBe("partial");
+  });
+
+  const contractCases: Array<[string, Record<string, unknown>[]]> = [
+    [
+      "page 2 before page 1",
+      [
+        pageRecord("2099-02", 2, 2, pagedHtml(16, 2, 2, 6)),
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+      ],
+    ],
+    [
+      "a skipped page",
+      [
+        pageRecord("2099-02", 1, 3, pagedHtml(26, 1, 3, 10)),
+        pageRecord("2099-02", 3, 3, pagedHtml(26, 3, 3, 6)),
+      ],
+    ],
+    [
+      "a repeated page",
+      [
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+      ],
+    ],
+    [
+      "a page count that changes within the month",
+      [
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+        pageRecord("2099-02", 2, 3, pagedHtml(16, 2, 2, 6)),
+      ],
+    ],
+    [
+      "a page beyond the page count",
+      [
+        pageRecord("2099-02", 1, 1, pagedHtml(7, 1, 1, 7)),
+        pageRecord("2099-02", 2, 1, pagedHtml(7, 1, 1, 7)),
+      ],
+    ],
+    [
+      "the next month before the last page",
+      [pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)), emptyMonth("2099-01")],
+    ],
+    [
+      "page 2 of another month",
+      [
+        pageRecord("2099-02", 1, 2, pagedHtml(16, 1, 2, 10)),
+        pageRecord("2099-01", 2, 2, pagedHtml(16, 2, 2, 6)),
+      ],
+    ],
+    ["a page number beyond the cap", [pageRecord("2099-02", 6, 7, pagedHtml(70, 6, 7, 10))]],
+    ["a page number of zero", [pageRecord("2099-02", 0, 1, fixtureHtml())]],
+    ["a record without its page", [{ type: "artifact", month: "2099-02", html: fixtureHtml() }]],
+  ];
+  for (const [name, records] of contractCases) {
+    test(`out-of-order page records break the contract: ${name}`, async () => {
+      const r = await run([metadata, ...records]);
+      expect(r.manifest?.failures.map((f) => f.errorCode)).toContain("container_contract_invalid");
+      expect(r.manifest?.status).not.toBe("success");
+    });
+  }
+
+  test("a stream that ends before the month's last page breaks the contract", async () => {
+    const r = await run([
+      metadata,
+      emptyMonth("2099-02"),
+      pageRecord("2099-01", 1, 2, pagedHtml(16, 1, 2, 10)),
+    ]);
+    expect(r.manifest?.failures.map((f) => f.errorCode)).toEqual([
+      "container_contract_invalid",
+      "activity_pages_unwalked",
+    ]);
+    expect(r.manifest?.artifacts).toHaveLength(2);
   });
 });
 
@@ -352,7 +599,7 @@ describe("GLOBAL PASS refusal shape is counts and closed codes only", () => {
   test("the logged shape says which expectation failed and carries no page text", async () => {
     const r = await run([
       metadata,
-      { type: "artifact", month: "2099-02", html: refusedPage() },
+      { type: "artifact", month: "2099-02", page: 1, pageCount: 1, html: refusedPage() },
       { ...artifact, month: "2099-01" },
     ]);
     const failed = r.logs

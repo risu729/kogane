@@ -39,6 +39,7 @@ function manifest(runId: string): CollectionManifest {
       {
         dataset: GLOBALPASS_DATASET,
         month: "2099-02",
+        page: 1,
         key: `raw/prestia-globalpass/2099/02/01/${runId}/activity-2099-02.html`,
         mediaType: GLOBALPASS_MEDIA_TYPE,
         bytes: SANITIZED_HTML.length,
@@ -54,7 +55,7 @@ function inputOf(runId: string) {
   return {
     manifest: value,
     manifestJson: JSON.stringify(value),
-    captures: [{ month: "2099-02", sanitizedHtml: SANITIZED_HTML }],
+    captures: [{ month: "2099-02", page: 1, sanitizedHtml: SANITIZED_HTML }],
     identity: { attemptId: `attempt-${runId}` },
   };
 }

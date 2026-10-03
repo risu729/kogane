@@ -22,7 +22,7 @@
     }
   },
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "globalpass-browser-poc-v2",
+    "COLLECTOR_SCHEMA_VERSION": "globalpass-browser-poc-v3",
     "RELAY_PUBLIC_URL": "wss://kogane-globalpass-collector-poc.takuanimal.workers.dev/tcp"
   },
   "r2_buckets": [

@@ -935,10 +935,11 @@ cron (`17 18 * * *`), unchanged. Terminal source id `prestia-globalpass` (the
 Processor maps it to the CORE source `global-pass`), producer
 `collector-prestia-globalpass`.
 
-| Artifact                  | Role                         | Bytes                                                      |
-| ------------------------- | ---------------------------- | ---------------------------------------------------------- |
-| `activity-<yyyy-mm>.html` | `sanitized_provider_capture` | the page `sanitizeGlobalPassActivityHtml` already produced |
-| `manifest.json`           | `collector_manifest`         | the collector manifest, the bytes legacy mode staged       |
+| Artifact                       | Role                         | Bytes                                                                              |
+| ------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------- |
+| `activity-<yyyy-mm>.html`      | `sanitized_provider_capture` | page 1 of the month, as `sanitizeGlobalPassActivityHtml` produced it               |
+| `activity-<yyyy-mm>-p<n>.html` | `sanitized_provider_capture` | page `n` (2..5) of a walked month, as `sanitizeGlobalPassActivityHtml` produced it |
+| `manifest.json`                | `collector_manifest`         | the collector manifest, the bytes legacy mode staged                               |
 
 - `requestedScope`: `month_range` over the selected months (oldest to newest),
   `unitKeys: ["account"]`. A run whose container never reported its month list
@@ -947,26 +948,43 @@ Processor maps it to the CORE source `global-pass`), producer
   descriptors use, counting the stored pages; `manifest.json` names no unit
   (ADR 0021 — it named the unit without being counted, which CORE refuses at
   the seal with `run_inventory_incomplete`). `ranges`: one `requested` range
-  plus one `declared_coverage` month range per stored page.
-- **Coverage is `partial` even on success, for the run and the unit.** The
-  provider exposes a rolling window of statement months, and the collector
-  keeps only the page a month selection renders (`paginationStatus:
-first_page_only`): the container sends `page.content()` once per month and
-  follows no Next link, while a month with more than ten statements shows
-  `Found N Result [p/Ppage] Back Next` and at most ten statements per page (observed
-  2026-09-27). A page with no pager is not proven to hold the whole month.
-  So a finished run is a claim about persistence, never about the account's
-  history or a whole month. The `partial` unit registers as the unit outcome
-  `partial`, so a successful run is `partial` in `observation_fetch_runs` and
-  `not_eligible` for parse jobs: shared-R2 GLOBAL PASS runs are not parsed
-  ([ADR 0026](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes)).
-- Pages: before sanitizing, the Worker reads `N` and `p/P` from the page's
-  visible text and logs `globalpass-activity-pages` (the month's position in
-  the run, `statedTotal`, `pageIndex`, `pageCount`; never the month or any
-  text). A page stating more than one page is stored if the sanitizer accepts
-  it, and gets the failure `pagination` / `activity_pages_unwalked` (or
-  `activity_pager_unreadable` when its pagers or totals disagree), which makes
-  the run `partial`. Walking Next is not implemented.
+  plus one `declared_coverage` month range per month with a stored page.
+- **The page walk** (`paginationStatus: pages_walked`). After selecting a
+  month, the container reads the top pager (`div.nablarch_paging`) and, while
+  its Next is an enabled `a.nablarch_nextSubmit`, clicks it, waits for the
+  POST to `/p/statementInquiry/RW1313010201`, and checks that the new page
+  states the next index, the same page count and the same total and shows a
+  statement block; a click that produced no POST is retried once, and a
+  failed check throws, which ends the run as a container error. It sends one
+  `{type: "artifact", month, page, pageCount, html}` line per page, page 1
+  first, at most five pages a month (`ACTIVITY_PAGE_CAP`); a month without a
+  pager is one page with `pageCount: 1`. The Worker accepts the pages of a
+  month only as 1..min(`pageCount`, 5) in order, with one `pageCount`, before
+  the next month starts; anything else is `container_contract_invalid`.
+- **Coverage.** The `account` unit is `complete` when the run is `success`,
+  and the run is `success` only when every selected month is proven whole
+  (`monthCoverageCode` in `src/pagination.ts`): either a page with no Found
+  line, no pager and no statement block (an empty month), or pages 1..P all
+  captured, every page stating the same `N` and `P` and its own index, and
+  the statement blocks (two `table.tableStyle4` each) adding up to `N`. A
+  month that is not gets one failure `pagination` / `PaginationError` on its
+  page-1 key: `activity_pages_unwalked` (pages missing, or the five-page cap),
+  `activity_pager_unreadable` (totals, page counts or indexes disagree, or a
+  page shows statements or a Found line without a pager) or
+  `activity_total_mismatch` (blocks do not add up to `N`). The pager is read
+  in English (`Found N Result`, `[p/Ppage]`) and Japanese (「検索結果 N件」,
+  「[p/Pページ]」). The run's own coverage stays `partial`: the provider
+  exposes a rolling window of statement months. A `success` run registers as
+  `success` and its pages are eligible for `global-pass-activity`; any other
+  run is `partial` and `not_eligible`
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)).
+- Logs: before sanitizing, the Worker logs `globalpass-activity-pages` per
+  page (the month's position in the run, the walk's `page` and
+  `walkPageCount`, and the page's `statedTotal`, `pageIndex`, `pageCount`,
+  `statementBlocks`), and `globalpass-activity-coverage` per month
+  (`pagesCaptured`, `walkPageCount`, and `errorCode` when not whole); never
+  the month or any text. A page the sanitizer refuses still counts in its
+  month's decision.
 - Failure entries have the keys `operation`, `errorType`, `errorCode`,
   `artifactKey`, and on a sanitizer refusal also `expectationCode`. A page
   the sanitizer refuses is `sanitization` / `GlobalPassSanitizerError` with

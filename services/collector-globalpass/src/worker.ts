@@ -26,7 +26,12 @@ import {
   type ContainerRecord,
   type StoredArtifact,
 } from "./model";
-import { activityPageState, uncapturedPagesCode } from "./pagination";
+import {
+  ACTIVITY_PAGE_CAP,
+  monthCoverageCode,
+  readActivityPage,
+  type CapturedActivityPage,
+} from "./pagination";
 import {
   globalPassRefusalShape,
   sanitizeGlobalPassActivityHtml,
@@ -300,6 +305,39 @@ async function collectWithContainer(
   let containerErrorSeen = false;
   let streamStarted = false;
   const attemptedMonths = new Set<string>();
+  // The month whose pages are arriving. A month starts with its page 1 and is
+  // decided (`monthCoverageCode`) when the next month starts, the container
+  // reports an error, or the stream ends.
+  let walk:
+    | { month: string; monthIndex: number; pageCount: number; pages: CapturedActivityPage[] }
+    | undefined;
+  const walkFinished = (current: NonNullable<typeof walk>): boolean =>
+    current.pages.length === Math.min(current.pageCount, ACTIVITY_PAGE_CAP);
+  const finishMonth = (): void => {
+    if (!walk) return;
+    const code = monthCoverageCode(walk.pages);
+    // Counts and a closed code only: the month's position, never the month.
+    logEvent(
+      "log",
+      JSON.stringify({
+        event: "globalpass-activity-coverage",
+        runId,
+        monthIndex: walk.monthIndex,
+        pagesCaptured: walk.pages.length,
+        walkPageCount: walk.pageCount,
+        ...(code ? { errorCode: code } : {}),
+      }),
+    );
+    if (code) {
+      failures.push({
+        operation: "pagination",
+        errorType: "PaginationError",
+        errorCode: code,
+        artifactKey: artifactFilename(walk.month),
+      });
+    }
+    walk = undefined;
+  };
   try {
     await diagnostics.step("container-start", () => container.startAndWaitForPorts());
     const response = await diagnostics.step("container-request", async () => {
@@ -355,45 +393,63 @@ async function collectWithContainer(
           errorType: record.errorType,
           errorCode: record.errorCode,
         });
+        // The container stopped; a month it was walking is decided on the
+        // pages it sent, after the container's own failure.
+        finishMonth();
         continue;
       }
       if (!metadataSeen || containerErrorSeen) throw new CollectionContractError();
       const month = safeMonth(record.month);
-      const expectedMonth = selectedMonths[attemptedMonths.size];
-      if (
-        month !== expectedMonth ||
-        !selectedMonths.includes(month) ||
-        attemptedMonths.has(month)
+      if (record.page === 1) {
+        // A new month: the previous one must have sent every page it said it
+        // would walk, and months arrive in selected order, once each.
+        if (walk && !walkFinished(walk)) throw new CollectionContractError();
+        finishMonth();
+        const expectedMonth = selectedMonths[attemptedMonths.size];
+        if (
+          month !== expectedMonth ||
+          !selectedMonths.includes(month) ||
+          attemptedMonths.has(month)
+        ) {
+          throw new CollectionContractError();
+        }
+        attemptedMonths.add(month);
+        walk = {
+          month,
+          monthIndex: attemptedMonths.size - 1,
+          pageCount: record.pageCount,
+          pages: [],
+        };
+      } else if (
+        !walk ||
+        walk.month !== month ||
+        record.page !== walk.pages.length + 1 ||
+        record.pageCount !== walk.pageCount ||
+        record.page > Math.min(walk.pageCount, ACTIVITY_PAGE_CAP)
       ) {
         throw new CollectionContractError();
       }
-      attemptedMonths.add(month);
-      const artifactKey = artifactFilename(month);
-      // Read before sanitizing, so a refused page still says whether it was
-      // one of several. Counts only: the log line carries the month's
-      // position in the run, never the month, and no provider text.
-      const pages = activityPageState(record.html);
-      const pagesCode = uncapturedPagesCode(pages);
+      const artifactKey = artifactFilename(month, record.page);
+      // Read before sanitizing, so a refused page still counts in its month's
+      // decision. Counts only: the log line carries the month's position in
+      // the run and the page's position in the walk, never the month, and no
+      // provider text.
+      const read = readActivityPage(record.html);
+      walk.pages.push({ page: record.page, pageCount: record.pageCount, read });
       logEvent(
         "log",
         JSON.stringify({
           event: "globalpass-activity-pages",
           runId,
-          monthIndex: attemptedMonths.size - 1,
-          statedTotal: pages.statedTotal,
-          pageIndex: pages.pageIndex,
-          pageCount: pages.pageCount,
-          ...(pagesCode ? { errorCode: pagesCode } : {}),
+          monthIndex: walk.monthIndex,
+          page: record.page,
+          walkPageCount: record.pageCount,
+          statedTotal: read.statedTotal,
+          pageIndex: read.pageIndex,
+          pageCount: read.pageCount,
+          statementBlocks: read.statementBlocks,
         }),
       );
-      const pagesFailure: CollectionFailure | undefined = pagesCode
-        ? {
-            operation: "pagination",
-            errorType: "PaginationError",
-            errorCode: pagesCode,
-            artifactKey,
-          }
-        : undefined;
       let sanitizedHtml: string;
       try {
         sanitizedHtml = sanitizeGlobalPassActivityHtml(record.html);
@@ -413,23 +469,22 @@ async function collectWithContainer(
           ),
           ...(expectation ? { expectationCode: expectation } : {}),
         });
-        if (pagesFailure) failures.push(pagesFailure);
         continue;
       }
       try {
         artifacts.push(
           // The manifest entry only: the bytes reach DATA content-addressed
           // when the terminal is written, and nothing is staged.
-          (await describeHtml(prefix, month, sanitizedHtml)).record,
+          (await describeHtml(prefix, month, record.page, sanitizedHtml)).record,
         );
-        captures.push({ month, sanitizedHtml });
+        captures.push({ month, page: record.page, sanitizedHtml });
       } catch (error) {
         failures.push(collectionFailure("r2", error, "artifact_store_failed", artifactKey));
       }
-      // The stored page is page 1 of a longer month: it is kept, but the
-      // month is not captured whole, so the run cannot be `success`.
-      if (pagesFailure) failures.push(pagesFailure);
     }
+    // The stream ended without a container error: the last month must have
+    // sent every page it said it would walk.
+    if (walk && !walkFinished(walk)) throw new CollectionContractError();
   } catch (error) {
     diagnostics.failure("browser-collection", error);
     failures.push(
@@ -440,6 +495,9 @@ async function collectWithContainer(
       ),
     );
   }
+  // A month still open here was cut short by a contract failure; it is
+  // decided on the pages that arrived, after the contract entry.
+  finishMonth();
   if (!metadataSeen && failures.length === 0) {
     failures.push(
       collectionFailure("contract", new CollectionContractError(), "container_contract_invalid"),
@@ -532,6 +590,7 @@ async function collectWithContainer(
 async function describeHtml(
   prefix: string,
   month: string,
+  page: number,
   html: string,
 ): Promise<{
   record: StoredArtifact;
@@ -539,11 +598,12 @@ async function describeHtml(
 }> {
   const body = new TextEncoder().encode(html);
   const sha256 = hex(await crypto.subtle.digest("SHA-256", body));
-  const key = `${prefix}/${artifactFilename(month)}`;
+  const key = `${prefix}/${artifactFilename(month, page)}`;
   return {
     record: {
       dataset: GLOBALPASS_DATASET,
       month,
+      page,
       key,
       mediaType: GLOBALPASS_MEDIA_TYPE,
       bytes: body.byteLength,
@@ -619,13 +679,21 @@ function parseContainerRecord(line: string): ContainerRecord {
   }
   if (
     record["type"] === "artifact" &&
-    exactKeys(record, ["type", "month", "html"]) &&
+    exactKeys(record, ["type", "month", "page", "pageCount", "html"]) &&
     typeof record["month"] === "string" &&
+    Number.isInteger(record["page"]) &&
+    (record["page"] as number) >= 1 &&
+    (record["page"] as number) <= ACTIVITY_PAGE_CAP &&
+    Number.isInteger(record["pageCount"]) &&
+    (record["pageCount"] as number) >= 1 &&
+    (record["pageCount"] as number) <= 9999 &&
     typeof record["html"] === "string"
   ) {
     return {
       type: "artifact",
       month: record["month"],
+      page: record["page"] as number,
+      pageCount: record["pageCount"] as number,
       html: record["html"],
     };
   }

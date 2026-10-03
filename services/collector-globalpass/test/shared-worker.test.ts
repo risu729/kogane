@@ -43,8 +43,8 @@ async function trigger(target: string | undefined) {
       selectedMonths: ["2099-02", "2099-01"],
       browserVersion: "synthetic",
     },
-    { type: "artifact", month: "2099-02", html: fixtureHtml() },
-    { type: "artifact", month: "2099-01", html: fixtureHtml() },
+    { type: "artifact", month: "2099-02", page: 1, pageCount: 1, html: fixtureHtml() },
+    { type: "artifact", month: "2099-01", page: 1, pageCount: 1, html: fixtureHtml() },
   ];
   container = {
     async startAndWaitForPorts() {},
@@ -136,7 +136,9 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
     const read = await readTerminal(data, "prestia-globalpass", String(result.runId));
     if (read.outcome !== "found") throw new Error("unreachable");
     expect(read.manifest.providerOutcome).toBe("success");
+    // The run is a rolling window; the account unit is proven whole.
     expect(read.manifest.coverageStatus).toBe("partial");
+    expect(read.manifest.units.map((unit) => unit.coverageStatus)).toEqual(["complete"]);
     expect(data.putKeys.at(-1)).toBe(terminalKey("prestia-globalpass", String(result.runId)));
     // Both months are in the terminal even though no staging put happened.
     expect(read.manifest.artifacts.map((entry) => entry.artifactKey)).toEqual([

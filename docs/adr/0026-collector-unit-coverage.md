@@ -54,15 +54,15 @@ previous snapshot, a `partial` one may not.
 Checked against each collector's persist path and registered with
 `collector-plans.test.ts` (the run status each successful plan gets):
 
-| Collector                                                                                                 | Unit on success                                                                                                                                                                                                                            | Why that is what the collector captured                                                                      |
-| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| MyJCB                                                                                                     | `complete` (this ADR; was `partial`) when every month is read whole; the menu's schedule pages are outside the coverage (ADR 0005's amendment (c)); a connection stopped at a month is `partial` with its stop code (ADR 0005's amendment) | see below                                                                                                    |
-| GLOBAL PASS                                                                                               | `partial` (unchanged)                                                                                                                                                                                                                      | page 1 per selected month; a month over ten statements has more (amendment of 2026-09-27, `first_page_only`) |
-| Vpass                                                                                                     | `complete` only when each month's captured rows equal the provider's stated total; otherwise `partial` (ADR 0023)                                                                                                                          | see the amendment below                                                                                      |
-| Mizuho                                                                                                    | `partial` when the page shows more history (`history-pagination-unverified`), else `complete`                                                                                                                                              | per page                                                                                                     |
-| Mobile Suica                                                                                              | `complete` only when the collector proved it reached the end of the history                                                                                                                                                                | per run                                                                                                      |
-| Money Forward ME, Sony Bank, SBI Securities, SBI Shinsei, SBI VC Trade, SMBC Direct, V Point, V Point Pay | `complete`                                                                                                                                                                                                                                 | the collector's own run status                                                                               |
-| St. George                                                                                                | no units                                                                                                                                                                                                                                   | the run status alone                                                                                         |
+| Collector                                                                                                 | Unit on success                                                                                                                                                                                                                            | Why that is what the collector captured                             |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| MyJCB                                                                                                     | `complete` (this ADR; was `partial`) when every month is read whole; the menu's schedule pages are outside the coverage (ADR 0005's amendment (c)); a connection stopped at a month is `partial` with its stop code (ADR 0005's amendment) | see below                                                           |
+| GLOBAL PASS                                                                                               | `complete` only when every selected month is proven whole against the pager's stated total; otherwise `partial` (amendment of 2026-10-04; was `partial` on every run)                                                                      | every page of each selected month, walked (amendment of 2026-10-04) |
+| Vpass                                                                                                     | `complete` only when each month's captured rows equal the provider's stated total; otherwise `partial` (ADR 0023)                                                                                                                          | see the amendment below                                             |
+| Mizuho                                                                                                    | `partial` when the page shows more history (`history-pagination-unverified`), else `complete`                                                                                                                                              | per page                                                            |
+| Mobile Suica                                                                                              | `complete` only when the collector proved it reached the end of the history                                                                                                                                                                | per run                                                             |
+| Money Forward ME, Sony Bank, SBI Securities, SBI Shinsei, SBI VC Trade, SMBC Direct, V Point, V Point Pay | `complete`                                                                                                                                                                                                                                 | the collector's own run status                                      |
+| St. George                                                                                                | no units                                                                                                                                                                                                                                   | the run status alone                                                |
 
 For MyJCB, a connection's `success` means the collector enumerated the
 credit months from the credit menu and the past-months response and kept,
@@ -170,7 +170,8 @@ eligibility rules and registration are unchanged.
   later capture (cancelled, or changed before it was confirmed) is in no
   parsed run. Until the first eligible run, the importer's MyJCB captures
   stay current (ADR 0014, merge safety).
-- **GLOBAL PASS shared runs are not parsed.** A successful run registers as
+- **GLOBAL PASS shared runs are not parsed** (lifted by the amendment of
+  2026-10-04 below, for runs whose months are proven whole). A successful run registers as
   `partial` and is `not_eligible`, as MyJCB's were. Lifting that needs
   evidence that one activity page holds a whole month (a pager that was
   never there, or the owner's confirmation), recorded in the source note,
@@ -243,7 +244,9 @@ exact counts; the walk's stops and what stays unobserved are in
 
 ## Amendment 2026-09-27: GLOBAL PASS pagination observed; sanitizer refusals get closed codes
 
-- Status: proposed; accepted when #281 merges
+- Status: proposed; accepted when #281 merges. Its page-1-only decision, and
+  its note that a month of ten or fewer shows no pager, are superseded by the
+  [amendment of 2026-10-04](#amendment-2026-10-04-global-pass-walks-every-page-of-a-month).
 - Date: 2026-09-27
 - Carried by: `services/collector-globalpass/src/sanitize.ts`
   (`GlobalPassSanitizerError`, `GLOBALPASS_SANITIZER_CODES`),
@@ -675,3 +678,225 @@ count, and form count matched.
   (reproducing the English page's refusal); on this change they pass.
 - No production data was read for this amendment; the survey's labels and
   counts come from the owner.
+
+## Amendment 2026-10-04: GLOBAL PASS walks every page of a month
+
+- Status: proposed; accepted when #408 merges
+- Date: 2026-10-04
+- Carried by: `services/collector-globalpass/container/server.mjs`
+  (`walkActivityPages`, `clickActivityNext`, `readActivityPager`,
+  `ACTIVITY_PAGE_CAP`), `services/collector-globalpass/src/pagination.ts`
+  (`readActivityPage`, `monthCoverageCode`, `ACTIVITY_PAGE_CAP`),
+  `services/collector-globalpass/src/worker.ts`,
+  `services/collector-globalpass/src/model.ts` (`artifactFilename`,
+  `GLOBALPASS_PAGINATION_STATUS`, `GLOBALPASS_SCHEMA_VERSION`),
+  `services/collector-globalpass/src/shared-collection.ts` (`sharedOutcome`),
+  `packages/application/src/collection/descriptors.ts`,
+  `packages/parsers/src/parsers/global-pass-activity.ts` (1.1.0),
+  `packages/read-model/src/sql.ts` (`GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES`),
+  [collection: GLOBAL PASS](../collection.md#prestia-globalpass-kogane-globalpass-collector-poc),
+  [PRESTIA / GLOBAL PASS source note](../sources/prestia.md#global-pass-pager-and-page-walk-2026-10-04),
+  [observations](../observations.md#global-pass-walked-months-and-page-qualified-external-ids-activity-parser-110),
+  [read model](../read-model.md#card-snapshot-currentness-and-current-card-usage),
+  the tests listed under Verification
+
+### Context
+
+After the English pages were admitted (amendment of 2026-09-29), production
+fetch_run 903 (2026-09-29) stored both selected months' activity pages, and
+its account unit ended `failed` with `activity_pages_unwalked`: one month had
+a second page the collector never read. Every GLOBAL PASS run so far is
+`partial`, so `globalpass-activity` has never been parsed from a shared run.
+
+The amendment of 2026-09-27 left walking Next undone because the pager's
+markup was unreviewed and guessed selectors would be provider semantics
+nobody observed ([ADR 0004](0004-payment-type-shapes-from-evidence.md)). On
+2026-10-04 the owner observed the pager on the live site, in English and
+then in Japanese (structure, counts, fixed labels and booleans only; the
+source note has the detail):
+
+- Month selection, Next and Back are full-page POSTs to the same path,
+  `/p/statementInquiry/RW1313010201`, all inside `form nablarch_form5`
+  (post, no action; hidden `nablarch_hidden` and `nablarch_submit` only).
+- Each page has two identical pagers, `div.nablarch_paging` with
+  `div.resultCountHeader` (`Found N Result` / 「検索結果 N件」),
+  `div.nablarch_currentPageNumber` (`[p/Ppage]` / 「[p/Pページ]」),
+  `div.nablarch_prevSubmit` and `div.nablarch_nextSubmit`. An enabled Next is
+  `a.nablarch_nextSubmit` (attributes `class`, `name`, `href`, `onclick`,
+  `tabindex`; `onclick` `return window.nablarch_submit(event, this);`); a
+  disabled one is plain text. The markup is the same in both languages.
+- A two-page month: page 1 `[1/2page]` with ten statement blocks
+  (`table.tableStyle4` ×20), page 2 `[2/2page]` with six (×12), the same N on
+  both, 10 + 6 = N, the same title, headings and table labels. Back returns
+  to page 1. Switching month resets the pager to page 1.
+- A month of ten or fewer shows `[1/1page]` with both links disabled (the
+  2026-09-27 survey said it shows no pager; it was wrong). A month with no
+  statement shows no Found line, no pager and no table.
+- A first click on Next that did not navigate was seen once with a browser
+  extension's coordinate click; with in-page click events Next and Back
+  navigated on the first click every time. It is not site behaviour.
+
+### Options considered
+
+1. **Join a month's pages into one artifact.** One key per month and an
+   unchanged parser, but the stored bytes would no longer be a provider
+   capture: the sanitizer's reviewed page shape is one document, and a joined
+   document is something the provider never sent.
+2. **Qualify every page's key** (`activity-YYYY-MM-p1.html`, …). Uniform, but
+   every stored run, the parser's key check, the registration descriptor and
+   the ledgers name `activity-YYYY-MM.html`; page 1 would change identity for
+   no gain.
+3. **Page 1 keeps its key; later pages are page-qualified; the Worker proves
+   each month whole against the pager's stated total; the unit is `complete`
+   only then.** **Chosen.**
+4. **Walk the pages but keep the unit `partial`.** Safe, but nothing would
+   ever be parsed, which is the blocker this amendment exists to lift, and
+   the stated total now gives the proof that amendment asked for.
+
+### Decision
+
+**Option 3.**
+
+- **Walk.** After selecting a month, the container reads the top pager. While
+  its Next is an enabled `a.nablarch_nextSubmit`, it clicks it, waits for a
+  POST to the activity path on `www.debit.vpass.ne.jp` (the same
+  `waitForResponse` pattern month selection uses), waits for
+  `domcontentloaded` and for the pager to show the next index, and checks
+  that the page states the previous index plus one, the same page count, the
+  same total and at least one statement block; otherwise it throws, which
+  ends the run as a container error. A click that produced no POST within ten
+  seconds is retried once, as plain robustness. It sends one
+  `{type: "artifact", month, page, pageCount, html}` line per page, page 1
+  first, with the existing 2 MiB limit per page. A month without a pager is
+  one page with `pageCount: 1`.
+- **Cap.** At most **five pages** a month (`ACTIVITY_PAGE_CAP`, the same
+  number in the container and the Worker): fifty statements, where the
+  largest month seen stated 20. A month stating more is sent as its first five
+  pages and is `activity_pages_unwalked`.
+- **Stream contract** (`globalpass-browser-poc-v3`). The Worker accepts a
+  month's pages only as 1..min(`pageCount`, 5) in order, with one
+  `pageCount`, and the next month only after the last of them; anything else
+  is `container_contract_invalid`. A container error may cut a month short;
+  that month is decided on the pages it sent.
+- **Keys.** Page 1 is `activity-YYYY-MM.html` as before; page N is
+  `activity-YYYY-MM-pN.html`. The registration descriptor maps
+  `activity-YYYY-MM-p[2-9].html` to `globalpass-activity`; `-p1` and
+  two-digit pages stay unmapped.
+- **Coverage rule.** A month is proven whole only in one of the two observed
+  shapes: (a) one page with no Found line, no pager and no statement block;
+  (b) every page states the same `N` and `P` and its own index (equal to its
+  walk position), pages 1..P are all captured, and the statement blocks (two
+  `table.tableStyle4` each) across the pages add up to `N`. The pager is read
+  in English and Japanese. Otherwise the month gets one failure `pagination`
+  / `PaginationError` on its page-1 key: `activity_pages_unwalked` (pages
+  missing), `activity_pager_unreadable` (conflicting or missing pager text,
+  or a page index, page count or total that disagrees) or the new
+  `activity_total_mismatch` (blocks do not add up to `N`). A page the
+  sanitizer refuses is not stored and keeps its own failure; its counts
+  still enter its month's decision.
+- **Unit.** The run is `success` only when every selected month is stored
+  and proven whole and nothing failed; then the `account` unit is
+  `complete`. The run's own coverage stays `partial` (a rolling window). The
+  manifest's `paginationStatus` is `pages_walked` (was `first_page_only`), and
+  each manifest artifact names its `page`.
+- **Logs.** `globalpass-activity-pages` per page (month position, walk page
+  and page count, the page's stated total, index, page count and block
+  count) and `globalpass-activity-coverage` per month (pages captured, walk
+  page count, the closed code when not whole). Counts and closed codes only.
+- **Parser** `global-pass-activity@1.1.0`. Accepts both key forms, requires
+  the key's month to be the selected month and the page's pager to name the
+  key's page (a later page must show one). Page 1 is read exactly as in
+  1.0.0. A later page names its page in the external id
+  (`global-pass:<fingerprint>:pN:<occurrence>`), the raw locator
+  (`html:activity-page=N;activity-record=M`) and `_kogane.identityOrigin`,
+  so identical rows on two pages of a month never share an id (INV06), as
+  Vpass 1.2.0 does.
+- **Currentness.** The Transactions read takes, per source and month, the
+  newest run whose activity pages of that month all have an active parse,
+  and all its pages, instead of ranking each key alone. Otherwise a page a
+  newer run no longer shows would stay current beside the newer page 1 that
+  shows its rows again. A run with any page of the month unparsed (pending
+  or failed) is passed over for that month as a whole: the month shows the
+  newest earlier whole snapshot, or nothing while no run qualifies.
+
+### Consequences
+
+- The first nightly run after deploy whose two months are proven whole
+  registers `success`; its pages get `global-pass-activity@1.1.0` jobs. That
+  is the first GLOBAL PASS shared run ever parsed, so the parser's table model
+  meets the production month page for the first time there: a mismatch fails
+  the parse visibly and keeps the evidence (the 2026-09-08 investigation in
+  the observations doc found importer-era pages the parser refuses).
+- A month that is not proven whole makes the run `partial` and
+  `not_eligible`, as before, with a code that says why.
+- Importer-era GLOBAL PASS artifacts are re-read under 1.1.0 with the same
+  output (all are page-1 keys). No migration is needed: no `active_releases`
+  row names the dataset, and maintenance registers the release.
+- The terminal's `declared_coverage` range is one per month with a stored
+  page, as before per stored page; nothing reads it for eligibility.
+- **Limits.**
+  - No run has walked a page; the walk is exercised on synthetic pages only.
+    Whether `page.content()` after a Next POST equals the surveyed DOM, and
+    whether page 2 passes the sanitizer (its form and hidden-input counts
+    were not reported), is shown by the first run.
+  - The Japanese display was observed live only. The container and the
+    Worker read the Japanese pager, and the sanitizer accepts the Japanese
+    title and labels (synthetic test), but the parser reads only English table
+    labels, so a Japanese page would be stored and fail its parse. The display
+    language follows a browser cookie (`set_language()`); `engUseFlg` is `1`
+    in both. Whether the server also stores it is not verified; the collector
+    logs in with a fresh browser each run and sets no cookie.
+  - Whether a page 2 keeps the month selected in its month select is not in
+    the report; the parser requires it and fails the page otherwise.
+  - The walk cap is five pages.
+  - Which page a row lands on when statements are added or removed between
+    two runs has not been observed. An id that names its page moves with the
+    page; no row is lost or merged, and the month's snapshot is replaced
+    whole.
+  - A month whose page states a total but no pager, or statements without a
+    pager, is refused as unreadable: neither shape was observed.
+
+### Verification
+
+- `services/collector-globalpass/test/pagination.test.ts`: both languages'
+  totals and pagers, conflicts within a page, script/style/comment text
+  ignored, block counting, and the coverage rule: a two-page month walked
+  whole (English and Japanese), a `[1/1page]` month, the empty month, pages
+  missing, N differing between pages, blocks not adding up, pages out of
+  order or repeated, a container page count that disagrees.
+- `services/collector-globalpass/test/worker-collection.test.ts`: through the
+  Worker from a synthetic container stream in the observed Nablarch shape
+  (pager links that pass the sanitizer): a two-page month plus an empty month
+  is `success` with keys `activity-2099-02.html`, `activity-2099-02-p2.html`,
+  `activity-2099-01.html` and a `complete` unit (both languages); a stop
+  after page 1, the five-page cap, N differing, blocks not adding up and a
+  non-advancing page give their codes; a refused page 2; ten out-of-order or
+  malformed page streams are `container_contract_invalid`; the log lines
+  carry no month, page text or label.
+- `services/collector-globalpass/test/shared-collection.test.ts`,
+  `test/shared-worker.test.ts`, `test/model.test.ts`: the unit is `complete`
+  on success and the run `partial`; a walked month's pages are separate
+  artifacts with one month range; key scheme and page order.
+- `services/collector-globalpass/test/sanitize.test.ts`: a Japanese month page
+  with the twelve Japanese labels, both line-break notations and the Japanese
+  pager passes the sanitizer.
+- `packages/parsers/test/global-pass-parser.test.ts`: page 1 output unchanged
+  with or without a pager; page 2 ids and locators qualified (both
+  languages); key, pager and month mismatches refused; the observed English
+  label set in both notations parses.
+- `packages/read-model/test/global-pass-snapshots.test.ts`: identical to a
+  frozen copy of the per-key ranking on single-page stores (hand-built and 40
+  random) and on a scaled store with the complete CORE schema and no table
+  statistics, where walked months also match an independently written model;
+  a walked month's pages current together; a page a newer run no longer shows
+  is not current; a newer run with an unparsed page keeps the older whole
+  month; the Transactions plan reads the artifacts once, as the per-key
+  ranking did, and reaches each run's pages through
+  `idx_fetch_artifacts_run_role`.
+- `services/processor/test/collector-plans.test.ts`: the collector's real
+  plan for a walked two-page month plus an empty month registers `success`
+  with every page in `globalpass-activity`; the last case lists
+  `prestia-globalpass` as `success`. `scripts/artifact-datasets.test.ts`
+  covers the page-qualified key.
+- Production was read only through the owner's report (counts, shapes and
+  fixed labels); no value appears here.

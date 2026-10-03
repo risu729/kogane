@@ -188,4 +188,92 @@ describe("global-pass-activity", () => {
       ),
     ).toThrow(/cardinality/u);
   });
+
+  // A walked month (ADR 0026's amendment of 2026-10-04): page 1 keeps its
+  // key and every 1.0.0 output; page 2 onward is `activity-YYYY-MM-pN.html`
+  // and names its page in the external id and the raw locator. The pager is
+  // the observed `div.nablarch_currentPageNumber`, in English or Japanese.
+  const withPager = (label: string) =>
+    mutate(
+      "<h1>ご利用明細</h1>",
+      `<h1>ご利用明細</h1><div class="nablarch_paging"><div class="nablarch_currentPageNumber">${label}</div></div>` +
+        `<div class="nablarch_paging"><div class="nablarch_currentPageNumber">${label}</div></div>`,
+    );
+
+  test("page 1 is read exactly as before, with or without its pager", () => {
+    const plain = globalPassActivity.parse(bytes(), meta());
+    expect(globalPassActivity.parse(withPager("[1/2page]"), meta())).toEqual(plain);
+    expect(globalPassActivity.parse(withPager("[1/1ページ]"), meta())).toEqual(plain);
+    const first = plain.observations[0]!;
+    expect(first.kind === "transaction" && first.externalId).toMatch(/^global-pass:[^:]+:0$/u);
+    expect(first.rawLocator).toBe("html:activity-record=1");
+  });
+
+  test("a later page qualifies its external id and locator by its page", () => {
+    const pageOne = globalPassActivity.parse(withPager("[1/2page]"), meta()).observations[0]!;
+    for (const label of ["[2/2page]", "[2/2ページ]"]) {
+      const pageTwo = globalPassActivity.parse(
+        withPager(label),
+        meta({ artifactKey: "activity-2099-02-p2.html" }),
+      ).observations[0]!;
+      if (pageOne.kind !== "transaction" || pageTwo.kind !== "transaction") {
+        throw new Error("unreachable");
+      }
+      // The same provider row on another page is another row: its id differs
+      // only by the page segment, so nothing is counted twice or merged.
+      expect(pageTwo.externalId).toBe(pageOne.externalId!.replace(/:0$/u, ":p2:0"));
+      expect(pageTwo.rawLocator).toBe("html:activity-page=2;activity-record=1");
+      expect(pageTwo.extra).toMatchObject({
+        _kogane: {
+          identityOrigin: "all-provider-fields+page+occurrence",
+          selectedMonth: "2099-02",
+        },
+      });
+      expect({ ...pageTwo, externalId: "", rawLocator: "", extra: {} }).toEqual({
+        ...pageOne,
+        externalId: "",
+        rawLocator: "",
+        extra: {},
+      });
+    }
+  });
+
+  test("the key, the pager and the selected month must agree", () => {
+    const p2 = meta({ artifactKey: "activity-2099-02-p2.html" });
+    // A later page without a pager, or naming another page.
+    expect(() => globalPassActivity.parse(bytes(), p2)).toThrow(/no pager/u);
+    expect(() => globalPassActivity.parse(withPager("[1/2page]"), p2)).toThrow(/different pages/u);
+    expect(() => globalPassActivity.parse(withPager("[2/2page]"), meta())).toThrow(
+      /different pages/u,
+    );
+    expect(() => globalPassActivity.parse(withPager("2/2"), meta())).toThrow(/unreadable/u);
+    // Keys outside the scheme: page 1 is never qualified, at most page 9.
+    for (const artifactKey of [
+      "activity-2099-02-p1.html",
+      "activity-2099-02-p10.html",
+      "activity-2099-01-p2.html",
+      "activity-2099-02-p2.htm",
+    ]) {
+      expect(() => globalPassActivity.parse(withPager("[2/2page]"), meta({ artifactKey }))).toThrow(
+        /artifact key and selected month/u,
+      );
+    }
+  });
+
+  test("reads the observed English table labels in both line-break notations", () => {
+    // The live English month page (2026-10-04) states twelve labels; the same
+    // label may be written with or without a line break inside it.
+    const live = bytes()
+      .toString("utf8")
+      .replace(
+        /<th>Transaction Date<\/th>[\s\S]*?<th>Funded Currency and Amount<\/th>\n<\/tr><\/thead><tbody>\n<tr><td>2099/u,
+        "<th>Transaction<br>Date</th><th>Transaction Detail</th><th>Transaction Currency<br>and Amount</th>" +
+          "<th>Transaction Fee</th><th>ATM Fee</th><th>FX commissions</th><th>Status</th><th>Approval Number</th>" +
+          "<th>Remarks</th><th>Local Currency and Amount</th><th>Local Fee</th><th>Applicable Rate</th>\n</tr></thead><tbody>\n<tr><td>2099",
+      );
+    expect(live).toContain("FX commissions");
+    expect(
+      globalPassActivity.parse(new TextEncoder().encode(live), meta()).observations,
+    ).toHaveLength(1);
+  });
 });

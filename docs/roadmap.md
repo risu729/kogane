@@ -252,19 +252,20 @@ Concrete limits in the current code:
   non-success unit is `not_eligible` for parse jobs. Terminals are immutable
   and the eligibility rule is not loosened, so the confirmed statements of
   those days come back with the next successful run, while pending-only rows
-  that disappeared before it are lost. GLOBAL PASS's successful runs are
-  `partial` the same way and are not parsed: its collector stores only the
-  first page of a month and follows no Next link, while a month with more
-  than ten statements is observed to have a second page; such a month is
-  marked `activity_pages_unwalked`. Walking the pages is not implemented. No
-  GLOBAL PASS run has stored a page since at least the week before
-  2026-09-27: the sanitizer refused every page, and still does
-  (`globalpass_html_contract_invalid` every night since the code was
-  recorded, ADR 0026's amendment of 2026-09-27). A refusal now also logs
-  which expectation failed and a counts-only shape of the page
-  ([ADR 0026 amendment of 2026-09-28](adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape));
-  the next step is reading that shape from the next night's log and
-  correcting the contract from it. A Vpass card run is `partial` the same
+  that disappeared before it are lost. GLOBAL PASS's runs so far are all
+  `partial` and none has been parsed: since the English pages were admitted
+  (2026-09-29) the pages are stored, but the collector kept only page 1 of a
+  month and production marked a two-page month `activity_pages_unwalked`.
+  The collector now walks every page of a month (at most five) and stores
+  page N as `activity-YYYY-MM-pN.html`; a run whose every selected month is
+  proven whole against the pager's stated total registers `success` and is
+  parsed by `global-pass-activity@1.1.0`
+  ([ADR 0026 amendment of 2026-10-04](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)).
+  Open limits: no run has walked a page yet, so the walk is proven on
+  synthetic pages only; the Japanese display was observed live but the
+  parser reads only English table labels; whether the parser's table model
+  matches the production page has not been shown (no shared run has been
+  parsed). A Vpass card run is `partial` the same
   way unless every month's captured rows equal the provider's stated total
   (ADR 0026's amendment). Both stated totals were seen on the live site
   (`allCnt` a string, `total` a number) and are read as exact counts, but the
