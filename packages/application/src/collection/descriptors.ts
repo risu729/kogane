@@ -248,8 +248,11 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
     },
   ],
   "prestia-globalpass": [
+    // A month's page 1 is `activity-YYYY-MM.html`; the pages the collector
+    // walks after it are `activity-YYYY-MM-pN.html` (ADR 0026's amendment of
+    // 2026-10-04).
     {
-      key: /^activity-\d{4}-\d{2}\.html$/u,
+      key: /^activity-\d{4}-\d{2}(?:-p[2-9])?\.html$/u,
       role: "sanitized_provider_capture",
       mediaTypes: HTML_TYPE,
       dataset: "globalpass-activity",
