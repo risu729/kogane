@@ -16,6 +16,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "5b40a5fb92a270668fbc3e9053e84af0d990c16d5873934e125b1e9822aa4fc9",
     "packages/domain/src/myjcb-amounts.ts":
       "072dc5fc2570fc8257343d85d53e93cf9fa9036f61a1648390a8d8845303ea3e",
+    "packages/domain/src/myjcb-schedule-page-kind.ts":
+      "89fba9fd5860dbabc0c1e15e97a5318bb69e8d0ecd6409c504e7c73d25e0f3d1",
     "packages/domain/src/myjcb-skip-payment-schedule.ts":
       "5eb00bc2a0d0921c794d21914e7a199060a867f62646bfdc33b17ff5f1551265",
     "packages/domain/src/myjcb-statement-heading.ts":
@@ -49,7 +51,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
       "d0699817ff34ab5876b9b1d206de30a54b8fa2f61feb8193d9ab389e1392611a",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
-      "030ff3acc9e5c05b351066a94077c5edc57e5faa706c19ff4995bcdde2a975ed",
+      "b81d524f718ec291ef91b1056264762d6608467e7a4acee70b094cdd80671ad4",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
       "a89829e4856c7baa3abcda2e25762b7debf4a22fddc777756adb920ed8951621",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
@@ -198,12 +200,14 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-canonical-evidence-boundary": {
-      version: "1.1.4",
-      codeDigest: "f88edc6ebd1a46f91cc55eb1389165c9119466dc2a79b4145916ef3790287b12",
+      version: "1.1.5",
+      codeDigest: "ea14fd6c5c035bc1a4af959b51c91b8e14184fcf5ee2f8b5da458b3e03f5f070",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-schedule-page-kind.ts",
+        "packages/domain/src/myjcb-skip-payment-schedule.ts",
         "packages/domain/src/myjcb-statement-heading.ts",
         "packages/domain/src/myjcb-statement-page.ts",
         "packages/domain/src/time.ts",
@@ -217,12 +221,14 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-ledger": {
-      version: "1.2.1",
-      codeDigest: "f88edc6ebd1a46f91cc55eb1389165c9119466dc2a79b4145916ef3790287b12",
+      version: "1.2.2",
+      codeDigest: "ea14fd6c5c035bc1a4af959b51c91b8e14184fcf5ee2f8b5da458b3e03f5f070",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-schedule-page-kind.ts",
+        "packages/domain/src/myjcb-skip-payment-schedule.ts",
         "packages/domain/src/myjcb-statement-heading.ts",
         "packages/domain/src/myjcb-statement-page.ts",
         "packages/domain/src/time.ts",
@@ -236,12 +242,14 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-past-month-balances": {
-      version: "1.1.4",
-      codeDigest: "f88edc6ebd1a46f91cc55eb1389165c9119466dc2a79b4145916ef3790287b12",
+      version: "1.1.5",
+      codeDigest: "ea14fd6c5c035bc1a4af959b51c91b8e14184fcf5ee2f8b5da458b3e03f5f070",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-schedule-page-kind.ts",
+        "packages/domain/src/myjcb-skip-payment-schedule.ts",
         "packages/domain/src/myjcb-statement-heading.ts",
         "packages/domain/src/myjcb-statement-page.ts",
         "packages/domain/src/time.ts",
@@ -255,12 +263,14 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-statement-total": {
-      version: "1.3.0",
-      codeDigest: "f88edc6ebd1a46f91cc55eb1389165c9119466dc2a79b4145916ef3790287b12",
+      version: "1.4.0",
+      codeDigest: "ea14fd6c5c035bc1a4af959b51c91b8e14184fcf5ee2f8b5da458b3e03f5f070",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-schedule-page-kind.ts",
+        "packages/domain/src/myjcb-skip-payment-schedule.ts",
         "packages/domain/src/myjcb-statement-heading.ts",
         "packages/domain/src/myjcb-statement-page.ts",
         "packages/domain/src/time.ts",
