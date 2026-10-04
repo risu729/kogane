@@ -5,10 +5,11 @@ not.** The next objective is to turn collected provider displays into connected
 transactions, explainable assets and liabilities, valuations, and eventually
 cost basis, P&L and tax outputs.
 
-This status was updated with the card purchase recognition slice on 2026-09-24.
-It distinguishes implemented contracts and calculation components from a feature
-that works with real inputs through its user interface. It is a repository
-assessment, not a new production acceptance run. Historical infrastructure
+The code status was reviewed on 2026-10-04. It distinguishes implemented
+contracts and calculation components from a feature that works with real inputs
+through its user interface. This is a repository assessment, not a new production
+acceptance run. Dated production observations below describe those observations,
+not a fresh measurement of the deployed system. Historical infrastructure
 completion evidence belongs in [legacy retirement](legacy-retirement.md) and
 the relevant rollout records.
 
@@ -48,23 +49,27 @@ Concrete limits in the current code:
   since U09 (counted on 2026-09-26) stay blocked (a block is write-once), and
   re-registering them under a new registration contract version refuses the
   same bytes again: nothing makes them registrable. The 14 sbi-vc-trade runs
-  keep their catalogued artifacts unsealed and are tried again whenever the
-  scan reaches them, because a seal-trigger refusal is rethrown rather than
-  classified as a block
-  ([processor §3](processor.md#3-idempotency-and-what-blocks)); recording it as
-  a block is a Processor follow-up.
+  observed at that time had catalogued but unsealed artifacts. The Processor
+  now classifies known permanent seal-trigger refusals as a recorded block,
+  retaining the unsealed run reference; unrelated errors remain retryable.
+  Repeated scans can answer the recorded verdict rather than retry the same
+  immutable terminal under the same registration contract
+  ([processor §3](processor.md#3-idempotency-and-what-blocks),
+  [seal refusal handling](../packages/application/src/collection/register-terminal.ts)).
+  This describes the implemented handling, not a new count of historic blocks.
 
 - [Card settlement review](card-settlements.md) now connects authoritative
   Vpass/MyJCB statement totals to SMBC and SBI Shinsei bank debits
   ([bank adapters](card-settlements.md#bank-adapters)) through explicit
   operator decisions. Unknown ownership, stale evidence and occupied
-  allocations block acceptance. Production holds no published SBI Shinsei
-  transaction yet: 0.1.1 rejected every stored activity capture because the
-  provider leaves the window's end empty. 0.1.2 accepts that shape and records
-  the end as not stated
-  ([ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)); until the
-  repair lane has re-parsed the stored captures after deploy, the adapter
-  admits nothing. The SBI Shinsei exchange-rate board is parsed from 1.0.2
+  allocations block acceptance. The production investigation recorded in
+  [ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md) found no published
+  SBI Shinsei transactions at that time: 0.1.1 rejected the stored activity
+  captures because the provider leaves the window's end empty. Version 0.1.2
+  accepts that shape and records the end as not stated. Admission requires
+  those captures to be successfully re-parsed and published after deploy;
+  the current production publication count has not been re-measured here.
+  The SBI Shinsei exchange-rate board is parsed from 1.0.2
   (1.0.1 assumed digits where the stored time ends in two letters and matched
   no board; migration 0059), every `customerCategory` tier kept. A board
   row of the 13 currencies the provider's public pages quote per 1 unit is
@@ -82,12 +87,20 @@ Concrete limits in the current code:
   digits) is read from stored pages into `card_debit_account_statement` and
   attached to MyJCB candidates as proposal-only evidence
   ([ADR 0032](adr/0032-provider-stated-debit-accounts.md), 2026-09-27
-  amendment). Limits: the evidence is not shown on the review page yet;
-  branch names are not compared (no bank reference carries one); SMBC's
-  account reference carries no digits and SBI Shinsei's layout is unverified,
-  so neither adapter bank can be matched; Mizuho is comparable but not an
-  adapter; and no Vpass statement API carries a debit account (observed
-  absent), so Vpass candidates keep amount and date only.
+  amendment). [ADR 0034](adr/0034-card-settlement-automation-prerequisites.md)
+  adds authenticated request context to new SMBC normalized artifacts; parser
+  1.1.0 retains it without changing the legacy source-account identifier.
+  Debit-account policy v3 can compare a candidate only using that debit's own
+  published context. Old captures cannot acquire missing digits from a newer
+  balance or another run, and agreement remains proposal-only evidence, not
+  ownership or acceptance. Remaining rollout requires a new authenticated
+  capture, verified retained context and effective account/ownership scope.
+  The pure automation evaluator and aggregate shadow command are implemented;
+  the production acceptance adapter/lane is not connected. Limits: the
+  evidence is not shown on the review page yet; branch names are not compared;
+  SBI Shinsei's identifier layout remains unverified; Mizuho is comparable but
+  not an adapter; and the observed Vpass statement API supplies no debit
+  account, so Vpass candidates keep amount and date only.
 - Vpass and MyJCB pending-to-posted candidates come from the purchase lane's
   [candidate pass](economic-events.md#pending-to-posted-links), which pairs one
   recognised pending event with one posted event per purchase; every pair
@@ -104,8 +117,12 @@ Concrete limits in the current code:
   published capture, proposed one candidate per capture pair and skipped every
   statement month with more than 200 published rows
   ([where stage B runs](economic-events.md#matching-stages)). Stage A needs a
-  provider-issued row id, which neither source supplies, so the lane reads its
-  pages and proposes nothing until a source does. The collector records a
+  provider-issued row id, which the deployed parsers do not supply. Its page
+  query now starts from an index of stored provider-origin identifiers, so an
+  empty eligible set does not scan every fingerprint row. Historical, custom
+  and future provider-origin evidence still runs through the same matcher;
+  stage B remains unchanged ([ADR 0037](adr/0037-reconciliation-purchase-cost.md)).
+  The collector records a
   confirmed MyJCB page by the payment month the page names, so a statement
   keeps its rows' keys while its position moves
   ([release note](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release));
@@ -127,7 +144,12 @@ Concrete limits in the current code:
   rows are worked through in bounded five-minute ticks: at most 100 events
   retired and at most 200 guarded recognition writes, so at most 300 event
   mutations per tick, plus the candidate pass's one proposal batch and at most
-  20 provider-linked merges). Installment, revolving and bonus rows, amountless
+  20 provider-linked merges). An unchanged-input proof can skip the retirement
+  query after an empty result; input or recognition changes invalidate it,
+  and nonempty, failed or deferred work remains eligible for another attempt.
+  Recognition and candidate processing still run
+  ([ADR 0037](adr/0037-reconciliation-purchase-cost.md)).
+  Installment, revolving and bonus rows, amountless
   rows and rows without a stable card identity are excluded, and so is every
   Vpass web payment-type code but `1` until an installment row shows what the
   others mean, and every Vpass customized `bunkatsuYaku` but `0` (the only
@@ -597,16 +619,20 @@ or confirmation. A stored row or HTTP 200 alone is insufficient.
 Contracts: [agent API](agent-api.md), [operations API](ops-api.md),
 [frontend](frontend.md), [website data boundaries](website-data-boundaries.md).
 
-## Small independent follow-up — Rollback compatibility
+## Completed infrastructure guard — Rollback compatibility
 
-After [legacy retirement](legacy-retirement.md), releases depending on removed
-Workers, buckets or CORE projections are invalid rollback targets. Add a
-machine-enforced minimum compatible release/resource-schema check before upload;
-migration filename/digest prefix compatibility alone does not establish this.
+The trusted [deployment workflow](../.github/workflows/_deploy-workers.yml)
+checks the production compatibility floor introduced by #207 before target
+code is checked out, production credentials are used or a Worker is uploaded. It applies
+both to releases and to every rollback subset. An ancestor predating the
+CORE/ingestion and public-demo retirements cannot pass by carrying its own
+older workflow; [guard tests](../tasks/_lib/rollback-floor.test.ts) cover the
+floor, compatible descendants and incompatible targets.
 
-**Done when:** an incompatible pre-retirement target is rejected before any
-Worker upload and a compatible target passes the gate. Keep this work bounded
-and independent of the main financial milestone.
+This guard is implemented. Future incompatible resource retirements must
+advance the floor and its tests. A code rollback still does not undo database
+migrations, stored evidence or recorded decisions
+([rollout](rollout.md), [legacy retirement](legacy-retirement.md)).
 
 ## Historical MVP boundary
 
