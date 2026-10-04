@@ -1,6 +1,6 @@
 # ADR 0033: Avoid repeated historical reads in processor maintenance
 
-- Status: proposed
+- Status: proposed until this PR merges; accepted upon merge
 - Date: 2026-10-04
 
 ## Context
