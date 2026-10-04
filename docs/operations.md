@@ -31,7 +31,7 @@ Layer A through to the read model, not just "no failed jobs".
 | Raw integrity verification result                   | raw-evidence verification tables                                                                        | Not summarised on `/status`                                 |
 | Notification backlog                                | pipeline `GET /status`: `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                     | -                                                           |
 | Unregistered shared-R2 terminals                    | Processor `GET /internal/health`: `registration.unregistered`, `.pending`, `.oldestPendingAgeMs`        | Not summarised on `/status`                                 |
-| Operations and covered D1 costs per invocation/lane | Processor `invocation_budget` log line per cron and queue invocation (§1.1)                             | Workers Logs only; not persisted                            |
+| Operations and covered D1 costs per invocation/lane | Processor `invocation_budget` log line per scheduled and queue invocation (§1.1)                        | Workers Logs only; not persisted                            |
 | Lane liveness and replay progress                   | pipeline `GET /status`: `laneState[]`, `replayPlans[]`                                                  | -                                                           |
 | Event-lane ticks and their counts                   | pipeline `GET /status` and `GET /internal/health`: `laneTicks[]`; `processor_lane_ticks` (last day)     | The latest tick per lane only; older ticks are read from D1 |
 | Report generation                                   | `report_job` scheduled stage log line (only while `REPORTS_ENABLED` is on)                              | Not on `/status`; add when the flag becomes the default     |
@@ -54,7 +54,7 @@ Paid). Registration is bounded below them by an operation budget
 and the deployed Processor measures what it actually does, so the documented
 numbers and the runtime can be compared rather than assumed.
 
-Every cron and queue invocation of the Processor runs its bindings through a
+Every scheduled and queue invocation of the Processor runs its bindings through a
 meter and ends with one log line, however the invocation ends. The retained
 base fields look like this (additional cost and lane fields are described below):
 
@@ -228,7 +228,7 @@ mise run //services/processor:ops status
 
 How to read it:
 
-- `ageMs` well over five minutes means the lane has not ticked since: the cron
+- `ageMs` well over five minutes means the lane has not ticked since: the alarm
   is not firing, or the Worker is dying before this lane (an earlier lane
   running into a limit leaves no row for the lanes after it).
 - `skipped-by-flag` means the Worker holds the flag off; compare `flags` in the

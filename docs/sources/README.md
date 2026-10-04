@@ -1,5 +1,14 @@
 # Source Research Records
 
+These are dated research and implementation observations, not a catalogue of
+currently enabled collectors. Authentication, feasibility, prices and provider
+maintenance must be checked again before a new implementation decision. Later
+appendices can supersede earlier recommendations. Use [current status](../current-status.md),
+[collector runtimes](../collector-runtime-profiles.md), collector code/configs
+and [schedules](../schedules.md) for current implementation and timing.
+Source maintenance provenance is stored in the scheduling DB, not maintained by
+copying hours into every research record.
+
 Each file in this directory covers exactly one institution or one confirmed
 shared API family. Research branches and pull requests stay separate so a
 future implementation can continue from the source-specific evidence without

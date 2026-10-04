@@ -46,7 +46,8 @@ Processor and App. It removes the fourteen configured Cron jobs and reconciles
 future alarms only after healthy release checks. Initial reservations have a
 twenty-minute activation floor to cover Cron propagation; a failed partial release
 requires completing/re-running the same release. Verify the postcheck's actual
-alarm count and reads back deployed empty Cron arrays through the Cloudflare API before calling the cutover complete.
+alarm count and read back deployed empty Cron arrays through the Cloudflare API
+before calling the cutover complete.
 
 Scheduling/storage failures reserve a one-minute bookkeeping wakeup rather than
 exhausting only native alarm retries. Receipts still in `started` after one hour
@@ -55,3 +56,23 @@ are reported as uncertain; this neither expires leases nor repeats collection.
 The trusted workflow refuses pre-alarm release/rollback targets before checkout
 and before any production mutation. Removing the ScheduleAlarm class requires a
 separate retirement migration; it is not an ordinary old-commit rollback.
+
+## Settings API
+
+- `GET /api/ops/v1/schedules`: settings, maintenance provenance, reservations
+  and receipts.
+- `POST /api/ops/v1/schedules/:id`: version-checked job edits.
+- `POST /api/ops/v1/schedules/maintenance`: versioned maintenance edits.
+- `POST /api/ops/v1/schedules/leases/:sourceId`: release the exact stopped
+  execution lease after confirmation, without starting collection.
+
+These routes require the configured human Access operator. Writes require
+same-origin JSON, `x-kogane-settings: 1` and strict payload validation
+(maximum 16 KiB). They are not agent grants, service-token edit routes or MCP
+tools. The separately allowlisted, bodyless deployment `/bootstrap` route
+only reconciles reservations after release identity checks.
+
+Maintenance changes can be made from the management screen using this HTTP API.
+An AI/MCP integration, its credentials/permissions and automatic online research
+refresh remain unimplemented. See [agent access](agent-api.md) and
+[current status](current-status.md).

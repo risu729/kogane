@@ -285,14 +285,14 @@ so a run of more than 50 artifacts failed `invalid_items` on every attempt and
 never sealed.
 
 **The budget.** Every registration of one Worker invocation — the queue
-consumer's whole batch, or the cron's `collection_scan` and
+consumer's whole batch, or the scheduled tick's `collection_scan` and
 `operation_dispatch` lanes together — spends from one `RegistrationBudget`
 of **500 operations**, where an operation is one D1 statement (each statement
 of a batch counts) or one R2 call
 (`packages/application/src/collection/budget.ts`). The count is measured,
 not estimated: registration wraps the bindings it is handed in a meter and
 builds its port over them. 500 is half the documented D1 limit — the queue
-consumer spends nothing else, and a cron invocation shares the rest with its
+consumer spends nothing else, and a scheduled invocation shares the rest with its
 other lanes — and a twentieth of the subrequest limit. No lower provider
 limit is assumed.
 

@@ -95,7 +95,7 @@ expire instead of being answered from new rows.
 Set Processor `BALANCE_PROJECTION_ENABLED=1` and
 `REWARD_READ_PROJECTION_ENABLED=true`, then release through GitHub Actions.
 
-The next cron tick:
+The next Processor alarm tick:
 
 1. claims the new read instance;
 2. captures a fixed input from CORE at a revision that did not move while it was

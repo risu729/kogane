@@ -264,6 +264,12 @@ its own registered release names.
 
 ## Deploy order
 
+The original component migration/activation sequence below is historical.
+Current releases follow [rollout controls](rollout.md#4-deployment-order);
+rollback targets must satisfy its current schema/resource/alarm floor.
+Component-level compatibility with an old schema does not authorize an old
+production Worker rollback.
+
 1. `services/raw-evidence`: apply `0027_metadata_projections.sql`, then
    `0028_parse_releases.sql`. Both are additive; 0028 builds on 0026's tables,
    so it must not be applied before it. The previous Workers keep working.

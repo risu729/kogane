@@ -1,5 +1,12 @@
 # Operations API
 
+The committed App configuration enables `OPS_API_ENABLED` and names a human
+operator; agent grants remain empty. MCP additionally requires the agent-API
+transport grant, so an operations flag alone does not enable a client. These
+six operation-request kinds are distinct from the newer operator-only
+[schedule settings API](schedules.md#settings-api). Collection/session-refresh
+requests remain pending executor wiring; see [current status](current-status.md).
+
 The six things an operator asks this system to _do_ — collect a source,
 re-register a persisted run, replay a parse, rebuild the read model, refresh a
 session, and read what happened — as one authenticated API under
@@ -98,7 +105,7 @@ An empty `HEALTH_PROBE_TOKENS` means _no_ service token, which fails the
 release rather than opening the route. A `HEALTH_PROBE_TOKENS` that is present
 but cannot be read closes the route to everyone with `503 grants_misconfigured`,
 as an unreadable grant list does on the six routes. Empty subject lists are a
-_usable_ configuration (deny-all, the committed default): `grants.usable` is
+_usable_ configuration (deny-all when no subjects are configured): `grants.usable` is
 false only for a list that is present but unreadable, or a subject named in
 both lists, and then the deployment is `degraded` — a release does not certify
 a Worker that can grade nobody.
@@ -202,7 +209,7 @@ already does:
    hold (addendum 10 §5), and it has no operations to read because it cannot
    create one. A subject in neither list is refused for the same reason, one
    step earlier — the operator role is granted here, never inferred from being
-   authenticated. **With `OPERATOR_SUBJECTS` empty — the committed default —
+   authenticated. **With `OPERATOR_SUBJECTS` empty
    `OPS_API_ENABLED=true` serves the routes and every one of them answers
    `subject_not_granted` until a deployment names its operator. That is
    intended.**
@@ -319,16 +326,16 @@ writing their own SQL against the tables above:
 | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `requestCollection` / `requestImport` / `requestReplay` / `requestProjectionRebuild` / `requestSessionRefresh` | the six accept paths                                        |
 | `readOperation`                                                                                                | the operation record, scoped to a principal                 |
-| `pendingDispatches({store, nowMs, limit})`                                                                     | the Processor cron's queue of undispatched requests         |
+| `pendingDispatches({store, nowMs, limit})`                                                                     | the Processor alarm tick's queue of undispatched requests   |
 | `recordDispatch({operationId, outcome, targetRef?})`                                                           | one dispatch; binds `target_ref` once, answers who holds it |
 | `recordOperationStage({operationId, stage, state})`                                                            | stage evidence; completes the operation when all stages are |
 
 `dispatch_state='dispatch_pending'` is the hook U09 replaces with a Service
 Binding call to the collector: the row stays pending until a dispatch
-succeeds, so the cron keeps re-dispatching and a failed notification never
+succeeds, so the scheduled lane keeps re-dispatching and a failed notification never
 loses the request. Nothing in this change contacts a collector.
 
-U08 built the cron side of that contract: the `operation_dispatch` lane of
+U08 built the scheduled side of that contract: the `operation_dispatch` lane of
 `services/processor` (`docs/processor.md` §7), behind
 `OPS_DISPATCH_ENABLED`, default off. It re-registers a stored terminal in
 process, starts the replay plan an acceptance created, and hands a projection
@@ -382,14 +389,16 @@ Acceptance ids and the test that carries each:
 
 ## Flags, deploy order and rollback
 
-Flags this change adds, both off:
+Flag defaults when absent (not the current committed settings):
 
 | Variable                 | Default | Effect                                                        |
 | ------------------------ | ------- | ------------------------------------------------------------- |
 | `OPS_API_ENABLED`        | `""`    | `"true"` serves the six routes and publishes the six tools    |
 | `SESSION_REFRESH_POLICY` | `""`    | Sources a collector may refresh unattended; absent = a person |
 
-Deploy order:
+Historical initial activation procedure for migration 0040; current releases
+follow [rollout controls](rollout.md#4-deployment-order). Do not send a real
+operation merely to check deployment health.
 
 1. Apply CORE migration `0040_operations_api.sql`. It is additive and the
    running Worker never reads the tables it creates.
@@ -402,7 +411,7 @@ Deploy order:
    actually been demonstrated.
 
 Rollback: set `OPS_API_ENABLED` to `""` (no code deploy needed if it is a
-secret), or redeploy the previous Worker revision. Accepted operations stay in
+secret), or deploy a compatible Worker revision under the current rollback floor. Accepted operations stay in
 `ops_requests`; they are inert while nothing dispatches them, and turning the
 flag off does not need to remove them. The migration is not rolled back: its
 tables are unread by the previous revision.

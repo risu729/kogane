@@ -1,5 +1,10 @@
 # Production observations rollout
 
+> Historical record: 2026-09-07–2026-09-08. Scope, counts, resources and rollout
+> instructions below describe that record, not a current production check.
+> Use [current status](current-status.md), [rollout controls](rollout.md) and
+> the [documentation index](README.md) for maintained references.
+
 ## Scope
 
 Connect the merged collectors' stored Layer A evidence to persistent Layer B
@@ -55,7 +60,7 @@ those historical ingestion/parse limitations.
 
 - PR #105 merged as `ceb2bf3b52ad3387137eaf12add5dcf3ade855ee`.
 - Reconciler provisioning and initial repair evidence is recorded in
-  [the reconciler runbook](../services/collector-r2-importer/docs/r2-outbox-reconciler.md).
+  [the reconciler runbook](https://github.com/risu729/kogane/blob/bdee142d49f840f8c53603702d783d2421eda5e6/services/collector-r2-importer/docs/r2-outbox-reconciler.md).
 - Before the UI change, the existing enrolled WARP browser successfully
   displayed the production Sony evidence list. Local WARP HTTP returned 200;
   an HTTP request from the existing OCI `bots` host returned 403. Local HTTP

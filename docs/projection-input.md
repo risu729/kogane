@@ -264,16 +264,20 @@ READ (05 §5).
 
 ## Flags
 
-**None are added by this change.** U11 adds `READ_PROJECTION_ENABLED` (default
-off) beside the flag below, which chooses the database the same build writes to;
-see [The READ database](read-model-d1.md).
-
-The original text: **none are added.** This replaces the internals of the existing
-`BALANCE_PROJECTION_ENABLED` path, which is off by default in both the pipeline
-and the evidence browser. With the flag off the job returns `skipped(flag_off)`
+This input-context contract adds no flag. The former
+`READ_PROJECTION_ENABLED` switch and CORE projection fallback were removed
+with [legacy retirement](legacy-retirement.md); readers and writers use READ.
+`BALANCE_PROJECTION_ENABLED` is enabled in the committed App and Processor
+configs; disabling it pauses the job/reader as described in
+[rollout controls](rollout.md). With the flag off the job returns `skipped(flag_off)`
 and its outbox rows stay pending, exactly as "nothing was updated" should read.
 
 ## Deploy order and rollback
+
+The migration/first-activation sequence below is historical. Current releases
+follow [rollout controls](rollout.md#4-deployment-order), and rollback targets
+must satisfy its current schema/resource/alarm floor. An old component-level
+compatibility test does not authorize a pre-alarm production rollback.
 
 1. **Schema** — apply migration `0038`
    (`packages/storage-d1/migrations/core/`). It is additive: new tables, new
