@@ -70,8 +70,11 @@ class GlobalPassStore {
     db.run("INSERT INTO fetch_run_seals(fetch_run_id) VALUES(?)", [id]);
     return id;
   }
-  /** One page artifact; `parsed` publishes an `ok` parse with one placeholder row. */
-  page(run: number, key: string, fetchedAt: string, parsed = true): number {
+  /**
+   * One page artifact; `parsed` publishes an `ok` parse with `rows`
+   * placeholder rows (one by default; zero is the empty month 1.2.0 reads).
+   */
+  page(run: number, key: string, fetchedAt: string, parsed = true, rows = 1): number {
     const db = this.store.db;
     const artifact = this.id();
     db.run(
@@ -92,11 +95,12 @@ class GlobalPassStore {
       "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'global-pass-activity','1.1.0','2026-09-01','pending','[]')",
       [parse, artifact],
     );
-    db.run(
-      `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,amount_text,amount_scale,currency,description,as_of,raw_locator,extra_json)
-       VALUES(?,'global-pass:card',?,'1.00',2,'USD','SYNTHETIC','2099-01-02','html:activity-record=1','{}')`,
-      [parse, `global-pass:synthetic-${artifact}:0`],
-    );
+    for (let row = 0; row < rows; row += 1)
+      db.run(
+        `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,amount_text,amount_scale,currency,description,as_of,raw_locator,extra_json)
+         VALUES(?,'global-pass:card',?,'1.00',2,'USD','SYNTHETIC','2099-01-02',?,'{}')`,
+        [parse, `global-pass:synthetic-${artifact}:${row}`, `html:activity-record=${row + 1}`],
+      );
     db.run("UPDATE parse_runs SET status='ok' WHERE id=?", [parse]);
     db.run(
       "INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at) VALUES(?,'global-pass-activity',NULL,?,'normal','pipeline','parse_ok','2026-09-01')",
@@ -184,6 +188,37 @@ describe("GLOBAL PASS activity snapshots", () => {
     const fresh = s.page(newer, "activity-2099-01.html", "2099-02-02T00:00:00Z");
     expect(s.current(FROZEN_PER_KEY_CTES)).toEqual([stale, fresh]);
     expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([fresh]);
+  });
+
+  test("limit: a newer empty month (an ok parse with no row) supersedes an older capture with rows", () => {
+    // global-pass-activity 1.2.0 reads the observed empty month as an ok parse
+    // with no observation (ADR 0026's empty-month amendment). The month is
+    // then current with nothing in it, and an older run's rows for the same
+    // month stop being current. The parser cannot tell the observed empty
+    // month from a page whose list failed to render (the same markup); this
+    // pins the read model's behaviour so a change to it is visible. A newer
+    // capture with rows supersedes the empty reading in turn.
+    const s = new GlobalPassStore();
+    const older = s.run();
+    s.page(older, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 2);
+    s.page(older, "activity-2099-01-p2.html", "2099-02-01T00:00:00Z");
+    const other = s.page(older, "activity-2098-12.html", "2099-02-01T00:00:00Z");
+    const newer = s.run();
+    const empty = s.page(newer, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 0);
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([other, empty]);
+    const current = s.store.db
+      .query(
+        `WITH ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}
+         SELECT COUNT(*) AS n FROM transaction_observations o
+         JOIN parse_runs p ON p.id = o.parse_run_id
+         WHERE p.fetch_artifact_id IN (SELECT fetch_artifact_id FROM current_global_pass_snapshots)`,
+      )
+      .get() as { n: number };
+    // Only the other month's row: the empty month contributes none.
+    expect(current.n).toBe(1);
+    const latest = s.run();
+    const refilled = s.page(latest, "activity-2099-01.html", "2099-02-03T00:00:00Z");
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([other, refilled]);
   });
 
   test("a newer run whose pages are not all parsed keeps the older whole month", () => {
