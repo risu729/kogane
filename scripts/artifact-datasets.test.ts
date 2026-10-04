@@ -55,6 +55,14 @@ const html = "text/html";
 
 /** Artifacts as the collectors write them. */
 const SAMPLES: readonly Sample[] = [
+  {
+    source: "prestia-bank",
+    artifactKey: "balance.html",
+    role: "sanitized_provider_capture",
+    mediaType: html,
+    dataset: "prestia-bank-balance-html",
+    unitKey: "balance-summary",
+  },
   // services/collector-moneyforward/src/shared-collection.ts
   {
     source: "moneyforward-me",

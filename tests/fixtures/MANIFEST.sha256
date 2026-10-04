@@ -1,4 +1,5 @@
 b332f41d0232477a7e4902322669f22cd496ae119a7ed1db8d8a17af41466f5d  tests/fixtures/observation-pipeline/coverage-contract/expected.json
+745305ffa90c669428a5cd209dfc07c9e506415675c599a50d3799afe862f6c3  tests/fixtures/observation-pipeline/coverage-contract/prestia-bank-expected.json
 3bf44df427d4e9e112c4a3b3d430da8d383c75287a79a750ee7da4715d3997ff  tests/fixtures/observation-pipeline/coverage-contract/sbi-shinsei-exchange-rate-expected.json
 10765fa1ff84bf7cb74f51d2b2b72d50b4f8ed9f6f45eca88ad37c471434a205  tests/fixtures/observation-pipeline/coverage-contract/sbi-shinsei-observed-shapes-expected.json
 84aab7387cf675cfe4c19683ae3c3cfc8861fc6be09bb41329bbbc1b3564123a  tests/fixtures/observation-pipeline/coverage-contract/st-george-expected.json

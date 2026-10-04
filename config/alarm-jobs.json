@@ -176,6 +176,22 @@
     }
   },
   {
+    "id": "prestia-bank",
+    "source": "prestia-bank",
+    "workspace": "collector-prestia-bank",
+    "worker": "kogane-prestia-bank-collector",
+    "cron": "30 21 * * *",
+    "kind": "collection",
+    "enabled": false,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:30",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
     "id": "st-george",
     "source": "st-george",
     "workspace": "collector-st-george",

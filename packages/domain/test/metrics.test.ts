@@ -37,6 +37,45 @@ function lookupsFor(
 }
 
 describe("metric registry seeded from the current PoC rules", () => {
+  test("PRESTIA native, bank aggregate and monthly qualification measures stay non-additive", () => {
+    const metrics = [
+      ["available_balance", "capacity", "point-in-time"],
+      ["term_deposit_principal", "stock", "point-in-time"],
+      ["provider_yen_equivalent", "valuation", "point-in-time"],
+      ["provider_balance_group_total", "valuation", "point-in-time"],
+      ["provider_monthly_average_total_relationship_balance", "qualification", "period"],
+      ["provider_monthly_average_foreign_currency_balance", "qualification", "period"],
+      ["provider_monthly_average_liquid_deposit_balance", "qualification", "period"],
+    ] as const;
+    for (const [metric, kind, time] of metrics) {
+      const definition = resolveMetric({
+        family: metric.startsWith("provider_") ? "valuation" : "balance",
+        sourceId: "prestia",
+        parserName: "prestia-bank-balances",
+        metric: metric!,
+        sourceAccount: "prestia-bank:synthetic",
+        amountBasis: null,
+      });
+      expect(definition.metricId).not.toBe("unknown");
+      expect(definition.measurementKind).toBe(kind);
+      expect(definition.timeBasis).toBe(time);
+      expect(definition.aggregationRule).toBe("non-additive");
+      expect(definition.netAssetEligible).toBe(false);
+      expect(definition.sourceAuthority).toBe("provider-reported");
+      expect(definition.definitionRelease).toBe("metric-registry-v2");
+      expect(additivityVerdict(definition, definition).additive).toBe(false);
+    }
+    expect(
+      resolveMetric({
+        family: "balance",
+        sourceId: "global-pass",
+        parserName: "prestia-bank-balances",
+        metric: "available_balance",
+        sourceAccount: "global-pass:card",
+        amountBasis: null,
+      }),
+    ).toBe(UNKNOWN_METRIC);
+  });
   test("every balance definition matches classifyBalance for its selectors (no behaviour change)", () => {
     let checked = 0;
     for (const { selectors, definition } of METRIC_REGISTRY)

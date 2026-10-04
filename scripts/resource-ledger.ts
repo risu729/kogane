@@ -274,6 +274,15 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "services/collector-prestia-bank": {
+    source: "PRESTIA bank integration, ADR 0040",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-prestia-bank",
+    requiredVerification:
+      "Verify the portable HTTP client in the Worker runtime and first production collection before enabling its schedule; keep OTP human-required",
+    executionStatus: "INTEGRATED_UNDEPLOYED",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "services/collector-st-george": {
     source: "St.George automation integration, 2026-09-13",
     proposedAction: "promote-service",

@@ -29,6 +29,37 @@ function input(
 }
 
 describe("non-SBI account identification", () => {
+  test("PRESTIA durable native references preserve currency and term identity, not product labels", () => {
+    const ref = "prestia-bank:account:synthetic-account:USD";
+    const first = otherIdentity(input("prestia", ref, { kind: "balance", currency: "USD" }));
+    const later = otherIdentity(
+      input("prestia", ref, {
+        kind: "balance",
+        currency: "USD",
+        fetchRunId: 99,
+        extra: { providerProductLabel: "synthetic-other-label" },
+      }),
+    );
+    expect(first.account).toMatchObject({ status: "provider-local", role: "deposit", key: [ref] });
+    expect(later.account.key).toEqual(first.account.key);
+    expect(otherIdentity(input("prestia", ref.replace("USD", "JPY"))).account.key).not.toEqual(
+      first.account.key,
+    );
+    expect(
+      otherIdentity(input("prestia", ref + ":deposit:synthetic-term")).account.key,
+    ).not.toEqual(first.account.key);
+    expect(
+      otherIdentity(input("prestia", "prestia-bank:group:foreign-deposits")).account,
+    ).toMatchObject({ status: "aggregate", role: "valuation-aggregate" });
+    expect(otherIdentity(input("prestia", "prestia-bank:relationship")).account).toMatchObject({
+      status: "aggregate",
+      role: "qualification-aggregate",
+    });
+    expect(otherIdentity(input("prestia", "prestia-bank:group:unobserved")).account.status).toBe(
+      "unresolved",
+    );
+    expect(otherIdentity(input("prestia", "global-pass:card")).account.status).toBe("unresolved");
+  });
   test("St.George identity is its provider account hash, independent of alias and fetch run", () => {
     const account = "st-george:" + "a".repeat(64);
     const first = otherIdentity(input("st-george", account, { currency: "AUD" }));

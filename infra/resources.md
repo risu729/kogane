@@ -14,7 +14,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Summary
 
-- Wrangler configs: 25
+- Wrangler configs: 26
 - Distinct Workers that exist in the account: 14
 - Live Workers with no config in this repository: —
 - Live R2 buckets no config references: —
@@ -27,13 +27,13 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | test | `00000000-0000-0000-0000-000000000001` | no | kogane-evidence-browser-test |
 | test-read | `00000000-0000-0000-0000-000000000002` | no | kogane-evidence-browser-test |
 | kogane-read | `320ebe31-a031-48a1-985f-0e6fabbd517a` | yes | kogane-evidence-browser<br>kogane-observation-pipeline<br>kogane-read-migrations |
-| kogane-raw-evidence | `b335a887-250d-45c9-bd72-af83f35fdc60` | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mizuho-collector<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-sony-bank-collector-poc<br>kogane-st-george-collector<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc |
+| kogane-raw-evidence | `b335a887-250d-45c9-bd72-af83f35fdc60` | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mizuho-collector<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-prestia-bank-collector<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-sony-bank-collector-poc<br>kogane-st-george-collector<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc |
 
 ## R2 buckets
 
 | bucket | live | bound by |
 | --- | --- | --- |
-| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mizuho-collector<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-smbc-direct-backfill-poc<br>kogane-sony-bank-collector-poc<br>kogane-st-george-collector<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
+| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mizuho-collector<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-prestia-bank-collector<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-smbc-direct-backfill-poc<br>kogane-sony-bank-collector-poc<br>kogane-st-george-collector<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
 | test | no | kogane-evidence-browser-test |
 
 ## Queues
@@ -410,6 +410,32 @@ No wrangler config.
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
+### `services/collector-prestia-bank`
+
+- Disposition (PRESTIA bank integration, ADR 0040): `promote-service` → services/collector-prestia-bank
+- Required verification: Verify the portable HTTP client in the Worker runtime and first production collection before enabling its schedule; keep OTP human-required
+- Execution status: INTEGRATED_UNDEPLOYED (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(buckets=kogane-raw-evidence)
+
+#### `kogane-prestia-bank-collector` — `services/collector-prestia-bank/wrangler.jsonc`
+
+- Role: not-deployed; exists in the account: no
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
+- R2: DATA → kogane-raw-evidence
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>PRESTIA_BANK_USER_AGENT<br>RELEASE_SHA
+- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>PRESTIA_BANK_PASSWORD<br>PRESTIA_BANK_USER_ID
+
 ### `services/collector-sbi-securities`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-securities
@@ -683,7 +709,7 @@ No wrangler config.
 - Containers: —
 - Browser binding: —
 - VPC networks: —
-- Service bindings: SCHEDULE_GLOBALPASS → kogane-globalpass-collector-poc<br>SCHEDULE_VPASS → kogane-vpass-collector-poc<br>SCHEDULE_MYJCB → kogane-myjcb-collector-poc<br>SCHEDULE_SBI_SECURITIES → kogane-sbi-collector-poc<br>SCHEDULE_SBI_SHINSEI → kogane-sbi-shinsei-collector-poc<br>SCHEDULE_SONY_BANK → kogane-sony-bank-collector-poc<br>SCHEDULE_SBI_VC_TRADE → kogane-sbi-vc-session-poc<br>SCHEDULE_MOBILE_SUICA → kogane-mobile-suica-collector-poc<br>SCHEDULE_MONEYFORWARD → kogane-moneyforward-collector-poc<br>SCHEDULE_VPOINT → kogane-vpoint-collector-poc<br>SCHEDULE_MIZUHO → kogane-mizuho-collector<br>SCHEDULE_ST_GEORGE → kogane-st-george-collector
+- Service bindings: SCHEDULE_GLOBALPASS → kogane-globalpass-collector-poc<br>SCHEDULE_VPASS → kogane-vpass-collector-poc<br>SCHEDULE_MYJCB → kogane-myjcb-collector-poc<br>SCHEDULE_SBI_SECURITIES → kogane-sbi-collector-poc<br>SCHEDULE_SBI_SHINSEI → kogane-sbi-shinsei-collector-poc<br>SCHEDULE_SONY_BANK → kogane-sony-bank-collector-poc<br>SCHEDULE_SBI_VC_TRADE → kogane-sbi-vc-session-poc<br>SCHEDULE_MOBILE_SUICA → kogane-mobile-suica-collector-poc<br>SCHEDULE_MONEYFORWARD → kogane-moneyforward-collector-poc<br>SCHEDULE_VPOINT → kogane-vpoint-collector-poc<br>SCHEDULE_MIZUHO → kogane-mizuho-collector<br>SCHEDULE_ST_GEORGE → kogane-st-george-collector<br>SCHEDULE_PRESTIA_BANK → kogane-prestia-bank-collector
 - Crons: —
 - Assets: —
 - Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>PURCHASE_RECOGNITION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>RELEASE_SHA<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SCHEDULES_ENABLED<br>SHARED_R2_INGEST_ENABLED

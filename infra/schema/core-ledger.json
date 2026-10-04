@@ -1052,6 +1052,25 @@
         }
       ],
       "sha256": "3413c5a62df966d77d915ae6ce137d9f7c86212887396b2dafdd9377a17fc0db"
+    },
+    {
+      "file": "0066_prestia_bank_snapshot_schedule.sql",
+      "statementCount": 3,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "collection_schedules",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "collection_schedule_revisions",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "67621a515660753b1846bee314eee76d69b0aec67f375f4c9a724a316bafd3c8"
     }
   ],
   "tables": [
@@ -18901,7 +18920,8 @@
       "0062_identity_value_rewrite_staging.sql",
       "0063_identity_value_rewrite_apply.sql",
       "0064_purchase_retirement_and_reconciliation_cost.sql",
-      "0065_alarm_schedules.sql"
+      "0065_alarm_schedules.sql",
+      "0066_prestia_bank_snapshot_schedule.sql"
     ],
     "schemaSha256": "cdb732d32955a6b1b891cdaff5566cd12252c21dac9fa65acabf5a551ad5029c"
   }

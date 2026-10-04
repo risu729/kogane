@@ -56,6 +56,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "b81d524f718ec291ef91b1056264762d6608467e7a4acee70b094cdd80671ad4",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
       "a89829e4856c7baa3abcda2e25762b7debf4a22fddc777756adb920ed8951621",
+    "poc/observation-pipeline/src/parsers/prestia-bank-html.ts":
+      "d8810ae3e9adcffe0411f2692ed17b22514074c00867be2e1d6e01cc12b53de2",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
       "dabbee389a0f4b7d985ebc302d046c3468065d87d3048fa172f243ac1bff19f7",
     "poc/observation-pipeline/src/parsers/sbi-domestic-cash-positions.ts":
@@ -311,6 +313,19 @@ export const PARSER_DIGESTS: ParserDigests = {
         "packages/domain/src/guards.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/paypay-csv.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "prestia-bank-balances": {
+      version: "1.0.0",
+      codeDigest: "818d71edd5d066a51fe9f2dbfeeadf70efaac35f2770fe98f000287048ad170a",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/prestia-bank-html.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

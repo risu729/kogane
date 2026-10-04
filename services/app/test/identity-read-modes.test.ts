@@ -118,7 +118,7 @@ it("a correction changes latest and never as-recorded, and each response names i
       mode,
       snapshotId: null,
       identityRelease: mode === "latest" ? "current-mappings-v1" : "identity-default-v1",
-      measurePolicyRelease: "metric-registry-v1",
+      measurePolicyRelease: "metric-registry-v2",
       decimalPolicyRelease: "decimal-v1",
     });
   }

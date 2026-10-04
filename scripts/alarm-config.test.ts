@@ -8,7 +8,7 @@ import { parseJsonc } from "./jsonc";
 describe("alarm activation configuration", () => {
   test("all 14 prior jobs are preserved, manual/email sources stay disabled", () => {
     expect(jobs.filter((j) => j.enabled)).toHaveLength(14);
-    expect(new Set(jobs.map((j) => j.id)).size).toBe(16);
+    expect(new Set(jobs.map((j) => j.id)).size).toBe(17);
     for (const job of jobs) {
       expect(validPattern(job.pattern)).toBe(true);
       if (!job.supported) expect(job.enabled).toBe(false);
@@ -20,11 +20,25 @@ describe("alarm activation configuration", () => {
         expect(config.name).toBe(job.worker);
       }
     }
+    expect(jobs.find((j) => j.id === "prestia-bank")).toMatchObject({
+      enabled: false,
+      supported: true,
+      pattern: { time: "06:30" },
+    });
     expect(jobs.find((j) => j.id === "st-george")?.pattern).toMatchObject({ time: "06:35" });
   });
   test("migration seeds exactly the reviewed jobs and provenance without arming", () => {
     const db = new Database(":memory:");
     db.exec(readFileSync("packages/storage-d1/migrations/core/0065_alarm_schedules.sql", "utf8"));
+    db.exec(
+      "CREATE TABLE dataset_snapshot_policies (source_id TEXT,dataset TEXT,parser_name TEXT,policy_id TEXT,required_parser_version TEXT,replaces_previous_on_complete_empty INTEGER,unit_scope TEXT)",
+    );
+    db.exec(
+      readFileSync(
+        "packages/storage-d1/migrations/core/0066_prestia_bank_snapshot_schedule.sql",
+        "utf8",
+      ),
+    );
     const seeded = db
       .query(
         "SELECT id,pattern_json,enabled,next_nominal_at,next_run_at FROM collection_schedules ORDER BY id",
