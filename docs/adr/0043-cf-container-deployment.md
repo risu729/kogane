@@ -176,6 +176,20 @@ manifest/ledger entrypoints remain in use.
   2026-10-04 21:51:57 UTC: all three identity/resource/namespace and 100%
   allocation checks matched, with zero active/assigned instances and no active
   rollouts. This does not substitute for immutable registry image verification.
+- A single explicit credential probe, 37240919803 on main
+  afa898e34c514f179a3d5e0765d6e86e8c09fa67, failed at
+  2026-10-04 22:40:56 UTC with the fixed operation registry_pull_credentials,
+  POST, HTTP 201. Its rejected response body was not read, displayed or stored.
+  This reproduces a credentials-status incompatibility; it does not establish
+  the original release's unrecorded operation/status. The shared API accepts
+  only 200/201 for that exact five-minute pull-only managed-registry POST,
+  validates its successful envelope and documented required credential fields
+  and exact registry host before use, and reports the actual status.
+  Every GET remains 200-only. Deadlines, registry digest/image identity,
+  application/namespace/resource/rollout gates and failure-ledger semantics
+  remain unchanged. Synthetic tests verify valid 201, malformed 201, rejected
+  GET 201, unknown routes/bodies and credential-safe diagnostics. Live
+  credential/image verification and complete production rollout remain separate.
 
 Sources: [cf project configuration](https://developers.cloudflare.com/cf/projects/cloudflare-config/),
 [Container rollouts](https://developers.cloudflare.com/containers/configuration/rollouts/),

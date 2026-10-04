@@ -387,7 +387,9 @@ describe("registry verification keeps credentials on the controlled host and rep
       ],
     ] as const;
     for (const [path, body, operation, method] of cases) {
-      for (const status of [201, 302, 401, 403, 429, 500]) {
+      for (const status of method === "POST"
+        ? [202, 204, 302, 401, 403, 429, 500]
+        : [201, 202, 204, 302, 401, 403, 429, 500]) {
         const diagnostics: unknown[] = [];
         let calls = 0;
         const api = cloudflareApi({
@@ -398,7 +400,12 @@ describe("registry verification keeps credentials on the controlled host and rep
             calls++;
             expect(init.method).toBe(method);
             expect(init.redirect).toBe("manual");
-            return new Response("synthetic-private-provider-body", { status });
+            return {
+              status,
+              json: async () => {
+                throw new Error("unexpected private body read");
+              },
+            };
           },
         });
         await expect(api(path, body)).rejects.toThrow("cf_container_api_http");
@@ -479,6 +486,94 @@ describe("registry verification keeps credentials on the controlled host and rep
     ])
       await expect(api(path, body)).rejects.toThrow("cf_container_api_request_unknown");
     expect(calls).toBe(0);
+  });
+  test("only the fixed credential POST accepts validated 200 or 201 and reports actual metadata", async () => {
+    const result = {
+      account_id: "synthetic-internal-id",
+      username: "synthetic-private-user",
+      password: "synthetic-private-password",
+      registry_host: "registry.cloudflare.com",
+    };
+    for (const status of [200, 201]) {
+      const metadata: unknown[] = [];
+      const diagnostics: unknown[] = [];
+      const api = cloudflareApi({
+        accountId: account,
+        token: "synthetic-private-token",
+        reportDiagnostic: (entry: unknown) => diagnostics.push(entry),
+        reportResponse: (entry: unknown) => metadata.push(entry),
+        fetchImpl: async () => Response.json({ success: true, result }, { status }),
+      });
+      expect(
+        await api("containers/registries/registry.cloudflare.com/credentials", {
+          expiration_minutes: 5,
+          permissions: ["pull"],
+        }),
+      ).toEqual(result);
+      expect(metadata).toEqual([
+        { operation: "registry_pull_credentials", method: "POST", httpStatus: status },
+      ]);
+      expect(diagnostics).toEqual([]);
+      expect(JSON.stringify(metadata)).not.toContain("synthetic-private");
+      expect(JSON.stringify(metadata)).not.toContain(result.account_id);
+    }
+  });
+  test("credential 201 fails closed for malformed envelope or response shape before success metadata", async () => {
+    const valid = {
+      account_id: "private-account",
+      username: "private-user",
+      password: "private-password",
+      registry_host: "registry.cloudflare.com",
+    };
+    const cases = [
+      ["not-json", "api_response"],
+      [
+        JSON.stringify({
+          success: false,
+          result: valid,
+          errors: [{ message: "private-provider-text" }],
+        }),
+        "api_response",
+      ],
+      [JSON.stringify({ success: true }), "api_response"],
+      ...[
+        null,
+        [],
+        "private-provider-text",
+        {},
+        { ...valid, account_id: "" },
+        { ...valid, username: null },
+        { ...valid, password: 0 },
+        { ...valid, registry_host: "example.invalid" },
+      ].map((result) => [JSON.stringify({ success: true, result }), "registry_credential_shape"]),
+    ];
+    for (const [body, code] of cases) {
+      const metadata: unknown[] = [],
+        diagnostics: unknown[] = [];
+      const api = cloudflareApi({
+        accountId: account,
+        token: "private-token",
+        reportResponse: (entry: unknown) => metadata.push(entry),
+        reportDiagnostic: (entry: unknown) => diagnostics.push(entry),
+        fetchImpl: async () => new Response(body, { status: 201 }),
+      });
+      await expect(
+        api("containers/registries/registry.cloudflare.com/credentials", {
+          expiration_minutes: 5,
+          permissions: ["pull"],
+        }),
+      ).rejects.toThrow(`cf_container_${code}`);
+      expect(metadata).toEqual([]);
+      expect(diagnostics).toEqual([
+        {
+          code: `cf_container_${code}`,
+          operation: "registry_pull_credentials",
+          method: "POST",
+          httpStatus: 201,
+        },
+      ]);
+      expect(JSON.stringify(diagnostics)).not.toContain("private-");
+    }
   });
   test("API errors expose closed codes only", async () => {
     const api = cloudflareApi({

@@ -247,7 +247,13 @@ it without logging, storing or exporting it. Only the fixed operation, method,
 HTTP status and shape-validation result are printed. It does not deploy, download
 an image, invoke a collector or contact a bank. The
 [credential API](https://developers.cloudflare.com/api/resources/containers/subresources/registries/subresources/credentials/methods/generate/)
-documents HTTP 200; other statuses remain failures, with no retry.
+shows a 200 example. Explicit probe
+[37240919803](https://github.com/risu729/kogane/actions/runs/37240919803) reproduced
+HTTP 201 from the fixed credentials POST at 2026-10-04 22:40:56 UTC. The shared
+API now accepts only 200/201 for that fixed five-minute, pull-only POST, requires a
+successful envelope and nonempty documented account/username/password fields plus
+the exact registry host before use, and reports the actual status. All GET requests
+still require 200. Other statuses remain failures, with no retry.
 
 Production run [37235079565](https://github.com/risu729/kogane/actions/runs/37235079565)
 published GlobalPass but failed its after-deploy guard with

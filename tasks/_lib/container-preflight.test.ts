@@ -493,18 +493,19 @@ test("probe rejects missing or wrong required fields and never returns credentia
       probeRegistryCredentials({
         accountId,
         token,
+        reportDiagnostic: () => {},
         fetchImpl: async () => {
           calls++;
           return Response.json({ success: true, result });
         },
       }),
-    ).rejects.toThrow("container_preflight_registry_credential_shape");
+    ).rejects.toThrow("cf_container_registry_credential_shape");
     expect(calls).toBe(1);
   }
 });
 
-test("probe preserves strict 200, reports only closed diagnostics and does not retry", async () => {
-  for (const status of [201, 302, 401, 403, 429, 500]) {
+test("probe rejects other statuses, reports only closed diagnostics and does not retry", async () => {
+  for (const status of [202, 302, 401, 403, 429, 500]) {
     const diagnostics: unknown[] = [];
     let calls = 0;
     await expect(
@@ -586,7 +587,7 @@ test("plain Node preflight CLI keeps default GET-only and never prints a minted 
         if (process.env.REGISTRY_CREDENTIAL_PROBE !== "true" || ++posts !== 1) throw new Error("unexpected probe");
         if (!input.endsWith("/containers/registries/registry.cloudflare.com/credentials")) throw new Error("wrong path");
         if (init.body !== JSON.stringify({expiration_minutes:5,permissions:["pull"]})) throw new Error("wrong body");
-        return Response.json({success:true,result:{account_id:"private-account",username:"private-user",password:"private-password",registry_host:"registry.cloudflare.com"}});
+        return Response.json({success:true,result:{account_id:"private-account",username:"private-user",password:"private-password",registry_host:"registry.cloudflare.com"}},{status:201});
       }
       if (init.method !== "GET") throw new Error("unexpected method");
       return Response.json({success:true,result:input.endsWith("/versions")?[]:{}});
@@ -615,10 +616,39 @@ test("plain Node preflight CLI keeps default GET-only and never prints a minted 
       expect(lines[1]).toEqual({
         operation: "registry_pull_credentials",
         method: "POST",
-        httpStatus: 200,
+        httpStatus: 201,
         credentialShapeValid: true,
       });
     expect(stdout).not.toContain("private-");
     expect(stdout).not.toContain(token);
+  }
+});
+
+test("credential probe reports actual 200 or 201 after shared validation without returning secrets", async () => {
+  for (const status of [200, 201]) {
+    const result = await probeRegistryCredentials({
+      accountId,
+      token,
+      fetchImpl: async () =>
+        Response.json(
+          {
+            success: true,
+            result: {
+              account_id: "private-id",
+              username: "private-user",
+              password: "private-password",
+              registry_host: "registry.cloudflare.com",
+            },
+          },
+          { status },
+        ),
+    });
+    expect(result).toEqual({
+      operation: "registry_pull_credentials",
+      method: "POST",
+      httpStatus: status,
+      credentialShapeValid: true,
+    });
+    expect(JSON.stringify(result)).not.toContain("private-");
   }
 });
