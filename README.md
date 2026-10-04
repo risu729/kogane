@@ -1,9 +1,9 @@
 # Kogane
 
-A personal finance data platform: collect raw evidence from banks, cards,
-brokers, exchanges, and reward programs, and keep it re-processable so that
-balances, valuations, P&L, and tax views can be recomputed later under
-different rules.
+Kogane collects financial records from banks, cards, brokers, exchanges and
+reward programs, preserves their original evidence, and builds financial views
+whose source and interpretation can be traced. Saved evidence can be parsed and
+interpreted again under versioned rules without rewriting the original.
 
 - [Documentation index](docs/README.md)
 - [Current implementation and limits](docs/current-status.md)
@@ -12,48 +12,49 @@ different rules.
 - [Architecture decision records](docs/adr/README.md)
 - [Agent instructions](AGENTS.md)
 
-## Product status and next milestone
+## What works today
 
-The infrastructure migration and legacy resource retirement are complete.
-Financial product development continues: existing schemas, READ projections and
-pure calculation functions do not yet provide complete transaction matching,
-portfolio valuation, cost basis, P&L or tax reporting.
+- **Evidence and observations:** shared raw storage, sealed collection history,
+  versioned parsing, adoption and replay. The protected Japanese UI displays
+  transactions, balances, positions, reported state and their evidence.
+- **Card review:** Vpass/MyJCB single-payment purchase/refund recognition,
+  pending-to-posted review, and statement/debit matching with SMBC and SBI Shinsei
+  adapters. Decisions retain their history and do not create a second expense.
+- **Scheduling:** fourteen Processor-owned alarm jobs cover twelve daily
+  collectors, SBI VC session keepalive and the Processor tick. The management
+  screen connects schedule/maintenance revisions to execution history.
+- **Rewards and calculations:** typed reward buckets, observed expiry, READ
+  projections, valuation components and fixed report artifacts exist. Useful
+  forecasts and simulations still need verified rules and complete inputs.
 
-The first [card settlement review](docs/card-settlements.md) connects authoritative
-**Vpass/MyJCB statement totals to SMBC and SBI Shinsei bank debits**. Operators can review,
-accept, reject and withdraw a correspondence while preserving evidence and
-history. Unknown ownership or stale evidence blocks acceptance; payment allocation
-adds no duplicate cash movement or purchase expense. Source coverage, additional
-bank adapters, partial payments and refund allocation remain incomplete.
+Collection, parsing and adoption are separate outcomes. A saved capture or an
+empty view does not prove complete source coverage. Vpass collector statement
+pages remain withheld from parsing pending card-identity continuity. Full
+transaction matching, reconstructed state, portfolio valuation, lots, cost
+basis, P&L and tax outputs are incomplete.
 
-[Card purchase recognition](docs/economic-events.md#card-purchase-recognition)
-is the first purchase-event writer: on in production since 2026-09-24
-(`PURCHASE_RECOGNITION_ENABLED`), it turns adopted Vpass/MyJCB single-payment
-usage rows into purchase and refund events, each with a recorded rule decision.
-When a later re-parse re-keys a row, its event is retired and the new key is
-recognised as a new event, so the purchase is not counted twice. Installment,
-revolving and bonus rows are never recognised, and a pending row becomes one
-purchase with its posted row only through a reviewed link (or a provider link
-id, which no deployed source supplies yet).
+The operator HTTP API can edit schedules and maintenance. Research is not
+automatically refreshed. MCP query/explanation/proposal code exists, but agent
+grants are empty and maintenance has no MCP tool. Generic collection-operation
+requests still need executor wiring; alarm execution uses a separate implemented
+private RPC path.
 
-The [roadmap](docs/roadmap.md) records the current implementation limits,
-development order and acceptance criteria. Its main sequence is identity and
-data coverage → reconciliation/events → dated holdings and liabilities →
-price/FX valuation → lots/P&L → tax. Rewards progress in parallel, while UI and
-AI/MCP flows are delivered with each feature.
+The next milestone is **card usage → statement → bank debit**, with an
+explainable trail and no double expense. Dated holdings/liabilities, valuation,
+lots/P&L and tax follow; rewards can progress in parallel. See
+[current status](docs/current-status.md) for the bounded implementation assessment
+and [roadmap](docs/roadmap.md) for the delivery order and acceptance criteria.
 
-The operator-only **カード利用** page
-([purchase explanation](docs/card-settlements.md#purchase-explanation-chain))
-traces each recognised card purchase to its provider statement and, where a
-settlement was accepted, to the bank debit. Captured, pending, refund and
-unresolved figures stay apart, a statement total is shown beside them but never
-compared with them, and a settlement adds no purchase expense. An empty list is
-not proof that there were no purchases.
+## Repository map
 
-[Schedule administration](docs/schedules.md) connects alarm settings, public
-maintenance revisions and execution history. Maintenance can be edited through
-the operator HTTP API; research is not automatically refreshed. MCP code exists,
-but agent grants are empty and maintenance has no MCP tool.
+| Path                        | Role                                                                  |
+| --------------------------- | --------------------------------------------------------------------- |
+| `services/collector-*`      | Per-source acquisition Workers and their runtime adapters             |
+| `services/processor`        | Alarm coordination, registration, parsing and derived jobs            |
+| `services/app` + `apps/web` | Protected APIs and the Japanese management/evidence UI                |
+| `packages/`                 | Shared domain, collection, parsing, application and storage contracts |
+| `infra/`                    | Generated resource/schema ledgers and release ordering                |
+| `docs/`                     | Maintained references, decisions, plans and dated evidence            |
 
 ## Getting started
 
@@ -64,7 +65,7 @@ One Bun workspace, one lockfile, and mise as the only task runner. There are no
 mise trust
 mise install              # pinned tools (bun, node, hk, oxlint, ...)
 mise run install          # frozen Bun install for every workspace
-hk check --all           # lint, types, tests, Knip, builds and Worker dry runs
+mise exec -- hk check --all --no-fail-fast # complete validation graph
 mise run //services/app:ci # one workspace's checks
 mise run fix              # explicitly apply lint/format fixes
 mise tasks ls --all        # discover the monorepo tasks
@@ -75,7 +76,9 @@ CI uses the same `hk check` entry point, and what to do when adding a workspace.
 
 ## Collectors
 
-One deployed Worker per source, under `services/collector-<source>`. The runtime
+Each source implementation lives under `services/collector-<source>`. Twelve
+have daily automatic jobs; SMBC Direct and V Point Pay automatic login remain
+unsupported. Their presence below does not claim unattended collection. The runtime
 each of them needs, and why, is in the
 [collector runtime inventory](docs/collector-runtime-profiles.md).
 
