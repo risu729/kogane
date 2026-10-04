@@ -7,6 +7,39 @@
 
 Research date: 2026-08-27
 
+## PRESTIA bank Worker integration (2026-10-05)
+
+This update supersedes the earlier recommendation to begin a bank mobile-HTML
+prototype; the historical observations below are retained as dated evidence.
+An owner-authorized local portable HTTP run accepted authentication and read a
+structurally recognized account-summary page. This is not proof that Cloudflare
+Worker egress, deployment or unattended production collection works.
+
+The separate [bank Worker](../../services/collector-prestia-bank/) now writes
+sanitized `balance.html` evidence as terminal source `prestia-bank`, mapped to
+CORE source `prestia`. Registration/publication admits the
+`prestia-bank-balances@1.0.0` parser only for complete, failure-free snapshot
+evidence. Synthetic end-to-end tests use the
+production run-plan helper through registration, publication and evidence-detail
+readback. GLOBAL PASS remains a separate collector/session and its dated
+acceptance claims are unchanged.
+
+Confirmed bank labels distinguish native available amounts, term principal,
+section-level bank yen equivalents and three monthly-average qualification
+measures. All are non-additive. Yen equivalents are not allocated to account
+rows; monthly averages are neither current stock nor income, and an unstated
+calendar period is not inferred. Provider totals, calculation notes and period
+metadata remain valuation evidence accessible through artifact parse-run
+references and observation details, separate from the native balance screen.
+No transaction-history or empty-account completeness is claimed.
+
+The [decision](../adr/0040-prestia-bank-worker.md) is proposed until merge and the
+[delivery plan](../plans/2026-10-prestia-bank-worker.md) remains pending production
+verification. The Processor-managed 06:30 JST alarm is seeded disabled; Worker
+Cron triggers are empty. Full checks/independent review, merge, exact deployment,
+first production registration/parse/publication and separate schedule activation
+remain gates. No provider values or identifying captures are recorded here.
+
 ## Scope and decision
 
 This note evaluates SMBC Trust Bank PRESTIA and its GLOBAL PASS debit-card

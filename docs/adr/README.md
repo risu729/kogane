@@ -50,4 +50,5 @@ for current behavior.
 - [ADR 0037: Admit reconciliation pages by evidence and reuse clean purchase retirement checks](0037-reconciliation-purchase-cost.md)
 - [ADR 0038: Isolate complete hosted verification while sharing preparation](0038-shared-verification-preparation.md)
 - [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md)
+- [ADR 0040: PRESTIA bank snapshots and non-additive provider measures](0040-prestia-bank-worker.md) — proposed; production verification pending
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
