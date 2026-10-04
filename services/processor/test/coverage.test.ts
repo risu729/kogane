@@ -58,11 +58,15 @@ test("the current production migration chain preserves legacy policies and adds 
       .filter(
         (row) =>
           row.parser_name !== "st-george-balances" &&
+          row.parser_name !== "prestia-bank-balances" &&
           row.parser_name !== "sbi-shinsei-exchange-rate",
       )
       .every((row) => row.policy_id === "legacy-warning-compat-v1"),
   ).toBe(true);
   expect(policies.find((row) => row.parser_name === "st-george-balances")?.policy_id).toBe(
+    "coverage-v1",
+  );
+  expect(policies.find((row) => row.parser_name === "prestia-bank-balances")?.policy_id).toBe(
     "coverage-v1",
   );
   // 0053: the SBI Shinsei exchange-rate board is chosen by its coverage claim.

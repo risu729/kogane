@@ -50,7 +50,11 @@ test("the registration path makes no Service Binding call", () => {
   );
   expect(processor).toHaveLength(1);
   expect(processor[0]!.name).toBe("kogane-observation-pipeline");
-  expect(processor[0]!.serviceBindings).toHaveLength(12);
+  expect(processor[0]!.serviceBindings).toHaveLength(13);
+  expect(processor[0]!.serviceBindings).toContainEqual({
+    binding: "SCHEDULE_PRESTIA_BANK",
+    service: "kogane-prestia-bank-collector",
+  });
   expect(
     processor[0]!.serviceBindings.every((binding) => binding.binding.startsWith("SCHEDULE_")),
   ).toBe(true);

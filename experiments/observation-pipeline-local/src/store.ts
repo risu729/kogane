@@ -174,6 +174,28 @@ export function openStore(stateDir?: string): Store {
     if (policy === undefined) throw new Error("0053 names no snapshot policy row");
     db.transaction(() => db.exec(policy))();
   }
+  // PRESTIA snapshot policy only (0066); this local store has no alarm tables.
+  // Apply once so reopening preserves an operator's existing policy choices.
+  if (
+    !db
+      .query(
+        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name = 'prestia-bank-balances' AND dataset = 'prestia-bank-balance-html'",
+      )
+      .get()
+  ) {
+    const policy = readFileSync(
+      join(
+        EXPERIMENT_ROOT,
+        "../../packages/storage-d1/migrations/core/0066_prestia_bank_snapshot_schedule.sql",
+      ),
+      "utf8",
+    )
+      .replace(/^\s*--.*$/gm, "")
+      .split(";")
+      .find((statement) => statement.includes("INSERT INTO dataset_snapshot_policies"));
+    if (policy === undefined) throw new Error("0066 names no snapshot policy row");
+    db.transaction(() => db.exec(policy))();
+  }
   // 0056 moves that row's pinned parser version to 1.0.1, and 0059 to 1.0.2
   // (ADR 0028 and its amendment). Each UPDATE names the value the one before
   // wrote, so both are no-ops once applied.

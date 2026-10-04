@@ -798,6 +798,65 @@
       ]
     },
     {
+      "directory": "services/collector-prestia-bank",
+      "workspace": "services",
+      "disposition": {
+        "source": "PRESTIA bank integration, ADR 0040",
+        "proposedAction": "promote-service",
+        "proposedTarget": "services/collector-prestia-bank",
+        "requiredVerification": "Verify the portable HTTP client in the Worker runtime and first production collection before enabling its schedule; keep OTP human-required",
+        "executionStatus": "INTEGRATED_UNDEPLOYED",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "LIVE(buckets=kogane-raw-evidence)"
+      },
+      "workers": [
+        {
+          "config": "services/collector-prestia-bank/wrangler.jsonc",
+          "name": "kogane-prestia-bank-collector",
+          "main": "src/schedule-entrypoint.ts",
+          "role": "not-deployed",
+          "liveWorker": false,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
+          "r2": [
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
+              "live": true
+            }
+          ],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [],
+          "varNames": [
+            "COLLECTOR_SCHEMA_VERSION",
+            "PRESTIA_BANK_USER_AGENT",
+            "RELEASE_SHA"
+          ],
+          "requiredSecretNames": [
+            "ADMIN_TRIGGER_TOKEN",
+            "PRESTIA_BANK_PASSWORD",
+            "PRESTIA_BANK_USER_ID"
+          ],
+          "unextractedKeys": []
+        }
+      ]
+    },
+    {
       "directory": "services/collector-sbi-securities",
       "workspace": "services",
       "disposition": {
@@ -1540,6 +1599,10 @@
             {
               "binding": "SCHEDULE_ST_GEORGE",
               "service": "kogane-st-george-collector"
+            },
+            {
+              "binding": "SCHEDULE_PRESTIA_BANK",
+              "service": "kogane-prestia-bank-collector"
             }
           ],
           "varNames": [
@@ -1622,7 +1685,7 @@
     }
   ],
   "summary": {
-    "configCount": 25,
+    "configCount": 26,
     "deployedWorkerCount": 14,
     "crons": [],
     "queues": [
@@ -1713,6 +1776,7 @@
           "kogane-myjcb-collector-poc",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
+          "kogane-prestia-bank-collector",
           "kogane-sbi-collector-poc",
           "kogane-sbi-shinsei-collector-poc",
           "kogane-sbi-vc-session-poc",
@@ -1772,6 +1836,7 @@
           "kogane-myjcb-collector-poc",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
+          "kogane-prestia-bank-collector",
           "kogane-sbi-collector-poc",
           "kogane-sbi-shinsei-collector-poc",
           "kogane-sbi-vc-session-poc",

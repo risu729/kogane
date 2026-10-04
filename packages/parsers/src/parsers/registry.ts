@@ -2,6 +2,7 @@ import type { Parser } from "../types.ts";
 // Build identity of every parser below (design review D03): the registry is
 // what a Worker reads, so the digests travel with it.
 export { PARSER_CODE_DIGESTS, PARSER_DIGESTS } from "./digests.ts";
+import { prestiaBankBalances } from "./prestia-bank-html.ts";
 import { paypayCsv } from "./paypay-csv.ts";
 import { mobileSuicaSfHistory } from "./mobile-suica-sf-history.ts";
 import { mizuhoAccountList, mizuhoOrdinaryHistory } from "./mizuho.ts";
@@ -46,6 +47,7 @@ import { vPointPayNotificationEvent } from "./v-point-pay.ts";
 import { vpassStatementPage } from "./vpass.ts";
 
 export const PARSERS: readonly Parser[] = [
+  prestiaBankBalances,
   globalPassActivity,
   mobileSuicaSfHistory,
   mizuhoAccountList,

@@ -96,6 +96,37 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
       "通知に記載された残高です。最終決済や現在残高を保証しません。",
       { assetClass: "prepaid", timeBasis: "event_report" },
     );
+  if (matches("prestia", "prestia-bank-balances", ["available_balance"]))
+    return result(
+      "other",
+      "利用可能額",
+      "取得元の利用可能額です。預金元本や円換算集計とは重複加算しません。",
+      { measurementKind: "capacity" },
+    );
+  if (
+    matches("prestia", "prestia-bank-balances", [
+      "provider_yen_equivalent",
+      "provider_balance_group_total",
+    ])
+  )
+    return result(
+      "aggregate",
+      "取得元の残高集計",
+      "銀行が報告した区分集計です。外貨の円換算は銀行TTBによる集計であり個別口座への配賦や純資産への自動加算はしません。",
+      { assetClass: "mixed", timeBasis: "reported_snapshot" },
+    );
+  if (
+    matches("prestia", "prestia-bank-balances", [
+      "provider_monthly_average_total_relationship_balance",
+      "provider_monthly_average_foreign_currency_balance",
+      "provider_monthly_average_liquid_deposit_balance",
+    ])
+  )
+    return result(
+      "other",
+      "月間平均残高（資格判定）",
+      "銀行が報告する資格判定用の月間平均です。対象暦月を推定せず、現在残高や収入に加算しません。",
+    );
   const deposit =
     matches("sbi-shinsei-bank", "sbi-shinsei-yen-deposit-account", [
       "yen_deposit_account_balance",
@@ -105,6 +136,7 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
       "account_balance",
       "activity_current_balance",
     ]) ||
+    matches("prestia", "prestia-bank-balances", ["term_deposit_principal"]) ||
     matches("smbc-bank", "smbc-direct-balance", ["account_balance"]) ||
     matches("mizuho-bank", "mizuho-account-list", ["account_balance"]) ||
     matches("sony-bank", "sony-bank-history-json", ["available_after_transaction"]) ||

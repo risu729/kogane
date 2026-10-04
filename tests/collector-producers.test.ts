@@ -30,6 +30,7 @@ import * as mizuho from "../services/collector-mizuho/src/storage.ts";
 import * as mobileSuica from "../services/collector-mobile-suica/src/shared-run.ts";
 import * as moneyforward from "../services/collector-moneyforward/src/shared-collection.ts";
 import * as myjcb from "../services/collector-myjcb/src/shared-collection.ts";
+import * as prestiaBank from "../services/collector-prestia-bank/src/storage.ts";
 import * as sbiSecurities from "../services/collector-sbi-securities/src/shared-run.ts";
 import * as sbiShinsei from "../services/collector-sbi-shinsei/src/shared-collection.ts";
 import * as sbiVcTrade from "../services/collector-sbi-vc-trade/src/shared-collection.ts";
@@ -94,6 +95,15 @@ const COLLECTORS: Readonly<Record<string, readonly TerminalIdentity[]>> = {
       source: myjcb.SOURCE,
       producerName: "PRODUCER",
       producer: myjcb.PRODUCER,
+    },
+  ],
+  "collector-prestia-bank": [
+    {
+      file: "src/storage.ts",
+      sourceName: "PRESTIA_BANK_SOURCE",
+      source: prestiaBank.PRESTIA_BANK_SOURCE,
+      producerName: "PRESTIA_BANK_PRODUCER",
+      producer: prestiaBank.PRESTIA_BANK_PRODUCER,
     },
   ],
   "collector-sbi-securities": [

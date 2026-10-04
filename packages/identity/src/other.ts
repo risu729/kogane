@@ -10,6 +10,7 @@ import {
 const LABELS: Record<string, string> = {
   vpass: "Vpassカード明細",
   "global-pass": "GLOBAL PASSデビット明細",
+  prestia: "SMBC信託銀行 PRESTIA",
   myjcb: "MyJCB請求口座",
   "smbc-bank": "三井住友銀行 円普通預金",
   "mizuho-bank": "みずほ銀行 普通預金",
@@ -76,6 +77,18 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
     case "global-pass":
       if (a === "global-pass:card")
         account("debit-card-activity", "provider-card-surface-not-prestia-deposit");
+      break;
+    case "prestia":
+      if (/^prestia-bank:account:[^:]+:[A-Z]{3}(?::deposit:[^:]+)?$/u.test(a))
+        account("deposit", "provider-account-reference-with-native-unit");
+      else if (
+        /^prestia-bank:group:(yen-deposits|foreign-deposits|premium-deposit|mutual-funds|money-trust|borrowing|yen-current)$/u.test(
+          a,
+        )
+      )
+        account("valuation-aggregate", "provider-group-not-individual-holding", "aggregate");
+      else if (a === "prestia-bank:relationship")
+        account("qualification-aggregate", "provider-monthly-average-qualification", "aggregate");
       break;
     case "myjcb":
       if (/^myjcb:[a-z0-9][a-z0-9-]{0,63}:root$/u.test(a))

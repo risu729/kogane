@@ -52,6 +52,11 @@
       "config": "wrangler.jsonc"
     },
     {
+      "name": "prestia-bank-worker",
+      "path": "services/collector-prestia-bank",
+      "config": "wrangler.jsonc"
+    },
+    {
       "name": "processor",
       "path": "services/processor",
       "config": "wrangler.jsonc"

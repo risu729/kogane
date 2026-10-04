@@ -14,6 +14,17 @@ shared API family. Research branches and pull requests stay separate so a
 future implementation can continue from the source-specific evidence without
 bringing unrelated authentication assumptions with it.
 
+## PRESTIA / GLOBAL PASS
+
+[PRESTIA source evidence](prestia.md) preserves the dated browser/app research and
+GLOBAL PASS observations. Its [2026-10-05 bank Worker update](prestia.md#prestia-bank-worker-integration-2026-10-05)
+links the separate bank snapshot implementation, [proposed ADR 0042](../adr/0042-prestia-bank-worker.md)
+and [pending-production plan](../plans/2026-10-prestia-bank-worker.md). The local
+bank login/read result is not production Worker verification and does not update
+GLOBAL PASS acceptance or claim bank transaction-history coverage.
+
+## Record outline
+
 Use this outline:
 
 1. scope and non-goals;

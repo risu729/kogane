@@ -30,6 +30,7 @@ const FROZEN: Record<string, Record<string, Frozen>> = {};
 for (const file of [
   "expected.json",
   "st-george-expected.json",
+  "prestia-bank-expected.json",
   "sbi-shinsei-exchange-rate-expected.json",
   "sbi-shinsei-observed-shapes-expected.json",
 ]) {
@@ -140,6 +141,14 @@ const CLAIMS: Record<string, Record<string, Expectation>> = {
   "sony-bank-gross-balance": { "complete-rows": { ...complete(17), expected: 17 } },
   "smbc-direct-balance": { "complete-rows": { ...complete(1), expected: 1 } },
   "st-george-balances": { "complete-rows": { ...complete(2), expected: 2 } },
+  "prestia-bank-balances": {
+    "complete-rows": complete(12, [
+      "row_unreadable",
+      "row_unreadable",
+      "row_unreadable",
+      "row_unreadable",
+    ]),
+  },
 };
 
 describe("coverage contract registry", () => {
@@ -212,7 +221,13 @@ for (const { parser, cases } of CONTRACT_PARSERS) {
         expect(coverage.observedCount).toBe(result.observations.length);
         expect(coverage.evidenceRefs.length).toBeGreaterThan(0);
         // Evidence references are locators and page markers, never provider values.
-        for (const ref of coverage.evidenceRefs) expect(ref).toMatch(/^(json:\$|mts-shift-jis:)/);
+        if (parser.name === "prestia-bank-balances")
+          expect(coverage.evidenceRefs).toEqual([
+            "html:form[name=ACKZDSP]",
+            "html:section=balance-summary",
+          ]);
+        else
+          for (const ref of coverage.evidenceRefs) expect(ref).toMatch(/^(json:\$|mts-shift-jis:)/);
       });
     }
   });

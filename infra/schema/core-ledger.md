@@ -14,7 +14,7 @@ Schema digest: `cdb732d32955a6b1b891cdaff5566cd12252c21dac9fa65acabf5a551ad5029c
 
 ## Summary
 
-- Migrations applied: 64
+- Migrations applied: 65
 - Tables: 123 (all `STRICT`: yes)
 - Views: 39
 - Triggers: 455
@@ -254,5 +254,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0063_identity_value_rewrite_apply.sql` | 23 | account_mappings, identity_value_rewrite_0063_check, identity_value_rewrite_0063_guard |
 | `0064_purchase_retirement_and_reconciliation_cost.sql` | 43 | card_purchase_retirement_check |
 | `0065_alarm_schedules.sql` | 59 | collection_schedule_revisions, collection_schedules, provider_maintenance_references, provider_maintenance_rules |
+| `0066_prestia_bank_snapshot_schedule.sql` | 3 | collection_schedule_revisions, collection_schedules, dataset_snapshot_policies |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql
