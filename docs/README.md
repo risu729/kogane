@@ -18,7 +18,7 @@ production freshness.
 Do not move old docs wholesale into ADRs. Move only an actual design decision
 that lacks a repository decision record; keep contracts and operational steps in
 living docs. Existing ADRs remain historical even when their original trigger
-or deployment assumptions have been superseded. See [ADR 0040](adr/0040-documentation-scope.md).
+or deployment assumptions have been superseded. See [ADR 0041](adr/0041-documentation-scope.md).
 
 Code/configs and generated [infrastructure ledgers](infra-ledgers.md) are the
 implementation authority. Distinguish implemented, enabled, deployed and verified
