@@ -15,6 +15,8 @@ export interface PrestiaBankRun {
   version: string;
   body?: string;
 }
+export const PRESTIA_BANK_SOURCE = "prestia-bank";
+export const PRESTIA_BANK_PRODUCER = "collector-prestia-bank";
 export async function prestiaBankRunPlan(input: PrestiaBankRun): Promise<PersistRunPlan> {
   const success = input.body !== undefined;
   if (success && (!input.body || sanitizePrestiaBankPage(input.body) !== input.body))
@@ -36,8 +38,8 @@ export async function prestiaBankRunPlan(input: PrestiaBankRun): Promise<Persist
     : [];
   return {
     run: {
-      source: "prestia-bank",
-      producer: "collector-prestia-bank",
+      source: PRESTIA_BANK_SOURCE,
+      producer: PRESTIA_BANK_PRODUCER,
       producerVersion: input.version,
       runId: input.runId,
       attemptId: input.runId,
@@ -74,7 +76,7 @@ export async function prestiaBankRunPlan(input: PrestiaBankRun): Promise<Persist
       transformations: artifacts.map((a) => ({
         transformationId: "sanitize-balance",
         stepKind: "redacted",
-        transformerId: "collector-prestia-bank",
+        transformerId: PRESTIA_BANK_PRODUCER,
         transformerVersion: input.version,
         inputArtifactKeys: [],
         outputArtifactKey: a.artifactKey,

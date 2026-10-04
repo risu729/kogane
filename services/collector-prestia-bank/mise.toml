@@ -15,7 +15,6 @@ depends = ["//services/collector-prestia-bank:types"]
 run = ["bun test ./test", "./node_modules/.bin/vitest run"]
 
 [tasks.dry-run]
-wait_for = ["//:ci:workspaces", "//:ci:remainder:workspaces", "//packages/storage-d1:test"]
 description = "Validate PRESTIA bank deployment without uploading it."
 depends = ["//services/collector-prestia-bank:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run"
