@@ -31,10 +31,134 @@ export interface InvocationContext {
   registration: RegistrationBudget;
   /** Failures whose text names a platform invocation limit. Counted, never quoted. */
   limitErrors: number;
+  /** Fixed-name stage aggregates for this invocation only; never persisted per query. */
+  lanes: Partial<Record<ObservedLane, LaneCost>>;
+}
+
+const OBSERVED_LANES = [
+  "observation_sweep",
+  "collection_scan",
+  "identity_sweep",
+  "balance_projection",
+  "reconciliation_sweep",
+  "card_debit_account_sweep",
+  "card_settlement_sweep",
+  "purchase_recognition",
+  "reward_claims_sweep",
+  "reward_read_projection",
+  "price_promotion",
+  "report_job",
+  "operation_dispatch",
+  "decision_outbox",
+  "collection_notification",
+] as const;
+type ObservedLane = (typeof OBSERVED_LANES)[number];
+
+const RETURNED_OUTCOMES = [
+  "skipped",
+  "unchanged",
+  "building",
+  "complete",
+  "refused",
+  "retryable",
+  "pending",
+  "dispatched",
+  "registered",
+  "already_registered",
+  "blocked",
+  "deferred",
+  "ignored",
+  "invalid",
+  "flag_off",
+] as const;
+type ReturnedOutcome = (typeof RETURNED_OUTCOMES)[number];
+
+interface LaneCost {
+  meter: OperationMeter;
+  runs: number;
+  failed: number;
+  skipped: number;
+  limitErrors: number;
+  durationMs: number;
+  /** Only known returned count fields; absent means unavailable. */
+  resultCounts: Partial<Record<"failed" | "error" | "retried" | "deferred", number>>;
+  /** Closed returned status/outcome codes; refused/blocked are not thrown failures. */
+  resultOutcomes: Partial<Record<ReturnedOutcome, number>>;
+  /** A boolean deferred flag describes a tick, not a number of deferred jobs. */
+  deferredFlags: { yes: number; no: number };
+  /** Successfully returned queue action calls, not an assertion of eventual delivery. */
+  acknowledgements: number;
+  retries: number;
+}
+
+export interface LaneObservation {
+  env: Env;
+  finish(outcome: "ran" | "failed" | "skipped", result?: object, limit?: boolean): void;
+  queueAction(action: "ack" | "retry"): void;
+}
+
+/** A bounded scope: unknown names cannot allocate map entries or copy private fields. */
+export function observeLane(env: Env, context: InvocationContext, name: string): LaneObservation {
+  if (!(OBSERVED_LANES as readonly string[]).includes(name))
+    throw new Error("unknown_observation_lane");
+  const lane = name as ObservedLane;
+  const cost = (context.lanes[lane] ??= {
+    meter: new OperationMeter(),
+    runs: 0,
+    failed: 0,
+    skipped: 0,
+    limitErrors: 0,
+    durationMs: 0,
+    resultCounts: {},
+    resultOutcomes: {},
+    deferredFlags: { yes: 0, no: 0 },
+    acknowledgements: 0,
+    retries: 0,
+  });
+  const started = performance.now();
+  let finished = false;
+  return {
+    env: meteredEnv(env, cost.meter),
+    finish(outcome, result, limit = false) {
+      if (finished) return;
+      finished = true;
+      cost.durationMs += Math.max(0, performance.now() - started);
+      const source = result as Record<string, unknown> | undefined;
+      if (
+        outcome === "ran" &&
+        (source?.["enabled"] === false ||
+          source?.["status"] === "skipped" ||
+          source?.["outcome"] === "flag_off")
+      )
+        outcome = "skipped";
+      if (outcome === "ran") cost.runs += 1;
+      else if (outcome === "failed") cost.failed += 1;
+      else cost.skipped += 1;
+      if (limit) cost.limitErrors += 1;
+      if (result) {
+        const counts = result as Record<string, unknown>;
+        if (typeof counts["deferred"] === "boolean")
+          cost.deferredFlags[counts["deferred"] ? "yes" : "no"] += 1;
+        for (const code of RETURNED_OUTCOMES) {
+          if (counts["status"] === code || counts["outcome"] === code)
+            cost.resultOutcomes[code] = (cost.resultOutcomes[code] ?? 0) + 1;
+        }
+        for (const field of ["failed", "error", "retried", "deferred"] as const) {
+          const value = counts[field];
+          if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
+            cost.resultCounts[field] = (cost.resultCounts[field] ?? 0) + value;
+        }
+      }
+    },
+    queueAction(action) {
+      if (action === "ack") cost.acknowledgements += 1;
+      else cost.retries += 1;
+    },
+  };
 }
 
 export function invocationContext(): InvocationContext {
-  return { registration: new RegistrationBudget(), limitErrors: 0 };
+  return { registration: new RegistrationBudget(), limitErrors: 0, lanes: {} };
 }
 
 /**
@@ -78,9 +202,25 @@ export function invocationProbe(
   return {
     event: "invocation_budget",
     trigger,
-    d1Statements: meter.d1Statements,
-    d1Batches: meter.d1Batches,
-    r2Operations: meter.r2Operations,
+    ...meter.summary(),
+    lanes: Object.fromEntries(
+      Object.entries(context.lanes).map(([lane, cost]) => [
+        lane,
+        {
+          ...cost.meter.summary(),
+          runs: cost.runs,
+          failed: cost.failed,
+          skipped: cost.skipped,
+          limitErrors: cost.limitErrors,
+          durationMs: cost.durationMs,
+          resultCounts: cost.resultCounts,
+          resultOutcomes: cost.resultOutcomes,
+          deferredFlags: cost.deferredFlags,
+          acknowledgements: cost.acknowledgements,
+          retries: cost.retries,
+        },
+      ]),
+    ),
     registration: context.registration.summary(),
     limitErrors: context.limitErrors,
     documented: DOCUMENTED_LIMITS,

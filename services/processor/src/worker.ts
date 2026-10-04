@@ -72,6 +72,7 @@ import {
   invocationContext,
   invocationProbe,
   meteredEnv,
+  observeLane,
   platformLimitError,
   type InvocationContext,
 } from "./invocation-probe.ts";
@@ -1911,13 +1912,16 @@ export async function runScheduled(
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
     const startedAtMs = Date.now();
+    const observation = observeLane(env, context, event);
     if (!enabled) {
+      observation.finish("skipped");
       await recordTick(env.DB, event, startedAtMs, { outcome: "skipped-by-flag" }, log);
       continue;
     }
     let tick: LaneTickResult;
     try {
-      const result = await stage(env, context);
+      const result = await stage(observation.env, context);
+      observation.finish("ran", result);
       log(JSON.stringify({ event, ...result }));
       tick = { outcome: "ran", result };
     } catch (error) {
@@ -1931,6 +1935,7 @@ export async function runScheduled(
       // the one thing the probe keeps from the error; the text is dropped.
       const limit = platformLimitError(error);
       if (limit) context.limitErrors += 1;
+      observation.finish("failed", undefined, limit);
       log(JSON.stringify({ event: `${event}_failed`, code, ...(limit ? { limit: true } : {}) }));
       tick = { outcome: "failed", code };
     }
@@ -1971,16 +1976,23 @@ export async function consumeTerminalNotifications(
   log: (line: string) => void = (line) => console.log(line),
 ): Promise<void> {
   for (const message of messages) {
+    const observation = observeLane(env, context, "collection_notification");
     let event: Record<string, unknown>;
     try {
       const result = await handleTerminalNotification(
-        collectionEnv(env),
+        collectionEnv(observation.env),
         { body: message.body },
         { budget: context.registration },
       );
       event = { event: "collection_notification", ...result };
-      if (result.outcome === "retryable" || result.outcome === "deferred") message.retry();
-      else message.ack();
+      if (result.outcome === "retryable" || result.outcome === "deferred") {
+        message.retry();
+        observation.queueAction("retry");
+      } else {
+        message.ack();
+        observation.queueAction("ack");
+      }
+      observation.finish("ran", result);
     } catch (error) {
       // Safe codes only: never the exception text, never a key or a value.
       const code =
@@ -1992,7 +2004,9 @@ export async function consumeTerminalNotifications(
       const limit = platformLimitError(error);
       if (limit) context.limitErrors += 1;
       event = { event: "collection_notification_failed", code, ...(limit ? { limit: true } : {}) };
+      observation.finish("failed", undefined, limit);
       message.retry();
+      observation.queueAction("retry");
     }
     log(JSON.stringify(event));
   }

@@ -578,6 +578,17 @@ that the lane exists and is off ([observation-lanes.md](observation-lanes.md));
 the one row `operation_dispatch` writes then is its `skipped-by-flag` tick
 (§6.1).
 
+Every wired scheduled stage also contributes one bounded aggregate to the
+invocation's `invocation_budget.lanes` log map: attempted/failed D1 and R2
+operations, elapsed milliseconds, and available D1 rows read/written,
+SQL duration and provider retries with explicit coverage. Stage-reported
+failure/retry/deferred counts are copied only from a fixed numeric field list.
+Tick audit writes sit outside the lane scope and remain in invocation totals.
+No new tick fields, migration, cost query or per-query write is added.
+Unknown `first`/`raw` metadata stays unknown; interpretation and limits are
+in [operations.md §1.1](operations.md#11-invocation-budget-probe-issue-87)
+and [ADR 0036](adr/0036-lane-cost-observability.md).
+
 ### 6.1 Tick records
 
 Most lanes keep no state of their own, so until migration 0049 the only trace
