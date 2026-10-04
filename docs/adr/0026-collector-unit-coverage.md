@@ -681,7 +681,9 @@ count, and form count matched.
 
 ## Amendment 2026-10-04: GLOBAL PASS walks every page of a month
 
-- Status: proposed; accepted when #408 merges
+- Status: accepted (#408, merged 2026-10-03); its empty-month limit is
+  amended by
+  [the empty-month amendment below](#amendment-2026-10-04-global-pass-empty-months-are-read-as-no-rows)
 - Date: 2026-10-04
 - Carried by: `services/collector-globalpass/container/server.mjs`
   (`walkActivityPages`, `clickActivityNext`, `readActivityPager`,
@@ -965,8 +967,8 @@ empty month. It removes one known, observed gap.
 - **Rule.** A page is the empty month only when all of these hold: the
   doctype, the run precondition, exactly one month select with one selected
   month and the key's month equal to it (as in 1.1.0); the key names page 1
-  (`activity-YYYY-MM.html`); no `div.nablarch_currentPageNumber`; no element
-  of the pager's classes (`nablarch_paging`, `resultCountHeader`,
+  (`activity-YYYY-MM.html`); no `div.nablarch_currentPageNumber`; no element,
+  whatever its tag, with one of the pager's classes (`nablarch_paging`, `resultCountHeader`,
   `nablarch_currentPageNumber`, `nablarch_prevSubmit`,
   `nablarch_nextSubmit`); no `Found N Result` / 「検索結果 N件」 and no
   `[p/Ppage]` / 「[p/Pページ]」 in the page's visible text (script, style and
@@ -1012,6 +1014,18 @@ empty month. It removes one known, observed gap.
     from the observed empty month: both would be the same markup. The
     collector waits for the month-selection POST before capturing, and a
     later capture of the same month with rows supersedes the empty reading.
+  - **An empty reading hides older rows of the same month.** The read
+    model's per-month rule (`GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES`) does not
+    look at the row count: a newer run's `ok` empty page is that month's
+    current snapshot and an older run's rows for the month stop being
+    current, with no reason shown. Nobody has observed a month's statements
+    disappearing from the provider's list, so such a pair would be either
+    that unobserved provider behaviour or a failed render read as empty.
+    Nothing guards against it today; it is pinned by
+    `packages/read-model/test/global-pass-snapshots.test.ts` ("limit: a newer
+    empty month ... supersedes an older capture with rows") so a change to
+    it is visible. A guard would change the read model's query and needs its
+    own frozen-SQL differential proof; it is not part of this amendment.
   - The empty month page has not been stored by a shared run yet; the first
     one proves the rule against production markup.
 
@@ -1022,13 +1036,17 @@ empty month. It removes one known, observed gap.
   `ok` with no observation and no warning, deterministically, also with pager
   and Found text inside a script or comment; a zero-table page with the
   observed pager (English or Japanese), a Found line alone (either language,
-  with or without its class), a pager alone, an empty pager container or a
-  pager link is refused with `table cardinality drift`; an unreadable pager,
+  with or without its class), a pager alone, an empty pager container, a
+  pager link or a pager class on another tag is refused with `table cardinality drift`; an unreadable pager,
   a later page with or without a pager, another month, an unselected or
   missing month select, a missing doctype and a non-success run keep their
   1.1.0 refusals.
 - `packages/parsers/test/global-pass-parser.test.ts` (unchanged) passes
   under 1.2.0.
+- `packages/read-model/test/global-pass-snapshots.test.ts`: a newer run's
+  `ok` empty page (no row) is its month's current snapshot and an older
+  run's rows for that month stop being current; a still newer capture with
+  rows supersedes the empty one (the limit above, pinned).
 - `packages/parsers/test/global-pass-sanitized-contract.test.ts` (#439): the
   collector's synthetic empty month of either variant, after
   `sanitizeGlobalPassActivityHtml`, parses `ok` with no observation and no

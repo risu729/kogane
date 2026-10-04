@@ -29,7 +29,7 @@ refused the page (`table cardinality drift`: it needs one activity table).
 
 - **Rule.** Page 1 of the key's month (`activity-YYYY-MM.html`) with the
   doctype and one month select with one selected month (as before), and no
-  `table`, no pager element (`nablarch_paging`, `resultCountHeader`,
+  `table`, no element of any tag with a pager class (`nablarch_paging`, `resultCountHeader`,
   `nablarch_currentPageNumber`, `nablarch_prevSubmit`,
   `nablarch_nextSubmit`), and no Found or pager text in either language
   (script, style and template text are not page text).
@@ -55,7 +55,10 @@ importer-era artifacts 1.1.0 refuses fall in 7 months none of which has an
 `ok` capture with rows (read-only count, 2026-10-04), so no stored row is
 hidden. Limits: the empty month was seen in English only; a page whose list
 failed to load would look the same as the empty month, which the parser
-cannot tell apart (a later capture with rows supersedes it); no shared run has
+cannot tell apart (a later capture with rows supersedes it); the read model's
+per-month rule does not look at row counts, so a newer empty reading also hides
+an older run's rows for the same month, with no reason shown (pinned in
+`packages/read-model/test/global-pass-snapshots.test.ts`); no shared run has
 stored an empty month yet. Tests:
 `packages/parsers/test/global-pass-empty-month.test.ts`.
 
