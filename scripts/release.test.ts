@@ -4,10 +4,11 @@
 // modules under tasks/_lib/ci and is decided here — the ledger interlock
 // against a real git history in a temporary repository, and the manifest
 // against a fixture tree.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
+import { cfArtifactFiles } from "../tasks/_lib/ci/release-manifest.mjs";
 import {
   appliedMigrations,
   buildManifest,
@@ -783,6 +784,79 @@ describe("the release manifest (G5-11)", () => {
       "lock",
       "migrations",
     ]);
+  });
+
+  test("cf metadata and asset bytes are covered by pre-upload verification", () => {
+    const cfRoot = manifestFixture();
+    const orderPath = join(cfRoot, "infra/deploy-order.json");
+    const order = JSON.parse(readFileSync(orderPath, "utf8"));
+    order.workers[0].deployBackend = "cf";
+    writeFileSync(orderPath, JSON.stringify(order));
+    write(cfRoot, "services/processor/cloudflare.config.ts", "export default {};\n");
+    write(cfRoot, "services/processor/wrangler.config.ts", "export default {};\n");
+    for (const file of [
+      "config.json",
+      "workers/default/worker.config.json",
+      "workers/default/bundle/worker.js",
+      "workers/default/assets/index.html",
+    ]) {
+      write(cfRoot, `services/processor/.cloudflare/output/v0/${file}`, "synthetic original\n");
+    }
+    write(
+      cfRoot,
+      "services/processor/.cloudflare/output/v0/workers/default/worker.config.json",
+      JSON.stringify({
+        manifest: { mainModule: "worker.js", modules: { "worker.js": { type: "esm" } } },
+      }),
+    );
+    const manifest = buildManifest({ root: cfRoot, sha: SHA });
+    expect(manifest.cfArtifacts[0].files).toHaveLength(4);
+    for (const file of [
+      "cloudflare.config.ts",
+      "wrangler.config.ts",
+      ".cloudflare/output/v0/config.json",
+      ".cloudflare/output/v0/workers/default/worker.config.json",
+      ".cloudflare/output/v0/workers/default/bundle/worker.js",
+      ".cloudflare/output/v0/workers/default/assets/index.html",
+    ]) {
+      const path = join(cfRoot, "services/processor", file);
+      const original = readFileSync(path);
+      writeFileSync(
+        path,
+        file.endsWith("worker.config.json")
+          ? JSON.stringify({ ...JSON.parse(original.toString()), changed: true })
+          : "synthetic changed\n",
+      );
+      expect(manifestDifferences(manifest, buildManifest({ root: cfRoot, sha: SHA }))).toEqual([
+        "cfArtifacts",
+      ]);
+      writeFileSync(path, original);
+    }
+  });
+
+  test("cf output refuses missing metadata, missing entry and empty modules", () => {
+    const cfRoot = manifestFixture();
+    const output = join(cfRoot, "cf-output");
+    expect(() => cfArtifactFiles(output)).toThrow();
+    mkdirSync(output);
+    expect(() => cfArtifactFiles(output)).toThrow("metadata");
+    write(cfRoot, "cf-output/config.json", "{}");
+    write(cfRoot, "cf-output/workers/default/worker.config.json", "{}");
+    expect(() => cfArtifactFiles(output)).toThrow("entry module");
+    write(
+      cfRoot,
+      "cf-output/workers/default/worker.config.json",
+      JSON.stringify({
+        manifest: { mainModule: "worker.js", modules: { "worker.js": { type: "esm" } } },
+      }),
+    );
+    expect(() => cfArtifactFiles(output)).toThrow("entry module");
+    write(cfRoot, "cf-output/workers/default/bundle/worker.js", "");
+    expect(() => cfArtifactFiles(output)).toThrow("entry module");
+    write(cfRoot, "cf-output/workers/default/bundle/worker.js", "export default {};");
+    expect(cfArtifactFiles(output)).toHaveLength(3);
+    rmSync(join(output, "workers/default/worker.config.json"));
+    expect(() => cfArtifactFiles(output)).toThrow("metadata");
   });
 
   test("the deployment payload stays small and carries what the next run needs", () => {

@@ -190,6 +190,41 @@ and `zizmor`'s `secrets-inherit` is ignored on exactly these two `uses:` lines;
 `credentialWiringViolations` in `tasks/_lib/deploy-order.test.ts` fails if a
 caller ever drops it again.
 
+### cf version deployment and compatible rollbacks
+
+ADR 0040 moves thirteen compatible Workers to `cf@1.0.0-beta.12` and the pinned
+`wrangler-deploy-action` v2.1.1. Their native `cloudflare.config.ts` and
+`wrangler.config.ts` retain the canonical Wrangler settings; parity guards
+cover bindings, variables, observability, assets and the two already-declared
+V Point exports. Existing Wrangler tests, bundles and dry runs remain, with
+credential-free cf builds and prebuilt version-upload dry runs added.
+
+Container deployments (GlobalPass, SBI Shinsei, St.George) retain v1.2.0 because
+`cf workers versions create` does not update Container applications. Legacy DO
+owners (SBI VC Trade, SMBC Direct, Processor) use code-only cf bindings to their
+existing self-Worker/class namespaces, with no native exports or migrations.
+Canonical migration histories remain unchanged. A build guard checks their
+actual artifacts; before publication the live migration tag must match the
+latest canonical tag, and after publication all active namespace IDs must
+match the captured baseline. Pending DO lifecycle work requires a separate
+Wrangler rollout. Processor alone enables trigger synchronization to preserve
+its existing Queue consumer settings. All 16 Workers keep ADR 0039's order and the authenticated
+App/Processor release and schema postcheck.
+
+`deployBackend` belongs to the target commit's deployment ledger. A target that
+has no `cf` marker uses the existing v1 path, including commits predating this
+migration. The trusted workflow normalizes a cf step's actual outcome into the
+legacy step identifier before the target's release helper reads it, preserving
+partial failure and resume accounting. Exactly one backend runs per target.
+
+The release sha is stamped before building, so both deployment artifacts carry
+the same identity. The manifest digests the native source and build config and
+every file in cf Build Output, including assets and Worker metadata. It is
+rechecked before the first upload. v2 uploads that prebuilt artifact, deploys
+the returned version at 100%, and reads that exact deployment back. Trigger
+synchronization is explicitly disabled; existing schedules and queue consumers
+stay under the existing deployment paths. No preview lane is introduced.
+
 ### What the release job does, in order
 
 1. **Refuses a target that is not a commit.** The sha must be 40 hex
@@ -215,7 +250,8 @@ caller ever drops it again.
    later step reads. A run with nothing left to do stops here, successfully,
    having changed nothing; a run that finds the ledger cannot account for some
    Workers deploys exactly those.
-5. **Installs the rest of the toolchain**, then `mise run install`,
+5. **Installs the rest of the toolchain**, then `mise run install`, stamps the
+   release sha into the App and Processor configurations, and runs
    `mise run bundle` and `mise run dry-run`. Everything is built and validated
    before any credential exists in the job (G5-09). `mise run dry-run` covers
    every configuration, not only the deployed ones, and `mise run bundle` covers
@@ -395,20 +431,17 @@ first upload; a difference names the field that moved and stops the deployment.
 That is what the pipeline can honestly assert: **nothing changed between the
 build that was validated and the upload that was performed**.
 
-It is _not_ an assertion that the live script is byte-identical to the bundle
-that was tested. The pinned deploy Action re-bundles in `production` mode and
-exposes neither `--outdir` nor `--no-bundle`, and the Workers API returns a
-version id, an author and a source for a deployed version — not a content
-digest of the uploaded script. Emitting a per-service `dist/<name>/wrangler.json`
-with `no_bundle` set and pointing the Action at it is the only route to byte
-identity through this Action; it is deliberately not taken yet, because it moves
-the deployed configuration into a generated file. Until then the pre-deploy
-bundle digest in the manifest is the recorded build identity, and the
-`<short>:bundle` mise tasks reproduce it from any checkout of the same commit:
-two `mise run bundle` runs from a clean `dist/` produced the same five digests
-when this was reviewed. That reproducibility is checked by hand, not by a CI
-test, which would double the build; the CI test asserts determinism of the
-manifest over one tree.
+The thirteen cf Workers upload their validated prebuilt artifacts. The manifest also
+hashes each native source and build configuration and every cf build-output file,
+including Worker metadata, modules, maps and App assets. Missing metadata or an
+empty entry module fails before upload. The pinned v2 Action creates one version,
+deploys that exact version at 100%, and reads the allocation back.
+
+The three v1 Workers still re-bundle during deployment, so their recorded bundle
+digest proves the validated build identity and unchanged inputs. The Workers API
+does not expose the uploaded script's content digest. The existing
+`<short>:bundle` tasks retain reproducible Wrangler bundles for all Workers, and
+the manifest's deterministic hashes and tamper checks remain covered offline.
 
 ### Deploy order (G5-14, G5-15)
 
@@ -485,10 +518,9 @@ synthetic is written to a financial view.
 **How the sha gets in.** A Worker cannot know its own commit: the value comes
 from the variable `RELEASE_SHA`, which is empty in the repository and stamped
 into the App's and the Processor's configuration by
-`tasks/_lib/ci/release-sha.mjs` in the runner's checkout — the pinned deploy
-Action exposes `mode`, `working-directory`, `config`, `environment`,
-`preview-alias`, the two credentials and `secrets-json`, and no input for a
-variable. The stamp runs **before** the manifest is computed, so the manifest
+`tasks/_lib/ci/release-sha.mjs` in the runner's checkout. The App's native cf configuration reads that canonical
+variable when building. The stamp runs **before** every bundle and the manifest
+are computed, so the manifest
 digests the configuration that is actually uploaded and the re-verification
 before the first upload still holds. A configuration that already carries a
 sha is an error, not a second rewrite.
@@ -573,22 +605,29 @@ The integrator cannot create any of these. The repository owner must, once:
    commit that is not on the default branch. Required reviewers are optional;
    with them, an overtaken run waits for an approval before reporting that it
    has nothing to do.
-2. **Environment secret** `CLOUDFLARE_API_TOKEN` — a Cloudflare API token
-   scoped to the account that holds the Workers, with:
-   - `Workers Scripts: Edit` — upload the Workers;
-   - `D1: Edit` — apply the migrations;
-   - `Workers R2 Storage: Read` — Wrangler checks existing bucket metadata before upload;
-   - `Containers: Edit` — publish the GlobalPass and SBI Shinsei container images and deployments;
-   - `Connectivity Directory: Admin` — deploy their existing direct Tunnel VPC bindings;
-   - `Account Settings: Read` — Wrangler reads the account.
+2. **Environment secret** `CLOUDFLARE_API_TOKEN` — a token with **Editor on
+   the 16 individual deployed Workers** named by `infra/deploy-order.json`, plus
+   these account permissions:
+   - `D1: Edit` — apply CORE and READ migrations;
+   - `Queues: Edit` — update the Processor's existing queue consumer configuration;
+   - `Containers: Edit` — publish the GlobalPass, SBI Shinsei and St.George images and applications;
+   - `Connectivity Directory: Admin` — deploy existing direct Tunnel VPC bindings.
 
-   Add `Queues: Edit` or `Workers R2 Storage: Edit` **only** if a deployment
-   must create a queue or a bucket; existing R2 bindings still require the
-   read permission above. Do not give the token Workers KV, Tail or zone permissions.
+   Existing R2 and D1 bindings are authorized by the individual Worker Editor
+   role; they do not require independent storage permissions merely to bind
+   ([binding authorization](https://developers.cloudflare.com/workers/authorization/#bindings)).
+   The pinned Wrangler inherits an unchanged existing R2 binding, and retains
+   named bindings when bucket-metadata provisioning is unavailable. CD performs
+   no direct R2 object operation. `Account Settings: Read` is also unnecessary
+   with the explicit `CLOUDFLARE_ACCOUNT_ID`. Both account permissions were
+   removed from the production token on 2026-10-05; an actual full release,
+   rather than a same-commit ledger skip, verifies those credentials.
+
    Direct Tunnel bindings require Admin rather than Bind
    ([Cloudflare VPC roles](https://developers.cloudflare.com/workers-vpc/api/#required-roles)).
-   This token is the whole of CD's Cloudflare authority: a Worker's own
-   runtime secrets are set out of band and are never written by a workflow.
+   No Workers Previews, KV, Tail, zone, R2 object or account-settings permission
+   is granted by this setup. A Worker's runtime secrets remain out of band;
+   workflows never synchronize them.
 
 3. **Environment (or repository) variable** `CLOUDFLARE_ACCOUNT_ID` — the
    account id, already recorded in `infra/resources.json`.

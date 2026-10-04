@@ -398,12 +398,14 @@ describe("the deploy workflow follows the ledger", () => {
     );
   });
 
-  test("only credential preflight, migrations, deployment and trigger readback see the Cloudflare token (G5-17)", () => {
+  test("only credential preflight, migrations, deployment and identity/trigger readback see the Cloudflare token (G5-17)", () => {
     const usingToken = workflowSteps(deployWorkflow)
       .filter((step) => step.body.includes("secrets.CLOUDFLARE_API_TOKEN"))
-      .map((step) => step.name);
+      .map((step) => step.name.replace(/ with cf$/u, ""))
+      .filter((name, index, names) => names.indexOf(name) === index);
     expect(usingToken).toEqual([
       "Confirm the production credentials reached this job",
+      "Capture the existing DO namespaces and lifecycle",
       "Apply the CORE migrations",
       "Apply the READ migrations",
       "Deploy the GlobalPass collector",
@@ -422,6 +424,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the V Point collector",
       "Deploy the Processor",
       "Deploy the App",
+      "Verify the existing DO namespaces and lifecycle",
       "Reconcile future schedule alarms",
     ]);
   });
@@ -464,7 +467,8 @@ describe("the deploy workflow follows the ledger", () => {
     // make the re-verification before the first upload fail (plan 11 §6).
     const names = workflowSteps(deployWorkflow).map((step) => step.name);
     const stamp = names.indexOf("Stamp the release sha into the deployed configurations");
-    expect(stamp).toBeGreaterThan(names.indexOf("Validate every Worker without uploading"));
+    expect(stamp).toBeGreaterThan(names.indexOf("Install the locked dependencies"));
+    expect(stamp).toBeLessThan(names.indexOf("Build every deployable bundle"));
     expect(stamp).toBeLessThan(names.indexOf("Compute the release manifest"));
   });
 

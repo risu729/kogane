@@ -146,7 +146,13 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
       { cwd: REPO_ROOT },
     );
     expect(result.exitCode).toBe(0);
-    const tracked = result.stdout.toString().split("\0").filter(Boolean).sort();
+    // wrangler.config.ts controls cf bundling; canonical runtime identities
+    // remain in the JSON/TOML configs and native parity is guarded separately.
+    const tracked = result.stdout
+      .toString()
+      .split("\0")
+      .filter((path) => /\/wrangler[^/]*\.(?:jsonc|json|toml)$/u.test(path))
+      .sort();
     expect(tracked.length).toBeGreaterThan(0);
     expect(
       ledger.directories.flatMap((entry) => entry.workers.map((w) => w.config)).sort(),

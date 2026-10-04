@@ -75,7 +75,13 @@
       "ignoreBinaries": ["Xvfb", "kogane-synthetic-missing-executable"]
     },
     "services/*": {
-      "entry": ["test/**/*.{test.ts,test.mjs,node.mjs}", "scripts/**/*.{ts,mjs}", "src/local/*.ts"],
+      "entry": [
+        "test/**/*.{test.ts,test.mjs,node.mjs}",
+        "scripts/**/*.{ts,mjs}",
+        "src/local/*.ts",
+        "cloudflare.config.ts",
+        "wrangler.config.ts"
+      ],
       // Wrangler configs name the Worker entry points, including test variants.
       "wrangler": { "config": ["wrangler*.jsonc"] }
     }
