@@ -299,8 +299,10 @@ needing the Processor are covered there.
   ([rollout.md](rollout.md)). Collectors have no target flag: the
   `COLLECTION_TARGET` switch was removed with the legacy path, and no collector
   reads it.
-- Deploy order: reader (Processor) before writers (collectors), so a terminal
-  is never written before something can read it.
+- Current release order: collector named entrypoints, then Processor, then App;
+  health verification precedes future alarm bootstrap. The existing Processor
+  understands the unchanged terminal contract during collector uploads. See
+  [rollout controls](rollout.md#4-deployment-order).
 - Rollback: turning `SHARED_R2_INGEST_ENABLED` off pauses registration;
   terminals already written stay valid and are read on the next scan. There is
   no legacy collection path to fall back to

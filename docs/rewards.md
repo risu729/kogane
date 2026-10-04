@@ -1,5 +1,9 @@
 # ポイント・マイル・前払式残高（A11）
 
+現在のconfigではclaim昇格・READ投影・表示を有効にしている。下記の初回導入手順や
+合成データ試験は当時の確認範囲であり、実データを使った予測・交換simulationの完成を
+意味しない。現状と不足入力は[実装状況](current-status.md)に記載する。
+
 対象は設計レビュー追補08「ポイント・マイル・前払式残高の専用設計」と、シナリオ SC11〜SC14、
 受け入れ試験 AT37/AT39/AT41/AT43〜AT54。移行番号は `0033_reward_buckets.sql`。
 
@@ -169,6 +173,11 @@ publication pointerの巻き戻しはreward側の表示からも同時に消え�
 
 ## 10. デプロイ順とロールバック
 
+The migration/first-activation sequence below is historical. Current releases
+follow [rollout controls](rollout.md#4-deployment-order), and rollback targets
+must satisfy its current schema/resource/alarm floor. An old component-level
+compatibility test does not authorize a pre-alarm production rollback.
+
 1. `0033_reward_buckets.sql` を適用する（追加のみ。既存の表・trigger・indexに触れない）。
 2. `services/processor` をデプロイする。`REWARD_CLAIMS_ENABLED` は `"false"` のまま。
    問題がなければ `"1"`（または `"true"`）にして昇格を開始する。
@@ -201,6 +210,8 @@ publication pointerの巻き戻しはreward側の表示からも同時に消え�
 
 確認していないこと: 本番D1・本番Workerでの動作、実際のプログラム規約の現在の内容、
 providerが表示する期限の実際の表記ゆれ、V Point の `point_type` / `point_div` の実値。
+
+<a id="read-second-stage"></a>
 
 ## 12. READ second stage（U16）
 

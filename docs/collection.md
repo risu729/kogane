@@ -1,5 +1,11 @@
 # Evidence Collection
 
+Current source timing and overlap/maintenance controls are in
+[schedules](schedules.md). The source-by-source implementation notes below
+include earlier Cron-based rollout descriptions; those trigger claims are
+superseded by ADR 0039. Active Worker Cron arrays are empty. Daily collection
+and SBI VC keepalive use Processor-owned alarm jobs.
+
 Collection starts before modeling. The goal of the first working system is:
 
 > Everything visible on a financial site or in an export is saved in a form
@@ -220,8 +226,10 @@ Rules that hold for every collector below:
   and the operator bootstrap, and fails when any of these is broken.
 
 - `operationId`/`attemptId` are carried when an operation requested the run.
-  U08 dispatches collection operations; today the cron and the admin trigger
-  leave them unset.
+  Generic collection/session-refresh operations currently stop at
+  `awaiting_collector_dispatch`; acceptance is not execution. Alarm scheduling
+  uses the private named RPC path. See [current status](current-status.md) and
+  [schedules](schedules.md).
 - **One copy** (plan 00: the original is stored once; no standing
   collector-side → central double copy). A run is written only into `DATA`.
   sbi-shinsei, globalpass and sbi-vc-trade hold every artifact of a run in
@@ -230,8 +238,8 @@ Rules that hold for every collector below:
   staging puts. The one bounded exception is smbc-direct, whose chunks span
   Durable Object alarms and are staged under its run prefix inside `DATA`
   until the terminal is written (see its section).
-- Deploy order: the Processor before the collectors, so a terminal is never
-  written before something can read it
+- Current deployment order: collectors, then Processor, then App; health
+  verification precedes future alarm bootstrap
   ([rollout.md §4](rollout.md#4-deployment-order)). There is no collector
   legacy mode to roll back to, and a release that needs the retired Workers
   or buckets is not a valid rollback target. Terminals already written stay

@@ -1,5 +1,10 @@
 # PayPay consumer wallet source assessment
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 Research date: 2026-08-26
 
 ## Scope and safety boundary

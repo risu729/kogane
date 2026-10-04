@@ -4,8 +4,9 @@ Architecture addendum A06 (review findings D06 and D08, root review 04). This
 change makes manual identity decisions durable and corrigible, moves the
 per-source policy selection out of the identity store, and lets readers ask
 for observations as they were recorded rather than as they are interpreted
-today. Nothing here deletes or updates an existing mapping row, and no public
-write route is added.
+today. Nothing here deletes or updates an existing mapping row, and the original migration added no public write route. Current operator
+commands use the [change lifecycle](change-lifecycle.md); agents cannot accept
+or commit decisions.
 
 ## Tables (migration `0029_decision_log.sql`)
 

@@ -1,6 +1,6 @@
 # Domain contracts (`packages/domain`)
 
-`@kogane/domain` holds the pure contracts that later PRs persist, query and
+`@kogane/domain` holds the pure contracts services persist, query and
 expose: exact quantities, role-typed time, metric definitions, scope and
 adoption, coverage, contexts, decisions and the shared result shape. It has no
 runtime dependencies, no I/O and no clock. Services import it by relative path

@@ -1040,6 +1040,12 @@ new route.
 
 ## Deploy order and rollback
 
+The original component migration/activation sequence below is historical.
+Current releases follow [rollout controls](rollout.md#4-deployment-order);
+rollback targets must satisfy its current schema/resource/alarm floor.
+Component-level compatibility with an old schema does not authorize an old
+production Worker rollback.
+
 1. Apply migration `0032_economic_events.sql` (schema; additive, writes no rows)
    and `0048_reconciliation_scan_cursor.sql` (the sweep's scan cursor and the
    `(kind, stage)` proposal index; additive, writes no rows).

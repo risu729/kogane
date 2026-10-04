@@ -1,5 +1,11 @@
 # Plan: finish the card milestone, then dated reported state and valuation
 
+> Historical proposal, partially superseded by subsequent implementation.
+> The original proposed status is retained; merged parts do not constitute
+> approval of the remaining plan. Migration numbers and open-PR lists below
+> belong to their dated snapshots. Use [roadmap](../roadmap.md) and
+> [current status](../current-status.md) for today's work.
+
 - Status: **proposed**, awaiting the owner's go-ahead. Nothing here is
   decided until it is accepted; accepted parts become ADRs under
   [`docs/adr/`](../adr/).

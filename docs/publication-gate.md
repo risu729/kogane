@@ -228,6 +228,12 @@ actually writes.
 
 ## Deploy order
 
+The original component migration/activation sequence below is historical.
+Current releases follow [rollout controls](rollout.md#4-deployment-order);
+rollback targets must satisfy its current schema/resource/alarm floor.
+Component-level compatibility with an old schema does not authorize an old
+production Worker rollback.
+
 1. `services/raw-evidence`: apply 0026 then 0036 (both additive; the previous
    Workers keep working, the backfill makes the projection equal to what they
    show, and 0036 only rejects a row no correct writer produces).

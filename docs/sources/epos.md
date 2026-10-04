@@ -1,5 +1,10 @@
 # Epos / Epos Visa Prepaid family 調査
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 - 調査日: 2026-08-26（Australia/Sydney）
 - 対象: エポスカード、エポスVisaプリペイドカード、エポスNet、エポスアプリ、および同じ明細に入る追加カード
 - 対象外: 他社カード、外部アグリゲーターを初期データ源とする経路、決済代行・加盟店向けサービス

@@ -1,5 +1,10 @@
 # Production evidence browser
 
+> Historical record: initial production evidence-browser rollout. Scope, counts, resources and rollout
+> instructions below describe that record, not a current production check.
+> Use [current status](current-status.md), [rollout controls](rollout.md) and
+> the [documentation index](README.md) for maintained references.
+
 The read-only Worker in `services/app` serves the existing React
 frontend in evidence mode and reads the central raw-evidence D1/R2 store. The
 first enabled source is `sony-bank`. It introduces no migrations, parsed

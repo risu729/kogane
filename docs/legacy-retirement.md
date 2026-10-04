@@ -1,5 +1,10 @@
 # Legacy retirement — 2026-09-13
 
+> Historical record: 2026-09-13 legacy retirement. Scope, counts, resources and rollout
+> instructions below describe that record, not a current production check.
+> Use [current status](current-status.md), [rollout controls](rollout.md) and
+> the [documentation index](README.md) for maintained references.
+
 The owner authorized removal of the legacy ingestion path, its Cloudflare
 resources, and the CORE projection fallback. Original evidence was copied to
 central DATA and verified before the old buckets were emptied.
@@ -75,6 +80,8 @@ features off pauses them and never restores a CORE projection fallback.
 `legacy-import` tree and `packages/collection` legacy adapters are removed.
 Tests register synthetic evidence through the same in-process application
 operations as the Processor. The CD and CI ledgers contain only current services.
+
+<a id="7-retired-globalpass-experiment--2026-09-13"></a>
 
 ## Retired GlobalPass experiment — 2026-09-13
 

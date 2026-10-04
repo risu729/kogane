@@ -1,5 +1,10 @@
 # Smart EX source research
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 調査日: 2026-08-26（公開情報、ログアウト状態の公開 endpoint/JavaScript、公開第三者実装）、
 ユーザー会員情報を使う live 検証は未実施
 

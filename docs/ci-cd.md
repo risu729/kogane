@@ -470,7 +470,8 @@ redirect, not become a 200 with an HTML body), and asserts all of:
 reports `grants.usable` (false, with a problem _code_, when
 `OPERATOR_SUBJECTS`/`AGENT_GRANTS` are present but unreadable or overlap) and
 is `degraded` while it is false, so a release cannot certify a Worker that
-grades nobody. Empty lists — the committed deny-all default — are usable.
+grades nobody. Empty lists are usable deny-all configuration; the committed
+App config names a human operator and leaves agent grants empty.
 The App's answer also carries the capability snapshot, the DATA bucket probe
 and the Processor's lane flags, cursor ages and READ pointer
 ([ops-api.md](ops-api.md#get-apiopsv1health--the-release-postchecks-route),

@@ -1,0 +1,10 @@
+# Plans
+
+Plans state proposed work, status and acceptance criteria. A merged plan file
+is not approval of its remaining recommendations. Accepted design choices are
+recorded separately in [ADRs](../adr/README.md); the current delivery sequence
+and limits are in [roadmap](../roadmap.md) and [current status](../current-status.md).
+
+- [2026-09 next-milestone proposal](2026-09-next-milestone.md): proposed,
+  partially superseded by later implementation; original migration reservations
+  and PR state are historical.

@@ -111,7 +111,7 @@ observe" is never rendered as "the balance is gone".
 | ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Candidate bound           | 5,000 | The existing read bound; above it the build is refused, not cut. Coverage claims and declared relations have the same bound and the same refusal.                    |
 | `ADOPTION_SUBJECT_BOUND`  | 250   | Adoption compares scopes pairwise. A larger target records every candidate `unresolved`/`adoption_target_oversized` — never silently adopted, never silently summed. |
-| `PROJECTION_WRITE_BUDGET` | 1,000 | Rows written per cron invocation; the rest resume from the stored build cursor.                                                                                      |
+| `PROJECTION_WRITE_BUDGET` | 1,000 | Rows written per scheduled invocation; the rest resume from the stored build cursor.                                                                                 |
 
 ## The API
 
@@ -239,7 +239,7 @@ arithmetic, and reports `liabilitiesCoverage: "unknown"` with no `netWorth`
 field. Without the reader flag or a sealed snapshot it answers
 `unavailable` / `projection_not_built` instead of computing a figure from the
 observation rows behind the projection. See
-[Agent API](agent-api.md#query-intents) for the intent's contract.
+[Agent API](agent-api.md#intents) for the intent's contract.
 
 ## Dated reported state
 
@@ -269,7 +269,7 @@ published decision reach the read model:
    decision. Nothing serves a projection built before the decision as if it
    were current.
 2. The outbox processor makes the rebuild start on the same tick instead of
-   waiting for the next cron. It asks one question — does the snapshot the read
+   waiting for the next Processor alarm. It asks one question — does the snapshot the read
    model publishes cover the revision the decision moved? — so a duplicated or
    out-of-order delivery cannot rebuild twice or undo a finished build, and it
    is bounded like every other invocation. It answers
@@ -285,7 +285,7 @@ cannot disagree.
 
 ## Rebuild and invalidation
 
-The cron job (`services/processor/src/balance-projection-job.ts`,
+The scheduled job (`services/processor/src/balance-projection-job.ts`,
 one call from `scheduled`) first continues any unfinished build from the input
 that build fixed. Otherwise it captures a new input and, if the resulting
 snapshot id is already sealed, does nothing but advance the pointer's
@@ -319,6 +319,12 @@ Named by the review, and none of them is used here:
 - `DELETE` against Layer B to fix a wrong projection.
 
 ## Deploy order
+
+The original component migration/activation sequence below is historical.
+Current releases follow [rollout controls](rollout.md#4-deployment-order);
+rollback targets must satisfy its current schema/resource/alarm floor.
+Component-level compatibility with an old schema does not authorize an old
+production Worker rollback.
 
 GitHub Actions applies the CORE and READ schemas, then deploys Processor before
 App. Processor `BALANCE_PROJECTION_ENABLED=1` builds into READ; the App's same

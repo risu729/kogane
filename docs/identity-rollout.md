@@ -1,5 +1,10 @@
 # Account and instrument identity rollout
 
+> Historical record: 2026-09-08 with a 2026-09-28 update. Scope, counts, resources and rollout
+> instructions below describe that record, not a current production check.
+> Use [current status](current-status.md), [rollout controls](rollout.md) and
+> the [documentation index](README.md) for maintained references.
+
 ## 2026-09-08 implementation and initial deployment
 
 - #114: append-only account/instrument mappings, pinned decisions and sealed projections.

@@ -1,5 +1,10 @@
 # Organized display and connection evidence acceptance
 
+> Historical record: 2026-09-08. Scope, counts, resources and rollout
+> instructions below describe that record, not a current production check.
+> Use [current status](current-status.md), [rollout controls](rollout.md) and
+> the [documentation index](README.md) for maintained references.
+
 Accepted on 2026-09-08. This closes the display/correspondence goal, not a combined
 ledger, full financial-data recovery, or universal account-equivalence project.
 

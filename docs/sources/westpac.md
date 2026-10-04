@@ -1,5 +1,10 @@
 # Westpac Australia source research
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 - 調査日: 2026-08-26 (Australia/Sydney)
 - 対象: **Westpac Australia (`Westpac` brand) のみ**
 - 調査方法: 公式公開 Web、公式ログイン画面とhash付きJavaScriptの整形・静的解析、未認証Chrome runtime metadata、公式 app/Play配布情報とDigital Asset Links、Westpac の公開 CDR Product API、豪州政府 CDR サイト、Consumer Data Standards、公開 DNS/HTTP 応答を read-only で確認した。口座ログイン、consent、OTP 送信、取引、設定変更、個人向け帳票の取得は行っていない。

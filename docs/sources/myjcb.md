@@ -1,5 +1,10 @@
 # MyJCB カードファミリー調査
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 - 調査日: 2026-08-26（Australia/Sydney）
 - 対象: 同一の MyJCB／関連バックエンドで参照できる個人カード群。現インベントリでは JCB W、リクルートカード（JCB）、みずほ JCB デビット、京銀 JCB デビットを中心とする。
 - 対象外: Visa／Mastercard 版リクルートカード、JCB ブランドでも MyJCB 非対応のカード、銀行口座そのものの入出金明細、カード申込・支払・設定変更などの write 操作。

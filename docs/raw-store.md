@@ -1,9 +1,12 @@
 # Raw evidence store
 
-Status: phase 2 schema and Worker candidate under final review. D1, R2, Worker,
-and a synthetic sealed run were verified in production on 2026-09-02; the
-additive `0003` contract and run-scoped API are verified locally and are
-deployed only through the migration-first runbook below.
+Type: historical Layer A contract and initial rollout record (2026-09-02,
+with subsequent amendments). The original store invariants remain relevant,
+but the raw-evidence Worker/importer paths and source staging architecture
+below are retired. Current acquisition/registration contracts are in
+[collection contract](collection-contract.md), [evidence contract](evidence-contract.md)
+and [Processor](processor.md); current deployment uses [rollout controls](rollout.md).
+See [legacy retirement](legacy-retirement.md) for retired resources.
 
 This is the canonical design for layer A of Kogane. It was derived from the
 current collector manifests **and** the source and architecture notes under
@@ -416,8 +419,12 @@ redacted template plus a separate-key HMAC fingerprint.
 
 ## Deployment order
 
-Run `bash scripts/deploy.sh` from `services/raw-evidence`. The checked-in deployment
-script lists and applies pending remote D1 migrations first, deploys the Worker
+Historical raw-evidence Worker deployment; the directory/script no longer exists.
+Use [current release order](rollout.md#4-deployment-order), not the following
+retired procedure.
+
+The old procedure ran `bash scripts/deploy.sh` from `services/raw-evidence`.
+That deployment script listed and applies pending remote D1 migrations first, deploys the Worker
 second, then runs the authenticated synthetic round trip. `0003` is additive;
 the prior Worker remains compatible if Worker deployment fails after migration.
 Do not deploy the new Worker before the migration because it reads the new
@@ -441,7 +448,11 @@ source-side validator tests use only invented HTML and manifest fixtures.
 
 ## Backfill order
 
-Backfill is read-only against each staging bucket and must never delete or move
+Historical importer/staging procedure. Retired buckets are not a current
+backfill target; use the current resource ledger and Processor replay/registration
+procedures for a separately scoped repair.
+
+Backfill was read-only against each staging bucket and must never delete or move
 its source object. For every bucket:
 
 1. list all keys with pagination and save a local inventory receipt;
@@ -454,13 +465,16 @@ its source object. For every bucket:
 7. reconcile source object count, unique content count, artifact count, run
    count, and seal count before calling that bucket complete.
 
-Current staging buckets to process are discovered from checked-in Wrangler
+At the time, staging buckets to process were discovered from checked-in Wrangler
 configuration, including SBI Securities, Vpass, SBI Shinsei, SBI VC Trade,
 MyJCB, Mobile Suica, GLOBAL PASS, SMBC Direct backfill, Sony Bank, V Point, and
 V Point Pay. Discovery is repeated at execution time because cloud resources
 and object counts are live state.
 
 ## Remaining implementation steps
+
+Historical backlog at the initial rollout, superseded by shared collection and
+legacy retirement. This list is not the current work queue; see [roadmap](roadmap.md).
 
 - Add importer commands for collector R2 and Kuebiko. The local-file importer is
   implemented. They share

@@ -1,5 +1,10 @@
 # Rakuten Card / Rakuten Point / Rakuten Cash source research
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 調査日: 2026-08-26（公開情報およびログアウト状態の公開 endpoint）、live 検証は未実施
 
 ## 1. 対象範囲と禁止事項

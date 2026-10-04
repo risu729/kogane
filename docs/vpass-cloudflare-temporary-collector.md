@@ -1,5 +1,10 @@
 # Temporary Cloudflare collector
 
+> Historical record: original Vpass PoC and subsequent storage updates. Scope, counts, resources and rollout
+> instructions below describe that record, not a current production check.
+> Use [current status](current-status.md), [rollout controls](rollout.md) and
+> the [documentation index](README.md) for maintained references.
+
 This PoC is temporarily deployed as a plain Cloudflare Worker. It authenticates
 through the Vpass Android API once per day and writes the sanitized statement
 JSON responses, one run per card, into the shared `DATA` bucket
