@@ -68,6 +68,8 @@ Existing observations retain their original Layer B source account, amounts and
 provenance. Re-identification attaches the HMAC account key in Layer C. There is
 no financial reimport or financial reparse requirement.
 
+<a id="the-collectors-binding-adr-0023"></a>
+
 ## The collector's binding (ADR 0023, ADR 0029)
 
 The importer and its private source bucket are retired. The Vpass collector
