@@ -202,16 +202,27 @@ cover bindings, variables, observability, assets and the two already-declared
 V Point exports. Existing Wrangler tests, bundles and dry runs remain, with
 credential-free cf builds and prebuilt version-upload dry runs added.
 
-Container deployments (GlobalPass, SBI Shinsei, St.George) retain v1.2.0 because
-`cf workers versions create` does not update Container applications. Legacy DO
+The three Container deployments (GlobalPass, SBI Shinsei, St.George) use the
+pinned Action v2.2.0 full-deploy strategy under [ADR 0043](adr/0043-cf-container-deployment.md),
+because `cf workers versions create` does not update Container applications.
+They retain the default scheduling policy, existing app/namespaces and
+APAC/basic/max-instance settings. Their image manifest binds the Docker image,
+daemon and source measurement; identity, immutable registry digest and complete
+control-plane allocation readback are required after publication. An unverified
+Container is recorded as failed for resume. Existing older source targets use
+the trusted, strict SQLite-exports/image-reference rollback adapter; actual
+production readback and controlled rollback remain verification gates. Legacy DO
 owners (SBI VC Trade, SMBC Direct, Processor) use code-only cf bindings to their
 existing self-Worker/class namespaces, with no native exports or migrations.
 Canonical migration histories remain unchanged. A build guard checks their
 actual artifacts; before publication the live migration tag must match the
 latest canonical tag, and after publication all active namespace IDs must
 match the captured baseline. Pending DO lifecycle work requires a separate
-Wrangler rollout. Processor alone enables trigger synchronization to preserve
-its existing Queue consumer settings. All 17 deployed Workers keep ADR 0039's order and the authenticated
+Wrangler rollout. Processor and PRESTIA opt into trigger synchronization on the
+versions strategy: Processor preserves its Queue consumer settings; PRESTIA
+applies its checked-in workersDev:true/previewUrls:false after version upload.
+The three Container full-deploy steps also explicitly consent to synchronization.
+All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
 
 The manual **Container account readback** workflow is a read-only diagnostic for
@@ -239,8 +250,10 @@ the same identity. The manifest digests the native source and build config and
 every file in cf Build Output, including assets and Worker metadata. It is
 rechecked before the first upload. v2 uploads that prebuilt artifact, deploys
 the returned version at 100%, and reads that exact deployment back. Trigger
-synchronization is explicitly disabled; existing schedules and queue consumers
-stay under the existing deployment paths. No preview lane is introduced.
+synchronization is disabled for the other code-only Workers. Processor/PRESTIA
+and the three full-deploy Container owners explicitly enable it as described
+above. No preview lane, route/domain addition or bank-secret synchronization
+is introduced.
 
 ### What the release job does, in order
 

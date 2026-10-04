@@ -30,7 +30,9 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "globalpass-worker:bundle",
       "bundleDir": "dist/globalpass-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf",
+      "productionStrategy": "deploy"
     },
     {
       "name": "mobile-suica-worker",
@@ -104,7 +106,9 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "sbi-shinsei-worker:bundle",
       "bundleDir": "dist/sbi-shinsei-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf",
+      "productionStrategy": "deploy"
     },
     {
       "name": "sbi-vc-trade-worker",
@@ -179,7 +183,9 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "st-george-worker:bundle",
       "bundleDir": "dist/st-george-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf",
+      "productionStrategy": "deploy"
     },
     {
       "name": "prestia-bank-worker",
