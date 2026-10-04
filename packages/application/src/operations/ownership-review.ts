@@ -1,4 +1,5 @@
 import { validCardSettlementFacts } from "../../../domain/src/card-settlement.ts";
+import { cardSettlementReadinessCtes } from "../../../read-model/src/card-settlement-readiness.ts";
 import {
   ownershipReviewPartyRef,
   ownershipReviewEvidenceRefs,
@@ -32,6 +33,25 @@ interface OwnershipReview {
   sourceId: string;
   precondition: CommitGuard;
 }
+/**
+ * The candidate `?` and whether both its source facts are still current,
+ * judged for that candidate alone through the keyed form of
+ * `card_settlement_readiness` (packages/read-model/src/card-settlement-readiness.ts)
+ * rather than the whole view.
+ */
+export const OWNERSHIP_REVIEW_CANDIDATE_SQL = `WITH chosen AS (SELECT ? AS id), ${cardSettlementReadinessCtes()}
+SELECT c.id,c.facts_json,c.revision,c.status,r.statement_current,r.bank_current
+FROM chosen JOIN card_settlement_reviews c ON c.id=chosen.id JOIN readiness r ON r.id=c.id`;
+/**
+ * The commit guard's candidate term, binds (id, revision): the candidate is
+ * still proposed at the planned revision and both source facts are current.
+ * It runs inside the statement that reserves the receipt, so it is judged
+ * atomically with the commit.
+ */
+export const OWNERSHIP_REVIEW_CANDIDATE_GUARD_SQL = `EXISTS(WITH chosen AS (SELECT ? AS id), ${cardSettlementReadinessCtes()}
+    SELECT 1 FROM chosen JOIN card_settlement_reviews c ON c.id=chosen.id JOIN readiness r ON r.id=c.id
+    WHERE c.status='proposed' AND c.revision=? AND r.statement_current=1 AND r.bank_current=1)`;
+
 export async function prepareOwnershipReview(
   store: CommandStore,
   relation: RelationPayload,
@@ -47,11 +67,7 @@ export async function prepareOwnershipReview(
     return commandError("invalid_command");
   const marker = markers[0]!,
     proposalId = marker.slice("card-settlement:".length);
-  const candidate = await store.first<CandidateRow>(
-    `SELECT c.id,c.facts_json,c.revision,c.status,r.statement_current,r.bank_current
- FROM card_settlement_reviews c JOIN card_settlement_readiness r ON r.id=c.id WHERE c.id=?`,
-    [proposalId],
-  );
+  const candidate = await store.first<CandidateRow>(OWNERSHIP_REVIEW_CANDIDATE_SQL, [proposalId]);
   if (!candidate) return commandError("target_missing", [marker]);
   if (
     candidate.status !== "proposed" ||
@@ -122,8 +138,7 @@ export async function prepareOwnershipReview(
         },
       ],
       precondition: {
-        sql: `EXISTS(SELECT 1 FROM card_settlement_reviews c JOIN card_settlement_readiness r ON r.id=c.id
-    WHERE c.id=? AND c.status='proposed' AND c.revision=? AND r.statement_current=1 AND r.bank_current=1)
+        sql: `${OWNERSHIP_REVIEW_CANDIDATE_GUARD_SQL}
     AND (SELECT count(*) FROM current_identity_observations o JOIN current_account_mappings m ON m.source_account_id=o.source_account_id
      WHERE o.kind=? AND o.observation_id=? AND o.parse_run_id=?)=1
     AND EXISTS(SELECT 1 FROM current_identity_observations o JOIN current_account_mappings m ON m.source_account_id=o.source_account_id

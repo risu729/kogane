@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
-import { queryCardOwnership } from "../src/query/card-ownership.ts";
+import { CARD_OWNERSHIP_CANDIDATE_SQL, queryCardOwnership } from "../src/query/card-ownership.ts";
+import { LEGACY_CARD_OWNERSHIP_CANDIDATE_SQL } from "./card-settlement-readiness-legacy-sql.ts";
 import { settlementFacts } from "./card-settlement-fixture.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 const databases: Database[] = [];
@@ -19,13 +20,18 @@ function fixture() {
   db.prepare("INSERT INTO card_settlement_reviews VALUES('one',?,0,'proposed')").run(
     JSON.stringify(settlementFacts(true)),
   );
+  // The stub table stands in for the readiness view, so the keyed candidate
+  // read runs as the shipped text over it; card-settlement-review-differential.test.ts
+  // proves the two equal on the complete schema.
+  const text = (query: string): string =>
+    query === CARD_OWNERSHIP_CANDIDATE_SQL ? LEGACY_CARD_OWNERSHIP_CANDIDATE_SQL : query;
   const sql: SqlExecutor = {
     async all<T>(query: string, args: readonly unknown[]): Promise<T[]> {
-      expect(query.trimStart().startsWith("SELECT")).toBe(true);
-      return db.prepare(query).all(...(args as (string | number | null)[])) as T[];
+      expect(query.trimStart()).toMatch(/^(?:SELECT|WITH)\b/);
+      return db.prepare(text(query)).all(...(args as (string | number | null)[])) as T[];
     },
     async first<T>(query: string, args: readonly unknown[]): Promise<T | null> {
-      return db.prepare(query).get(...(args as (string | number | null)[])) as T | null;
+      return db.prepare(text(query)).get(...(args as (string | number | null)[])) as T | null;
     },
   };
   return { db, sql };

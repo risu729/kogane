@@ -2,6 +2,8 @@ import { parse, type DefaultTreeAdapterMap } from "parse5";
 import type { ArtifactMeta, BalanceObservation, Parser, ParseResult } from "../types.ts";
 import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import { readMyJcbStatementPage } from "../../../../packages/domain/src/myjcb-statement-page.ts";
+import { readMyJcbStatementHeading } from "../../../../packages/domain/src/myjcb-statement-heading.ts";
+import { myjcbSchedulePageHeadingKind } from "../../../../packages/domain/src/myjcb-schedule-page-kind.ts";
 import {
   exactKeys,
   normalizedDate,
@@ -37,9 +39,19 @@ const UNCONFIRMED_EXPANDED = new Set([
 const ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/(credit-ledger-(0[0-9]|1[0-7])\.json)$/u;
 const PAST_ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-past-months\.json$/u;
 
+/**
+ * Since 1.2.0 a `confirmed` ledger may carry the unconfirmed header set: the
+ * collector stores it only for a closed page that proves its 「ご利用金額」
+ * amounts are this statement's payment (ADR 0005 amendment d,
+ * `readMyJcbStatementPage` `usageHeader: "proven"`). Its amount cell is read as
+ * what the header labels it, the usage amount (`amountBasis`
+ * `confirmed-usage`, `usageAmountText`); no `paymentAmountText` is recorded,
+ * because nothing on the row states this statement's payment for it. The
+ * statement's payment is the page's total (`myjcb-credit-statement-total`).
+ */
 export const myJcbCreditLedger: Parser = {
   name: "myjcb-credit-ledger",
-  version: "1.1.2",
+  version: "1.2.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -72,8 +84,14 @@ export const myJcbCreditLedger: Parser = {
       throw new Error("credit-ledger metadata does not match the collector manifest");
     }
     const state = artifact.statementState;
-    const expectedHeaders = state === "confirmed" ? CONFIRMED_HEADERS : UNCONFIRMED_HEADERS;
-    if (!sameStringArray(root["headers"], expectedHeaders)) {
+    // Which amount the summary cell holds is the stored header's fourth label.
+    const usageHeader = sameStringArray(root["headers"], UNCONFIRMED_HEADERS);
+    if (
+      !(
+        usageHeader ||
+        (state === "confirmed" && sameStringArray(root["headers"], CONFIRMED_HEADERS))
+      )
+    ) {
       throw new Error("credit-ledger headers do not match the provider contract");
     }
     const rows = root["rows"];
@@ -124,9 +142,13 @@ export const myJcbCreditLedger: Parser = {
       );
       const providerAmount = amountCandidates[0]!.amount;
       const observationAmount = providerAmount === 0 ? 0 : -providerAmount;
-      const usageText = state === "unconfirmed" ? cells[amountCellIndex] : expanded["ご利用金額"];
+      const usageText = usageHeader ? cells[amountCellIndex] : expanded["ご利用金額"];
       const paymentText =
-        state === "confirmed" ? cells[amountCellIndex] : expanded["今回のお支払い金額"];
+        state === "unconfirmed"
+          ? expanded["今回のお支払い金額"]
+          : usageHeader
+            ? undefined
+            : cells[amountCellIndex];
       const fingerprint = stableFingerprint({
         period,
         state,
@@ -161,7 +183,12 @@ export const myJcbCreditLedger: Parser = {
             statementState: state,
             period,
             detailMonth,
-            amountBasis: state === "confirmed" ? "current-statement-payment" : "unconfirmed-usage",
+            amountBasis:
+              state === "unconfirmed"
+                ? "unconfirmed-usage"
+                : usageHeader
+                  ? "confirmed-usage"
+                  : "current-statement-payment",
             amountCellIndex,
             paymentTypeCellIndex,
             providerAmountSign: "credit-liability-positive-refund-negative",
@@ -179,7 +206,7 @@ export const myJcbCreditLedger: Parser = {
 
 export const myJcbPastMonthBalances: Parser = {
   name: "myjcb-credit-past-month-balances",
-  version: "1.1.2",
+  version: "1.1.5",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -310,6 +337,13 @@ function statementText(node: StatementNode): string {
  * uses too, so the two readings cannot drift:
  *
  * - exactly one `(確定分)` h1, over a confirmed or no amount header: `confirmed`;
+ * - exactly one `(確定分)` h1, over the unconfirmed amount header, when the
+ *   page proves its usage amounts are this statement's payment (every row in
+ *   the first ledger, one single payment, and their exact sum equal to the
+ *   page's total; 1.2.0, ADR
+ *   0005 amendment d): `confirmed`, recorded with
+ *   `statementStateBasis: "page-heading-usage-total-proof"` and the ledger's
+ *   `ledgerAmountLabel` 「ご利用金額」;
  * - no heading, and no ledger or a ledger with no rows: `unknown`. An empty
  *   ledger's header label states nothing about a statement it has no rows of;
  * - no heading, and rows under the unconfirmed header: `unconfirmed`;
@@ -317,17 +351,20 @@ function statementText(node: StatementNode): string {
  *   page does not state that it is closed, so no total is read from it,
  *   exactly as before;
  * - more than one heading, a header with both labels, ledgers that disagree,
- *   or the heading over an unconfirmed header: the page contradicts itself
- *   and the parse fails.
+ *   or the heading over an unconfirmed header the page does not prove: the
+ *   page contradicts itself and the parse fails.
  *
  * The collector manifest's state is not an input: it is recorded beside the
  * result as a cross-check (`_kogane.manifestStatementState`).
  */
-function statementPageState(document: StatementNode): "confirmed" | "unconfirmed" | "unknown" {
-  const { reading } = readMyJcbStatementPage(document);
+function statementPageState(document: StatementNode): {
+  state: "confirmed" | "unconfirmed" | "unknown";
+  usageHeaderProven: boolean;
+} {
+  const { reading, usageHeader } = readMyJcbStatementPage(document);
   if (reading === "conflict") throw new Error("myjcb statement confirmation conflicts");
-  if (reading === "confirmed" || reading === "unconfirmed") return reading;
-  return "unknown";
+  const state = reading === "confirmed" || reading === "unconfirmed" ? reading : "unknown";
+  return { state, usageHeaderProven: usageHeader === "proven" };
 }
 
 /**
@@ -336,10 +373,27 @@ function statementPageState(document: StatementNode): "confirmed" | "unconfirmed
  * so a closed statement the collector's manifest recorded as `unconfirmed`
  * (every position-1 page before the collector decided from the page) is read
  * as the confirmed statement it is.
+ *
+ * Since 1.3.0 the page's `h2` may name its payment with the day,
+ * 「YYYY年M月D日(曜)お支払い分のカードご利用明細」, beside the undated
+ * 「YYYY年M月お支払い分のカードご利用明細」 (ADR 0005 amendment g,
+ * `readMyJcbStatementHeading`). A dated heading must state the total's own
+ * payment date, or the parse fails. A page with the undated heading is
+ * recorded exactly as in 1.2.0.
+ *
+ * Since 1.4.0 a page whose h1 is a menu schedule page's (the observed
+ * 「ショッピングスキップ払いご利用明細(未確定分)」 or
+ * 「ボーナス#回払いご利用代金明細(未確定分)」, `myjcbSchedulePageHeadingKind`)
+ * is not a statement, whatever its `h2` says: the ボーナス払い page's `h2` has
+ * the dated heading's form (ADR 0005 amendment j). Such a page is parsed `ok`
+ * with no observation and the closed warning `schedule_page_not_statement`,
+ * before its state is read, so that the new run supersedes an earlier
+ * version's run of the same stored page; a thrown error would leave that run
+ * published. Every other page is read exactly as in 1.3.0.
  */
 export const myJcbCreditStatement: Parser = {
   name: "myjcb-credit-statement-total",
-  version: "1.1.0",
+  version: "1.4.0",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.dataset === "credit-detail" &&
@@ -351,10 +405,13 @@ export const myJcbCreditStatement: Parser = {
     if (bytes.byteLength > 3_000_000) throw new Error("myjcb statement HTML is too large");
     validateSanitizedHtml(bytes, artifact, true);
     const document = parse(decodeUtf8(bytes));
+    // Since 1.4.0 a schedule page is never a statement (ADR 0005 amendment j).
+    if (myjcbSchedulePageHeadingKind(document) !== "unobserved")
+      return { observations: [], warnings: ["schedule_page_not_statement"] };
     const headings = statementNodes(document, "h2").map((node) =>
       statementText(node).replace(/\s+/gu, ""),
     );
-    const pageState = statementPageState(document);
+    const { state: pageState, usageHeaderProven } = statementPageState(document);
     const manifestState = artifact.statementState ?? null;
     // The manifest alone disagreeing never fails the parse: it is the
     // collector's earlier reading of these same bytes. People see it here,
@@ -370,11 +427,10 @@ export const myJcbCreditStatement: Parser = {
       return { observations: [], warnings: ["statement_total_not_confirmed", ...stateWarnings] };
     if (/\/credit-detail-00\.html$/u.test(artifact.artifactKey ?? ""))
       throw new Error("myjcb detailMonth 0 cannot be finalized");
-    const periods = headings.flatMap((text) => {
-      const match = /^(\d{4})年(\d{1,2})月お支払い分のカードご利用明細$/u.exec(text);
-      return match ? [`${match[1]}-${match[2]!.padStart(2, "0")}`] : [];
-    });
-    if (periods.length !== 1) throw new Error("myjcb statement period missing or ambiguous");
+    // Since 1.3.0 the heading may carry the payment day (ADR 0005 amendment g).
+    const statedHeadings = headings.flatMap((text) => readMyJcbStatementHeading(text) ?? []);
+    if (statedHeadings.length !== 1) throw new Error("myjcb statement period missing or ambiguous");
+    const heading = statedHeadings[0]!;
     const totals = statementNodes(document, "dt").filter((node) =>
       statementText(node).includes("お支払い金額合計"),
     );
@@ -392,7 +448,9 @@ export const myJcbCreditStatement: Parser = {
       "myjcb statement payment date",
     );
     const period = paymentDate.slice(0, 7);
-    if (period !== periods[0]) throw new Error("myjcb statement date and month conflict");
+    if (period !== heading.month) throw new Error("myjcb statement date and month conflict");
+    if (heading.date !== null && heading.date !== paymentDate)
+      throw new Error("myjcb statement heading date and payment date conflict");
     if (artifact.period != null) {
       const metadataMonth = providerYearMonth(artifact.period, "myjcb statement metadata period");
       if (metadataMonth !== undefined && metadataMonth.slice(0, 7) !== period)
@@ -427,7 +485,14 @@ export const myJcbCreditStatement: Parser = {
               statementMonth: period.replace("-", ""),
               paymentDate,
               statementState: "confirmed",
-              statementStateBasis: "page-heading",
+              // A page under the usage header records how it was proven and
+              // the label its ledger shows; any other page is as in 1.1.0.
+              ...(usageHeaderProven
+                ? {
+                    statementStateBasis: "page-heading-usage-total-proof",
+                    ledgerAmountLabel: "ご利用金額",
+                  }
+                : { statementStateBasis: "page-heading" }),
               manifestStatementState: manifestState,
               sourceAccountScope: "root-statement-aggregate",
               amountSign: "provider-statement-total",
@@ -443,7 +508,7 @@ export const myJcbCreditStatement: Parser = {
 
 export const myJcbEvidenceOnly: Parser = {
   name: "myjcb-canonical-evidence-boundary",
-  version: "1.1.2",
+  version: "1.1.5",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (

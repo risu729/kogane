@@ -102,7 +102,7 @@ complete transaction history was verified. Other outcomes exit 2. Browser
 launch/navigation timeouts are 15–30 seconds; manual login waits at most five
 minutes. There is no retry loop.
 
-The official bank page observed on 2026-09-13 displayed a visible “Request error”
+The official bank page observed on 2026-09-13 displayed a visible "Request error"
 heading instead of login controls. That exact heading now produces
 `stopped / bank-request-error`, including on an otherwise recognizable login or
 portfolio layout. The report contains no diagnostic message, IP address, or

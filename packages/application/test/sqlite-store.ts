@@ -15,13 +15,28 @@ const MIGRATIONS = fileURLToPath(CORE_MIGRATIONS_URL);
 
 /** Every migration, in order, on a fresh in-memory database with FKs on (as D1 has). */
 export function migratedDatabase(): Database {
+  // Every migration runs once per process and each call gets its own copy of
+  // the resulting file image, as `fullCoreDatabase` does in packages/storage-d1.
+  // Replaying CORE per call (about 0.6 s locally) took most of a test's 5 s
+  // budget on a loaded CI runner. The first call still migrates, so a suite
+  // that uses this builds it in `beforeAll` with its own timeout rather than
+  // inside its first test.
+  migratedImage ??= migrate();
+  const db = Database.deserialize(migratedImage);
+  db.exec("PRAGMA foreign_keys=ON");
+  return db;
+}
+let migratedImage: Uint8Array | undefined;
+function migrate(): Uint8Array {
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
   for (const file of readdirSync(MIGRATIONS)
     .filter((entry) => entry.endsWith(".sql"))
     .sort())
     db.exec(readFileSync(join(MIGRATIONS, file), "utf8"));
-  return db;
+  const image = db.serialize();
+  db.close();
+  return image;
 }
 
 type Bind = string | number | bigint | boolean | null | Uint8Array;

@@ -433,7 +433,7 @@ The measured results were:
 | `TAMIA.fetch()` to an AWS IP reflector                                | HTTP 200 and TAMIA public IPv4                                          | HTTP-level VPC routing through the existing Tunnel works.                                                                                        |
 | Container Chromium -> local SOCKS5 -> egress Worker                   | SOCKS negotiation and WebSocket upgrade succeeded                       | The Container, Chromium proxy configuration and Worker relay were not the first failure.                                                         |
 | `TAMIA.connect()` to Cloudflare-hosted `icanhazip.com:443`            | Socket became readable EOF with zero response bytes; Chromium timed out | Initially suggested the documented Workers restriction on outbound TCP to Cloudflare IP ranges, but this was only a hypothesis.                  |
-| `TAMIA.connect()` to AWS-hosted `checkip.amazonaws.com` on 80 and 443 | Same zero-byte EOF                                                      | Falsifies “Cloudflare-owned destination alone caused the EOF.” Public raw-TCP egress through this direct `tunnel_id` binding is not established. |
+| `TAMIA.connect()` to AWS-hosted `checkip.amazonaws.com` on 80 and 443 | Same zero-byte EOF                                                      | Falsifies "Cloudflare-owned destination alone caused the EOF." Public raw-TCP egress through this direct `tunnel_id` binding is not established. |
 | Direct read-only TCP/TLS from TAMIA to both reflectors                | Successful                                                              | The public destinations and TAMIA's ordinary IPv4 Internet access were healthy.                                                                  |
 | `TAMIA.connect("100.64.1.254:22")`                                    | Zero-byte EOF                                                           | TAMIA's LAN-side address was not reachable as an announced route through this binding.                                                           |
 | `TAMIA.connect("127.0.0.1:22")`                                       | Returned the TAMIA OpenSSH banner                                       | Raw TCP over the VPC binding works for a service local to the `cloudflared` host.                                                                |
@@ -452,8 +452,8 @@ rather than a stable contract.
 Cloudflare separately documents that the ordinary Workers outbound TCP Socket
 API blocks Cloudflare-owned IP ranges. That warning explains why a
 Cloudflare-hosted reflector was a poor first test target, but it does **not**
-explain the AWS EOF and must not be generalized into “every Cloudflare VPC TCP
-connection to Cloudflare is impossible.” The VPC binding's successful
+explain the AWS EOF and must not be generalized into "every Cloudflare VPC TCP
+connection to Cloudflare is impossible." The VPC binding's successful
 localhost SSH connection is a distinct private-network path.
 
 At this stage, before testing the account-wide Mesh binding, the remaining
@@ -533,8 +533,8 @@ boundary, so the application allowlist is mandatory.
 #### Separating the scraper route from personal WARP use
 
 A hostname route is configured in the account's Zero Trust route table, not
-inside one Worker, so it cannot itself be scoped to “requests from this
-scraper.” An enrolled personal WARP client may also be eligible for that route.
+inside one Worker, so it cannot itself be scoped to "requests from this
+scraper." An enrolled personal WARP client may also be eligible for that route.
 Use a dedicated personal-device profile to keep this effect off the user's
 ordinary browsing. There are two distinct goals:
 
@@ -882,8 +882,207 @@ container. The per-source staging bucket is not written in shared mode: the
 run is stored once, in `DATA` (plan 00).
 
 A successful run still declares `coverageStatus: partial`, because the provider
-exposes a rolling window of statement months and pagination remains unproven.
+exposes a rolling window of statement months and the collector stores only
+the first page of a month (below).
 
 Deploy order, rollback and the artifact/role table are in
 [`docs/collection.md`](../collection.md#prestia-globalpass-kogane-globalpass-collector-poc).
 Merged is not enabled: the var ships as `legacy`.
+
+## GLOBAL PASS activity pages and refusals (2026-09-27)
+
+Observed on the live Account Activities screen by the owner's agent
+(structure and counts only, no values):
+
+- The month select (`W131301.referenceDate`, a placeholder option plus 15
+  months) submits by POST on change.
+- A month with more than ten statements shows `Found N Result [p/Ppage] Back
+Next`. Back and Next are Nablarch POST links; there are no page-number
+  links and no page-size setting. A page holds at most ten statement blocks
+  (each block two `table.tableStyle4`). Of 15 months, five had two pages;
+  the largest stated total was 20. (This survey also said a month of ten or
+  fewer shows no pager. That was wrong: on 2026-10-04 such a month showed
+  `Found N Result [1/1page] Back Next` with both links disabled; only a month
+  with no statement shows no pager. See
+  [the pager section](#global-pass-pager-and-page-walk-2026-10-04).)
+  Whether a month ever had a second page before is not known to the owner.
+- Stored captures had shown a month stating 16 results with 16 rows and no
+  pager link. That is not reconciled with the above: the collector in this
+  repository then kept `page.content()` once per month and followed no Next link,
+  and nothing here shows what rendered that capture.
+
+Production runs, the seven nights before 2026-09-27: every night both selected months were
+refused by the activity sanitizer, so no page was stored. Which of its checks
+refused them was not recorded then. The Worker now records it as a closed
+code (`globalpass_html_contract_invalid`, `_redaction_failed`,
+`_shape_unreviewed`, `_utf8_invalid`), and logs each month's stated total and
+page numbers as counts. The collector then stored page 1 only, and marked a
+month whose page states more pages `activity_pages_unwalked`
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes));
+since 2026-10-04 it walks every page
+([below](#global-pass-pager-and-page-walk-2026-10-04)).
+
+Open then: which check refuses production pages (answered 2026-09-28/29); the
+pager's markup (answered 2026-10-04 from the live DOM); whether `Found N
+Result` appears for a month of ten or fewer (it does).
+
+## GLOBAL PASS refusal shape diagnostic (2026-09-28)
+
+Since 2026-09-27 the production runs log the refusal code
+`globalpass_html_contract_invalid` for every month, which seventeen checks of
+the sanitizer share. From this change on, the `artifact-write` diagnostic
+line of a refused page also carries a `shape` object: which expectation
+failed (a closed code such as `forbidden_token`, `activity_heading_missing`,
+`credential_field` or `hidden_name_unallowed`), on which element and
+attribute class, and counts of the page's markup (tables, rows, cells, forms,
+scripts, links, the reviewed hidden inputs), landmark booleans (doctype,
+activity heading, title, login field, password field, month select) and
+forbidden-token occurrences, with the byte and text lengths reduced to their
+number of digits. It carries no text, attribute value, URL or number read
+from the page. The manifest's failure entry carries the same expectation as
+`expectationCode`
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape)).
+
+No error-banner landmark is recorded: no error-banner markup has been
+observed on GLOBAL PASS.
+
+## GLOBAL PASS activity pages in English (2026-09-29)
+
+The night of 2026-09-28 logged the shape of both refused months: expectation
+`activity_heading_missing` on a logged-in page (title present, month select
+present, no login or password field, no forbidden token), one with no table
+(a month without transactions) and one with 21 tables. A live survey of the
+same pages the next day found why. GLOBAL PASS serves the statement pages in
+the language of the session, and the collector's session is English
+(`engUseFlg` 1): the pages are titled `Account Activities`, the month page
+(`/p/statementInquiry/RW1313010101`) is headed `Viewing Monthly Account
+Activities`, the selected month (`RW1313010201`) is headed with the month,
+and the table headings are English (`Transaction Date`, `Transaction Detail`,
+`Transaction Currency and Amount`, … — the ones the activity parser already
+reads). 「ご利用明細」 and 「利用明細」 appear nowhere on them. A language link
+(`Change language to Japanese`) is offered; the collector does not use it.
+
+The sanitizer now takes the activity page in either language: its heading
+landmark is 「ご利用明細」, 「利用明細」 or `Account Activities`. Read against the
+reviewed contract, the live English month page differed in two more places,
+which are admitted exactly and nothing else:
+
+- the download form's action is written relative,
+  `/p/statementInquiry/RW1313010301`, instead of the absolute URL of the same
+  path on the same host; it still counts as the one static-action form of
+  variant A;
+- the `Manage Services` menu link carries one handler outside the reviewed
+  call grammar,
+  `if (window.innerWidth < 640) { $(this.parentNode).toggleClass('closed'); } else { $('#chgAccountSettingMenu')[0].click(); } return false;`,
+  admitted with its `<` literal or as `&lt;` (a DOM serializer may write
+  either). Like every handler it is stored as `return false;`.
+
+The survey found nothing else outside the contract on that page: every link,
+script and image path, hidden input name and count, and form count matched.
+
+A page named 「ご利用明細」 or 「利用明細」 is accepted as before, and the
+absolute download action and the reviewed handler grammar stay accepted; every
+other check is unchanged
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-09-29-global-pass-activity-pages-in-english)).
+
+Open: whether the pages the Container captures (`page.content()`) match the
+live DOM in every other respect, which the next night's run shows.
+
+## GLOBAL PASS pager and page walk (2026-10-04)
+
+Production, fetch_run 903 (2026-09-29): the first run after the English
+pages were admitted stored both selected months' pages (no `artifact-write`
+error, `activity_heading_missing` not seen again), and the account unit
+ended `failed` with `activity_pages_unwalked`: one month had a second page
+the collector never read. Every run so far ended `partial`, so
+`globalpass-activity` has never been parsed from a shared run.
+
+Observed on the live site by the owner (round 8 and its addendum; structure,
+counts and fixed labels only), in English and, with the owner's approval and
+switched back afterwards, in Japanese:
+
+- **Path.** A selected month is `/p/statementInquiry/RW1313010201`. Month
+  selection, Next and Back are all POSTs to that same path, full page loads
+  (not XHR), answered 200.
+- **Form.** The whole list, both pagers and every statement block sit inside
+  `form name="nablarch_form5"`, method `post`, no `action`. Its hidden inputs
+  are only `nablarch_hidden` (a value of three characters) and
+  `nablarch_submit` (empty before submit). Each statement block also has a
+  `button[type=button]` (no name) and an `a.jsToggleHook`.
+- **Pager.** Two identical pagers per page, above and below the list, each a
+  `div.nablarch_paging` with four children: `div.resultCountHeader`
+  (`Found N Result`; Japanese 「検索結果 N件」), `div.nablarch_currentPageNumber`
+  (`[p/Ppage]`; 「[p/Pページ]」), `div.nablarch_prevSubmit` (`Back`; 「前へ」)
+  and `div.nablarch_nextSubmit` (`Next`; 「次へ」). Markup, classes, names and
+  behaviour are the same in both languages; only these texts differ.
+- **Links.** An enabled Next is `a.nablarch_nextSubmit` inside its div, with
+  exactly the attributes `class`, `name`, `href`, `onclick`, `tabindex`:
+  `name` is `nextSubmit` on the top pager and `nablarch_form5_2` (Nablarch's
+  automatic numbering) on the bottom one, `href` is the same path with
+  no query or fragment, `onclick` is `return
+window.nablarch_submit(event, this);`. Back is the same with `prevSubmit`.
+  A disabled link is its label as plain text in the div, no `a`, still shown.
+- **Two pages.** Page 1 of a two-page month showed `[1/2page]` and ten
+  statement blocks (`table.tableStyle4` ×20, two per block), Back disabled.
+  Next loaded `[2/2page]` with the same N on both pagers, the same title,
+  headings (an empty h1, the month in an h3: `YYYY/MM` in English,
+  「YYYY年M月」 in Japanese, no h2) and the same set of table header labels,
+  six blocks (×12), Next disabled and Back enabled; 10 + 6 equalled N. Back
+  returned to page 1 by the same POST.
+- **Table labels.** English: Transaction Date, Transaction Detail,
+  Transaction Currency and Amount, Transaction Fee, ATM Fee, FX commissions,
+  Status, Approval Number, Remarks, Local Currency and Amount, Local Fee,
+  Applicable Rate; written in two notations that differ only in line breaks.
+  Japanese: お取引日, お取引内容, お取引通貨 金額, お取引手数料, ATM手数料,
+  為替手数料, 確定状態, 承認番号, 備考, ご利用通貨 金額, ご利用手数料, 換算レート.
+  The Japanese month page is titled 「利用明細照会」.
+- **Small and empty months.** A month of ten or fewer still shows `Found N
+Result [1/1page] Back Next` with both links disabled (the 2026-09-27 note
+  above said otherwise). A month with no statement shows no Found line, no
+  pager and no table.
+- **Month switch.** Selecting another month resets the pager to page 1; a
+  month's page 2 is not remembered.
+- **First click.** With the extension's coordinate click, the first click on
+  Next after a page load did not navigate once; with click events sent in the
+  page, Next and Back navigated on the first click every time. It is not
+  site behaviour.
+- **Language.** 「Change language to Japanese」 sits in `form
+nablarch_form2` (post; hidden `cc`, `engUseFlg`,
+  `nablarch_needs_hidden_encryption`, `nablarch_hidden`, `nablarch_submit`).
+  Its `onclick` is `set_language()` with no argument, a function that reads
+  and writes a cookie and neither touches `engUseFlg` nor submits; its `href`
+  is `/p/statementInquiry/RW1313010101`, which the default navigation GETs.
+  The hidden `engUseFlg` was `1` in both languages, so the language follows
+  the cookie, not that input. The first switch reloaded the page still in
+  English and the second switched it; why is not known.
+
+What the collector does with this
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)):
+after selecting a month the container clicks the top pager's enabled Next,
+waits for the POST to the same path, checks that the new page states the next
+index, the same page count and the same total, and sends every page; page 1
+is stored as `activity-YYYY-MM.html` and page N as `activity-YYYY-MM-pN.html`.
+The Worker calls a month whole only when it is empty (no Found line, no
+pager, no block) or when every page states the same N and P, pages 1..P are
+captured, and the blocks add up to N. The pager is read in both languages.
+
+Limits:
+
+- No run has walked a page yet. Whether `page.content()` after a Next POST
+  matches the surveyed DOM, and whether page 2 passes the sanitizer (its form
+  and hidden-input counts were not reported), is shown by the first run.
+- Whether page 2 keeps the month selected in its month select was not
+  reported; the activity parser requires it and fails the page otherwise.
+- Whether the server stores the language choice is not verified. The
+  collector logs in with a fresh browser each run and sets no language
+  cookie, so the owner's browser does not change what it receives; nightly
+  runs have been English.
+- The Japanese pages were observed live only; no run has stored one. The
+  sanitizer accepts the Japanese title and labels (synthetic test), and the
+  activity parser reads only the English table labels, so a Japanese page
+  would be stored and fail its parse.
+- The walk stops at five pages a month (fifty statements; the largest month
+  seen stated 20). A longer month is stored as its first five pages and
+  marked `activity_pages_unwalked`.
+- What the pages of a month look like when a statement is added or removed
+  between two runs (which page a row moves to) has not been observed.

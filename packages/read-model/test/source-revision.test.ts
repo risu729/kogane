@@ -7,7 +7,8 @@
 // counting query the read model used before cannot see the change that made
 // the old identity wrong. Every row below is synthetic.
 import { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
+import { fromTemplate } from "./schema-template";
+import { beforeAll, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -25,13 +26,22 @@ import {
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
 
 function migratedDatabase(): Database {
-  const db = new Database(":memory:");
-  for (const name of readdirSync(MIGRATIONS)
-    .filter((entry) => entry.endsWith(".sql"))
-    .sort())
-    db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
-  return db;
+  return fromTemplate("core", () => {
+    const db = new Database(":memory:");
+    for (const name of readdirSync(MIGRATIONS)
+      .filter((entry) => entry.endsWith(".sql"))
+      .sort())
+      db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
+    return db;
+  });
 }
+
+// The first build of the migrated template runs every CORE migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./schema-template).
+beforeAll(() => {
+  migratedDatabase().close();
+}, 60_000);
 
 const revision = (db: Database): CoreRevisionRow =>
   db.query(CORE_REVISION_SQL).get() as CoreRevisionRow;

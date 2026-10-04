@@ -2,6 +2,24 @@
 // review 09 section 2: matching and its explanation before any net-worth
 // screen).
 //
+// Each slice names the matching stages it runs (`ReconciliationSlice.stages`,
+// a closed set). Both deployed slices, Vpass and MyJCB, run stage A only:
+// their pending-to-posted heuristic (stage B) is the purchase-recognition
+// lane's candidate pass (card-purchase-job.ts), which pairs recognised events
+// under the same `proposalIdentity`. That pass pairs one pending and one
+// posted event per purchase, including a pending event retired once its row
+// left the display; this lane read rows, so it paired every capture of a
+// pending row with every capture of its posted row, and a month captured
+// daily outgrew the group bound and was skipped. Reading only current rows
+// would not help: a Vpass card-month and a MyJCB pending slot each have one
+// current capture, so a pending row and the posted row it became are never
+// current together (docs/economic-events.md, "Matching stages"). Proposals
+// this lane stored before stay as history: nothing deletes them, and the
+// digest lookup never sends one again. Stage A needs a provider-issued row
+// id, which neither source has, so for them a tick reads its page and pairs
+// nothing; the cursor, group read, digest lookup and write budget stay for a
+// source that does carry provider ids.
+//
 // Pending/posted pairs stay inside one source account and billing period.
 // Vpass uses unconfirmed/posted; MyJCB uses unconfirmed/confirmed. MyJCB's
 // posted payment can be an installment slice, so only rows whose explicit
@@ -13,9 +31,10 @@
 // One tick, per slice (bounded: see `reconciliationSweep`):
 //   1. one page of the slice's published rows after its scan cursor, in
 //      observation id order;
-//   2. the groups (source account, statement period) the page touched are read
-//      whole, so a pair is found whichever pages its two rows fall on;
-//   3. stage A and stage B run over each group. The digests already stored
+//   2. the groups (source account, statement period) the page touched with a
+//      row one of the slice's stages can pair (`pairable`) are read whole, so
+//      a pair is found whichever pages its two rows fall on;
+//   3. the slice's stages run over each group. The digests already stored
 //      are looked up a chunk at a time, and only the proposals not stored yet
 //      are written: a decided proposal is never proposed again, and a stored
 //      one costs no write;
@@ -63,21 +82,44 @@ import {
 import type { TemporalValue } from "../../../packages/domain/src/time.ts";
 import { acceptProposal } from "./reconciliation-commands.ts";
 
+/**
+ * The matching stages a slice may run (docs/economic-events.md, "Matching
+ * stages"): `A`, one provider row observed twice (provider-issued ids only);
+ * `B`, a pending row against its posted row. Stage C needs an established
+ * owner on both sides and is not run by this lane.
+ */
+const RECONCILIATION_STAGES = ["A", "B"] as const;
+type ReconciliationStage = (typeof RECONCILIATION_STAGES)[number];
+
 /** One source whose own displays are compared. Datasets, not free-form rules. */
 export interface ReconciliationSlice {
   sourceId: string;
   /** Provider statuses that mean "not final yet" and "recorded", for this source only. */
   pendingStatuses: readonly string[];
   postedStatuses: readonly string[];
+  /** The stages this lane runs for the source; nothing else is paired. */
+  stages: readonly ReconciliationStage[];
 }
 
 /**
  * Explicit supported provider status families; installment comparability is
- * checked before MyJCB facts enter the matcher.
+ * checked before MyJCB facts enter the matcher. Both run stage A only: their
+ * stage B pairs are the purchase-recognition lane's candidate pass, which
+ * pairs one recognised pending event with one posted event per purchase.
  */
 export const RECONCILIATION_SLICES: readonly ReconciliationSlice[] = [
-  { sourceId: "vpass", pendingStatuses: ["unconfirmed"], postedStatuses: ["posted"] },
-  { sourceId: "myjcb", pendingStatuses: ["unconfirmed"], postedStatuses: ["confirmed"] },
+  {
+    sourceId: "vpass",
+    pendingStatuses: ["unconfirmed"],
+    postedStatuses: ["posted"],
+    stages: ["A"],
+  },
+  {
+    sourceId: "myjcb",
+    pendingStatuses: ["unconfirmed"],
+    postedStatuses: ["confirmed"],
+    stages: ["A"],
+  },
 ];
 
 /** Published rows one tick reads after a slice's cursor. */
@@ -514,7 +556,7 @@ async function sweepSlice(
   // Groups in the order their first row appears on the page.
   const touched = new Map<string, TouchedGroup>();
   for (const row of page) {
-    if (!comparablePayment(row)) continue;
+    if (!pairable(row, slice)) continue;
     const period = statementPeriodOf(row);
     const key = groupKey(row.source_account, period);
     if (!touched.has(key))
@@ -596,10 +638,10 @@ async function sweepSlice(
       result.groups += 1;
       // Stage C (cross-source correspondence) needs an established owner on
       // both sides and a second source in the slice; it is not run yet.
-      proposals.push(
-        ...stageAProposals(facts, DEFAULT_MATCH_OPTIONS),
-        ...stageBProposals(facts, DEFAULT_MATCH_OPTIONS),
-      );
+      if (slice.stages.includes("A"))
+        proposals.push(...stageAProposals(facts, DEFAULT_MATCH_OPTIONS));
+      if (slice.stages.includes("B"))
+        proposals.push(...stageBProposals(facts, DEFAULT_MATCH_OPTIONS));
     }
   }
   result.proposed += proposals.length;
@@ -690,6 +732,18 @@ export async function reconciliationSweep(
   return result;
 }
 
+/**
+ * A page row one of the slice's stages could pair, so its group is read.
+ * Stage A pairs only provider-issued identifiers (`originOf`), so a stage-A
+ * slice leaves a collector-fingerprint row's group unread: for Vpass and
+ * MyJCB, every row.
+ */
+function pairable(row: FactRow, slice: ReconciliationSlice): boolean {
+  if (!comparablePayment(row)) return false;
+  if (slice.stages.includes("B")) return true;
+  return slice.stages.includes("A") && row.external_id !== null && originOf(row) === "provider";
+}
+
 /** MyJCB's posted amount can be an installment slice. Only a provider row with
  * equal, positive usage/payment amounts participates in pending-to-posted
  * matching. The rule is the domain's `comparableCardPayment`, which reads the
@@ -697,10 +751,11 @@ export async function reconciliationSweep(
  * purchase recognition uses.
  *
  * A MyJCB confirmed row must also carry a known payment month, read as
- * recognition reads it (`statementPeriodOf`). The collector writes the
- * relative fallback `detailMonth-N` for every month the past-months API does
- * not label (docs/sources/myjcb.md: the first connection's menu lists months
- * 0..8 and the API only 9..17). That label is a position in the provider's
+ * recognition reads it (`statementPeriodOf`). The collector records a
+ * confirmed page by the payment month the page names, and wrote the relative
+ * fallback `detailMonth-N` for every month the past-months API does not label
+ * before it did (docs/sources/myjcb.md, 明細の月: the first connection's menu
+ * lists months 0..8 and the API only 9..17). That label is a position in the provider's
  * month list on the capture day, so it names a month only together with its
  * capture time, and a position the rule does not place (`detailMonth-2` and
  * beyond) names none. This job pairs only inside a known payment month; the

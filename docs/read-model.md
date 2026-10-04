@@ -106,21 +106,46 @@ checks in `src/read.ts` are unchanged.
 
 Which Vpass and MyJCB capture is current is defined once in `src/sql.ts`:
 `MYJCB_LEDGER_SNAPSHOT_CTES` (`current_myjcb_snapshots`: the newest published
-credit-ledger capture per connection, statement state and period, where every
-unconfirmed capture of a connection shares one slot) and
+credit-ledger capture per connection, statement state and statement, the
+payment month `myjcbStatementSlot` reads, where a pending capture is current
+only while it is also the newest capture of its position,
+[ADR 0016](adr/0016-myjcb-pending-statement-slots.md)) and
 `VPASS_STATEMENT_SNAPSHOT_CTES` (`current_vpass_snapshots`: per card unit and
 statement month, the newest fetch run whose statement pages all have an active
 parse, whatever the family), with the membership predicates
 `MYJCB_LEDGER_MEMBER` and `VPASS_SNAPSHOT_MEMBER`. `listTransactions` composes
 them unchanged.
 
+GLOBAL PASS activity pages follow the Vpass rule:
+`GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES` (`current_global_pass_snapshots`) takes,
+per source and month (the month in `activity-YYYY-MM.html` or
+`activity-YYYY-MM-pN.html`), the newest fetch run whose activity pages of that
+month all have an active parse, and every page of that run. A walked month is
+one snapshot, so a page a newer run no longer shows is not current beside the
+newer page 1 that shows its rows again. A run in which any page of the month
+has no active parse (pending, or failed) is passed over for that month as a
+whole: the month shows the newest earlier run whose pages all parsed, and
+nothing at all while no run qualifies; the failed parse shows only in the
+parsing health count and the artifact's parse history. With one page per month
+and run, which every run stored before 2026-10-04 has, it selects exactly what
+the earlier per-artifact-key ranking selected. `test/global-pass-snapshots.test.ts`
+compares a frozen copy of that ranking on hand-built and random stores and on a
+scaled store with the complete CORE schema and no table statistics, checks
+walked months against an independently written model there, and checks the
+Transactions plan: one pass over the artifacts for the eligible snapshots, as
+the per-key ranking made, and the expected-page count and the current pages
+reached by `idx_fetch_artifacts_run_role` (`fetch_run_id=?`), never by a scan
+per month
+([ADR 0026's amendment of 2026-10-04](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)).
+
 `currentCardUsageSql({ afterId, limit })` (`src/card-usage.ts`) composes the
 same CTEs for purchase recognition: every current Vpass and MyJCB usage row with
 its recognition key (the `bank_key` shape of migration 0044), resolved account,
 identity policy family, provider state and decimal-v1 amount. On top of the
 snapshot it keeps the newest fetch run per (resolved account, source, slot),
-where the slot is the Vpass statement month or the MyJCB state and period, and
-then the latest observation per key. Ranking runs over the whole current set
+where the slot is the Vpass statement month or the MyJCB state and statement
+(a pending MyJCB row must also come from the account's newest run of its
+position), and then the latest observation per key. Ranking runs over the whole current set
 before the `observation_id > afterId` cursor and the `limit` (1 to 1,000)
 apply. Two identical Vpass rows on different pages of one capture are two keys
 and two rows: the parser numbers identical rows per page, and since
@@ -189,7 +214,16 @@ or identity rows whole; `KOGANE_CARD_USAGE_SCALE=full` builds this store and
 prints the timings. `card-usage-differential.test.ts` makes the same comparison
 on small random stores that draw every state the shipped reads handle, and
 every scenario of `card-usage.test.ts` and `card-purchase-keys.test.ts` runs
-both texts.
+both texts. The MyJCB currentness rules changed on purpose after the text was
+frozen ([ADR 0007](adr/0007-myjcb-statement-identity.md),
+[ADR 0016](adr/0016-myjcb-pending-statement-slots.md)), so the row comparisons
+run the shipped text with those rules substituted and its plan untouched
+(`STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL`, the rules restated as NOT EXISTS
+and GROUP BY rather than window functions), and the random stores draw pending and
+confirmed captures at positions 0 and 1 so that the substituted rules decide
+rows; the plan checks run the unmodified shipped text. This proves the plan
+rewrite and the rule change separately: the rewrite returns what the shipped
+plan returns under the intended rules, not the shipped rows byte for byte.
 
 ## Parity proof
 

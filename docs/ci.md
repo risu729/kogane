@@ -128,8 +128,12 @@ forgot to add another Actions matrix row or root task-file include.
 - Oxlint, Oxfmt, Tombi, yamllint and yamlfmt check source and configuration.
 - Actionlint, ShellCheck, ghalint, pinact and zizmor check workflow syntax,
   permissions, action pins, shell code and unsafe workflow patterns.
-- Ruff checks Python without executing probes; typos and hk hygiene checks
-  cover spelling, whitespace, merge markers and file integrity.
+- Ruff checks Python without executing probes; typos and hk-config's whole
+  `hygiene` group cover spelling, whitespace, line endings, byte-order marks,
+  smart quotes, merge markers, case conflicts, symlinks, submodules and
+  shebangs matching executable bits in both directions. One synthetic bank
+  page in the St.George experiment test keeps its curly apostrophes and is
+  excluded from the smart-quote check.
 - Repository guards cover manifests, task coverage, infrastructure ledgers,
   auto-merge and release decisions, publication gates and import boundaries.
 - Knip checks unlisted dependencies and unresolved imports as build failures.

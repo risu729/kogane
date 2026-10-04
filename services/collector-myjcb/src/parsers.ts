@@ -1,10 +1,18 @@
-import type { DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
+import { MYJCB_ORIGIN } from "./policy";
+import type { CreditExportKind, DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
 import { StopConditionError } from "./types";
 import { parse, serialize, type DefaultTreeAdapterMap } from "parse5";
 import {
   CONFIRMED_STATEMENT_HEADING,
   readMyJcbStatementPage,
 } from "../../../packages/domain/src/myjcb-statement-page";
+import {
+  myjcbSchedulePageHeadingKind,
+  type MyJcbSchedulePageKind,
+} from "../../../packages/domain/src/myjcb-schedule-page-kind";
+import { readMyJcbStatementHeading } from "../../../packages/domain/src/myjcb-statement-heading";
+
+export type { MyJcbSchedulePageKind };
 
 type HtmlNode = DefaultTreeAdapterMap["node"];
 type HtmlElement = DefaultTreeAdapterMap["element"];
@@ -105,13 +113,122 @@ export function extractCreditMenuLinkId(html: string): string | undefined {
   return undefined;
 }
 
-export function parseCreditMenuMonths(html: string): number[] {
+/**
+ * The URL the credit menu is served at, which its relative links resolve
+ * against.
+ */
+const CREDIT_MENU_PAGE_URL = `${MYJCB_ORIGIN}/iss-pc/member/details_inquiry/detailMenu.html`;
+
+/**
+ * The menu's section headings, compared after whitespace removal, and the
+ * group each one names (observed 2026-09-27, round 4; ADR 0005's amendment
+ * (c)). Round 9 (2026-10-04, amendment (j)) observed their levels: the two
+ * month headings are `h2.hdg-H2`, the schedule heading is `h3.hdg-H3`. The
+ * level does not decide the group; the text does. The `#` in the observed
+ * 「ボーナス#回払い」 is a digit, so any run of digits is accepted there;
+ * every other character must match exactly.
+ */
+const CREDIT_MENU_GROUP_HEADINGS: readonly {
+  readonly pattern: RegExp;
+  readonly group: CreditMenuGroup;
+}[] = [
+  { pattern: /^最新のご利用明細$/u, group: "months" },
+  { pattern: /^過去の明細$/u, group: "months" },
+  { pattern: /^ボーナス[0-9０-９]+回払い・ショッピングスキップ払い$/u, group: "schedules" },
+];
+
+/** What a credit menu position is: a statement month, or a payment schedule page. */
+export type CreditMenuGroup = "months" | "schedules";
+
+export interface CreditMenuPositions {
+  /** Positions under 「最新のご利用明細」 and 「過去の明細」, ascending. */
+  readonly months: readonly number[];
+  /** Positions under 「ボーナス#回払い・ショッピングスキップ払い」, ascending. */
+  readonly schedules: readonly number[];
+}
+
+/**
+ * The credit menu's `detail.html?detailMonth=N` links, grouped by the section
+ * heading each falls under: the last `h2` or `h3` before the link in document
+ * order. The observed menu (round 9, ADR 0005's amendment (j)) puts its nine
+ * 「明細を見る」 links in card boxes, in DOM order 0, 1, 7, 8, 2, 3, 4, 5, 6,
+ * under three section headings: `h2` 「最新のご利用明細」 (0, 1), `h3`
+ * 「ボーナス#回払い・ショッピングスキップ払い」 (7, 8) and `h2` 「過去の明細」
+ * (2–6); guidance `h2`s and `h3`s follow every link at the bottom of the
+ * page. The link text names no month, so only the heading tells a statement
+ * month from a schedule page. Before amendment (j) only `h2` counted, which
+ * put 7 and 8 under 「最新のご利用明細」 as months.
+ *
+ * A link before any `h2` or `h3`, a link under a heading that is not one of
+ * the observed three (at either level), or a position listed under both
+ * groups stops the collection (`credit-menu-group`): the grouping is never
+ * guessed (ADR 0004). The stop log carries counts only, never the heading
+ * text.
+ */
+export function readCreditMenuGroups(html: string): CreditMenuPositions {
   const months = new Set<number>();
-  for (const match of html.matchAll(/(?:[?&]|\b)detailMonth(?:=|["']?\s+value=["'])(\d{1,2})/giu)) {
-    const month = Number(match[1]);
-    if (Number.isInteger(month) && month >= 0 && month <= 17) months.add(month);
+  const schedules = new Set<number>();
+  let unrecognized = 0;
+  let outside = 0;
+  let heading: string | undefined;
+  const visit = (node: HtmlNode): void => {
+    // A link inside a heading belongs to that heading.
+    if (isElement(node) && (node.tagName === "h2" || node.tagName === "h3"))
+      heading = compactText(node);
+    if (isElement(node) && node.tagName === "a") {
+      const position = creditDetailLinkPosition(node);
+      if (position !== undefined) {
+        if (heading === undefined) outside += 1;
+        else {
+          const text = heading;
+          const group = CREDIT_MENU_GROUP_HEADINGS.find(({ pattern }) => pattern.test(text))?.group;
+          if (group === "months") months.add(position);
+          else if (group === "schedules") schedules.add(position);
+          else unrecognized += 1;
+        }
+      }
+    }
+    for (const child of childNodes(node)) visit(child);
+  };
+  visit(parse(html));
+  const both = [...months].filter((position) => schedules.has(position)).length;
+  if (unrecognized > 0 || outside > 0 || both > 0) {
+    // Counts only: the heading text never reaches the log.
+    console.warn(
+      JSON.stringify({
+        event: "myjcb-credit-menu-groups",
+        monthLinks: months.size,
+        scheduleLinks: schedules.size,
+        unrecognizedHeadingLinks: unrecognized,
+        linksOutsideHeading: outside,
+        positionsInBothGroups: both,
+      }),
+    );
+    throw new StopConditionError(
+      "MyJCB credit menu grouped a link under an unrecognised heading",
+      "credit-menu-group",
+    );
   }
-  return [...months].sort((left, right) => left - right);
+  const ascending = (values: Set<number>) => [...values].sort((left, right) => left - right);
+  return { months: ascending(months), schedules: ascending(schedules) };
+}
+
+/** The `detailMonth` a menu link opens, or undefined for any other link. */
+function creditDetailLinkPosition(link: HtmlElement): number | undefined {
+  const href = link.attrs.find((attribute) => attribute.name === "href")?.value;
+  if (href === undefined) return undefined;
+  let url: URL;
+  try {
+    url = new URL(href, CREDIT_MENU_PAGE_URL);
+  } catch {
+    return undefined;
+  }
+  if (url.origin !== MYJCB_ORIGIN) return undefined;
+  if (url.pathname !== "/iss-pc/member/details_inquiry/detail.html") return undefined;
+  const month = url.searchParams.get("detailMonth");
+  if (month === null || !/^\d{1,2}$/u.test(month)) return undefined;
+  const position = Number(month);
+  return position <= 17 ? position : undefined;
 }
 
 export function extractGeneralJsonDiscriminator(html: string): string {
@@ -170,14 +287,40 @@ export function parsePastMonthAvailability(json: string): PastMonthAvailability[
     .sort((left, right) => left.detailMonth - right.detailMonth);
 }
 
+/**
+ * The URL a credit detail page is served at, which its relative links resolve
+ * against. Confirmed months link their exports relatively and without a
+ * month (`detailDbPdf.html?output=pdf`, `detail.html?output=csv`,
+ * `detail.html?output=money`), observed 2026-09-27: resolved against the
+ * origin alone they named `/detail.html` and never matched, so no run found an
+ * export (ADR 0005's second amendment).
+ */
+const CREDIT_DETAIL_PAGE_URL = `${MYJCB_ORIGIN}/iss-pc/member/details_inquiry/detail.html`;
+
+/**
+ * The exports a credit detail page links to for its own month. A link is
+ * resolved against the page's URL, so relative, root-relative and absolute
+ * hrefs are read alike; it must stay on the MyJCB origin. The observed links
+ * name no `detailMonth`: a link found on this month's page is this month's
+ * export. A link that does name a `detailMonth` counts only when it names
+ * exactly this one (another month's link, or a malformed month, is not this
+ * month's export).
+ */
 export function discoverCreditExports(
   html: string,
   detailMonth: number,
-): readonly ("csv" | "pdf" | "ofx")[] {
-  const found = new Set<"csv" | "pdf" | "ofx">();
+): readonly CreditExportKind[] {
+  const found = new Set<CreditExportKind>();
   for (const match of html.matchAll(/\bhref=["']([^"']+)["']/giu)) {
-    const url = new URL(decodeHtml(match[1] ?? ""), "https://my.jcb.co.jp");
-    if (Number(url.searchParams.get("detailMonth")) !== detailMonth) continue;
+    let url: URL;
+    try {
+      url = new URL(decodeHtml(match[1] ?? ""), CREDIT_DETAIL_PAGE_URL);
+    } catch {
+      continue;
+    }
+    if (url.origin !== MYJCB_ORIGIN) continue;
+    const month = url.searchParams.get("detailMonth");
+    if (month !== null && (!/^\d{1,2}$/u.test(month) || Number(month) !== detailMonth)) continue;
     if (
       url.pathname === "/iss-pc/member/details_inquiry/detail.html" &&
       url.searchParams.get("output") === "csv"
@@ -197,6 +340,19 @@ export function discoverCreditExports(
   return [...found];
 }
 
+/**
+ * The ledger of a credit detail page whose statement state is `state`.
+ *
+ * A confirmed page shows the confirmed header set (「今回のお支払い金額」), or,
+ * when the page itself proves that the usage amounts are this statement's
+ * payment (`usageHeader: "proven"`, ADR 0005 amendment d), the unconfirmed set
+ * (「ご利用金額」). The stored `headers` are the set the page shows, so the
+ * ledger parser reads the amount cell as the usage amount it is labelled as,
+ * and nothing records a row's 「今回のお支払い金額」. No stored page has shown
+ * that second variant: amendment (d)'s premise was a string-matching artifact,
+ * and the acceptance path stays only because removing it would re-release
+ * every MyJCB parser (ADR 0005 amendment f).
+ */
 export function parseCreditLedger(
   html: string,
   state: "confirmed" | "unconfirmed",
@@ -208,8 +364,17 @@ export function parseCreditLedger(
   const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u.test(
     nodeText(ledger),
   );
-  const headers = state === "unconfirmed" ? UNCONFIRMED_LEDGER_HEADERS : CONFIRMED_LEDGER_HEADERS;
-  const headerText = header ? normalizeText(nodeText(header)) : "";
+  const usageHeader =
+    state === "unconfirmed" || readMyJcbStatementPage(document).usageHeader === "proven";
+  const headers = usageHeader ? UNCONFIRMED_LEDGER_HEADERS : CONFIRMED_LEDGER_HEADERS;
+  // Labels are matched with all whitespace removed (ADR 0005 amendment f):
+  // every stored confirmed page splits its amount label over a line break,
+  // 「今回の<br class="pc-none">お支払い金額」, and `nodeText` puts a space on
+  // each side of the `br`, so a match on space-collapsed text failed on every
+  // confirmed month. Only whitespace is ignored, and that includes the space
+  // `nodeText` puts at every element boundary: a label split over elements
+  // (even over two head cells) matches too, as in the shared page reading.
+  const headerText = header ? compactText(header) : "";
   // A ledger with rows must display the whole header set of its state: the
   // fourth label says which amount the summary cell holds, so `headers` in the
   // stored ledger is a checked fact about the page, not an assumption. An
@@ -218,6 +383,9 @@ export function parseCreditLedger(
   if (requiredHeaders.some((label) => !headerText.includes(label))) {
     throw new StopConditionError(`MyJCB ${state} ledger headers changed`, "credit-ledger-headers");
   }
+  // A confirmed page's expanded rows (`item-more`) label the usage amount
+  // 「ご利用金額」, once per row; its head shows 「今回のお支払い金額」 across a
+  // `br` (round-5 survey, 2026-09-28; ADR 0005 amendment f).
   const expandedLabels =
     state === "unconfirmed"
       ? ["今回のお支払い金額", "摘要", "今回回数", "備考", "訂正サイン"]
@@ -292,6 +460,13 @@ export function parseCreditLedger(
  * - `detailMonth=0` is the mutable current month and is always `unconfirmed`;
  *   a position-0 page that shows the heading stops the collection;
  * - the heading, with a confirmed (or no) amount header: `confirmed`;
+ * - the heading, with the unconfirmed amount header, when the page proves its
+ *   usage amounts are this statement's payment (every row in the first
+ *   ledger, the one `parseCreditLedger` stores, every row one single payment,
+ *   and the rows' exact sum equal to the page's 「お支払い金額合計」;
+ *   `readMyJcbStatementPage` `usageHeader: "proven"`, ADR 0005 amendment d):
+ *   `confirmed`, and its ledger is stored under the header it shows. No
+ *   stored page has shown this variant (amendment f);
  * - no heading and no ledger: `unknown`, as before;
  * - no heading and a ledger without rows: `unknown`. Production captures of
  *   older closed months (positions 7 and 8 of the surveyed connection) are
@@ -311,7 +486,8 @@ export function parseCreditLedger(
  * `unknown` stores the page as evidence and no ledger artifact. A page that
  * contradicts itself stops the collection at every position
  * (`credit-statement-state`): more than one heading, a header with both
- * labels, ledgers that disagree, or the heading over an unconfirmed header.
+ * labels, ledgers that disagree, or the heading over an unconfirmed header
+ * the page does not prove; its log names the closed reason (`usageHeader`).
  */
 export function creditStatementState(html: string, detailMonth: number): CreditStatementState {
   const page = readMyJcbStatementPage(parse(html));
@@ -324,6 +500,9 @@ export function creditStatementState(html: string, detailMonth: number): CreditS
       ledgerCount: page.ledgerCount,
       rowCount: page.rowCount,
       amountHeaders: page.amountHeaders,
+      // A closed code or null: why a heading over the usage header was or
+      // was not accepted. Never an amount.
+      usageHeader: page.usageHeader,
     });
   const stop = (message: string): never => {
     console.warn(shape("myjcb-credit-statement-state"));
@@ -356,6 +535,158 @@ export function creditStatementState(html: string, detailMonth: number): CreditS
   }
 }
 
+/**
+ * The ledger rows a credit detail page shows, counted by the same page reading
+ * as `creditStatementState`. An `unknown` page with rows keeps them only as
+ * HTML evidence, which no parser reads, so the connection that captured it did
+ * not capture that month whole (ADR 0026).
+ */
+export function creditPageRowCount(html: string): number {
+  return readMyJcbStatementPage(parse(html)).rowCount;
+}
+
+/**
+ * The third ledger header, observed 2026-09-27 on the ショッピングスキップ払い
+ * page (menu position 8 of the surveyed connection, a payment schedule under
+ * the menu's 「ボーナス#回払い・ショッピングスキップ払い」 box, not a statement
+ * month): the payment date and a future payment amount in place of the payment
+ * type and this statement's or the usage amount. The live `div.head` has three
+ * cells, 「ご利用日」 / 「ご利用先など」 and 「お支払日」 on two lines of one
+ * cell / 「今後のお支払い金額」, so the labels are matched in the head's text
+ * with whitespace removed, never by cell. What its rows mean is not
+ * confirmed, so they are never read as a statement (ADR 0004).
+ */
+const SCHEDULED_LEDGER_LABELS = ["ご利用日", "ご利用先など", "お支払日", "今後のお支払い金額"];
+/** Labels of the two read header sets; a header carrying one is not the third variant. */
+const READ_LEDGER_LABELS = ["支払区分", "今回のお支払い金額", "ご利用金額"];
+
+/**
+ * The rows under ledgers that carry the third (scheduled) header, counted by
+ * the same row rule as the statement reading (the known empty-ledger row does
+ * not count), or `undefined` when no ledger carries that header. A header is
+ * the third variant when it displays every one of its labels and none of the
+ * labels only the read header sets show.
+ */
+export function scheduledLedgerRowCount(html: string): number | undefined {
+  const scheduled = findElements(parse(html), (element) =>
+    hasClass(element, "detail-list-01"),
+  ).filter((ledger) => {
+    const head = findElements(ledger, (element) => hasClass(element, "head"))[0];
+    const label = head ? compactText(head) : "";
+    return (
+      SCHEDULED_LEDGER_LABELS.every((part) => label.includes(part)) &&
+      !READ_LEDGER_LABELS.some((part) => label.includes(part))
+    );
+  });
+  if (scheduled.length === 0) return undefined;
+  return scheduled.reduce((count, ledger) => count + readMyJcbStatementPage(ledger).rowCount, 0);
+}
+
+/**
+ * The kind of a menu schedule page, read from its h1 only: `skip-payment`
+ * when exactly one h1 is the observed 「ショッピングスキップ払いご利用明細(未確定分)」
+ * (ADR 0005 amendment e); otherwise `bonus` when exactly one h1 is the
+ * observed 「ボーナス#回払いご利用代金明細(未確定分)」, # any run of ASCII or
+ * full-width digits (amendment j); otherwise `unobserved`. The collector
+ * names the stored page by it, so that only the skip-payment page gets a
+ * parser dataset at registration, and stores a page of either observed kind
+ * as a schedule page at a month position too. Its rows are read by the
+ * parser, not here; the bonus page's by nothing (ADR 0004).
+ */
+export function schedulePageKind(html: string): MyJcbSchedulePageKind {
+  return myjcbSchedulePageHeadingKind(parse(html));
+}
+
+/**
+ * Every payment month (`YYYY-MM`) a page's `h2` headings state: normally none
+ * or one. A closed statement page names its payment in an `h2`, undated
+ * (「YYYY年M月お支払い分のカードご利用明細」) or dated
+ * (「YYYY年M月D日(曜)お支払い分のカードご利用明細」, ADR 0005 amendment g),
+ * compared after whitespace removal. `readMyJcbStatementHeading` is the
+ * reading `myjcb-credit-statement-total` uses too, so the month the collector
+ * records and the month the statement total carries are one reading. The day
+ * is not recorded here; the statement parser compares it with the total's
+ * payment date.
+ */
+export function statedPaymentMonths(html: string): string[] {
+  return findElements(parse(html), (element) => element.tagName === "h2").flatMap((element) => {
+    const heading = readMyJcbStatementHeading(compactText(element));
+    return heading ? [heading.month] : [];
+  });
+}
+
+/**
+ * The payment month (`YYYY-MM`) of a past-months API `settlementYM`, in the
+ * shapes the past-month parser reads (`YYYYMM`, `YYYY-MM`, `YYYY年M月お支払い分`
+ * and their day and 度 variants), or null for any other text.
+ */
+export function settlementMonth(value: string): string | null {
+  const normalized = value.normalize("NFKC").replace(/\s+/gu, "");
+  const match =
+    /^(\d{4})年(\d{1,2})月(?:\d{1,2}日)?(?:度)?(?:お支払い分)?$/u.exec(normalized) ??
+    /^(\d{4})[/.-](\d{1,2})(?:[/.-]\d{1,2})?(?:度)?(?:お支払い分)?$/u.exec(normalized) ??
+    /^(\d{4})(\d{2})(?:\d{2})?(?:度)?(?:お支払い分)?$/u.exec(normalized);
+  return (match ? yearMonth(match[1]!, match[2]!) : [])[0] ?? null;
+}
+
+function yearMonth(year: string, month: string): string[] {
+  const number = Number(month);
+  return number >= 1 && number <= 12 ? [`${year}-${String(number).padStart(2, "0")}`] : [];
+}
+
+/**
+ * The period the collector records for one credit month: the statement's own
+ * name, so that a statement keeps one period, and each of its ledger rows one
+ * external id, while its position in the provider's list moves
+ * (docs/sources/myjcb.md, 明細の月). The ledger parser hashes the period into
+ * every row's fingerprint; the position stays recorded beside it, in the
+ * artifact key and the ledger's `detailMonth`.
+ *
+ * - A month the past-months API labels keeps its `settlementYM` verbatim, as
+ *   before. When the page is a confirmed statement that also states its
+ *   payment month, the two must name the same month.
+ * - Any other confirmed page records the payment month its heading states,
+ *   `YYYY-MM`. Only a page with the `(確定分)` heading is confirmed, and a
+ *   closed statement page names its payment month: a confirmed page that
+ *   names none, or more than one, stops the collection
+ *   (`credit-statement-period`), as the statement parser rejects it.
+ * - Every other page (`unconfirmed`, `unknown`) keeps the relative
+ *   `detailMonth-N`. It states no month; the label stays evidence and is
+ *   resolved afterwards from the capture time (docs/observations.md,
+ *   "Relative period labels are resolved from the capture time").
+ */
+export function creditStatementPeriod(input: {
+  readonly html: string;
+  readonly detailMonth: number;
+  readonly state: CreditStatementState;
+  readonly settlementYM: string | undefined;
+}): string {
+  const { html, detailMonth, state, settlementYM } = input;
+  if (state !== "confirmed") return settlementYM ?? `detailMonth-${detailMonth}`;
+  const stated = statedPaymentMonths(html);
+  const stop = (message: string): never => {
+    // Counts and codes only: the page's month never reaches the log.
+    console.warn(
+      JSON.stringify({
+        event: "myjcb-credit-statement-period",
+        detailMonth,
+        statedMonths: stated.length,
+        settlementLabelled: settlementYM !== undefined,
+      }),
+    );
+    throw new StopConditionError(message, "credit-statement-period");
+  };
+  if (stated.length > 1) return stop("MyJCB confirmed statement page names more than one month");
+  if (settlementYM !== undefined) {
+    const labelled = settlementMonth(settlementYM);
+    if (stated.length === 1 && labelled !== null && labelled !== stated[0])
+      return stop("MyJCB confirmed statement month disagrees with its past-months label");
+    return settlementYM;
+  }
+  if (stated.length === 0) return stop("MyJCB confirmed statement page names no payment month");
+  return stated[0]!;
+}
+
 function safeClassNames(element: HtmlElement): string[] {
   return (element.attrs.find((attribute) => attribute.name === "class")?.value ?? "")
     .split(/\s+/u)
@@ -371,6 +702,12 @@ export function statementState(value: string): StatementState {
   return "unknown";
 }
 
+/**
+ * The page as it is stored: the sanitizer removes executable and embedding
+ * elements, URL, session and credential attributes and full card numbers.
+ * Body text is kept as displayed, including the account holder's name in the
+ * カード情報 table (ADR 0029, amendment 2).
+ */
 export function redactedStatementHtml(html: string): string {
   const document = parse(html);
   sanitizeHtmlTree(document);
@@ -523,6 +860,16 @@ function hasClass(element: HtmlElement, className: string): boolean {
 function nodeText(node: HtmlNode): string {
   if ("value" in node) return node.value;
   return childNodes(node).map(nodeText).join(" ");
+}
+
+/**
+ * A node's text with all whitespace removed, the form every provider label
+ * (headings, ledger header labels) is compared in. `nodeText` joins nodes
+ * with a space, so a label the page breaks with a `br` or splits over
+ * elements reads as one word only here. Cell values keep `normalizeText`.
+ */
+function compactText(node: HtmlNode): string {
+  return nodeText(node).replace(/\s+/gu, "");
 }
 
 function findLabelValue(root: HtmlElement, label: string): string | undefined {

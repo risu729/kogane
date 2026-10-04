@@ -9,16 +9,23 @@
 // collector regression must fail the run rather than publish a session token
 // or a card number (G3-08).
 //
-// The collector manifest is written in the shape central storage receives:
-// connection blockers and failure messages become coarse codes, so the free
-// text of an upstream error never reaches the shared bucket either.
+// The collector manifest records a stopped connection as a closed stop code, a
+// month position and a count of the months it kept (ADR 0005's amendment), so
+// the free text of an upstream error never reaches the shared bucket either.
 import { assertRedactedHtml } from "./redaction";
-import type {
-  CollectionFailure,
-  CollectionManifest,
-  ConnectionSummary,
-  RawArtifact,
-  StoredArtifact,
+import {
+  CONNECTION_STOP_CODES,
+  SCHEDULE_PAGE_CODES,
+  UNREAD_MONTH_CODES,
+  type CollectionFailure,
+  type CollectionManifest,
+  type ConnectionStopCode,
+  type ConnectionSummary,
+  type ExportOffer,
+  type RawArtifact,
+  type SchedulePage,
+  type StoredArtifact,
+  type UnreadMonth,
 } from "./types";
 import {
   objectKey,
@@ -34,8 +41,14 @@ import {
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 
-const SOURCE = "myjcb";
-const PRODUCER = "myjcb-worker";
+export const SOURCE = "myjcb";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-myjcb";
+/**
+ * What derives a ledger or the discovery record from provider pages: this
+ * collector, named by its collector id (ADR 0021).
+ */
+const TRANSFORMER_ID = PRODUCER;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 /**
  * Datasets the central path has never accepted: the importer refuses a run
@@ -121,27 +134,78 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-function coverage(
-  status: ConnectionSummary["status"] | CollectionManifest["status"],
-): CoverageStatus {
+/**
+ * A connection's coverage of what the run set out to collect (ADR 0026). A
+ * `success` connection enumerated its credit months from the menu and the
+ * past-months response and kept every one of them: the page and the ledger
+ * the collector derives from a page that states its state. Export links are
+ * recorded as offers and not fetched (ADR 0005's second amendment).
+ * `collectConnection` reports `partial` when a month is kept unread: its page
+ * shows rows but no stated state, or rows under the observed third ledger
+ * header (the rows were kept as HTML only), and when
+ * a month's fetch, state, period, ledger or export failed: the connection
+ * stopped there and kept the months before it (ADR 0005's amendment). Either
+ * unit stays `partial`. A connection that stopped before its first credit
+ * month keeps nothing and is `unknown`.
+ *
+ * The months are the menu positions under 「最新のご利用明細」 and 「過去の明細」
+ * and the past-months response's; the positions under
+ * 「ボーナス#回払い・ショッピングスキップ払い」 are payment schedule pages, stored
+ * as `credit-skip-payment-NN.html` (the ショッピングスキップ払い page, amendment
+ * (e)) or `credit-schedule-NN.html` (any other) and never part of the
+ * coverage, whether they show rows or failed to fetch (ADR 0005's amendment
+ * (c)). A month position whose page carries the ショッピングスキップ払い h1 is
+ * that schedule page and not a month either (amendment (h)).
+ */
+function coverage(status: ConnectionSummary["status"]): CoverageStatus {
   if (status === "success") return "complete";
   return status === "partial" ? "partial" : "unknown";
 }
 
+/**
+ * The run's coverage is a claim about the cards' history, not about the
+ * snapshot the run requested: a card exposes a rolling set of statement
+ * periods, so even a fully successful run is `partial` here. Registration
+ * records it on the run and derives no outcome from it (ADR 0026).
+ */
+function runCoverage(status: CollectionManifest["status"]): CoverageStatus {
+  return status === "failed" ? "unknown" : "partial";
+}
+
 /** A blocked connection is a state to report, never a reason to retry a login
- * (source policy, G3-10/G3-11). */
-function connectionErrorCode(status: ConnectionSummary["status"]): string | undefined {
-  if (status === "success") return undefined;
-  if (status === "human-required") return "human_required";
-  return status === "partial" ? "collector_partial" : "collector_failed";
+ * (source policy, G3-10/G3-11). A stopped connection's unit carries the stage
+ * it stopped at. One that ran to the end but kept months unread carries
+ * `scheduled_payments_page` when every unread month is under the observed third
+ * ledger header (ADR 0005's second amendment), and `collector_partial`
+ * otherwise, as before. */
+export function connectionErrorCode(summary: ConnectionSummary): string | undefined {
+  if (summary.status === "success") return undefined;
+  if (summary.stopCode !== undefined) return stopCode(summary.stopCode);
+  if (summary.status === "human-required") return "human_required";
+  if (summary.status !== "partial") return "collector_failed";
+  const unread = new Set((summary.unreadMonths ?? []).map((month) => month.code));
+  return unread.size === 1 && unread.has("scheduled_payments_page")
+    ? "scheduled_payments_page"
+    : "collector_partial";
 }
 
 function runErrorCode(input: SharedRunInput): string | undefined {
   if (input.status === "success") return undefined;
-  const blocked = input.connections.filter((connection) => connection.summary.status !== "success");
-  if (blocked.length > 0 && blocked.every((c) => c.summary.status === "human-required")) {
-    return "human_required";
-  }
+  // When every connection that is not whole says the same thing (all wait for
+  // a person, or all stopped at the same stage), the run carries that code;
+  // otherwise the coarse one, and each unit keeps its own.
+  const codes = new Set(
+    input.connections
+      .filter((connection) => connection.summary.status !== "success")
+      .map((connection) => connectionErrorCode(connection.summary)),
+  );
+  const [only] = codes;
+  if (
+    codes.size === 1 &&
+    only !== undefined &&
+    (STOP_CODES.has(only) || only === "scheduled_payments_page")
+  )
+    return only;
   return input.status === "partial" ? "collector_partial" : "collector_failed";
 }
 
@@ -151,21 +215,83 @@ function identifier(value: string | undefined, code: string): string | undefined
   return value;
 }
 
+const STOP_CODES: ReadonlySet<string> = new Set(CONNECTION_STOP_CODES);
+
+/** A stop code from the closed list, or a refused plan. */
+function stopCode(value: string): ConnectionStopCode {
+  if (!STOP_CODES.has(value)) throw new Error("manifest_stop_code_invalid");
+  return value as ConnectionStopCode;
+}
+
+/** A month position (`detailMonth`), or a refused plan. */
+function position(value: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > 17) {
+    throw new Error("manifest_stop_position_invalid");
+  }
+  return value;
+}
+
+const UNREAD_CODES: ReadonlySet<string> = new Set(UNREAD_MONTH_CODES);
+const SCHEDULE_CODES: ReadonlySet<string> = new Set(SCHEDULE_PAGE_CODES);
+const EXPORT_KINDS: ReadonlySet<string> = new Set(["csv", "pdf", "ofx"]);
+
+/** Each unread month as a position and a code from `UNREAD_MONTH_CODES`, or a refused plan. */
+function unreadMonths(months: readonly UnreadMonth[]): UnreadMonth[] {
+  return months.map((month) => {
+    if (!UNREAD_CODES.has(month.code)) throw new Error("manifest_unread_code_invalid");
+    return { position: position(month.position), code: month.code };
+  });
+}
+
+/** Each schedule page as a position and a code from `SCHEDULE_PAGE_CODES`, or a refused plan. */
+function schedulePages(pages: readonly SchedulePage[]): SchedulePage[] {
+  return pages.map((page) => {
+    if (!SCHEDULE_CODES.has(page.code)) throw new Error("manifest_schedule_code_invalid");
+    return { position: position(page.position), code: page.code };
+  });
+}
+
 /**
- * The collector manifest as central storage receives it
- * (`normalizeMyJcbManifestForCentral`): a connection blocker and a failure
- * message become coarse codes, and each artifact names the content-addressed
- * object that was written rather than a bucket path shared mode never
- * creates.
+ * The count of stored schedule pages: it must be the number of entries coded
+ * `scheduled_payments_page`, or the plan is refused.
+ */
+function schedulePageCount(pages: readonly SchedulePage[], count: number | undefined): number {
+  const stored = pages.filter((page) => page.code === "scheduled_payments_page").length;
+  if (count !== stored) throw new Error("manifest_schedule_count_invalid");
+  return stored;
+}
+
+/**
+ * A connection that lists no schedule page states no count either: a count
+ * without its entries is refused rather than dropped.
+ */
+function noSchedulePages(count: number | undefined): Record<string, never> {
+  if (count !== undefined) throw new Error("manifest_schedule_count_invalid");
+  return {};
+}
+
+/** Each export offer as a position and closed kinds, or a refused plan. */
+function exportOffers(offers: readonly ExportOffer[]): ExportOffer[] {
+  return offers.map((offer) => {
+    if (offer.kinds.length === 0 || offer.kinds.some((kind) => !EXPORT_KINDS.has(kind)))
+      throw new Error("manifest_export_kind_invalid");
+    return { position: position(offer.position), kinds: [...new Set(offer.kinds)] };
+  });
+}
+
+/**
+ * The collector manifest the shared bucket stores. Each connection and each
+ * failure is rebuilt field by field from closed values: a status, counts, a
+ * stop code from `CONNECTION_STOP_CODES` and a month position. No error
+ * message, provider text or amount has a field to travel in, and a code
+ * outside the list refuses the plan. Each artifact names the
+ * content-addressed object that was written.
  */
 function manifestBytes(
   input: SharedRunInput,
   connections: readonly ConnectionSummary[],
   stored: readonly StoredArtifact[],
 ): Uint8Array {
-  const statusByConnection = new Map(
-    connections.map((connection) => [connection.connectionId, connection.status]),
-  );
   const manifest: CollectionManifest = {
     schemaVersion: input.schemaVersion,
     source: "myjcb",
@@ -175,22 +301,43 @@ function manifestBytes(
     status: input.status,
     trigger: input.trigger,
     connections: connections.map((connection) => ({
-      ...connection,
-      ...(connection.blocker === undefined
+      connectionId: connection.connectionId,
+      bootstrapMode: connection.bootstrapMode,
+      status: connection.status,
+      cardCount: connection.cardCount,
+      periodCount: connection.periodCount,
+      artifactCount: connection.artifactCount,
+      ...(connection.stopCode === undefined
         ? {}
         : {
-            blocker:
-              connection.status === "human-required" ? "human-required" : "collector-failure",
+            stopCode: stopCode(connection.stopCode),
+            ...(connection.stopPosition === undefined
+              ? {}
+              : { stopPosition: position(connection.stopPosition) }),
+            capturedMonthCount: connection.capturedMonthCount ?? 0,
+          }),
+      ...(connection.unreadMonths === undefined || connection.unreadMonths.length === 0
+        ? {}
+        : { unreadMonths: unreadMonths(connection.unreadMonths) }),
+      ...(connection.exportOffers === undefined || connection.exportOffers.length === 0
+        ? {}
+        : { exportOffers: exportOffers(connection.exportOffers) }),
+      ...(connection.schedulePages === undefined || connection.schedulePages.length === 0
+        ? noSchedulePages(connection.schedulePageCount)
+        : {
+            schedulePages: schedulePages(connection.schedulePages),
+            schedulePageCount: schedulePageCount(
+              connection.schedulePages,
+              connection.schedulePageCount,
+            ),
           }),
     })),
     artifacts: stored,
     failures: input.failures.map((failure) => ({
-      ...failure,
-      message: failure.operation.startsWith("r2:")
-        ? "r2-write-failure"
-        : statusByConnection.get(failure.connectionId) === "human-required"
-          ? "human-required"
-          : "collector-failure",
+      connectionId: failure.connectionId,
+      operation: "collect",
+      code: stopCode(failure.code),
+      ...(failure.position === undefined ? {} : { position: position(failure.position) }),
     })),
   };
   return new TextEncoder().encode(JSON.stringify(manifest));
@@ -201,16 +348,19 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
   const outcome: ProviderOutcome = input.status;
   const errorCode = runErrorCode(input);
   // A failed run keeps no artifact: there is nothing whose persistence could
-  // be claimed, and the terminal states the failure on its own (G1-09).
-  const sources = outcome === "failed" ? [] : input.connections;
+  // be claimed, and the terminal states the failure on its own (G1-09). Its
+  // connections stay units with no artifact, so each one's stop code is in
+  // the terminal (ADR 0005's amendment).
+  const failed = outcome === "failed";
 
   const artifacts: PersistArtifact[] = [];
   const stored: StoredArtifact[] = [];
   const transformations: TerminalTransformation[] = [];
   const units: TerminalUnit[] = [];
-  for (const connection of sources) {
+  for (const connection of input.connections) {
     const unitKey = connection.summary.connectionId;
-    for (const artifact of connection.artifacts) {
+    const kept = failed ? [] : connection.artifacts;
+    for (const artifact of kept) {
       if (UNOBSERVED_DATASETS.has(artifact.dataset)) {
         throw new Error("artifact_dataset_unobserved");
       }
@@ -247,24 +397,45 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
           transformationId: `redacted:${artifactKey.replaceAll("/", ":")}`,
           stepKind: "redacted",
           transformerId: "myjcb-sanitizer",
-          transformerVersion: "v1",
+          // v3: person-name cells are kept as displayed again; v2 (#333)
+          // replaced them, which ADR 0029's amendment 2 withdrew. The version
+          // moves forward so each stored run still says which step wrote it.
+          transformerVersion: "v3",
           // The provider HTML was deliberately not retained.
           inputArtifactKeys: [],
           outputArtifactKey: artifactKey,
         });
       }
+      if (role === "collector_derived") {
+        // What a derived artifact was derived from (ADR 0021). A
+        // `credit-ledger-NN.json` is parsed from the statement page before
+        // redaction, and `discovery.json` from the login and mypage
+        // responses; none of those bytes is kept. The redacted capture of the
+        // statement page is not the ledger's input (the sanitizer rewrites
+        // text as well as attributes), so naming it would invent a parent:
+        // the step names no input and registers as
+        // `source_bytes_not_available`.
+        transformations.push({
+          transformationId: `extracted:${artifactKey.replaceAll("/", ":")}`,
+          stepKind: "extracted",
+          transformerId: TRANSFORMER_ID,
+          transformerVersion: input.schemaVersion,
+          inputArtifactKeys: [],
+          outputArtifactKey: artifactKey,
+        });
+      }
     }
-    const connectionCode = connectionErrorCode(connection.summary.status);
+    const connectionCode = connectionErrorCode(connection.summary);
     units.push({
       unitKey,
       unitKind: "connection",
-      artifactCount: connection.artifacts.length,
-      coverageStatus: coverage(connection.summary.status),
+      artifactCount: kept.length,
+      coverageStatus: failed ? "unknown" : coverage(connection.summary.status),
       ...(connectionCode === undefined ? {} : { safeErrorCode: connectionCode }),
     });
   }
 
-  const summaries = sources.map((connection) => connection.summary);
+  const summaries = input.connections.map((connection) => connection.summary);
   if (artifacts.length > 0) {
     const bytes = manifestBytes(input, summaries, stored);
     artifacts.push({
@@ -308,15 +479,13 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
       startedAt: input.startedAt,
       completedAt: input.completedAt,
       providerOutcome: outcome,
-      // A MyJCB card exposes a rolling set of statement periods, so even a
-      // fully successful run is not a claim about the card's whole history.
-      coverageStatus: input.status === "success" ? "partial" : coverage(input.status),
+      coverageStatus: runCoverage(input.status),
       persistenceComplete: true,
       ...(errorCode === undefined ? {} : { safeErrorCode: errorCode }),
-      units: units.map((unit) => ({
-        ...unit,
-        coverageStatus: unit.coverageStatus === "complete" ? "partial" : unit.coverageStatus,
-      })),
+      // Each unit states its own coverage unchanged. A whole connection is
+      // `complete`, which registration turns into the unit outcome `success`
+      // that the Processor's eligibility rules read (ADR 0026).
+      units,
       // The statement periods are provider labels, not machine ranges; they
       // stay in the collector manifest rather than becoming terminal ranges.
       ranges: [],

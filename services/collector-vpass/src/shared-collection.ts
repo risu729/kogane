@@ -11,9 +11,13 @@
 //   web-meisai-top.json     the statement-month discovery response
 //   months/<yyyymm>/<top|answer>-NNN.json   each statement page
 //   manifest.json           the run summary, in its central shape
+//   card-identity-binding.json   the card's durable binding token, when the
+//                                card tuple passes its checks (ADR 0023, 0029)
 //
 // No raw envelope, cookie, auth blob or card identify key is written: the
-// sanitizer replaces them and refuses output that still carries one.
+// sanitizer replaces them and refuses output that still carries one. The card
+// binding is derived from the raw selection and discovery responses before
+// they are sanitized (`./card-binding`); only its token is stored.
 //
 // One Vpass session visits several cards under one run timestamp. Each card is
 // its own run (`<runId>-card-NNN`) and all of them carry the session timestamp
@@ -35,10 +39,22 @@ import {
   type R2BucketLike,
   type TerminalRange,
   type TerminalTransformation,
+  type TerminalUnit,
 } from "../../../packages/collection/src/index";
+import {
+  deriveVpassCardBinding,
+  VPASS_BINDING_ARTIFACT_KEY,
+  VPASS_BINDING_CONTRACT,
+  VPASS_BINDING_TRANSFORMER_ID,
+  VPASS_BINDING_TRANSFORMER_VERSION,
+  type VpassBindingUnavailable,
+  type VpassCardBinding,
+} from "./card-binding";
+import { providerCount } from "./provider-count";
 
-const SOURCE = "vpass";
-const PRODUCER = "vpass-json";
+export const SOURCE = "vpass";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-vpass";
 /** The schema version central storage records for a card-scoped Vpass run. */
 const VPASS_CARD_SCHEMA_VERSION = "vpass-worker-card-v1";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
@@ -90,6 +106,10 @@ export interface VpassFailedRun {
 export interface SharedRunOutcome {
   readonly result: PersistRunResult;
   readonly artifactCount: number;
+  /** A card run only: `bound`, or the closed code of why no binding was stored. */
+  readonly binding?: "bound" | VpassBindingUnavailable;
+  /** A card run only: the card unit's coverage code (ADR 0023 option 8). */
+  readonly coverage?: VpassCardCoverage;
 }
 
 /**
@@ -119,11 +139,12 @@ function pageArtifactKey(month: string, page: VpassPageCapture): string {
   return `months/${month}/${page.kind}-${String(page.index).padStart(3, "0")}.json`;
 }
 
+/** One planned artifact; the run's own manifest passes no unit (ADR 0021). */
 async function artifactOf(
   artifactKey: string,
   bytes: Uint8Array,
   role: string,
-  unitKey: string,
+  unitKey?: string,
 ): Promise<PersistArtifact> {
   return {
     artifactKey,
@@ -131,7 +152,7 @@ async function artifactOf(
     byteSize: bytes.byteLength,
     mediaType: "application/json",
     role,
-    unitKey,
+    ...(unitKey === undefined ? {} : { unitKey }),
     body: { kind: "bytes", bytes },
   };
 }
@@ -149,14 +170,104 @@ function redaction(artifactKey: string): TerminalTransformation {
   };
 }
 
+/**
+ * Whether a month was captured whole, as a closed code (ADR 0023 option 8,
+ * ADR 0026). `complete` only when the rows the stored pages carry equal the
+ * row count the provider stated for the month; anything else is a reason the
+ * card unit is `partial`, never a count to adjust.
+ */
+export type VpassMonthCoverage = "complete" | "stated_total_unverified" | "stated_total_mismatch";
+/** The card unit's coverage: `complete`, or the first reason it is not. */
+export type VpassCardCoverage = VpassMonthCoverage | "statement_months_absent";
+
+interface MonthCheck {
+  readonly capturedRows: number;
+  readonly statedTotal: number | null;
+  readonly coverage: VpassMonthCoverage;
+}
+
+function objectField(value: unknown, key: string): unknown {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+
+/**
+ * Compare a month's captured rows with the provider's stated total, read from
+ * the raw pages the walk kept. A finalized statement page
+ * (`WebMeisaiTopDisplayServiceBean`) states `webMeisaiTopK3Vo.allCnt`; a
+ * customized page (`CustomizedMeisaiAnsDisplayServiceBean`) states `total`.
+ * The rows are the pages' `meisaiList` entries, as the walk counts them. The
+ * stated total is the last one the pages carry, which is the value the walk
+ * itself stopped on; a page that carries the field unparsable leaves the
+ * month unverified. Nothing else is inferred from the count.
+ */
+function monthCheck(capture: VpassMonthCapture): MonthCheck {
+  let capturedRows = 0;
+  let statedTotal: number | null = null;
+  let readable = true;
+  for (const page of capture.pages) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(page.rawJson);
+    } catch {
+      readable = false;
+      continue;
+    }
+    const content = objectField(objectField(parsed, "body"), "content");
+    const finalized = objectField(content, "WebMeisaiTopDisplayServiceBean");
+    const customized = objectField(content, "CustomizedMeisaiAnsDisplayServiceBean");
+    const bean = finalized ?? customized;
+    const rows = objectField(bean, "meisaiList");
+    if (Array.isArray(rows)) capturedRows += rows.length;
+    const stated =
+      finalized !== undefined
+        ? objectField(objectField(finalized, "webMeisaiTopK3Vo"), "allCnt")
+        : objectField(customized, "total");
+    if (stated !== undefined && stated !== null) {
+      statedTotal = providerCount(stated);
+      if (statedTotal === null) readable = false;
+    }
+  }
+  const coverage: VpassMonthCoverage =
+    !readable || statedTotal === null
+      ? "stated_total_unverified"
+      : capturedRows === statedTotal
+        ? "complete"
+        : "stated_total_mismatch";
+  return { capturedRows, statedTotal: readable ? statedTotal : null, coverage };
+}
+
+/** The card unit's coverage: `complete` only when every walked month is. */
+function cardCoverage(checks: readonly MonthCheck[]): VpassCardCoverage {
+  if (checks.length === 0) return "statement_months_absent";
+  return (
+    checks.find((check) => check.coverage === "stated_total_mismatch")?.coverage ??
+    checks.find((check) => check.coverage === "stated_total_unverified")?.coverage ??
+    "complete"
+  );
+}
+
 /** The run summary in the shape central storage records it. */
-function manifestBytes(run: VpassCardRun, months: readonly string[]): Uint8Array {
+function manifestBytes(
+  run: VpassCardRun,
+  months: readonly string[],
+  checks: readonly MonthCheck[],
+  coverage: VpassCardCoverage,
+): Uint8Array {
   const summary: Record<string, JsonValue> = {};
   let pageCount = 0;
   let transactionCount = 0;
-  for (const month of months) {
+  for (const [index, month] of months.entries()) {
     const capture = run.months[month]!;
-    summary[month] = { pages: capture.pages.length, transactions: capture.transactionCount };
+    const check = checks[index]!;
+    summary[month] = {
+      pages: capture.pages.length,
+      transactions: capture.transactionCount,
+      capturedRows: check.capturedRows,
+      statedTotal: check.statedTotal,
+      coverage: check.coverage,
+    };
     pageCount += capture.pages.length;
     transactionCount += capture.transactionCount;
   }
@@ -168,6 +279,7 @@ function manifestBytes(run: VpassCardRun, months: readonly string[]): Uint8Array
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     status: "success",
+    coverage,
     monthCount: months.length,
     pageCount,
     transactionCount,
@@ -175,8 +287,52 @@ function manifestBytes(run: VpassCardRun, months: readonly string[]): Uint8Array
   });
 }
 
-/** Build the persist plan for one finished card. Pure apart from hashing. */
+/**
+ * The binding artifact (ADR 0023): the token and the derivation that made it,
+ * never the tuple (ADR 0029 permits storing the tuple; that is a later change).
+ * The format is the importer's `vpass-card-identity-binding-json` version 1
+ * without the fields that named the importer's private source objects
+ * (snapshot and manifest digests, the storage-key fingerprint) and without a
+ * key version, since the v2 derivation has no key: `schemaVersion` names it.
+ */
+function bindingBytes(run: VpassCardRun, token: string): Uint8Array {
+  return encodeCanonical({
+    schemaVersion: VPASS_BINDING_CONTRACT,
+    accountIdentity: token,
+    sourceSession: run.sessionRunId,
+    sourceNamespace: VPASS_CARD_SCHEMA_VERSION,
+    sourceCardOrdinal: run.cardLabel,
+    checks: { selectedCardDescriptor: true, selectionDiscoveryCardCode: true },
+  });
+}
+
+/** The binding was read out of the selection and discovery responses, which
+ * are stored only redacted, so the step names no input artifact and the
+ * Processor records `source_bytes_not_available` (ADR 0021). */
+function bindingExtraction(): TerminalTransformation {
+  return {
+    transformationId: `extracted:${VPASS_BINDING_ARTIFACT_KEY}`,
+    stepKind: "extracted",
+    transformerId: VPASS_BINDING_TRANSFORMER_ID,
+    transformerVersion: VPASS_BINDING_TRANSFORMER_VERSION,
+    inputArtifactKeys: [],
+    outputArtifactKey: VPASS_BINDING_ARTIFACT_KEY,
+  };
+}
+
+/**
+ * Build the persist plan for one finished card. Pure apart from hashing.
+ *
+ * With a selection and discovery that carry a consistent card tuple, the run
+ * also holds the card's durable binding: a second `card` unit keyed by the
+ * token with exactly one `card-identity-binding.json` (ADR 0023, ADR 0029).
+ * Otherwise the run is the same card run with no binding.
+ */
 export async function vpassCardRunPlan(run: VpassCardRun): Promise<PersistRunPlan> {
+  return planFor(run, await deriveVpassCardBinding(run));
+}
+
+async function planFor(run: VpassCardRun, binding: VpassCardBinding): Promise<PersistRunPlan> {
   const months = Object.keys(run.months).sort();
   for (const month of months) {
     if (!MONTH.test(month)) throw new Error("vpass_month_invalid");
@@ -208,7 +364,11 @@ export async function vpassCardRunPlan(run: VpassCardRun): Promise<PersistRunPla
         await artifactOf(
           pageArtifactKey(month, page),
           sanitizedEnvelopeBytes(page.rawJson, "statement_page_json_invalid"),
-          "provider_response",
+          // A statement page is the sanitizer's output, like the three
+          // envelopes above: CORE seals a provider role only with `decrypted`
+          // or `extracted` steps, so a `provider_response` carrying this
+          // `redacted` step could never be sealed (ADR 0021).
+          "sanitized_provider_capture",
           unitKey,
         ),
       );
@@ -217,8 +377,32 @@ export async function vpassCardRunPlan(run: VpassCardRun): Promise<PersistRunPla
   const transformations: TerminalTransformation[] = artifacts.map((artifact) =>
     redaction(artifact.artifactKey),
   );
-  const summary = manifestBytes(run, months);
-  artifacts.push(await artifactOf("manifest.json", summary, "collector_manifest", unitKey));
+  const checks = months.map((month) => monthCheck(run.months[month]!));
+  const coverage = cardCoverage(checks);
+  const summary = manifestBytes(run, months, checks, coverage);
+  // The card run's manifest belongs to the run and names no unit (ADR 0021).
+  const cardArtifactCount = artifacts.length;
+  artifacts.push(await artifactOf("manifest.json", summary, "collector_manifest"));
+  // The binding lives in its own unit, keyed by the token, so the trusted
+  // binding view reads the token as it read the importer's binding unit.
+  const bindingUnits: TerminalUnit[] = [];
+  if (binding.status === "derived") {
+    artifacts.push(
+      await artifactOf(
+        VPASS_BINDING_ARTIFACT_KEY,
+        bindingBytes(run, binding.token),
+        "collector_derived",
+        binding.token,
+      ),
+    );
+    transformations.push(bindingExtraction());
+    bindingUnits.push({
+      unitKey: binding.token,
+      unitKind: "card",
+      artifactCount: 1,
+      coverageStatus: "complete",
+    });
+  }
 
   // A card exposes a rolling window of statement months, so even a fully
   // successful run is not a claim about the card's whole history.
@@ -261,9 +445,20 @@ export async function vpassCardRunPlan(run: VpassCardRun): Promise<PersistRunPla
         {
           unitKey,
           unitKind: "card",
-          artifactCount: artifacts.length,
-          coverageStatus: "partial",
+          artifactCount: cardArtifactCount,
+          // The card unit is `complete` only when every statement month the
+          // provider listed was walked and each month's captured rows equal
+          // the row count the provider stated for it (ADR 0023 option 8,
+          // ADR 0026). Otherwise it is `partial`, registration records a
+          // `partial` unit report and a `partial` fetch run, and neither
+          // identity nor the trusted binding reads the run, so nothing
+          // binds; the reason is the closed `coverage` code in
+          // `manifest.json` and in the persist diagnostic. The rolling
+          // window of months stays on the run's `coverageStatus` and on the
+          // `statement-months` range.
+          coverageStatus: coverage === "complete" ? "complete" : "partial",
         },
+        ...bindingUnits,
       ],
       ranges,
       reports: [
@@ -343,7 +538,14 @@ export async function persistCardRun(
   bucket: R2BucketLike,
   run: VpassCardRun,
 ): Promise<SharedRunOutcome> {
-  return persist(bucket, await vpassCardRunPlan(run));
+  const binding = await deriveVpassCardBinding(run);
+  const outcome = await persist(bucket, await planFor(run, binding));
+  const months = Object.keys(run.months).sort();
+  return {
+    ...outcome,
+    binding: binding.status === "derived" ? "bound" : binding.code,
+    coverage: cardCoverage(months.map((month) => monthCheck(run.months[month]!))),
+  };
 }
 
 /** Persist the terminal of a card or session that collected nothing. */
@@ -372,6 +574,8 @@ export function sharedRunDiagnostic(
     unitKey,
     persistence: result.outcome,
     artifactCount: outcome.artifactCount,
+    ...(outcome.binding === undefined ? {} : { binding: outcome.binding }),
+    ...(outcome.coverage === undefined ? {} : { coverage: outcome.coverage }),
     ...(result.outcome === "incomplete"
       ? {
           reasonCode: result.reasonCode,

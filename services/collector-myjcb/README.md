@@ -139,7 +139,7 @@ collectorは、おまとめ設定追加・解除、初期表示変更、支払�
 
 ## stop condition
 
-次を検出したconnectionはretryせず`human-required`または`failed`としてmanifestへ記録する。
+次を検出したconnectionはretryせずその場で止める。最初のクレジット月より前で止まったconnectionは何も保存せず、`human-required`または`failed`としてmanifestへ記録する。月の取得、状態判定、明細の月、ledger、exportで止まったconnectionは、それより前の月を保存して`partial`になる。どちらもmanifestとterminal unitには閉じた停止code（`CONNECTION_STOP_CODES`）、止まった月の位置、保存した月の数だけを書く（`docs/sources/myjcb.md`の「connectionの停止と取得済みの月」、ADR 0005のamendment）。
 
 - passkey、生体/PIN、QR、OTP、秘密の合い言葉、CAPTCHA、本人確認
 - Access Denied、401、403、429、account lock/risk warning
@@ -148,6 +148,8 @@ collectorは、おまとめ設定追加・解除、初期表示変更、支払�
 - password login無効、規約同意、新規登録、端末登録
 - response size上限8 MiB、未知charset、seq範囲外、cookie domain/count/size異常
 - クレジット明細pageの`(確定分)` h1とledger headerの状態が矛盾する、または確定明細でないpageにexport linkがある（`credit-statement-state`、次節）
+- 確定明細pageが支払月を名乗らない、二つ以上名乗る、または過去月APIの`settlementYM`と違う月を名乗る（`credit-statement-period`、次節）
+- 前のpositionで保存したpageとredact後のbytesが同じ月のpageが、違う状態またはperiodになる（`credit-page-repeated`、停止code `credit_page_repeated`。ADR 0005のamendment (h)）
 - token/cookie/credentialを保存しそうな状態
 
 scheduled runは同じconnectionを自動再試行しない。次回の日次runは新規browser/loginで開始する。
@@ -158,11 +160,11 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 
 デビットはmenuに実在する`seq=0..14`だけを列挙する。parse不能時は停止し、0〜14をblind走査しない。
 
-クレジット初期menuでは観測された月だけを取得し、`detailPastJson`の9〜17候補は`detailAvailableFlag=true`だけを追加する。例ではolder 9候補中10/13だけがavailableだったため、全offset総当たりをしない。API failureやhidden `generalJsonShikibetuId`欠落時は停止する。JSON-RPCは`method=execute`、`params=[{generalJsonShikibetuId}]`、official JSと同じ`0301006`＋2桁counter形のIDを使う。
+クレジット初期menuは各linkの前にある最後の`h2`か`h3`見出しで分ける（ADR 0005のamendment (j)）。`h2`「最新のご利用明細」と「過去の明細」の下が月、`h3`「ボーナス#回払い・ショッピングスキップ払い」の下が支払予定pageで、それ以外の見出し（または見出しの前のlink）は`credit_menu_group_unrecognized`で停止する。支払予定pageは月の後に取得して保存し、manifestの`schedulePages`に記録する。h1が観測済みの「ショッピングスキップ払いご利用明細(未確定分)」ちょうど1つのpageだけを`credit-skip-payment-NN.html`として保存し、登録時にdataset `credit-schedule`が付いて`myjcb-skip-payment-schedule`が読む（ADR 0005のamendment (e)）。それ以外（ボーナス払いpageなど）は`credit-schedule-NN.html`として読まずに保存する。月のcoverageには入らない（ADR 0005のamendment (c)）。月のpositionのpageでも、h1がその見出しちょうど1つなら同じく`credit-skip-payment-NN.html`として保存し、`schedulePages`に記録し、月には数えない（ADR 0005のamendment (h)）。h1が「ボーナス#回払いご利用代金明細(未確定分)」ちょうど1つのpageも、どのpositionでも`credit-schedule-NN.html`として保存して`schedulePages`に記録し、月には数えない（amendment (j)）。観測された月だけを取得し、`detailPastJson`の9〜17候補は`detailAvailableFlag=true`だけを追加する。例ではolder 9候補中10/13だけがavailableだったため、全offset総当たりをしない。API failureやhidden `generalJsonShikibetuId`欠落時は停止する。JSON-RPCは`method=execute`、`params=[{generalJsonShikibetuId}]`、official JSと同じ`0301006`＋2桁counter形のIDを使う。
 
-`detailMonth=0`はmutable `unconfirmed` snapshotで、exportなしの`.detail-list-01`をHTML＋parsed JSONとして保存する。確定月も同ledger componentを持ち、CSV/OFXと突合できる。export linkがその月のHTMLに実在する場合だけCSV/PDF/OFXを取得し、notice PDFは除外する。CSVはmetadata行の後に現れるexact 12-column headerを探し、CP932 bytesをそのまま保存する。
+`detailMonth=0`はmutable `unconfirmed` snapshotで、exportなしの`.detail-list-01`をHTML＋parsed JSONとして保存する。確定月も同ledger componentを持つ。export link（確定月は`detailMonth`を名乗らない相対hrefで持つ）はdetail page自身のURLに対して解決し、そのpageのCSV/PDF/OFX linkをその月のexportとして数える（別の`detailMonth`を名乗るlinkは数えない）。notice PDFは除外する。Workerはexportを取得せず、manifestの`exportOffers`に記録するだけである（共通bucketがexport datasetを拒否するため。ADR 0005のamendment (b)）。`collectCredit`の`exports: "fetch"`でだけ取得し、CSVはmetadata行の後に現れるexact 12-column headerを探してCP932 bytesをそのまま保存する。ledger headerが`ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`（ショッピングスキップ払いの支払予定pageで観測。live DOMは3 cell）で行があるpositionは、pageだけを`unknown`として保存し、行を読まずに次の月へ進む（`scheduled_payments_page`）。
 
-月の明細状態はexport linkの有無ではなく、page自身から決める（`src/parsers.ts`の`creditStatementState`）。調査したconnectionにはどの月にもexport linkがないため、以前の「`detailMonth<=1`でexportなしなら`unconfirmed`」という規則は、position 1の締め済み明細を`unconfirmed`と記録していた。
+月の明細状態はexport linkの有無ではなく、page自身から決める（`src/parsers.ts`の`creditStatementState`）。調査したconnectionではexport linkが一度も見つからなかった（相対hrefを解決できないbugで、2026-09-27に修正）ため、以前の「`detailMonth<=1`でexportなしなら`unconfirmed`」という規則は、position 1の締め済み明細を`unconfirmed`と記録していた。
 
 - `detailMonth=0`: 常に`unconfirmed`。h1があれば停止する
 - `<h1>カードご利用代金明細(確定分)</h1>`がちょうど一つあり、ledger headerの金額labelが`今回のお支払い金額`またはなし: `confirmed`
@@ -173,7 +175,15 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 
 position 2以降を停止にしないのは、productionのposition 7と8がh1のない行0件のledgerを持つためである（`docs/sources/myjcb.md`の「明細状態の判定」）。停止時と`unknown`時のlog（`myjcb-credit-statement-state`／`myjcb-credit-statement-unstated`）にはh1の個数、ledger数、行数、label codeだけを出す。
 
-行を持つledgerは、状態に対応するheader一式（`ご利用日`、`ご利用先など`、`支払区分`、`今回のお支払い金額`または`ご利用金額`）をheadに表示していなければならない（`credit-ledger-headers`）。これにより、ledger JSONの`headers`はpageで確認した事実になる。確定ledgerはexpandedの`ご利用金額`を、未確定ledgerは`今回のお支払い金額`を読む。
+月のperiodは明細自身の名前にする（`src/parsers.ts`の`creditStatementPeriod`）。ledger parserはperiodを行のexternal idに入れるので、明細がposition 1から2へ移ってもperiodが変わらなければ行のidも変わらない。
+
+- 過去月APIがlabelする月: `settlementYM`をそのまま記録する。確定pageが月を名乗るなら同じ月でなければ停止する
+- それ以外の確定page: `<h2>YYYY年M月お支払い分のカードご利用明細</h2>`、または支払日つきの`<h2>YYYY年M月D日(曜)お支払い分のカードご利用明細</h2>`（ADR 0005 amendment (g)）が名乗る月を`YYYY-MM`で記録する。名乗らない、または二つ以上なら`credit-statement-period`で停止する
+- 未確定と`unknown`のpage: `detailMonth-N`（月を名乗らないため）
+
+停止log（`myjcb-credit-statement-period`）には`detailMonth`、名乗った月の個数、API labelの有無だけを出す。詳細は`docs/sources/myjcb.md`の「明細の月」にある。
+
+行を持つledgerは、状態に対応するheader一式（`ご利用日`、`ご利用先など`、`支払区分`、`今回のお支払い金額`または`ご利用金額`）をheadに表示していなければならない（`credit-ledger-headers`）。labelはheadの文字列から空白をすべて除いて比べる。確定月のheadは`今回の<br class="pc-none">お支払い金額`と`br`で分かれているためである（ADR 0005のamendment (f)）。これにより、ledger JSONの`headers`はpageで確認した事実になる。確定ledgerはexpandedの`ご利用金額`を、未確定ledgerは`今回のお支払い金額`を読む。`(確定分)`の見出しの下に`ご利用金額`のheaderを示すpageは、全行が1回払いで行の合計がpageの「お支払い金額合計」と一致する場合だけ`confirmed`とし、ledgerにはpageが示すheader一式（`ご利用金額`）を保存する。一致しなければ従来どおり`credit-statement-state`で停止し、logには閉じた理由code（`usageHeader`）だけを出す（ADR 0005のamendment (d)、`docs/sources/myjcb.md`）。この形のpageは観測されていない（amendment (f)）。
 
 既存captureのraw evidenceとmanifestは書き換えない。position-1 pageの確定totalは`myjcb-credit-statement-total@1.1.0`がpageから読み直す。ledger JSONにはpageの証拠がないため、既存のposition-1 ledger行は`unconfirmed`のまま残る。これらの行は修正後の最初の成功runでcurrentでなくなる。詳細は`docs/sources/myjcb.md`の「明細状態の判定」と`docs/observations.md`のrelease noteにある。
 
@@ -220,7 +230,7 @@ mise run //services/collector-myjcb:typecheck
 mise run //services/collector-myjcb:dry-run
 ```
 
-live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第一connectionの実credential testまで行った。成功runは1 connection、20 artifact、failure 0で、内訳はcredit detail 11、parsed ledger 6、menu 1、過去月JSON 1、discovery 1だった。このrunでは公式CSV/PDF/OFX linkが提示されず、export artifactは0だった。従ってこのconnectionではHTML ledgerが実データsourceとして必要であり、別IDでexportが存在する場合だけ確定月をCSV中心へ最適化する。manifestとsource-preserving artifactはprivate R2へ保存し、実値やsecretはPRへ含めない。
+live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第一connectionの実credential testまで行った。成功runは1 connection、20 artifact、failure 0で、内訳はcredit detail 11、parsed ledger 6、menu 1、過去月JSON 1、discovery 1だった。このrunでは公式CSV/PDF/OFX linkが見つからず、export artifactは0だった（2026-09-27の調査で、確定月はlinkを相対hrefで持ち、collectorがそれを解決できていなかったと分かった）。従ってこのconnectionではHTML ledgerが実データsourceとして必要であり、別IDでexportが存在する場合だけ確定月をCSV中心へ最適化する。manifestとsource-preserving artifactはprivate R2へ保存し、実値やsecretはPRへ含めない。
 
 作成済みpersistent resourceはWorker `kogane-myjcb-collector-poc`、Cron `0 21 * * *`、admin/connection secret群である。保存先は共有DATA bucket `kogane-raw-evidence`で、旧private R2 bucket同名は2026-09-13に中央DATAへコピー・検証した後に削除した。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時はWorkerとsecretだけを削除し、他のcollectorとProcessorも使う共有DATA bucketは削除しない。
 

@@ -42,8 +42,29 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  * The version of *this* derivation. It is part of the registration identity
  * (03 §4): when the mapping below changes what a terminal means in CORE, the
  * same run registers again as a new revision instead of reusing the old one.
+ *
+ * - `terminal-registration-v1`: no artifact dataset but St George's snapshot.
+ * - `terminal-registration-v2` (ADR 0022): the dataset table
+ *   `ARTIFACT_DATASETS`.
+ *
+ * A terminal already registered under an earlier version whose descriptors
+ * the current version does not change is not registered again: the new
+ * version's row is linked to the run it already is (`carryOver` in
+ * `register-terminal.ts`, ADR 0022). Registering it again would parse the same
+ * capture twice, and a Mizuho capture's transactions would be listed twice.
  */
-export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v1";
+export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v2";
+
+/** Every version this code can derive, oldest first; each derivation is kept reproducible. */
+export const REGISTRATION_CONTRACT_VERSIONS = [
+  "terminal-registration-v1",
+  REGISTRATION_CONTRACT_VERSION,
+] as const;
+export type RegistrationContractVersion = (typeof REGISTRATION_CONTRACT_VERSIONS)[number];
+
+export function isRegistrationContractVersion(value: string): value is RegistrationContractVersion {
+  return (REGISTRATION_CONTRACT_VERSIONS as readonly string[]).includes(value);
+}
 
 /** The external id namespace every shared-R2 acquisition session is recorded under. */
 export const EXTERNAL_ID_NAMESPACE = "shared-r2";
@@ -83,6 +104,348 @@ export function coreSourceId(collectorSource: string): string | null {
   return Object.hasOwn(COLLECTOR_SOURCE_IDS, collectorSource)
     ? COLLECTOR_SOURCE_IDS[collectorSource]!
     : null;
+}
+
+/**
+ * One closed rule of `ARTIFACT_DATASETS`: an artifact whose key, role and
+ * declared media type all match is the named parser dataset.
+ */
+export interface ArtifactDatasetRule {
+  /** The exact artifact key, or a pattern the whole key must match. */
+  readonly key: string | RegExp;
+  readonly role: ArtifactRole;
+  /** The media types the collector declares for these bytes (`terminal-v1` carries no parameters). */
+  readonly mediaTypes: readonly string[];
+  /** The dataset, or the dataset built from the key pattern's captures. */
+  readonly dataset: string | ((match: RegExpExecArray) => string);
+}
+
+const JSON_TYPE = ["application/json"] as const;
+const HTML_TYPE = ["text/html"] as const;
+/**
+ * The Sony CSV exports carry the provider's own `content-type` header, cut to
+ * its base type; these are the base types `sony-bank-history-csv` decodes.
+ */
+const SONY_CSV_TYPES = [
+  "text/csv",
+  "application/csv",
+  "application/x-csv",
+  "text/plain",
+  "application/octet-stream",
+] as const;
+
+/** A dataset named by the artifact key itself: `<dataset>.json`. */
+function jsonByName(
+  datasets: readonly string[],
+  role: ArtifactRole,
+  prefix = "",
+): ArtifactDatasetRule[] {
+  return datasets.map((dataset) => ({
+    key: `${prefix}${dataset}.json`,
+    role,
+    mediaTypes: JSON_TYPE,
+    dataset,
+  }));
+}
+
+/**
+ * Terminal `source` → the artifacts that carry a parser dataset (ADR 0022).
+ *
+ * `terminal-v1` has no dataset field, and every parser except Mizuho's
+ * selects its artifacts by dataset, so without this table a registered
+ * artifact has `dataset = NULL` and nothing parses it. The table is closed and
+ * derived from two sides only:
+ *
+ *  * what each collector writes: the artifact key, role and media type of
+ *    every persist path under `services/collector-*` (`docs/collection.md`
+ *    lists them per collector). These are the artifacts the retired importer
+ *    registered under the same datasets;
+ *  * what each parser accepts (`packages/parsers/src/parsers/*.ts`).
+ *
+ * Only datasets a registered parser reads are listed. Evidence that no parser
+ * reads (a manifest, a summary, the raw page beside its normalized rows)
+ * stays NULL and out of every parse, as before. An artifact that matches no
+ * rule, or whose role or media type is not the one its collector declares,
+ * also stays NULL: it is never guessed into a dataset.
+ * `scripts/artifact-datasets.test.ts` checks both directions: every mapped
+ * dataset is accepted by a registered parser, and every dataset a parser
+ * requires from a shared-R2 source is either mapped or named there as
+ * unreachable, with the reason.
+ *
+ * Mizuho is absent on purpose: its parsers accept `dataset = NULL` and select
+ * by key and unit, so its registration does not change. `kogane-synthetic`
+ * and `v-point-pay` write nothing a parser reads. `vpass` is known but
+ * withheld (`WITHHELD_ARTIFACT_DATASETS`).
+ */
+export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  "mobile-suica": [
+    // The normalized rows only. The CP932 page and the summary stay evidence:
+    // registering the page as well would produce every row twice.
+    {
+      key: "sf-history.json",
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "sf-history",
+    },
+  ],
+  "moneyforward-me": [
+    {
+      key: "accounts.html",
+      role: "provider_response",
+      mediaTypes: HTML_TYPE,
+      dataset: "accounts-index",
+    },
+    {
+      key: /^account-detail-\d{2}\.html$/u,
+      role: "provider_response",
+      mediaTypes: HTML_TYPE,
+      dataset: "account-detail",
+    },
+    {
+      key: /^account-\d{2}-month-\d{4}-\d{2}\.html$/u,
+      role: "provider_response",
+      mediaTypes: HTML_TYPE,
+      dataset: "monthly-transactions",
+    },
+  ],
+  // MyJCB keys are `<connectionId>/<filename>`: the unit is the connection.
+  // `credit-menu.html` is not listed: its parser accepts only the media type
+  // `text/html; charset=utf-8`, which no terminal can declare.
+  myjcb: [
+    {
+      key: /^[^/]+\/discovery\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "discovery",
+    },
+    {
+      key: /^[^/]+\/credit-past-months\.json$/u,
+      role: "provider_response",
+      mediaTypes: JSON_TYPE,
+      dataset: "credit-past-months",
+    },
+    {
+      key: /^[^/]+\/credit-detail-\d{2}\.html$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: "credit-detail",
+    },
+    {
+      key: /^[^/]+\/credit-ledger-\d{2}\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "credit-ledger",
+    },
+    // Only the schedule page whose h1 is the observed ショッピングスキップ払い
+    // heading is stored under this name (ADR 0005 amendment e). Every other
+    // schedule page stays `credit-schedule-NN.html`, catalogued with no
+    // dataset and read by nothing.
+    {
+      key: /^[^/]+\/credit-skip-payment-\d{2}\.html$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: "credit-schedule",
+    },
+  ],
+  "prestia-globalpass": [
+    // A month's page 1 is `activity-YYYY-MM.html`; the pages the collector
+    // walks after it are `activity-YYYY-MM-pN.html` (ADR 0026's amendment of
+    // 2026-10-04).
+    {
+      key: /^activity-\d{4}-\d{2}(?:-p[2-9])?\.html$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: "globalpass-activity",
+    },
+  ],
+  "sbi-securities": jsonByName(
+    [
+      "domestic-cash-positions",
+      "account-assets-current",
+      "yen-detail-history",
+      "domestic-trade-records",
+      "foreign-cash-positions",
+      "foreign-cash-balances",
+      "foreign-trade-records",
+    ],
+    "collector_derived",
+  ),
+  // `exchange-rate` is read by `sbi-shinsei-exchange-rate` (ADR 0020) and
+  // `balance-summary-and-stage` by `sbi-shinsei-balance-summary-and-stage`
+  // (ADR 0031).
+  "sbi-shinsei": jsonByName(
+    [
+      "top-accounts-balance-and-activity",
+      "yen-deposit-account",
+      "exchange-rate",
+      "balance-summary-and-stage",
+    ],
+    "sanitized_provider_capture",
+    "raw-",
+  ),
+  "sbi-vc-trade": [
+    ...jsonByName(
+      ["cash-balances", "account-margin", "position-summary", "executions-recent-page-0001"],
+      "collector_derived",
+    ),
+    {
+      key: /^((?:executions|cashflows)-historical-page-\d{4})\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: (match) => match[1]!,
+    },
+  ],
+  "smbc-direct": [
+    {
+      key: "balance.normalized.json",
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "balance-normalized",
+    },
+    {
+      key: /^transactions\/\d{8}-\d{8}\.normalized\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "transactions-normalized",
+    },
+  ],
+  "sony-bank": [
+    {
+      key: "gross-balance.json",
+      role: "provider_response",
+      mediaTypes: JSON_TYPE,
+      dataset: "gross-balance",
+    },
+    {
+      key: /^((?:yen-history|foreign-history-[a-z]{3})-page-\d{4})\.json$/u,
+      role: "provider_response",
+      mediaTypes: JSON_TYPE,
+      dataset: (match) => match[1]!,
+    },
+    {
+      key: /^(yen-history|foreign-history-[a-z]{3})\.csv$/u,
+      role: "provider_export",
+      mediaTypes: SONY_CSV_TYPES,
+      dataset: (match) => `${match[1]!}-csv`,
+    },
+    {
+      // The file name carries `YYYY-MM`; the dataset carries `YYYYMM`, as the
+      // collector manifest entry the media-type extractor matches does.
+      key: /^wallet-history-(\d{4})-(\d{2})\.html$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: (match) => `wallet-history-${match[1]!}${match[2]!}`,
+    },
+  ],
+  // This source's minimized capture contract names exactly one dataset.
+  "st-george": [
+    {
+      key: "account-snapshot.json",
+      role: "sanitized_provider_capture",
+      mediaTypes: JSON_TYPE,
+      dataset: "account-snapshot",
+    },
+  ],
+  "v-point": [
+    ...jsonByName(["balance-info", "smfg-point"], "collector_derived"),
+    {
+      key: /^(history-page-\d{4})\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: (match) => match[1]!,
+    },
+  ],
+  "v-point-pay-email": [
+    {
+      key: "normalized-event.json",
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "notification-event",
+    },
+  ],
+  // `vpass` is withheld: see `WITHHELD_ARTIFACT_DATASETS`.
+};
+
+/**
+ * Rules that are known and deliberately not applied: the artifact stays at
+ * `dataset = NULL`, so no parser runs on it, until the stated condition holds.
+ * Moving a source from here into `ARTIFACT_DATASETS` is a decision, recorded
+ * in an ADR; `scripts/artifact-datasets.test.ts` pins this list.
+ *
+ * `vpass` (ADR 0022, ADR 0023): the collector derives the trusted card binding
+ * (ADR 0023's amendment), but only once the owner sets its binding key, which
+ * must be the retired importer's. Until then a parsed collector capture would
+ * become the current statement snapshot of its card-month and retire the
+ * importer-era Vpass purchases with nothing to replace them. Unparsed, it is
+ * never eligible as a snapshot, so the importer-era snapshots stay current.
+ * The rule becomes live in a later change, after the binding code is
+ * deployed, the key is set and the collector's tokens are shown to be the
+ * importer's (docs/identity-operations.md).
+ */
+export const WITHHELD_ARTIFACT_DATASETS: Readonly<
+  Record<string, { readonly until: string; readonly rules: readonly ArtifactDatasetRule[] }>
+> = {
+  vpass: {
+    until: "the collector's binding key is set and its tokens match the importer's (ADR 0023)",
+    rules: [
+      {
+        // The collector writes its pages as sanitized captures (ADR 0021).
+        key: /^months\/\d{6}\/(?:top|answer)-\d{3}\.json$/u,
+        role: "sanitized_provider_capture",
+        mediaTypes: JSON_TYPE,
+        dataset: "statement-page",
+      },
+    ],
+  },
+};
+
+/**
+ * The parser dataset of one terminal artifact, or null when the closed table
+ * names none. Null is not a default standing in for a guess: it is what every
+ * shared-R2 artifact carried before ADR 0022, and only Mizuho's parsers read
+ * an artifact without a dataset.
+ */
+export function artifactDataset(
+  collectorSource: string,
+  artifact: Pick<TerminalArtifact, "artifactKey" | "role" | "mediaType">,
+  contractVersion: string = REGISTRATION_CONTRACT_VERSION,
+): string | null {
+  if (!isRegistrationContractVersion(contractVersion)) fail("registration_contract_unknown");
+  const table = DATASETS_BY_VERSION[contractVersion];
+  if (!Object.hasOwn(table, collectorSource)) return null;
+  return datasetByRules(table[collectorSource]!, artifact);
+}
+
+/**
+ * The dataset table of each registration contract version. `v1` is kept so
+ * that what a registration under it meant stays reproducible: it named one
+ * dataset, St George's snapshot, and left every other artifact without one.
+ */
+const DATASETS_BY_VERSION: Readonly<
+  Record<RegistrationContractVersion, Readonly<Record<string, readonly ArtifactDatasetRule[]>>>
+> = {
+  "terminal-registration-v1": { "st-george": ARTIFACT_DATASETS["st-george"]! },
+  "terminal-registration-v2": ARTIFACT_DATASETS,
+};
+
+/** The dataset the first matching rule names, or null. */
+export function datasetByRules(
+  rules: readonly ArtifactDatasetRule[],
+  artifact: Pick<TerminalArtifact, "artifactKey" | "role" | "mediaType">,
+): string | null {
+  for (const rule of rules) {
+    if (rule.role !== artifact.role || !rule.mediaTypes.includes(artifact.mediaType)) continue;
+    if (typeof rule.key === "string") {
+      if (rule.key === artifact.artifactKey && typeof rule.dataset === "string") {
+        return rule.dataset;
+      }
+      continue;
+    }
+    const match = rule.key.exec(artifact.artifactKey);
+    if (match === null) continue;
+    return typeof rule.dataset === "string" ? rule.dataset : rule.dataset(match);
+  }
+  return null;
 }
 
 export class TerminalRegistrationError extends Error {
@@ -142,7 +505,10 @@ export function instantMs(value: string): number {
   return parsed;
 }
 
-export function createRunRequest(manifest: TerminalManifest): CreateRunRequest {
+export function createRunRequest(
+  manifest: TerminalManifest,
+  contractVersion: string = REGISTRATION_CONTRACT_VERSION,
+): CreateRunRequest {
   const sourceId = coreSourceId(manifest.source);
   if (sourceId === null) fail("unknown_source");
   return {
@@ -157,7 +523,7 @@ export function createRunRequest(manifest: TerminalManifest): CreateRunRequest {
     // The contract version is part of the run key, so a changed derivation
     // registers a second run rather than reusing rows that meant something
     // else.
-    sourceRunKey: `${manifest.runId}:${REGISTRATION_CONTRACT_VERSION}`,
+    sourceRunKey: `${manifest.runId}:${contractVersion}`,
   };
 }
 
@@ -373,6 +739,45 @@ function fidelityAndLineage(
 }
 
 /**
+ * The Vpass card binding a collector derives (ADR 0023): the one
+ * `collector_derived` artifact the trusted binding view reads
+ * (`trusted_vpass_card_bindings`, migrations 0020, 0021 and 0055). The view
+ * requires this dataset and format, which `terminal-v1` cannot state, so the
+ * derivation names them for exactly this key, role and media type and for
+ * nothing else. It is not a parser dataset: no parser reads it, and the view
+ * checks the rest of the binding (the unit, the token shape, the run). So it
+ * is kept out of `ARTIFACT_DATASETS`, whose every entry is a dataset a
+ * registered parser accepts, and out of the Vpass withholding: the binding
+ * registers from the first collector run that carries one, while the
+ * statement pages stay unparsed. No terminal registered before carries this
+ * artifact, so no registered descriptor changes and the contract version
+ * stays (`scripts/artifact-datasets.test.ts`).
+ */
+export const VPASS_CARD_BINDING_DESCRIPTOR = {
+  source: "vpass",
+  artifactKey: "card-identity-binding.json",
+  role: "collector_derived",
+  mediaType: "application/json",
+  dataset: "card-identity-binding",
+  formatId: "vpass-card-identity-binding-json",
+  formatVersion: "1",
+} as const;
+
+function vpassCardBinding(
+  manifest: TerminalManifest,
+  artifact: TerminalArtifact,
+  role: ArtifactRole,
+): Pick<ArtifactRequest, "dataset" | "formatId" | "formatVersion"> {
+  const rule = VPASS_CARD_BINDING_DESCRIPTOR;
+  return manifest.source === rule.source &&
+    artifact.artifactKey === rule.artifactKey &&
+    role === rule.role &&
+    artifact.mediaType === rule.mediaType
+    ? { dataset: rule.dataset, formatId: rule.formatId, formatVersion: rule.formatVersion }
+    : {};
+}
+
+/**
  * One artifact descriptor.
  *
  * No origin block is recorded. The manifest states the object's key in the
@@ -386,6 +791,7 @@ export function artifactRequest(
   manifest: TerminalManifest,
   artifact: TerminalArtifact,
   unitIds: ReadonlyMap<string, number>,
+  contractVersion: string = REGISTRATION_CONTRACT_VERSION,
 ): ArtifactRequest {
   const role = artifactRole(artifact.role);
   const steps = transformSteps(manifest, artifact);
@@ -397,16 +803,13 @@ export function artifactRequest(
   const fetchUnitId =
     artifact.unitKey === undefined ? null : (unitIds.get(artifact.unitKey) ?? null);
   if (artifact.unitKey !== undefined && fetchUnitId === null) fail("artifact_unit_unknown");
+  // The closed per-source table (ADR 0022). An artifact it does not name
+  // keeps no dataset and so does not inherit financial eligibility.
+  const dataset = artifactDataset(manifest.source, artifact, contractVersion);
   return {
     artifactKey: artifact.artifactKey,
-    // This source's minimized capture contract names exactly one parser dataset.
-    // Other artifact names and roles do not inherit financial eligibility.
-    ...(manifest.source === "st-george" &&
-    artifact.artifactKey === "account-snapshot.json" &&
-    role === "sanitized_provider_capture" &&
-    artifact.mediaType === "application/json"
-      ? { dataset: "account-snapshot" }
-      : {}),
+    ...(dataset === null ? {} : { dataset }),
+    ...vpassCardBinding(manifest, artifact, role),
     artifactRole: role,
     payloadFidelity,
     containerKind: "single",

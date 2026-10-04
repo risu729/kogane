@@ -8,6 +8,7 @@ import type {
   CardOwnershipSide,
   CardOwnershipClaim,
 } from "../../../domain/src/card-ownership-review.ts";
+import { cardSettlementReadinessCtes } from "../../../read-model/src/card-settlement-readiness.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
 interface Candidate {
@@ -36,16 +37,21 @@ interface Claim {
   decision_revision_id: string;
 }
 
+/**
+ * The candidate `?1` with its source currentness, judged for that candidate
+ * alone through the keyed form of `card_settlement_readiness`
+ * (card-settlement-readiness.ts) rather than the whole view.
+ */
+export const CARD_OWNERSHIP_CANDIDATE_SQL = `WITH chosen AS (SELECT ?1 AS id), ${cardSettlementReadinessCtes()}
+SELECT c.id,c.facts_json,c.revision,c.status,r.statement_current,r.bank_current
+FROM chosen JOIN card_settlement_reviews c ON c.id=chosen.id JOIN readiness r ON r.id=c.id`;
+
 /** Operator review only: known mappings and recorded claims, never an inferred party. */
 export async function queryCardOwnership(
   sql: SqlExecutor,
   proposalId: string,
 ): Promise<CardOwnershipReview | null> {
-  const rows = await sql.all<Candidate>(
-    `SELECT c.id,c.facts_json,c.revision,c.status,r.statement_current,r.bank_current
-    FROM card_settlement_reviews c JOIN card_settlement_readiness r ON r.id=c.id WHERE c.id=?1`,
-    [proposalId],
-  );
+  const rows = await sql.all<Candidate>(CARD_OWNERSHIP_CANDIDATE_SQL, [proposalId]);
   const row = rows[0];
   if (!row) return null;
   const facts: unknown = JSON.parse(row.facts_json);

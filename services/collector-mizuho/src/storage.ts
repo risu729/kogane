@@ -8,6 +8,10 @@ import {
 import { sanitizeMizuhoPage } from "../../../packages/parsers/src/parsers/mizuho-html";
 import type { MizuhoArtifact } from "./client";
 
+/** The terminal's source (the collector id) and its producer, `collector-<collector id>` (ADR 0014). */
+export const MIZUHO_SOURCE = "mizuho-bank";
+export const MIZUHO_PRODUCER = "collector-mizuho-bank";
+
 export interface MizuhoRun {
   runId: string;
   startedAt: string;
@@ -69,8 +73,8 @@ export async function mizuhoRunPlan(input: MizuhoRun): Promise<PersistRunPlan> {
       : "success";
   return {
     run: {
-      source: "mizuho-bank",
-      producer: "collector-mizuho-bank",
+      source: MIZUHO_SOURCE,
+      producer: MIZUHO_PRODUCER,
       producerVersion: input.version,
       runId: input.runId,
       attemptId: input.runId,
@@ -85,7 +89,14 @@ export async function mizuhoRunPlan(input: MizuhoRun): Promise<PersistRunPlan> {
       providerOutcome,
       coverageStatus: input.partial ? "partial" : "unknown",
       persistenceComplete: true,
-      ...(input.failed ? { safeErrorCode: "collection-failed" } : {}),
+      // A run that is not a success must name why (the manifest refuses it
+      // otherwise); a partial run carries its failed units' code.
+      ...(providerOutcome === "success"
+        ? {}
+        : {
+            safeErrorCode:
+              providerOutcome === "failed" ? "collection-failed" : "collection-unit-failed",
+          }),
       units,
       ranges: [],
       reports: [

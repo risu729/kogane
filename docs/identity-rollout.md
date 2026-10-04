@@ -158,3 +158,19 @@ acceptance covers successfully parsed, eligible observations, not recovery of
 rejected payloads. It does not claim transaction deduplication, cross-provider
 account equivalence, portfolio totals or a global security master.
 No temporary public Worker, database, bucket or new financial login was created.
+
+## 2026-09-28: the importer-era Vpass tokens are to be replaced once
+
+The Vpass counts above are importer-era `vpass-card-v1-` tokens. No deployed
+component holds the importer's key any more, so the collector's `vpass-card-v2-` token of the same
+card is a different value and account entity.
+[ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)
+decides to replace each staged v1 token by its v2 token in the stored rows
+once: in the importer's fetch unit keys, identity pins
+(`identity_vpass_bindings.card_token`) and source-account references, keeping
+every id and the importer-era account entity. Migration 0062 only stages the
+pairs (the owner inserts the Vpass ones,
+[identity operations](identity-operations.md#one-time-identity-value-rewrite));
+migration 0063 rewrites them. The counts recorded above were read before it:
+after it, a staged card's importer rows carry its v2 token, with the same
+ids, pins and account entity.

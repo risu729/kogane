@@ -114,7 +114,9 @@ ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
       await db.prepare(sql).run();
   }
   await db.batch([
-    db.prepare("INSERT INTO sources VALUES('smbc-bank','synthetic'),('v-point','synthetic')"),
+    db.prepare(
+      "INSERT INTO sources VALUES('smbc-bank','synthetic'),('v-point','synthetic'),('mizuho-bank','synthetic')",
+    ),
     db.prepare("INSERT INTO producers VALUES('synthetic-producer'),('other-producer')"),
   ]);
 }, 30000);
@@ -391,7 +393,11 @@ async function seed(id: number, count = 1, source = "smbc-bank", success = true)
       )
       .bind(
         id,
-        source === "v-point" ? "v-point:member" : "smbc-bank:ordinary-yen",
+        source === "v-point"
+          ? "v-point:member"
+          : source === "mizuho-bank"
+            ? "mizuho-bank:ordinary:001:1234567"
+            : "smbc-bank:ordinary-yen",
         source === "v-point" ? "V_POINT" : "JPY",
         JSON.stringify(Array.from({ length: count }, (_, i) => i)),
       ),
@@ -605,6 +611,79 @@ test("sweep honors source bounds, skips errors, and publishes empty successful p
   await expect(identifyParse(db, parse(100), otherIdentity, 0)).rejects.toThrow(
     "identity_version_invalid",
   );
+});
+
+test("Mizuho parses sealed under policy 1 are re-identified append-only at policy 2", async () => {
+  await seed(120, 2, "mizuho-bank");
+  // What the policy-1 build recorded: no `mizuho-bank` rule in the resolver.
+  const unrecognized: IdentityResolver = (input) => {
+    const plan = providerIdentity(input);
+    Object.assign(plan.account, {
+      label: "未識別の取得元口座",
+      role: "source-account",
+      status: "unresolved",
+      reason: "unrecognized-source-account",
+    });
+    return plan;
+  };
+  expect(await identifyParse(db, parse(120, "mizuho-bank"), unrecognized, 1)).toBe(2);
+  const v1 = await identityKey("ir", [120, 1]);
+  const recorded = await db
+    .prepare("SELECT * FROM identity_observations WHERE identity_run_id=? ORDER BY observation_id")
+    .bind(v1)
+    .all();
+  // The sealed policy-1 run no longer satisfies the required policy.
+  expect(await identitySweep(db, providerIdentity, 8, "mizuho-bank")).toEqual({
+    processedRuns: 1,
+    identifiedRuns: 1,
+    identifiedObservations: 2,
+  });
+  expect(await identitySweep(db, providerIdentity, 8, "mizuho-bank")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  const v2 = await identityKey("ir", [120, 2]);
+  expect(
+    await db
+      .prepare(
+        "SELECT policy_family,policy_release FROM identity_run_policies WHERE identity_run_id=?",
+      )
+      .bind(v2)
+      .first<{ policy_family: string; policy_release: string }>(),
+  ).toEqual({ policy_family: "identity-default", policy_release: "identity-default-v2" });
+  // The policy-1 rows stay exactly as recorded; only the newer run is current.
+  expect(
+    (
+      await db
+        .prepare(
+          "SELECT * FROM identity_observations WHERE identity_run_id=? ORDER BY observation_id",
+        )
+        .bind(v1)
+        .all()
+    ).results,
+  ).toEqual(recorded.results);
+  expect(
+    await db
+      .prepare(
+        "SELECT count(*) n,count(DISTINCT observation_id) d,min(policy_version) v FROM current_identity_observations WHERE parse_run_id=120",
+      )
+      .first<{ n: number; d: number; v: number }>(),
+  ).toEqual({ n: 2, d: 2, v: 2 });
+  const accounts = await db
+    .prepare(
+      `SELECT m.label,m.status,m.reason,m.policy_version FROM current_account_mappings m
+       JOIN source_accounts a ON a.id=m.source_account_id WHERE a.source_id='mizuho-bank'`,
+    )
+    .all();
+  expect(accounts.results).toEqual([
+    {
+      label: "みずほ銀行 普通預金",
+      status: "provider-local",
+      reason: "provider-branch-and-account",
+      policy_version: 2,
+    },
+  ]);
 });
 
 test("all four observation kinds preserve their instrument roles and provenance", async () => {

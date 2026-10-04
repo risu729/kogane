@@ -9,13 +9,14 @@
 // `import()`, and a type-only import that disappears at runtime
 // (`tsPreCompilationDeps` is what keeps those visible).
 //
-// TypeScript caveat: dependency-cruiser 18.2.0 supports `typescript` < 7. If it
-// cannot resolve a TS 5.x transpiler it still exits 0, having cruised a few
+// TypeScript caveat: dependency-cruiser 18.4.0 supports `typescript` < 7. If it
+// cannot resolve a TS < 7 transpiler it still exits 0, having cruised a few
 // dozen modules instead of several hundred — a rule that passes because it saw
 // almost nothing. `tasks/_lib/depcruise.ts` therefore asserts a minimum module
 // count as well as an empty violation list, and the root manifest keeps
-// `typescript@5.9.3` (the Workers packages pin 7.x locally; that is fine as
-// long as the root one stays resolvable from here).
+// TypeScript below 7, `6.0.3` today; 6 is the last release with the in-process
+// compiler API. The Workers packages pin 7.x locally; that is fine as long as
+// the root one stays resolvable from here.
 export default {
   forbidden: [
     {

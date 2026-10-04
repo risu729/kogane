@@ -120,7 +120,23 @@ async function seedRows(
   return parseId;
 }
 
+/** The deployed Vpass slice: stage A only. */
 const VPASS: ReconciliationSlice = RECONCILIATION_SLICES[0]!;
+
+/**
+ * A slice with stage B turned on, the way the deployed slices ran it before
+ * their pending-to-posted heuristic moved to the purchase lane's candidate
+ * pass. The tests of the stage B machinery (groups, the matching window, the
+ * MyJCB payment month, the write budget) run through it: a future source whose
+ * rows carry a provider link id would pair through the same code.
+ */
+function withStageB(slice: ReconciliationSlice): ReconciliationSlice {
+  return { ...slice, stages: ["A", "B"] };
+}
+const VPASS_B = withStageB(VPASS);
+/** The deployed MyJCB slice (stage A only), and with stage B turned on. */
+const MYJCB: ReconciliationSlice = RECONCILIATION_SLICES[1]!;
+const MYJCB_B = withStageB(MYJCB);
 
 async function proposals(): Promise<
   { id: string; kind: string; stage: string; status: string; rationale: string[] }[]
@@ -145,13 +161,23 @@ async function proposals(): Promise<
   }));
 }
 
-test("slices cover Vpass and guarded MyJCB pending/posted pairs", () => {
-  expect(RECONCILIATION_SLICES).toHaveLength(2);
-  expect(VPASS).toEqual({
-    sourceId: "vpass",
-    pendingStatuses: ["unconfirmed"],
-    postedStatuses: ["posted"],
-  });
+test("the deployed slices are Vpass and MyJCB, each running stage A only", () => {
+  // Their stage B pairs are the purchase lane's candidate pass
+  // (reconciliation-coverage.test.ts proves it covers them).
+  expect(RECONCILIATION_SLICES).toEqual([
+    {
+      sourceId: "vpass",
+      pendingStatuses: ["unconfirmed"],
+      postedStatuses: ["posted"],
+      stages: ["A"],
+    },
+    {
+      sourceId: "myjcb",
+      pendingStatuses: ["unconfirmed"],
+      postedStatuses: ["confirmed"],
+      stages: ["A"],
+    },
+  ]);
   expect(reconciliationEnabled(undefined)).toBe(false);
   expect(reconciliationEnabled("0")).toBe(false);
   expect(reconciliationEnabled("1")).toBe(true);
@@ -238,7 +264,10 @@ test("a pending and a posted row of one card become one candidate, accepted by n
     },
     { status: "posted", amount: -1234, asOf: "2026-03-02", month: "2026-03", family: "web" },
   ]);
-  const first = await reconciliationSweep(db, { now: "2026-03-20T00:00:00Z" });
+  const first = await reconciliationSweep(db, {
+    slices: [VPASS_B, MYJCB_B],
+    now: "2026-03-20T00:00:00Z",
+  });
   expect(first).toMatchObject({ slices: 2, scanned: 2, groups: 1, written: 1, autoAccepted: 0 });
   const stored = await proposals();
   expect(stored).toHaveLength(1);
@@ -254,7 +283,10 @@ test("a pending and a posted row of one card become one candidate, accepted by n
     await db.prepare("SELECT count(*) AS n FROM entity_relations").first<{ n: number }>(),
   ).toEqual({ n: 0 });
   // Re-running over the same published rows writes nothing new.
-  const second = await reconciliationSweep(db, { now: "2026-03-21T00:00:00Z" });
+  const second = await reconciliationSweep(db, {
+    slices: [VPASS_B, MYJCB_B],
+    now: "2026-03-21T00:00:00Z",
+  });
   expect(second).toMatchObject({ scanned: 2, written: 0, autoAccepted: 0 });
   expect(await proposals()).toEqual(stored);
 });
@@ -271,7 +303,7 @@ test("two posted rows of the same amount are two candidates, never one merge (SC
     { status: "posted", amount: -900, asOf: "2026-04-01", month: "2026-04", family: "web" },
     { status: "posted", amount: -900, asOf: "2026-04-01", month: "2026-04", family: "web" },
   ]);
-  await reconciliationSweep(db, { now: "2026-04-10T00:00:00Z" });
+  await reconciliationSweep(db, { slices: [VPASS_B], now: "2026-04-10T00:00:00Z" });
   const cardB = (await proposals()).filter((row) => row.rationale.includes("multiple_candidates"));
   expect(cardB).toHaveLength(2);
   for (const row of cardB) expect(row.status).toBe("proposed");
@@ -294,7 +326,7 @@ test("an unpublished parse produces no candidate (docs/publication-gate.md)", as
     ],
     false,
   );
-  await reconciliationSweep(db, { now: "2026-05-10T00:00:00Z" });
+  await reconciliationSweep(db, { slices: [VPASS_B], now: "2026-05-10T00:00:00Z" });
   expect((await proposals()).length).toBe(before);
 });
 
@@ -422,6 +454,7 @@ test("an explicit provider link id is the only thing the rule accepts by itself"
     sourceId: "synthetic-linked",
     pendingStatuses: ["unconfirmed"],
     postedStatuses: ["posted"],
+    stages: ["A", "B"],
   };
   await seedRows("synthetic-linked", "card-l", [
     {
@@ -500,6 +533,59 @@ test("the scheduled lane is off unless the flag is on", async () => {
   // Counts only: no amount, account label or provider text is logged.
   expect(JSON.stringify(lines)).not.toMatch(/1234|card-a|merchant/u);
 }, 60_000);
+
+test("the deployed slices pair no pending row with a posted one, read no group, and keep stored proposals", async () => {
+  const pair = [
+    {
+      status: "unconfirmed",
+      amount: -1800,
+      asOf: "2026-08-01",
+      month: "2026-08",
+      family: "customized",
+    },
+    { status: "posted", amount: -1800, asOf: "2026-08-02", month: "2026-08", family: "web" },
+  ];
+  // An earlier capture's pair, proposed while the Vpass slice still ran stage B.
+  await seedRows("vpass", "card-history", pair);
+  await reconciliationSweep(db, { slices: [VPASS_B], now: "2026-08-10T00:00:00Z" });
+  const stored = await proposals();
+  expect(stored.some((row) => row.stage === "B")).toBe(true);
+  // A later capture of the same month: new rows, a new pair for stage B.
+  await seedRows("vpass", "card-history", pair);
+  const { db: counted, sent } = counting(db);
+  const result = await reconciliationSweep(counted, { now: "2026-08-11T00:00:00Z" });
+  expect(result).toMatchObject({
+    slices: 2,
+    groups: 0,
+    groupsSkipped: 0,
+    groupsDeferred: 0,
+    proposed: 0,
+    known: 0,
+    written: 0,
+  });
+  expect(result.scanned).toBeGreaterThan(0);
+  // Nothing is looked up or sent, and every stored proposal stays as it was.
+  expect(sent).toEqual({ inserts: 0, lookups: 0, batches: 0 });
+  expect(await proposals()).toEqual(stored);
+});
+
+test("a Vpass row with a provider-issued id is still a stage A pair under the deployed slice", async () => {
+  const row = {
+    status: "posted",
+    amount: -2100,
+    asOf: "2026-08-05",
+    month: "2026-08",
+    family: "web",
+    origin: "provider-row-id",
+  };
+  const before = new Set((await proposals()).map((entry) => entry.id));
+  await seedRows("vpass", "card-provider-id", [row]);
+  await seedRows("vpass", "card-provider-id", [row]);
+  const result = await reconciliationSweep(db, { slices: [VPASS], now: "2026-08-12T00:00:00Z" });
+  expect(result).toMatchObject({ groups: 1, proposed: 1, written: 1, autoAccepted: 1 });
+  const added = (await proposals()).filter((entry) => !before.has(entry.id));
+  expect(added.map((entry) => entry.stage)).toEqual(["A"]);
+});
 
 test("migration 0032 applies on 0017 through 0035 with seeded rows and keeps its closed enums", async () => {
   const local = new Miniflare(
@@ -604,7 +690,6 @@ test("migration 0032 applies on 0017 through 0035 with seeded rows and keeps its
 }, 60_000);
 
 test("MyJCB full one-payment rows propose, installment slices do not mimic a pending purchase", async () => {
-  const myjcb = RECONCILIATION_SLICES.find((slice) => slice.sourceId === "myjcb")!;
   await seedRows("myjcb", "full-payment", [
     { status: "unconfirmed", amount: -1200, asOf: "2026-09-01", month: "202609", family: "ledger" },
     {
@@ -629,7 +714,7 @@ test("MyJCB full one-payment rows propose, installment slices do not mimic a pen
       paymentAmountText: "300",
     },
   ]);
-  const result = await reconciliationSweep(db, { slices: [myjcb] });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B] });
   expect(result.written).toBe(1);
   expect(result.autoAccepted).toBe(0);
 });
@@ -638,9 +723,6 @@ test("MyJCB full one-payment rows propose, installment slices do not mimic a pen
 // MyJCB rows as the deployed ledger parser emits them
 // ---------------------------------------------------------------------------
 
-const MYJCB: ReconciliationSlice = RECONCILIATION_SLICES.find(
-  (slice) => slice.sourceId === "myjcb",
-)!;
 /** One payment month, shown first by the unconfirmed ledger and then by the confirmed one. */
 const MYJCB_PERIOD = "2026年10月お支払い分";
 /** Every observation `seedLedger` stored, across the tests below. */
@@ -839,7 +921,7 @@ test("a MyJCB pending row and its confirmed row with 1,200円 texts become one r
     .first<{ usage: string; payment: string }>();
   expect(texts).toEqual({ usage: "1,200円", payment: "1,200円" });
 
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-02T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-02T00:00:00Z" });
   expect(result).toMatchObject({ written: 1, autoAccepted: 0 });
   const stored = await citing([pending!, posted!]);
   expect(stored).toHaveLength(1);
@@ -890,7 +972,7 @@ test("a MyJCB installment slice (usage 12,000 / payment 4,000) is never compared
   ]);
   // Without the guard the matcher would pair the pending purchase with each slice.
   expect(stageBProposals(await unguardedFacts("conn-installment"))).toHaveLength(2);
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-02T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-02T00:00:00Z" });
   expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
   expect(await citing([pending!, ...slices])).toEqual([]);
 });
@@ -905,7 +987,7 @@ test("two MyJCB confirmed rows of the same amount stay two candidates, never one
     { ...purchase, amount: "900円" },
   ]);
   expect(twins).toHaveLength(2);
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-02T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-02T00:00:00Z" });
   expect(result).toMatchObject({ written: 2, autoAccepted: 0 });
   const stored = await citing([pending!, ...twins]);
   expect(stored).toHaveLength(2);
@@ -924,7 +1006,7 @@ test("re-running the sweep over the same MyJCB rows writes no duplicate proposal
   const before = await proposals();
   // The one matched pair and the two twin candidates above.
   expect(await citing(ledgerObservations)).toHaveLength(3);
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-03T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-03T00:00:00Z" });
   expect(result.scanned).toBeGreaterThanOrEqual(ledgerObservations.length);
   expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
   expect(await proposals()).toEqual(before);
@@ -945,7 +1027,7 @@ test("a proposal already decided is never proposed again", async () => {
   });
   expect(rejected).toMatchObject({ ok: true });
   const before = await proposals();
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-04T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-04T00:00:00Z" });
   expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
   expect(await proposals()).toEqual(before);
   expect((await citing(ledgerObservations)).find((row) => row.id === pair!.id)?.status).toBe(
@@ -979,7 +1061,7 @@ test("a relative MyJCB label is resolved from its capture time: detailMonth-0 pa
     [`transaction:${pending}`, "2026-10"],
     [`transaction:${posted}`, "2026-10"],
   ]);
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-05T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-05T00:00:00Z" });
   expect(result).toMatchObject({ written: 1, autoAccepted: 0 });
   const [stored, ...others] = await citing([pending!, posted!]);
   expect(others).toEqual([]);
@@ -1021,7 +1103,7 @@ test("the same relative label captured in another cycle names another month, so 
   expect(rest).toEqual([]);
   expect(unguarded!.rationaleCodes).toContain("same_statement_period");
   const before = await proposals();
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-06T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-06T00:00:00Z" });
   expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
   expect(await citing([pending!, posted!])).toEqual([]);
   expect(await proposals()).toEqual(before);
@@ -1052,7 +1134,7 @@ test("a confirmed row at a position the rule does not place (detailMonth-2) pair
     "2026-10",
     null,
   ]);
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-21T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-21T00:00:00Z" });
   expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
   expect(await citing([pending!, posted!])).toEqual([]);
 });
@@ -1076,12 +1158,12 @@ test("a MyJCB confirmed row re-captured by a later run is not proposed as the sa
     "collector-fingerprint",
   ]);
   expect(stageAProposals(captures)).toEqual([]);
-  const result = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-06T00:00:00Z" });
+  const result = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-06T00:00:00Z" });
   expect(result).toMatchObject({ written: 0, autoAccepted: 0 });
   expect(await citing([...first, ...second])).toEqual([]);
   // A pending row of the same month still pairs with each capture, as a candidate.
   const [pending] = await seedLedger("conn-recapture", "unconfirmed", [row]);
-  const paired = await reconciliationSweep(db, { slices: [MYJCB], now: "2026-10-07T00:00:00Z" });
+  const paired = await reconciliationSweep(db, { slices: [MYJCB_B], now: "2026-10-07T00:00:00Z" });
   expect(paired).toMatchObject({ written: 2, autoAccepted: 0 });
   const stored = await citing([pending!]);
   expect(stored.map((proposal) => [proposal.stage, proposal.targets[0]])).toEqual([
@@ -1098,7 +1180,12 @@ const NOW = "2026-10-10T00:00:00Z";
 
 /** A synthetic slice of its own, so each test below pages only its own rows. */
 function syntheticSlice(sourceId: string): ReconciliationSlice {
-  return { sourceId, pendingStatuses: ["unconfirmed"], postedStatuses: ["posted"] };
+  return {
+    sourceId,
+    pendingStatuses: ["unconfirmed"],
+    postedStatuses: ["posted"],
+    stages: ["A", "B"],
+  };
 }
 
 /** The observation ids a `seedRows` parse stored, in row order. */

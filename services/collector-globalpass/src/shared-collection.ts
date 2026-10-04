@@ -14,10 +14,14 @@
 // importer re-derives and sends centrally today. The GLOBAL PASS id, password
 // and relay token are never part of a plan.
 //
-// Coverage is `partial` even on a `success` run. The provider exposes a
-// rolling window of statement months and the collector's pagination status is
-// `unproven` (`GLOBALPASS_PAGINATION_STATUS`), so a finished run is a claim
-// about persistence, never about the account's whole history.
+// The account unit is `complete` on a `success` run and `partial` otherwise.
+// The container walks every page of a selected month and the Worker records a
+// closed code for any month whose pages it cannot prove whole against the
+// pager's stated total (`pagination.ts`, `monthCoverageCode`), so a run is
+// `success` only when every selected month is proven whole (ADR 0026's
+// amendment of 2026-10-04). The run's own coverage stays `partial`: the
+// provider exposes a rolling window of statement months, so a run is never a
+// claim about the account's whole history.
 import {
   persistRun,
   type CoverageStatus,
@@ -39,7 +43,8 @@ import {
 
 /** `runs/<source>/…` in DATA. The Processor maps it to the CORE source `global-pass`. */
 export const SHARED_SOURCE = "prestia-globalpass";
-const PRODUCER = "collector-globalpass";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-prestia-globalpass";
 const MANIFEST_ARTIFACT_KEY = "manifest.json";
 const JSON_MEDIA_TYPE = "application/json";
 /** The single unit the central descriptors already use for this source. */
@@ -51,9 +56,11 @@ export const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
 
 const encoder = new TextEncoder();
 
-/** One month's already-sanitized activity page, as it was stored. */
+/** One already-sanitized activity page of a month, as it was stored. */
 export interface SharedCapture {
   readonly month: string;
+  /** The page of the month, 1 for the page the month selection renders. */
+  readonly page: number;
   readonly sanitizedHtml: string;
 }
 
@@ -108,19 +115,29 @@ export function waitingForHuman(_manifest: CollectionManifest): boolean {
   return false;
 }
 
-/** A `partial` run stays partial and a `failed` run never claims coverage. */
+/**
+ * A `success` run proved every selected month whole, so its unit is
+ * `complete`; the run stays `partial` (a rolling window). A `partial` run
+ * stays partial and a `failed` run never claims coverage.
+ */
 export function sharedOutcome(manifest: CollectionManifest): {
   providerOutcome: ProviderOutcome;
   coverageStatus: CoverageStatus;
+  unitCoverageStatus: CoverageStatus;
   safeErrorCode?: string;
 } {
   if (manifest.status === "success") {
-    // Never `complete`: a rolling window with unproven pagination.
-    return { providerOutcome: "success", coverageStatus: "partial" };
+    return {
+      providerOutcome: "success",
+      coverageStatus: "partial",
+      unitCoverageStatus: "complete",
+    };
   }
+  const coverageStatus = manifest.status === "partial" ? "partial" : "unknown";
   return {
     providerOutcome: manifest.status === "partial" ? "partial" : "failed",
-    coverageStatus: manifest.status === "partial" ? "partial" : "unknown",
+    coverageStatus,
+    unitCoverageStatus: coverageStatus,
     safeErrorCode: manifest.failures[0]?.errorCode ?? "collector_run_incomplete",
   };
 }
@@ -159,9 +176,9 @@ function ranges(manifest: CollectionManifest): TerminalRange[] {
       unitKey: UNIT_KEY,
     });
   }
-  // One declared-coverage range per month whose page was actually stored.
-  for (const artifact of manifest.artifacts) {
-    const month = safeMonth(artifact.month);
+  // One declared-coverage range per month with at least one stored page.
+  const storedMonths = new Set(manifest.artifacts.map((artifact) => safeMonth(artifact.month)));
+  for (const month of storedMonths) {
     entries.push({
       rangeKey: `month-${month}`,
       rangeKind: "declared_coverage",
@@ -177,18 +194,20 @@ function ranges(manifest: CollectionManifest): TerminalRange[] {
 
 /**
  * The `terminal-v1` plan for one run: the manifest plus one artifact per stored
- * month. A `failed` run plans the manifest alone, so the failure stays a
+ * page. A `failed` run plans the manifest alone, so the failure stays a
  * failure instead of reading like a complete month with nothing in it (G1-09).
  */
 export async function buildSharedRunPlan(input: SharedRunInput): Promise<PersistRunPlan> {
-  const stored = new Map(input.captures.map((capture) => [safeMonth(capture.month), capture]));
+  const stored = new Map(
+    input.captures.map((capture) => [`${safeMonth(capture.month)}#${capture.page}`, capture]),
+  );
   const artifacts: PersistArtifact[] = [];
   const transformations: TerminalTransformation[] = [];
   for (const entry of input.manifest.artifacts) {
     const month = safeMonth(entry.month);
-    const capture = stored.get(month);
+    const capture = stored.get(`${month}#${entry.page}`);
     if (!capture) throw new Error("shared_capture_missing");
-    const artifactKey = artifactFilename(month);
+    const artifactKey = artifactFilename(month, entry.page);
     artifacts.push(
       await artifactOf({
         artifactKey,
@@ -214,7 +233,10 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
       bytes: encoder.encode(input.manifestJson),
       mediaType: JSON_MEDIA_TYPE,
       role: COLLECTOR_MANIFEST_ROLE,
-      unitKey: UNIT_KEY,
+      // The run's manifest belongs to the run, not to the account unit, whose
+      // `artifactCount` counts the activity pages only (ADR 0021). Naming the
+      // unit here without counting it made CORE refuse the seal
+      // (`run_inventory_incomplete`).
     }),
   );
 
@@ -242,7 +264,7 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
         unitKey: UNIT_KEY,
         unitKind: UNIT_KIND,
         artifactCount: input.manifest.artifacts.length,
-        coverageStatus: outcome.coverageStatus,
+        coverageStatus: outcome.unitCoverageStatus,
         ...(outcome.safeErrorCode === undefined ? {} : { safeErrorCode: outcome.safeErrorCode }),
       },
     ],

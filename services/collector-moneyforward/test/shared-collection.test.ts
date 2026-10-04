@@ -76,7 +76,7 @@ describe("G1-02 shared mode persists every page and then the terminal", () => {
     if (read.outcome !== "found") throw new Error("unreachable");
     const manifest = read.manifest;
     expect(manifest.source).toBe("moneyforward-me");
-    expect(manifest.producer).toBe("moneyforward-worker");
+    expect(manifest.producer).toBe("collector-moneyforward-me");
     expect(manifest.producerVersion).toBe(schemaVersion);
     expect(manifest.providerOutcome).toBe("success");
     expect(manifest.coverageStatus).toBe("complete");
@@ -233,6 +233,8 @@ describe("G1-01 a failed put leaves no terminal", () => {
       status: "success",
       persistence: "incomplete",
       artifactCount: plan.artifacts.length,
+      // The synthetic detail pages carry no tuple: the units stay positional.
+      identity: "identity_tuple_absent",
       reasonCode: "object_put_failed",
       persistedCount: outcome.result.checkpoint.persistedArtifactKeys.length,
       pendingCount: outcome.result.checkpoint.pendingArtifactKeys.length,

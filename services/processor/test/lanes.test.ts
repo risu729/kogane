@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { runScheduled, sweep } from "../src/worker.ts";
 import { runBalanceProjection } from "../src/balance-projection-job.ts";
@@ -44,10 +45,10 @@ const job = (id: number) =>
     .bind(id)
     .first<{ lane: string; status: string; replay_plan_id: number | null }>();
 
-test("harness applies every Layer B migration in order through 0050", () => {
+test("harness applies every Layer B migration in order through 0063", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
-  expect(names.at(-1)).toBe("0050_statement_fact_indexes.sql");
+  expect(names.at(-1)).toBe("0063_identity_value_rewrite_apply.sql");
   expect(names).toEqual([
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
@@ -82,6 +83,18 @@ test("harness applies every Layer B migration in order through 0050", () => {
     "0048_reconciliation_scan_cursor.sql",
     "0049_processor_lane_ticks.sql",
     "0050_statement_fact_indexes.sql",
+    "0051_card_purchase_review_commands.sql",
+    "0052_sbi_shinsei_bank_debits.sql",
+    "0053_price_promotion.sql",
+    "0055_vpass_collector_card_binding.sql",
+    "0056_sbi_shinsei_exchange_rate_policy_version.sql",
+    "0057_vpass_card_token_v2.sql",
+    "0058_identity_crosswalk.sql",
+    "0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql",
+    "0060_card_debit_account_statements.sql",
+    "0061_scheduled_payment_observations.sql",
+    "0062_identity_value_rewrite_staging.sql",
+    "0063_identity_value_rewrite_apply.sql",
   ]);
   expect([...names].sort()).toEqual(names);
 });
@@ -217,6 +230,58 @@ test("a dropped notification is recovered by the repair lane", async () => {
   const result = await sweep(env, { lane: "repair" });
   expect(result.lanes.repair).toMatchObject({ created: 1, parsed: 1 });
   expect(await job(400)).toEqual({ lane: "repair", status: "done", replay_plan_id: null });
+}, 30000);
+
+test("a stored board a retired version rejected gets a 1.0.2 job from the repair lane, with no operator step", async () => {
+  // The stored SBI Shinsei boards (ADR 0028, amended for 1.0.2) each hold a
+  // failed 1.0.1 job. Jobs are keyed by (artifact, parser, version), so the
+  // cyclic repair scan creates the deployed version's job by itself, and the
+  // board's coverage-v1 row pins that version (0059).
+  const board = new Uint8Array(
+    readFileSync(
+      new URL(
+        "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/exchange-rate-observed-board.json",
+        import.meta.url,
+      ),
+    ),
+  );
+  await seedArtifact(
+    env,
+    410,
+    "sbi-shinsei-bank",
+    "exchange-rate",
+    "raw-exchange-rate.json",
+    board,
+  );
+  await env.DB.prepare("DELETE FROM observation_work_items WHERE fetch_run_id=410").run();
+  await env.DB.prepare(
+    "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,attempts,last_error_code) VALUES(410,'sbi-shinsei-exchange-rate','1.0.1','failed',1,'parser_rejected')",
+  ).run();
+  await setCursor(409);
+  const result = await sweep(env, { lane: "repair" });
+  // Scoped to this board: the page after the cursor may also hold artifacts
+  // an earlier test left without a job, which this test does not own.
+  expect(result.lanes.repair?.created).toBeGreaterThanOrEqual(1);
+  expect(result.lanes.repair?.error).toBe(0);
+  const jobs = (
+    await env.DB.prepare(
+      "SELECT parser_version,lane,status FROM observation_parse_jobs WHERE fetch_artifact_id=410 ORDER BY parser_version",
+    ).all<{ parser_version: string; lane: string; status: string }>()
+  ).results;
+  expect(jobs).toEqual([
+    { parser_version: "1.0.1", lane: "incremental", status: "failed" },
+    { parser_version: "1.0.2", lane: "repair", status: "done" },
+  ]);
+  expect(
+    await count(
+      "SELECT count(*) AS n FROM parse_runs WHERE fetch_artifact_id=410 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.2' AND status='ok'",
+    ),
+  ).toBe(1);
+  expect(
+    await env.DB.prepare(
+      "SELECT policy_id,required_parser_version FROM dataset_snapshot_policies WHERE parser_name='sbi-shinsei-exchange-rate' AND dataset='exchange-rate'",
+    ).first<{ policy_id: string; required_parser_version: string }>(),
+  ).toEqual({ policy_id: "coverage-v1", required_parser_version: "1.0.2" });
 }, 30000);
 
 test("pause/resume is idempotent, leases are fenced, and nothing publishes twice", async () => {
@@ -395,15 +460,28 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     "collection_scan",
     "identity_sweep",
     "balance_projection",
+    // Unflagged: it writes append-only prices only (ADR 0020).
+    "price_promotion",
     "operation_dispatch",
     "decision_outbox",
   ]);
+  expect(lines[4]).toEqual({
+    event: "price_promotion",
+    scanned: expect.any(Number),
+    promoted: expect.any(Number),
+    basis_unverified: expect.any(Number),
+    unsupported_currency: expect.any(Number),
+    tier_unmatched: expect.any(Number),
+    stage_unstated: expect.any(Number),
+    stage_pending: expect.any(Number),
+    written: expect.any(Number),
+  });
   expect(lines[0]).toHaveProperty("lanes");
   // The two U08 lanes are wired by default and, with their flags off, say so
   // and do nothing: no R2 list, no CORE write, no cursor movement
   // (docs/processor.md §6).
   expect(lines[1]).toMatchObject({ event: "collection_scan", enabled: false, status: "skipped" });
-  expect(lines[4]).toMatchObject({
+  expect(lines[5]).toMatchObject({
     event: "operation_dispatch",
     enabled: false,
     status: "skipped",
@@ -494,6 +572,57 @@ test("with its flag on, purchase_recognition sits right after the two reconcilia
     "card_settlement_sweep",
     "purchase_recognition",
     "reward_claims_sweep",
+    "decision_outbox",
+  ]);
+}, 60000);
+
+test("price_promotion runs after identity_sweep and right before report_job, whatever the flags", async () => {
+  const lines: Record<string, unknown>[] = [];
+  const log = (line: string) => lines.push(JSON.parse(line));
+  const ok = () => Promise.resolve({ ok: true });
+  const stages = {
+    parse: ok,
+    identity: ok,
+    balanceProjection: ok,
+    reconcile: ok,
+    settlements: ok,
+    purchases: ok,
+    rewards: ok,
+    rewardReadProjection: ok,
+    prices: ok,
+    reports: ok,
+    decisions: ok,
+  };
+  const on = {
+    RECONCILIATION_ENABLED: "true",
+    PURCHASE_RECOGNITION_ENABLED: "true",
+    REWARD_CLAIMS_ENABLED: "true",
+    REWARD_READ_PROJECTION_ENABLED: "true",
+    REPORTS_ENABLED: "true",
+  };
+  await runScheduled({ ...env, ...on } as unknown as Env, stages, log);
+  const events = lines.map((line) => line.event);
+  expect(events).toEqual([
+    "observation_sweep",
+    "identity_sweep",
+    "balance_projection",
+    "reconciliation_sweep",
+    "card_settlement_sweep",
+    "purchase_recognition",
+    "reward_claims_sweep",
+    "reward_read_projection",
+    "price_promotion",
+    "report_job",
+    "decision_outbox",
+  ]);
+  lines.length = 0;
+  const off = Object.fromEntries(Object.keys(on).map((flag) => [flag, "0"]));
+  await runScheduled({ ...env, ...off } as unknown as Env, stages, log);
+  expect(lines.map((line) => line.event)).toEqual([
+    "observation_sweep",
+    "identity_sweep",
+    "balance_projection",
+    "price_promotion",
     "decision_outbox",
   ]);
 }, 60000);

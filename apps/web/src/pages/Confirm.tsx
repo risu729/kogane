@@ -34,22 +34,13 @@ import { CardSettlementDetails } from "../reconciliation-display.tsx";
 import { Link } from "../router.tsx";
 import { Badge, EmptyState, Kv, KvRow, Notice, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
+  COMMAND_KIND_LABELS,
   CommandError,
   postCommand,
   type ApprovalView,
   type ReceiptView,
   type SimulationReportView,
 } from "../command-api.ts";
-
-const KIND_LABELS: Record<string, string> = {
-  "identity.assign": "対応付けの手動確定",
-  "identity.release-override": "手動確定の解除（自動方針に戻す）",
-  "relation.accept": "関係の採用",
-  "relation.reject": "関係の却下",
-  "card-settlement.accept": "カード請求と銀行引落の対応付けを採用",
-  "card-settlement.reject": "カード決済の照合候補を却下",
-  "card-settlement.withdraw": "カード決済の採用を解除",
-};
 
 const RECEIPT_STATE: Record<string, { tone: "ok" | "warn" | "bad"; label: string; note: string }> =
   {
@@ -317,7 +308,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
           <>
             <Panel
               id="plan-summary"
-              title={KIND_LABELS[data.simulation.kind] ?? data.simulation.kind}
+              title={COMMAND_KIND_LABELS[data.simulation.kind] ?? data.simulation.kind}
               note={
                 features.known && !features.commands
                   ? "この接続先は確認操作を提供していません。内容の表示のみ行えます。"

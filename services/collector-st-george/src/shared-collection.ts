@@ -12,6 +12,10 @@ import {
 } from "../../../packages/parsers/src/st-george-contract";
 import { safeFailureCode, type FailureCode } from "./result";
 
+/** The terminal's source (the collector id) and its producer, `collector-<collector id>` (ADR 0014). */
+export const ST_GEORGE_SOURCE = "st-george";
+export const ST_GEORGE_PRODUCER = "collector-st-george";
+
 export interface SharedRunInput {
   runId: string;
   attemptId: string;
@@ -79,8 +83,8 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
   );
   return {
     run: {
-      source: "st-george",
-      producer: "collector-st-george",
+      source: ST_GEORGE_SOURCE,
+      producer: ST_GEORGE_PRODUCER,
       producerVersion: "st-george-browser-v1",
       runId: input.runId,
       attemptId: input.attemptId,

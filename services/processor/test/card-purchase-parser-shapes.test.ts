@@ -319,6 +319,50 @@ test("a closed position-1 statement, as the collector now records it, is a captu
   ).toBe(true);
 });
 
+test("a confirmed month under the usage header (ADR 0005 amendment d) is recorded, never recognised as a payment", () => {
+  // The collector stores this ledger only for a closed page that proved its
+  // 「ご利用金額」 amounts sum to the page total with every row 1回払; it keeps
+  // the header the page shows. Synthetic row in the production shape.
+  const ledger = {
+    schemaVersion: 1,
+    detailMonth: 1,
+    period: "2026年10月お支払い分",
+    state: "confirmed",
+    headers: ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"],
+    rows: [
+      {
+        summaryCells: ["2026/09/05", "架空商店 1回払", "架空", "1,000円"],
+        expanded: { ご利用金額: "1,000円", 摘要: "架空摘要" },
+      },
+    ],
+  };
+  const [row] = rows(
+    myJcbCreditLedger,
+    "myjcb",
+    new TextEncoder().encode(JSON.stringify(ledger)),
+    meta({
+      artifactKey: "connection-a/credit-ledger-01.json",
+      statementState: "confirmed",
+      period: ledger.period,
+    }),
+  );
+  // The row amount is the usage amount it is labelled as; nothing claims the
+  // row's 今回のお支払い金額, so recognition's one MyJCB amount rule has no
+  // payment to agree with and the row is excluded, not guessed (INV05). The
+  // statement's payment is the page total (myjcb-credit-statement-total).
+  expect(row!.providerStatus).toBe("confirmed");
+  expect([row!.usageAmountText, row!.paymentAmountText]).toEqual(["1,000円", null]);
+  expect(outcome(row!)).toEqual({ excluded: "payment_split_unknown" });
+  expect(
+    comparableCardPayment({
+      sourceId: row!.sourceId,
+      status: row!.providerStatus,
+      usageAmountText: row!.usageAmountText,
+      paymentAmountText: row!.paymentAmountText,
+    }),
+  ).toBe(false);
+});
+
 test("recognition and the matching guard never disagree on a parsed MyJCB row", () => {
   // Every usage/payment text pair below is parsed by the deployed ledger
   // parser, confirmed and unconfirmed, in the production row shape, next to

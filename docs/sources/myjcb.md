@@ -311,7 +311,7 @@ Workers内でdownloadした任意JavaScriptを`eval`せず、保護scriptを手�
 
 ### Kuebikoで確認したクレジットread/export
 
-- 初期menuは`detailMenu.html?link_id=...`、明細は`detail.html?detailMonth=N&output=web`。第一IDの初期HTMLは`0..8`を列挙した。
+- 初期menuは`detailMenu.html?link_id=...`、明細は`detail.html?detailMonth=N&output=web`。第一IDの初期HTMLは`0..8`を列挙した。このうち 7 と 8 は月ではなく支払予定 page である（下の「credit menu の group と支払予定 page」）。
 - `detailAPI.js`はdetail pageの`input:hidden[name=generalJsonShikibetuId]`を読み、`detailPastJson.json`へ`application/json`でJSON-RPC POSTする。request fieldsは`jsonrpc`、`method`、`params`、`id`、contractは`method=execute`、`params=[{generalJsonShikibetuId}]`、IDは`0301006`＋2桁counter（初回`030100601`）。responseは`result.errId`、`errMessage`、`detailPastJsonInfo[]`を持ち、item fieldsは`detailAvailableFlag`、`detailMonth`、`payAmount`、`payAmountDispFlag`、`settlementYM`だった。hidden欠落／API failureでは停止し、推測値や`0..17`をblind scanしない。
 - 第一IDの過去月responseは9候補（`detailMonth=9..17`）のうち2件（`10`、`13`）だけがavailableだった。collectorは`detailAvailableFlag=true`だけを初期menu月へ追加する。
 - 別の`detailReplaceJson.json`はrequest parameterに`generalJsonShikibetuId`、`simeYmd`、`payAmount`、response itemに`changeOperationLimitDate`、`detailInquiryURL`、`fixFlag`、`newestFlag`、`payAmount`、`payAmountDispFlag`、`payHowChangeEnableFlag`、`settlementDate`を持つUI/payment-display metadataだった。ledger取得には不要なのでallowlistしない。
@@ -338,13 +338,13 @@ Layer Aの中央取込は`services/collector-r2-importer`に実装した。sourc
 
 中央へ正規化済みの5 datasetのうち、金融観測を作るcanonical routeは`credit-ledger`と`credit-past-months`だけに限定した。`credit-menu`、`credit-detail`、`discovery`はstrictにshapeとmetadataを検証するが、HTMLとnormalized ledgerの二重計上を避けるため観測をemitしない。CSV/PDF/OFXとdebitは実R2成功artifactが未観測であり、Layer A同様Layer Bにも推測parserを登録していない。
 
-`credit-ledger`はmanifestのconnection、filename、statement state、periodとpayloadを相互照合する。実shapeでは日付文字列に内部空白があり、支払区分と金額がsummary cell 2/3のいずれにも現れたため、日付と金額はLayer Aと同じ空白正規化後に厳密検証し、2/3のうちexact JPY表示がちょうど1個であることを要求する。providerの利用額は債務増を正、refundを負で表すので、Layer B取引は支出負・流入正へ明示反転する。元row、採用cell位置、sign contract、period/state、由来detail HTMLを`extra`に保持する。同一行が複数回現れてもfingerprintと出現順で安定identityを作り、欠落placeholderは作らない。current viewは確定済みperiodごとの最新success artifactと、全未確定の最新success snapshotだけを選ぶため、別runの重複と後続snapshotから消えたpendingを残さない。
+`credit-ledger`はmanifestのconnection、filename、statement state、periodとpayloadを相互照合する。実shapeでは日付文字列に内部空白があり、支払区分と金額がsummary cell 2/3のいずれにも現れたため、日付と金額はLayer Aと同じ空白正規化後に厳密検証し、2/3のうちexact JPY表示がちょうど1個であることを要求する。providerの利用額は債務増を正、refundを負で表すので、Layer B取引は支出負・流入正へ明示反転する。元row、採用cell位置、sign contract、period/state、由来detail HTMLを`extra`に保持する。同一行が複数回現れてもfingerprintと出現順で安定identityを作り、欠落placeholderは作らない。current viewは確定明細ごと（支払月）の最新success artifactと、未確定明細ごと（支払月）の最新success artifactのうちそのpositionの最新captureでもあるものだけを選ぶため、別runの重複と後続snapshotから消えたpendingを残さない（[未確定明細のslot](#未確定明細のslot2026-09-26)）。
 
 支払区分の実shape（2026-09-24 本番D1の件数のみの読み取り診断）: 支払区分の文言（`1回払`）は結合セル`ご利用先など／支払区分`（`summaryCells[1]`）の中に加盟店名と並んで現れ、parserがCOREへ書いた全行（confirmed 48行・unconfirmed 514行）の全てで同じで、他の`N回払`や`分割`／`リボ`／`ボーナス`／`キャッシング`を含む行はなかった。parserが支払区分として採るcell（`_kogane.paymentTypeCellIndex`、`description`へ複写）には画面上の2文字のラベルが入り、支払区分ではない。値はevidenceに既にあるため、parserはrelease（version bump）せず、read model（`packages/read-model/src/card-usage.ts`の`payment_type`）が`summaryCells[1]`を読み、card purchase recognitionが`1回払`等の回数がすべて1で`分割`／`リボ`／`ボーナス`／`キャッシング`を含まない行だけを一回払いとする（[single payment, per source](../economic-events.md#single-payment-per-source)）。結合セルは加盟店名を含むため、ruleが読むだけで保存・logしない。
 
 `credit-past-months`はJSON-RPC envelope、最大18件、month重複禁止を要求し、availableかつdisplay対象の`payAmount`だけを`credit_statement_payment_amount`として記録する。これは現金残高でなくprovider表示の月次支払額であり、非表示・利用不可をzeroとして発明しない。`settlementYM`に絶対年月があれば日を発明せずyear-month精度の`asOf`へ正規化する。Layer Aが許す`detailMonth-N`等の相対fallbackはwarning付き・`asOf`なしで保持する。current balance viewは最新complete artifactを先に選び、その中の最小`detailMonth`を採用するため、absolute/fallback混在や空の最新snapshotでも古い値をcurrentに残さない。
 
-相対ラベル`detailMonth-N`は収集時に解決しない（[`docs/observations.md`](../observations.md#relative-period-labels-are-resolved-from-the-capture-time)）。collectorはproviderの表示どおりのlabelを保存し、raw evidenceを書き換えない。暦月はevidenceからの解釈なので、reader/processorが後から、そのlabelを持つartifactの`fetched_at`（Asia/Tokyo）と相対indexで導出する（versioned rule `relative-statement-period-v1`）。取得日`d`が1〜15日なら`P0`＝`d`の月＋1、16日以降なら＋2（15日締め・翌月払い）とし、`detailMonth-0`＝`P0`、`detailMonth-1`＝`P0 − 1`の支払月（`YYYY-MM`、`card_statement_facts.period`と同じ意味）とする。`N ≥ 2`は解決しない（null）。16日での切替はJCBの公表スケジュール（15日締め、24日前後の確定）に基づくもので、12〜30日のcaptureがまだないため未検証である。根拠は第一connectionの本番captureの集計（日付・金額・加盟店は記録しない）で、月境界の両側で`detailMonth-0`／`detailMonth-1`の全行の利用日がそれぞれ`P0`／`P0 − 1`の請求期間に入り、過去月APIが絶対labelを返した`N = 10, 13`は`P0 − 8`、`P0 − 11`だった。menuと過去月の番号は一様な月offsetではなく、menuの2〜8月は行がなく位置を確定できない。同じ集計で、export linkのない`detailMonth=1`はcollectorが`unconfirmed`と記録する一方、ページ見出しは`カードご利用代金明細(確定分)`で、statement parserはこの矛盾を拒否している（collector側の既知の不一致）。このためその月の行はpending扱いでstatement factがなく、current viewは同一connectionのunconfirmed ledgerを最新の1つしか残さない。
+相対ラベル`detailMonth-N`は収集時に解決しない（[`docs/observations.md`](../observations.md#relative-period-labels-are-resolved-from-the-capture-time)）。collectorはproviderの表示どおりのlabelを保存し、raw evidenceを書き換えない。暦月はevidenceからの解釈なので、reader/processorが後から、そのlabelを持つartifactの`fetched_at`（Asia/Tokyo）と相対indexで導出する（versioned rule `relative-statement-period-v1`）。取得日`d`が1〜15日なら`P0`＝`d`の月＋1、16日以降なら＋2（15日締め・翌月払い）とし、`detailMonth-0`＝`P0`、`detailMonth-1`＝`P0 − 1`の支払月（`YYYY-MM`、`card_statement_facts.period`と同じ意味）とする。`N ≥ 2`は解決しない（null）。16日での切替はJCBの公表スケジュール（15日締め、24日前後の確定）に基づくもので、12〜30日のcaptureがまだないため未検証である。根拠は第一connectionの本番captureの集計（日付・金額・加盟店は記録しない）で、月境界の両側で`detailMonth-0`／`detailMonth-1`の全行の利用日がそれぞれ`P0`／`P0 − 1`の請求期間に入り、過去月APIが絶対labelを返した`N = 10, 13`は`P0 − 8`、`P0 − 11`だった。menuと過去月の番号は一様な月offsetではなく、menuの2〜8月は行がなく位置を確定できない。同じ集計で、export linkのない`detailMonth=1`はcollectorが`unconfirmed`と記録する一方、ページ見出しは`カードご利用代金明細(確定分)`で、statement parserはこの矛盾を拒否している（collector側の既知の不一致）。このためその月の行はpending扱いでstatement factがなく、当時のcurrent viewは同一connectionのunconfirmed ledgerを最新の1つしか残さなかった（現在は[未確定明細のslot](#未確定明細のslot2026-09-26)）。
 
 checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査した。statusはsuccess 8 / failed 16、全manifestがLayer A strict contractを通り、success artifactは全件がLayer B registryでexactly one routeを選択してparse成功した。集計はtransaction 181、statement metric 16で、nonempty ledgerとdisplayed past monthを確認した一方、multiple connectionsは未観測だった。object key、hash、body、connection/account identifier、加盟店、日付、金融値、secretは出力・保存・commitせず、R2 write/deleteも行っていない。
 
@@ -358,30 +358,58 @@ checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査し�
 
 collectorは状態をpage自身から決める（`services/collector-myjcb/src/parsers.ts`の`creditStatementState`）。pageは状態を二か所で示す。一つは`カードご利用代金明細(確定分)`のh1で、もう一つはledger headerの金額label（確定は`今回のお支払い金額`、未確定は`ご利用金額`。parserの`CONFIRMED_HEADERS`／`UNCONFIRMED_HEADERS`の4番目）である。
 
-`(確定分)` h1だけが「締め済み明細である」というpage自身の表明である。h1、ledger行、金額labelの読み取りは`packages/domain/src/myjcb-statement-page.ts`の`readMyJcbStatementPage`一か所にあり、collectorと`myjcb-credit-statement-total@1.1.0`が共用する。position規則はcollectorだけが加える。
+`(確定分)` h1だけが「締め済み明細である」というpage自身の表明である。h1、ledger行、金額labelの読み取りは`packages/domain/src/myjcb-statement-page.ts`の`readMyJcbStatementPage`一か所にあり、collectorと明細total parser（`myjcb-credit-statement-total`、1.1.0以降）が共用する。position規則はcollectorだけが加える。
 
-| `(確定分)` h1 | ledger                                          | 記録する状態                                         |
-| ------------- | ----------------------------------------------- | ---------------------------------------------------- |
-| 1個           | 金額labelが`今回のお支払い金額`／なし           | `confirmed`                                          |
-| 1個           | 金額labelが`ご利用金額`                         | 停止（`credit-statement-state`）                     |
-| なし          | ledgerなし                                      | `unknown`                                            |
-| なし          | 行のないledger（labelは問わない）               | `unknown`（ledger artifactは作らない）               |
-| なし          | 行があり、金額labelが`ご利用金額`               | position 1は`unconfirmed`、position 2以降は`unknown` |
-| なし          | 行があり、金額labelが`今回のお支払い金額`／なし | position 1は停止、position 2以降は`unknown`          |
-| 2個以上       | 任意                                            | 停止                                                 |
-| 任意          | 一つのheaderに両label、またはledger間で不一致   | 停止                                                 |
+| `(確定分)` h1 | ledger                                          | 記録する状態                                                                                                                                                                          |
+| ------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1個           | 金額labelが`今回のお支払い金額`／なし           | `confirmed`                                                                                                                                                                           |
+| 1個           | 金額labelが`ご利用金額`                         | pageが証明すれば`confirmed`、しなければ停止（`credit-statement-state`、[amendment (d)](#確定分の見出しとご利用金額のheader2026-09-27adr-0005-の-amendment-d)。未観測、amendment (f)） |
+| なし          | ledgerなし                                      | `unknown`                                                                                                                                                                             |
+| なし          | 行のないledger（labelは問わない）               | `unknown`（ledger artifactは作らない）                                                                                                                                                |
+| なし          | 行があり、金額labelが`ご利用金額`               | position 1は`unconfirmed`、position 2以降は`unknown`                                                                                                                                  |
+| なし          | 行があり、金額labelが`今回のお支払い金額`／なし | position 1は停止、position 2以降は`unknown`                                                                                                                                           |
+| 2個以上       | 任意                                            | 停止                                                                                                                                                                                  |
+| 任意          | 一つのheaderに両label、またはledger間で不一致   | 停止                                                                                                                                                                                  |
 
-`detailMonth=0`は常に`unconfirmed`である。position 0のpageが確定を示した場合は停止する。`unknown`のpageはHTMLだけをevidenceとして保存し、ledger artifactを作らない。position 2以降でh1のないpageを停止にしない理由は、production evidenceにある（read-only、件数だけの集計で、値は記録していない）。各runで取得したposition 7と8は、h1のない行0件のledgerを持っていた（manifestは`confirmed`、`myjcb-credit-statement-total@1.0.1`は12 runすべてで`statement_total_not_confirmed`）。これらを停止にすれば日次runが毎回止まる。`unconfirmed`として保存すれば、同じrunでposition 0より後に記録されるため、connectionで一つの未確定snapshot slotを空のcaptureが占め、position 0の保留行がcurrentでなくなる。締め済み明細はすべてposition 1を通り、そこでh1を持つ（production evidenceでは12 run中12 run）。そのためposition 1では、h1なしで確定labelの行があるpageを停止にする。一方、古いpage一つで日次runを止めることはしない。停止または`unknown`のlogにはh1の個数、ledger数、行数、label codeだけを出し、page本文は出さない。
+`detailMonth=0`は常に`unconfirmed`である。position 0のpageが確定を示した場合は停止する。`unknown`のpageはHTMLだけをevidenceとして保存し、ledger artifactを作らない。position 2以降でh1のないpageを停止にしない理由は、production evidenceにある（read-only、件数だけの集計で、値は記録していない）。各runで取得したposition 7と8は、h1のない行0件のledgerを持っていた（manifestは`confirmed`、`myjcb-credit-statement-total@1.0.1`は12 runすべてで`statement_total_not_confirmed`）。これらを停止にすれば日次runが毎回止まる。`unconfirmed`として保存すれば、同じrunでposition 0より後に記録されるため、当時のread modelではconnectionで一つの未確定snapshot slotを空のcaptureが占め、position 0の保留行がcurrentでなくなっていた。締め済み明細はすべてposition 1を通り、そこでh1を持つ（production evidenceでは12 run中12 run）。そのためposition 1では、h1なしで確定labelの行があるpageを停止にする。一方、古いpage一つで日次runを止めることはしない。停止または`unknown`のlogにはh1の個数、ledger数、行数、label codeだけを出し、page本文は出さない。
 
 export linkは状態の根拠にしない。ただし、確定明細でないpageにexport linkがあれば停止する。exportは`confirmed`として記録されるためである。行を持つledgerのheaderは、その状態のheader一式（4 label）を全部表示していなければならない。これにより、ledger artifactの`headers`はpageで確認済みの事実になる。修正後の最初のrunから、position 1は`confirmed`として保存される。そのledgerは、未確定labelでは読めなかった`ご利用金額`も保持する。
 
 既存captureのraw evidenceとmanifestは書き換えない。解釈はversion付きparserで直す。
 
-- 明細total（`myjcb-credit-statement-total@1.1.0`）: 状態をpageから読み、manifestの状態は照合用として`_kogane.manifestStatementState`に記録する。manifestとpageで「確定かどうか」が異なる場合はwarning `statement_state_differs_from_manifest`を出す（`unconfirmed`と`unknown`の違いはwarningにしない）。失敗させるのはpage自身が矛盾する場合（h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と未確定header）だけで、manifestだけが違う場合は失敗させない。h1のないpageは1.0.1と同じくtotalを出さない。1.0.1で`parser_rejected`だったposition-1 pageは、repair laneの再parseまたはbounded replayで、正確な支払日を持つtotalを公開する。1.0.1のerror runは履歴として残る。
+- 明細total（`myjcb-credit-statement-total@1.1.0`）: 状態をpageから読み、manifestの状態は照合用として`_kogane.manifestStatementState`に記録する。manifestとpageで「確定かどうか」が異なる場合はwarning `statement_state_differs_from_manifest`を出す（`unconfirmed`と`unknown`の違いはwarningにしない）。失敗させるのはpage自身が矛盾する場合（h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と未確定header。1.2.0以降はpageが証明しない未確定headerだけ）だけで、manifestだけが違う場合は失敗させない。h1のないpageは1.0.1と同じくtotalを出さない。1.0.1で`parser_rejected`だったposition-1 pageは、repair laneの再parseまたはbounded replayで、正確な支払日を持つtotalを公開する。1.0.1のerror runは履歴として残る。
 - ledger（`myjcb-credit-ledger@1.1.2`）: 同じmoduleのdigest変更によるversion bumpだけで、挙動は変えない。parserは一artifactしか見ない。`credit-ledger-NN.json`の`state`はcollectorの判断であり、`headers`もその判断から書かれていて、pageの証拠を含まない。確定pageを未確定labelで読んだため、`ご利用金額`も保存されていない。さらにread modelのsnapshot区分は、manifestが書いたappend-onlyの`observation_artifact_metadata.statement_state`を使う。したがってparserで行の状態を直すことはできない。既存のposition-1行は、当時collectorが述べた記録として`unconfirmed`のまま残る。
-- 既存行は、修正後collectorの最初の成功runでcurrentでなくなる。connectionの未確定captureは一つのsnapshot slotを共有し、その最新は以後position 0になる（例外は、position 1がh1なしで`ご利用金額`の行を示す場合だけで、production evidenceでは観測していない）。同じ明細はposition 1で`confirmed`として別slot（`detailMonth-1`）に再取得される。以前はposition 0と1が同じslotを奪い合い、片方しかcurrentにならなかった。purchase laneはcurrentでなくなった`authorized` eventを`unknown`へretireし、確定行を`captured`として新しいeventで認識する。状態はfingerprintとexternal idに含まれるため、同じeventのreviseにはならない。retireされた`unknown` eventはlegを持たないので、同じ購入が二重に数えられることはない。
+- 既存行は、修正後collectorの最初の成功runでcurrentでなくなる。当時、connectionの未確定captureは一つのsnapshot slotを共有し、その最新は以後position 0になった（現在の規則は[未確定明細のslot](#未確定明細のslot2026-09-26)）（例外は、position 1がh1なしで`ご利用金額`の行を示す場合だけで、production evidenceでは観測していない）。同じ明細はposition 1で`confirmed`として別slot（`detailMonth-1`）に再取得される。以前はposition 0と1が同じslotを奪い合い、片方しかcurrentにならなかった。purchase laneはcurrentでなくなった`authorized` eventを`unknown`へretireし、確定行を`captured`として新しいeventで認識する。状態はfingerprintとexternal idに含まれるため、同じeventのreviseにはならない。retireされた`unknown` eventはlegを持たないので、同じ購入が二重に数えられることはない。
 
 release noteと再parse手順は`docs/observations.md`の「MyJCB statement state from the page (statement parser 1.1.0)」にある。
+
+## 明細の月（2026-09-26）
+
+providerは最新の締め済み明細をposition 1に置き、次の明細が締まるとposition 2へ移す。collectorは過去月APIがlabelしない月のperiodを`detailMonth-N`（position）で記録していた。periodはledger parserの行fingerprint、つまりexternal idとcard purchase recognitionのkeyに入るため、同じ明細の行が毎月新しいkeyになり、purchase laneは同じ購入をretireして認識し直していた。また、read modelは確定captureをperiodごとのslotに分けていたため、同じ明細がposition 1とposition 2の両方のslotでcurrentになり得た（二重計上）。
+
+collectorは確定明細pageが名乗る月をperiodにする（`services/collector-myjcb/src/parsers.ts`の`creditStatementPeriod`）。確定明細pageは`(確定分)` h1を持ち、`<h2>YYYY年M月お支払い分のカードご利用明細</h2>`、または支払日つきの`<h2>YYYY年M月D日(曜)お支払い分のカードご利用明細</h2>`で支払月を名乗る（`myjcb-credit-statement-total`が読むのと同じh2。下の「支払日つきの明細見出し」）。collectorはその月を`YYYY-MM`としてdetail、ledger、exportのperiodに記録する。positionはartifact keyとledgerの`detailMonth`に残る。相対labelを収集時に解決するのではなく、page自身が述べる絶対月を記録する。
+
+- 過去月APIがlabelする月は、従来どおり`settlementYM`をそのまま使う。pageも月を名乗る場合は同じ月でなければ停止する（`credit-statement-period`）。
+- それ以外の確定pageは、名乗る月がない、または二つ以上ある場合に停止する（`credit-statement-period`）。statement parserも同じpageを拒否する。
+- 未確定のpageは月を名乗らないため、`detailMonth-N`のままである。`unknown`のpageも月を名乗らず、amendment (h)以降はperiodを書かない（下の「同じ page を示す複数の position」）。
+- 停止logには`detailMonth`、名乗った月の個数、API labelの有無だけを出し、月そのものは出さない。
+
+ledger parserは変更しない（version bumpなし）。同じ明細の行はどのpositionでも同じexternal idになる。read modelは確定captureのslotを明細（支払月）にする（`packages/read-model/src/sql.ts`の`myjcbStatementMonth`）。絶対period（`YYYY-MM`、`YYYYMM`、`YYYY年M月お支払い分`）はその月、`detailMonth-0`／`detailMonth-1`は`relative-statement-period-v1`で`fetched_at`から解決した月になる。一つの明細のcaptureは一つのslotに入り、最新のものだけがcurrentになる。規則が置けない確定`detailMonth-N`（N ≥ 2）はpositionであって明細を名指さないため、currentにしない。
+
+deploy時、`detailMonth-1`として確定記録された明細（#248以降のcapture）は、月を名乗る最初のcaptureに置き換わる。その明細の認識済み行は一度だけretireされ、新しいkeyで一度だけ認識される。二重計上はない。保留行、API labelの月、それ以降の月のkeyは変わらない。processor（read model）をcollectorと同時かそれより先にdeployする。設計比較（read modelだけのkey、parser release、collector）と理由は`docs/observations.md`の「MyJCB statements keep their identity when their position moves」にある。
+
+## 未確定明細のslot（2026-09-26）
+
+15日の締めから確定（24日前後）までの間、providerは未確定明細を二つ表示する。position 0は利用が続いている周期、position 1は締め済みで未確定の周期であり、collectorはそれぞれ`detailMonth-0`／`detailMonth-1`の`unconfirmed`として記録する。以前のread modelはconnectionの未確定captureをすべて一つのsnapshot slotに入れていたため、二つのうち新しい方しかcurrentにならなかった。もう一方の明細の保留行は一覧にも認識にも出ず、二つのcaptureの公開順が入れ替わるたびにpurchase laneは新しい情報なしにeventをretireして認識し直していた。
+
+read modelは未確定captureも明細（支払月）で区切る（[ADR 0016](../adr/0016-myjcb-pending-statement-slots.md)、`packages/read-model/src/sql.ts`の`myjcbStatementSlot`と`MYJCB_LEDGER_SNAPSHOT_CTES`）。slotは`relative-statement-period-v1`で`fetched_at`から導く支払月（`detailMonth-0`＝`P0`、`detailMonth-1`＝`P0 − 1`）で、状態ごとのpartitionに入る。同じ明細の未確定captureと確定captureは同じ月の別partitionである。未確定captureは、その月の最新の未確定captureであり、かつそのposition（artifact key `<connection>/credit-ledger-NN.json`）の最新ledger capture（状態を問わない）であるときだけcurrentになる。
+
+- 同じ日の二つの未確定明細は両方currentになり、後のcaptureはその明細だけを置き換える。
+- 明細が確定し、position 1が`confirmed`として取得されると、同じreadで未確定captureはcurrentでなくなる。二つが同時にcurrentになることはない。状態はexternal idに含まれるため、purchase laneは保留eventを一度retireし、確定行を`captured`として一度認識する。
+- 一つのpositionの二つのcaptureは、規則がどの月を与えても同時にcurrentにならない。16日の切替（未検証）が誤っていても、同じpositionの15日と16日のcaptureで同じ明細が二重にcurrentになることはない。ただしposition間を結ぶのは月だけである。切替日が誤っていて、明細がposition 1へ移る日にposition 1がposition 0より先に公開されると、position 0の最後のcaptureとposition 1の新しいcaptureが別の月になり、position 0が再び公開されるまで同じ明細が二重にcurrentになる（逆の場合は同じ遅延の間、明細が隠れる）。二つの切替日の間の未確定captureは誤った月で区切られる。
+- 一つのaccountに解決される別connection間でも、保留行はそのpositionのaccount内で最新のrunから来なければならない（card usageのstep 3）。置き換えられたconnectionの未確定captureは新connectionのcaptureと並んでcurrentにならない。
+
+recognition keyは変わらない（keyは行のexternal id）。position 0からposition 1へ移る未確定明細は、labelが行のfingerprintに入るため16日に一度新しいkeyになる。これは既知の制約で、ここでは変えない。保存済みevidenceとlabelは書き換えず、migrationも不要である。deploy時、最新captureでposition 1が未確定なら、position 0の保留行がcurrentになり認識される。testは`packages/read-model/test/card-usage.test.ts`（「two pending MyJCB statements are two slots」）と`services/processor/test/myjcb-statement-identity.test.ts`にある。
 
 ## 共通 DATA R2 への切替 (U09)
 
@@ -392,3 +420,267 @@ per-source bucket + importer 経由。`shared` にすると run は `packages/co
 中央と同じ redaction 不変条件を再検査する。connection は terminal の unit として
 分離され、human-required は unit の状態として記録するだけで再 login はしない。
 deploy 順と rollback は `docs/collection.md` の該当節を参照。
+
+### 口座名義（2026-09-27、ADR 0029 の amendment 2）
+
+確定明細の page には 「カード情報」 表（縦の th／td）があり、口座名義の行は provider が一部を `*` で隠した口座名義人の名前である。保存する page はこの行を provider の表示どおりに残す（[ADR 0029 の amendment 2](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)）。`redactedStatementHtml` は sanitizer（script などの要素、URL・session・credential の属性、card 番号の除去）だけを行い、`assertRedactedHtml` は口座名義の cell を検査しない。terminal の redaction step は `myjcb-sanitizer` v3 である。
+
+経緯：[#333](https://github.com/risu729/kogane/pull/333) の merge から amendment 2 までは、口座名義の `td` の中身を `[redacted:name]` に置き換え、manifest の page の entry に `redactedFieldCount` を書き、step は `myjcb-sanitizer` v2 だった。その間に保存した page は marker のままで、書き換えない（append-only。名前は保持していない）。#333 より前に保存した page は口座名義を含む。
+
+### 共通 DATA R2 の manifest と明細メタデータ（2026-09-26、ADR 0025）
+
+ledger と明細 page の parser が使う statement state と period は、run の collector manifest から processor の metadata extractor（`services/processor/src/metadata-extractors/myjcb.ts`）が読む。terminal にはこれらの field がない。importer 時代の中央 manifest は各 artifact に `connectionId` と `filename` を持っており、extractor はその二つで entry を探していた。collector が共通 bucket に書く manifest の entry は `dataset`、`key`（`objects/<2 hex>/<sha256>`）、`mediaType`、`sha256`、`bytes` と、記録した場合の `statementState`／`period` だけを持つ。そのため共通 R2 の run はすべて `manifest_artifact_mismatch` で parse に失敗していた。
+
+extractor は二つの形を読む。importer 形（どれかの entry が `connectionId` か `filename` を持つ manifest）は従来どおり名前で探し、挙動は変えない。変更前の extractor を固定した differential test で同一性を確認している。共通形では、artifact と同じ digest、size、content-addressed key を名指す entry を探し、その entry の `statementState` と `period` を使う。connection は artifact key の先頭で、manifest の `connections` にあるものでなければならない。同じ bytes が複数の entry にある場合、全 entry の値が一致するときだけ使い、一致しなければ `manifest_artifact_ambiguous` で止める。位置や名前から値を推測しない。
+
+共通形の manifest には、importer 形が持っていた `connectionId`、`filename`、`ordinal` がない。extractor はどちらの形でもこれらを出力しない。connection と position は従来どおり artifact key から読む。entry の `mediaType`（parameter 付き）は使わないので、`credit-menu.html` は引き続き parser に届かない（ADR 0022）。
+
+ADR 0026 以前の collector は、成功した connection の unit coverage も `partial` と書いていた（card が見せる明細期間は一部だけのため）。registration はこれを unit outcome `partial` にし、`observation_fetch_runs` ではその run が `partial` になる。run scope でも `unit-independent-v1` でも parse 対象にならないので、その run は metadata extractor に届く前に `not_eligible` で止まる。これは次節で解消した。
+
+### connection の unit coverage（2026-09-26、ADR 0026）
+
+unit の coverage は「この run が集めようとしたものを、この unit が欠けなく取得したか」を表す。card の履歴全体についての主張ではない。履歴についての主張は run の `coverageStatus` が持ち、成功 run でも `partial` のままである（registration は記録するだけで、outcome を導かない）。
+
+成功した connection の unit は `complete` と書く。成功した connection は、credit menu と過去月 response が列挙した月をすべて取得している。各月について redact 済み page と、状態を示す page から作る ledger をすべて保存する。page が示す export は記録するだけで取得しない（下の amendment (b) の節）。状態が `unknown` の page は規則どおり HTML だけを保存する（ADR 0005）。これは欠落ではない。ただし `unknown` の page に ledger 行がある場合（見出しがなく position 2 以降に行がある page）、その行は HTML の中にしかなく、どの parser も読まない。この月は欠けなく取得できていないので、`collectCredit` がその月を数え、`collectConnection` は connection を `partial` と報告する。unit は `collector_partial` 付きの `partial` になり、failure がなくても run は `partial` になる。月、export、parse のどれかが失敗したときの扱いは次節のとおりである。plan は `partial` の unit を広げない。
+
+`complete` の unit は registration で unit outcome `success` になる。importer 時代と同じである。成功 run は `observation_fetch_runs` で `success` になり、parse job が作られ、end to end で parse される（`services/processor/test/myjcb-shared-r2.test.ts`）。
+
+制限：`complete` は、一つの `detail.html?detailMonth=N&output=web` がその月の全行を持つことを前提にしている。行数上限や page 分割は未確認（上の未確認事項）で、collector は page の行と page が示す合計を照合していない。GLOBAL PASS を `partial` のままにしている理由と同じ未確認事項だが、MyJCB は importer 時代から connection を `success` と記録しており、これまでの parse はすべてこの前提に立つ。観測ではなく前提として記録する。
+
+制限：ADR 0026 より前に書かれた terminal は変更できず、processor の eligibility 規則も緩めないので、その run は `partial`／`not_eligible` のまま parse されない。ADR 0022 の contract v2 でも変わらない（unit outcome は同じ terminal から導かれる）。MyJCB の明細は次の取得で再び見える snapshot なので、card がまだ見せている月の確定明細は ADR 0026 後の最初の成功 run で取り戻せる。失われるのは、その期間の未確定だけの履歴である。後の取得までに消えた未確定行（取消、または確定前の変更）は、parse された run のどれにも入らない。最初の対象 run までは importer の取得分が current のままである（ADR 0014）。
+
+### connection の停止と取得済みの月（2026-09-27、ADR 0005 の amendment）
+
+以前は、月の取得、状態判定、ledger parse、export のどれかが失敗すると connection 全体を捨てていた。その connection は artifact を一つも残さず、terminal は `collector_failed`、collector manifest は `collector-failure` としか書かなかった。どの段階で止まったか、どの月まで取れていたかは保存された evidence に残らず、期限のある Worker log にしかなかった。
+
+現在の collector は月を `detailMonth` の昇順に一つずつ取得する。一つの月は丸ごと保存するか、何も保存しないかのどちらかである。page、ledger、export がすべて読めた時点で初めて connection の artifact に加わる。月の取得、状態判定、明細の月、ledger parse、export のどれかが失敗すると、connection はその月で止まる（[ADR 0005 の amendment](../adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months)）。credit menu、過去月 response、それより前の月、`discovery.json` は保存し、それ以降は何も読まない（後の月もデビットも読まない）。connection は `partial` になり、unit は停止段階の code 付きの `partial` になる。collector manifest の connection には `stopCode`、`stopPosition`（止まった `detailMonth`）、`capturedMonthCount`（保存した月の数）を書き、failure には `{ connectionId, operation: "collect", code, position }` だけを書く。
+
+停止 code は閉じた一覧（`services/collector-myjcb/src/types.ts` の `CONNECTION_STOP_CODES`）である。
+
+| code                                                       | 段階                                                 | 保存するもの                              |
+| ---------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------- |
+| `human_required`                                           | 人の操作が必要                                       | なし（unit は `unknown`）                 |
+| `login`                                                    | login、passkey、session 復元                         | なし                                      |
+| `discovery`                                                | mypage の card 列挙                                  | なし                                      |
+| `credit_menu`、`credit_first_detail`、`credit_past_months` | credit menu、最初の明細 page（識別子）、過去月 API   | なし                                      |
+| `credit_menu_group_unrecognized`                           | credit menu の見出しが観測した三つのどれでもない     | なし                                      |
+| `month_fetch`、`month_parse`                               | 月の page の取得、page の読み取り                    | 止まった月より前の月（unit は `partial`） |
+| `credit_statement_state`、`credit_statement_period`        | 状態の矛盾、明細の月                                 | 同上                                      |
+| `credit_page_repeated`                                     | 前の position と同じ page が違う状態か period になる | 同上（その page は保存しない）            |
+| `ledger_parse`                                             | ledger header、行の cell                             | 同上                                      |
+| `export_fetch`                                             | CSV／PDF／OFX の取得と検証                           | 同上                                      |
+| `debit`                                                    | デビット明細                                         | なし（共通 bucket はデビットを拒否）      |
+| `no_route`                                                 | mypage に credit もデビットもない                    | なし                                      |
+| `unclassified`                                             | 段階を名乗らない error                               | なし                                      |
+
+各停止条件（`StopConditionCode`）は `connectionStopCode` の `Record` で一つの段階に対応する。新しい条件は段階を決めない限り compile できない。manifest の connection と failure は閉じた field だけから組み立て直し、一覧外の code（`manifest_stop_code_invalid`）や `detailMonth` でない位置（`manifest_stop_position_invalid`）は plan を拒否する。error message、HTTP body、provider の文言、金額は保存も log もしない。停止 log（`myjcb-credit-month-failed`）は `detailMonth`、条件 code、停止 code、保存した月の数だけを出す。
+
+run のすべての connection が何も保存しなかった場合、run は `failed` で terminal だけを書く（従来どおり）。それでも unit は書くので、各 connection の停止 code は terminal に残る。registration はこの run を従来どおり `provider_run_failed` として記録するだけで、seal しない。止まっていない connection 以外がすべて同じ段階で止まった場合、run の `safeErrorCode` はその停止 code になる（`human_required` と同じ扱い）。
+
+registration と eligibility は変えない。停止 code 付きの `partial` unit は unit report `failed` になり、run は `observation_fetch_runs` で `partial`、parse job は `not_eligible` である。取得済みの月は catalogue され seal されるが、parse されない。変わるのは、evidence と原因が残ることである。
+
+制限：これ以前の terminal は `collector_failed` のままで、月も残っていない（terminal は変更できない）。停止 code は collector 側の段階を示すだけで、provider が何を意味したかは示さない。
+
+`export_fetch` は、下の節のとおり Worker が export を取得しなくなったため、現在の Worker では起きない（`collectCredit` の `exports: "fetch"` でだけ起きる）。`credit_statement_state`、`credit_statement_period`、`ledger_parse` で止まった場合は、止まった月の page も保存する（下の節）。
+
+### ledger header の三種、export link、停止した page（2026-09-27、ADR 0005 の amendment (b)）
+
+2026-09-27 に owner の agent が一つの connection の live page を構造だけ（要素数、header label、link の形。値は記録しない）調べた。menu は `detailMonth` 0..8 の 9 link を持つ。
+
+| `detailMonth` | ledger       | header label                                              | export link                | collector の扱い                              |
+| ------------- | ------------ | --------------------------------------------------------- | -------------------------- | --------------------------------------------- |
+| 0             | あり、行あり | `ご利用日 / ご利用先など / 支払区分 / ご利用金額`         | なし                       | `unconfirmed`、ledger を作る                  |
+| 1、2          | あり、行あり | `ご利用日 / ご利用先など / 支払区分 / 今回のお支払い金額` | PDF、CSV、OFX（相対 href） | `confirmed`、ledger を作る、export は記録だけ |
+| 3–6           | なし         | —                                                         | なし                       | `unknown`、page だけ                          |
+| 7             | あり、空     | `ご利用日 / ご利用先など / 支払区分 / ご利用金額`         | なし                       | `unknown`、page だけ（欠落なし）              |
+| 8             | あり、空     | `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`   | なし                       | `unknown`、page だけ（欠落なし）              |
+
+確定月（1、2）の 4 番目の label は、保存された確定 page のすべてで `今回の<br class="pc-none">お支払い金額` と `br` で分かれている（round 5、2026-09-28。下の amendment (f)）。position 7 と 8 の「空」は、`content` 行が一つだけで、その `item-cell` に `div.cell.w-100per` 「ご利用明細はございません。」 が一つだけある形である。
+
+同じ日の二度目の構造調査（round 4）で、position 7 と 8 が月ではないと分かった。menu の 9 link はすべて文言 「明細を見る」 で、DOM 順は 0、1、7、8、2、3、4、5、6。月名は link ではなく同じ box の見出しにある。0 と 1 は h2 「最新のご利用明細」、2〜6 は 「過去の明細」 の下にあり、これが月である。7 と 8 は h2 「ボーナス#回払い・ショッピングスキップ払い」 の下にあり、7 は ボーナス払い、8 は ショッピングスキップ払い（box に月名なし）の支払予定 page である。position 8 の page は h1 「ショッピングスキップ払いご利用明細(未確定分)」 を持つ。ledger はどの page でも `div.detail-list-01` の grid で、`<table>` ではない（collector も `<table>` に依存しない）。三つ目の header の live の `div.head` は 3 cell で、2 番目の cell が 「ご利用先など」 と 「お支払日」 を二行で持つ。最初の調査はこれを 4 label と書いた。
+
+amendment (b) の時点の collector は `detailMonth` の position を数え、月と支払予定 page を区別しなかった。7 と 8 も月として取得、保存され、`periodCount` と `capturedMonthCount` に数えられ、読まなければ `unreadMonths` に入った。現在は menu の見出しで区別する（下の「credit menu の group と支払予定 page」、amendment (c)）。period は `detailMonth-7`／`detailMonth-8` の相対 label で、どの reader も暦月に解決しない（解決するのは `detailMonth-0` と `-1` だけ）。
+
+**export link。** 確定月は `detailDbPdf.html?output=pdf`、`detail.html?output=csv`、`detail.html?output=money` を、`detailMonth` を名乗らない相対 href で持つ（月はその link がある page の月である）。以前の `discoverCreditExports` は href を origin だけに対して解決したので `/detail.html` になり、一度も一致しなかった。保存済みのどの run も export を 0 件と記録したのはこの bug で、「調べた connection はどの月にも export link を持たない」（上の明細状態の判定）は誤りだった。現在は detail page 自身の URL（`https://my.jcb.co.jp/iss-pc/member/details_inquiry/detail.html`）に対して解決するので、相対、`./`、root 相対、絶対の href が同じく読める。MyJCB の origin にあり、export の path（`/iss-pc/member/details_inquiry/` の `detail.html` か `detailDbPdf.html`）と `output`（`csv`、`money`、`pdf`）を持つ link を数える。観測どおり `detailMonth` を名乗らない link は、その link がある page の月の export とする。`detailMonth` を名乗る link は、その月をちょうど名乗る場合だけ数える（以前は `Number(null)` により、月のない link を month 0 のものとし、他の月では数えなかった）。
+
+Worker は見つけた export を取得しない。共通 bucket は `credit-csv`／`credit-pdf`／`credit-ofx` を拒否する（`artifact_dataset_unobserved`）ので、取得すれば確定月のある run はすべて plan の段階で失敗し、terminal を書かない。そこで collector manifest の connection に `exportOffers: [{ position, kinds }]`（kind は `csv`、`pdf`、`ofx`）として記録するだけにした。offer は unit を `partial` にしない。確定明細でない page に export link があれば停止する規則（`credit_statement_state`）は変えておらず、発見を直したことで live page でも働くようになった。
+
+**三つ目の header。** `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` は、読む二種の金額 label のどちらも持たない。ショッピングスキップ払いの支払予定 page でだけ観測されたので、code は `scheduled_payments_page` とした。行の意味は確認されていないので、statement としては読まない（ADR 0004）。header の文字列から空白を除いたものに `ご利用日`、`ご利用先など`、`お支払日`、`今後のお支払い金額` がすべてあり、`支払区分`、`今回のお支払い金額`、`ご利用金額` のどれもない header をこの型とみなす（`scheduledLedgerRowCount`）。cell 単位では比べないので、観測された 3 cell の形も 4 cell の形も同じく読む（どちらも行は読まない）。
+
+- 行があれば、どの position でもその position を「取得したが読まない」ものにする。状態を読む前に判定し、page を `unknown` の evidence として（amendment (h) 以降は period なしで）保存し、ledger を作らず、export も取得せず、次の月へ進む。以前は、position 0 では未確定 header 一式がないので `ledger_parse`、position 1 では見出しなしなら `credit_statement_state`、見出しがあればどの position でも確定 header 一式がないので `ledger_parse` で停止し、見出しのない position 2 以降だけは状態を示さない行として読まずに進んだ（現在の `rows_unstated`）。
+- 同じ page に別の ledger があっても、月全体を読まない。
+- 空なら何も欠けないので、従来どおり読む（position 8 の観測どおり）。
+- 三種のどれでもない header で行があれば、従来どおり停止する。
+- 月の position の page にこの header の行があれば、connection は `partial` で、run は parse されない。行が月の明細にも現れるかは観測されていないので、欠落として扱う（INV05）。menu が支払予定 page として示す position は月ではなく、この規則の対象外である（下の amendment (c)）。
+
+読まない月は manifest の connection に `unreadMonths: [{ position, code }]` として書く。code は閉じた一覧（`UNREAD_MONTH_CODES`）で、`scheduled_payments_page`（三つ目の header）と `rows_unstated`（position 2 以降で状態を示さない page の行。以前から数えていたが名前がなかった）である。読まない月のある connection は `partial` になる。読まない月がすべて `scheduled_payments_page` で、connection が止まっていなければ unit の `safeErrorCode` は `scheduled_payments_page`、それ以外は従来どおり `collector_partial` である。manifest の `failures` には書かない（停止ではない）。log は `myjcb-credit-month-unread` に position と code だけを出す。registration と eligibility は変えない。unit report は `failed`、run は `partial`、`not_eligible` で、読まない page は catalogue と seal はされるが、どの parser も読まない。
+
+**停止した page。** `credit_statement_state`、`credit_statement_period`、`ledger_parse` で止まった場合、止まった月の page を redact して `credit-detail`（状態 `unknown`、ledger なし、export なし。amendment (h) 以降は period なし）として保存する。redaction は script や属性を除くが本文は残すので、保存した他の明細 page と同じく、ledger の後の 「カード情報」 の表も残る。`capturedMonthCount` はそれより前の月の数のままで、`stopPosition` がその page の月を示す。停止 log には `stopPageKept` を加えた。statement page として読めなかった page（`month_parse`）は従来どおり保存しない。
+
+**menu が先。** `detailMenu.html` を経ずに `detail.html?detailMonth=N` を取得すると別の page（h1 `カードご利用明細一覧`、ledger なし）が返り、menu を経ると明細 page が返ることが観測された。`collectCredit` は同じ session で `detailMenu.html` を一度読み、最初の月、過去月 API、残りの月の順に読む。この順序は以前からで、test で固定した。
+
+**通信エラー page。** 連続して取得すると 「通信エラーが発生しました」 の page が返ることが観測された（回数や解除の条件は不明）。provider による停止として記録するが、collector は判定しない。page の構造が記録されておらず、通常の page が同じ文言を（隠れた dialog などで）持つかも分からないため、判定規則は推測になる。最初の明細 page として返れば識別子がないので月の前で止まる（`credit_first_detail`）が、それ以降の月に返れば ledger のない `unknown` の月として保存され、欠落なしと読まれる。
+
+制限：
+
+- 2026-09-25 と 09-26 の run は position 1 で `credit-ledger-headers` により止まり、artifact を残さなかった（最初の amendment の前）。09-27 の live の position 1 は確定の形で、通るはずである。position 1 の page の形は時刻か session によって変わる。その夜の page は保存されていないので、原因は確かめられない。以前の run が保存した position 1 の page（round 4 で label の数だけを数えた）は `(確定分)` の見出しを持つが `今回のお支払い金額` をどこにも持たず、`ご利用金額` だけを持つ。この ADR の規則は、行のあるこの形の page で停止する（確定の ledger は確定 header 一式を表示しなければならない、`ledger_parse`）ので、これが最も考えられる原因だが、確認はされていない。次に同じ停止が起きれば、停止した page が保存される。**訂正（2026-09-28、amendment (f)）：** この数え方は文字列一致の誤りだった。`ご利用金額` は各行の展開部（`item-more`）の label で、`今回のお支払い金額` が 0 回だったのは head の label が `br` で分かれていたためである。停止の原因は collector の header 照合（下の amendment (f)）だった。
+- 三つ目の header の行の意味、export の中身（2026-08-31 に確認、保存はしない）、menu を月ごとに読み直す必要があるかは未確認である。
+
+### credit menu の group と支払予定 page（2026-09-27、ADR 0005 の amendment (c)）
+
+round 4 の構造調査で、credit menu（`detailMenu.html`）の 9 link は三つの見出しの下の card box にあることが分かった（round 4 はこれを三つの `h2` と記録したが、round 9 で支払予定の見出しは `h3` と分かった。下の amendment (j)）。link の文言はすべて 「明細を見る」 で月名を持たないので、月か支払予定 page かは見出しだけが示す。
+
+| 見出し（空白を除いて比較）                    | position（観測） | collector の扱い                                                                                          |
+| --------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------- |
+| 「最新のご利用明細」                          | 0、1             | 月。unit の coverage に入る                                                                               |
+| 「過去の明細」                                | 2–6              | 月。unit の coverage に入る                                                                               |
+| 「ボーナス#回払い・ショッピングスキップ払い」 | 7、8             | 支払予定 page。保存する。ショッピングスキップ払いの page だけを読む（amendment (e)）。coverage に入らない |
+| 上のどれでもない見出し、見出しの前の link     | —                | `credit_menu_group_unrecognized` で最初の月の前に停止する                                                 |
+
+`#` は数字で、調査は値を記録していない。collector は 1 桁以上の数字（半角か全角）を受け入れ、それ以外の文字は完全一致で比べる。link は文書順でその前にある最後の `h2` か `h3` に属する（amendment (j) から。それまでは `h2` だけを見ていた）。`/iss-pc/member/details_inquiry/detail.html` への `detailMonth`（1–2 桁）付きの link だけを数え、menu の URL に対して解決する（相対、root 相対、絶対の href を同じく読む）。同じ position が両方の group にある場合も停止する。停止 log（`myjcb-credit-menu-groups`）は link の数だけを出し、見出しの文字列は出さない。
+
+- **月**：月の group の position と、過去月 API が available とした position を従来どおり読む。`periodCount` と `capturedMonthCount` は月だけを数える。過去月 API が支払予定 page の position を available とした場合は（観測されていない）、どちらとも決めず `credit_past_months` で停止する。
+- **支払予定 page**：最後の月の後に昇順で一度ずつ取得し、何を表示していても redact して丸ごと `credit-schedule-NN.html`（dataset `credit-schedule`、状態 `unknown`、period `detailMonth-N`）として保存する。行、状態、link は読まない。`credit-detail-NN.html` ではないので registration はどの parser dataset も与えず、catalogue と seal だけされ、parse job は作られない。（amendment (e) から、h1 がショッピングスキップ払いの page だけは `credit-skip-payment-NN.html` として保存し、parser が読む。下の節を参照。）collector manifest の connection には `schedulePages: [{ position, code }]`（code は `scheduled_payments_page`＝保存した、`schedule_page_fetch`＝取得か decode に失敗し何も保存しなかった）と `schedulePageCount`（保存した数）を書く。取得の失敗は停止ではなく、`failures` にも `unreadMonths` にも入らない。log は `myjcb-credit-schedule-page-failed` に position と code だけを出す。月で停止した connection は支払予定 page を読まない。
+- **coverage**：月をすべて丸ごと読めば connection は `success`、unit は `complete` で、支払予定 page に行があっても、取得に失敗しても変わらない。以前は position 8 に行があるかぎり unit が `partial` になり、MyJCB の run は一つも parse されなかった。
+
+制限：支払予定 page の行の意味は未確認で、amendment (c) の時点ではどの parser も読まなかった（ショッピングスキップ払いの page は amendment (e) で独自の dataset として読む）。position 7（ボーナス払い）は行のある状態では観測されていない。保存される menu は redact で `href` を除くので、保存された menu からはどの link がどの position かは読めない。見出しが変われば、新しい見出しを観測して記録するまで connection は最初の月の前で止まり、何も保存しない。
+
+### 確定分の見出しとご利用金額のheader（2026-09-27、ADR 0005 の amendment (d)）
+
+**訂正（2026-09-28、amendment (f)）：** 次の段落の観測は文字列一致の誤りだった。保存されたどの確定 page も head は `今回の<br class="pc-none">お支払い金額` で、`ご利用金額` の head を持つ確定 page は観測されていない（ADR 0004 では未観測の形）。この節の受け入れ規則は code に残るが、production のどの page も通っていない。残す理由は、削除すると共有 module（`myjcb-statement-page.ts`）の digest が変わり、観測を何も変えずに MyJCB の四つの parser すべての新 release と再 parse が必要になるためである。次に MyJCB の parser を別の理由で release するときに削除する。
+
+round 4 の構造調査（label の数だけ、値は記録しない）で、以前の run が保存した position 1 の page は `(確定分)` の見出しの下に未確定の header 一式（`ご利用日 / ご利用先など / 支払区分 / ご利用金額`）を持ち、`今回のお支払い金額` は 0 回だった。同じ日の live の同じ position は確定の header だった。どちらの label を出すかは夜か session によって変わり、その理由は分からない。page 自身は合計を `div.detail-box-price-01 dl` の dt 「YYYY年M月D日(曜)お支払い金額合計」 と dd 「#,###円」 で示す。
+
+4 番目の label は summary の金額が何かを示す。`今回のお支払い金額` ならその明細の支払額、`ご利用金額` なら利用額である。分割、リボ、ボーナスの行では二つが異なるので、label だけでは `ご利用金額` を支払額と読めない。そこで owner は、page 自身が証明する場合だけ受け入れると決めた（`readMyJcbStatementPage` の `usageHeader`）。
+
+| header の組み合わせ        | 条件                                                | 状態                                      | ledger に保存する header          | 行の金額                                                |
+| -------------------------- | --------------------------------------------------- | ----------------------------------------- | --------------------------------- | ------------------------------------------------------- |
+| h1 と `今回のお支払い金額` | なし                                                | `confirmed`                               | 確定の一式                        | 今回のお支払い金額（`current-statement-payment`）       |
+| h1 と `ご利用金額`         | 全行が1回払い、かつ行の合計がお支払い金額合計に一致 | `confirmed`                               | 未確定の一式（page が示すとおり） | ご利用金額（`confirmed-usage`）。行の支払額は記録しない |
+| h1 と `ご利用金額`         | 上記を満たさない                                    | 停止（`credit-statement-state`）          | —                                 | —                                                       |
+| h1 なし、`ご利用金額`      | なし                                                | 従来どおり（position 1 は `unconfirmed`） | 未確定の一式                      | ご利用金額（`unconfirmed-usage`）                       |
+
+- **支払区分。** 行の支払区分は、card purchase recognition と同じ規則（`packages/domain/src/myjcb-amounts.ts` の `myjcbSinglePayment`）で、`summaryCells[1]` の 「ご利用先など／支払区分」 の結合 cell から読む。支払回数が一つ以上あり、すべて 1 で、`分割`、`リボ`、`ボーナス`、`キャッシング` を含まないことが条件である。書き方は `1回払`（production の全行）、`1回払い`、`一回払い` と全角数字で、新しい label は加えていない。満たさない行、支払区分のない cell、空の cell、4 cell で読めない行があれば `usage_header_payment_type_unproven` で拒否する。
+- **合計。** 行の金額は、3 番目と 4 番目の cell のうち exact な円として読める一つ（ledger parser と同じ読み方）である。`sumQuantities` で exact に足し、page の一つの 「…お支払い金額合計」 と比べる。合計がない、二つ以上ある、読めない場合は `usage_header_total_missing`、行の金額が読めない、または合計と一致しない場合は `usage_header_total_mismatch` で拒否する。返金行は符号付きで足す。行のない ledger は合計 0 だけを証明する。
+- **行の場所。** 行はすべて最初の `detail-list-01` になければならない。collector が保存する ledger はそれだけなので、ほかの `detail-list-01` に行があれば、合計が一致しても `usage_header_rows_outside_first_ledger` で拒否する（保存した ledger に行が欠けたまま合計を公開しないため）。行のない二つ目の ledger は影響しない。この確認は支払区分と合計より先に行う。
+- 拒否の理由は閉じた code（`USAGE_HEADER_REFUSALS`）で、停止 log に `usageHeader` として出す。金額や provider の文字列は log に出さない。
+- `myjcb-credit-ledger@1.2.0` はこの ledger の金額を利用額として読み（`usageAmountText`）、`paymentAmountText` を記録しない。card purchase recognition は利用額と支払額の一致を必要とするので、この行は `payment_split_unknown` で除外され、pending-to-posted の照合にも使われない。明細の支払額は page の合計で、`myjcb-credit-statement-total@1.2.0` が `statementStateBasis: "page-heading-usage-total-proof"` と `ledgerAmountLabel: "ご利用金額"` を付けて公開する。確定の header の page は 1.1.0 と同じに記録する。
+- 制限：保存した page の二つ目の `detail-list-01` が明細の一部かは分からない。ledger artifact は従来どおり最初の ledger だけを保存するので、二つ目に行があればその page は証明されず、従来どおり停止する。行ごとの支払額を利用額とみなさない理由は ADR 0005 の amendment (d) にある。この page の展開 label は数えただけで、行ごとには読んでいない。2026-09-25/26 の停止の原因がこの形であることは、可能性が高いが確認されていない。
+
+### ショッピングスキップ払いの支払予定（2026-09-27、ADR 0005 の amendment (e)）
+
+round 4 の構造調査で、position 8 の page は h1 「ショッピングスキップ払いご利用明細(未確定分)」、見出し 「YYYY年M月D日(曜)時点のショッピングスキップ払いご利用明細(YYYY年M月以降のお支払い分)」、`div.detail-list-01` 一つ（`div.head` は 3 cell：「ご利用日」 / 「ご利用先など」と「お支払日」を 2 行で持つ 1 cell / 「今後のお支払い金額」）と本文 2 行を持っていた。本文の cell の中身と数は記録されていない。owner は、行のある状態で観測されたこの page だけを独自の dataset として読むと決めた。
+
+- **保存名。** collector は支払予定 page の h1 だけを見る（`schedulePageKind`）。空白を除いて 「ショッピングスキップ払いご利用明細(未確定分)」 に一致する h1 がちょうど一つなら `credit-skip-payment-NN.html`、それ以外（ボーナス払いの page、見出しがない・二つある・全角括弧など）は従来どおり `credit-schedule-NN.html` として保存する。ボーナス払いの h1 は amendment (j) から種類 `bonus` として認識するが、保存名は `credit-schedule-NN.html` のままである。manifest、code、coverage は変わらない。
+- **registration。** `credit-skip-payment-NN.html` だけが dataset `credit-schedule` を得る。`credit-schedule-NN.html` は dataset なしで、parse job は作られない。
+- **parser。** `myjcb-skip-payment-schedule@0.1.1`（amendment (f)、観測は 0.1.0 と同じ）は観測された形だけを読む。h1、行がある場合の as-of 見出し（一つ、暦上の日付と月）、行のある ledger が一つ以下、head が観測どおりの 3 cell、ledger の子要素が head とそれに続く `content` 行だけ（ほかの入れ子の行は空の ledger と読まずに拒否する）、各行が 3 cell の `item-cell` 一つで中央の cell がちょうど 2 行（1 行目がご利用先など、2 行目がお支払日）、日付が `YYYY/MM/DD`、金額が exact な円。本文の配置は記録されていないので、head と同じ配置だけを読む。それ以外は閉じた code（`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`）で拒否し、message はその code だけである。行のない ledger は 0 行で、失敗ではない。空の ledger は、`content` 行が一つだけで、それが観測された空の行（`item-cell` 一つ、その中に `div.cell.w-100per` 一つ、空白を除いて 「ご利用明細はございません。」）の場合に限る。空の行がほかの行と並べば、未観測の組み合わせとして `schedule_row_shape_unobserved` で拒否する。kind が `types.ts` の外で宣言されているので、processor が書き込む前に `scheduled_payment` の行を検査する（`scheduledPaymentRows`: このパーサー以外からの行、宣言外の key、暦上でない日付、正準でない整数の金額などは `parse_contract_invalid`）。
+- **観測。** 各行は `scheduled_payment` の観測として `scheduled_payment_observations`（migration 0061、append-only）に入る：ご利用日、お支払日（`due_date`）、今後のお支払い金額（exact な整数の decimal 文字列、表示の符号）、ご利用先など（`counterparty`）、page の as-of 日付、`extra_json` に表示 cell と 「YYYY年M月以降のお支払い分」 の月。external id は表示 cell の fingerprint と出現順で、as-of 日付を含まない。
+- **読むもの。** 取引でも残高でもないので、read path、card purchase recognition、settlement の候補、identity はこの table を読まない。二重計上はない（INV06）。
+
+制限：行の金額が何を表すか（一回分か残額か）、行の支払いが後の明細月に現れるかは未確認で、明細や支払いと突き合わせない。read model、API、UI はまだ表示しない。この変更の前に保存された skip page は `credit-schedule-NN.html` のままで読まれない。本文の配置が違えば（行ごとの展開 list、4 cell、お支払日が別 cell など）最初の production の parse が `schedule_row_shape_unobserved` で失敗し、構造だけの調査の後に新しい release を出す。position 7（ボーナス払い）は行のある状態で観測されるまで読まない（ADR 0004）。
+
+### ledger header の改行と空の支払予定 page（2026-09-28、ADR 0005 の amendment (f)）
+
+round 5 の構造調査（保存された R2 object を構造と件数だけ読んだ。値は記録しない）と collector の停止 log で、次が分かった。
+
+| page                                          | h1                                                       | head（3 cell）                                                                          | 本文                                                                     |
+| --------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 確定月（保存 8 page すべて）                  | 「カードご利用代金明細(確定分)」                         | 「ご利用日」 / 「ご利用先など」+「支払区分」 / `今回の<br class="pc-none">お支払い金額` | 4 cell（日付、中央の 2 行、金額、toggle button）の行、全行に `item-more` |
+| 未確定月（position 0）                        | 「…(未確定分)」                                          | 「ご利用日」 / 「ご利用先など」+「支払区分」 / 「ご利用金額」（`br` なし）              | 確定月と同じ形                                                           |
+| ボーナス払い（position 7、12 夜同一）         | 「ボーナス#回払いご利用代金明細(未確定分)」（# は 1 桁） | 「ご利用日」 / 「ご利用先など」+「支払区分」 / 「ご利用金額」                           | 空の行だけ                                                               |
+| ショッピングスキップ払い（position 8、12 夜） | 「ショッピングスキップ払いご利用明細(未確定分)」         | 「ご利用日」 / 「ご利用先など」+「お支払日」 / 「今後のお支払い金額」                   | 空の行だけ                                                               |
+
+中央の cell は `span.row` 二つである。空の行は `div.content > div.item-cell > div.cell.w-100per` 「ご利用明細はございません。」 で、`item-more` はない。確定月の page の `detail-list-01` は一つだけで、HTML に二度出る文字列の一つは一括表示 button（`ul.list-btn-double.js-toggle-detail-list-01`）の class 名である。
+
+- **停止の原因。** 2026-09-25〜27（UTC）の三夜の run は position 1 で `ledger_parse`（`credit-ledger-headers`）により止まった。collector の `nodeText` は子 node を空白でつなぐので、確定月の header は 「今回の お支払い金額」 と読まれ、`今回のお支払い金額` を含まなかった。collector は label（ledger header、menu と明細月の h2）を、空白をすべて除いた文字列（`compactText`）で比べるようにした。共有の page 読み取り（`readMyJcbStatementPage`）と `myjcb-credit-statement-total` は以前から空白を除いて比べていたので、同じ page を確定と読んでいた。空白以外の違いは従来どおり停止する。ただし `nodeText` は要素の境目に空白を入れるので、境目も除かれ、要素（head の隣り合う cell を含む）をまたいで分かれた label も一致する（共有の page 読み取りと同じ）。cell の値は従来どおり空白でつないだ文字列で保存する。
+- **空の支払予定 page。** `myjcb-skip-payment-schedule@0.1.1` は上の空の行だけの ledger を 0 行と読む。collector の行数（`scheduledLedgerRowCount`）も空の行を数えない。ボーナス払いの page は行のある状態で観測されていないので、従来どおり `credit-schedule-07.html` として保存し、読まない。
+- **release。** `myjcb-skip-payment-schedule` 0.1.0 は production の `parser_releases` に登録済み（parse run はない）で、同じ version で digest を変えると migration 0028 が登録を拒否するので 0.1.1 とした。MyJCB の四つの parser の digest は変わらない。
+
+制限：行のあるショッピングスキップ払い page の本文は保存されておらず、未観測のままである（amendment (e)）。行と空の行が並ぶ page は観測されていない（並べば拒否する）。
+
+### 支払日つきの明細見出し（2026-09-28、ADR 0005 の amendment (g)）
+
+amendment (f) の後の最初の夜間 run（2026-09-28 21:01Z）は、position 1 で `credit_statement_period` により止まった。round 5 の構造調査（値は記録しない）では、確定月の page の h2 は 「YYYY年MM月DD日(曜)お支払い分のカードご利用明細」 で、お支払い分の前に支払日と括弧つきの曜日一文字がある。ボーナス払い page の h2 も同じ日付つきの形である。collector と明細 total parser は 「YYYY年M月お支払い分のカードご利用明細」 だけを読んでいたので、page は月を名乗らないと読まれ、過去月 API の label がない position 1 で停止した。それ以前に保存された確定 page は日付のない形である（`myjcb-credit-statement-total@1.2.0` の 24 件の `ok` parse はすべてこの形で通った）。二つの形が両方観測されている。
+
+- **読み取り。** `packages/domain/src/myjcb-statement-heading.ts` の `readMyJcbStatementHeading` を collector と parser が共用する。空白をすべて除いた h2 の文字列が、日付のない形か、`YYYY年M月D日(W)お支払い分のカードご利用明細`（W は 月火水木金土日 の一文字、ASCII の括弧）に完全一致する場合だけ見出しとする。page の total label（「YYYY年M月D日(曜)お支払い金額合計」）と同じく NFKC はかけない。月は 1〜12、日はその月に実在する日でなければならない。曜日は形だけを見て、日付との一致は確かめない。全角の括弧、曜日の別表記、ほかの文言は見出しではなく、確定 page なら従来どおり停止する。
+- **collector。** 見出しの月を `YYYY-MM` として period に記録する。日付は記録しない。見出しが二つ（日付つきと日付なしを含む）なら停止する。
+- **明細 total（`myjcb-credit-statement-total@1.3.0`）。** 日付つきの見出しなら、その日付が total の支払日と一致しなければ parse を失敗させる。日付のない見出しの page は 1.2.0 と同じに記録する。
+- **release。** 四つの MyJCB parser は `packages/parsers/src/parsers/myjcb.ts` を共有しているので、ほかの三つも digest だけが変わる：`myjcb-credit-ledger@1.2.1`、`myjcb-credit-past-month-balances@1.1.4`、`myjcb-canonical-evidence-boundary@1.1.4`。観測は変わらない。amendment (d) の未観測の経路はこの release でも残す。
+
+制限：ボーナス払い page の日付つき h2 は読まない（page は `credit-schedule-07.html` のまま）。collector は見出しの日付を何とも比べない。**訂正（2026-10-04、amendment (j)）：** 実際には menu の読み取りが position 7 を月にしていたので、ボーナス払い page は `credit-detail-07.html` として保存され、明細 parser に読まれていた（total は出ていない）。下の amendment (j) を参照。
+
+### 同じ page を示す複数の position と月として読まれたスキップ払い page（2026-09-29、ADR 0005 の amendment (h)）
+
+amendment (g) の後の最初の夜間 run（collection run 561、fetch run 908、2026-09-29 21:03Z）は全月を読み、unit は `success`、ledger 5 件はすべて parse された。production は集計の query だけで読んだ（件数、SQL 内での digest の比較、閉じた code、position 番号。値は記録しない）。
+
+- **四つの position が同じ page。** `credit-detail-NN.html` 11 件の digest は 8 種で、position 3、4、5、6 の page は byte 単位で同じ object だった。`myjcb-credit-statement-total@1.3.0` はこの 4 artifact で `manifest_artifact_ambiguous` の `error` になった（4 artifact × 3 回で 12 件。ほかの 7 page は `ok`）。共通 R2 の manifest は page を bytes で名指す（ADR 0025）。collector は各 page を `unknown`（`(確定分)` の見出しも行もない）と読み、period に position の label（`settlementYM ?? detailMonth-N`）を書いたので、同じ bytes の 4 entry の period が食い違い、extractor は選ばずに止めた。
+- **provider が同じ page を示している。** 以前の 12 run（fetch run 215–719、importer 形の manifest は entry を file 名で名指すので曖昧にならなかった）では、どの run でも position 2–6 が一つの object だった（60 artifact、12 run を通じて digest 一つ、状態 `unknown`、period は各 position の label）。run 908 では position 2 が別の確定明細になり、group は 3–6 になった。締まった明細が移ってきた position だけが抜けている。collector は各 position を menu の後に同じ session で、それぞれの `detailMonth` で取得し、同じ run で group の後に読んだ position（7、8、11、14）は別々の page で、11 と 14 は ledger のある確定明細だった。round 4 の調査は position 3–6 を ledger なしと記録し、menu の 「過去の明細」 の box は 「… お支払い分 #円」 か 「ご請求はありません」 だった。したがって collector の遷移の誤りではなく、請求のない過去の position に provider が示す page で、page 自身は月を名乗らない。
+- **スキップ払い page が月として読まれた。** MyJCB の `credit-schedule-NN.html`／`credit-skip-payment-NN.html` は一件も登録されていない（0 行）。run 908 では position 7 と 8 が `credit-detail-07.html`／`credit-detail-08.html`（月）として保存され、`credit-schedule` dataset も `myjcb-skip-payment-schedule` の parse run もない。どちらも行のない `unknown` と読まれたので unit は `success` のままで、明細 parser は両方に `statement_total_not_confirmed` を記録した。position 8 は保存された 13 run すべてで digest が違い（スキップ払い page の時点見出しは日付を持つ）、position 7 は以前の 12 run で digest 一つ（ボーナス払い page、amendment (f)）である。deploy された Worker は `readCreditMenuGroups` を含み、menu の group の読み取りも過去月 API との重複の確認も止まらなかった。したがって、その夜の menu が 7 と 8 の link を月の見出しの下に置いた（たとえば支払予定の見出しが `h2` でなく、観測された DOM 順 0、1、7、8、2–6 で前にある 「最新のご利用明細」 の下に入った）か、menu が 7 と 8 を示さず過去月 API が available とした、のどちらかである。保存される menu には `href` がなく、manifest と過去月 response は R2 の bytes で読んでいないので、どちらかは分からない。
+
+collector は page が述べることだけを記録する（`collectCredit`）。
+
+- **`unknown` の page は period を書かない。** `unknown` と記録する `credit-detail`（状態を示さない月、読まない月、停止で保存する page）の manifest entry には `period` がない。position は artifact key に、過去月 API の label は `credit-past-months.json` に残る。状態のある page の period（未確定は `detailMonth-0`／`-1`、確定は名乗る月か過去月 API の label）と ledger は変わらない。`unknown` の page の period を読むものはない（read model は ledger だけを読み、明細 parser は確定 page でだけ period を比べる）。同じ bytes はどの position でも同じことを述べるので、extractor はそのまま読む。
+- **一つの page は一つのことを述べる。** connection の中で、前の position で保存した page と redact 後の bytes が同じ月の page は、同じ状態と period でなければならない。違えば（たとえば同じ未確定 page が position 0 と 1 にあり、二つの未確定明細になる場合。観測されていない）その position で `credit_page_repeated`（condition `credit-page-repeated`）により停止し、その page は保存しない。それより前の月は保存する。log は position と code だけを出す。
+- **月の position のスキップ払い page。** 月の page の状態を読む前に `schedulePageKind`（amendment (e)）を見る。h1 が観測された 「ショッピングスキップ払いご利用明細(未確定分)」 ちょうど一つなら、menu の支払予定 page と同じく `credit-skip-payment-NN.html`（dataset `credit-schedule`、状態 `unknown`、period `detailMonth-N`）として保存し、`schedulePages` に `scheduled_payments_page` として書き、`schedulePageCount` に数える。月ではないので `periodCount`、`capturedMonthCount`、`unreadMonths` に入らない。log は `myjcb-credit-month-schedule-page` に position と code だけを出す。`schedulePages` は position の昇順で、停止した場合は停止より前の月の position で見つけた支払予定 page を含む（menu の支払予定 position は従来どおり停止の後に読まない）。
+- **変えないもの。** metadata extractor、menu の読み取り、ボーナス払い page（月の position では `credit-detail` の `unknown` の月のまま。amendment (j) で支払予定 page とした）、すべての parser。保存済みの run は書き換えない。run 908 の 12 件の `error` は履歴として残る（manifest は固定の evidence なので、再 parse しても同じ）。
+
+制限と、owner の agent に頼む観測（構造と件数、真偽値だけ。値は記録しない）：
+
+1. run 908 の保存済み `credit-detail-03.html`（03–06 は同じ bytes）：h1 の数と、各 h1 が 「カードご利用明細一覧」、「カードご利用代金明細(確定分)」、それ以外のどれか。本文に 「ご請求はありません」、「通信エラーが発生しました」、「ご利用明細はございません」 があるか（真偽値）。`detail-list-01` の数。h2 の数と、`readMyJcbStatementHeading` が読む形の h2 があるか（真偽値）。これで請求のない page か通信エラー page かが決まる。
+2. run 908 の保存済み `credit-past-months.json`：`detailPastJsonInfo` の件数、`detailMonth` 7 と 8 の item があるか、ある場合の `detailAvailableFlag` と `payAmountDispFlag`（真偽値）。
+3. live の `detailMenu.html`：`detail.html?detailMonth=N` の各 link について、N、文書順でその前にある最後の `h2` が三つの観測済み見出しのどれか（code で。文字列は記録しない）、その link の box の見出し要素の tag 名（`h2`、`h3`、`p` など）。支払予定の box の見出しが `h2` かどうか。
+
+1 で通信エラー page なら、その page を認識する規則を決める（amendment (b) の制限）。2、3 で 7 と 8 が月になった経路が分かれば、menu の読み取りを直す。**回答（2026-10-04、round 9、amendment (j)）：** 1 は通信エラー page ではなく、月を名乗らない請求なしの page だった。3 で支払予定の見出しは `h3` で、`h2` だけを見る読み取りが 7 と 8 を 「最新のご利用明細」 に入れていた。下の amendment (j) を参照。
+
+重複の確認は月の `credit-detail` page だけが対象である。支払予定 page の entry は position の label を period に持つ（`myjcb-skip-payment-schedule` が key と比べる）ので、同じスキップ払い page の bytes が二つの position（月の position 二つ、または月の position と menu の支払予定 position）で保存されると period が二つになり、extractor は両方を `manifest_artifact_ambiguous` で拒否する。観測されていない（position 8 の digest は保存された run ごとに違う）。
+
+### 最初に保存されたスキップ払い page の拒否（2026-10-02、ADR 0005 の amendment (i)）
+
+amendment (h) の後の最初の夜間 run（collection run 612、fetch run 956、2026-10-02 21:00Z）は 19 artifact で `success`、`myjcb-credit-statement-total@1.3.0` は 10 page すべて `ok` だった。初めて `credit-schedule` の artifact（月の position 8 の `credit-skip-payment-08.html`）が登録され、`myjcb-skip-payment-schedule@0.1.1` は `parser_rejected` の `error` になった（parse run 1 件、job は `failed`、`parse_issues` なし）。production は集計の query だけで読んだ。
+
+- **metadata は parser の要求どおり。** key の形、状態 `unknown`、period が key の `detailMonth-N` と一致（metadata projection と artifact の行の両方）、media type、run の `success`。月の position と menu の経路は同じ関数（`schedulePageArtifact`）で同じ entry を書く。collector の不一致ではない。
+- **HTML の境界は以前に通っている。** parser の境界の検査は明細 parser と一字一句同じで、明細 parser は以前の position 8 の 15 page（amendment (h) の前に月として保存された同じ page）すべてでそれを通した。
+- **空の page である。** 大きさがその 15 page のそれぞれと 2 byte 以内（3 件とは同じ）で、round 5 の調査はそれらを空の page と記録している。
+
+したがって、保存された空の page を reader の構造の検査のどれか（`schedule_head_unobserved`、`schedule_row_shape_unobserved`、空の行が認められない場合の `schedule_as_of_invalid` か `schedule_ledger_ambiguous`）が拒否した。どれかは R2 の bytes にあり、この変更では読んでいない。parser、collector、extractor は変えない（ADR 0004）。
+
+counts-only の replay は MyJCB も選び、processor が読む extractor release（`active_releases` の行、なければ `legacy-metadata-v1`）の最新の完了した（`ok` か `absent`）metadata projection の状態と period を parser に渡し、スキップ払い page の構造（h1 の数、時点見出しの数、各 `detail-list-01` の子要素、head の子要素と三つの cell が期待どおりか、各 `content` 行の構造と件数。tag は閉じた一覧、class は reader が見るものだけ、文字列と属性値は出さない）を出す。
+
+owner に頼む観測（一回の実行。出力は code、真偽値、件数、閉じた名前だけ）：
+
+```sh
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts myjcb-skip-payment-schedule 1
+```
+
+出力の `category.reason`（閉じた code）と `shape` の行をそのまま共有してもらう。それで reader を観測された形に合わせる次の amendment（`myjcb-skip-payment-schedule` 0.1.2 と parser release の migration）を書く。それまでスキップ払いの `scheduled_payment` 観測はない。月には影響しない。
+
+### menu の h3 見出しとボーナス払い page（2026-10-04、ADR 0005 の amendment (j)）
+
+owner の live 調査（round 9。形、件数、固定の文言、真偽値だけで、値は記録しない）と、production の集計の query（round 7）で、amendment (h) の二つの問いが決まった。
+
+- **menu の見出し。** h1 は二つ（logo と `hdg-H1` 「カードご利用明細一覧」）、h2 は五つ、h3 は四つ。`detail.html?detailMonth=N` の link は 9 個で、DOM 順は 0、1、7、8、2、3、4、5、6、文言はすべて 「明細を見る」。見出し要素の文書順は `h2.hdg-H2` 「最新のご利用明細」、**`h3.hdg-H3` 「ボーナス#回払い・ショッピングスキップ払い」**（# は数字）、`h2.hdg-H2` 「過去の明細」、その後に page 下部の案内の `h2`／`h3`（どの link よりも後）。各 box の前には `p.hdg` がある。最後の `h2` で group を決めると 7 と 8 は 「最新のご利用明細」 に入り、月になる。fetch run 908 で 07／08 が `credit-detail-07/08.html` として保存されたことと一致する。
+- **ボーナス払い page（position 7）。** `h1.hdg-H1` は 「ボーナス#回払いご利用代金明細(未確定分)」（# は数字）。h2 は三つで、そのうち一つ（`hdg-H2`）が `YYYY年M月D日(曜)お支払い分のカードご利用明細` の形に完全一致する（amendment (g) の日付つき見出し）。`detail-list-01` 一つ、table 三つ、「ご利用明細はございません」 あり、`form` 一つ（method `get`、action のパス `/iss-pc/member/details_inquiry/detail.html`、hidden input なし）。h2 だけでは月の明細と区別できない。
+- **ショッピングスキップ払い page（position 8）。** h1 は 「ショッピングスキップ払いご利用明細(未確定分)」。`hdg-H2` は `YYYY年M月D日(曜)時点のショッピングスキップ払いご利用明細(YYYY年M月以降のお支払い分)` の形で、日付つき見出しには一致しない。`detail-list-01` 一つ、table 二つ、「ご利用明細はございません」 あり、form は position 7 と同じ形。
+- **請求なしの page（position 3–6）。** 応答の bytes が同一（SHA-256 が一致）で、月を示す要素がない。`h1.hdg-H1` 「カードご利用代金明細」（「(確定分)」 なし、「カードご利用明細一覧」 でもない）、本文に 「当該月の請求はございません」。h2 0 個、`detail-list-01` なし、table なし、form なし。「ご請求はありません」、「通信エラーが発生しました」、「ご利用明細はございません」 はいずれもない。HTTP 200、redirect なし。run 908、921、940 の 03〜06 の `manifest_artifact_ambiguous`（計 60 件の `error`）の原因はこの同一の内容で、amendment (h) の後の run 956 では明細 parser が 10 page すべて `done` だった。
+
+collector と明細 parser の変更：
+
+- **menu。** `readCreditMenuGroups` は link を文書順でその前にある最後の `h2` か `h3` の group に入れる。三つの見出しと比べ方（空白を除き、# は半角か全角の数字の並び、ほかは完全一致）は変えず、どちらの level でも同じ。見出しの前の link、ほかの `h2`／`h3` の下の link、両方の group にある position は従来どおり `credit_menu_group_unrecognized` で停止し、log は件数だけを出す。案内の見出しは link より後にあるので group に関わらない。すべて `h2` の形（amendment (c) の記録）も同じ group になる。
+- **ボーナス払い page の h1。** `packages/domain/src/myjcb-schedule-page-kind.ts` の `myjcbSchedulePageHeadingKind` は、amendment (e) の判定（スキップ払いの h1 ちょうど一つ。先に見る）が当てはまれば `skip-payment`、そうでなく空白を除いた h1 が `ボーナス[0-9０-９]+回払いご利用代金明細\(未確定分\)` に一致するものがちょうど一つなら `bonus`、それ以外は `unobserved` を返す。`myjcb-skip-payment-schedule` の digest を動かさないよう別の module にした。collector の `schedulePageKind` はこれを読む。
+- **collector。** `bonus` の page は `credit-schedule-NN.html`（dataset `credit-schedule`、状態 `unknown`、period `detailMonth-N`）として保存する。registration はこの名前に parser dataset を与えないので、どの parser も読まない（ADR 0004）。支払予定の position ではこれまでと同じ。月の position では、amendment (h) のスキップ払い page と同じく状態を読む前に支払予定 page として保存し、`schedulePages` に `scheduled_payments_page` と書き、`schedulePageCount` に数え、`periodCount`、`capturedMonthCount`、`unreadMonths` には入れない。log は `myjcb-credit-month-schedule-page` に position と code だけを出す。
+- **明細 total（`myjcb-credit-statement-total@1.4.0`）。** HTML の境界の検査の後、状態を読む前に、h1 の種類が `skip-payment` か `bonus` の page を、h2、`(確定分)` の h1、total が何を示していても、観測なしの `ok` と閉じた warning `schedule_page_not_statement` にする。ほかの page は 1.3.0 と同じに読む。`error` にしないのは、`error` の parse run は以前の version の `ok` run を置き換えないからである。
+- **release。** 四つの MyJCB parser は `myjcb.ts` を共有するので、`myjcb-credit-ledger@1.2.2`、`myjcb-credit-past-month-balances@1.1.5`、`myjcb-canonical-evidence-boundary@1.1.5` は digest だけが変わる。`myjcb-skip-payment-schedule@0.1.1` の digest は変わらない。processor が deploy された release を `parser_releases` に自分で登録し、MyJCB の parser version を固定する migration はないので、migration は追加しない（1.3.0 と同じ）。
+- **請求なしの page。** 変えない。`(確定分)` の h1 も ledger もないので `unknown` と読まれ、明細 parser は 1.3.0 でも 1.4.0 でも観測なしの `ok` と `statement_total_not_confirmed` を記録する。0 円の total は出さない（INV05）。collector は amendment (h) のとおり、各 position に period なしの `unknown` の page として保存する。
+
+production への影響（制限として）：保存済みの `credit-detail-07.html` はすべてボーナス払い page で、月として登録されている（position 7 を保存した run 215–719 の 12 run、run 908、この deploy までの以後の run。run 956 の 10 明細 page にも含まれる。run 921 と 940 は position 別に数えていない）。amendment (h) の前に保存された `credit-detail-08.html`（スキップ払い page）も同じである。どれも 1.3.0（2026-09-29 以降。それ以前は前の version）で観測なしの `ok` と `statement_total_not_confirmed` になり、total は出ていない（`(確定分)` の h1 がない）。ただし公開されている読みは明細の読みで、ボーナス払い page の日付つき h2 と total の間には h1 の規則しかなかった。deploy は何も書き換えない。repair lane が保存済みの page を 1.4.0 で再 parse し、その `ok` run（`schedule_page_not_statement`）が各 artifact の 1.3.0 の `ok` run を置き換えて公開の pointer を持つ（`publishBatch`）。read model から見える観測は変わらない（どちらも観測なし）。run 908、921、940 の `manifest_artifact_ambiguous` の artifact は、manifest が固定の evidence なので 1.4.0 でも失敗のままである。対象の artifact の数は数えていない。
+
+制限：round 9 の menu は一つの connection の一夜である。支払予定の見出しの level が変わる、または案内の見出しが link より前に移ると、connection は最初の月の前で止まる（推測しない）。ボーナス払い page は行のある状態でまだ観測されていない。請求なしの page を認識する独自の規則はなく、`(確定分)` の h1 も ledger もないので `unknown` になる。
+
+## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
+
+round 4 の観測（構造と件数のみ）: 確定明細（`detail.html?detailMonth=N`）とショッピングスキップ払いの頁（位置 8）には「カード・お振替情報」という見出しはなく、引落口座は明細グリッドの後の `h3.hdg-H3`「カード情報」の下、`div.detail-lyt-02.border-01 > div.col-01 > table.table-data`（th/td の縦表）にある。行は カード名称、カード発行会社、金融機関名（銀行名）、支店名（支店名。支店番号はない）、科目・口座番号（「普通 ####\*\*\*」の形: 科目、空白、口座番号の**先頭** 4 桁、残りは `*`）、口座名義（一部 `*` の名義）。同じ表は保存済みの redacted HTML（`credit-detail-NN.html`）にも同じ形で残っている。
+
+- 読み取り: `readMyJcbCardInformation`（`packages/domain/src/myjcb-card-information.ts`）が金融機関名、支店名、科目、先頭 4 桁、`*` の数だけを読む。カード名称と口座名義の値は読まない（使う処理がない。保存 HTML は口座名義を表示どおりに残す。ADR 0029 の amendment 2）。表は class 名ではなく、本文が「カード情報」の見出し要素（h1–h6）とその後の最初の table、th の label で探す。他の形は closed code で拒否する。
+- 保存: processor の `card_debit_account_sweep` lane が、`myjcb-credit-statement-total` の parse が公開済みの頁を R2 から読み直し、`card_debit_account_statement`（migration 0060、append-only）へ card・raw object・reader version ごとに 1 行書く。
+- 利用: 決済照合の候補に evidence として付くだけで、候補の facts・適格性・承認は変わらない（[card-settlements.md](../card-settlements.md#provider-stated-debit-accounts)）。
+- collector は変更しない。頁はすでに redacted HTML として保存されており、collector が読む必要はない。

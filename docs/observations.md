@@ -17,6 +17,657 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## GLOBAL PASS walked months and page-qualified external ids (activity parser 1.1.0)
+
+2026-10-04. Production (fetch_run 903, 2026-09-29) stored both selected
+months' pages and ended its account unit `failed` with
+`activity_pages_unwalked`: the collector kept only page 1, so no GLOBAL PASS
+run has been parsed. The owner then observed the pager live in English and
+Japanese ([source note](sources/prestia.md#global-pass-pager-and-page-walk-2026-10-04)),
+and the collector now walks it
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)):
+page 1 of a month keeps `activity-YYYY-MM.html`, page N is
+`activity-YYYY-MM-pN.html` (N 2..5 from the collector; the parser and the
+registration descriptor accept 2..9), and a run is `success`, its unit
+`complete` and its pages parse-eligible only when every selected month is
+proven whole against the pager's stated total.
+
+`global-pass-activity@1.1.0`:
+
+- **Keys.** Accepts both key forms; the key's month must be the selected
+  month (as before) and a page's pager (`div.nablarch_currentPageNumber`,
+  `[p/Ppage]` or 「[p/Pページ]」) must name the key's page. A later page with no
+  pager, a pager naming another page, or an unreadable pager fails the parse.
+  `-p1` and two-digit pages are refused.
+- **Identity.** Page 1 keeps every 1.0.0 output. A row on page N ≥ 2 names
+  its page before the occurrence counter, as
+  [Vpass 1.2.0](#vpass-page-qualified-external-ids-statement-parser-120) does:
+  `global-pass:<fingerprint>:pN:<occurrence>`, raw locator
+  `html:activity-page=N;activity-record=M`, `_kogane.identityOrigin`
+  `all-provider-fields+page+occurrence`. Two identical rows on different
+  pages are two ids; nothing else changes. The same cost as Vpass: a row that
+  moves across a page boundary between captures changes its id.
+- **Currentness.** The Transactions read ranked each activity key on its own,
+  which would have kept a page a newer run no longer shows (a month that
+  shrank to one page) current beside the new page 1 that shows its rows
+  again. `GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES` (`packages/read-model/src/sql.ts`)
+  now takes per (source, month) the newest run whose every page of the month
+  has an active parse, and all its pages; with one page per month and run,
+  which is every stored run, it selects exactly what the per-key ranking did
+  (`packages/read-model/test/global-pass-snapshots.test.ts` compares a frozen
+  copy on hand-built and random stores). `experiments/observation-pipeline-local`
+  keeps the per-key ranking; it reads no walked month.
+
+Deploying rewrites nothing. Maintenance registers the 1.1.0 release and job
+creation adds 1.1.0 jobs for every eligible artifact the parser accepts:
+the importer-era artifacts 1.0.0 already read are re-read with the same
+output (all page-1 keys; a page whose pager names another page than 1 would
+now fail), and no shared GLOBAL PASS run is eligible until the first
+`success` run after deploy. No migration is needed: no `active_releases` row
+names this dataset. Limits: no walked page has been stored or parsed; the
+parser reads only the English table labels (the Japanese labels are recorded
+in the source note), so a Japanese page would fail its parse; and whether the
+parser's table model fits the production month page is shown only by the
+first parse (the 2026-09-08 investigation below found stored pages it
+refused). Tests: `packages/parsers/test/global-pass-parser.test.ts`.
+
+## MyJCB: the menu's schedule heading is an h3, and the bonus page is not a statement (statement parser 1.4.0)
+
+2026-10-04. The owner's live survey of the MyJCB pages (round 9; shapes,
+counts, fixed labels and booleans only) settles how positions 7 and 8 became
+months
+([ADR 0005's amendment (j)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-04-j-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-known-by-its-h1)):
+
+- **The menu's schedule heading is an `h3`.** The credit menu's headings are
+  `h2` 「最新のご利用明細」, `h3` 「ボーナス#回払い・ショッピングスキップ払い」,
+  `h2` 「過去の明細」, then guidance `h2`/`h3` after every link. The collector
+  grouped links by the last `h2`, so 7 and 8 were months. It now groups by
+  the last `h2` or `h3`; an unrecognised heading at either level before a
+  link still stops the connection (`credit_menu_group_unrecognized`).
+- **The bonus page is known by its h1.** Its h1 is
+  「ボーナス#回払いご利用代金明細(未確定分)」 (# a digit), and one of its `h2`s
+  has exactly the dated statement heading's form. The collector stores it as
+  `credit-schedule-NN.html` (read by nothing) at a schedule position and at a
+  month position alike, as it stores the skip page since amendment (h).
+- **`myjcb-credit-statement-total@1.4.0`** parses a page whose h1 is the
+  bonus or the skip-payment schedule heading `ok` with no observation and the
+  closed warning `schedule_page_not_statement`, whatever its `h2`s say. Every
+  other page reads as in 1.3.0. `myjcb-credit-ledger@1.2.2`,
+  `myjcb-credit-past-month-balances@1.1.5` and
+  `myjcb-canonical-evidence-boundary@1.1.5` change digest only (shared
+  module); `myjcb-skip-payment-schedule@0.1.1` keeps its digest. No migration:
+  the processor registers releases itself.
+- **The empty-month page.** Positions 3–6 are one byte-identical page with
+  h1 「カードご利用代金明細」, no `h2`, no ledger and the phrase
+  「当該月の請求はございません」. It is read `unknown`, and the statement parser
+  records `statement_total_not_confirmed` with no observation, under 1.3.0 and
+  1.4.0 alike: a reason, never a zero total (INV05).
+
+Production exposure, a limit: every stored `credit-detail-07.html` (the
+bonus page, from the 12 runs 215–719 to the last run before this deploy) and
+every `credit-detail-08.html` stored before amendment (h) was registered as a
+month and parsed `ok` with no observation and `statement_total_not_confirmed`.
+No total came from them (neither page has the `(確定分)` h1). Deploying
+rewrites nothing; the repair lane re-parses the stored pages under 1.4.0, and
+its `ok` run supersedes the 1.3.0 run of each and takes the publication
+pointer (an `error` run would not have). The count of affected artifacts was
+not taken. Tests: `services/collector-myjcb/test/parsers.test.ts`,
+`services/collector-myjcb/test/credit-statement-state.test.ts`,
+`packages/parsers/test/myjcb-statement.test.ts`.
+
+## MyJCB: the first stored skip-payment page was refused (no parser release)
+
+2026-10-02. The nightly MyJCB run of 2026-10-02 21:00Z (collection run 612,
+fetch run 956), the first after amendment (h), succeeded with 19 artifacts,
+and `myjcb-credit-statement-total@1.3.0` parsed all 10 statement pages
+`ok`. It also registered the first `credit-schedule` artifact,
+`credit-skip-payment-08.html` (the ショッピングスキップ払い page at a month
+position), and `myjcb-skip-payment-schedule@0.1.1` refused it: one `error`
+parse run with `parser_rejected`, one `failed` job, no `parse_issues` rows
+([ADR 0005's amendment (i)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-02-i-the-first-stored-skip-payment-page-was-refused)).
+Aggregate queries only:
+
+- **The metadata is what the parser requires.** Key shape, state `unknown`
+  and period equal to the key's `detailMonth-N`, in both the metadata
+  projection and the artifact row; media type accepted; run `success` with
+  no failure. The month-position and menu paths write the same entry.
+- **The boundary passed before.** The parser's HTML boundary is the
+  statement parser's, check for check, and the statement parser passed it on
+  all 15 earlier position-8 pages (the same provider page, stored as a month
+  before amendment (h)).
+- **It is the empty page.** Its size is within 2 bytes of each of those 15
+  pages, which the round-5 survey recorded as empty.
+
+So one of the reader's structural checks refused the stored empty page, and
+which one is in the R2 bytes, which this change did not read. No parser,
+collector or extractor changed. The counts-only replay now covers MyJCB,
+hands the parser the metadata projection the processor reads, and prints the
+skip page's structure (counts, booleans, closed names); the owner runs it
+([operations](operations.md#replaying-a-parser-rejection)), and the next
+amendment changes the reader for the shape it reports. Until then no
+`scheduled_payment` observation exists; the months are unaffected. Tests:
+`services/processor/test/parser-rejection.test.ts`.
+
+## MyJCB: one page at four positions, and the skip-payment page read as a month (collector, no parser release)
+
+2026-09-29. The nightly MyJCB run of 2026-09-29 21:03Z (fetch run 908), the
+first after the dated-heading fix below, read every month and parsed its
+five ledgers, but `myjcb-credit-statement-total@1.3.0` failed on 4 of its
+11 statement pages with `manifest_artifact_ambiguous` (12 `error` parse
+runs, 7 pages `ok`)
+([ADR 0005's amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)):
+
+- **One page, four positions.** The 11 pages had 8 distinct digests:
+  positions 3–6 are one object. The provider shows one page, with no
+  heading, rows or month, at past positions without a bill: positions 2–6
+  were one object in each of the 12 earlier runs that stored them, and
+  position 2 left the group when a closed statement moved into it, while
+  positions read later in the same run returned their own pages. The
+  collector gave each copy its position's label as the period, so the
+  shared manifest's entries for one object disagreed and the extractor
+  refused, as ADR 0025 decided.
+- **The collector now records what the page states.** An `unknown` page's
+  manifest entry has no period (its position stays in the artifact key), so
+  the copies state the same thing and parse. The same bytes read as two
+  different states or periods (not observed) stop the connection with
+  `credit_page_repeated` instead of being stored twice.
+- **The skip-payment page was stored as a month.** No MyJCB
+  `credit-schedule` or `credit-skip-payment` artifact has ever been
+  registered: run 908 stored positions 7 and 8 as `credit-detail` months
+  (read `unknown`, no rows), so `myjcb-skip-payment-schedule` had nothing
+  to read. Why the menu reading gave them to the months is not known (the
+  menu shape and the past-months flags were not read). A month position
+  whose page carries the ショッピングスキップ払い h1 is now stored as
+  `credit-skip-payment-NN.html` and listed as a schedule page, not a month.
+
+No parser file changed. Stored runs are not rewritten; run 908's error
+rows stay. The observation that settles the two open questions (whether the
+repeated page is the no-bill page or the 「通信エラーが発生しました」 page, and
+how the menu listed positions 7 and 8) is in the
+[source note](sources/myjcb.md#同じ-page-を示す複数の-position-と月として読まれたスキップ払い-page2026-09-29adr-0005-の-amendment-h).
+Tests: `services/collector-myjcb/test/credit-statement-state.test.ts`,
+`services/processor/test/myjcb-shared-r2.test.ts`.
+
+## GLOBAL PASS activity pages are English; the sanitizer accepts both languages (collector, no parser release)
+
+2026-09-29. The refusal shape logged on the night of 2026-09-28 named the
+expectation: every month was refused with `activity_heading_missing` on a
+logged-in page with the month select and no login field. The owner's live
+survey (labels only) found the pages in English, because the collector's
+session is English: titled `Account Activities`, headed `Viewing Monthly
+Account Activities` before a month is selected, with English table headers
+and no 「ご利用明細」 or 「利用明細」. The sanitizer now takes either language's
+name as the heading landmark, and admits exactly the two other differences the
+survey found on the English month page: a relative download action and one
+menu-toggle onclick, stored as `return false;`
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-29-global-pass-activity-pages-in-english),
+[source note](sources/prestia.md#global-pass-activity-pages-in-english-2026-09-29)).
+Whether the stored capture matches the surveyed DOM elsewhere is shown only by
+the next night's run. No parser changed: `global-pass-activity` already reads
+the English headers.
+
+## MyJCB: confirmed months stopped on a dated statement heading (statement parser 1.3.0)
+
+2026-09-28. The nightly MyJCB run of 2026-09-28 21:01Z, the first after the
+line-break fix below, stopped at credit position 1 with
+`credit_statement_period`
+([ADR 0005's amendment (g)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-g-the-statement-heading-may-carry-its-payment-day)):
+
+- **The heading carries the payment day.** The owner's round-5 structure
+  survey shows the confirmed page's `h2` as
+  「YYYY年MM月DD日(曜)お支払い分のカードご利用明細」, and the bonus schedule
+  page's `h2` in the same dated form. The collector and the statement
+  parser read only 「YYYY年M月お支払い分のカードご利用明細」, so the page named no
+  month, and position 1 has no past-months label to fall back on. Earlier
+  pages show the undated form: the 24 `ok` parses of
+  `myjcb-credit-statement-total@1.2.0` all passed that match.
+- **Both forms are read** by one shared reading,
+  `readMyJcbStatementHeading` (`packages/domain/src/myjcb-statement-heading.ts`):
+  the undated form, and the dated form with one of 月火水木金土日 in ASCII
+  parentheses, as the page's total label writes it. The day must exist in
+  that month. Any other shape, full-width parentheses included, names no
+  month, and a confirmed page stops as before. The collector records the
+  month.
+- **`myjcb-credit-statement-total@1.3.0`** also requires a dated heading's
+  day to equal the total's payment date, and fails the parse otherwise. A
+  page with the undated heading is recorded exactly as in 1.2.0.
+- **`myjcb-credit-ledger@1.2.1`, `myjcb-credit-past-month-balances@1.1.4`
+  and `myjcb-canonical-evidence-boundary@1.1.4`** change digest only: the
+  four parsers share `packages/parsers/src/parsers/myjcb.ts`.
+
+Deploying rewrites nothing. The next night's run records position 1 under
+its payment month and goes on to the later months. The repair lane
+re-parses the stored MyJCB artifacts under the new releases; ledgers,
+past-month summaries and pages with the undated heading publish identical
+observations, and a stored confirmed page with the dated heading, in a run
+eligible for parsing, publishes its total when the heading's day is the
+total's payment date (how many exist was not counted). Amendment (d)'s
+unobserved path is still in the code. Tests:
+`services/collector-myjcb/test/credit-statement-state.test.ts`,
+`packages/parsers/test/myjcb-statement.test.ts`.
+
+## Identity values: the one-time rewrite (migration 0063, no parser release)
+
+2026-09-29. Migration 0063 applies the staged pairs of 0062: in the
+importer's rows it replaces each staged `v1` value by its `v2` value in the
+fetch unit keys, Vpass pins, source-account references, MoneyForward
+`transaction_observations.source_account` and connection review keys,
+appends a `rule` mapping revision pointing each collector source account of
+a staged value at the importer-era entity, recreates the append-only guards
+with their exact text and drops the staging table
+([ADR 0030's amendment](adr/0030-identity-crosswalk.md#0063-as-implemented-2026-09-29)).
+No parser, parse run, external id, amount or raw object changes. After it, a
+MoneyForward month both producers captured is read once (the newer capture),
+and the identity store resolves a source account by its natural key, so
+re-identifying an importer parse reuses the importer's source account. The
+owner's production counts before it: MoneyForward 4 pairs, Vpass 6, held 0.
+Tests: `packages/storage-d1/test/identity-value-rewrite-migration.test.ts`,
+`services/processor/test/moneyforward-producer-switch.test.ts`.
+
+## Identity values: the crosswalk is retired and the one-time rewrite is staged (migration 0062, no parser release)
+
+2026-09-28. The owner decided that the retired importer's `v1` identity
+values (Vpass `vpass-card-v1-`, MoneyForward `moneyforward-account-v1-`) are
+replaced once by the collectors' `v2` values in the stored rows, instead of
+being joined by a crosswalk record
+([ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)).
+Migration 0062 adds the staging table `identity_value_rewrites`, stages the
+MoneyForward pairs whose current transaction rows overlap one-to-one
+(compared by the selected month, date, description, amount and occurrence,
+since the external id carries the identity), validates every staged pair by
+trigger, and drops the unused crosswalk table. No observation, parse run or
+parser changes: the rewrite of the five identity columns, including
+`transaction_observations.source_account` of the MoneyForward importer
+parses, is migration 0063 (above). Until it applies a value read under
+both identities is still two source accounts and two entities.
+Tests: `packages/storage-d1/test/identity-value-rewrite-migration.test.ts`,
+`services/processor/test/moneyforward-producer-switch.test.ts`.
+
+## MyJCB: confirmed months stopped on a line break in the ledger header (schedule parser 0.1.1)
+
+2026-09-28. Observed by the owner's agent in the stored MyJCB pages (round
+5, structure and counts only, no values) and the collector's stop logs
+([ADR 0005's amendment (f)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks)):
+
+- **The nightly stop at position 1** (`ledger_parse`, sub-code
+  `credit-ledger-headers`, three nights in a row) was the collector's own
+  header match. Every stored confirmed page (8 distinct pages) shows its
+  third head cell as `今回の<br class="pc-none">お支払い金額`; the collector's
+  text joins nodes with a space, so the header read 「今回の お支払い金額」
+  and never contained 「今回のお支払い金額」. The collector now compares
+  labels with all whitespace removed, as the shared page reading already
+  did. Cell values are read as before.
+- **Correction of the entry below on the usage header.** No stored
+  `(確定分)` page has a 「ご利用金額」 head. The 11 「ご利用金額」 counted on
+  that page are the labels of its rows' expanded `item-more` lists, and the
+  0 「今回のお支払い金額」 is the `br` splitting the head label. The pages
+  really show: h1 「カードご利用代金明細(確定分)」, a three-cell head
+  「ご利用日」 / 「ご利用先など」+「支払区分」 (two `span.row`) / `今回の<br>お支払い金額`,
+  rows of four cells (date, the two-line middle cell, amount, a toggle
+  button), each with an `item-more`. The variant the 1.2.0 releases accept
+  is unobserved; their code is kept (removing it would re-release all four
+  MyJCB parsers for no observation change) and nothing in production took
+  it.
+- **Empty schedule pages.** The stored skip-payment page (position 8) and
+  ボーナス払い page (position 7) show one `detail-list-01`, a three-cell head
+  and one `content` row: one `item-cell` with one `div.cell.w-100per`
+  「ご利用明細はございません。」, no `item-more`. The bonus page's h1 is
+  「ボーナス#回払いご利用代金明細(未確定分)」 (# one digit) and its head
+  「ご利用日」 / 「ご利用先など」+「支払区分」 / 「ご利用金額」; it stays unread
+  (`credit-schedule-07.html`, never observed with rows).
+  `myjcb-skip-payment-schedule@0.1.1` reads a ledger as empty only when that
+  row is its one `content` row, with exactly that shape and label; beside
+  real rows it is refused (`schedule_row_shape_unobserved`). Every
+  observation is as in 0.1.0. 0.1.0 is registered in `parser_releases`
+  with no parse run, so the change is a new version (migration 0028).
+
+Deploying rewrites nothing. The next night's run stores the confirmed months
+and the schedule pages it stopped before. Tests:
+`services/collector-myjcb/test/credit-statement-state.test.ts`,
+`packages/parsers/test/myjcb-statement.test.ts`,
+`packages/parsers/test/myjcb-skip-payment-schedule.test.ts`.
+
+## No stored object carries the `[redacted:name]` marker
+
+2026-09-28, read-only counts by the owner's agent. No artifact was stored
+between #333's merge (2026-09-27 18:21Z) and #340's (20:06Z): no artifact
+was fetched from 17:00Z to 21:00Z that day. The
+13 SBI Shinsei and SBI Securities objects stored after 21:00Z carry no
+`[redacted:…]` marker, and the SBI Shinsei balance summary keeps its three
+customer-name keys as #340 intends. The recorded transform steps agree:
+`myjcb-sanitizer` and `sbi-shinsei-token-sanitizer` have `redacted` steps
+at v1 and v3 only, none at v2 (the #333 step). So no stored object carries the marker,
+and ADR 0029 amendment 2's rule for objects written under v2 applies to
+none ([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)).
+
+## MyJCB: the skip-payment schedule page is read as scheduled payments (schedule parser 0.1.0)
+
+2026-09-27. The owner chose to read the ショッピングスキップ払い schedule
+page as a dataset of its own, and only that page, because it is the only
+schedule page observed with rows
+([ADR 0005's amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
+The collector stores a schedule page whose one h1 is
+「ショッピングスキップ払いご利用明細(未確定分)」 as
+`credit-skip-payment-NN.html`; registration gives only that name the dataset
+`credit-schedule`; every other schedule page, the ボーナス払い page included,
+is still `credit-schedule-NN.html`, with no dataset and read by nothing.
+
+`myjcb-skip-payment-schedule@0.1.0` reads the shape the round-4 survey
+recorded: the page's as-of heading, and one `detail-list-01` ledger whose head
+is exactly the three cells 「ご利用日」 / 「ご利用先など」+「お支払日」 on two
+lines / 「今後のお支払い金額」. The survey did not record the body cells, so a
+row is read only when it mirrors the head (three cells, the middle one two
+lines: merchant text, then payment date). Each row becomes a
+`scheduled_payment` observation in `scheduled_payment_observations`
+(migration 0061): usage date, payment date (`due_date`), the future payment
+amount as exact decimal text, the merchant text, the page's as-of date and,
+in `extra_json`, the first payment month the page names. Every other shape
+refuses the page with one closed code from
+`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`; an empty ledger is zero rows.
+
+The kind is not a transaction or a balance, and nothing reads the new table:
+no read path, purchase recognition or settlement matching sees a scheduled
+payment, so nothing is counted twice. It is declared outside the parser
+contract's `types.ts` so that no deployed parser's digest changes. Limits:
+the rows' meaning beyond "a payment still due" is not confirmed; no read
+model shows them; skip pages stored before this change keep the old name and
+stay unread; release adoption does not compare this table. Tests:
+`packages/parsers/test/myjcb-skip-payment-schedule.test.ts`,
+`services/collector-myjcb/test/parsers.test.ts`,
+`credit-statement-state.test.ts`, `scripts/artifact-datasets.test.ts`,
+`services/processor/test/myjcb-shared-r2.test.ts`,
+`parser-rejection.test.ts`.
+
+## MyJCB 「カード情報」 and Vpass debit accounts (no parser release)
+
+Observed on 2026-09-27 (round 4) by the owner's agent, structure and counts
+only ([ADR 0032 amendment](adr/0032-provider-stated-debit-accounts.md#amendment-2026-09-27-the-observed-shapes)):
+
+- **MyJCB.** The statement page has no 「カード・お振替情報」 heading. The debit
+  account is under `h3.hdg-H3` 「カード情報」, after the ledger, in a
+  `table.table-data` of th/td rows: カード名称, カード発行会社, 金融機関名 (a bank
+  name), 支店名 (a branch name; no branch code), 科目・口座番号 (the account type,
+  a space, the **first** four digits and three `*`), 口座名義 (a partly masked
+  holder name). The same table is on the ショッピングスキップ払い page, and in
+  the stored redacted `credit-detail-NN.html` pages with the same value
+  shapes (three stored captures of one page have identical digests).
+- **Vpass.** None of `web_meisai_top/v1`, `dropdownlist_init/v1`,
+  `meisai_ans/v1` or `xt_seikyu/v1` carries a bank, branch or debit-account
+  field, for any of seven cards across both bean families. The only
+  account-looking keys, `webMeisaiTopK3Vo.accountNo` (fully masked) and
+  `webMeisaiTopK3Vo.accountOvly`, are card-side identifiers.
+
+What changes: no parser. A processor lane reads the MyJCB table from the
+stored pages into `card_debit_account_statement` (migration 0060) and the
+settlement sweep attaches what it says to MyJCB candidates as evidence
+([card settlements](card-settlements.md#provider-stated-debit-accounts)). The
+holder name and card name are never read. **Kept as limits:** Vpass has no
+reader; branch names are not compared; the relation between the mask length
+and a bank's account-number length is not checked.
+
+## MyJCB menu groups: schedule pages are not months (collector, no parser release)
+
+2026-09-27. The second structure-only survey of the day (round 4, counts and
+shapes only) read the credit menu: nine 「明細を見る」 links, all
+`detail.html?detailMonth=N`, in DOM order 0, 1, 7, 8, 2, 3, 4, 5, 6, each in
+a card box under an `h2`. Positions 0 and 1 are under 「最新のご利用明細」,
+2 to 6 under 「過去の明細」, and 7 and 8 under
+「ボーナス#回払い・ショッピングスキップ払い」 (`#` a digit the survey did not
+record). Position 8 is the ショッピングスキップ払い schedule (h1
+「ショッピングスキップ払いご利用明細(未確定分)」, the third ledger header over
+two rows); position 7, the bonus schedule, has not been seen with rows.
+
+With the previous collector a skip page with rows was stored unread and kept
+the unit `partial`, so the run registered `partial`, was `not_eligible`, and
+no MyJCB month was parsed while a skip payment was outstanding. The collector
+now reads the menu's headings
+([ADR 0005's amendment (c)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months),
+[source note](sources/myjcb.md)): the months are the positions under the two
+month headings (and the past-months response's), and the schedule positions
+are stored as `credit-schedule-NN.html` evidence, recorded in the manifest
+(`schedulePages`, `schedulePageCount`), outside the unit's coverage and read
+by no parser. A menu heading that is not one of the three observed ones stops
+the connection before its first month (`credit_menu_group_unrecognized`).
+
+No parser changes and nothing stored is rewritten. What the schedule rows mean
+is not confirmed; reading the ショッピングスキップ払い page as its own dataset
+is left for a later change, for pages observed with rows. Tests:
+`services/collector-myjcb/test/parsers.test.ts`,
+`credit-statement-state.test.ts`, `shared-collection.test.ts`, and
+`services/processor/test/myjcb-shared-r2.test.ts`.
+
+## MyJCB: a confirmed page under the usage header (ledger and statement parsers 1.2.0)
+
+Corrected on 2026-09-28 ([above](#myjcb-confirmed-months-stopped-on-a-line-break-in-the-ledger-header-schedule-parser-011)):
+the observation below was a string-matching artifact. No stored confirmed
+page has the usage header; the code described here is kept, unobserved.
+
+2026-09-27. A position-1 page an earlier run stored carries the `(確定分)`
+heading over the unconfirmed ledger header
+(「ご利用日 / ご利用先など / 支払区分 / ご利用金額」; 「今回のお支払い金額」 0 times),
+while the live page of the same position showed the confirmed header the
+same day. Until now such a page was a `conflict`: the collector stopped the
+connection at that month and the statement parser failed it. The owner
+chose to accept it only when the page proves it
+([ADR 0005 amendment (d)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-d-a-confirmed-page-under-the-usage-header-proven-by-the-page)).
+The proof has two parts. Every row's combined 「ご利用先など／支払区分」 cell must
+be one single payment by recognition's own grammar (`myjcbSinglePayment`).
+The exact sum of the row amounts (`sumQuantities`) must equal the page's
+「…お支払い金額合計」. All rows must be in the first `detail-list-01`, the one
+ledger the collector stores. Otherwise the page stays a conflict. The log
+names one closed reason: `usage_header_rows_outside_first_ledger`,
+`usage_header_payment_type_unproven`, `usage_header_total_missing` or
+`usage_header_total_mismatch`.
+
+- **Collector.** A proven page is `confirmed`. Its ledger stores the header
+  the page shows and a confirmed page's expanded labels.
+- **`myjcb-credit-ledger@1.2.0`.** A `confirmed` ledger under the usage
+  header records its amount as the usage amount (`amountBasis`
+  `confirmed-usage`, `usageAmountText`) and no `paymentAmountText`.
+  Recognition therefore excludes such rows (`payment_split_unknown`), and
+  matching never compares them. Every other ledger parses as in 1.1.2.
+- **`myjcb-credit-statement-total@1.2.0`.** A proven page publishes its
+  total with `statementStateBasis: "page-heading-usage-total-proof"` and
+  `ledgerAmountLabel: "ご利用金額"`. Every other page is recorded exactly as
+  in 1.1.0.
+- **`myjcb-credit-past-month-balances@1.1.3` and
+  `myjcb-canonical-evidence-boundary@1.1.3`.** These change digest only. The
+  MyJCB cell grammars moved to `packages/domain/src/myjcb-amounts.ts`, which
+  the shared module now imports.
+
+Deploying rewrites nothing. The repair lane re-parses the stored MyJCB
+artifacts under the new releases. Ledgers and pages under the confirmed
+header publish identical observations. A stored closed page under the usage
+header, in a run eligible for parsing, publishes its total when it proves
+it. How many do was not surveyed. The cause of the 2026-09-25/26 stops is
+likely this page shape, not confirmed. Why the label changes between nights
+is unknown. Tests: `services/collector-myjcb/test/credit-statement-state.test.ts`,
+`packages/parsers/test/myjcb-statement.test.ts`,
+`services/processor/test/card-purchase-parser-shapes.test.ts`.
+
+## Person names kept in stored captures (collectors, no parser release)
+
+Decided on 2026-09-27 by the owner
+([ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)),
+the same day as the entry below: person names may be stored as the provider
+shows them. The collectors no longer replace them; each capture's manifest
+entry no longer carries `redactedFieldCount`, and the sanitizing steps are
+`sbi-shinsei-token-sanitizer` v3 and `myjcb-sanitizer` v3. No parser reads
+either field, so no parser releases and no observation changes. **Kept as a
+fact, not rewritten:** captures written between the two changes carry
+`[redacted:name]` (append-only; the names were never retained).
+
+## Person names removed from stored captures (collectors, withdrawn the same day)
+
+Observed on 2026-09-27 by the owner's agent in stored objects, reporting key
+names, types and match results only
+([ADR 0029's amendment](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2026-09-27-names-are-removed-from-stored-evidence)):
+
+- SBI Shinsei `balance-summary-and-stage` captures carry the account holder's
+  name in three fields of `responseParam.summary.responseParam`.
+- MyJCB confirmed statement pages carry a partially masked account holder
+  name in the 口座名義 row of the 「カード情報」 table.
+
+What changed then ([#333](https://github.com/risu729/kogane/pull/333)): the
+collectors replaced those values with `[redacted:name]` before anything was
+written, and each capture's manifest entry counted the replacements
+(`redactedFieldCount`). Withdrawn by the entry above.
+
+## SBI Shinsei board time ends in letters (board parser 1.0.2)
+
+Observed on 2026-09-27 by the owner's agent (structure and counts only,
+[ADR 0028 amendment](adr/0028-sbi-shinsei-observed-capture-shapes.md#amendment-2026-09-27-the-two-trailing-characters-are-letters-parser-102)):
+
+- **Replay diagnostics after 1.0.1.** `sbi-shinsei-exchange-rate`: 17 boards
+  selected, 17 refused, all with "provider timestamp format is not
+  recognized"; 33 `error` and 0 `ok` parse runs of the parser; all 17 are
+  importer-era captures. `sbi-shinsei-top-balances-and-activity`: 0 selected
+  (54 `error`, 29 `ok` and 29 published parse runs; no artifact still failing),
+  so 0.1.2 resolved the activity refusals.
+- **The stored `transactionTime`** is `dddd/dd/dd dd:dd:dd aa`: 22 characters,
+  a time with seconds, a space and two letters. The entry below wrote it as
+  `NNNN/NN/NN NN:NN:NN NN`, and 1.0.1 read each `N` as a digit; it matched no
+  stored board.
+- **Screens.** The logged-in top shows 5 currencies (mid rate only); the FX
+  savings page and the public rate page show 13 (USD, EUR, CAD, AUD, GBP, NZD,
+  SGD, HKD, ZAR, NOK, CNY, TRY, BRL). Their times are minute precision with no
+  trailing letters. CHF and JPY are on no screen; no per-100 unit is shown, and
+  the public pages state fees and rates per 1 base currency unit, in yen.
+
+1.0.2 matches the letter shape exactly (either case) and refuses the digit
+form again; migration 0059 moves the board's policy row to 1.0.2, and the
+repair lane re-parses the stored boards after deploy. The letters' meaning,
+the owner's tier and the board's own time stay unknown; no FX price is
+admitted.
+
+## GLOBAL PASS refusals log a counts-only shape (collector, no parser release)
+
+2026-09-28. The GLOBAL PASS collector has stored no page for seven nights:
+since 2026-09-27 every month is refused with
+`globalpass_html_contract_invalid`, a code seventeen sanitizer checks share.
+With the owner's approval, a refusal now logs which expectation failed and a
+counts-only shape of the refused page in the `artifact-write` diagnostic line
+(closed codes, booleans and counts; no text), and the manifest's failure entry
+carries the expectation as `expectationCode`
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape),
+[source note](sources/prestia.md#global-pass-refusal-shape-diagnostic-2026-09-28)).
+No check changed, so the pages are refused as before; which expectation
+refuses them has not been observed yet. No parser changed.
+
+## GLOBAL PASS activity pages paginate; the collector keeps page 1 (collector, no parser release)
+
+Observed on 2026-09-27 by the owner's agent on the live Account Activities
+screen, structure and counts only
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-27-global-pass-pagination-observed-sanitizer-refusals-get-closed-codes),
+[source note](sources/prestia.md#global-pass-activity-pages-and-refusals-2026-09-27)):
+a month with more than ten statements shows `Found N Result [p/Ppage] Back
+Next` with ten statement blocks per page; five of 15 months had two pages. The
+collector sends one `page.content()` per month and follows no Next link, so
+for such a month it can store page 1 only. It now marks that month
+`activity_pages_unwalked` and the run `partial`. No parser changed:
+`global-pass-activity` reads no pager and would take page 1 as the month, but
+it sees no shared GLOBAL PASS run, whose unit stays `partial`. Separately,
+in each of the seven nightly runs before 2026-09-27 both months were refused by the
+sanitizer; the refusal is now recorded as one of four closed codes, and which
+one it is has not been observed yet. A stored capture stating 16 results with
+16 rows and no pager is not reconciled with the live behaviour. (Superseded on 2026-10-04: the collector walks every page;
+[above](#global-pass-walked-months-and-page-qualified-external-ids-activity-parser-110).)
+
+## Vpass stated-total fields on the live site (collector, no parser release)
+
+Observed on 2026-09-27 by the owner's agent on the live web statement page
+for all seven cards, reporting field names and JSON types only
+([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site),
+[field table](vpass-android-api.md#statement-response-fields-live-2026-09-27)):
+
+- Five cards answer with `WebMeisaiCommonDisplayServiceBean` and
+  `WebMeisaiTopDisplayServiceBean`; `webMeisaiTopK3Vo.allCnt` is present and
+  a JSON string.
+- Two cards answer with `CustomizedMeisaiAnsDisplayServiceBean`; `total` is
+  present and a JSON number.
+
+What changes: nothing in any parser. The collector's month check already read
+a digit-string `allCnt`; it, the Worker's walk and both Node clients now share
+one exact reader, and the synthetic fixtures state `allCnt` as a string and
+`total` as a number. **Unknown, kept as limits:** the meaning and type of
+`pageNo`, `lastPage`, `rowCnt`, `limitCnt`, `dispCnt`, `prevPageRow` and
+`responseCnt`, which the walk therefore does not read; the type and meaning
+of `nextPageRow`, which the walk compares with `allCnt` and sends back as the
+next page's cursor, as it did before; and whether any live month logs
+`stated_total_unverified` or `stated_total_mismatch`, which the next
+collection's persist diagnostic shows.
+
+## SBI Shinsei stored-capture shapes (activity parser 0.1.2, board parser 1.0.1)
+
+Observed on 2026-09-27 by the owner's local agent replaying stored captures
+through the deployed parsers, reporting structure and counts only
+([ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)):
+
+- `top-accounts-balance-and-activity` (two captures, one from the importer
+  era, one recent): the key sets match `sbi-shinsei-top-balances-and-activity`
+  0.1.1's exactly; `activity.responseParam.fromDate` is present as
+  `YYYY/MM/DD` and `toDate` is an empty string; `activityDetails` has 10 rows
+  in both. 0.1.1 throws `incomplete activity window`, which is the whole cause
+  of its 29 `parser_rejected` runs.
+- `exchange-rate`: 67 rows under
+  `responseParam.exchangeRateInformation.responseParam.exchangeRates`, each
+  `{currency, customerCategory, buyRate, sellRate, midRate}`: 13 currencies ×
+  5 `customerCategory` tiers, CHF in one row, JPY in one row.
+  `transactionTime` is 22 characters, `NNNN/NN/NN NN:NN:NN NN`. 1.0.0 rejects
+  the board: the time form is not recognised, a currency repeats (the tiers),
+  and a JPY row is present.
+
+What the releases do, and what they leave unknown:
+
+- **0.1.2** reads an empty `toDate` beside a stated `fromDate` as an end the
+  provider did not state. The start still bounds every posting date; no end
+  is checked or invented; every observation of the activity block carries
+  `_kogane.activityWindowEnd: "not-stated"`. Slash dates were already read.
+- **1.0.1** keeps each tier as its own observations (identity
+  `(currency, customerCategory)`, the claim expecting rows × 3 over all
+  tiers), skips a JPY row with an `info` `row_unreadable` issue of impact
+  `none`, and for a `transactionTime` of the observed 22-character shape
+  (digits and separators only, which no stored board has: see 1.0.2 above;
+  any other unrecognised form still fails)
+  writes no provider time,
+  marks `_kogane.providerTimeBasis: "unrecognized"` and records one `info`
+  `unknown_fields_preserved` issue without the value. Readers use the fetch
+  instant, marked as the collector's.
+- **Unknown, kept as reasons:** the window's end, the meaning of the two
+  trailing characters (so the board's own time), which tier applies to the
+  owner, and each currency's quote basis. The price rule promoted no board row
+  until an admission named the currency, its tier and its basis (ADR 0020
+  amendment); since ADR 0031 the tier is the stage category the same run's
+  balance summary states, for the 13 currencies the provider's pages quote
+  per 1 unit, and the stage is kept as a valuation-kind observation with no
+  amount (account `sbi-shinsei:customer`, metric
+  `provider_customer_category`, currency `XXX`).
+
+Deploying the parsers is enough to re-parse: the repair lane's cyclic scan
+creates a job per stored artifact for the new (parser, version) pair and
+drains them at its budget, and a replay plan per dataset does the same at
+once. The board's policy row pins its parser version exactly, so migration
+0056 moves it to 1.0.1; the activity dataset's row pins none. The earlier
+frozen coverage-contract outputs are unchanged, and new cases freeze the
+observed shapes on synthetic fixtures
+(`sbi-shinsei-parser-boundaries/top-accounts-balance-and-activity-window-end-not-stated.json`,
+`sbi-shinsei-parser-boundaries/exchange-rate-observed-board.json`). Whether
+every stored capture passes the checks after the first one is known only once
+the new version's jobs have run.
+
+## MoneyForward v2 account identity (monthly parser 2.0.3, boundary parser 1.0.2)
+
+Both MoneyForward parsers take the account from the artifact's unit key. They
+accepted only the retired importer's `moneyforward-account-v1-<64 hex>`; they
+now also accept the collector's `moneyforward-account-v2-<64 hex>`, the
+unkeyed digest of the same account/service tuple
+([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md)). Nothing
+else changed, so every stored v1 artifact parses as before, positional
+`account-NN` units stay `parser_rejected`, and the new versions' jobs only
+repeat the old ones' outcome for stored artifacts. A v1 and a v2 identity are
+different source accounts: a month captured under both is listed under both
+([identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity)).
+
 ## MoneyForward description-template repair (monthly parser 2.0.2)
 
 Read-only, size/SHA-256-verified inspection of an affected monthly artifact found
@@ -150,6 +801,144 @@ had, with 1.1.0 ids, so every `failed` count there needs a look.
 `packages/parsers/test/vpass-page-identity.test.ts` pins the unchanged
 first-page ids and the new later-page ids for both families.
 
+## MyJCB export links and the third ledger header (collector, no parser release)
+
+2026-09-27. A structure-only survey of one connection's live credit pages
+(counts, header labels and link shapes, no values) found three things the
+collector read wrongly or not at all
+([ADR 0005's amendment (b)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page),
+[source note](sources/myjcb.md)).
+
+- Confirmed months link their PDF, CSV and OFX exports with relative hrefs.
+  The collector resolved them against the origin alone and never matched one,
+  so every stored run recorded no export; "the surveyed connection offers no
+  export links" in the entry below was that bug. The collector now resolves
+  links against the detail page's URL and records the offered kinds in the
+  manifest. It does not fetch them: the shared bucket refuses the export
+  datasets.
+- Position 8 shows a third ledger header,
+  `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` (three cells), over
+  an empty ledger. A second look the same day found that positions 7 and 8
+  are not months: the menu groups them under
+  「ボーナス#回払い・ショッピングスキップ払い」, and position 8 is the
+  ショッピングスキップ払い payment schedule. With rows at position 0 or 1, or
+  under the confirmed heading, the header stopped the connection. A position
+  whose ledger has rows under it is now kept unread
+  (`scheduled_payments_page`): its page is stored as `unknown` evidence, no
+  ledger is derived, and the next position is read. Its run is `partial` and
+  not parsed; the collector still counted positions, not months (until the
+  menu groups entry above).
+- A detail page fetched without the credit menu first is a different page;
+  the collector already reads the menu first. A 「通信エラーが発生しました」
+  page followed many consecutive fetches; the collector does not recognise
+  it (a limit).
+
+No parser changes and nothing stored is rewritten. The position-1 stops of
+2026-09-25 and 09-26 (`credit-ledger-headers`, no artifact kept) are not
+confirmed: a position-1 page an earlier run stored carries the `(確定分)`
+heading without `今回のお支払い金額` (label counts only), a shape the current
+rule stops on, so it is the likely cause. A later stop on a page's own shape
+stores the page. Tests:
+`services/collector-myjcb/test/parsers.test.ts`,
+`credit-statement-state.test.ts`, `shared-collection.test.ts`, and
+`services/processor/test/myjcb-shared-r2.test.ts`.
+
+## MyJCB statements keep their identity when their position moves (collector, no parser release)
+
+The MyJCB collector recorded every credit month the past-months API does not
+label under its position, `detailMonth-N`. That period is the artifact's
+metadata, the snapshot slot the read model partitioned confirmed captures by,
+and an input of `myjcb-credit-ledger`'s row fingerprint, so of each row's
+external id and card purchase recognition key. When the next statement closes,
+the provider moves the newest closed one from position 1 to position 2. Its
+rows then got new keys: the purchase lane retired every event of the statement
+(`provider_status_absent`) and recognised the same purchases again, a monthly
+churn with no new information. Worse, one slot per position could keep a
+statement current twice: its position-1 capture stayed the newest of slot
+`detailMonth-1` until a newer run replaced it, beside its position-2 capture,
+and a position whose newest page later had no ledger artifact kept its last
+capture current for good.
+
+Three designs were compared.
+
+- **(a) A stable statement key in the read model only**, recognition keys
+  without the position. Recognition keys cannot leave the external id:
+  migration 0047's `card_purchase_recognition_keys_guard` requires each key to
+  equal the row's own
+  `json_array(source, producer, namespace, source_account, external_id)`, a
+  five-element array (`CHECK`). A new key shape needs a schema migration and
+  gives every existing MyJCB event a new key: every one of them retired and
+  recognised once. Keeping the keys and carrying an event over to its row's new
+  key instead needs a revision per row per month, a stale-key read that joins
+  every stale key to its successor, and, for positions 2 and later, the month
+  from a different artifact (the page's statement total), which publishes on its
+  own schedule: until it does, the moved capture has no statement and is either
+  hidden or current twice.
+- **(b) A parser release deriving the external id from a stable statement
+  key.** A parser sees one artifact, and `credit-ledger-NN.json` names no month:
+  it could resolve positions 0 and 1 from `fetched_at`
+  (`relative-statement-period-v1`), which fixes a versioned interpretation into
+  an identity, but not position 2, where the churn is. It would also give every
+  existing MyJCB event a new key.
+- **(c) The collector records the month a confirmed page names** (chosen). A
+  closed statement page carries the `(確定分)` heading and names its payment
+  month in `<h2>YYYY年M月お支払い分のカードご利用明細</h2>`, the heading
+  `myjcb-credit-statement-total` already reads. The collector now records that
+  month, `YYYY-MM`, as the period of the page, its ledger and its exports
+  (`creditStatementPeriod` in `services/collector-myjcb/src/parsers.ts`). The
+  ledger parser is unchanged, and a statement's rows hash to the same external
+  ids at every position, so from the first run after the deploy the lane writes
+  nothing when a statement moves. The position stays recorded beside it (the
+  artifact key and the ledger's `detailMonth`). This is not a relative label
+  resolved at collection time: the page states the month, as the past-months
+  API does for the months it labels (their `settlementYM` is kept verbatim and
+  must name the same month when the page names one). Unconfirmed and `unknown`
+  pages name no month and keep `detailMonth-N`. A confirmed page naming no
+  month, or more than one, stops the collection with `credit-statement-period`;
+  the statement parser rejects such a page as well.
+
+The read model completes (c) for captures stored before it. A confirmed
+capture's snapshot slot is now its statement, the payment month
+(`myjcbStatementMonth` in `packages/read-model/src/sql.ts`): an absolute
+period (`YYYY-MM`, `YYYYMM`, `YYYY年M月お支払い分`), or `detailMonth-0` and
+`detailMonth-1` resolved from the capture's `fetched_at` by
+`relative-statement-period-v1` (the SQL text is tested against
+`resolveRelativePeriod`). Every capture of one statement is one slot, whatever
+its position and label, so only its newest capture is current and no statement
+is counted twice. A confirmed `detailMonth-N` with N ≥ 2 names a position, not a
+statement, and is never current: no rule places it, and letting it be current
+beside the named capture of the same statement is exactly the double count
+above. Only captures from before this collector carry such a label, and in
+the production captures [the relative-label rule](#relative-period-labels-are-resolved-from-the-capture-time)
+was drawn from, menu months 2–8 carried no row. The unconfirmed slot was
+left unchanged here; it is now keyed the same way
+([pending statements](#myjcb-pending-statements-are-one-slot-each)). The stored
+labels are never rewritten.
+
+On deploy nothing is re-parsed and nothing stored changes. The read model's
+slot change moves no key. A statement recorded as confirmed under
+`detailMonth-1` (only captures since the fix in
+[the statement-state note below](#myjcb-statement-state-from-the-page-statement-parser-110))
+is superseded by its first capture under the month its page names: each of its
+recognised rows is retired once and recognised once under its new key, and the
+captured total counts it once throughout. That is one statement per connection
+(two if a month boundary passes between the deploys), not every MyJCB event:
+pending events, the months the past-months API labels and every later month
+keep their keys. A `detailMonth-N` (N ≥ 2) confirmed capture with rows that
+was current stops being current and its events retire; where the same
+statement is also current from its position-1 capture, that removes a double
+count. Deploy the read model (processor) with or before the collector: the
+collector alone would put a statement's named capture in a slot beside its
+`detailMonth-1` capture. Rollback of the collector restores the relative labels
+and the churn; the read model's slots hold either way.
+`services/collector-myjcb/test/credit-statement-state.test.ts` pins the period
+the collector records, `packages/read-model/test/card-usage.test.ts` and
+`card-purchase-keys.test.ts` the slot, and
+`services/processor/test/myjcb-statement-identity.test.ts` a statement moving
+from position 1 to 3 with no retire and no recognition, a pending row becoming
+authorized and then captured once, and the one-time move of a relative
+capture.
+
 ## MyJCB statement state from the page (statement parser 1.1.0)
 
 `services/collector-myjcb` decided a credit month's statement state from its
@@ -183,7 +972,11 @@ label stop the collection at position 1 and are `unknown` at an older
 position. A page that contradicts itself stops the collection with
 `credit-statement-state` at any position: two headings, both labels in one
 header, ledgers that disagree, or the heading over an unconfirmed header. So do
-export links on a page that is not a confirmed statement.
+export links on a page that is not a confirmed statement. (Since
+[ADR 0005's amendment](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months),
+such a stop ends that connection at that month: the months before it are kept
+as a `partial` unit with the stop code `credit_statement_state`, and the run is
+`partial` and not parsed.)
 
 Older positions do not stop the run because of production evidence (counts
 only, read only). Every run captured positions 7 and 8 with a ledger of zero
@@ -191,9 +984,10 @@ rows and no heading; their manifests say `confirmed`, and
 `myjcb-credit-statement-total@1.0.1` answered `statement_total_not_confirmed`
 for all 12 captures of each. Stopping on them would stop every daily run.
 Recording them as `unconfirmed` would be worse: they are recorded after
-position 0 in the same run, so an empty capture would become the newest in the
-connection's one unconfirmed snapshot slot and position 0's pending rows would
-stop being current. Every closed statement passes through position 1, where
+position 0 in the same run, so an empty capture would have become the newest in
+the connection's one unconfirmed snapshot slot (the read model before
+[the pending statement slots](#myjcb-pending-statements-are-one-slot-each)) and
+position 0's pending rows would have stopped being current. Every closed statement passes through position 1, where
 all 12 production captures show the heading, so position 1 keeps the stop for
 rows that claim a statement the page does not state. The stop log
 (`myjcb-credit-statement-state`) and the `unknown` log
@@ -249,14 +1043,16 @@ There are three reasons:
 
 The stored rows therefore remain `unconfirmed` observations, the record of what
 the collector said at the time. They stop being current on the first successful
-run of the fixed collector. Every unconfirmed ledger capture of a connection
-shares one snapshot slot, `(connection, unconfirmed)`, and from then on its
-newest capture is position 0, unless position 1 shows unconfirmed rows without
-the heading, which no production capture has. The same statement is captured again at
-position 1 in its own slot, `(confirmed, detailMonth-1)`. Until then,
-position 0 and position 1 of one run competed for the unconfirmed slot, so only
-one of them was current. After the fix, position 0's pending rows are current
-beside the posted ones. On the next ticks the purchase lane's retire pass moves
+run of the fixed collector. At this release every unconfirmed ledger capture of
+a connection shared one snapshot slot, `(connection, unconfirmed)`, and from
+then on its newest capture was position 0, unless position 1 showed
+unconfirmed rows without the heading, which no production capture has. The
+same statement is captured again at position 1 as `confirmed`, in its own
+slot. Until then, position 0 and position 1 of one run competed for the
+unconfirmed slot, so only one of them was current. After the fix, position 0's
+pending rows are current beside the posted ones. (Pending captures now have a
+slot per statement and end when a newer capture of their position exists:
+[pending statements](#myjcb-pending-statements-are-one-slot-each).) On the next ticks the purchase lane's retire pass moves
 each `authorized` event whose row left the current view to `unknown`
 (`provider_status_absent`), a revision with no leg. The recognition pass then
 recognises the confirmed rows, under their `confirmed` external ids, as
@@ -586,6 +1382,9 @@ second interpretation of the same provider HTML. A fourth route,
 payment date from credit detail HTML. Since 1.1.0 it takes the statement state
 from the page itself, not from the manifest
 ([release note](#myjcb-statement-state-from-the-page-statement-parser-110)).
+Since 1.4.0 a page whose h1 is a menu schedule page's (ボーナス払い or
+ショッピングスキップ払い) is never read as a statement
+([release note](#myjcb-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-not-a-statement-statement-parser-140)).
 
 Every artifact is bound to its manifest-relative
 `<connection-id>/<filename>`, statement state, and period before bytes are
@@ -607,9 +1406,14 @@ row beside the declared sign convention.
 
 Stable transaction identity hashes the normalized row together with period and
 statement state, then adds a deterministic same-artifact occurrence counter.
+The period of a confirmed page is the month the page names, so a row keeps its
+identity while its statement moves down the provider's list
+([release note](#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)).
 The row locator remains its exact JSON index. Current transactions select the
-newest successful artifact for each confirmed period and the newest successful
-unconfirmed snapshot overall. This both collapses repeated collection runs and
+newest successful artifact for each confirmed statement (its payment month,
+whatever position it was captured at) and, for each pending statement, the
+newest successful unconfirmed artifact while its position still shows it
+([pending statements](#myjcb-pending-statements-are-one-slot-each)). This both collapses repeated collection runs and
 removes a pending row that disappears from a later complete snapshot, while
 the append-only observations remain available as evidence.
 
@@ -636,10 +1440,14 @@ as production-validated Layer B routes.
 Some providers name a period only by its position on the day it is shown.
 MyJCB's credit menu links `detailMonth=0..8`, and its past-months API labels
 only months 9–17 with an absolute `settlementYM`, so the collector stores
-`detailMonth-N` as the period of every other month
-(`services/collector-myjcb/src/collector.ts`). On the connection surveyed in
-[the MyJCB notes](sources/myjcb.md) that is every pending row and every recent
-confirmed month.
+`detailMonth-N` as the period of every other month that does not name its own
+(`creditStatementPeriod` in `services/collector-myjcb/src/parsers.ts`). A
+confirmed page names its payment month in its heading, and since
+[the statement identity fix](#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)
+the collector records that month instead; that is the page's own statement,
+not a resolution of its position. On the connection surveyed in
+[the MyJCB notes](sources/myjcb.md) the relative label therefore remains on
+every pending row, and on the confirmed months captured before that fix.
 
 **A relative label is never resolved at collection time.** The collector keeps
 storing exactly what the provider showed, and the label stays raw evidence
@@ -686,19 +1494,71 @@ a time), and no capture yet falls on days 12–30 to show on which day the
 provider's position 0 moves to the next cycle. A capture on those days that
 contradicts it is corrected by a new rule version, never by editing v1.
 
-What the surveyed connection shows today limits what a resolved
-`detailMonth-1` achieves there. Its `detailMonth=1` page carries no export
-link, so the collector records that month as `unconfirmed` (it treats month 0
-or 1 without an export as unconfirmed) although the page heading says 確定分
-([the MyJCB notes](sources/myjcb.md)). That ledger's rows are pending rows,
-the statement parser rejects that page, so it has no `card_statement_facts`
-row, and both unconfirmed ledgers of the connection share the one
-unconfirmed snapshot the current views keep (above), so only the newer of the
-two is current for recognition. The rule still gives those pending rows their
-payment month; the statement join and the confirmed-row pairing a resolved
-`detailMonth-1` enables ([card settlements](card-settlements.md),
-[economic events](economic-events.md#the-vertical-slice-that-runs)) apply
-where the collector records that month as confirmed.
+The read model applies the same rule to a confirmed capture's snapshot slot
+(`myjcbStatementMonth` in `packages/read-model/src/sql.ts`, tested against
+`resolveRelativePeriod`), so a statement captured under `detailMonth-1` and
+later under the month its page names is one slot. A confirmed `detailMonth-N`
+with N ≥ 2 names no statement and is never current
+([release note](#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)).
+Before the collector read the statement state from the page, it recorded
+`detailMonth=1` as `unconfirmed`
+([statement parser 1.1.0](#myjcb-statement-state-from-the-page-statement-parser-110));
+those stored rows stay pending rows, current only until a newer capture of
+position 1 exists (below).
+
+#### MyJCB pending statements are one slot each
+
+From the 16th until the closed cycle is confirmed (around the 24th), the
+provider lists two unconfirmed statements: the cycle still accumulating at
+position 0 and the closed cycle at position 1, recorded as `unconfirmed` under
+`detailMonth-0` and `detailMonth-1`. Every unconfirmed ledger capture of a
+connection used to share one snapshot slot, so only the newer of the two was
+current: the other statement's pending rows were neither listed nor
+recognised, and when the order of the two captures' publication changed, the
+purchase lane retired one statement's events and recognised the other's again.
+
+The read model now keys a pending capture like a confirmed one
+([ADR 0016](adr/0016-myjcb-pending-statement-slots.md)). Its slot is the
+payment month it shows (`myjcbStatementSlot` in
+`packages/read-model/src/sql.ts`: `detailMonth-0` is `P0` and `detailMonth-1`
+is `P0 − 1` under this rule), in the partition of its state, so a statement's
+pending capture and its confirmed capture are one month in two partitions. A
+pending capture is current only while its position still shows it: it must be
+the newest pending capture of its month and also the newest published ledger
+capture of its position (the artifact key `<connection>/credit-ledger-NN.json`),
+whatever that capture's state. So:
+
+- two pending statements of one capture day are both current, and a later
+  capture of either replaces only that one;
+- a statement's confirmed capture at position 1 ends its pending capture in
+  the same read, so the two are never current together; their rows are two
+  keys (the state is in the external id), so the lane retires each pending
+  event once and recognises the posted row once as `captured`;
+- two captures of one position are never current together, whatever months
+  the rule gives them, so an error in the unverified switch on the 16th cannot
+  keep one statement current twice from its captures of the 15th and 16th at
+  one position. Across the two positions the month is the only link: if the
+  switch day is wrong and, on the day the statement moves to position 1,
+  position 1 is published before position 0, the last capture of position 0
+  and the new capture of position 1 are two months and the statement is
+  current twice until position 0 is published again (the mirror case hides a
+  statement for the same lag). Pending captures between the two switch days
+  are also keyed by the wrong month;
+- across connections that one account resolves, a pending row must also come
+  from the account's newest capture of its position (card usage step 3), so a
+  replaced connection's pending capture is not current beside the new one's;
+- a pending relative label no rule places is never current; the
+  collector records none.
+
+Recognition keys do not change: the key is the row's external id. A pending
+statement that moves from position 0 to position 1 on the 16th still gets new
+keys, because the label is in its rows' fingerprint, so its events retire and
+are recognised again once per cycle; that is a known limit, not changed here.
+Nothing stored is rewritten and no migration is needed. On deploy, where the
+newest captures hold a pending position 1 beside position 0, position 0's rows
+become current and are recognised. `packages/read-model/test/card-usage.test.ts`
+("two pending MyJCB statements are two slots") and
+`services/processor/test/myjcb-statement-identity.test.ts` pin the rules.
 
 Other relative labels surveyed (`services/collector-*`,
 `packages/parsers/src/parsers/*`, `docs/sources/*.md`):
@@ -1163,7 +2023,12 @@ CREATE INDEX IF NOT EXISTS idx_val_obs_parse_run
   ON valuation_observations (parse_run_id);
 ```
 
-Two notes for anyone applying this DDL.
+Two notes for anyone applying this DDL, and one about what it lacks: the
+production CORE schema has a fifth observation table,
+`scheduled_payment_observations` (migration 0061), for payments a provider
+says are still due (the MyJCB ショッピングスキップ払い page,
+[ADR 0005 amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
+It is append-only like the four above and is read by nothing yet.
 
 The `source_account` comment is reproduced from `schema.sql` as it stands
 and is, as described above, not what the parsers do. The
@@ -1533,6 +2398,20 @@ transactions select all pages from the latest successful card-month snapshot.
 A newer empty snapshot therefore clears older current rows without deleting
 the append-only evidence or observations. Pending customized and posted web
 rows remain separate; matching them belongs to the reconciler, not Layer B.
+
+The latest snapshot is chosen per card and statement month regardless of the
+producer, so a parsed capture of the Vpass collector (`collector-vpass`) would
+replace the importer's capture of the same card-month. Its rows carry the same
+`vpass:card-NNN` source account. When the collector held the binding key and
+the responses carried the card tuple, its run holds a trusted card binding of
+its own (migration 0055), identity policy 2 maps the rows to the card token's
+account entity, which is the importer-era entity for the same token, and card
+purchase recognition retires the importer-era events of that card-month and
+recognises the collector's once on the same account. Without a binding the
+rows map to run-scoped unresolved accounts and recognition skips them as
+`account_not_resolved`. The collector's statement pages are registered without
+a parser dataset, so none is parsed today
+([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
 
 The checked-in remote read-only canary validates the source R2 manifest and
 pagination contract first, then invokes the same parser with the Layer A card

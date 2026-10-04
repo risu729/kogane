@@ -35,7 +35,7 @@ import type { BackfillManifest, BackfillProgress, StoredArtifact } from "./types
 
 /** `runs/<source>/…` in DATA. The Processor maps it to the CORE source `smbc-bank`. */
 export const SHARED_SOURCE = "smbc-direct";
-const PRODUCER = "collector-smbc-direct";
+export const PRODUCER = "collector-smbc-direct";
 const MANIFEST_ARTIFACT_KEY = "manifest.json";
 const JSON_MEDIA_TYPE = "application/json";
 /** The single unit the central descriptors already use for this source. */
@@ -184,11 +184,19 @@ export interface SharedRunInput {
   readonly identity: SharedRunIdentity;
 }
 
+/**
+ * One planned artifact. A stored response and its normalized counterpart
+ * belong to the account unit; the run's own manifest belongs to the run and
+ * names no unit, so the unit's `artifactCount` is exactly the artifacts that
+ * name it (ADR 0021). Until then the manifest named the unit without being
+ * counted, and CORE refused the seal (`run_inventory_incomplete`).
+ */
 async function artifactOf(options: {
   artifactKey: string;
   bytes: Uint8Array;
   mediaType: string;
   role: string;
+  unitKey?: string;
 }): Promise<PersistArtifact> {
   return {
     artifactKey: options.artifactKey,
@@ -196,7 +204,7 @@ async function artifactOf(options: {
     byteSize: options.bytes.byteLength,
     mediaType: options.mediaType,
     role: options.role,
-    unitKey: UNIT_KEY,
+    ...(options.unitKey === undefined ? {} : { unitKey: options.unitKey }),
     body: { kind: "bytes", bytes: options.bytes },
   };
 }
@@ -223,6 +231,7 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
         bytes,
         mediaType: baseMediaType(entry.mediaType),
         role: role(entry),
+        unitKey: UNIT_KEY,
       }),
     );
     if (entry.dataset.endsWith("-normalized")) {

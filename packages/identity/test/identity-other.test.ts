@@ -53,6 +53,45 @@ describe("non-SBI account identification", () => {
       "unresolved",
     );
   });
+  test("Mizuho ordinary deposits are provider-local by branch and account number", () => {
+    const account = "mizuho-bank:ordinary:001:1234567";
+    const balance = otherIdentity(
+      input("mizuho-bank", account, { kind: "balance", currency: null, instrument: "JPY" }),
+    );
+    const transaction = otherIdentity(input("mizuho-bank", account, { fetchRunId: 99 }));
+    expect(balance.account).toEqual({
+      key: [account],
+      label: "みずほ銀行 普通預金",
+      role: "deposit",
+      status: "provider-local",
+      reason: "provider-branch-and-account",
+    });
+    expect(balance.issues).toEqual([]);
+    // Balance and history rows of one account share the reference, across runs.
+    expect(transaction.account.key).toEqual(balance.account.key);
+    expect(transaction.instruments).toEqual([currencyIdentity("JPY", "unit")]);
+    expect(
+      otherIdentity(input("mizuho-bank", "mizuho-bank:ordinary:001:7654321")).account.key,
+    ).not.toEqual(balance.account.key);
+    for (const unexpected of [
+      "mizuho-bank:ordinary:01:1234567",
+      "mizuho-bank:ordinary:001:123456",
+      "mizuho-bank:ordinary:001:12345678",
+      "mizuho-bank:savings:001:1234567",
+      "mizuho-bank:ordinary:001:1234567:extra",
+      "mizuho-bank:ordinary-yen",
+      "mizuho:ordinary:001:1234567",
+    ]) {
+      const plan = otherIdentity(input("mizuho-bank", unexpected));
+      expect(plan.account).toMatchObject({
+        key: [unexpected],
+        label: "みずほ銀行 普通預金",
+        status: "unresolved",
+        reason: "unrecognized-source-account",
+      });
+      expect(plan.issues).toContain("unrecognized-source-account");
+    }
+  });
   test("Vpass durable binding is trusted input only and ignores ordinal, run and forged extra", () => {
     const binding = {
       cardToken: `vpass-card-v1-${"a".repeat(64)}`,
@@ -76,6 +115,52 @@ describe("non-SBI account identification", () => {
     );
     expect(forged.account.status).toBe("unresolved");
     expect(forged.account.key).toEqual(["vpass:card-001", "fetch-run", "4"]);
+  });
+  test("ADR 0023: the collector's trusted token keys the same account reference as the importer's", () => {
+    const binding = {
+      cardToken: `vpass-card-v1-${"a".repeat(64)}`,
+      bindingArtifactId: 10,
+      financialUnitId: 20,
+    };
+    const importer = otherIdentity(
+      input("vpass", "vpass:card-001", {
+        producerId: "collector-r2-importer",
+        trustedVpassBinding: binding,
+      }),
+    );
+    const collector = otherIdentity(
+      input("vpass", "vpass:card-002", {
+        producerId: "collector-vpass",
+        fetchRunId: 99,
+        trustedVpassBinding: { ...binding, bindingArtifactId: 11, financialUnitId: 21 },
+      }),
+    );
+    expect(collector.account.key).toEqual(importer.account.key);
+    expect(collector.account.status).toBe("provider-local");
+    expect(importer.account.reason).toBe("verified-importer-durable-card-binding");
+    expect(collector.account.reason).toBe("verified-collector-durable-card-binding");
+    // Without the store-verified binding, a collector row stays run-scoped.
+    const unbound = otherIdentity(
+      input("vpass", "vpass:card-001", { producerId: "collector-vpass", fetchRunId: 99 }),
+    );
+    expect(unbound.account.status).toBe("unresolved");
+    expect(unbound.account.key).toEqual(["vpass:card-001", "fetch-run", "99"]);
+  });
+  test("ADR 0029: a v2 token keys its own account; v1 and v2 of one card stay apart", () => {
+    const bound = (cardToken: string) =>
+      otherIdentity(
+        input("vpass", "vpass:card-001", {
+          producerId: "collector-vpass",
+          trustedVpassBinding: { cardToken, bindingArtifactId: 10, financialUnitId: 20 },
+        }),
+      ).account;
+    const v2 = bound(`vpass-card-v2-${"a".repeat(64)}`);
+    expect(v2.status).toBe("provider-local");
+    expect(v2.key).toEqual(["vpass:card", `vpass-card-v2-${"a".repeat(64)}`]);
+    expect(v2.key).not.toEqual(bound(`vpass-card-v1-${"a".repeat(64)}`).key);
+    for (const token of [`vpass-card-v3-${"a".repeat(64)}`, `vpass-card-v2-${"A".repeat(64)}`]) {
+      expect(bound(token).status).toBe("unresolved");
+    }
   });
   test("V Point common semantic buckets survive ordinal and run changes", () => {
     const extra = {
@@ -154,6 +239,12 @@ describe("non-SBI account identification", () => {
       "aggregator-mirror",
       "provider-local",
     ],
+    [
+      "moneyforward-me",
+      `moneyforward-me:moneyforward-account-v2-${"a".repeat(64)}`,
+      "aggregator-mirror",
+      "provider-local",
+    ],
     ["paypay", "paypay", "wallet-export", "provider-local"],
   ] as const)("%s %s recognizes the audited account scope", (source, account, role, status) => {
     const plan = otherIdentity(input(source, account));
@@ -181,6 +272,8 @@ describe("non-SBI account identification", () => {
     ["smbc-bank", "smbc-bank:ordinary-aud"],
     ["sbi-shinsei", "sbi-shinsei:synthetic-ref"],
     ["moneyforward-me", "moneyforward-me:account-001"],
+    ["moneyforward-me", `moneyforward-me:moneyforward-account-v3-${"a".repeat(64)}`],
+    ["moneyforward-me", `moneyforward-me:moneyforward-account-v2-${"A".repeat(64)}`],
     ["sony-bank", "sony-bank:gross:asset:012"],
     ["sony-bank", "sony-bank:deposit:XYZ"],
     ["myjcb", "myjcb:synthetic-connection:subcard"],

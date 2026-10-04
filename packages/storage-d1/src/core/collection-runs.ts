@@ -280,7 +280,12 @@ export function readPendingRegistrations(
 }
 
 export interface RegistrationBacklog {
-  /** Runs seen and neither registered nor blocked, for any reason. */
+  /**
+   * Runs of this contract version seen and neither registered nor blocked,
+   * for any reason. A row of an earlier version is not counted: after a
+   * version bump it is never worked again, and the terminal is counted under
+   * the new version once the scan sees it (ADR 0022).
+   */
   unregistered: number;
   /** Of those, the staged registrations waiting for their next invocation. */
   pending: number;
@@ -297,7 +302,8 @@ export async function readRegistrationBacklog(
     db,
     `SELECT
        (SELECT count(*) FROM collection_runs
-         WHERE blocked_code IS NULL AND registered_at IS NULL) AS unregistered,
+         WHERE blocked_code IS NULL AND registered_at IS NULL
+           AND registration_contract_version = ?1) AS unregistered,
        count(*) AS pending,
        min(r.first_seen_at) AS oldest_pending_first_seen_at
        FROM collection_runs r
@@ -335,6 +341,13 @@ export async function readCollectionScanState(db: D1Like): Promise<CollectionSca
 export interface CollectionScanProgress {
   /** The R2 cursor for the next tick; null finishes the cycle and restarts it. */
   cursor: string | null;
+  /**
+   * True when the tick dealt with its whole page. A tick held by its budget
+   * lists the same page again next time: it counts neither a page nor a
+   * cycle, even when that page is the first one and the cursor stays null
+   * (ADR 0024).
+   */
+  pageFinished: boolean;
   nowMs: number;
   seen: number;
   registered: number;
@@ -342,9 +355,11 @@ export interface CollectionScanProgress {
 }
 
 /**
- * Advances the cursor by one page. A finished walk (`cursor` null) counts a
+ * Records one tick of the scan. A finished page moves the cursor and counts a
+ * page; a finished walk (`cursor` null after a finished page) also counts a
  * cycle and starts the next tick at the beginning of the prefix again, which
- * is what makes a terminal confirmed late reachable at all (G1-12).
+ * is what makes a terminal confirmed late reachable at all (G1-12). A held
+ * tick only records when it ran and what it saw.
  */
 export async function advanceCollectionScan(
   db: D1Like,
@@ -353,8 +368,9 @@ export async function advanceCollectionScan(
   await run(
     db,
     `UPDATE collection_scan_state
-        SET cursor = ?2, last_scan_at_ms = ?3, pages_completed = pages_completed + 1,
-            cycles_completed = cycles_completed + CASE WHEN ?2 IS NULL THEN 1 ELSE 0 END,
+        SET cursor = ?2, last_scan_at_ms = ?3,
+            pages_completed = pages_completed + ?7,
+            cycles_completed = cycles_completed + CASE WHEN ?7 = 1 AND ?2 IS NULL THEN 1 ELSE 0 END,
             last_seen = ?4, last_registered = ?5, last_blocked = ?6
       WHERE lane = ?1`,
     [
@@ -364,6 +380,7 @@ export async function advanceCollectionScan(
       progress.seen,
       progress.registered,
       progress.blocked,
+      progress.pageFinished ? 1 : 0,
     ],
   );
 }

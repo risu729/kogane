@@ -45,7 +45,10 @@ export function createGlobalPassActivity(
 ): Parser {
   return {
     name: "global-pass-activity",
-    version: "1.0.0",
+    // 1.1.0: reads the page-qualified keys of a walked month
+    // (`activity-YYYY-MM-pN.html`) and qualifies a later page's external id
+    // and raw locator by its page; page 1 is read exactly as in 1.0.0.
+    version: "1.1.0",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (
@@ -67,7 +70,12 @@ export function createGlobalPassActivity(
       const html = decodeUtf8(bytes);
       if (!/^\s*<!doctype\s+html\b/iu.test(html)) throw new Error("global-pass HTML doctype drift");
       const document = parseDocument(html);
-      const selectedMonth = parseMonthSelector(document, artifact.artifactKey);
+      const { month: keyMonth, page } = parseArtifactKey(artifact.artifactKey);
+      const selectedMonth = parseMonthSelector(document);
+      if (keyMonth !== selectedMonth) {
+        throw new Error("global-pass artifact key and selected month disagree");
+      }
+      requirePagerPage(document, page);
       const tables = elements(document, "table");
       const outer = tables.filter((table) => owned(table, "th", "table").length === 12);
       const compact = tables.filter((table) => owned(table, "th", "table").length === 4);
@@ -145,18 +153,27 @@ export function createGlobalPassActivity(
         const identity = stableFingerprint(record);
         const occurrence = occurrences.get(identity) ?? 0;
         occurrences.set(identity, occurrence + 1);
+        // Page 1 keeps the 1.0.0 id; a later page names its page before the
+        // occurrence, so identical rows on different pages of one month never
+        // share an id (INV06), as Vpass statement pages do since 1.2.0.
         if (!amount.signed) unsigned = true;
         return {
           kind: "transaction",
           sourceAccount: "global-pass:card",
-          externalId: `global-pass:${identity}:${occurrence}`,
+          externalId:
+            page === 1
+              ? `global-pass:${identity}:${occurrence}`
+              : `global-pass:${identity}:p${page}:${occurrence}`,
           ...(amount.minor !== undefined ? { amountMinor: amount.minor } : {}),
           amountText: amount.amountText,
           amountScale: amount.scale,
           currency: amount.currency,
           description: record.compactFields[DETAIL_HEADER]!,
           asOf: record.date,
-          rawLocator: `html:activity-record=${index + 1}`,
+          rawLocator:
+            page === 1
+              ? `html:activity-record=${index + 1}`
+              : `html:activity-page=${page};activity-record=${index + 1}`,
           extra: {
             compactFields: record.compactFields,
             expandedFields: record.expandedFields,
@@ -167,7 +184,10 @@ export function createGlobalPassActivity(
             _kogane: {
               selectedMonth,
               sourceView: "single-provider-html-with-responsive-duplicate",
-              identityOrigin: "all-provider-fields+occurrence",
+              identityOrigin:
+                page === 1
+                  ? "all-provider-fields+occurrence"
+                  : "all-provider-fields+page+occurrence",
               amountDirection: amount.signed ? "provider-signed" : "unresolved-unsigned",
               pendingToConfirmedIdentity: "unproven",
             },
@@ -186,7 +206,42 @@ export function createGlobalPassActivity(
   };
 }
 
-function parseMonthSelector(document: Node, artifactKey: string | null | undefined): string {
+/**
+ * The month and page an artifact key names. Page 1 of a month is
+ * `activity-YYYY-MM.html`, the key every run before the collector walked
+ * pages used; the walked pages after it are `activity-YYYY-MM-pN.html`
+ * (ADR 0026's amendment of 2026-10-04).
+ */
+function parseArtifactKey(artifactKey: string | null | undefined): {
+  month: string;
+  page: number;
+} {
+  const match = /^activity-(\d{4}-\d{2})(?:-p([2-9]))?\.html$/u.exec(artifactKey ?? "");
+  if (!match) throw new Error("global-pass artifact key and selected month disagree");
+  return { month: match[1]!, page: match[2] === undefined ? 1 : Number(match[2]) };
+}
+
+/**
+ * A page's pager (`div.nablarch_currentPageNumber`, `[p/Ppage]` in English,
+ * `[p/Pページ]` in Japanese, two per page) must name the page its key names.
+ * Page 1 of a month without statements shows no pager; any later page must.
+ */
+function requirePagerPage(document: Node, page: number): void {
+  const pagers = elements(document, "div").filter((div) =>
+    (attribute(div, "class") ?? "").split(/\s+/u).includes("nablarch_currentPageNumber"),
+  );
+  const indices = pagers.map((pager) => {
+    const match = /^\[\s*(\d{1,4})\s*\/\s*(\d{1,4})\s*(?:pages?|ページ)\s*\]$/iu.exec(text(pager));
+    if (!match) throw new Error("global-pass pager is unreadable");
+    return Number(match[1]);
+  });
+  if (indices.length === 0 && page !== 1) throw new Error("global-pass later page has no pager");
+  if (indices.some((index) => index !== page)) {
+    throw new Error("global-pass pager and artifact key name different pages");
+  }
+}
+
+function parseMonthSelector(document: Node): string {
   const candidates = elements(document, "select").filter((select) => {
     const options = owned(select, "option", "select");
     return options.some((option) => /^\d{8}$/u.test(attribute(option, "value") ?? ""));
@@ -225,13 +280,9 @@ function parseMonthSelector(document: Node, artifactKey: string | null | undefin
   const selected = options.filter((option) => hasAttribute(option, "selected"));
   if (selected.length !== 1)
     throw new Error("global-pass month selector must have one selected option");
-  const selectedMonth = attribute(selected[0]!, "value")!
+  return attribute(selected[0]!, "value")!
     .slice(0, 6)
     .replace(/^(\d{4})(\d{2})$/u, "$1-$2");
-  if (artifactKey !== `activity-${selectedMonth}.html`) {
-    throw new Error("global-pass artifact key and selected month disagree");
-  }
-  return selectedMonth;
 }
 
 function previousMonth(month: string): string {

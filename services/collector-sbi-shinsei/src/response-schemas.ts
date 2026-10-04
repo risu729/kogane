@@ -147,6 +147,10 @@ function validateBalanceSummary(value: unknown): JsonObject {
     ["summary", "category", "branchFetch"],
   );
   const summary = wrapper(response.summary, "balanceSummary.summary");
+  // The three name fields are the account holder's name, stored as the
+  // provider returns it (ADR 0029, amendment 2). Captures written while #333's
+  // redaction was deployed carry the string marker `[redacted:name]` instead;
+  // both are scalars and pass this validator.
   const summaryResponse = exactObject(
     summary.responseParam,
     "balanceSummary.summary.responseParam",

@@ -14,6 +14,10 @@
 // plan and lets `persistRun` write the terminal last.
 import type { CollectionFailure, CollectionManifest, RawArtifact, StoredArtifact } from "./types";
 import {
+  moneyForwardAccountIdentities,
+  type MoneyForwardIdentityUnavailable,
+} from "./account-identity";
+import {
   objectKey,
   persistRun,
   type CoverageStatus,
@@ -27,8 +31,9 @@ import {
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 
-const SOURCE = "moneyforward-me";
-const PRODUCER = "moneyforward-worker";
+export const SOURCE = "moneyforward-me";
+/** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
+export const PRODUCER = "collector-moneyforward-me";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 /** `account-NN-month-YYYY-MM.html`, the collector's own filename grammar. */
 const MONTHLY_FRAGMENT = /^account-(\d{2})-month-(\d{4}-\d{2})\.html$/u;
@@ -58,7 +63,11 @@ export interface SharedRunInput {
 export interface SharedRunOutcome {
   readonly result: PersistRunResult;
   readonly artifactCount: number;
+  /** `derived`, or the closed code saying why the units stayed positional (ADR 0027). */
+  readonly identity: MoneyForwardIdentityState;
 }
+
+export type MoneyForwardIdentityState = "derived" | MoneyForwardIdentityUnavailable;
 
 /**
  * The Workers `R2Bucket` provides everything `R2BucketLike` names; the two
@@ -70,7 +79,11 @@ export function sharedBucket(binding: R2Bucket): R2BucketLike {
   return binding as unknown as R2BucketLike;
 }
 
-/** The account a captured page belongs to, or null for the run-wide index. */
+/**
+ * The positional account a captured page belongs to, or null for the run-wide
+ * index. This is the collector's filename grammar, not identity: it is the
+ * unit key only when the run has no account identity (ADR 0027).
+ */
 export function artifactUnitKey(filename: string): string | null {
   const monthly = MONTHLY_FRAGMENT.exec(filename);
   if (monthly) return `account-${monthly[1]!}`;
@@ -130,14 +143,48 @@ function manifestBytes(input: SharedRunInput, stored: readonly StoredArtifact[])
   return new TextEncoder().encode(JSON.stringify(manifest));
 }
 
-/** Build the persist plan for a finished run. Pure apart from hashing. */
+/**
+ * Build the persist plan for a finished run. Pure apart from hashing.
+ *
+ * With a tuple on every account-detail page that passes the importer's checks,
+ * each account's unit key is its `moneyforward-account-v2-<64 hex>` identity
+ * (ADR 0027, ADR 0029); otherwise the units stay positional (`account-NN`),
+ * which the parser rejects.
+ */
 export async function moneyForwardRunPlan(input: SharedRunInput): Promise<PersistRunPlan> {
+  return (await moneyForwardRunPlanWithIdentity(input)).plan;
+}
+
+/** The plan and the identity state it was built with (for the diagnostic). */
+export async function moneyForwardRunPlanWithIdentity(
+  input: SharedRunInput,
+): Promise<{ plan: PersistRunPlan; identity: MoneyForwardIdentityState }> {
   const outcome: ProviderOutcome = input.status;
   const coverageStatus = coverage(input.status);
   const errorCode = safeErrorCode(input.status);
   // A failed run keeps no artifact: there is nothing whose persistence could
   // be claimed, and the terminal states the failure on its own (G1-09).
   const sources = outcome === "failed" ? [] : input.artifacts;
+
+  const positionalUnits = new Set<string>();
+  for (const artifact of sources) {
+    const positional = artifactUnitKey(artifact.filename);
+    if (positional !== null) positionalUnits.add(positional.slice("account-".length));
+  }
+  const identities = await moneyForwardAccountIdentities(
+    sources,
+    positionalUnits,
+    input.status === "success" ? input.accountDetailCount : undefined,
+  );
+  const identity: MoneyForwardIdentityState =
+    identities.status === "derived" ? "derived" : identities.code;
+  // The unit of a page: its account's identity when the run has one for every
+  // account, else the positional key. Never a mix within one run.
+  const unitKeyOf = (filename: string): string | null => {
+    const positional = artifactUnitKey(filename);
+    if (positional === null || identities.status !== "derived") return positional;
+    return identities.byOrdinal.get(positional.slice("account-".length))!;
+  };
 
   const artifacts: PersistArtifact[] = [];
   const stored: StoredArtifact[] = [];
@@ -146,7 +193,7 @@ export async function moneyForwardRunPlan(input: SharedRunInput): Promise<Persis
   for (const artifact of sources) {
     const bytes = new TextEncoder().encode(artifact.body);
     const sha256 = await sha256Hex(bytes);
-    const unitKey = artifactUnitKey(artifact.filename);
+    const unitKey = unitKeyOf(artifact.filename);
     if (unitKey !== null) unitKeys.add(unitKey);
     const month = artifactMonth(artifact.filename);
     if (unitKey !== null && month !== null) {
@@ -220,7 +267,7 @@ export async function moneyForwardRunPlan(input: SharedRunInput): Promise<Persis
 
   const operationId = identifier(input.operationId, "shared_operation_id_invalid");
   const sessionRef = identifier(input.acquisitionSessionRef, "shared_session_ref_invalid");
-  return {
+  const plan: PersistRunPlan = {
     run: {
       source: SOURCE,
       producer: PRODUCER,
@@ -250,6 +297,7 @@ export async function moneyForwardRunPlan(input: SharedRunInput): Promise<Persis
     },
     artifacts,
   };
+  return { plan, identity };
 }
 
 /**
@@ -261,9 +309,9 @@ export async function persistSharedRun(
   bucket: R2BucketLike,
   input: SharedRunInput,
 ): Promise<SharedRunOutcome> {
-  const plan = await moneyForwardRunPlan(input);
+  const { plan, identity } = await moneyForwardRunPlanWithIdentity(input);
   const result = await persistRun(bucket, plan);
-  return { result, artifactCount: plan.artifacts.length };
+  return { result, artifactCount: plan.artifacts.length, identity };
 }
 
 /** Safe, code-only diagnostics for a persist attempt: no provider text, no
@@ -279,6 +327,7 @@ export function sharedRunDiagnostic(
     status: input.status,
     persistence: result.outcome,
     artifactCount: outcome.artifactCount,
+    identity: outcome.identity,
     ...(result.outcome === "incomplete"
       ? {
           reasonCode: result.reasonCode,

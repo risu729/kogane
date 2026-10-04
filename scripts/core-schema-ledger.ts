@@ -98,6 +98,10 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   position_observations: { classification: "core-keep", planRow: "parse runs and observations" },
   transaction_observations: { classification: "core-keep", planRow: "parse runs and observations" },
   valuation_observations: { classification: "core-keep", planRow: "parse runs and observations" },
+  scheduled_payment_observations: {
+    classification: "core-keep",
+    planRow: "parse runs and observations",
+  },
   // metadata_projections/inputs, parse_input_references → CORE
   metadata_projection_inputs: { classification: "core-keep", planRow: "metadata projections" },
   metadata_projections: { classification: "core-keep", planRow: "metadata projections" },
@@ -214,6 +218,17 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "bounded card settlement scan progress",
   },
+  // 0060 (ADR 0032): the card provider's own statement of the debit account,
+  // read from stored MyJCB pages, and what it says about each settlement
+  // candidate. Both append-only evidence; neither is lane state.
+  card_debit_account_statement: {
+    classification: "core-keep",
+    planRow: "card settlement evidence and decisions",
+  },
+  card_settlement_debit_account_evidence: {
+    classification: "core-keep",
+    planRow: "card settlement evidence and decisions",
+  },
   card_purchase_recognitions: {
     classification: "core-keep",
     planRow: "card purchase recognition evidence",
@@ -257,6 +272,16 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   // price_observations, calculation_policies → CORE
   calculation_policies: { classification: "core-keep", planRow: "prices and calculation policies" },
   price_observations: { classification: "core-keep", planRow: "prices and calculation policies" },
+  // Which claim each promoted price came from (0053): evidence, append-only.
+  price_observation_claims: {
+    classification: "core-keep",
+    planRow: "prices and calculation policies",
+  },
+  // The price promotion lane's scan progress per claim kind (0053).
+  price_promotion_cursor: {
+    classification: "operational-mutable",
+    planRow: "bounded price promotion scan progress",
+  },
   // calculation_runs/results, report_artifacts/events → CORE + DATA R2
   calculation_results: { classification: "core-keep", planRow: "calculation runs and reports" },
   calculation_runs: { classification: "core-keep", planRow: "calculation runs and reports" },

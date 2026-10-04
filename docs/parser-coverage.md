@@ -75,6 +75,37 @@ either throw or prove the whole container, so their claim is always complete;
 the Sony contract fixes the container at 17 rows (`expectedCount: 17`) and an
 empty Sony container is a schema drift, not a complete-empty snapshot.
 
+Parsers written after the conversion emit contract v2 from their first
+version and start on `coverage-v1`. `sbi-shinsei-exchange-rate` (1.0.0 from
+migration 0053, [ADR 0020](adr/0020-price-promotion-by-rule.md); 1.0.1 from
+migration 0056 and 1.0.2 from migration 0059,
+[ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md))
+reads SBI Shinsei's `exchange-rate` artifact as one complete container: every
+quote row, one per `(currency, customerCategory)`, gives three rate cells, so
+its claim states `expectedCount = quote rows × 3`; an unreadable rate cell is
+a `row_unreadable` issue with impact `membership` and leaves the board
+partial; a JPY row is not a quote and is skipped with an `info`
+`row_unreadable` issue of impact `none`; a `transactionTime` of the observed
+22-character shape (a time with seconds, a space and two ASCII letters; 1.0.2)
+is an `info` `unknown_fields_preserved` issue of impact `field` (any other
+unrecognised form, the two-digit suffix 1.0.1 assumed included, still fails); an empty board
+(or one with no quote row), an unknown field or a pair listed twice fails the
+artifact. Its policy row sets `replaces_previous_on_complete_empty = 0` and
+pins `required_parser_version`, which the selection matches exactly, so each
+release of this parser moves the row in a migration (0056: 1.0.1; 0059:
+1.0.2). Its frozen
+expectations live in `coverage-contract/sbi-shinsei-exchange-rate-expected.json`
+and, for the observed shapes of 2026-09-27,
+`coverage-contract/sbi-shinsei-observed-shapes-expected.json`, beside the
+historical `expected.json`.
+
+`sbi-shinsei-balance-summary-and-stage` (0.1.0,
+[ADR 0031](adr/0031-sbi-shinsei-stage-category-fx-tier.md)) emits contract v2
+too: one stage-category observation and a complete-container claim with
+`expectedCount: 1`, or a throw. It has no snapshot policy row, because nothing
+selects its observation as a container snapshot; the price promotion lane
+reads it by fetch run.
+
 **Parser versions are unchanged.** The output contract gained fields, but
 `tests/fixtures/observation-pipeline/coverage-contract/expected.json` freezes the observations and
 warning strings every synthetic case produced before the change, and
@@ -468,3 +499,21 @@ MyJCB past-month summary observations remain month-based and are not promoted
 to exact payment dates. New synthetic tests cover ambiguity, invalid dates,
 refund/zero totals and mutable pages; archived provider samples were checked
 read-only without copying private values into fixtures.
+
+## Card scheduled payments (MyJCB ショッピングスキップ払い)
+
+`myjcb-skip-payment-schedule` (0.1.1,
+[ADR 0005 amendments (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)
+and [(f)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks))
+reads the MyJCB `credit-schedule` page that the collector stores as
+`credit-skip-payment-NN.html`. It is a legacy-shape parser (no issues, no
+coverage claim) and has no snapshot policy row: nothing selects its rows as a
+container snapshot. It proves nothing about completeness beyond its own
+rule: a page is read whole or refused with one closed code
+(`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`), and an empty ledger (its one row the
+provider's empty row) is zero rows, not a failure. Its rows are the fifth observation kind, `scheduled_payment`
+(`scheduled_payment_observations`, migration 0061), declared outside
+`types.ts` so that no other parser's digest changes. They are future
+payments, not purchases, statement rows or balances; no read path reads them
+yet. The ボーナス払い schedule page is not read until it is observed with
+rows.

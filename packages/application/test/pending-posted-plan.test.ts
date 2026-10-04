@@ -5,7 +5,7 @@
 // purchases written by the guarded recognition builder. Accepting merges the
 // two events into one purchase; withdrawing splits them again. Synthetic
 // values only.
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { CardPurchaseCandidate } from "../../domain/src/card-purchase-view.ts";
 import type { SourceFactRef } from "../../domain/src/events.ts";
@@ -27,7 +27,14 @@ import { simulate } from "../src/command/simulate.ts";
 import { relationMutation } from "../src/operations/relation-writes.ts";
 import { queryCardPurchases } from "../src/query/card-purchases.ts";
 import { PurchaseWorld } from "./card-purchase-world.ts";
-import { sqliteCommandStore } from "./sqlite-store.ts";
+import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite-store.ts).
+beforeAll(() => {
+  migratedDatabase().close();
+}, 60_000);
 
 const OPERATOR: Principal = {
   id: "operator",

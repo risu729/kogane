@@ -57,6 +57,15 @@ export {
   type TransactionQuery,
 } from "./reader";
 export { createObservationReader } from "./observation-reader";
+export {
+  PRICE_SELECTION_BOUND,
+  PRICE_SELECTION_SQL,
+  PriceSelectionError,
+  type PriceSelectionQuery,
+  type SelectedPrice,
+  priceSelectionArgs,
+  selectPrices,
+} from "./price-selection";
 export { createD1ObservationReader, d1Executor, type D1Like } from "./d1";
 export {
   DECIMAL_POLICY_RELEASE,

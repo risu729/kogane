@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { createDiagnostics, safeErrorDetails } from "../src/index";
+import { createDiagnostics, safeErrorDetails, safeShape } from "../src/index";
 
 const runId = "00000000-0000-4000-8000-000000000001";
 afterEach(() => {
@@ -79,6 +79,31 @@ describe("safe collector diagnostics", () => {
     ).toMatchObject({ category: "response", code: "collect-credit-export" });
   });
 
+  test("keeps the GLOBAL PASS sanitizer's closed code and nothing else", () => {
+    for (const code of [
+      "globalpass_html_contract_invalid",
+      "globalpass_html_redaction_failed",
+      "globalpass_html_shape_unreviewed",
+      "globalpass_html_utf8_invalid",
+    ]) {
+      const error = Object.assign(new Error(code), { name: "GlobalPassSanitizerError", code });
+      expect(safeErrorDetails(error)).toEqual({
+        category: "response",
+        errorType: "GlobalPassSanitizerError",
+        code,
+      });
+    }
+    // A code outside the list is not echoed, even under the sanitizer's name.
+    expect(
+      safeErrorDetails(
+        Object.assign(new Error("globalpass_html_private"), {
+          name: "GlobalPassSanitizerError",
+          code: "globalpass_html_private",
+        }),
+      ),
+    ).toEqual({ category: "unknown", errorType: "GlobalPassSanitizerError" });
+  });
+
   test("rejects unrecognized source, stage and correlation values", () => {
     const records = capture();
     createDiagnostics("secret-source", "user@example.test").failure("secret-stage", "private-body");
@@ -125,5 +150,52 @@ describe("safe collector diagnostics", () => {
       }),
     ).rejects.toBe(error);
     diagnostic.finish("failed");
+  });
+});
+
+describe("a failure's shape keeps closed codes, booleans and counts only", () => {
+  test("drops text, negative or fractional numbers, unknown strings and deep nesting", () => {
+    expect(
+      safeShape({
+        expectation: "forbidden_token",
+        summarized: true,
+        byteMagnitude: 5,
+        merchant: "SYNTHETIC MERCHANT",
+        amount: -12,
+        ratio: 0.5,
+        "bad key": 1,
+        elements: { table: 1, label: "private-text", deeper: { tr: 2 } },
+        list: [1, 2],
+      }),
+    ).toEqual({
+      expectation: "forbidden_token",
+      summarized: true,
+      byteMagnitude: 5,
+      elements: { table: 1 },
+    });
+    // A key outside the closed key list is dropped even with a safe value.
+    expect(safeShape({ SYNTHETICMERCHANT: 1, elements: { SYNTHETICLABEL: true } })).toBeUndefined();
+    expect(safeShape("private-text")).toBeUndefined();
+    expect(safeShape({ text: "private-text" })).toBeUndefined();
+  });
+
+  test("the diagnostic line carries the kept shape on a failure only", () => {
+    const records = capture();
+    const diagnostic = createDiagnostics("prestia-globalpass", runId);
+    const error = Object.assign(new Error("globalpass_html_contract_invalid"), {
+      name: "GlobalPassSanitizerError",
+      code: "globalpass_html_contract_invalid",
+    });
+    diagnostic.failure("artifact-write", error, {
+      shape: { expectation: "credential_field", element: "input", note: "private-text" },
+    });
+    diagnostic.failure("artifact-write", error);
+    expect(records[0]).toMatchObject({
+      stage: "artifact-write",
+      code: "globalpass_html_contract_invalid",
+      shape: { expectation: "credential_field", element: "input" },
+    });
+    expect(records[1]).not.toHaveProperty("shape");
+    expect(JSON.stringify(records)).not.toContain("private-text");
   });
 });

@@ -605,10 +605,11 @@ type Group = [string, string, string | null, string | null];
  * The group a recognised event is paired in. Vpass: its statement period, or
  * its usage month when it has none. MyJCB: always its usage month. A MyJCB
  * pending row's label resolves to a payment month from its capture time
- * (`cardStatementPeriod`: `detailMonth-0` and `detailMonth-1`), but the
- * confirmed row of the same purchase can sit at a later position the rule
- * does not place (`detailMonth-2` and beyond, docs/observations.md), so
- * grouping by period would keep the two apart. The usage date is the one
+ * (`cardStatementPeriod`: `detailMonth-0` and `detailMonth-1`), and the
+ * confirmed row of the same purchase carries the month its page names, but a
+ * month the rule resolves wrongly (its day-16 switch is unverified,
+ * docs/observations.md) would keep the two apart if they were grouped by
+ * period. The usage date is the one
  * key both displays of a purchase share; the resolved periods still reach the
  * matcher, which admits a pair only when the posted usage day is inside its
  * matching window after the pending one, and claims `same_statement_period`

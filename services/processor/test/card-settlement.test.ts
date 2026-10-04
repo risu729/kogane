@@ -692,3 +692,132 @@ test("a newer resolved card ordinal invalidates an earlier approval without cons
     ).ok,
   ).toBe(true);
 }, 60000);
+
+/** A fresh owned statement and debit of `period` and their one candidate. */
+async function ownedPair(base: number, period: string): Promise<string> {
+  const due = `${period}-10`;
+  for (const [id, source, parser] of [
+    [base, "vpass", "vpass-statement-page"],
+    [base + 1, "smbc-bank", "smbc-direct-transactions"],
+  ] as const) {
+    await seedArtifact(env, id, source, "synthetic", "guard-" + id, {});
+    await db
+      .prepare(`INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES(?,?,?,'1',?,'ok','[]')`)
+      .bind(id, id, parser, `${period}-12`)
+      .run();
+  }
+  await db
+    .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
+    VALUES(?,?,'credit_statement_payment_amount',7000,'7000',0,'JPY',?,'synthetic-guard',?)`)
+    .bind(
+      base,
+      `vpass:guard-${base}`,
+      `${period}-01`,
+      JSON.stringify({
+        _kogane: {
+          period,
+          paymentDate: due,
+          snapshotSemantics: "provider-reported-monthly-payment-amount",
+        },
+      }),
+    )
+    .run();
+  await db
+    .prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,as_of,raw_locator,extra_json)
+    VALUES(?,?,?,'posted',-7000,'-7000',0,'JPY',?,'synthetic-guard',?)`)
+    .bind(
+      base + 1,
+      `smbc-bank:guard-${base}`,
+      `synthetic-guard-debit-${base}`,
+      `${due}T00:00:00+09:00`,
+      JSON.stringify({ _kogane: { direction: "outflow", amountSignSource: "direction" } }),
+    )
+    .run();
+  for (const [id, source] of [
+    [base, "vpass"],
+    [base + 1, "smbc-bank"],
+  ] as const) {
+    await publishParse(db, id);
+    await identifyParse(
+      db,
+      {
+        id,
+        artifact_id: id,
+        source_id: source,
+        producer_id: "collector-r2-importer",
+        fetch_run_id: id,
+      },
+      resolver,
+    );
+  }
+  await ownership(base, "liable_party");
+  await ownership(base + 1, "beneficial_owner");
+  await cardSettlementSweep(db);
+  const candidate = await db
+    .prepare("SELECT id FROM card_settlement_candidates WHERE statement_parse_run_id=?")
+    .bind(base)
+    .first<{ id: string }>();
+  if (!candidate) throw new Error("no candidate for " + period);
+  return candidate.id;
+}
+const receiptCount = async (): Promise<number> =>
+  (await db.prepare("SELECT count(*) AS n FROM operation_receipts").first<{ n: number }>())!.n;
+
+test("an acceptance planned before its owner changed or its review moved writes nothing", async () => {
+  // A competing owner claim for the statement's account after the plan: the
+  // owner is no longer known, so the commit guard refuses.
+  const contested = await ownedPair(1001, "2027-01");
+  const acceptContested = await preparedCommand("card-settlement.accept", {
+    proposalId: contested,
+    reason: "reviewed before the owner changed",
+  });
+  const mapping = (await db
+    .prepare(
+      "SELECT m.account_id FROM current_account_mappings m JOIN current_identity_observations o ON o.source_account_id=m.source_account_id WHERE o.parse_run_id=1001 LIMIT 1",
+    )
+    .first<{ account_id: string }>())!;
+  const claim = await command("relation.accept", {
+    relationKind: "liable_party",
+    fromRef: "account:" + mapping.account_id,
+    toRef: "party:synthetic-competing-owner",
+    validFrom: null,
+    validTo: null,
+    evidenceRefs: ["synthetic-competing-proof"],
+    reason: "Synthetic competing ownership evidence",
+  });
+  expect(claim.ok).toBe(true);
+  expect(
+    (await db
+      .prepare("SELECT ownership_current FROM card_settlement_readiness WHERE id=?")
+      .bind(contested)
+      .first<{ ownership_current: number }>())!.ownership_current,
+  ).toBe(0);
+  let receipts = await receiptCount();
+  expect((await acceptContested()).ok).toBe(false);
+  expect(await receiptCount()).toBe(receipts);
+
+  // Two plans of one acceptance: once the first commits, the review is no
+  // longer proposed at the planned revision. Its own settlement does not make
+  // the allocation unavailable to it, so only the revision refuses the second:
+  // commit's expected revisions and the guard's `c.revision=? AND c.status=?`.
+  const twice = await ownedPair(1011, "2027-02");
+  const acceptFirst = await preparedCommand("card-settlement.accept", {
+    proposalId: twice,
+    reason: "first plan",
+  });
+  const acceptSecond = await preparedCommand("card-settlement.accept", {
+    proposalId: twice,
+    reason: "second plan",
+  });
+  expect((await acceptFirst()).ok).toBe(true);
+  receipts = await receiptCount();
+  expect((await acceptSecond()).ok).toBe(false);
+  expect(await receiptCount()).toBe(receipts);
+  expect(
+    (await db
+      .prepare("SELECT count(*) AS n FROM card_settlement_decisions WHERE proposal_id=?")
+      .bind(twice)
+      .first<{ n: number }>())!.n,
+  ).toBe(1);
+}, 60000);

@@ -33,7 +33,7 @@ function healthy(overrides: Partial<CruiseResult["summary"]> = {}): CruiseResult
       violations: [],
       environment: {
         transpilersFound: [
-          { name: "typescript", available: true, currentVersion: "typescript@5.9.3" },
+          { name: "typescript", available: true, currentVersion: "typescript@6.0.3" },
         ],
       },
       ...overrides,
@@ -65,8 +65,9 @@ describe("G4-07 resolved-import guard", () => {
   });
 
   test("a cruise that saw almost nothing fails instead of passing", () => {
-    // dependency-cruiser 18 exits 0 with ~44 modules when no TypeScript < 7 is
-    // resolvable. That is the silent failure this floor exists to catch.
+    // dependency-cruiser 18 exits 0 with a few dozen modules when no
+    // TypeScript < 7 is resolvable. That is the silent failure this floor
+    // exists to catch.
     expect(cruiseProblems(healthy({ totalCruised: 44 }))).toEqual([
       `only 44 modules were cruised, below the ${MINIMUM_MODULES} floor: the rules would pass vacuously`,
     ]);
@@ -84,7 +85,7 @@ describe("G4-07 resolved-import guard", () => {
       }),
     );
     expect(problems).toEqual([
-      "no TypeScript transpiler is resolvable: dependency-cruiser would silently cruise almost nothing; keep typescript 5.x in the root manifest",
+      "no TypeScript transpiler is resolvable: dependency-cruiser would silently cruise almost nothing; keep typescript below 7 in the root manifest",
     ]);
   });
 

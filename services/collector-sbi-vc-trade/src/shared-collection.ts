@@ -31,7 +31,7 @@ export type { SharedRunSummary };
 
 /** `runs/<source>/…` in DATA; the CORE source id is the same string. */
 export const SHARED_SOURCE = "sbi-vc-trade";
-const PRODUCER = "collector-sbi-vc-trade";
+export const PRODUCER = "collector-sbi-vc-trade";
 const MANIFEST_ARTIFACT_KEY = "manifest.json";
 const JSON_MEDIA_TYPE = "application/json";
 /** The single unit the central descriptors already use for this source. */
@@ -81,10 +81,18 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * One planned artifact. A provider capture belongs to the account unit; the
+ * run's own manifest belongs to the run and names no unit, so the unit's
+ * `artifactCount` is exactly the artifacts that name it (ADR 0021). Until then
+ * the manifest named the unit without being counted, and CORE refused the seal
+ * (`run_inventory_incomplete`).
+ */
 async function artifactOf(options: {
   artifactKey: string;
   bytes: Uint8Array;
   role: string;
+  unitKey?: string;
 }): Promise<PersistArtifact> {
   return {
     artifactKey: options.artifactKey,
@@ -92,7 +100,7 @@ async function artifactOf(options: {
     byteSize: options.bytes.byteLength,
     mediaType: JSON_MEDIA_TYPE,
     role: options.role,
-    unitKey: UNIT_KEY,
+    ...(options.unitKey === undefined ? {} : { unitKey: options.unitKey }),
     body: { kind: "bytes", bytes: options.bytes },
   };
 }
@@ -224,6 +232,7 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
         artifactKey,
         bytes: encoder.encode(body),
         role: COLLECTOR_DERIVED_ROLE,
+        unitKey: UNIT_KEY,
       }),
     );
     transformations.push({

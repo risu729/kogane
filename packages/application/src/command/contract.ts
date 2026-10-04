@@ -6,6 +6,17 @@
 // runs against D1 in a Worker and against a test double.
 import { isOneOf, isRecord, isText } from "../../../domain/src/guards.ts";
 import { RELATION_KINDS, type RelationKind } from "../../../domain/src/decisions.ts";
+import {
+  CARD_PURCHASE_EXCLUSION_REASONS,
+  type CardPurchaseExclusionReason,
+  isCardEventIdOfKind,
+  isCardInstallmentObligationId,
+  isCardInstallmentPortionKey,
+  isCardInstallmentPortionRef,
+  isCardPurchaseEventId,
+  isCardRefundAllocationId,
+  isPortionList,
+} from "../../../domain/src/card-purchase-review.ts";
 
 /**
  * The closed list of change kinds. There is no external money action here and
@@ -19,8 +30,34 @@ export const CHANGE_KINDS = [
   "card-settlement.accept",
   "card-settlement.reject",
   "card-settlement.withdraw",
+  "card-purchase.exclude",
+  "card-purchase.restore",
+  "card-refund.allocate",
+  "card-refund.withdraw",
+  "card-installment.link",
+  "card-installment.unlink",
 ] as const;
 export type ChangeKind = (typeof CHANGE_KINDS)[number];
+
+/**
+ * The card purchase review kinds (ADR 0017, CORE 0051). The schema and the
+ * payload contract exist; a kind is plannable only once its planner is
+ * registered in `REVIEW_PLANNERS`, and until then planning it is refused with
+ * `unsupported_semantics` before any row is written.
+ */
+export const CARD_REVIEW_KINDS = [
+  "card-purchase.exclude",
+  "card-purchase.restore",
+  "card-refund.allocate",
+  "card-refund.withdraw",
+  "card-installment.link",
+  "card-installment.unlink",
+] as const satisfies readonly ChangeKind[];
+export type CardReviewKind = (typeof CARD_REVIEW_KINDS)[number];
+
+export function isCardReviewKind(kind: unknown): kind is CardReviewKind {
+  return isOneOf(CARD_REVIEW_KINDS)(kind);
+}
 
 export const IDENTITY_SUBJECTS = ["account", "instrument"] as const;
 export type IdentitySubject = (typeof IDENTITY_SUBJECTS)[number];
@@ -49,11 +86,53 @@ export interface CardSettlementPayload {
   proposalId: string;
   reason: string;
 }
+/** `card-purchase.exclude`: this row is not a purchase, for a closed reason. */
+export interface CardPurchaseExcludePayload {
+  eventId: string;
+  reasonCode: CardPurchaseExclusionReason;
+  reason: string;
+}
+/** `card-purchase.restore`: undo a live exclusion. */
+export interface CardPurchaseRestorePayload {
+  eventId: string;
+  reason: string;
+}
+/** `card-refund.allocate`: this refund belongs to that purchase. */
+export interface CardRefundAllocatePayload {
+  refundEventId: string;
+  purchaseEventId: string;
+  reason: string;
+}
+/** `card-refund.withdraw`: withdraw one live refund allocation. */
+export interface CardRefundWithdrawPayload {
+  allocationId: string;
+  reason: string;
+}
+/** `card-installment.link`: these later portion rows belong to that obligation. */
+export interface CardInstallmentLinkPayload {
+  obligationId: string;
+  portionRefs: string[];
+  reason: string;
+}
+/** `card-installment.unlink`: release these linked portion keys from that obligation. */
+export interface CardInstallmentUnlinkPayload {
+  obligationId: string;
+  portionKeys: string[];
+  reason: string;
+}
+export type CardReviewPayload =
+  | CardPurchaseExcludePayload
+  | CardPurchaseRestorePayload
+  | CardRefundAllocatePayload
+  | CardRefundWithdrawPayload
+  | CardInstallmentLinkPayload
+  | CardInstallmentUnlinkPayload;
 export type ChangePayload =
   | IdentityAssignPayload
   | IdentityReleasePayload
   | RelationPayload
-  | CardSettlementPayload;
+  | CardSettlementPayload
+  | CardReviewPayload;
 
 const REASON_MAX = 1000;
 
@@ -68,6 +147,7 @@ export function validPayload(kind: ChangeKind, value: unknown): value is ChangeP
   if (kind.startsWith("card-settlement.")) {
     return exactKeys(value, ["proposalId", "reason"]) && isText(value.proposalId, 512) && reason;
   }
+  if (isCardReviewKind(kind)) return reason && validCardReviewPayload(kind, value);
   if (kind === "identity.assign" || kind === "identity.release-override") {
     const assign = kind === "identity.assign";
     const keys = assign
@@ -103,6 +183,42 @@ export function validPayload(kind: ChangeKind, value: unknown): value is ChangeP
     new Set(value.evidenceRefs).size === value.evidenceRefs.length &&
     reason
   );
+}
+
+/** Exact keys and closed id shapes per review kind; the reason is checked by the caller. */
+function validCardReviewPayload(kind: CardReviewKind, value: Record<string, unknown>): boolean {
+  switch (kind) {
+    case "card-purchase.exclude":
+      return (
+        exactKeys(value, ["eventId", "reasonCode", "reason"]) &&
+        isCardPurchaseEventId(value.eventId) &&
+        isOneOf(CARD_PURCHASE_EXCLUSION_REASONS)(value.reasonCode)
+      );
+    case "card-purchase.restore":
+      return exactKeys(value, ["eventId", "reason"]) && isCardPurchaseEventId(value.eventId);
+    case "card-refund.allocate":
+      return (
+        exactKeys(value, ["refundEventId", "purchaseEventId", "reason"]) &&
+        isCardEventIdOfKind(value.refundEventId, "refund") &&
+        isCardEventIdOfKind(value.purchaseEventId, "purchase")
+      );
+    case "card-refund.withdraw":
+      return (
+        exactKeys(value, ["allocationId", "reason"]) && isCardRefundAllocationId(value.allocationId)
+      );
+    case "card-installment.link":
+      return (
+        exactKeys(value, ["obligationId", "portionRefs", "reason"]) &&
+        isCardInstallmentObligationId(value.obligationId) &&
+        isPortionList(value.portionRefs, isCardInstallmentPortionRef)
+      );
+    case "card-installment.unlink":
+      return (
+        exactKeys(value, ["obligationId", "portionKeys", "reason"]) &&
+        isCardInstallmentObligationId(value.obligationId) &&
+        isPortionList(value.portionKeys, isCardInstallmentPortionKey)
+      );
+  }
 }
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {

@@ -86,14 +86,16 @@ describe("G1-02/G1-15 the V Point Pay run is written to the shared bucket, termi
     if (read.outcome !== "found") throw new Error("terminal_missing");
     const manifest = read.manifest;
     expect(manifest.source).toBe("v-point-pay");
-    expect(manifest.producer).toBe("collector-vpoint-pay");
+    expect(manifest.producer).toBe("collector-v-point-pay");
     expect(manifest.producerVersion).toBe(PRODUCER_VERSION);
     expect(manifest.providerOutcome).toBe("success");
     expect(manifest.coverageStatus).toBe("complete");
+    // Months are stated as `YYYY-MM`, the only month form the ingest range
+    // contract accepts (ADR 0021).
     expect(manifest.requestedScope).toEqual({
       scopeKind: "month_range",
-      startValue: "202607",
-      endValue: "202609",
+      startValue: "2026-07",
+      endValue: "2026-09",
       unitKeys: ["account"],
     });
     expect(manifest.ranges).toEqual([
@@ -102,8 +104,8 @@ describe("G1-02/G1-15 the V Point Pay run is written to the shared bucket, termi
         rangeKind: "requested",
         precision: "month",
         basis: "source",
-        startValue: "202607",
-        endValue: "202609",
+        startValue: "2026-07",
+        endValue: "2026-09",
         unitKey: "account",
       },
     ]);

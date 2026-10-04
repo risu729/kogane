@@ -12,3 +12,20 @@ export const LEGACY_CARD_SETTLEMENT_STATEMENTS_SQL = `SELECT s.*,o.account_id,o.
 export const LEGACY_CARD_SETTLEMENT_BANK_DEBITS_SQL = `SELECT b.*,o.account_id,o.owner_ref,o.evidence_refs_json FROM card_bank_debit_facts b
  LEFT JOIN card_settlement_fact_ownership o ON o.kind='transaction' AND o.observation_id=b.id
  WHERE substr(b.as_of,1,10) BETWEEN date(?,'-3 days') AND date(?,'+3 days') ORDER BY b.id LIMIT ?`;
+
+/**
+ * The commit guard of src/card-settlement-commands.ts exactly as #251 left it,
+ * before it judged only its own candidate through the keyed CTEs of
+ * packages/read-model/src/card-settlement-readiness.ts; binds (id, revision,
+ * status). Verbatim; never edit it by hand.
+ */
+export function legacyCardSettlementCommitGuardSql(accept: boolean): string {
+  return (
+    `EXISTS(SELECT 1 FROM card_settlement_reviews c JOIN card_settlement_readiness ready ON ready.id=c.id
+   WHERE c.id=? AND c.revision=? AND c.status=?` +
+    (accept
+      ? " AND ready.statement_current=1 AND ready.bank_current=1 AND ready.ownership_current=1 AND ready.allocation_available=1"
+      : "") +
+    ")"
+  );
+}

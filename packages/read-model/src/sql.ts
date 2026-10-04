@@ -167,30 +167,118 @@ const VPASS_STATEMENT_MONTH = (artifact: string): string =>
 // (card-usage.ts) compose these same CTEs, so the two can never disagree on
 // which Vpass or MyJCB rows are the latest complete capture.
 
+/** `value` with full-width digits as ASCII and every space removed, in SQL. */
+const asciiCompact = (value: string): string =>
+  [..."０１２３４５６７８９"].reduce(
+    (text, digit, index) => `replace(${text}, '${digit}', '${index}')`,
+    `replace(replace(${value}, ' ', ''), '　', '')`,
+  );
+
+/**
+ * The payment month `YYYY-MM` a MyJCB credit-ledger capture shows, from its
+ * `period` and `fetched_at` (SQL expressions), or NULL when the period does not
+ * place one:
+ *
+ * - an absolute period in a shape `statementPeriod` reads
+ *   (packages/domain/src/card-purchase.ts): the collector's `YYYY-MM` (the
+ *   month a confirmed page names), and the past-months API's `YYYYMM` and
+ *   `YYYY年M月お支払い分`, full-width digits and spaces allowed;
+ * - `detailMonth-0` and `detailMonth-1` resolved from the capture's
+ *   `fetched_at` by relative-statement-period-v1, the rule
+ *   `resolveRelativePeriod` states (packages/domain/src/relative-period.ts):
+ *   with d the capture's civil date in Asia/Tokyo, P0 is the month of d plus
+ *   1 on days 1–15 and plus 2 from the 16th, and `detailMonth-N` is P0 − N.
+ *   card-usage.test.ts checks this text against the domain rule;
+ * - every other label, `detailMonth-2` and beyond included, is NULL.
+ *
+ * The stored label is never rewritten; this is a reading of it. Every GLOB
+ * pattern stays within D1's 50-byte limit (SQLITE_MAX_LIKE_PATTERN_LENGTH), so
+ * the shapes are checked piece by piece.
+ */
+export function myjcbStatementMonth(period: string, fetchedAt: string): string {
+  const label = asciiCompact(period);
+  const tokyo = `datetime(${fetchedAt}, '+9 hours')`;
+  const year = `substr(${label}, 1, 4) GLOB '[0-9][0-9][0-9][0-9]'`;
+  const twoDigits = (start: number) =>
+    `substr(${label}, ${start}, 2) GLOB '[0-9][0-9]' AND substr(${label}, ${start}, 2) BETWEEN '01' AND '12'`;
+  const japanese = `${year} AND substr(${label}, 5, 1) = '年'`;
+  return `CASE
+             WHEN length(${label}) = 7 AND ${year} AND substr(${label}, 5, 1) = '-'
+               AND ${twoDigits(6)}
+               THEN ${label}
+             WHEN length(${label}) = 6 AND ${year} AND ${twoDigits(5)}
+               THEN substr(${label}, 1, 4) || '-' || substr(${label}, 5, 2)
+             WHEN ${japanese} AND substr(${label}, 6, 1) GLOB '[1-9]'
+               AND substr(${label}, 7) IN ('月', '月お支払い分')
+               THEN substr(${label}, 1, 4) || '-0' || substr(${label}, 6, 1)
+             WHEN ${japanese} AND ${twoDigits(6)}
+               AND substr(${label}, 8) IN ('月', '月お支払い分')
+               THEN substr(${label}, 1, 4) || '-' || substr(${label}, 6, 2)
+             WHEN ${period} IN ('detailMonth-0', 'detailMonth-1') AND ${tokyo} IS NOT NULL
+               THEN strftime('%Y-%m', ${tokyo}, 'start of month', printf('%+d months',
+                 CASE WHEN CAST(strftime('%d', ${tokyo}) AS INTEGER) <= 15 THEN 1 ELSE 2 END
+                 - CAST(substr(${period}, 13) AS INTEGER)))
+           END`;
+}
+
+/**
+ * The snapshot slot of a MyJCB credit-ledger capture `fa` within its
+ * connection and statement state: the statement it shows, whatever position it
+ * was captured at. That is the payment month (`myjcbStatementMonth`), so a
+ * statement captured at position 1 and later at position 2 is one slot and its
+ * newest capture is current, never both; and two pending statements, position
+ * 0 and position 1 while the newest closed cycle is not yet confirmed, are two
+ * slots, both current (docs/adr/0016-myjcb-pending-statement-slots.md). A
+ * relative label no rule places (`detailMonth-2` and beyond) is NULL: it names
+ * a position, not a statement, and a position shows a different statement
+ * every month, so such a capture is never current. The collector records a
+ * confirmed page by the month the page names (docs/sources/myjcb.md, 明細の月);
+ * only captures from before it did carry such a label, and no unconfirmed
+ * capture ever did. Any other label the month reading does not place keeps
+ * itself as its slot.
+ */
+export const myjcbStatementSlot = (fa: string): string =>
+  `coalesce(${myjcbStatementMonth(`${fa}.period`, `${fa}.fetched_at`)},
+              CASE WHEN substr(${fa}.period, 1, 12) = 'detailMonth-' THEN NULL ELSE ${fa}.period END)`;
+
 /**
  * MyJCB credit ledger: the newest published capture per (source, connection,
- * statement state, period). Every unconfirmed capture of a connection shares
- * one partition, so a pending row that left the newest capture is not
- * current. Defines `current_myjcb_snapshots(fetch_artifact_id)`.
+ * statement state, statement slot), `myjcbStatementSlot`, so each statement is
+ * one slot per state however its position moved. An unconfirmed capture is
+ * current only while its position still shows it: it must also be the newest
+ * published ledger capture of its artifact key (`<connection>/credit-ledger-NN.json`,
+ * the position), in any state. A pending statement therefore stops being
+ * current when its position is captured again showing the next cycle or the
+ * same statement closed (a confirmed capture, which is current in its own
+ * slot), and a pending row that left the newest capture of its position is
+ * not current. A capture without a slot is never current. Defines
+ * `current_myjcb_snapshots(fetch_artifact_id, statement_slot)`.
  */
 export const MYJCB_LEDGER_SNAPSHOT_CTES = `ranked_myjcb_snapshots AS (
-         SELECT p.fetch_artifact_id,
+         SELECT fetch_artifact_id, statement_slot,
                 ROW_NUMBER() OVER (
-                  PARTITION BY
-                    fa.source_id,
-                    substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1),
-                    fa.statement_state,
-                    CASE WHEN fa.statement_state = 'unconfirmed' THEN '' ELSE fa.period END
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
-                ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'myjcb-credit-ledger'
-           AND fa.dataset = 'credit-ledger'
+                  PARTITION BY source_id, connection, statement_state, statement_slot
+                  ORDER BY fetched_at DESC, artifact_id DESC
+                ) AS snapshot_rank,
+                CASE WHEN statement_state = 'unconfirmed' THEN ROW_NUMBER() OVER (
+                  PARTITION BY source_id, artifact_key
+                  ORDER BY fetched_at DESC, artifact_id DESC
+                ) ELSE 1 END AS position_rank
+         FROM (
+           SELECT p.fetch_artifact_id, fa.id AS artifact_id, fa.source_id, fa.fetched_at,
+                  fa.artifact_key,
+                  substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1) AS connection,
+                  fa.statement_state,
+                  ${myjcbStatementSlot("fa")} AS statement_slot
+           FROM ${PARSE_CHAIN}
+           WHERE ${ACTIVE}
+             AND p.parser_name = 'myjcb-credit-ledger'
+             AND fa.dataset = 'credit-ledger'
+         ) captures
        ), current_myjcb_snapshots AS (
-         SELECT fetch_artifact_id
+         SELECT fetch_artifact_id, statement_slot
          FROM ranked_myjcb_snapshots
-         WHERE snapshot_rank = 1
+         WHERE snapshot_rank = 1 AND position_rank = 1 AND statement_slot IS NOT NULL
        )`;
 
 /**
@@ -234,6 +322,57 @@ export const VPASS_STATEMENT_SNAPSHOT_CTES = `eligible_vpass_snapshots AS (
          WHERE snapshot_rank = 1
        )`;
 
+/** The month an activity key names: `activity-YYYY-MM.html` or `activity-YYYY-MM-pN.html`. */
+const GLOBAL_PASS_MONTH = (alias: string): string => `substr(${alias}.artifact_key, 10, 7)`;
+
+/**
+ * GLOBAL PASS activity pages: per (source, month) the newest fetch run in
+ * which every `globalpass-activity` artifact of that month has an active
+ * parse, and all of that run's pages of the month. A walked month is one
+ * snapshot of several pages (`activity-YYYY-MM.html`, `-p2`, ...; ADR 0026's
+ * amendment of 2026-10-04), so a page a newer run no longer shows stops being
+ * current with the rest of its month instead of staying current under its own
+ * key. With one page per month and run (every run before the collector walked
+ * pages) this selects exactly what ranking each artifact key alone selected:
+ * the newest active page by `fetched_at`, then artifact id. Defines
+ * `current_global_pass_snapshots(fetch_artifact_id)`.
+ */
+export const GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES = `eligible_global_pass_snapshots AS (
+         SELECT fa.fetch_run_id, fa.source_id,
+                ${GLOBAL_PASS_MONTH("fa")} AS activity_month,
+                MAX(fa.fetched_at) AS fetched_at,
+                MAX(fa.id) AS newest_artifact_id
+         FROM ${PARSE_CHAIN}
+         WHERE ${ACTIVE}
+           AND p.parser_name = 'global-pass-activity'
+           AND fa.dataset = 'globalpass-activity'
+         GROUP BY fa.fetch_run_id, fa.source_id, activity_month
+         HAVING COUNT(DISTINCT fa.id) = (
+           SELECT COUNT(*)
+           FROM ${visibleEvidence.fetchArtifacts} expected_fa
+           WHERE expected_fa.fetch_run_id = fa.fetch_run_id
+             AND expected_fa.source_id = fa.source_id
+             AND expected_fa.dataset = 'globalpass-activity'
+             AND ${GLOBAL_PASS_MONTH("expected_fa")} = ${GLOBAL_PASS_MONTH("fa")}
+         )
+       ), ranked_global_pass_snapshots AS (
+         SELECT fetch_run_id, source_id, activity_month,
+                ROW_NUMBER() OVER (
+                  PARTITION BY source_id, activity_month
+                  ORDER BY fetched_at DESC, newest_artifact_id DESC
+                ) AS snapshot_rank
+         FROM eligible_global_pass_snapshots
+       ), current_global_pass_snapshots AS (
+         SELECT member_fa.id AS fetch_artifact_id
+         FROM ranked_global_pass_snapshots snapshot
+         JOIN ${visibleEvidence.fetchArtifacts} member_fa
+           ON member_fa.fetch_run_id = snapshot.fetch_run_id
+          AND member_fa.source_id = snapshot.source_id
+          AND member_fa.dataset = 'globalpass-activity'
+          AND ${GLOBAL_PASS_MONTH("member_fa")} = snapshot.activity_month
+         WHERE snapshot.snapshot_rank = 1
+       )`;
+
 /**
  * The artifact `fa` belongs to `snapshot`, a `current_vpass_snapshots` row:
  * the current snapshot of the artifact's own card-month.
@@ -261,21 +400,7 @@ const TRANSACTION_CTES = `${MYJCB_LEDGER_SNAPSHOT_CTES}, ranked_smbc_direct_snap
          SELECT fetch_artifact_id
          FROM ranked_smbc_direct_snapshots
          WHERE snapshot_rank = 1
-       ), ranked_global_pass_snapshots AS (
-         SELECT p.fetch_artifact_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY fa.source_id, fa.artifact_key
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
-                ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'global-pass-activity'
-           AND fa.dataset = 'globalpass-activity'
-       ), current_global_pass_snapshots AS (
-         SELECT fetch_artifact_id
-         FROM ranked_global_pass_snapshots
-         WHERE snapshot_rank = 1
-       ), ranked_moneyforward_snapshots AS (
+       ), ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}, ranked_moneyforward_snapshots AS (
          SELECT p.fetch_artifact_id,
                 ROW_NUMBER() OVER (
                   PARTITION BY fa.source_id, fa.fetch_unit_key, substr(fa.artifact_key, -12, 7)
@@ -285,7 +410,8 @@ const TRANSACTION_CTES = `${MYJCB_LEDGER_SNAPSHOT_CTES}, ranked_smbc_direct_snap
          WHERE ${ACTIVE}
            AND p.parser_name = 'moneyforward-monthly-transactions'
            AND fa.dataset = 'monthly-transactions'
-           AND fa.fetch_unit_key LIKE 'moneyforward-account-v1-%'
+           AND (fa.fetch_unit_key LIKE 'moneyforward-account-v1-%'
+             OR fa.fetch_unit_key LIKE 'moneyforward-account-v2-%')
        ), current_moneyforward_snapshots AS (
          SELECT fetch_artifact_id
          FROM ranked_moneyforward_snapshots
@@ -507,6 +633,22 @@ export function positionsSql(scope: CollectionScope, offset: number): PageSql {
 }
 
 /**
+ * The provider row a valuation `v` belongs to, beside position `po` of parse
+ * `p` with the same parse run, source account and code: source-specific
+ * locator guards keep equal codes in two markets apart. Shared with the dated
+ * reported state (dated-state.ts), so both match a valuation the same way.
+ */
+export const POSITION_VALUATION_LOCATOR = `CASE p.parser_name
+      WHEN 'sbi-foreign-cash-positions'
+        THEN v.raw_locator = po.raw_locator || '.evaluationProfitLoss'
+      WHEN 'sbi-domestic-cash-positions'
+        THEN CAST(substr(v.raw_locator, 28) AS INTEGER)
+          BETWEEN CAST(substr(po.raw_locator, 28) AS INTEGER)
+          AND CAST(substr(po.raw_locator, 28) AS INTEGER) + 422
+      ELSE 1
+    END`;
+
+/**
  * Provider-reported valuations of the given positions, matched within the
  * same parse snapshot and provider row. Source-specific locator guards keep
  * equal codes in two markets apart. Valuations are never summed or converted.
@@ -522,15 +664,7 @@ export const POSITION_VALUATIONS_SQL = `WITH ${SNAPSHOT_CTES}
     JOIN ${visibleEvidence.fetchArtifacts} fa ON fa.id = p.fetch_artifact_id
     JOIN ${visibleEvidence.fetchRuns} f ON f.id = fa.fetch_run_id
     WHERE po.id IN (SELECT value FROM json_each(?1))
-      AND ${ACTIVE} AND ${CURRENT_SNAPSHOT} AND CASE p.parser_name
-      WHEN 'sbi-foreign-cash-positions'
-        THEN v.raw_locator = po.raw_locator || '.evaluationProfitLoss'
-      WHEN 'sbi-domestic-cash-positions'
-        THEN CAST(substr(v.raw_locator, 28) AS INTEGER)
-          BETWEEN CAST(substr(po.raw_locator, 28) AS INTEGER)
-          AND CAST(substr(po.raw_locator, 28) AS INTEGER) + 422
-      ELSE 1
-    END`;
+      AND ${ACTIVE} AND ${CURRENT_SNAPSHOT} AND ${POSITION_VALUATION_LOCATOR}`;
 
 const observationCount = (table: ObservationTable, alias: string): string =>
   `(SELECT COUNT(*) FROM ${table} ${alias}

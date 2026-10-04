@@ -158,8 +158,12 @@ no relation.
 `vpass` module selects `vpass-card-binding` version 2 only with exactly one
 trusted sidecar binding (the same `trusted_vpass_card_bindings` lookup as
 before); a missing or ambiguous binding falls back to `identity-default`
-version 1 with `eligibility.status = "fallback"` and the reason. Sources
-without a module get `identity-default`. The standard request
+version 1 with `eligibility.status = "fallback"` and the reason. The
+`mizuho-bank` module needs no evidence: it selects `identity-default` at
+version 2 (`identity-default-v2`) for every Mizuho parse, so parses sealed
+before the resolver's Mizuho rule are re-identified
+([identity-operations.md](identity-operations.md#policy-2-mizuho-rule-re-identification)).
+Sources without a module get `identity-default`. The standard request
 (`IDENTITY_POLICY_VERSION`) runs the default family at the base version, as
 before; an explicit other version is stored as requested, so the numeric
 ordering tests are unchanged. `requiredIdentityPolicySql` is composed from the

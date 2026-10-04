@@ -878,3 +878,267 @@ staging bucket is not written in shared mode: the run is stored once, in
 Deploy order, rollback, the artifact/role table and what the terminal states
 are in [`docs/collection.md`](../collection.md#sbi-shinsei-kogane-sbi-shinsei-collector-poc).
 Merged is not enabled: the var ships as `legacy`.
+
+## Person names in stored captures (2026-09-27)
+
+`getBalanceSummaryAndStage` answers with the account holder's name in
+`responseParam.summary.responseParam.customerName`, `customerNameKanji` and
+`customerNameKana`. The collector stores that response as the provider sent
+it, names included
+([ADR 0029's amendment 2](../adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)):
+the Chrome handoff and the local diagnostic collector write each provider
+capture as the provider's text byte for byte, and on the shared path the
+token sanitizer (`sbi-shinsei-token-sanitizer` v3) only removes the rotating
+CSRF token, serializing the capture again as it always has. No parser reads
+the three fields.
+
+History: from [#333](https://github.com/risu729/kogane/pull/333)'s merge
+until amendment 2, the collector replaced each of the three values with
+`[redacted:name]` before the artifact existed, recorded
+`redactedFieldCount` on each capture's manifest entry, and named the step
+`sbi-shinsei-token-sanitizer` v2. Captures written in that window keep the
+marker (append-only; the names were never retained); the response schema
+accepts it as it accepts a name, since both are scalars. Captures stored
+before #333 keep the names.
+
+The live page also keeps a user object with name and national-id fields in
+`sessionStorage` (`SFC_USER_INFO`). The collector never reads
+`sessionStorage`; its tokens come from the login response, so that object is
+not stored.
+
+## Exchange-rate board (parser `sbi-shinsei-exchange-rate`, 2026-09-26)
+
+The collector reads `IFCM_CommonAdapter/getExchangeRate` on every run and
+stores the body as the `exchange-rate` artifact (schema
+`sbi-shinsei-exchange-rate-v1`: an optional `transactionTime` and
+`exchangeRates[]` of `currency`, optional `customerCategory`, `buyRate`,
+`sellRate`, `midRate`). Until this parser nothing read it; the earlier
+no-parser decision (a quote needs numerator/denominator semantics the money
+observation kinds lack) is superseded by `price_observations`, which stores the
+base quantity beside the amount ([ADR 0020](../adr/0020-price-promotion-by-rule.md)).
+
+**Survey of the stored artifacts (read-only aggregates, 2026-09-26).** In CORE,
+source `sbi-shinsei-bank` has 29 `exchange-rate` artifacts, all with
+`artifact_key` `raw-exchange-rate.json`, role `sanitized_provider_capture`,
+declared media type `application/json` and a fetch unit, over 17 distinct
+payloads of nearly constant size (a 5-byte spread). The same 29 runs carry the
+yen-deposit artifact that `sbi-shinsei-yen-deposit-account` 0.1.1 parses
+successfully, so the runs are successful and failure-free. **Not surveyed
+from CORE:** the currency list, the `customerCategory` values and whether
+`transactionTime` is present. Those live only in the payload bytes, which are
+in R2, and D1 holds none of them. The shape was observed on 2026-09-27 by
+replaying stored captures instead (below).
+
+**Parser 1.0.0** (`packages/parsers/src/parsers/sbi-shinsei-exchange-rate.ts`,
+`coverage-v1` from migration 0053):
+
+- The accepted shape is exactly the collector's validator; an unknown field
+  at any level fails the artifact. The root header may carry a rotated
+  `newToken`, as the collector allows. The wrapper's `errorInfo` must not name
+  an error, as in the other SBI Shinsei parsers.
+- Each row gives three valuation observations of `sbi-shinsei:fx-board`,
+  subject the currency, metrics `bank_buy_rate`, `bank_sell_rate` and
+  `bank_mid_rate`, in JPY, as exact decimal text without a minor-unit amount.
+  `asOf` is `transactionTime` read as Japan time when present; otherwise the
+  observation has no provider time.
+- `extra` keeps the row verbatim (the `customerCategory` included) and
+  `_kogane.quoteBasis: "not-stated"`: the payload never says whether a rate is
+  per 1 or per 100 units, and the parser does not infer it.
+- A rate that is not a plain positive decimal string is a `row_unreadable`
+  issue and the board is partial; an empty board, a duplicate currency and a
+  JPY row fail the artifact.
+
+**Observed shape (2026-09-27).** The owner's local agent replayed stored
+boards through 1.0.0 and reported structure and counts only
+([ADR 0028](../adr/0028-sbi-shinsei-observed-capture-shapes.md)): 67 rows of
+`{currency, customerCategory, buyRate, sellRate, midRate}`, 13 currencies in
+5 `customerCategory` tiers each, CHF in one row and one JPY row; and a
+22-character `transactionTime`, `NNNN/NN/NN NN:NN:NN NN` (a timestamp, a
+space and two characters whose meaning nobody has observed). 1.0.0 rejected
+every such board: the time form was not recognised, a currency appeared once
+per tier, and a JPY row was present.
+
+**Parser 1.0.1** (migration 0056 moves the `coverage-v1` policy row, whose
+`required_parser_version` is an exact match, from 1.0.0 to 1.0.1):
+
+- A `transactionTime` of the observed 22-character shape
+  (`NNNN/NN/NN NN:NN:NN NN`, digits only in the `N` places; no stored board
+  has it, and 1.0.2 below matches two letters instead) no longer fails
+  the board; any other unrecognised form still does. For that shape the
+  observations carry no provider time, so readers use the fetch instant
+  marked as the collector's; each records `_kogane.providerTimeBasis:
+"unrecognized"`, the text stays verbatim in its provider context, and one
+  `info` `unknown_fields_preserved` issue names the field without its value.
+  The trailing characters are never read.
+- A row's identity is `(currency, customerCategory)`: every tier gives its own
+  three observations, the category verbatim in `extra`; a pair listed twice
+  fails the artifact. The claim expects rows × 3 over all tiers (198 for the
+  observed shape).
+- A JPY row is skipped with an `info` `row_unreadable` issue of impact `none`
+  and is not counted, so the board stays complete. A board with no quote row
+  left is refused like an empty one.
+
+**Parser 1.0.2 (2026-09-27; migration 0059 moves the policy row from 1.0.1
+to 1.0.2).** A `replay-diagnostics` run after 1.0.1 was deployed selected 17
+stored boards and refused all 17 with "provider timestamp format is not
+recognized" (33 `error` and 0 `ok` parse runs of the parser; all 17 are
+importer-era captures): the stored `transactionTime` is
+`dddd/dd/dd dd:dd:dd aa`, 22 characters ending in a space and **two
+letters**, and 1.0.1 had assumed two digits, which no board carries
+([ADR 0028 amendment](../adr/0028-sbi-shinsei-observed-capture-shapes.md#amendment-2026-09-27-the-two-trailing-characters-are-letters-parser-102)).
+1.0.2 matches exactly that shape, two ASCII letters in either case, and
+refuses the two-digit form again; everything else is as 1.0.1 (no provider
+time, `providerTimeBasis: "unrecognized"`, one `info` issue without the value,
+the text verbatim in the provider context). After deploy the repair lane's
+cyclic scan creates a 1.0.2 job for every stored board without an operator
+step; a failed 1.0.1 job does not block it, because jobs are keyed by parser
+version.
+
+**Screens and public pages (2026-09-27, structure only).** The logged-in top
+shows 5 currencies with a mid rate only, each row labelled by a number and
+the currency's name, and a minute-precision update time. The logged-in FX
+savings page shows 13 currencies (USD, EUR, CAD, AUD, GBP, NZD, SGD, HKD,
+ZAR, NOK, CNY, TRY, BRL) with buy, mid and sell, notes that the rates are
+periodic reference values, states its fee per base currency unit, and shows a
+minute-precision time. The public rate page
+(<https://www.sbishinseibank.co.jp/retail/gaika/exchange_rate_fx.html>) shows
+the same 13 with TTS, TTB and mid, in yen, with its fee per 1 base currency
+unit; the beginners' page
+(<https://www.sbishinseibank.co.jp/retail/gaika/feature/beginner/>) works a
+fee example per 1 USD. No screen shows seconds or the two letters, none shows
+CHF or JPY, and none shows a per-100 currency. The basis this gives is
+recorded as the provider's public documentation in the
+[ADR 0020 amendment](../adr/0020-price-promotion-by-rule.md#amendment-2026-09-27-the-quote-basis-from-the-providers-public-pages):
+the 13 listed currencies are quoted per 1 unit; CHF is on no page.
+
+**Limits.** The board is a customer rate tiered by `customerCategory`, not a
+market reference. The parser picks no tier; the price rule reads the tier the
+same run's balance summary states as the owner's stage (ADR 0031, next
+section).
+The board's own time is not known (the two trailing letters' meaning is not,
+and no screen shows them), so the fetch instant stands in. The provider's
+public pages quote the 13 listed currencies per 1 unit, but that is general
+documentation, not the owner's confirmation per currency, and CHF is on no
+page; the price promotion lane admits them only in the stage the same run
+states (ADR 0031), and the manual table `SBI_SHINSEI_FX_QUOTE_BASIS`
+(`packages/domain/src/price-sources.ts`) stays empty. The FX
+policy that will value with this board is named `fx-sbi-shinsei-mid-v1` so
+the caveat travels with every result that uses it.
+
+**What admits a currency.** Since ADR 0031, the provider states both sides:
+see the next section. The manual table `SBI_SHINSEI_FX_QUOTE_BASIS` stays as
+an override, empty; an entry there names a currency, its tier, its basis and
+its `evidence`, in a change that amends ADR 0020.
+
+## Stage category and the board tier (ADR 0031, 2026-09-27)
+
+Every run also stores `IFTP_TopAdapter/getBalanceSummaryAndStage` as the
+`balance-summary-and-stage` artifact (`raw-balance-summary-and-stage.json`,
+schema `sbi-shinsei-balance-summary-v1`). Its
+`category.responseParam.customerCategory` is the customer's Step-Up stage
+(the top page is a different response and has no category block). The owner
+confirmed on 2026-09-27 that the board's 5 `customerCategory` values are the 5
+stages.
+
+**Observed 2026-09-27** (the owner's agent; structure and match results only):
+on a stored run of 2026-09-10, on the live API in one session and on the
+logged-in FX savings page, the stage is a one-character string in the board's
+own scheme and is strictly equal to exactly one of the board's 5 codes; of the
+session's 5 USD rows, the one with that code is the one whose buy and sell
+rates the FX page shows (the mid rate is the same in all 5). The page labels
+the stage 「今月のステージ」, so it can change monthly. The board has 67 rows:
+13 currencies with 5 rows each and CHF and JPY with one row each; CHF, BRL and
+JPY are not on the FX page. The same artifact also stores the customer's
+names under `summary.responseParam` in R2, kept as the provider shows them
+(ADR 0029, amendment 2); this parser does not read them.
+
+**Parser `sbi-shinsei-balance-summary-and-stage` 0.1.0**
+(`packages/parsers/src/parsers/sbi-shinsei-balance-summary-and-stage.ts`):
+
+- Validates the response exactly as the collector does; an unknown field
+  fails the artifact.
+- Emits one observation: valuation kind, account `sbi-shinsei:customer`,
+  subject `customerCategory`, metric `provider_customer_category`, currency
+  `XXX` (no currency), no amount, the category verbatim (string or number) in
+  `extra.customerCategory`, and nothing else from the page (the category
+  block's allowance and fee fields are validated only). An absent, null, empty, boolean or structured category fails the
+  artifact.
+- Emits nothing else: the customer's names, the summary balances and the
+  branch are validated only (nothing uses the names; the top page already
+  reports the balances).
+- No snapshot policy row: no current or dated state selects the observation.
+
+**Price rule.** A board row of one of the 13 per-1-unit currencies is
+promoted when its `customerCategory` is strictly equal (same JSON type and
+value) to the stage category the same fetch run's published balance summary
+states; exactly one distinct stage must be stated. A row of another code
+counts `tier_unmatched` (a currency listed once in another code has no owner's
+rate on that board, and nothing stands in for it); a row whose run states no
+stage, or more than one, counts `stage_unstated`; CHF and JPY stay
+`unsupported_currency`. See
+[calculation and reports §1](../calculation-and-reports.md#price-sources-provider-claims-promoted-by-rule).
+
+**Limits.** If the two notations ever diverged, no row would be promoted
+(every per-1-unit row `tier_unmatched`), and a mapping between two notations
+would be a new decision. The owner can check an admitted tier: its buy and sell
+rates should equal the rates the logged-in FX savings page shows at the same
+time. A board parsed before its run's balance summary is not judged while
+that page's stage job can still run: the lane stops before it
+(`stage_pending`) and judges it once the job publishes or fails. A board
+judged when its run had no stage (no page, a refused page, a failed job) is
+`stage_unstated` and is not re-examined without a cursor reset. A v2 registration made before ADR 0031 deploys keeps its
+balance summary without a dataset, so that run's board finds no stage.
+
+## Parse status in production (2026-09-26)
+
+Read-only aggregate counts of the production CORE store, taken while adding
+the SBI Shinsei bank debit adapter to card settlement review
+([bank adapters](../card-settlements.md#bank-adapters),
+[ADR 0018](../adr/0018-sbi-shinsei-bank-debit-adapter.md)):
+
+- `top-accounts-balance-and-activity`: 29 stored captures. Parser
+  `sbi-shinsei-top-balances-and-activity` 0.1.1 rejected all 29 (parse run
+  status `error`, job code `parser_rejected`); 25 of them had also been parsed
+  by 0.1.0, and all 25 of those runs ended in `error` too.
+- `yen-deposit-account`: 29 stored captures, all 29 parsed by
+  `sbi-shinsei-yen-deposit-account` 0.1.1 (`ok`); the 25 earlier 0.1.0 runs
+  ended in `error`.
+
+So no published SBI Shinsei transaction observation existed, and the card
+settlement adapter admitted nothing.
+
+**Cause and release (2026-09-27).** The owner's local agent replayed two
+stored captures (one from the importer era, one recent) and reported
+structure and counts only
+([ADR 0028](../adr/0028-sbi-shinsei-observed-capture-shapes.md)): the key sets
+match 0.1.1's exactly, `activity.responseParam.fromDate` is present as
+`YYYY/MM/DD`, `toDate` is an empty string, and `activityDetails` has 10 rows
+in both. 0.1.1 demanded both window ends or neither, so the replay throws
+`incomplete activity window`; that is the whole cause of the 29 rejections.
+CORE itself still keeps only `parser_rejected` for a throw, never the reason.
+
+`sbi-shinsei-top-balances-and-activity` 0.1.2 reads a stated `fromDate` with
+`toDate` as an empty string as a window whose end the provider did not state:
+the start still bounds every posting date, no end is checked or invented, and
+every observation of the activity block records `_kogane.activityWindowEnd:
+"not-stated"`. An absent or null `toDate` beside a stated start was not
+observed and is still refused. Every other rule is unchanged. After deploy the
+repair lane's cyclic scan creates a 0.1.2 job for each stored capture and a
+1.0.1 job for each stored board with the `exchange-rate` dataset, so both are
+re-parsed without an operator step (or at once through a replay plan per
+dataset). 1.0.1 matched no stored board (the time ends in letters, not
+digits); 1.0.2 and migration 0059 replace it, and the repair lane creates
+1.0.2 jobs the same way.
+
+**Limits.** The activity window's end is not known; only its start is
+enforced. The replay reported the first failing check only, so whether every
+stored capture passes the later checks is known only once the new version's
+jobs run; a remaining refusal shows as `parser_rejected` on them, and CORE
+stores no reason for it. Its cause is found the same way this one was: by
+replaying the stored captures with `replay-diagnostics.ts` ([operations:
+replaying a parser rejection](../operations.md#replaying-a-parser-rejection)),
+which prints a closed category and a shape summary per capture and no values.
+Until that is run for a remaining refusal, its cause stays unknown and the
+parser's rules stay as they are
+([ADR 0004](../adr/0004-payment-type-shapes-from-evidence.md)). Production was
+not read for this release.

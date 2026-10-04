@@ -149,11 +149,16 @@ bare specifier that resolves into a workspace through `node_modules`, an
 graph (`tsPreCompilationDeps: true` is what keeps the type-only edges).
 
 dependency-cruiser 18 supports `typescript` < 7 and, with none resolvable,
-cruises ~44 modules instead of 530 while still exiting 0. The root manifest
-therefore keeps `typescript@5.9.3` (the Worker workspaces keep their own 7.x),
-and `tasks/_lib/depcruise.ts` fails unless a TypeScript transpiler was found,
-at least 400 modules were cruised, and three known cross-workspace edges are
-still in the graph.
+cruises a few dozen modules (55 as of 2026-09) instead of the full graph
+(about a thousand modules as of 2026-09) while still exiting 0. The root
+manifest therefore keeps TypeScript below 7 (`typescript@6.0.3` today;
+TypeScript 6 is the last release with the in-process compiler API; the
+workspaces pin their own: 7.0.2 everywhere except
+`services/collector-globalpass`, see [tooling](tooling.md)), and
+`tasks/_lib/depcruise.ts` fails unless a TypeScript transpiler was found, at
+least 400 modules were cruised (a floor that exists to catch that
+transpiler-less run, not to track the graph's size), and three known
+cross-workspace edges are still in the graph.
 
 **3. Build closure.** Imports are not the whole dependency. A Worker that
 serves bytes built inside an experiment depends on it just as hard as one that
@@ -295,7 +300,8 @@ With synthetic fixtures only, on this checkout, after U04:
   `services/collector-r2-importer`, `services/raw-evidence` — their CI plans,
   `wrangler deploy --dry-run` included.
 - `ci:root` — the manifest guard, the repository-wide tests and
-  `root:depcruise` (530 modules, no violations).
+  `root:depcruise` (530 modules at the time, no violations; the graph has
+  grown since, see [resolved modules](#the-rules-ci-enforces)).
 
 Nothing was deployed and nothing was run against production data.
 

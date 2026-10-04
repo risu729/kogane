@@ -25,7 +25,7 @@ produce the complete economic event or its balance effect.
 
 | Step                                                      | Who does it                                               |
 | --------------------------------------------------------- | --------------------------------------------------------- |
-| Producing candidates from published observations          | The rule job, whenever `RECONCILIATION_ENABLED` is on     |
+| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on     |
 | Accepting a candidate                                     | A decision in the decision log, through a guarded command |
 | Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision       |
 | Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision     |
@@ -41,6 +41,29 @@ exact amount and a stable card identity.
 A confidence number is not produced anywhere. A candidate carries rationale
 codes and rejection conditions, which is what a reviewer needs; a score is at
 most an ordering aid and never evidence or authority (addendum 07 §3).
+
+## Scheduled card payments are observations, not obligations
+
+The MyJCB ショッピングスキップ払い page lists payments the provider says are
+still due on a later date
+([ADR 0005 amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
+`myjcb-skip-payment-schedule` stores each row as a `scheduled_payment`
+observation in `scheduled_payment_observations` (Layer B): usage date,
+payment date, exact decimal amount, merchant text and the page's as-of date.
+No event kind, obligation revision, allocation or settlement is written from
+it, and no rule proposes one:
+
+- the rows are not purchases (the purchases are the usage rows of the
+  statement months) and are never recognised, so no recognition key is held
+  twice (INV06);
+- they are not confirmed statement rows or statement totals, and settlement
+  matching does not read them;
+- turning a row into an `obligation_revisions` schedule would be adopted
+  state, which needs a decision (INV07) and a confirmed meaning of the
+  amount (one deferred payment or the rest of it), which is not confirmed
+  (ADR 0004).
+
+This is a limit, not a design: upcoming obligations have no read path yet.
 
 ## Tables (migration `0032_economic_events.sql`)
 
@@ -227,6 +250,36 @@ returned side by side with `cross_unit_requires_fx_model`; signed amounts in
   `proposalIdentity` (kind, stage, method, policy release, targets) is
   unchanged, so every pair still proposed keeps its stored digest and a
   decided pair is never proposed again (pinned in `test/reconcile.test.ts`).
+
+  **Where stage B runs.** For Vpass and MyJCB, stage B is the purchase lane's
+  [candidate pass](#pending-to-posted-links): it pairs one recognised pending
+  event with one posted event per purchase, a pending event retired to
+  `unknown` after its row left the display included. The reconciliation lane
+  ran stage B over the same sources' rows until 2026-09-26 and now runs stage
+  A only for them (`RECONCILIATION_SLICES[].stages`). It read every published
+  capture, so it proposed each purchase once per pair of captures, and a month
+  captured daily outgrew its 200-row group bound and was skipped. Reading only
+  current rows would not have fixed it: a Vpass card-month is one snapshot
+  whatever its family, and a MyJCB pending capture ends when its position is
+  captured again, the statement confirmed included
+  ([ADR 0016](adr/0016-myjcb-pending-statement-slots.md)), so a pending row and
+  the posted row it became are never current together. `services/processor/test/reconciliation-coverage.test.ts` builds
+  the scaled card store capture by capture, runs both lanes after each capture
+  day, and sorts the 292 stage B proposals the lane made on it: 26 are the
+  candidate pass's own proposals (same digest), 151 are the same purchase
+  pairs in another capture (the candidate pass proposes them once, for the
+  rows the events cite), 21 pair a pending refund with a posted purchase or
+  the reverse, which the candidate pass never pairs because they are never
+  one event, and 94 involve a row the purchase lane does not recognise
+  (`payment_type_unsupported` in that store), which therefore no longer gets
+  a candidate. That last group is the coverage gap: a row the purchase lane
+  skips (an unsupported payment type, an amount that is not exact, an
+  unresolved account) is never paired, and a MyJCB pending and confirmed row
+  whose usage days straddle a month end are in two candidate groups. The
+  proposals the lane stored before stay as history, open or decided: nothing
+  deletes them, and a proposal with the same digest is never sent again by
+  either lane.
+
 - **Stage C — a correspondence across sources.** Equal opposite amounts on
   nearby days never establish ownership; without an established owner on both
   sides the candidate carries `owner_not_established`, and cross-source
@@ -239,9 +292,14 @@ widening that closed list. Settlement is not one of them: it is a first-class
 
 ## The vertical slice that runs
 
-`services/processor/src/reconciliation-job.ts` runs stage A and stage B over
-the two entries of `RECONCILIATION_SLICES`, each **pending against posted
-inside one provider's own displays**:
+`services/processor/src/reconciliation-job.ts` runs the stages each entry of
+`RECONCILIATION_SLICES` names (`stages`, a closed set of `A` and `B`). Both
+entries run **stage A only** since 2026-09-26; their pending-to-posted pairs
+are the purchase lane's [candidate pass](#pending-to-posted-links) (see
+[where stage B runs](#matching-stages)). The slices remain the two
+**pending-against-posted displays inside one provider**, and a slice that
+names stage B (the tests' synthetic sources, or a future source whose rows
+carry a provider link id) pairs them as follows:
 
 - **The Vpass statement page.** That parser emits two provider displays of the
   same card and statement month — the `customized` family with provider status
@@ -262,17 +320,23 @@ inside one provider's own displays**:
   `detailMonth-0` row therefore pairs with the `detailMonth-1` confirmed row
   the next cycle moves it to when both resolve to one month (and the posted
   day is inside the [matching window](#matching-stages)), and the same label
-  captured in another cycle groups apart. That needs the collector to
-  record `detailMonth=1` as confirmed; on the surveyed connection it records
-  it as `unconfirmed` (no export link,
-  [observations](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
-  so its rows are pending rows there. A confirmed row whose month
-  neither the label nor the rule places (`detailMonth-2` and beyond) stays out
-  of this job; the recognition lane's candidate pass, which groups MyJCB by
-  usage month, still pairs it.
+  captured in another cycle groups apart. The collector now records a
+  confirmed page by the month the page names
+  ([observations](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)),
+  which groups with the pending rows its month resolves. A confirmed row whose
+  month neither the label nor the rule places (`detailMonth-2` and beyond,
+  only in captures stored before that fix) stays out of this job, and it is
+  not current either
+  ([release note](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)),
+  so the purchase lane does not recognise or pair it. A capture of the same
+  statement under the month its page names is current, and the candidate pass
+  pairs its rows.
 
 Both sources' external ids are collector fingerprints, so stage A proposes
-nothing for either; it runs for the day a slice carries provider row ids.
+nothing for either; it runs for the day a slice carries provider row ids. A
+stage-A-only slice reads its page and leaves every group with no
+provider-issued id unread (`pairable`), so for Vpass and MyJCB a tick reads
+its pages and nothing else, and writes nothing.
 
 These are the only pairs in the deployed parser set where both sides of a
 pending/posted revision exist in one identifier namespace, so no cross-source
@@ -367,8 +431,8 @@ external id change, a card statement against a bank debit
 
 ### Single payment, per source
 
-The rule (`classifyCardUsage`, `myjcbSinglePayment` in
-`packages/domain/src/card-purchase.ts`) reads the payment type (支払区分)
+The rule (`classifyCardUsage` in `packages/domain/src/card-purchase.ts`,
+`myjcbSinglePayment` in `packages/domain/src/myjcb-amounts.ts`) reads the payment type (支払区分)
 where production rows carry it, the read model's `payment_type`
 (`packages/read-model/src/card-usage.ts`), and a shape it does not know is
 `payment_type_unsupported`, never guessed:
@@ -548,9 +612,10 @@ as `transaction:<id>` pinned to `parse_run:<id>`, inserted only
 abort a second insert of an id). A pair already stored, proposed or decided, is
 never written again and never takes the write budget, and the ambiguity codes
 (`multiple_candidates`, `candidate_not_unique`) are kept. The recognition cursor cycles through every
-current row, so a pair is reached however many rows a source has, as the
-reconciliation lane's own [scan cursor](#bounds-1) reaches it over every
-published row. The amount
+current row, so a pair is reached however many rows a source has. This pass
+is the only producer of Vpass and MyJCB pending-to-posted candidates: the
+reconciliation lane runs stage A only for them
+([where stage B runs](#matching-stages)). The amount
 and counterparty are read from the rows to compare and never stored.
 
 **Merge.** A reviewed `relation.accept` of the candidate
@@ -608,6 +673,21 @@ row's event is re-anchored or revised onto a new observation.
 What stays proposal-only: every candidate without a provider link id, which
 is every one the deployed parsers produce today (no source supplies a
 pending-to-posted link id; see [above](#which-sources-supply-a-provider-link-id)).
+
+### Review commands for purchases (migration 0051)
+
+Three later reviews of a recognised purchase have their own change kinds:
+excluding a row that is not a purchase (`card-purchase.exclude` /
+`card-purchase.restore`), allocating a refund to its purchase
+(`card-refund.allocate` / `card-refund.withdraw`), and linking later
+installment portions to their obligation (`card-installment.link` /
+`card-installment.unlink`). Migration 0051 admits them in the command tables
+and the payload contract validates them
+([ADR 0017](adr/0017-card-purchase-review-commands.md),
+[change lifecycle](change-lifecycle.md#card-purchase-review-kinds-migration-0051)).
+None of them does anything yet: no planner is registered, so planning one is
+refused with `unsupported_semantics` and writes no row, and no screen offers
+them. Nothing here changes a purchase, a refund or a figure today.
 
 ### Bounds
 
@@ -933,10 +1013,10 @@ either.
 
 ## Flags
 
-| Flag                     | Where                     | Default | Effect when on                                                        |
-| ------------------------ | ------------------------- | ------- | --------------------------------------------------------------------- |
-| `RECONCILIATION_ENABLED` | `services/processor` vars | `"0"`   | The scheduled `reconciliation_sweep` lane runs and writes candidates. |
-| `EVENTS_V2_ENABLED`      | `services/app` vars       | `"0"`   | `/api/v2/*` is served if the projection exists.                       |
+| Flag                     | Where                     | Default | Effect when on                                                                |
+| ------------------------ | ------------------------- | ------- | ----------------------------------------------------------------------------- |
+| `RECONCILIATION_ENABLED` | `services/processor` vars | `"0"`   | The scheduled `reconciliation_sweep` lane runs and writes stage A candidates. |
+| `EVENTS_V2_ENABLED`      | `services/app` vars       | `"0"`   | `/api/v2/*` is served if the projection exists.                               |
 
 With both off, the scheduled worker logs no new event, writes nothing but the
 `skipped-by-flag` tick records of `reconciliation_sweep` and
@@ -972,14 +1052,16 @@ Per slice, one tick:
    (`SCAN_LIMIT`);
 2. counts the published rows of every group (source account, statement
    period; for MyJCB the payment month its label resolves to) those rows
-   belong to, in one pass that also names the rows of each
+   belong to, when a row is one the slice's stages can pair (`pairable`: any
+   comparable row under stage B, only a row with a provider-issued id under
+   stage A alone, so none for the deployed Vpass and MyJCB slices), in one pass that also names the rows of each
    group of at most 200 rows; skips a larger group (`GROUP_LIMIT`, counted in
    `groupsSkipped`), and reads the others whole by row id, at most 2,000 rows
    in all (`GROUP_READ_LIMIT`; the page's first group to pair is always read,
    so a deferred group never keeps the cursor where it is), so a pair is found
    whichever pages its two rows fall on. A group that does not fit waits for the next tick
    (`groupsDeferred`) and the cursor stops before its first row;
-3. runs stage A and stage B over each group read, looks the candidates'
+3. runs the slice's stages over each group read, looks the candidates'
    digests up 1,000 at a time (`LOOKUP_CHUNK`, about 67 KB of bound JSON) and
    writes only the proposals not stored yet, in batches of 100
    (`WRITE_BATCH`), at most 500 new proposals per tick over every slice
@@ -1018,21 +1100,31 @@ account label, provider text or row id:
 `proposed` counts the candidates the matcher produced for the groups read,
 `known` those already stored. One API page is 200 rows.
 
-Cost, on the scaled store of [the read model's measurement](read-model.md#cost)
-(268,575 observations, 220,309 published Vpass pending and posted rows after
-180 daily captures; `bun:sqlite`, no table statistics): one tick of both
-slices took 1.5–3.2 s, about 0.5 s choosing the pages (the ids first, then
-only the page's rows with their JSON columns: 0.3 s against 2 s for Vpass)
-and 1–1.8 s finding the members of the groups the pages touched, which reads
-each published row's statement period once. The first-1,000-rows read it
-replaces took about 1 s and paired only those rows. What still grows with
-history is that pass: the lane reads every published capture, not only the
-current ones, so a Vpass statement month captured daily holds thousands of
-rows there and is counted in `groupsSkipped` rather than paired, as it was
-skipped or read in part before. On the smaller store the CI scale test builds
-(2,070 published Vpass rows after 21 daily captures, near production's
-3,300) a tick's reads take tens of milliseconds, and several of its Vpass
-months already hold more than 200 rows.
+Cost, measured by `services/processor/test/reconciliation-coverage.test.ts`
+on the scaled store of [the read model's measurement](read-model.md#cost)
+(`KOGANE_RECONCILIATION_SCALE=full`: 268,573 observations, 220,309 published
+Vpass rows after 180 daily captures; `bun:sqlite`, no table statistics). The
+fixture builds 268,573 observations today (`scaledStore(FULL_SCALE).counts`,
+checked 2026-09-26); the read model's page quotes 268,575 from its own earlier
+run, which was not repeated here. With
+stage B (the slices until 2026-09-26), ten ticks read 2,000 rows each and took
+2.6 s per tick; they paired 34 groups and skipped 146 with more than 200
+published rows, because every capture of a month counts, and proposed 1,380
+candidates (one per pair of captures of a purchase). With the deployed
+stage-A-only slices, the same ten ticks read the same pages, 2,000 rows each,
+in 0.43 s per tick, and read no group, look up no digest and write nothing:
+no Vpass or MyJCB row carries a provider-issued id. These figures are what
+the test prints in that mode; it asserts none of them. On the CI store (2,070
+published Vpass rows after 21 daily captures, near production's 3,300) a
+one-off local run of the same measurement, which the test neither prints nor
+asserts, gave one cycle of three ticks either way (4,521 rows read): 74 ms
+per tick with stage B (33 groups paired, 17 skipped, 228 candidates) and
+50 ms without (no group, no candidate). Built capture by capture with both lanes after each day, as
+production runs them, that store gave the lane's stage B 292 proposals over
+its history against the candidate pass's 26, one per purchase pair
+([where stage B runs](#matching-stages)). What still grows with history is
+the page walk: every published capture is paged through, a cycle a little
+longer each day, and a tick's cost stays that of reading its pages.
 
 ## Verified locally (synthetic data only)
 
@@ -1057,8 +1149,12 @@ migration 0026.
   unknown, provider-against-derived difference with reasons, a wrong merge
   undone by a new revision with the old revision retained, double allocation
   rejected, append-only triggers).
-- `services/processor`: `test/reconciliation.test.ts` (the Vpass
-  slice, idempotent re-runs, unpublished parses producing nothing, two
+- `services/processor`: `test/reconciliation.test.ts` (the deployed Vpass
+  and MyJCB slices running stage A only: a pending/posted pair reads no group
+  and writes nothing while a proposal stored by the earlier stage B stays as
+  it was, and a Vpass row with a provider-issued id still pairs under stage A;
+  the stage B machinery below runs through the same slices with stage B named:
+  the Vpass slice, idempotent re-runs, unpublished parses producing nothing, two
   same-amount candidates never merged, acceptance and rejection through the
   decision log with resend and conflicts, the provider-link auto-acceptance path
   on a synthetic source, the scheduled lane off by default, and migration 0032
@@ -1076,12 +1172,23 @@ migration 0026.
   whose every batch D1 rejected not holding it, the digest lookup's chunk
   boundary, a stored proposal sending no statement and a decided one never
   proposed again, and only the in-window posted row proposed),
+  `test/reconciliation-coverage.test.ts` (on the scaled card store built
+  capture by capture with both lanes after each day, every stage B proposal
+  the lane made is the candidate pass's own, another capture of one of its
+  pairs, a refund against a purchase, or a row the purchase lane does not
+  recognise, in the counts [above](#matching-stages); the deployed lane then
+  reads its pages and nothing else),
   `test/card-purchase-relative-period.test.ts` (a `detailMonth-1` row's stored
   period is its statement's from the same capture and the explanation links
-  them; `detailMonth-0` stores its resolved month and `detailMonth-2` stays
-  `period_unrecognized`; a recognition stored without a period is revised with
-  the resolved one, append-only; a pending row pairs with its posted row by
-  usage month and claims one statement only when both resolve to it) and
+  them; `detailMonth-0` stores its resolved month and a confirmed
+  `detailMonth-2` capture is not current, while the same page recorded by its
+  month is; a recognition stored without a period is revised with the resolved
+  one, append-only; a pending row pairs with its posted row by usage month and
+  claims one statement only when both resolve to it),
+  `test/myjcb-statement-identity.test.ts` (a statement moving from position 1
+  to 3 keeps its events with no retire or recognition, a pending row becomes
+  authorized and then captured once, and a statement captured under
+  `detailMonth-1` moves to its named key once, never counted twice) and
   `test/card-purchase-parser-shapes.test.ts` (recognition and the matching
   guard never disagree on a parsed MyJCB row).
 - `services/app`: `test/events-api.test.ts` (capability gate, Access
@@ -1093,12 +1200,23 @@ arbiter; see the tests).
 
 ## Statement settlement review
 
-[Card statement settlement review](card-settlements.md) implements the first
-operator-approved Vpass/MyJCB-to-SMBC payment correspondence. Its append-only
+[Card statement settlement review](card-settlements.md) implements
+operator-approved Vpass/MyJCB-to-bank payment correspondence, with two bank
+adapters: SMBC and, since migration 0052, SBI Shinsei
+([bank adapters](card-settlements.md#bank-adapters),
+[ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md)). Each admits only
+rows with a provider row id and the provider's own debit direction, and one
+provider id is one payment however often it is re-observed; Mizuho and Sony
+Bank, whose ids are fingerprints, are not adapters. Its append-only
 candidate decisions pin published source revisions, ownership evidence and
 exclusive payment allocation, with an approved withdrawal path. Acceptance
 records the observed cash effect and keeps principal/fee decomposition unknown;
 a statement total is not turned into an invented obligation principal.
+A card provider's own statement of the debit account is designed as the
+candidate's primary evidence, proposal-only
+([provider-stated debit accounts](card-settlements.md#provider-stated-debit-accounts),
+[ADR 0032](adr/0032-provider-stated-debit-accounts.md)); only the domain rule
+exists, and no reader produces that evidence yet.
 
 The confirmation flow uses `card-settlement.accept`, `card-settlement.reject`
 and `card-settlement.withdraw`. The last withdraws a judgement, not funds.

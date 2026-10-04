@@ -102,7 +102,9 @@ beforeAll(() => {
       }[]
     ).map((row) => [row.name, row.sql]),
   );
-});
+  // The first build of the migrated CORE image runs every migration (see
+  // ./sqlite.ts); a hook's default budget is the same 5 s as a test's.
+}, 60_000);
 
 describe("the Drizzle schema mirrors the SQL migrations (G2-17)", () => {
   test("the mirror is not empty and covers the pilot's tables", () => {

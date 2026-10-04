@@ -50,6 +50,113 @@ async function mappingIdBindings(prefix: "am" | "im", ref: string, version: numb
   return [base, base] as const;
 }
 
+/**
+ * The producer whose source-account reference names the account entity of a
+ * trusted Vpass card token: the retired importer's, which bound every Vpass
+ * card first (ADR 0023). A v2 token (ADR 0029) is anchored to the same
+ * producer name, so it too names one entity whichever producer reads it.
+ */
+export const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
+
+/**
+ * The producer whose source-account reference names the account entity of a
+ * MoneyForward account identity: the retired importer's, which registered
+ * every MoneyForward account before the collector (ADR 0027). A v2 identity
+ * (ADR 0029) is anchored to the same producer name.
+ */
+export const MONEYFORWARD_IDENTITY_ENTITY_PRODUCER = "collector-r2-importer";
+const MONEYFORWARD_ACCOUNT_REFERENCE = /^moneyforward-me:moneyforward-account-v[12]-[0-9a-f]{64}$/u;
+
+/**
+ * The account entity an automatic mapping points at.
+ *
+ * Every entity is derived from its source-account reference, which includes
+ * the producer, so the same provider account read by two producers is two
+ * entities. Two identities are the exceptions, because each is a digest of
+ * the provider's own account tuple under a fixed derivation, so an equal
+ * value means the same account whichever producer derived it:
+ *
+ * - a trusted Vpass card token (`["vpass:card", token]`; `vpass-card-v1-`,
+ *   the importer's HMAC, ADR 0023, or `vpass-card-v2-`, the unkeyed digest,
+ *   ADR 0029);
+ * - a MoneyForward account identity
+ *   (`["moneyforward-me:moneyforward-account-v1-<64 hex>"]`, ADR 0027, or its
+ *   `-v2-` form, ADR 0029), which the parser takes only from the unit key of a
+ *   registered run.
+ *
+ * For those the entity is derived from the importer producer's source account
+ * for the same value: the one stored under that natural key when it exists,
+ * else the id that source account would be given. The importer-era entity ids
+ * are therefore unchanged, and a collector's source account for the same value
+ * maps to that same entity. A value the importer never registered (a new
+ * account, or an unpaired v2 value) gets an entity no importer reference
+ * names, and every producer that reads that value reaches the same one.
+ *
+ * The one-time identity-value rewrite (ADR 0030 amendment, migration 0063)
+ * replaced each staged importer-era v1 value by its collector-era v2 value in
+ * the importer's source-account reference, keeping that source account's id
+ * (a digest of the v1 reference). Looking the importer's source account up by
+ * its natural key is what makes a staged v2 value reach that importer-era
+ * entity (`E_o`); a v2 value that was not staged has no importer source
+ * account and keeps its own entity. Nothing else is shared: the collector's
+ * source account is its own subject, with its own mapping revisions and
+ * manual decisions.
+ */
+async function accountEntityId(
+  db: D1Like,
+  input: IdentityInput,
+  account: AccountIdentity,
+  ref: string,
+): Promise<string> {
+  const key = account.key;
+  if (
+    input.sourceId === "vpass" &&
+    input.trustedVpassBinding !== undefined &&
+    key.length === 2 &&
+    key[0] === "vpass:card" &&
+    key[1] === input.trustedVpassBinding.cardToken
+  ) {
+    return identityKey("account", [
+      await sourceAccountId(db, input.sourceId, VPASS_TOKEN_ENTITY_PRODUCER, key),
+    ]);
+  }
+  if (
+    input.sourceId === "moneyforward-me" &&
+    key.length === 1 &&
+    MONEYFORWARD_ACCOUNT_REFERENCE.test(key[0]!)
+  ) {
+    return identityKey("account", [
+      await sourceAccountId(db, input.sourceId, MONEYFORWARD_IDENTITY_ENTITY_PRODUCER, key),
+    ]);
+  }
+  return identityKey("account", [ref]);
+}
+
+/**
+ * The id of the source account for (source, producer, key): the stored one
+ * when `UNIQUE(source_id, producer_id, reference_json)` already holds that
+ * reference, else the digest a new source account is given. The two agree for
+ * every source account the store wrote itself; they differ only for the
+ * importer's source accounts whose reference the one-time identity-value
+ * rewrite (ADR 0030 amendment, migration 0063) moved to the collector-era
+ * value while keeping the id, which re-identifying an importer parse must
+ * reuse rather than insert again.
+ */
+async function sourceAccountId(
+  db: D1Like,
+  sourceId: string,
+  producerId: string,
+  key: readonly string[],
+): Promise<string> {
+  const stored = await db
+    .prepare(
+      "SELECT id FROM source_accounts WHERE source_id=? AND producer_id=? AND reference_json=?",
+    )
+    .bind(sourceId, producerId, JSON.stringify(key))
+    .first<{ id: string }>();
+  return stored?.id ?? identityKey("sa", [sourceId, producerId, key]);
+}
+
 /** Appends an automatic decision only when no effective manual decision
  * protects the subject and no current automatic decision of an equal or newer
  * policy exists. Version comparison is numeric; old workers cannot undo newer rules. */
@@ -59,8 +166,8 @@ async function accountMapping(
   account: AccountIdentity,
   version: number,
 ) {
-  const ref = await identityKey("sa", [input.sourceId, input.producerId, account.key]);
-  const entity = await identityKey("account", [ref]);
+  const ref = await sourceAccountId(db, input.sourceId, input.producerId, account.key);
+  const entity = await accountEntityId(db, input, account, ref);
   await db.batch([
     db
       .prepare(

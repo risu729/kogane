@@ -1,0 +1,113 @@
+{
+  "responseParam": {
+    "overview": {
+      "responseParam": {
+        "savingsDetails": [
+          {
+            "accountNo": "SYNTHETIC-001",
+            "balance": "193891",
+            "yenEqui": "193891",
+            "currency": "JPY",
+            "productCode": "601"
+          }
+        ]
+      }
+    },
+    "activity": {
+      "responseParam": {
+        "fromDate": "2026/05/01",
+        "toDate": "",
+        "currentBalance": "193891",
+        "accountNo": "SYNTHETIC-001",
+        "currency": "JPY",
+        "activityDetails": [
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-001",
+            "description": "Synthetic debit 1",
+            "debit": "1111",
+            "postingDate": "2026/05/02",
+            "balance": "198889",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-002",
+            "description": "Synthetic debit 2",
+            "debit": "1222",
+            "postingDate": "2026/05/03",
+            "balance": "197667",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-003",
+            "description": "Synthetic credit 3",
+            "credit": "1333",
+            "postingDate": "2026/05/04",
+            "balance": "199000",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-004",
+            "description": "Synthetic debit 4",
+            "debit": "1444",
+            "postingDate": "2026/05/05",
+            "balance": "197556",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-005",
+            "description": "Synthetic debit 5",
+            "debit": "1555",
+            "postingDate": "2026/05/06",
+            "balance": "196001",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-006",
+            "description": "Synthetic credit 6",
+            "credit": "1666",
+            "postingDate": "2026/05/07",
+            "balance": "197667",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-007",
+            "description": "Synthetic debit 7",
+            "debit": "1777",
+            "postingDate": "2026/05/08",
+            "balance": "195890",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-008",
+            "description": "Synthetic debit 8",
+            "debit": "1888",
+            "postingDate": "2026/05/09",
+            "balance": "194002",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-009",
+            "description": "Synthetic credit 9",
+            "credit": "1999",
+            "postingDate": "2026/05/10",
+            "balance": "196001",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-010",
+            "description": "Synthetic debit 10",
+            "debit": "2110",
+            "postingDate": "2026/05/11",
+            "balance": "193891",
+            "tradeTypeCode": "SYNTHETIC"
+          }
+        ]
+      }
+    },
+    "systemResponseTime": "20260512090000",
+    "sbiHyperYokinFlg": "0"
+  },
+  "header": {
+    "adapterResultCode": "0"
+  }
+}

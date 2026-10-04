@@ -32,8 +32,8 @@ CREATE TABLE raw_objects(sha256 TEXT PRIMARY KEY,byte_size INTEGER,blob_key TEXT
 CREATE TABLE fetch_run_ranges(id INTEGER PRIMARY KEY,fetch_run_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);
 CREATE TABLE artifact_ranges(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);`;
 
-/** CORE from migration `from` onwards, applied in order over the Layer A stub. */
-export function coreDatabase(from = "0017"): Database {
+/** CORE from migration `from` onwards (up to, not including, `before`), applied in order over the Layer A stub. */
+export function coreDatabase(from = "0017", before = "9999"): Database {
   const directory = fileURLToPath(CORE_MIGRATIONS_URL);
   const db = new Database(":memory:");
   db.exec(LAYER_A);
@@ -42,7 +42,10 @@ export function coreDatabase(from = "0017"): Database {
     // has neither those rows nor the registry/immutability tables it touches.
     .filter(
       (entry) =>
-        entry.endsWith(".sql") && entry >= from && entry !== "0043_remove_synthetic_bootstrap.sql",
+        entry.endsWith(".sql") &&
+        entry >= from &&
+        entry < before &&
+        entry !== "0043_remove_synthetic_bootstrap.sql",
     )
     .sort())
     db.exec(readFileSync(join(directory, name), "utf8"));
@@ -55,6 +58,18 @@ export function coreDatabase(from = "0017"): Database {
  * seal), the real registry, run and artifact tables with all their triggers.
  */
 export function fullCoreDatabase(): Database {
+  // Every migration runs once per process; each call gets its own copy of the
+  // resulting file image. Replaying all of CORE per call took most of a
+  // test's default 5 s budget on a loaded CI runner when a test built two.
+  // The first call still migrates, so a suite that uses this builds it in
+  // `beforeAll` with its own timeout rather than inside its first test.
+  coreImage ??= migratedCoreImage();
+  const db = Database.deserialize(coreImage);
+  db.exec("PRAGMA foreign_keys=ON");
+  return db;
+}
+let coreImage: Uint8Array | undefined;
+function migratedCoreImage(): Uint8Array {
   const directory = fileURLToPath(CORE_MIGRATIONS_URL);
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
@@ -62,7 +77,9 @@ export function fullCoreDatabase(): Database {
     .filter((entry) => entry.endsWith(".sql"))
     .sort())
     db.exec(readFileSync(join(directory, name), "utf8"));
-  return db;
+  const image = db.serialize();
+  db.close();
+  return image;
 }
 
 class SqliteStatement implements D1StatementLike {

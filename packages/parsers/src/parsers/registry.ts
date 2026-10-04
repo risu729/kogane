@@ -15,6 +15,7 @@ import {
   myJcbEvidenceOnly,
   myJcbPastMonthBalances,
 } from "./myjcb.ts";
+import { myJcbSkipPaymentSchedule } from "./myjcb-skip-payment-schedule.ts";
 import {
   sonyBankGrossBalance,
   sonyBankHistoryCsv,
@@ -36,6 +37,8 @@ import { sbiVcExecutions } from "./sbi-vc-executions.ts";
 import { sbiVcPositionSummary } from "./sbi-vc-position-summary.ts";
 import { smbcDirectBalance, smbcDirectTransactions } from "./smbc-direct.ts";
 import { stGeorgeBalances, stGeorgeTransactions } from "./st-george.ts";
+import { sbiShinseiBalanceSummaryAndStage } from "./sbi-shinsei-balance-summary-and-stage.ts";
+import { sbiShinseiExchangeRate } from "./sbi-shinsei-exchange-rate.ts";
 import { sbiShinseiTopBalancesAndActivity } from "./sbi-shinsei-top-balances-and-activity.ts";
 import { sbiShinseiYenDepositAccount } from "./sbi-shinsei-yen-deposit-account.ts";
 import { vPointBalanceInfo, vPointHistoryPage, vPointSmfgPoint } from "./v-point.ts";
@@ -53,6 +56,7 @@ export const PARSERS: readonly Parser[] = [
   myJcbCreditStatement,
   myJcbPastMonthBalances,
   myJcbEvidenceOnly,
+  myJcbSkipPaymentSchedule,
   sonyBankGrossBalance,
   sonyBankHistoryJson,
   sonyBankHistoryCsv,
@@ -75,6 +79,8 @@ export const PARSERS: readonly Parser[] = [
   stGeorgeTransactions,
   sbiShinseiTopBalancesAndActivity,
   sbiShinseiYenDepositAccount,
+  sbiShinseiExchangeRate,
+  sbiShinseiBalanceSummaryAndStage,
   vPointBalanceInfo,
   vPointSmfgPoint,
   vPointHistoryPage,

@@ -1,7 +1,8 @@
 # Card statement settlement review
 
 This slice connects an authoritative Vpass or MyJCB statement payment total to
-an observed SMBC bank debit. It records a reviewable correspondence and its
+an observed bank debit from one of the [bank adapters](#bank-adapters) (SMBC,
+SBI Shinsei). It records a reviewable correspondence and its
 correction history. It does not reconstruct all purchases, infer loan principal
 from a statement, or calculate net assets.
 
@@ -18,14 +19,152 @@ from a statement, or calculate net assets.
   These observations are statements, excluded from net-asset summation.
   Monthly MyJCB summaries without an exact due date remain useful evidence but
   cannot supply a guessed payment date to this matcher.
-- The first bank adapter uses SMBC's canonical `smbc-bank` transactions with a
-  provider identifier and explicitly signed debit direction. It preserves the
-  provider's civil date. Other banks and aggregator copies are not implicitly
-  interchangeable with this adapter.
+- Bank debits come from `card_bank_debit_facts`, a union of per-bank
+  adapters (migration 0052, [ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md)).
+  Each admits only rows with a provider row id and a debit direction the
+  provider itself states, ranks each provider id's captures so the newest one
+  is the only payment, and states the provider's civil date as `debit_date`.
+  Other banks and aggregator copies are not implicitly interchangeable with
+  these adapters; see [Bank adapters](#bank-adapters).
+
+### Bank adapters
+
+| Adapter                                | Rows admitted                                                                                                                                                                                                                       | Provider key          | `debit_date`                                                         |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | -------------------------------------------------------------------- |
+| SMBC (`smbc-bank`, since 0044)         | any `smbc-bank` parse; non-empty provider id; newest capture `status='posted'`, `_kogane.direction='outflow'`, `_kogane.amountSignSource='direction'`, negative amount                                                              | the row's provider id | `as_of` of the form `YYYY-MM-DDT00:00:00+09:00`, its date; else none |
+| SBI Shinsei (`sbi-shinsei-bank`, 0052) | parser `sbi-shinsei-top-balances-and-activity`; non-empty `txnReferenceNo`; newest capture with no status, `JPY`, `_kogane.amountSignSource='debit'` (the provider's debit column), negative amount (a zero debit is stored as `0`) | `txnReferenceNo`      | the posting date, `YYYY-MM-DD`                                       |
+
+The currency, status, direction and sign are judged on the newest capture of a
+provider id, so a newer capture that fails them withdraws the row instead of
+letting an older capture stand. Credits, zero debits, foreign-currency rows,
+rows without a provider id and rows of other parsers are never debits.
+
+The sweep reads the debits whose `debit_date` is within three days of a due
+date (at most 1,000 per due date). Before 0052 it read SMBC rows by the first
+ten characters of `as_of` and skipped, after reading them, those not of the
+midnight-JST form; such rows no longer take a place in that limit or count in
+the sweep's `scanned`, and the SMBC pairs it proposes are otherwise the same.
+
+Mizuho and Sony Bank are not adapters. Their history ids are fingerprints of
+the row's fields and its position (`mizuho:<fingerprint>:<occurrence>`,
+`sony-bank-history:<date+signed amount+after-balance+currency>:<n>`), so one
+payment re-observed after the page changed could carry another id and count
+twice. They need a stable row identity first.
+
+Which card pays from which bank: the code does not know, and no setting names
+a card's debit account. A card and a bank are paired only as a candidate
+(equal amount, due date ±3 days) and only an accepted review with shared
+ownership makes the pairing a decision. In production at the time of writing
+(2026-09-26), every proposed review pairs a Vpass or MyJCB statement with an
+SMBC debit, none is accepted, and there is no published SBI Shinsei
+transaction: every stored capture of the SBI Shinsei activity page was
+rejected by its parser (closed code `parser_rejected`), so the SBI Shinsei
+adapter admits nothing until the parser accepts them. A card provider's own
+statement of the debit account is recorded beside each MyJCB candidate as
+evidence for this pairing, never as a decision
+([Provider-stated debit accounts](#provider-stated-debit-accounts)).
+
+A debit posted more than three days from the due date, for example after a
+long run of bank holidays, produces no candidate. That is a limit of the
+matcher, not evidence that the bill was unpaid.
 
 The parsers preserve zero and refund totals as source values. The positive-debit
 matcher excludes them; a refund or a partial/multiple settlement requires its
 own supported model. No payment total is manufactured by summing purchase rows.
+
+### Provider-stated debit accounts
+
+Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md) and its
+2026-09-27 amendment (proposed). What the code does today:
+
+**The page.** Every MyJCB credit detail page observed in round 4 (the
+confirmed statement and the ショッピングスキップ払い page, live and in the
+stored redacted HTML) has an `h3.hdg-H3` heading 「カード情報」 after the
+ledger, followed by a `table.table-data` of th/td rows: カード名称, カード発行会社,
+金融機関名 (bank name), 支店名 (branch name, no branch code), 科目・口座番号
+(「普通 ####\*\*\*」 in shape: the account type, a space, the FIRST four digits,
+the rest masked with `*`) and 口座名義 (the holder's name, partly masked).
+`readMyJcbCardInformation` (`packages/domain/src/myjcb-card-information.ts`)
+finds the table by text, not by class names: the one heading element (h1-h6)
+whose text is 「カード情報」, then the first table after it, whose every row
+must be one th with a known label and one td. It reads the bank name, branch
+name, account type, the four leading digits and the mask length, checks the
+other rows' labels, and never reads the card name or the holder name:
+nothing uses them. The stored page keeps the holder name as displayed
+([ADR 0029 amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)). Any other shape is a closed
+refusal code: `card_information_absent`, `card_information_ambiguous`,
+`card_information_table_missing`, `card_information_table_invalid`,
+`card_information_name_invalid`, `card_information_account_invalid`.
+
+**The observation.** The `card_debit_account_sweep` lane
+(`services/processor/src/card-debit-account-job.ts`) reads pages whose
+`myjcb-credit-statement-total` parse is published, re-reading the bytes from R2
+and checking their digest, at most 20 a tick. Each becomes one
+`card_debit_account_statement` row (migration 0060) per card
+(`myjcb:<connection>:root`), raw object and reader version: `read` with the
+displayed values, or `refused` with a closed code (also `page_not_utf8`,
+`raw_object_unreadable`, for bytes that are missing, of another size or fail
+their digest) and no value, so a page is not read again under the same reader
+version. The same bytes stored by several runs are one row. Only artifact keys
+whose connection segment is `[a-z0-9][a-z0-9-]{0,63}` are selected, the shape
+the table accepts; any other key is never read. The table is append-only; a corrected reader is a new version and
+new rows. The lane runs under `RECONCILIATION_ENABLED`, right before
+`card_settlement_sweep`, and logs `scanned`, `read`, `refused`, `written`.
+
+**The rule** (`proposeCardDebitAccount`, policy
+`card-debit-account-statement-v2`). The displayed bank name resolves to a CORE
+source id only through a table of the banks Kogane models (みずほ銀行,
+三井住友銀行, SBI新生銀行, ソニー銀行, compared after NFKC and whitespace
+removal); any other name is `bank_not_resolved`. 普通 is `ordinary` and 当座 is
+`current`. A card → bank account relation is proposed when exactly one known
+account at that bank has the same account type and an account number that
+starts with the four leading digits, and every known account at that bank is
+comparable. The branch name is carried as displayed and never compared: no
+bank reference carries one (Mizuho's parser records a branch name in its
+observation `extra`, but its rendering next to MyJCB's is unobserved). Other
+outcomes are closed reasons: `statement_invalid`, `bank_not_resolved`,
+`account_type_not_resolved`, `account_digits_not_shown`,
+`no_comparable_bank_account`, `no_matching_account`, `ambiguous_accounts`,
+`uncomparable_account_at_bank`. Known accounts are the distinct source
+accounts the identity rules recorded for that bank (`source_accounts`, at most
+100; beyond that nothing is recorded).
+
+**In the settlement sweep.** For each MyJCB candidate, the sweep reads the
+debit-account row of the page the candidate's statement total was parsed from
+(same raw object, same card, current reader version) and appends to
+`card_settlement_debit_account_evidence` what it says: `supports` (the
+proposal names the candidate's card and bank account), `names_other_account`,
+or `not_proposed` with the reason. A row is appended only when the outcome
+differs from the candidate's latest row for that statement and policy. The
+candidate's facts, digest and eligibility are unchanged: the evidence sets no
+owner and no ownership evidence, and ownership and acceptance stay operator
+decisions (INV07). The sweep's log line adds `debitAccountEvidence`, the
+number of evidence rows appended.
+
+Limits:
+
+- **Not on the review page.** The evidence rows are not read by the
+  `カード照合` review or its API: showing them needs a new field in the review
+  contract (`packages/observation-shared/src/card-settlement-contract.ts`) and
+  the web page, which this change does not make.
+- **Adapter banks cannot be matched.** SMBC's reference
+  (`smbc-bank:ordinary-yen`) carries no account digits, and SBI Shinsei's
+  `accountNo` layout next to a displayed account number is unverified, so a
+  page naming either bank yields `no_comparable_bank_account`. Mizuho's
+  reference (`mizuho-bank:ordinary:<branch>:<account>`) is comparable, but
+  Mizuho is not an adapter, so a Mizuho proposal can name another account
+  (`names_other_account`) and never `supports` a candidate today.
+- **Branch names are not compared** (above), so two known accounts at one bank
+  with the same four leading digits are `ambiguous_accounts`.
+- **Vpass**: none of the statement APIs (`web_meisai_top/v1`,
+  `dropdownlist_init/v1`, `meisai_ans/v1`, `xt_seikyu/v1`) carries a bank,
+  branch or debit-account field, for any of the seven cards observed in
+  round 4; the only account-looking keys (`webMeisaiTopK3Vo.accountNo`, fully
+  masked, and `accountOvly`) are card-side identifiers. Vpass has no reader.
+- A unique match among the accounts Kogane knows can still be wrong (an
+  uncollected account at the same bank with the same leading digits), which
+  is why acceptance stays with the operator.
+- The mask length is recorded but not compared with the bank account's length.
 
 ## Candidate and decision lifecycle
 
@@ -123,15 +262,15 @@ recognised card purchase: 利用 → 請求 → 引落. An agent with a whole-st
   `card_settlement_fact_ownership(kind='balance')` account is the purchase's
   account, the newest capture first. Both sides mean the payment month: the
   statement's period comes from its payment date, and a MyJCB purchase's from
-  its ledger label, where the collector's relative `detailMonth-0` and
-  `detailMonth-1` are resolved from the capture time of the ledger artifact
+  its ledger label: the payment month a confirmed page names, which the
+  collector records as the period
+  ([observations](observations.md#myjcb-statements-keep-their-identity-when-their-position-moves-collector-no-parser-release)),
+  or, for captures stored before that, a relative `detailMonth-0` or
+  `detailMonth-1` resolved from the capture time of the ledger artifact
   (rule `relative-statement-period-v1`,
   [observations](observations.md#relative-period-labels-are-resolved-from-the-capture-time)),
-  so a recent MyJCB purchase joins the statement the same capture's page
-  names, once the collector records that month as confirmed. On the surveyed
-  connection it records `detailMonth=1` as `unconfirmed` (the page has no
-  export link), so those rows are pending and that page has no statement fact
-  yet. A card ordinal that changed under one account still joins; a statement
+  so a MyJCB purchase joins the statement the same capture's page names. A
+  card ordinal that changed under one account still joins; a statement
   whose account is not resolved joins nothing.
   A pending authorisation [linked to its posted row](economic-events.md#pending-to-posted-links)
   is one event carrying the posted row's facts, so it joins the posted row's
@@ -146,8 +285,9 @@ recognised card purchase: 利用 → 請求 → 引落. An agent with a whole-st
   facts cite; a proposed, rejected or withdrawn review is named without a debit.
 - A statement that cannot be shown is a reason, never a zero: `not_posted` for a
   pending row, `statement_not_collected`, or `period_unrecognized` when the
-  provider period is in no recognised shape (a MyJCB `detailMonth-2` or later,
-  which the rule does not place).
+  provider period is in no recognised shape. A MyJCB confirmed capture stored
+  under `detailMonth-2` or later, which the rule does not place, is not current
+  at all, so it is never recognised.
 
 No allocation links a purchase to a statement, and none is written: a statement
 total is not decomposable into purchases. The provider total is shown beside the
@@ -254,6 +394,12 @@ shipped reads and of the current ones:
 | sweep: a page of 100 statements with owners    | 562 ms   | 97 ms  | 623 ms           | 112 ms       |
 | sweep: debits around one due date, with owners | 3,465 ms | 53 ms  | 3,612 ms         | 67 ms        |
 
+These figures were measured before migration 0052. Since then the fixture
+debits each MyJCB bill from SBI Shinsei instead of SMBC, through the deployed
+SBI Shinsei parser, and captures SBI Shinsei's activity page daily over a
+three-day window (so every row is re-observed twice), which adds rows and one
+branch to the bank debit view; the timings have not been measured again.
+
 The shipped reads resolved owners through `card_settlement_fact_ownership`,
 whose `current_identity_observations` source materializes the candidate
 identity runs of every published parse (`SCAN pub`) and which groups every
@@ -276,13 +422,68 @@ What still grows with history: `card_statement_facts` ranks every captured
 statement total once per request and once per sweep tick (74 ms here; the
 scan of every balance observation is 4 ms of it, and neither a partial index
 on the statement metric nor an index on `metric` changed the time), and
-`card_bank_debit_facts` ranks every SMBC row once per statement of the sweep's
+`card_bank_debit_facts` ranks every adapter's rows once per statement of the sweep's
 page (51 ms here, so a full page of 100 is about 5 s of D1 time a tick).
 Candidates accrue one per recapture of a paid bill, reached by the index. The
 rest of the purchases page is the current card usage pass
-([read model](read-model.md#cost)). The review and commit reads of
-`card_settlement_readiness` still use the whole ownership view and are not
-changed here: on this store the first page of the `カード照合` list took 42 s.
+([read model](read-model.md#cost)).
+
+### Readiness
+
+Every read of `card_settlement_readiness` used to join the whole view: the
+`カード照合` list and one review (`queryCardSettlements`), the ownership
+review's candidate (`queryCardOwnership`), the settlement plan
+(`cardSettlementPlan`), the ownership review's plan read and commit guard
+(`prepareOwnershipReview`) and the settlement commit guard
+(`services/processor/src/card-settlement-commands.ts`). The view ranks every
+statement total and bank debit row and owns them through
+`card_settlement_fact_ownership`. Each read now chooses its candidates first
+(the page, or the one proposal) and judges only those through
+`packages/read-model/src/card-settlement-readiness.ts`. That file holds the
+view's own select over the facts of those candidates only: the statement
+totals of each candidate statement's source and period, the bank debit rows (both adapter branches) sharing
+each candidate debit's source account and provider id (whole ranking
+partitions, so the newest capture is the same), and their owners through the
+keyed ownership CTEs. The allocation check keeps the view's text and reaches the
+debit's rows by the account index. The view is unchanged, and so is each guard's
+place: the commit guards still run inside the statement that reserves the
+receipt, so a statement, debit, owner or allocation that changed after the plan
+still writes nothing. Median wall time on the store above (bun:sqlite; the
+container was shared with other jobs, so treat these as orders of magnitude):
+
+| Read                                       | Shipped   | Now    |
+| ------------------------------------------ | --------- | ------ |
+| `カード照合` list, first page (50 reviews) | 37,072 ms | 143 ms |
+| one review (`proposalId`)                  | 6,581 ms  | 63 ms  |
+| settlement plan read                       | 6,257 ms  | 38 ms  |
+| settlement acceptance commit guard         | 120 ms    | 31 ms  |
+| ownership review guard, candidate term     | 113 ms    | 33 ms  |
+
+The shipped guards were cheaper than the plan reads because SQLite evaluated
+the view's flags for the one row the guard names. The reads by id joined the
+view and evaluated them for every candidate. A rejection or withdrawal guard reads no flag.
+
+What still grows with history: each judged set of candidates ranks the
+statement totals of its periods after reading every balance observation once
+(the `b` scan the plan checks allow in `ready_statements`, as in
+`card_statement_facts`). The allocation check walks the debit account's bank
+rows through `idx_txn_obs_account` for each candidate. The list orders every
+candidate to choose its page (4 ms for 3,763 candidates here; no index).
+Not changed here, and not measured: the ownership review's account mapping
+reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
+and the two mapping terms of its commit guard) still read
+`current_identity_observations`, so the guard's row above times only its
+candidate term.
+`card-settlement-readiness.test.ts` compares the CTEs with the view on random
+stores whose reviews draw every flag both ways. It also shows that ten
+inexactness mutations (a cut partition, a reversed order, a dropped owner,
+evidence or reservation condition) each fail that comparison.
+`card-settlement-review-differential.test.ts`,
+`card-settlement-review-scale.test.ts` and the processor's
+`card-settlement-scale.test.ts` compare every reader and guard with the shipped
+text (`card-settlement-readiness-legacy-sql.ts`,
+`card-settlement-legacy-sql.ts`) and fail on a plan that reads the store's
+owners, scans a base table or builds an automatic index on one.
 
 `packages/application/test/card-statement-scale.test.ts` and
 `services/processor/test/card-settlement-scale.test.ts` compare the purchases
@@ -304,6 +505,26 @@ review/approval flow and refuse a detail revision that changed after planning.
 The pending-to-posted review is tested the same way. Its plans carry the
 candidate's own relation, and its confirmation refuses a pin, action or
 candidate that changed after planning.
+The SBI Shinsei adapter is tested through the processor's parse lane and the
+deployed parser on the synthetic parser-boundary fixture and variants of it
+(`services/processor/test/card-settlement-sbi-shinsei.test.ts`): an
+equal-amount statement yields a candidate; credit, zero and foreign-currency
+rows do not; a re-observed `txnReferenceNo` is one payment; unknown ownership
+blocks acceptance; an accepted SBI Shinsei debit reserves the statement
+against an SMBC one. `packages/read-model/test/card-bank-debit-facts.test.ts`
+shows the SMBC branch returns exactly the 0044 view's rows.
+`packages/domain/test/card-debit-account.test.ts` covers the provider-stated
+debit-account rule on synthetic inputs: bank names resolve only through the
+table, a unique account starting with the leading digits is proposed, an
+account ending in them is not, the account type must agree, every other case
+is a closed reason, and a proposal never makes a candidate eligible.
+`services/processor/test/card-debit-account.test.ts` covers the MyJCB reader on
+synthetic 「カード情報」 tables (the read values, every refusal shape, the holder
+and card names never read), the lane (one row per card and raw object, no
+second row on a re-run or for the same bytes of another run, refusals stored
+without values, append-only guards), and the settlement sweep (evidence
+attached, a changed outcome appended, the candidate's facts and eligibility
+unchanged).
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.

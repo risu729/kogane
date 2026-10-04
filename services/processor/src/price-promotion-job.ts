@@ -1,0 +1,526 @@
+// The `price_promotion` lane (ADR 0020, docs/calculation-and-reports.md §1,
+// docs/processor.md §6): provider prices already stored as observations become
+// `price_observations` rows by the closed rule list of
+// packages/domain/src/price-sources.ts, each with the claim it came from in
+// `price_observation_claims` (migration 0053).
+//
+//   * It reads successful parse runs, published or not: which price a reader
+//     uses is decided at read time by joining the claim's parse run to
+//     `published_parse_runs` (packages/read-model/src/price-selection.ts), so
+//     a parse published later is not missed and a re-parse needs no rewrite.
+//   * One cursor per claim kind (`valuation`, `position`) in
+//     `price_promotion_cursor`. A tick examines at most PRICE_PROMOTION_BATCH
+//     claims in all, valuation claims first; a claim the rule refuses is
+//     counted and passed, never retried under the same rules.
+//   * Every write is `INSERT … WHERE NOT EXISTS` keyed by the price id,
+//     `price_<sha256(rule, claimRef)>`, and the prices, their claims and the
+//     cursor move in one batch. Running the lane again over the same
+//     observations, even from a reset cursor, writes nothing.
+//   * FX board rows are judged against the stage category of their own
+//     collection run (ADR 0031): one read per tick, STAGE_SQL, made only when
+//     the page holds board rows, gives each board row its category and the
+//     categories the run's published `sbi-shinsei-balance-summary-and-stage`
+//     observations state. A board row whose run still has its stage page to
+//     parse (a job of the deployed stage parser that can still run and no
+//     published parse of that page) is not judged: the page stops before it
+//     and the cursor waits there, as it waits for a pending parse, so a board
+//     parsed before its stage page is never refused for good. The wait ends
+//     when that job publishes, fails or runs out of attempts.
+//   * Its log line and tick record carry counts only: `scanned`, `promoted`,
+//     `basis_unverified`, `unsupported_currency`, `tier_unmatched`,
+//     `stage_unstated`, `stage_pending` and `written`. No price, quantity, code, category or account label leaves
+//     the lane.
+import {
+  domesticCurrentPrice,
+  foreignStockPrice,
+  fxBoardPrice,
+  inDomesticRecord,
+  isFxBoardRow,
+  priceId,
+  SBI_SHINSEI_FX_QUOTE_BASIS,
+  type FxQuoteBasisTable,
+  type FxStageCategory,
+  type PriceClaimKind,
+  type PriceVerdict,
+} from "../../../packages/domain/src/price-sources.ts";
+import { PARSE_MAX_ATTEMPTS } from "./lane-budgets.ts";
+import {
+  SBI_SHINSEI_CUSTOMER_ACCOUNT,
+  SBI_SHINSEI_STAGE_METRIC,
+  sbiShinseiBalanceSummaryAndStage,
+} from "../../../packages/parsers/src/parsers/sbi-shinsei-balance-summary-and-stage.ts";
+
+/** Claims examined per tick, over both claim kinds. */
+export const PRICE_PROMOTION_BATCH = 500;
+
+interface D1Like {
+  prepare(sql: string): D1PreparedStatement;
+  batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
+}
+
+export interface PricePromotionResult {
+  /** Claims examined this tick. */
+  scanned: number;
+  /** Claims whose rule produced a price (new or already stored). */
+  promoted: number;
+  /** Claims refused because the basis check did not hold or could not be made. */
+  basis_unverified: number;
+  /** Claims refused because the currency is not one the rule admits. */
+  unsupported_currency: number;
+  /**
+   * FX board claims of a per-1-unit currency refused because the row is not
+   * in the one stage category its own run states: another tier's row, or a
+   * row without a category (ADR 0031).
+   */
+  tier_unmatched: number;
+  /**
+   * FX board claims of a per-1-unit currency refused because the row's own
+   * run states no stage category, or more than one (ADR 0031).
+   */
+  stage_unstated: number;
+  /**
+   * Claims left for a later tick, not judged and not in `scanned`: the page
+   * stopped at a board row whose run's stage page is still to be parsed
+   * (ADR 0031).
+   */
+  stage_pending: number;
+  /** Price rows this tick newly wrote. */
+  written: number;
+}
+
+export interface PricePromotionOptions {
+  limit?: number;
+  now?: string;
+  /** Tests only: the verified FX quote basis table (production: none verified). */
+  fxQuoteBasis?: FxQuoteBasisTable;
+}
+
+const CURSOR_SQL = "SELECT claim_kind,last_observation_id FROM price_promotion_cursor";
+
+const VALUATION_PARSERS = ["sbi-shinsei-exchange-rate", "sbi-domestic-cash-positions"] as const;
+
+// ?1 cursor, ?2 upper bound (the table's max id read in the same batch), ?3 limit.
+const VALUATION_CANDIDATES_SQL = `SELECT v.id,v.parse_run_id,a.source_id,p.parser_name,v.source_account,
+ v.subject,v.metric,v.currency,v.amount_text,v.as_of,v.raw_locator,a.fetched_at,
+ json_extract(v.extra_json,'$.customerCategory') AS customer_category
+ FROM valuation_observations v
+ JOIN parse_runs p ON p.id=v.parse_run_id
+ JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+ WHERE v.id>?1 AND v.id<=?2 AND p.status='ok'
+   AND ((p.parser_name='${VALUATION_PARSERS[0]}'
+         AND v.metric IN ('bank_mid_rate','bank_buy_rate','bank_sell_rate'))
+     OR (p.parser_name='${VALUATION_PARSERS[1]}' AND v.metric='current_price'))
+ ORDER BY v.id LIMIT ?3`;
+/**
+ * How far a tick may read: the highest id, but never at or past a row of a
+ * parse that is still `pending`. The parse writer inserts observations before
+ * the batch that marks the run `ok` (worker.ts), so a cursor that passed such
+ * a row would miss it for good; this bound waits for it instead.
+ */
+const upperBoundSql = (table: string): string => `SELECT min(
+ coalesce((SELECT max(id) FROM ${table}),0),
+ coalesce((SELECT min(o.id)-1 FROM parse_runs p JOIN ${table} o ON o.parse_run_id=p.id
+   WHERE p.status='pending'),9007199254740991)) AS max_id`;
+const VALUATION_MAX_SQL = upperBoundSql("valuation_observations");
+
+const POSITION_CANDIDATES_SQL = `SELECT po.id,po.parse_run_id,a.source_id,p.parser_name,po.security_code,
+ po.market,po.quantity_text,po.currency,po.as_of,po.extra_json,a.fetched_at
+ FROM position_observations po
+ JOIN parse_runs p ON p.id=po.parse_run_id
+ JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+ WHERE po.id>?1 AND po.id<=?2 AND p.status='ok' AND p.parser_name='sbi-foreign-cash-positions'
+ ORDER BY po.id LIMIT ?3`;
+const POSITION_MAX_SQL = upperBoundSql("position_observations");
+
+/** What the same parse runs hold beside a domestic `current_price`: positions and market values. */
+const DOMESTIC_RECORD_SQL = `SELECT 'position' AS role,po.parse_run_id,po.source_account,
+ po.security_code AS code,po.market,po.quantity_text AS amount_text,NULL AS currency,po.as_of,po.raw_locator
+ FROM position_observations po WHERE po.parse_run_id IN (SELECT value FROM json_each(?1))
+ UNION ALL
+ SELECT 'market_value',v.parse_run_id,v.source_account,v.subject,NULL,v.amount_text,v.currency,
+  v.as_of,v.raw_locator
+ FROM valuation_observations v
+ WHERE v.parse_run_id IN (SELECT value FROM json_each(?1)) AND v.metric='market_value'`;
+
+/**
+ * The stage category of each FX board row's own collection run (ADR 0031).
+ * ?1 is a JSON array of board observation ids. Per row: its category as JSON
+ * text (`->` keeps the JSON type, so `"3"` and `3` differ), how many distinct
+ * categories the run's published stage observations state, and the category
+ * when there is exactly one, and whether the run still waits for its stage:
+ * a balance-summary artifact of the run with no published stage parse and a
+ * job of the deployed stage parser that can still run (the parse lane's own
+ * runnable predicate less its clock). Every table is reached by key from the page's
+ * own rows: the observation, parse run and artifact by primary key, the run's
+ * balance-summary artifact by `idx_fetch_artifacts_run_role`, its publication
+ * by primary key and its observations by `idx_val_obs_parse_run`, the job and
+ * its replay plan by primary key. The CROSS
+ * JOINs fix that order and the unary `+` keeps the planner off
+ * `idx_val_obs_subject` and the dataset index, which would read the stage rows
+ * of every run ever stored (test/price-promotion-stage.test.ts checks the plan
+ * without statistics).
+ */
+export const STAGE_SQL = `WITH board AS (
+ SELECT v.id,v.extra_json -> '$.customerCategory' AS row_category,a.fetch_run_id
+ FROM valuation_observations v
+ JOIN parse_runs p ON p.id=v.parse_run_id
+ JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+ WHERE v.id IN (SELECT value FROM json_each(?1))),
+runs AS (SELECT DISTINCT fetch_run_id FROM board),
+stage AS (
+ SELECT r.fetch_run_id,count(DISTINCT s.extra_json -> '$.customerCategory') AS stated,
+  min(s.extra_json -> '$.customerCategory') AS category
+ FROM runs r
+ CROSS JOIN fetch_artifacts sa ON sa.fetch_run_id=r.fetch_run_id
+  AND +sa.source_id='sbi-shinsei-bank' AND +sa.dataset='balance-summary-and-stage'
+ CROSS JOIN published_parse_runs pp ON pp.fetch_artifact_id=sa.id
+  AND pp.parser_name='${sbiShinseiBalanceSummaryAndStage.name}'
+ CROSS JOIN valuation_observations s ON s.parse_run_id=pp.parse_run_id
+  AND +s.metric='${SBI_SHINSEI_STAGE_METRIC}' AND +s.source_account='${SBI_SHINSEI_CUSTOMER_ACCOUNT}'
+ GROUP BY r.fetch_run_id),
+waiting AS (
+ SELECT DISTINCT r.fetch_run_id
+ FROM runs r
+ CROSS JOIN fetch_artifacts wa ON wa.fetch_run_id=r.fetch_run_id
+  AND +wa.source_id='sbi-shinsei-bank' AND +wa.dataset='balance-summary-and-stage'
+ CROSS JOIN observation_parse_jobs j ON j.fetch_artifact_id=wa.id
+  AND j.parser_name='${sbiShinseiBalanceSummaryAndStage.name}'
+  AND j.parser_version='${sbiShinseiBalanceSummaryAndStage.version}'
+ WHERE +j.status IN ('pending','running') AND +j.attempts<${PARSE_MAX_ATTEMPTS}
+  AND (j.replay_plan_id IS NULL OR EXISTS(SELECT 1 FROM observation_replay_plans rp
+   WHERE rp.id=j.replay_plan_id AND rp.status='running'))
+  AND NOT EXISTS(SELECT 1 FROM published_parse_runs wp WHERE wp.fetch_artifact_id=wa.id
+   AND wp.parser_name='${sbiShinseiBalanceSummaryAndStage.name}'))
+SELECT b.id,b.row_category,coalesce(st.stated,0) AS stated,st.category,
+  w.fetch_run_id IS NOT NULL AS waiting
+ FROM board b LEFT JOIN stage st ON st.fetch_run_id=b.fetch_run_id
+ LEFT JOIN waiting w ON w.fetch_run_id=b.fetch_run_id`;
+
+interface StageRow {
+  id: number;
+  row_category: string | null;
+  stated: number;
+  category: string | null;
+  /** 1 while the row's run still has its stage page to parse. */
+  waiting: number;
+}
+
+/** What STAGE_SQL says about one board row: its category and its run's stage. */
+function stageOf(row: StageRow | undefined): {
+  categoryJson: string | null;
+  stage: FxStageCategory;
+} {
+  if (row === undefined) return { categoryJson: null, stage: { state: "absent" } };
+  const stage: FxStageCategory =
+    row.stated === 1 && row.category !== null
+      ? { state: "stated", categoryJson: row.category }
+      : row.stated > 1
+        ? { state: "disagreeing" }
+        : { state: "absent" };
+  return { categoryJson: row.row_category, stage };
+}
+
+const INSERT_PRICES_SQL = `INSERT INTO price_observations(id,base_instrument_ref,base_quantity_coefficient,
+ base_quantity_scale,quote_unit_ref,quote_amount_coefficient,quote_amount_scale,price_kind,effective_time,
+ source_claim_ref,market_ref,adjustment_policy_ref,recorded_at)
+ SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.base'),json_extract(j.value,'$.baseCoefficient'),
+  json_extract(j.value,'$.baseScale'),json_extract(j.value,'$.quote'),json_extract(j.value,'$.quoteCoefficient'),
+  json_extract(j.value,'$.quoteScale'),json_extract(j.value,'$.kind'),json_extract(j.value,'$.effectiveTime'),
+  json_extract(j.value,'$.claimRef'),json_extract(j.value,'$.market'),NULL,?2
+ FROM json_each(?1) j
+ WHERE NOT EXISTS(SELECT 1 FROM price_observations existing WHERE existing.id=json_extract(j.value,'$.id'))`;
+
+const INSERT_CLAIMS_SQL = `INSERT INTO price_observation_claims(price_id,rule_id,claim_kind,observation_id,
+ parse_run_id,json_path,created_at)
+ SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.rule'),json_extract(j.value,'$.claimKind'),
+  json_extract(j.value,'$.observationId'),json_extract(j.value,'$.parseRunId'),json_extract(j.value,'$.jsonPath'),?2
+ FROM json_each(?1) j
+ WHERE NOT EXISTS(SELECT 1 FROM price_observation_claims existing
+   WHERE existing.price_id=json_extract(j.value,'$.id'))`;
+
+const MOVE_CURSOR_SQL = `INSERT INTO price_promotion_cursor(claim_kind,last_observation_id) VALUES(?1,?2)
+ ON CONFLICT(claim_kind) DO UPDATE SET
+  last_observation_id=max(price_promotion_cursor.last_observation_id,excluded.last_observation_id)`;
+
+interface ValuationCandidate {
+  id: number;
+  parse_run_id: number;
+  source_id: string;
+  parser_name: string;
+  source_account: string;
+  subject: string;
+  metric: string;
+  currency: string;
+  amount_text: string | null;
+  as_of: string | null;
+  raw_locator: string;
+  fetched_at: string;
+  /** `$.customerCategory` of the row's extra: the board tier, null when absent. */
+  customer_category: string | number | null;
+}
+
+interface PositionCandidate {
+  id: number;
+  parse_run_id: number;
+  source_id: string;
+  parser_name: string;
+  security_code: string;
+  market: string | null;
+  quantity_text: string;
+  currency: string | null;
+  as_of: string | null;
+  extra_json: string;
+  fetched_at: string;
+}
+
+interface RecordRow {
+  role: "position" | "market_value";
+  parse_run_id: number;
+  source_account: string;
+  code: string;
+  market: string | null;
+  amount_text: string | null;
+  currency: string | null;
+  as_of: string | null;
+  raw_locator: string;
+}
+
+function parsedExtra(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The verdicts of a valuation page, judged up to the first board row whose
+ * run still waits for its stage page (`held`: that row's index, or the page
+ * length when nothing waits). Rows from `held` on get no verdict.
+ */
+async function valuationVerdicts(
+  db: D1Like,
+  page: ValuationCandidate[],
+  fxQuoteBasis: FxQuoteBasisTable,
+): Promise<{ verdicts: PriceVerdict[]; held: number }> {
+  const boardRows = page.filter(
+    (row) =>
+      row.parser_name === VALUATION_PARSERS[0] &&
+      isFxBoardRow({
+        sourceId: row.source_id,
+        parserName: row.parser_name,
+        sourceAccount: row.source_account,
+        metric: row.metric,
+      }),
+  );
+  const stages = new Map<number, StageRow>(
+    boardRows.length === 0
+      ? []
+      : (
+          (
+            await db
+              .prepare(STAGE_SQL)
+              .bind(JSON.stringify(boardRows.map((row) => row.id)))
+              .all<StageRow>()
+          ).results ?? []
+        ).map((row) => [row.id, row]),
+  );
+  const firstWaiting = page.findIndex((row) => stages.get(row.id)?.waiting === 1);
+  const held = firstWaiting === -1 ? page.length : firstWaiting;
+  const rows = page.slice(0, held);
+  const domestic = rows.filter((row) => row.parser_name === VALUATION_PARSERS[1]);
+  const records =
+    domestic.length === 0
+      ? []
+      : ((
+          await db
+            .prepare(DOMESTIC_RECORD_SQL)
+            .bind(JSON.stringify([...new Set(domestic.map((row) => row.parse_run_id))]))
+            .all<RecordRow>()
+        ).results ?? []);
+  const verdicts = rows.map((row) => {
+    if (row.parser_name === VALUATION_PARSERS[1]) {
+      // POSITION_VALUATIONS_SQL's pairing: same parse run, account and code,
+      // and the valuation's bytes inside the position's MTS record.
+      const same = records.filter(
+        (record) =>
+          record.parse_run_id === row.parse_run_id &&
+          record.source_account === row.source_account &&
+          record.code === row.subject,
+      );
+      const positions = same.filter(
+        (record) =>
+          record.role === "position" && inDomesticRecord(record.raw_locator, row.raw_locator),
+      );
+      const marketValues = same.filter(
+        (record) =>
+          record.role === "market_value" &&
+          positions.length === 1 &&
+          inDomesticRecord(positions[0]!.raw_locator, record.raw_locator),
+      );
+      return domesticCurrentPrice({
+        observationId: row.id,
+        parseRunId: row.parse_run_id,
+        sourceId: row.source_id,
+        parserName: row.parser_name,
+        metric: row.metric,
+        securityCode: row.subject,
+        priceText: row.amount_text,
+        priceCurrency: row.currency,
+        asOf: row.as_of,
+        fetchedAt: row.fetched_at,
+        positions: positions.map((record) => ({
+          market: record.market,
+          quantityText: record.amount_text ?? "",
+          asOf: record.as_of,
+        })),
+        marketValues: marketValues.map((record) => ({
+          amountText: record.amount_text,
+          currency: record.currency ?? "",
+        })),
+      });
+    }
+    const { categoryJson, stage } = stageOf(stages.get(row.id));
+    return fxBoardPrice(
+      {
+        observationId: row.id,
+        parseRunId: row.parse_run_id,
+        sourceId: row.source_id,
+        parserName: row.parser_name,
+        sourceAccount: row.source_account,
+        subject: row.subject,
+        metric: row.metric,
+        currency: row.currency,
+        amountText: row.amount_text,
+        asOf: row.as_of,
+        fetchedAt: row.fetched_at,
+        customerCategory: row.customer_category,
+        customerCategoryJson: categoryJson,
+        stage,
+      },
+      fxQuoteBasis,
+    );
+  });
+  return { verdicts, held };
+}
+
+function positionVerdicts(rows: PositionCandidate[]): PriceVerdict[] {
+  return rows.map((row) =>
+    foreignStockPrice({
+      observationId: row.id,
+      parseRunId: row.parse_run_id,
+      sourceId: row.source_id,
+      parserName: row.parser_name,
+      securityCode: row.security_code,
+      market: row.market,
+      quantityText: row.quantity_text,
+      currency: row.currency,
+      asOf: row.as_of,
+      fetchedAt: row.fetched_at,
+      extra: parsedExtra(row.extra_json),
+    }),
+  );
+}
+
+/** Writes one kind's verdicts and moves its cursor, in one batch. Returns the new price rows. */
+async function commit(
+  db: D1Like,
+  kind: PriceClaimKind,
+  verdicts: PriceVerdict[],
+  cursor: number,
+  now: string,
+): Promise<number> {
+  const prices: Record<string, unknown>[] = [];
+  const claims: Record<string, unknown>[] = [];
+  for (const verdict of verdicts) {
+    if (verdict.outcome !== "promoted") continue;
+    const id = await priceId(verdict.rule, verdict.claim);
+    prices.push({
+      id,
+      base: verdict.price.baseInstrumentRef,
+      baseCoefficient: verdict.price.baseQuantity.coefficient,
+      baseScale: verdict.price.baseQuantity.scale,
+      quote: verdict.price.quoteUnitRef,
+      quoteCoefficient: verdict.price.quoteAmount.coefficient,
+      quoteScale: verdict.price.quoteAmount.scale,
+      kind: verdict.price.priceKind,
+      effectiveTime: JSON.stringify(verdict.price.effectiveTime),
+      claimRef: verdict.price.sourceClaimRef,
+      market: verdict.price.marketRef,
+    });
+    claims.push({
+      id,
+      rule: verdict.rule,
+      claimKind: verdict.claim.claimKind,
+      observationId: verdict.claim.observationId,
+      parseRunId: verdict.claim.parseRunId,
+      jsonPath: verdict.claim.jsonPath,
+    });
+  }
+  const statements: D1PreparedStatement[] = [];
+  if (prices.length > 0)
+    statements.push(
+      db.prepare(INSERT_PRICES_SQL).bind(JSON.stringify(prices), now),
+      db.prepare(INSERT_CLAIMS_SQL).bind(JSON.stringify(claims), now),
+    );
+  statements.push(db.prepare(MOVE_CURSOR_SQL).bind(kind, cursor));
+  const results = await db.batch(statements);
+  return prices.length > 0 ? (results[0]?.meta.changes ?? 0) : 0;
+}
+
+export async function pricePromotionSweep(
+  db: D1Like,
+  options: PricePromotionOptions = {},
+): Promise<PricePromotionResult> {
+  const limit = options.limit ?? PRICE_PROMOTION_BATCH;
+  const now = options.now ?? new Date().toISOString();
+  const fxQuoteBasis = options.fxQuoteBasis ?? SBI_SHINSEI_FX_QUOTE_BASIS;
+  const result: PricePromotionResult = {
+    scanned: 0,
+    promoted: 0,
+    basis_unverified: 0,
+    unsupported_currency: 0,
+    tier_unmatched: 0,
+    stage_unstated: 0,
+    stage_pending: 0,
+    written: 0,
+  };
+  const cursors = new Map<string, number>(
+    (
+      (await db.prepare(CURSOR_SQL).all<{ claim_kind: string; last_observation_id: number }>())
+        .results ?? []
+    ).map((row) => [row.claim_kind, row.last_observation_id]),
+  );
+  const kinds: [PriceClaimKind, string, string][] = [
+    ["valuation", VALUATION_CANDIDATES_SQL, VALUATION_MAX_SQL],
+    ["position", POSITION_CANDIDATES_SQL, POSITION_MAX_SQL],
+  ];
+  for (const [kind, candidatesSql, maxSql] of kinds) {
+    const budget = limit - result.scanned;
+    if (budget <= 0) break;
+    const from = cursors.get(kind) ?? 0;
+    const upper = (await db.prepare(maxSql).first<{ max_id: number }>())?.max_id ?? 0;
+    if (upper <= from) continue;
+    const rows =
+      (await db.prepare(candidatesSql).bind(from, upper, budget).all<Record<string, unknown>>())
+        .results ?? [];
+    const { verdicts, held } =
+      kind === "valuation"
+        ? await valuationVerdicts(db, rows as unknown as ValuationCandidate[], fxQuoteBasis)
+        : { verdicts: positionVerdicts(rows as unknown as PositionCandidate[]), held: rows.length };
+    for (const verdict of verdicts) result[verdict.outcome] += 1;
+    result.scanned += held;
+    result.stage_pending += rows.length - held;
+    // A held page stops just before the board row that waits for its stage; a
+    // full page stops at its last row; a short page has read everything up to
+    // the bound, so the cursor moves past the rows no rule reads as well.
+    const last =
+      held < rows.length
+        ? Number(rows[held]!["id"]) - 1
+        : rows.length === budget
+          ? Number(rows.at(-1)!["id"])
+          : upper;
+    result.written += await commit(db, kind, verdicts, last, now);
+  }
+  return result;
+}

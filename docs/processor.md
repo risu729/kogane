@@ -70,11 +70,56 @@ the next tick lists the same page; the runs it already registered answer in
 one query each and the rest make progress. That cannot skip a run, which a
 remembered position inside a page could.
 
+**What spends one of the five** ([ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
+Only new work does: a registration, a pending run the listing reaches, a
+first verdict, a retry that is due, a missing terminal, a registration that
+threw. The continuations that run before the listing have their own bound of
+five and spend none of these. A terminal
+CORE has already judged under the current registration contract and the same
+terminal digest is answered from its `collection_runs` row and spends
+nothing:
+
+| Listed terminal                                                  | Attempted?                                   | Spends one of the five | Holds the page |
+| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------- | -------------- |
+| no `collection_runs` row yet                                     | always                                       | yes                    | if over budget |
+| registered                                                       | no (`already_registered`)                    | no                     | no             |
+| blocked                                                          | never again under this contract version      | no                     | no             |
+| newest `registered` stage `retryable`, recorded under 24 h ago   | no; its recorded code is counted             | no                     | no             |
+| newest `registered` stage `retryable`, recorded 24 h ago or more | yes, once; a repeat refusal appends a row    | yes                    | if over budget |
+| `pending`                                                        | yes (continued first, and again when listed) | yes, when listed       | if over budget |
+
+Such an answer costs three operations of the invocation's budget (the
+terminal read, the conditional insert and the row read) for a registered or
+blocked run, four for an unreadable terminal already recorded (it reads the
+bytes twice), and five for a retryable run within its interval (two stage
+reads more); it writes nothing. A page of 25 such terminals costs at most 125
+of the 500, plus the scan's own four (the list, the pending read, the state
+read and the state write), so a page of 25 judged terminals finishes in one tick and the cursor
+moves on even when nothing registered. The retry interval is
+`RETRYABLE_RETRY_INTERVAL_MS` (24 hours); each attempt that is refused again
+appends one `registered` `retryable` row, whose `recorded_at` is what the
+interval is measured from, so a retryable run is attempted at most once per
+day and only when the walk reaches it. A blocked run is never attempted again:
+the block is write-once, and only a new registration contract version, which
+is a new identity and so a new row, judges it again. The queue consumer passes
+no interval: every delivery is a real attempt, and the queue's own
+`max_retries` bounds it.
+
+`pages_completed` and `cycles_completed` in `collection_scan_state` count
+finished pages and finished walks only. A tick held by its budget records when
+it ran and what it saw (`last_scan_at_ms`, `last_seen`, `last_registered`,
+`last_blocked`) and leaves both counters and the cursor as they were. Before
+ADR 0024 every tick counted a page, and a held tick on the first page, whose
+cursor is null, also counted a cycle.
+
 A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
 made that the derivation did not foresee — is counted in the lane's `failed`
 and logged by its error class only; nothing is recorded for that run, the
 page still advances and the next cycle tries it again. One failing run never
-stops the page and never pins the cursor (G1-13).
+stops the page and never pins the cursor (G1-13). A seal CORE's completeness
+trigger refuses (`run_inventory_incomplete`) is not in this class: it is a
+verdict about the terminal and blocks the run (§3; ADR 0024, amendment of
+2026-09-26).
 
 ## 3. Idempotency and what blocks
 
@@ -84,25 +129,55 @@ The identity is the tuple of plan 03 §4:
 (source, runId, terminalDigest, registrationContractVersion)
 ```
 
-`registrationContractVersion` is `terminal-registration-v1`, the version of the
-`terminal-v1` → ingest-contract derivation in
-`packages/application/src/collection/descriptors.ts`. When that derivation
-changes what a terminal _means_ in CORE, the same run registers again as a new
-revision and the old registration is kept.
+`registrationContractVersion` is `terminal-registration-v2` (since ADR 0022;
+`v1` before it), the version of the `terminal-v1` → ingest-contract
+derivation in `packages/application/src/collection/descriptors.ts`. When that
+derivation changes what a terminal _means_ in CORE, the same run registers
+again as a new revision and the old registration is kept. A terminal an
+earlier version registered whose descriptors the new version does not change
+is **carried over** instead: the new version's row is linked to the fetch run
+the terminal already is, so one capture is never parsed twice (§3.4).
 
-| Situation                                                                                                                | Outcome                                            | Recorded                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| First sighting of a valid terminal                                                                                       | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                       |
-| Same terminal again                                                                                                      | no-op                                              | nothing new                                                                                     |
-| Different manifest, same run id                                                                                          | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                           |
-| Source not in the collector mapping (§3.1)                                                                               | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                     |
-| Source maps to an id CORE has no active row for                                                                          | blocked `source_undeclared`, no port call          | as above                                                                                        |
-| `providerOutcome: failed` with no provider artifact                                                                      | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)      |
-| Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage) | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                   |
-| Referenced object missing or resized                                                                                     | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                    |
-| Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13) |
-| Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state                                             |
-| Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)      |
+| Situation                                                                                                                | Outcome                                            | Recorded                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| First sighting of a valid terminal                                                                                       | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                         |
+| Same terminal again                                                                                                      | no-op                                              | nothing new                                                                                       |
+| Different manifest, same run id (under any contract version)                                                             | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                             |
+| Source not in the collector mapping (§3.1)                                                                               | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                       |
+| Source maps to an id CORE has no active row for                                                                          | blocked `source_undeclared`, no port call          | as above                                                                                          |
+| `providerOutcome: failed` with no provider artifact                                                                      | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)        |
+| Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage) | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                     |
+| Referenced object missing or resized                                                                                     | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                      |
+| Seal refused by CORE's completeness trigger (a unit or the run declares another artifact count than it holds)            | blocked `run_inventory_incomplete`, **unsealed**   | `registered` blocked naming the fetch run left unsealed (ADR 0024, amendment of 2026-09-26)       |
+| Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
+| Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state or per attempt 24 h after the last (ADR 0024) |
+| Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
+| Registered under an earlier contract version, descriptors unchanged (§3.4)                                               | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it             |
+
+The derivation does not re-check every seal rule. A manifest whose units'
+`artifactCount` disagrees with the artifacts that name them, or that puts a
+step other than `decrypted`/`extracted` on a provider role, is refused by
+CORE's seal trigger (`run_inventory_incomplete`), which is not a derivation
+refusal: it reaches `register-terminal.ts` as a D1 trigger error at the seal.
+Since the ADR 0024 amendment of 2026-09-26 it is a verdict: the run is blocked
+`run_inventory_incomplete`, once, and the scan answers it from its row
+afterwards. Of the errors the seal itself raises, only a trigger refusal whose
+code is in the closed list `SEAL_REFUSAL_CODES`
+(`packages/application/src/collection/seal-refusal.ts`; today
+`run_inventory_incomplete` alone) is classified this way. The fetch run the
+attempt made stays in CORE, catalogued and unsealed, so invisible to normal
+readers, and the blocked stage's `evidence_ref` names it
+(`collection_runs.fetch_run_id` stays null: a blocked run is not registered).
+A later contract version attempts the terminal once under its own run key and
+blocks again, so each version leaves at most one such fetch run per run id.
+Any other trigger code, constraint or D1 error from the seal still throws. The
+collectors are what keeps a seal refusal from happening at all
+([ADR 0021](adr/0021-collector-registration-contract.md),
+[collection: the registration contract](collection.md#shared-data-bucket-per-source-u09)):
+`services/processor/test/collector-plans.test.ts` registers every collector's
+real `*RunPlan` output against the whole CORE schema and the operator
+bootstrap (`infra/bootstrap/ingest-clients.sql`), and fails on any block, any
+retryable stage or any unsealed run.
 
 A resumed registration reads what the run already has — its units, ranges,
 catalogued artifacts, staged inventory items and unit reports, one statement
@@ -135,7 +210,12 @@ not exist before U09, so the Processor's ingest routes are declared together
 with them in `config/ingest-clients.json` and applied as one idempotent SQL
 file (§10). `scripts/config-bootstrap.test.ts` checks that the declared
 routes are exactly the mapping table's entries and that every CORE id the
-table points at is a declared source.
+table points at is a declared source; `tests/collector-producers.test.ts`
+checks the collectors' side, that every terminal a collector writes names
+`collector-<its source>` and that the pair is one of those routes
+([ADR 0014](adr/0014-collector-producer-ids.md)). A terminal already written
+with another producer keeps it: it stays `retryable` with
+`inactive_ingest_route` and never registers.
 
 ### 3.2 Failed runs
 
@@ -154,9 +234,16 @@ by the artifact roles, never by the outcome alone:
   `sanitized_provider_capture`, `user_capture`): the run registers and seals
   like any other, and its terminal report says `failed`. Nothing is widened.
 
-`success` with `coverageStatus: partial` (GLOBAL PASS by design) is a
-success that registers as such, with the partial coverage recorded on the
-run row and in the unit reports.
+A run's own `coverageStatus` is recorded on the run row and nothing derives
+an outcome from it. A unit's coverage is what the collector says it captured
+of what the run set out to collect
+([ADR 0026](adr/0026-collector-unit-coverage.md)): `complete` becomes the
+unit report `success`, `partial` becomes `partial`, and a unit with a safe
+error code is `failed`. A run is `success` in `observation_fetch_runs` only
+when every unit report is `success`, so a `success` run with a `partial` unit
+(GLOBAL PASS, whose collector has not shown a month is whole, and a Vpass
+card with a month short of or without its stated total) is `partial` there
+and gets no parse job.
 
 The collector's normalized `manifest.json` is one artifact among the others;
 registration never reads it. The terminal's own `artifacts[]` is the
@@ -252,7 +339,7 @@ and the scan walk registers its run anyway (G1-04).
 The final step is never split by a yield, but an invocation can still end
 inside it. The next call then re-enters it: the run report is found under its
 report key, the seal under its attempt id
-(`<runId>:terminal-registration-v1`), and the link is made once, so each is
+(`<runId>:<registration contract version>`), and the link is made once, so each is
 recorded once. The same test file kills an invocation after the run report
 and after the seal, for a direct and a staged seal.
 
@@ -263,7 +350,7 @@ invocation — so a missing or resized object still blocks with no fetch run at
 all (G1-14). Beyond that window each object is verified in its own step just
 before it is catalogued; a problem there blocks the run before its seal.
 
-**Versioning.** The registration contract stays `terminal-registration-v1`.
+**Versioning.** Staging (#250) kept the registration contract version.
 Staging changes how many calls a registration takes, not what a terminal means
 in CORE: the descriptors, the inventory digest and the seal's attempt id are
 byte-identical, so a bump would only register every run a second time as a new
@@ -282,6 +369,101 @@ once by an `import` operation) and completes on its existing inventory. Both
 cases are tested. Queue messages are R2 notifications before and after, so
 none in flight changes meaning. The health route's `registration` counts
 (§13) show how many terminals are still short of registration.
+
+### 3.4 Artifact datasets (ADR 0022)
+
+`terminal-v1` has no dataset field, and every parser except Mizuho's selects
+its artifacts by dataset, so the derivation supplies one. `artifactRequest`
+looks the artifact up in the closed table `ARTIFACT_DATASETS` (in
+`descriptors.ts`), keyed by the terminal's `source`: a rule names an exact
+artifact key or a whole-key pattern, the role and the media types the
+collector declares, and the dataset. An artifact that matches no rule — or
+matches a key with another role or media type — is registered with no
+dataset, which no parser but Mizuho's reads. Nothing is guessed.
+
+What the table maps (from each collector's persist path and each parser's
+`accepts`; [ADR 0022](adr/0022-registration-artifact-datasets.md) has the
+full list):
+
+- Mobile Suica `sf-history.json` → `sf-history`; Money Forward's index,
+  detail and monthly pages; MyJCB's discovery, past-months, detail and ledger
+  artifacts; GlobalPass activity pages; the SBI Securities, SBI Shinsei and
+  SBI VC Trade datasets; SMBC's normalized balance and transactions; Sony
+  Bank's balance, history pages, history CSVs and wallet pages; St George's
+  account snapshot; V Point's balance, SMFG point and history pages; the V
+  Point Pay notification event.
+- Not mapped: evidence no parser reads (manifests, summaries, raw pages beside
+  their normalized form); Mizuho, whose parsers read artifacts without a
+  dataset; MyJCB `credit-menu.html`, whose parser requires a media type
+  parameter a terminal cannot carry.
+- **Withheld: Vpass.** The statement-page rule is kept in
+  `WITHHELD_ARTIFACT_DATASETS` and not applied, so collector-vpass captures
+  are registered but never parsed. A parsed collector capture would become
+  the current statement snapshot of its card-month and retire the importer-era
+  purchases, because it cannot yet bind to the trusted card identity
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). It is applied when
+  the collector derives the binding.
+
+`scripts/artifact-datasets.test.ts` checks the table against both sides:
+every mapped or withheld dataset is accepted by a registered parser, every
+dataset a parser requires from a shared-R2 source is mapped, withheld or named
+unreachable, and the withheld list is pinned.
+
+**Contract version and carry-over.** The table is `terminal-registration-v2`;
+`v1`'s derivation (St George's dataset only) is kept beside it
+(`DATASETS_BY_VERSION`). The version is part of the `collection_runs` key and
+of the fetch run's `sourceRunKey`, so the scan gives every persisted terminal
+a v2 row. Then, for a terminal v1 already registered:
+
+- **its descriptors change** (an artifact gains a dataset — Mobile Suica, and
+  V Point Pay email runs sealed with none): it registers again, a second fetch
+  run in the same session over the same objects whose artifacts carry the
+  dataset, and is parsed. Its v1 artifacts had no dataset, which no parser but
+  Mizuho's reads (Mizuho is not in the table), so the capture is parsed once;
+- **its descriptors do not change** (Mizuho, St George, Vpass, every source
+  the table does not name): it is carried over — the v2 row is linked to the
+  existing fetch run with a completed `registered` stage naming it, and the
+  call answers `already_registered`. Registering it again would parse the
+  capture twice, and Mizuho history rows, which have no provider identity in
+  the transaction list, would be listed twice. Unchanged means every artifact
+  is catalogued in that run with the same sha256 and the descriptor digest v2
+  derives for it there, and nothing else is;
+- **it was blocked, retryable or unfinished under v1**: it is attempted afresh
+  under v2. A refusal about the terminal's own bytes blocks again;
+- **its terminal was overwritten after v1 registered it** (a different
+  digest): blocked `terminal_digest_conflict`, because the conflict check
+  compares the rows of every version, not only v2's.
+
+This amends the design point migration 0039's comment states (a new version
+"registers the run again as a new revision instead of silently reusing the
+old one"): a migration comment cannot change, so this section is where the
+rule now lives. Only a terminal whose meaning changed registers again; one
+whose meaning did not is reused explicitly, by a linked row and a stage.
+
+A re-registered capture is parsed once, but its two fetch runs and their
+artifacts are both recorded evidence, so the agent `coverage` intent's
+per-source `collectionRunCount` and `artifactCount`, which count those rows,
+count it twice. No financial read does.
+
+`services/processor/test/registration-datasets.test.ts` shows each case on
+synthetic terminals, and the health route's `unregistered` count is per
+version, so v1 rows that will never be worked again do not stay in it.
+
+MyJCB artifacts are mapped. The shared collector's manifest has no
+`connectionId` or `filename` per entry, so the metadata extractor finds an
+entry by the object it names: the artifact's digest and size, and its
+content-addressed key
+([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)). It takes the
+collector's `statementState` and `period` from that entry. The importer-era
+lookup is unchanged. A MyJCB terminal written before
+[ADR 0026](adr/0026-collector-unit-coverage.md) is still not parsed:
+`myJcbRunPlan` then reported every unit's coverage as `partial`,
+`unitReportRequest` maps that to the unit outcome `partial`, and
+`observation_fetch_runs` counts such a run as `partial`. Neither the run scope
+nor `unit-independent-v1` admits it, so the work item ends `not_eligible`.
+Since ADR 0026 a successful connection's unit is `complete`, and the run
+parses end to end (`services/processor/test/myjcb-shared-r2.test.ts` shows
+both).
 
 ## 4. No byte is copied
 
@@ -317,7 +499,8 @@ projected`, each with a state of `pending | completed | retryable | blocked`.
   `coverage_status`. Its corruption is not evidence about what the provider
   returned.
 - `collection_scan_state` is operational: resetting it re-walks the prefix
-  rather than losing anything.
+  rather than losing anything. Its `pages_completed` and `cycles_completed`
+  count finished pages and walks, not ticks (ADR 0024).
 
 `completed` is refused for the four reasons that are never completion
 (`queued`, `building`, `flag_off`, `no_processor`) by the shared stage
@@ -329,10 +512,25 @@ contract in `packages/collection/src/stages.ts`, before this table is reached.
 
 ```text
 observation_sweep → collection_scan → identity_sweep → balance_projection
-  → reconciliation_sweep → card_settlement_sweep → purchase_recognition
-  → reward_claims_sweep → reward_read_projection → report_job
-  → operation_dispatch → decision_outbox
+  → reconciliation_sweep → card_debit_account_sweep → card_settlement_sweep
+  → purchase_recognition
+  → reward_claims_sweep → reward_read_projection → price_promotion
+  → report_job → operation_dispatch → decision_outbox
 ```
+
+`price_promotion` has no flag. It promotes provider prices already stored as
+observations to `price_observations` by the closed rule list of
+`packages/domain/src/price-sources.ts`, each with its claim in
+`price_observation_claims` (migration 0053): at most 500 claims a tick,
+valuation claims before position claims, one cursor per claim kind in
+`price_promotion_cursor`, every write `INSERT … WHERE NOT EXISTS` in one batch
+with the cursor. The cursor never passes a row of a parse that is still
+`pending`, so a parse being written while the lane runs is read on a later
+tick; a parse left `pending` for good would hold that claim kind's cursor
+until the run is closed, which shows as `scanned: 0` tick after tick. It runs
+right before `report_job`, which values a holding only with a price claimed
+from the holding's own parse run; its log line is counts only (§6.1, [calculation-and-reports.md](calculation-and-reports.md#1-a-price-is-an-observation-with-a-basis),
+[ADR 0020](adr/0020-price-promotion-by-rule.md)).
 
 `card_settlement_sweep` shares `RECONCILIATION_ENABLED` with
 `reconciliation_sweep` and used to run inside it, its counts nested in that
@@ -340,6 +538,17 @@ lane's log line as `cardSettlements`. It is its own lane now, with its own
 `card_settlement_sweep` log line, `card_settlement_sweep_failed` event and tick
 record ([card-settlements.md](card-settlements.md)), so a failure of either
 sweep no longer hides the other's counts.
+
+`card_debit_account_sweep` shares the same flag and runs right before
+`card_settlement_sweep`, which reads what it writes. It reads the
+「カード情報」 table of stored MyJCB credit detail pages whose
+`myjcb-credit-statement-total` parse is published, at most 20 pages a tick,
+into `card_debit_account_statement` (migration 0060, one row per card, raw
+object and reader version, found by an anti-join on that key, so it keeps no
+cursor). The settlement sweep then appends what that statement says about
+each MyJCB candidate to `card_settlement_debit_account_evidence`, as evidence
+only ([card-settlements.md](card-settlements.md#provider-stated-debit-accounts),
+[ADR 0032](adr/0032-provider-stated-debit-accounts.md)).
 
 `purchase_recognition` runs only while `PURCHASE_RECOGNITION_ENABLED` is `"1"`
 or `"true"` (`"true"` in production since 2026-09-24); it turns adopted
@@ -377,15 +586,17 @@ answered from Workers Logs. `runScheduled` now also writes one row per tick of
 each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 `packages/storage-d1/src/core/lane-ticks.ts`):
 
-| Lane                    | Counts recorded                                                                                                                                                                                  |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `identity_sweep`        | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                      |
-| `reconciliation_sweep`  | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                       |
-| `card_settlement_sweep` | `scanned`, `proposed`, `written`                                                                                                                                                                 |
-| `purchase_recognition`  | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped` |
-| `reward_claims_sweep`   | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                            |
-| `operation_dispatch`    | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                         |
-| `decision_outbox`       | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                          |
+| Lane                       | Counts recorded                                                                                                                                                                                                                     |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity_sweep`           | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                                                         |
+| `reconciliation_sweep`     | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                                                          |
+| `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                                                             |
+| `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`                                                                                                                                                                            |
+| `purchase_recognition`     | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped`                                    |
+| `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
+| `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
+| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                                                            |
+| `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 
 Not recorded, because they already keep their own record: `observation_sweep`
 (`observation_lane_state`), `collection_scan` (`collection_scan_state`),

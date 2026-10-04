@@ -5,6 +5,7 @@
 // synthetic payload, so each `extra_json` path the query reads is the one
 // those parsers really emit. No provider data, account or card appears here.
 import { Database } from "bun:sqlite";
+import { fromTemplate } from "./schema-template";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { myJcbCreditLedger } from "../../../packages/parsers/src/parsers/myjcb";
@@ -81,7 +82,12 @@ interface AccountSpec {
   status?: "identified" | "provider-local" | "aggregate" | "unresolved";
 }
 
-function migrated(): Database {
+/** The Layer A stub and the CORE migrations from 0017: a copy of one build per process. */
+export function migrated(): Database {
+  return fromTemplate("card-usage-stub", migrate);
+}
+
+function migrate(): Database {
   const db = new Database(":memory:");
   db.exec(LAYER_A);
   for (const name of readdirSync(MIGRATIONS)

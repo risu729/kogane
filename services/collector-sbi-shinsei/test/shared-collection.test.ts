@@ -22,6 +22,11 @@ import {
 import type { CollectionFailure, CollectionManifest } from "../src/types";
 
 const RUN_ID = "00000000-0000-4000-8000-000000000000";
+const PLACEHOLDER_NAMES = {
+  customerName: "PLACEHOLDER HOLDER",
+  customerNameKanji: "見本　名前",
+  customerNameKana: "ミホン　ナマエ",
+};
 const IDENTITY = { attemptId: "attempt-0000" };
 
 function manifestOf(overrides: Partial<CollectionManifest> = {}): CollectionManifest {
@@ -160,6 +165,12 @@ describe("G1-01/G1-02 persisting a run", () => {
       "manifest.json",
       "raw-top-accounts-balance-and-activity.json",
     ]);
+    // The run manifest is the collector's own record, not a derivation of
+    // provider bytes: `collector_derived` with no step is refused at
+    // registration (`artifact_lineage_unstated`, ADR 0021).
+    expect(
+      read.manifest.artifacts.find((entry) => entry.artifactKey === "manifest.json")?.role,
+    ).toBe("collector_manifest");
     for (const artifact of read.manifest.artifacts) {
       const stored = await bucket.get(artifact.storageRef.key);
       expect(stored?.size).toBe(artifact.byteSize);
@@ -256,6 +267,14 @@ async function trigger(target: string | undefined) {
   };
   // A rotating CSRF token as the provider really returns it.
   fixtures.topBalances.header.newToken = "synthetic-next-csrf-token";
+  // Made-up placeholder names in the holder-name fields (ADR 0029, amendment 2).
+  Object.assign(
+    (
+      (fixtures.balanceSummary as { responseParam: Record<string, { responseParam: object }> })
+        .responseParam.summary as { responseParam: object }
+    ).responseParam,
+    PLACEHOLDER_NAMES,
+  );
   handoff = JSON.stringify({
     ok: true,
     responses: {
@@ -268,10 +287,11 @@ async function trigger(target: string | undefined) {
   const data = new FakeR2Bucket();
   const importerCalls: string[] = [];
   const staged: string[] = [];
+  const logged: unknown[][] = [];
   const spies = [
-    spyOn(console, "error").mockImplementation(() => {}),
-    spyOn(console, "warn").mockImplementation(() => {}),
-    spyOn(console, "log").mockImplementation(() => {}),
+    spyOn(console, "error").mockImplementation((...args: unknown[]) => void logged.push(args)),
+    spyOn(console, "warn").mockImplementation((...args: unknown[]) => void logged.push(args)),
+    spyOn(console, "log").mockImplementation((...args: unknown[]) => void logged.push(args)),
   ];
   try {
     const response = await worker.fetch(
@@ -323,6 +343,7 @@ async function trigger(target: string | undefined) {
       data,
       importerCalls,
       staged,
+      logged,
     };
   } finally {
     spies.forEach((spy) => spy.mockRestore());
@@ -376,5 +397,45 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
     expect(everything).not.toContain("synthetic-next-csrf-token");
     expect(everything).not.toContain("newToken");
     expect(everything).not.toContain("synthetic-secret");
+  });
+
+  test("ADR 0029 amendment 2: DATA keeps the names as sent, the manifest no name count, logs no name", async () => {
+    const { result, data, logged } = await trigger("shared");
+    expect(result.status).toBe("success");
+    const decoded = [...data.entries.values()].map((entry) =>
+      new TextDecoder().decode(entry.bytes),
+    );
+    for (const name of Object.values(PLACEHOLDER_NAMES)) {
+      expect(JSON.stringify(logged)).not.toContain(name);
+    }
+    const summaries = decoded
+      .filter((text) => text.includes('"customerNameKana"'))
+      .map((text) => JSON.parse(text) as { responseParam: { summary: { responseParam: object } } });
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.responseParam.summary.responseParam).toMatchObject(PLACEHOLDER_NAMES);
+    expect(decoded.join("\n")).not.toContain("[redacted:name]");
+    const read = await readTerminal(data, "sbi-shinsei", result.runId);
+    if (read.outcome !== "found") throw new Error("terminal missing");
+    const manifestRef = read.manifest.artifacts.find(
+      (entry) => entry.artifactKey === "manifest.json",
+    )!.storageRef.key;
+    const manifest = JSON.parse(new TextDecoder().decode(data.entries.get(manifestRef)!.bytes)) as {
+      artifacts: Record<string, unknown>[];
+    };
+    expect(manifest.artifacts.map((artifact) => artifact.dataset)).toEqual([
+      "top-accounts-balance-and-activity",
+      "balance-summary-and-stage",
+      "exchange-rate",
+      "yen-deposit-account",
+      "normalized",
+    ]);
+    for (const artifact of manifest.artifacts) {
+      expect(Object.keys(artifact)).not.toContain("redactedFieldCount");
+    }
+    expect(
+      read.manifest.transformations
+        .filter((step) => step.stepKind === "redacted")
+        .map((step) => [step.transformerId, step.transformerVersion]),
+    ).toEqual(Array.from({ length: 4 }, () => ["sbi-shinsei-token-sanitizer", "v3"]));
   });
 });

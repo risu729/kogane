@@ -222,6 +222,8 @@ export interface SeededUnit {
   /** Layer A unit id and unit key; MyJCB uses one unit per card connection. */
   id: number;
   key: string;
+  /** Default `connection`; a Vpass statement unit is a `card`. */
+  kind?: string;
   outcome: "success" | "partial" | "failed" | "human_required";
   failureCode?: string;
   artifacts: { id: number; key: string; payload: unknown }[];
@@ -244,19 +246,22 @@ export async function seedUnitRun(
     runOutcome: "success" | "partial" | "failed";
     units: SeededUnit[];
     fetchedAtMs?: number;
+    /** Default `collector-r2-importer`, the retired importer's producer. */
+    producer?: string;
   },
 ): Promise<void> {
   const now = run.fetchedAtMs ?? Date.now();
+  const producer = run.producer ?? "collector-r2-importer";
   const statements: D1PreparedStatement[] = [
     env.DB.prepare("INSERT OR IGNORE INTO sources VALUES(?,?)").bind(run.source, run.source),
-    env.DB.prepare("INSERT OR IGNORE INTO producers VALUES('collector-r2-importer')"),
+    env.DB.prepare("INSERT OR IGNORE INTO producers VALUES(?)").bind(producer),
     env.DB.prepare("INSERT INTO acquisition_sessions(id,external_session_id) VALUES(?,?)").bind(
       run.id,
       `run-${run.id}`,
     ),
     env.DB.prepare(
       "INSERT INTO fetch_runs(id,source_id,acquisition_session_id,producer_id,first_recorded_at_ms) VALUES(?,?,?,?,?)",
-    ).bind(run.id, run.source, run.id, "collector-r2-importer", now),
+    ).bind(run.id, run.source, run.id, producer, now),
     env.DB.prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal',?,?,?)").bind(
       run.id,
       run.runOutcome,
@@ -267,8 +272,8 @@ export async function seedUnitRun(
   for (const unit of run.units) {
     statements.push(
       env.DB.prepare(
-        "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'connection')",
-      ).bind(unit.id, run.id, unit.key),
+        "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,?)",
+      ).bind(unit.id, run.id, unit.key, unit.kind ?? "connection"),
       env.DB.prepare(
         "INSERT INTO fetch_unit_reports(fetch_unit_id,report_kind,normalized_outcome,safe_failure_code) VALUES(?,'terminal',?,?)",
       ).bind(unit.id, unit.outcome, unit.failureCode ?? null),

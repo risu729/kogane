@@ -13,6 +13,8 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import type { IdentityInput, IdentityPlan } from "../../../packages/identity/src/types.ts";
 import {
   approve,
+  CARD_REVIEW_KINDS,
+  CHANGE_KINDS,
   commit,
   createPlan,
   d1CommandStore,
@@ -21,10 +23,11 @@ import {
   simulate,
   type ChangePlan,
   type CommandStore,
+  type MutationInput,
   type Principal,
 } from "../../../packages/application/src/index.ts";
 import { balanceProjectionOutboxProcessor } from "../src/balance-projection-job.ts";
-import { changeMutationPlanners } from "../src/change-commands.ts";
+import { cardReviewMutation, changeMutationPlanners } from "../src/change-commands.ts";
 import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { executeIdentityCommand } from "../src/identity-commands.ts";
 import {
@@ -784,6 +787,31 @@ test("the internal command routes require a verified actor and refuse an agent's
     (await mf.dispatchFetch("https://pipeline.internal/command/v1/delete", { method: "POST" }))
       .status,
   ).toBe(404);
+});
+
+test("the card purchase review kinds have a writer slot but are refused at plan with no row written", async () => {
+  // Every change kind has a slot, so a later planner never meets a missing writer.
+  expect(Object.keys(changeMutationPlanners(db)).sort()).toEqual([...CHANGE_KINDS].sort());
+  for (const kind of CARD_REVIEW_KINDS)
+    expect(changeMutationPlanners(db)[kind]).toBe(cardReviewMutation);
+  expect(await cardReviewMutation({} as MutationInput)).toBeNull();
+  const count = async () =>
+    (await db.prepare("SELECT count(*) AS n FROM change_plans").first<{ n: number }>())!.n;
+  const before = await count();
+  const human = { "x-kogane-verified-actor": operator.id, "x-kogane-actor-kind": "human" };
+  const hex = (digit: string) => digit.repeat(64);
+  const payload = { eventId: `purchase_${hex("a")}`, reasonCode: "card_fee", reason: "route test" };
+  const response = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...human },
+    body: JSON.stringify({ kind: "card-purchase.exclude", payload }),
+  });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({
+    error: "unsupported_semantics",
+    refs: ["card-purchase.exclude"],
+  });
+  expect(await count()).toBe(before);
 });
 
 test("plans, approvals, receipts and outbox rows are append-only except their own state columns", async () => {

@@ -10,13 +10,17 @@ JSON report.
 Checked in WSL on 2026-08-30:
 
 - Node.js 26.8.1
-- TypeScript 5.9.3 (direct development dependency)
+- TypeScript (direct development dependency; 5.9.3 when checked, 6.0.3 today)
 - Esprima 4.0.1 and Escodegen 2.1.0 (available transitively)
 - Prettier, Acorn, Babel parser, and Terser are not installed
 
 The analyzer uses the TypeScript parser and printer because TypeScript is a
 direct dependency of this PoC. It does not depend on incidental packages in the
 Wrangler dependency tree.
+TypeScript 7 no longer exports that in-process parser (TypeScript 6 is the last
+release that ships it), so this workspace stays below 7 (`typescript@6.0.3`
+today), like the root manifest, while the other workspaces use 7.0.2
+([tooling](../../../docs/tooling.md)); a Renovate rule keeps it below 7.
 
 ## Safe report
 

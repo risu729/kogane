@@ -10,8 +10,9 @@
 // and dependency-cruiser fails *quietly* in exactly that way: with no
 // TypeScript < 7 resolvable it prints `missing-typescript-transpiler`, cruises
 // a few dozen modules and still exits 0. Every workspace that deploys a Worker
-// pins `typescript@7`, so the root manifest deliberately keeps `5.9.3` for this
-// step. The assertions below make a regression loud instead of silent:
+// pins `typescript@7`, so the root manifest deliberately keeps TypeScript below 7
+// (`6.0.3` today; 6 is the last release with the in-process compiler API) for
+// this step. The assertions below make a regression loud instead of silent:
 //
 //   * zero error-severity violations;
 //   * a TypeScript transpiler is available and is the < 7 one;
@@ -25,9 +26,11 @@ import { REPO_ROOT } from "./repo-root.ts";
 export const ROOTS = ["services", "packages", "apps", "experiments"] as const;
 
 /**
- * Floor for the cruised module count. The run cruises 530 modules today; a
- * number well below that but far above the ~44 of a transpiler-less run fails
- * a silent regression without failing every deletion.
+ * Floor for the cruised module count. It exists to catch the quiet failure
+ * above: with no TypeScript < 7 transpiler the run cruises a few dozen modules
+ * (55 as of 2026-09) and exits 0. A healthy run cruised about a thousand
+ * modules as of 2026-09, so a floor far above a few dozen but well below the
+ * real count fails that regression without failing every deletion.
  */
 export const MINIMUM_MODULES = 400;
 
@@ -107,7 +110,7 @@ export function cruiseProblems(result: CruiseResult): string[] {
   );
   if (typescript === undefined || !typescript.available)
     problems.push(
-      "no TypeScript transpiler is resolvable: dependency-cruiser would silently cruise almost nothing; keep typescript 5.x in the root manifest",
+      "no TypeScript transpiler is resolvable: dependency-cruiser would silently cruise almost nothing; keep typescript below 7 in the root manifest",
     );
   if (result.summary.totalCruised < MINIMUM_MODULES)
     problems.push(

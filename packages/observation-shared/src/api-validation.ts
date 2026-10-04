@@ -15,6 +15,7 @@ import { validFinancialResult } from "../../domain/src/result.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
 import { validCardOwnershipReview } from "./card-ownership-contract.ts";
 import { validCardPurchasePage } from "./card-purchase-contract.ts";
+import { validReportedState } from "./reported-state-contract.ts";
 import { validCardSettlementReviewPage } from "./card-settlement-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
@@ -187,6 +188,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   cardSettlementReconciliation: optional(boolean),
   cardOwnershipReview: optional(boolean),
   cardPurchaseRecognition: optional(boolean),
+  reportedStateOnDate: optional(boolean),
   opsApi: boolean,
 });
 const metadata = object<ApiMetadata>({
@@ -732,6 +734,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === "/api/v2/reconciliation/card-settlements")
     return validCardSettlementReviewPage(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
+  if (path === "/api/v2/reported-state") return validReportedState(value);
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/v2/query") return validSharedQueryResponse(value);
   if (path === "/api/filter-options") {

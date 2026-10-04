@@ -1,4 +1,5 @@
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import type { PersistedObservation } from "../../../packages/parsers/src/scheduled-payment.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import {
   snapshotPolicyComparisonSql,
@@ -21,6 +22,7 @@ import { internalHealthRoute } from "./internal-health.ts";
 import { runBatch } from "../../../packages/storage-d1/src/d1.ts";
 import { dispatchDecisionOutbox } from "./decision-outbox.ts";
 import { cardSettlementSweep } from "./card-settlement-job.ts";
+import { cardDebitAccountSweep } from "./card-debit-account-job.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import { cardPurchaseSweep, purchaseRecognitionEnabled } from "./card-purchase-job.ts";
 import { laneTickSummary, recordTick, type LaneTickResult } from "./lane-ticks.ts";
@@ -79,19 +81,20 @@ import {
   rewardReadProjectionEnabled,
   rewardReadProjectionStage,
 } from "./reward-read-projection.ts";
+import { pricePromotionSweep } from "./price-promotion-job.ts";
 import { reportsEnabled, runReportJob } from "./report-job.ts";
 import {
   IDENTITY_RUNS_PER_TICK,
   LANE_BUDGETS,
   LANES,
   MAX_LANE_JOBS,
+  PARSE_MAX_ATTEMPTS,
   type Lane,
 } from "./lane-budgets.ts";
 import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identity";
 import type {
   ArtifactMeta,
   CoverageClaim,
-  Observation,
   Parser,
   ParseIssue,
   ParseResult,
@@ -103,7 +106,7 @@ const REPORT_BASE_UNIT = "JPY";
 const REPORT_PERIMETER = "perimeter:all-visible-evidence";
 const SCAN_PAGE = 200;
 const MAX_BYTES = 16 * 1024 * 1024;
-const MAX_ATTEMPTS = 5;
+const MAX_ATTEMPTS = PARSE_MAX_ATTEMPTS;
 const LEASE_MS = 10 * 60 * 1000;
 // Contract v2 budgets: bounded like observation rows so one artifact cannot
 // flood D1 with diagnostics. A parser exceeding them is a parser bug.
@@ -292,6 +295,24 @@ const fields = {
     "rawLocator",
     "extra",
   ],
+  // A payment still to come (ADR 0005 amendment e, migration 0061). Declared
+  // outside the parser contract's `Observation` union so that no deployed
+  // parser's digest changes (`packages/parsers/src/scheduled-payment.ts`).
+  scheduled_payment: [
+    "sourceAccount",
+    "externalId",
+    "scheduleKind",
+    "usageDate",
+    "dueDate",
+    "amountText",
+    "amountScale",
+    "currency",
+    "counterparty",
+    "asOf",
+    "observedAt",
+    "rawLocator",
+    "extra",
+  ],
 } as const;
 const snake = (field: string) =>
   field === "extra" ? "extra_json" : field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
@@ -299,8 +320,8 @@ const snake = (field: string) =>
 export function observationInsert(
   db: D1Database,
   id: number,
-  kind: Observation["kind"],
-  rows: Observation[],
+  kind: PersistedObservation["kind"],
+  rows: PersistedObservation[],
 ): D1PreparedStatement {
   const names = fields[kind];
   return db
@@ -332,6 +353,49 @@ export function contractRows(result: ParseResult): {
   if (new Set(coverage.map((claim) => claim.claimId)).size !== coverage.length)
     throw new PipelineError("parse_contract_invalid");
   return { issues, coverage };
+}
+
+/** The parsers that may emit `scheduled_payment` rows (ADR 0005 amendment e). */
+const SCHEDULED_PAYMENT_PARSERS: readonly string[] = ["myjcb-skip-payment-schedule"];
+const ISO_DATE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
+const CANONICAL_INTEGER = /^(?:0|-?[1-9]\d{0,17})$/u;
+
+/**
+ * `scheduled_payment` is declared outside the parser contract's `Observation`
+ * union (`packages/parsers/src/scheduled-payment.ts`), so the type system
+ * does not check what reaches `fields.scheduled_payment`. This is the
+ * boundary instead: a row of that kind from any other parser, or with any
+ * key, type or shape other than the declared one, fails the parse with
+ * `parse_contract_invalid` before anything is written. The table's CHECKKs
+ * (migration 0061) stay the last line.
+ */
+export function scheduledPaymentRows(parserName: string, observations: readonly unknown[]): void {
+  const keys = ["kind", ...fields.scheduled_payment].sort().join(",");
+  for (const observation of observations) {
+    const row = observation as Record<string, unknown> | null;
+    if (row?.["kind"] !== "scheduled_payment") continue;
+    const text = (name: string) => typeof row[name] === "string" && row[name] !== "";
+    const date = (name: string) =>
+      typeof row[name] === "string" &&
+      ISO_DATE.test(row[name]) &&
+      new Date(`${row[name]}T00:00:00Z`).toISOString().startsWith(row[name]);
+    const extra = row["extra"];
+    if (
+      !SCHEDULED_PAYMENT_PARSERS.includes(parserName) ||
+      Object.keys(row).sort().join(",") !== keys ||
+      !["sourceAccount", "externalId", "counterparty", "observedAt", "rawLocator"].every(text) ||
+      row["scheduleKind"] !== "card-skip-payment" ||
+      !["usageDate", "dueDate", "asOf"].every(date) ||
+      typeof row["amountText"] !== "string" ||
+      !CANONICAL_INTEGER.test(row["amountText"]) ||
+      row["amountScale"] !== 0 ||
+      row["currency"] !== "JPY" ||
+      typeof extra !== "object" ||
+      extra === null ||
+      Array.isArray(extra)
+    )
+      throw new PipelineError("parse_contract_invalid");
+  }
 }
 
 function issueInsert(db: D1Database, id: number, rows: ParseIssue[]): D1PreparedStatement {
@@ -552,6 +616,7 @@ async function executeParseJob(
     if (new TextEncoder().encode(JSON.stringify(result.observations)).length > 2 * 1024 * 1024)
       throw new PipelineError("observation_payload_too_large");
     const contract = contractRows(result);
+    scheduledPaymentRows(parser.name, result.observations);
     failureStage = "persistence_failed";
     const inserted = await env.DB.prepare(
       `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,?,'pending',?) RETURNING id`,
@@ -582,10 +647,13 @@ async function executeParseJob(
         }),
       )
       .run();
-    for (const kind of Object.keys(fields) as Observation["kind"][]) {
-      let chunk: Observation[] = [];
+    // A parse result's rows are persisted by their own `kind`; the kinds
+    // `fields` names are every kind a registered parser emits.
+    const persisted = result.observations as PersistedObservation[];
+    for (const kind of Object.keys(fields) as PersistedObservation["kind"][]) {
+      let chunk: PersistedObservation[] = [];
       let bytes = 0;
-      for (const observation of result.observations) {
+      for (const observation of persisted) {
         if (observation.kind !== kind) continue;
         const size = new TextEncoder().encode(JSON.stringify(observation)).length;
         if (size > 500_000) throw new PipelineError("observation_row_too_large");
@@ -1698,6 +1766,12 @@ export interface ScheduledStages {
    */
   settlements?: (env: Env) => Promise<object>;
   /**
+   * MyJCB 「カード情報」 readings (ADR 0032, migration 0060), under the same
+   * flag as the settlement sweep, which reads them. Absent stage means the
+   * lane never runs.
+   */
+  debitAccounts?: (env: Env) => Promise<object>;
+  /**
    * Card purchase recognition (docs/economic-events.md). Absent stage, or
    * PURCHASE_RECOGNITION_ENABLED off, means the lane never runs and writes
    * nothing.
@@ -1711,6 +1785,13 @@ export interface ScheduledStages {
    * written to READ (docs/rewards.md).
    */
   rewardReadProjection?: (env: Env) => Promise<object>;
+  /**
+   * Provider prices promoted to `price_observations` by the closed rule list
+   * (ADR 0020, docs/calculation-and-reports.md §1). No flag: it writes only
+   * append-only prices and their claims, which no reader uses until it selects
+   * them, and it records its tick like the other stateless lanes.
+   */
+  prices?: (env: Env) => Promise<object>;
   /** A12 report job. Absent stage, or the flag off, means the lane never runs. */
   reports?: (env: Env) => Promise<object>;
   /**
@@ -1742,9 +1823,11 @@ const defaultStages: ScheduledStages = {
   balanceProjection: (env) => runBalanceProjection(env),
   reconcile: (env) => reconciliationSweep(env.DB),
   settlements: (env) => cardSettlementSweep(env.DB),
+  debitAccounts: (env) => cardDebitAccountSweep(env),
   purchases: (env) => cardPurchaseSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
   rewardReadProjection: (env) => rewardReadProjectionStage(env),
+  prices: (env) => pricePromotionSweep(env.DB),
   reports: (env) => {
     // One clock reading for both fields: the run records when it ran, and the
     // cutoff admits everything recorded up to that same instant.
@@ -1819,6 +1902,9 @@ export async function runScheduled(
     ["reconciliation_sweep", stages.reconcile, reconciliation],
     // Same flag, its own lane, so a failure of either sweep no longer hides
     // the other's counts (docs/card-settlements.md).
+    // The debit accounts MyJCB pages state, read before the settlement sweep
+    // that attaches them to candidates as evidence (docs/card-settlements.md).
+    ["card_debit_account_sweep", stages.debitAccounts, reconciliation],
     ["card_settlement_sweep", stages.settlements, reconciliation],
     // Off unless PURCHASE_RECOGNITION_ENABLED is set: then adopted Vpass and
     // MyJCB usage rows become purchase/refund events, each with a rule
@@ -1840,6 +1926,11 @@ export async function runScheduled(
       stages.rewardReadProjection,
       rewardReadProjectionEnabled(env.REWARD_READ_PROJECTION_ENABLED),
     ],
+    // After identity and before the report job, which reads the prices it
+    // promotes: provider prices become `price_observations` rows by the closed
+    // rule list, at most 500 claims a tick (docs/calculation-and-reports.md §1).
+    // Always on; it writes append-only prices and claims only.
+    ["price_promotion", stages.prices, true],
     // Off unless REPORTS_ENABLED is set, for the same reason
     // (docs/calculation-and-reports.md).
     ["report_job", stages.reports, reportsEnabled(env.REPORTS_ENABLED)],

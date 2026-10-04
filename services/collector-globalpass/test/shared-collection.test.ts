@@ -17,6 +17,7 @@ import {
   waitingForHuman,
 } from "../src/shared-collection";
 import {
+  artifactFilename,
   GLOBALPASS_DATASET,
   GLOBALPASS_MEDIA_TYPE,
   GLOBALPASS_PAGINATION_STATUS,
@@ -30,11 +31,12 @@ const RUN_ID = "00000000-0000-4000-8000-000000000000";
 const IDENTITY = { attemptId: "attempt-0000" };
 const SANITIZED_HTML = `<!doctype html><html><body>ご利用明細<input type="hidden" name="nablarch_hidden" value="${NABLARCH_HIDDEN_SENTINEL}"></body></html>`;
 
-function storedArtifact(month: string): StoredArtifact {
+function storedArtifact(month: string, page = 1): StoredArtifact {
   return {
     dataset: GLOBALPASS_DATASET,
     month,
-    key: `raw/prestia-globalpass/2099/02/01/${RUN_ID}/activity-${month}.html`,
+    page,
+    key: `raw/prestia-globalpass/2099/02/01/${RUN_ID}/${artifactFilename(month, page)}`,
     mediaType: GLOBALPASS_MEDIA_TYPE,
     bytes: SANITIZED_HTML.length,
     sha256: "a".repeat(64),
@@ -66,6 +68,7 @@ function inputOf(manifest: CollectionManifest) {
     manifestJson: JSON.stringify(manifest),
     captures: manifest.artifacts.map((artifact) => ({
       month: artifact.month,
+      page: artifact.page,
       sanitizedHtml: SANITIZED_HTML,
     })),
     identity: IDENTITY,
@@ -73,11 +76,13 @@ function inputOf(manifest: CollectionManifest) {
 }
 
 describe("G1-08/G1-09 run outcome", () => {
-  test("a successful run still declares partial coverage", () => {
-    // A rolling window with unproven pagination is never complete coverage.
+  test("a successful run's unit is complete; the run stays partial", () => {
+    // `success` means every selected month was proven whole (ADR 0026's
+    // amendment of 2026-10-04); the run is a rolling window.
     expect(sharedOutcome(manifestOf())).toEqual({
       providerOutcome: "success",
       coverageStatus: "partial",
+      unitCoverageStatus: "complete",
     });
   });
 
@@ -100,6 +105,7 @@ describe("G1-08/G1-09 run outcome", () => {
     ).toEqual({
       providerOutcome: "partial",
       coverageStatus: "partial",
+      unitCoverageStatus: "partial",
       safeErrorCode: "html_sanitization_failed",
     });
   });
@@ -123,6 +129,7 @@ describe("G1-08/G1-09 run outcome", () => {
     ).toEqual({
       providerOutcome: "failed",
       coverageStatus: "unknown",
+      unitCoverageStatus: "unknown",
       safeErrorCode: "browser_collection_failed",
     });
   });
@@ -148,6 +155,7 @@ describe("G1-01/G1-02 persisting a run", () => {
 
     const read = await readTerminal(bucket, "prestia-globalpass", RUN_ID);
     if (read.outcome !== "found") throw new Error("unreachable");
+    expect(read.manifest.producer).toBe("collector-prestia-globalpass");
     expect(read.manifest.artifacts.map((entry) => entry.artifactKey)).toEqual([
       "activity-2099-01.html",
       "activity-2099-02.html",
@@ -169,11 +177,60 @@ describe("G1-01/G1-02 persisting a run", () => {
         unitKey: "account",
         unitKind: "collection",
         artifactCount: 2,
-        coverageStatus: "partial",
+        coverageStatus: "complete",
       },
+    ]);
+    expect(read.manifest.coverageStatus).toBe("partial");
+    // The unit's count is exactly the artifacts that name it: the pages. The
+    // run manifest belongs to the run (ADR 0021; CORE refuses the seal with
+    // `run_inventory_incomplete` otherwise).
+    expect(
+      read.manifest.artifacts.map((entry) => [entry.artifactKey, entry.unitKey ?? null]),
+    ).toEqual([
+      ["activity-2099-01.html", "account"],
+      ["activity-2099-02.html", "account"],
+      ["manifest.json", null],
     ]);
     // Two identical pages share one content-addressed object.
     expect(new Set(read.manifest.artifacts.map((entry) => entry.storageRef.key)).size).toBe(2);
+  });
+
+  test("a walked month stores one artifact per page and one month range", async () => {
+    const bucket = new FakeR2Bucket();
+    const manifest = manifestOf({
+      artifacts: [
+        storedArtifact("2099-02"),
+        storedArtifact("2099-02", 2),
+        storedArtifact("2099-01"),
+      ],
+    });
+    const input = {
+      ...inputOf(manifest),
+      captures: [
+        { month: "2099-02", page: 1, sanitizedHtml: SANITIZED_HTML },
+        { month: "2099-02", page: 2, sanitizedHtml: SANITIZED_HTML.replace("<body>", "<body>p2") },
+        { month: "2099-01", page: 1, sanitizedHtml: SANITIZED_HTML },
+      ],
+    };
+    expect((await persistSharedRun(bucket, input)).outcome).toBe("persisted");
+    const read = await readTerminal(bucket, "prestia-globalpass", RUN_ID);
+    if (read.outcome !== "found") throw new Error("unreachable");
+    expect(read.manifest.artifacts.map((entry) => entry.artifactKey)).toEqual([
+      "activity-2099-01.html",
+      "activity-2099-02-p2.html",
+      "activity-2099-02.html",
+      "manifest.json",
+    ]);
+    expect(read.manifest.ranges.map((range) => range.rangeKey)).toEqual([
+      "month-2099-01",
+      "month-2099-02",
+      "requested",
+    ]);
+    expect(read.manifest.units[0]).toMatchObject({ artifactCount: 3, coverageStatus: "complete" });
+    // A page whose bytes are missing is refused before anything is written.
+    await expect(
+      buildSharedRunPlan({ ...input, captures: input.captures.slice(0, 1) }),
+    ).rejects.toThrow("shared_capture_missing");
   });
 
   test("nothing stored in DATA carries session or credential material", async () => {

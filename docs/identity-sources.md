@@ -12,6 +12,7 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 | GLOBAL PASS  | `global-pass:card`                                 | Debit activity, separate from PRESTIA bank deposits                                                                          |
 | MyJCB        | `myjcb:{connection}:root`                          | Statement aggregate without physical/subcard assignment                                                                      |
 | SMBC         | `smbc-bank:ordinary-yen`                           | Audited ordinary JPY deposit only; not Olive credit liability or AUD deposit                                                 |
+| Mizuho       | `mizuho-bank:ordinary:{branch 3}:{account 7}`      | Provider branch and account number of an ordinary JPY deposit; balance and history rows share it (policy 2)                  |
 | Sony         | `sony-bank:deposit:{currency}`                     | Currency-specific deposit scope                                                                                              |
 | Sony         | `sony-bank:wallet`                                 | Debit-card activity; not another stored-value deposit                                                                        |
 | Sony         | `sony-bank:gross`, asset 001–011, loan 012–015     | Provider totals/categories, not established product holdings                                                                 |
@@ -23,7 +24,8 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 | V Point      | `v-point:member`                                   | Member history scope                                                                                                         |
 | V Point Pay  | notification-events / prepaid-yen                  | Separate notification and historical event-balance roles, denominated in yen                                                 |
 | Mobile Suica | `mobile-suica:sf`                                  | SF scope, no physical card binding inferred                                                                                  |
-| MoneyForward | `moneyforward-me:moneyforward-account-v1-{64 hex}` | Verified account/service HMAC, aggregator mirror, never mapped by name                                                       |
+| MoneyForward | `moneyforward-me:moneyforward-account-v1-{64 hex}` | Verified account/service HMAC (retired importer), aggregator mirror, never mapped by name                                    |
+| MoneyForward | `moneyforward-me:moneyforward-account-v2-{64 hex}` | Verified account/service unkeyed digest (ADR 0029), aggregator mirror, a different account from its v1 identity              |
 | PayPay CSV   | `paypay`                                           | Export scope; does not distinguish money, money-lite or reward buckets                                                       |
 
 The classifier accepts exact patterns from the checked-in parser registry.

@@ -197,6 +197,28 @@ Rules that hold for every collector below:
 - A failed put returns `incomplete` with a checkpoint and no terminal: the
   run is not reported as complete, and only codes and counts are logged
   (G1-01, G3-08).
+- **The registration contract** ([ADR 0021](adr/0021-collector-registration-contract.md)).
+  A terminal states what the Processor needs to register and seal it, and
+  nothing more:
+  - every `collector_derived` artifact has a transformation whose output it
+    is: `extracted` or `reencoded` by the collector (named `collector-<id>`
+    or by its own transformer id) at the producer version, whose
+    `inputArtifactKeys` name the kept artifacts it was derived from, or are
+    empty when the input was never stored — which registers as
+    `source_bytes_not_available`, never as an invented parent;
+  - bytes a sanitizer produced are a `sanitized_provider_capture` with a
+    `redacted` step; a provider role (`provider_*`) carries the provider's
+    bytes with no step at all (CORE seals a provider role only with
+    `decrypted` or `extracted` steps);
+  - the collector's own run manifest is `collector_manifest` and names no
+    unit; a unit's `artifactCount` is exactly the number of artifacts whose
+    `unitKey` is that unit;
+  - a range at `month` precision states `YYYY-MM`.
+
+  `services/processor/test/collector-plans.test.ts` runs every collector's
+  real `*RunPlan` function through registration against the whole CORE schema
+  and the operator bootstrap, and fails when any of these is broken.
+
 - `operationId`/`attemptId` are carried when an operation requested the run.
   U08 dispatches collection operations; today the cron and the admin trigger
   leave them unset.
@@ -225,12 +247,40 @@ CORE source id through the closed table `COLLECTOR_SOURCE_IDS` in
 ([processor.md §3.1](processor.md#31-collector-ids-core-source-ids-and-producers));
 no collector carries the CORE id.
 
+Its `producer` is `collector-<collector id>`, the terminal's own `source`
+with the prefix `collector-` (`collector-vpass`, `collector-prestia-globalpass`,
+`collector-v-point-pay-email`), because that is the producer of the
+Processor's route for the source; a terminal naming any other producer is
+refused as `inactive_ingest_route`
+([ADR 0014](adr/0014-collector-producer-ids.md)).
+`tests/collector-producers.test.ts` checks every collector's terminal
+constants against the routes in `config/ingest-clients.json`.
+
 | Collector Worker                   | Terminal `source` (`runs/<source>/…`) | CORE source id     |
 | ---------------------------------- | ------------------------------------- | ------------------ |
 | `kogane-sbi-shinsei-collector-poc` | `sbi-shinsei`                         | `sbi-shinsei-bank` |
 | `kogane-globalpass-collector-poc`  | `prestia-globalpass`                  | `global-pass`      |
 | `kogane-sbi-vc-session-poc`        | `sbi-vc-trade`                        | `sbi-vc-trade`     |
 | `kogane-smbc-direct-backfill-poc`  | `smbc-direct`                         | `smbc-bank`        |
+| `kogane-mizuho-collector`          | `mizuho-bank`                         | `mizuho-bank`      |
+
+### Artifact datasets at registration (ADR 0022)
+
+A terminal names no parser dataset, and no collector adds one: the Processor
+derives it at registration from what the terminal already states — the
+artifact key, its role and its media type — through the closed table
+`ARTIFACT_DATASETS` in `packages/application/src/collection/descriptors.ts`
+([processor.md §3.4](processor.md#34-artifact-datasets-adr-0022),
+[ADR 0022](adr/0022-registration-artifact-datasets.md)). The artifact tables
+below are its source: a collector that renames an artifact, changes its role
+or declares another media type leaves that artifact without a dataset, and so
+unparsed, until the table follows. Vpass statement pages are withheld and
+registered without a dataset until the collector derives the trusted card
+binding ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). The table is
+registration contract `terminal-registration-v2`: a run registered under v1
+whose artifacts gain a dataset registers again under v2 (its v1 artifacts were
+never parsed), and every other v1 registration is carried over unchanged, so
+no capture is parsed twice.
 
 ### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 
@@ -253,7 +303,10 @@ enforced on the way to central storage: a wallet page that still carries a
 field (`loginPwd`, `password`, `csrf`, …), throws a stable code and the run
 writes no terminal instead of publishing the value (G3-08).
 
-Terminal fields: one unit `account` (`unitKind: account`); ranges
+Terminal fields: `producer: collector-sony-bank`; one unit `account`
+(`unitKind: account`) whose `artifactCount` counts every artifact but
+`manifest.json`, which belongs to the run and names no unit (ADR 0021; until
+then the manifest named the unit and was counted in it); ranges
 `request-window` (the requested `from`/`to`) and, when wallet statements were
 collected, `wallet-months`; one `terminal` report carrying the outcome;
 `requestedScope.scopeKind = date_range` over the same window;
@@ -289,34 +342,68 @@ also re-serialized its _parsed_ view of the manifest, adding `filename`,
 artifact key, not stated by the collector. The collector's manifest is its own
 record and does not carry them.)
 
-Terminal fields: one unit per account (`account-NN`, `unitKind: account`),
-taken from the collector's own filename grammar — the run-wide
-`accounts.html` index belongs to no unit; a `months-account-NN`
+Terminal fields: `producer: collector-moneyforward-me`; one unit per account
+(`unitKind: account`) holding its detail page and its monthly fragments — the
+run-wide `accounts.html` index belongs to no unit; a `months-<unit>`
 `declared_coverage` range per account covering the monthly fragments that were
 actually captured; one `terminal` report carrying the outcome;
 `requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
 aggregator currently shows) listing the accounts as `unitKeys`.
 
+The unit key is the account identity the parser requires,
+`moneyforward-account-v2-<64 hex>`
+([ADR 0027](adr/0027-moneyforward-collector-account-identity.md),
+[ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md)): the
+unkeyed, domain-separated SHA-256 of `["moneyforward-account-v2",
+account[id_hash], service[id]]`, read from each account-detail page with the
+retired importer's checks (`src/account-identity.ts`). No secret is involved.
+The artifact keys stay positional. When any account's tuple is absent or fails
+a check, the whole run keeps positional units (`account-NN`, from the filename
+grammar), which the parsers reject (`parser_rejected`); the persist diagnostic
+carries `identity: derived` or one closed code (`identity_tuple_absent`,
+`identity_tuple_invalid`, `identity_duplicate`, `identity_index_mismatch`,
+`identity_incomplete`). No identifier is logged or written outside the pages
+themselves. The parsers also accept the importer's `moneyforward-account-v1-`
+identities, which are a different account from the v2 identity of the same
+service ([identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity)).
+
 Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
-G1-02, G1-08, G1-09, G1-15, G3-07, G3-08). The importer-side parity suite was
+G1-02, G1-08, G1-09, G1-15, G3-07, G3-08) and
+`services/collector-moneyforward/test/account-identity.test.ts` (ADR 0027);
+end to end, registration and parsing in
+`services/processor/test/moneyforward-shared-r2.test.ts`. The importer-side parity suite was
 removed with the importer ([legacy-retirement.md](legacy-retirement.md)). No
 provider was contacted and no production bucket was read or written.
 
 ### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
 
-| Artifact key                                                                   | Role                         |
-| ------------------------------------------------------------------------------ | ---------------------------- |
-| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` |
-| `<connectionId>/credit-past-months.json`                                       | `provider_response`          |
-| `<connectionId>/credit-csv                                                     | pdf                          | ofx` | `provider_export` |
-| `<connectionId>/credit-ledger-*.json`, `…/discovery.json`                      | `collector_derived`          |
-| `manifest.json`                                                                | `collector_manifest`         |
+| Artifact key                                                                                                                                 | Role                         | Step (ADR 0021)                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
+| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/credit-schedule-NN.html`, `…/credit-skip-payment-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input  |
+| `<connectionId>/credit-past-months.json`                                                                                                     | `provider_response`          | none                                       |
+| `<connectionId>/credit-{csv,pdf,ofx}` exports                                                                                                | `provider_export`            | none                                       |
+| `<connectionId>/credit-ledger-NN.json`                                                                                                       | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `<connectionId>/discovery.json`                                                                                                              | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `manifest.json`                                                                                                                              | `collector_manifest`         | none; names no unit                        |
+
+A ledger is parsed from the statement page of the same `detailMonth` before
+that page is redacted, and `discovery.json` from the login and mypage
+responses; none of those bytes is kept, so both register as
+`source_bytes_not_available`. The redacted `credit-detail-NN.html` kept in the
+same run is not named as the ledger's input: the ledger was not derived from
+it, and the sanitizer rewrites text (card-number-shaped digit runs) as well as
+attributes, so the capture need not reproduce the ledger. Before ADR 0021
+neither stated a step, and the Processor refused the run
+(`artifact_lineage_unstated`).
 
 Sanitizer: the collector's own `redactedStatementHtml` (parse5 tree: scripts,
 styles, textareas, embedding elements and every URL-bearing attribute removed,
-every `value=` replaced by `[redacted]`, card numbers in text replaced), which
-is what the retired legacy path stored. The collector adds
+every `value=` replaced by `[redacted]`, card numbers in text replaced; body
+text, the 口座名義 cell included, is kept as displayed). `myjcb-sanitizer` v3
+is the same sanitizing as v1, which is what the retired legacy path stored;
+v2 runs also replaced the 口座名義 cell with `[redacted:name]`, which
+[ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence) withdrew. The collector adds
 `assertRedactedHtml` (`src/redaction.ts`), the invariants the importer
 enforced, checked on the bytes about to leave the Worker: a redaction
 regression throws `artifact_html_redaction_invalid` and the run writes no
@@ -326,22 +413,117 @@ never accepted (`debit-menu`, `debit-detail`, `credit-csv`, `credit-pdf`,
 `credit-ofx` — it refused a manifest naming one with
 `manifest_dataset_unobserved`) are refused here the same way
 (`artifact_dataset_unobserved`): `DATA` holds nothing the legacy path never
-let through. The collector manifest is written in its central shape — a
-connection blocker and a failure message become coarse codes
-(`human-required`, `collector-failure`, `r2-write-failure`), so upstream free
-text never reaches the shared bucket either. (As for Money Forward, the
+let through. The collector manifest rebuilds each connection and each failure
+from closed fields: a status, counts, and for a connection that stopped, a
+stop code from `CONNECTION_STOP_CODES`, the month position it stopped at and
+the number of months it kept (failure entries are
+`{ connectionId, operation: "collect", code, position }`), plus the months it
+kept unread (a position and a code from `UNREAD_MONTH_CODES`) and the export
+kinds each month offered (`csv`, `pdf`, `ofx`). A code or kind outside its
+list or a position that is not a `detailMonth` refuses the plan, so upstream
+free text never reaches the shared bucket either. (As for Money Forward, the
 importer's central bytes also carried its parsed `connectionId`, `filename`
 and `ordinal` per artifact; the collector's manifest keeps its own artifact
-shape.)
+shape.) The Processor's metadata extractor reads that shape. It finds an entry
+by the artifact's digest, size and content-addressed key, and takes the
+`statementState` and `period` the collector recorded. The connection and
+position come from the artifact key, as before
+([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)).
 
-Terminal fields: one unit per connection (`<connectionId>`,
-`unitKind: connection`), so several cards in one run stay distinguishable and
+Terminal fields: `producer: collector-myjcb`; one unit per connection
+(`<connectionId>`, `unitKind: connection`), so several cards in one run stay distinguishable and
 are never merged into one (G1-16); no ranges, because the statement periods are
 provider labels rather than machine ranges and stay in the manifest artifact;
 one `terminal` report carrying the outcome; `requestedScope.scopeKind =
-full_snapshot` over the connections. `coverageStatus` is `partial` even for a
-successful run — a MyJCB card exposes a rolling set of statement periods, so a
-finished run is not a claim about the card's whole history. A connection that
+full_snapshot` over the connections. The run's `coverageStatus` is `partial`
+even for a successful run — a MyJCB card exposes a rolling set of statement
+periods, so a finished run is not a claim about the card's whole history —
+and registration only records it. Each unit states its own coverage
+([ADR 0026](adr/0026-collector-unit-coverage.md)): `complete` for a
+successful connection, which enumerated its credit months from the menu and
+the past-months response and kept every month's page and the ledger of every
+page that states its state. Export links a page offers for its own month are
+recorded in the manifest (`exportOffers: [{ position, kinds }]`) and not
+fetched: the datasets are refused here (above), so a fetched export would fail
+the run's plan
+([ADR 0005's amendment (b)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page)).
+A menu link belongs to the last `h2` or `h3` before it. The months are the
+credit menu's links under the `h2` headings 「最新のご利用明細」 and
+「過去の明細」 and the past-months response's available positions; the links
+under the `h3` 「ボーナス#回払い・ショッピングスキップ払い」 are payment
+schedule pages
+([ADR 0005's amendment (c)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months);
+the heading levels are
+[amendment (j)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-04-j-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-known-by-its-h1)'s).
+A link under any other `h2` or `h3`, or before any, stops the connection
+before its first month (`credit_menu_group_unrecognized`). After the last
+month each schedule page is fetched and stored whole, redacted (state
+`unknown`, period `detailMonth-N`). The page whose one h1 is
+「ショッピングスキップ払いご利用明細(未確定分)」 is stored as
+`credit-skip-payment-NN.html`, which registration gives the dataset
+`credit-schedule` and `myjcb-skip-payment-schedule` reads
+([amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments));
+every other schedule page, the ボーナス払い page (one h1
+「ボーナス#回払いご利用代金明細(未確定分)」) included, is stored as
+`credit-schedule-NN.html`, which no registration rule gives a parser
+dataset, so it is catalogued and sealed but never parsed. The manifest records each one as
+`schedulePages: [{ position, code }]` (`scheduled_payments_page` when stored,
+`schedule_page_fetch` when its fetch failed, which is not a stop) and
+`schedulePageCount`; schedule pages never count in `periodCount` or
+`capturedMonthCount` and never change the unit's coverage. A month
+position whose page has the skip-payment h1 (amendment (h)) or the
+ボーナス払い h1 (amendment (j)) is stored and listed the same way, and is not
+a month; a `credit-detail` page read as `unknown` carries no period
+in the manifest, and one page's bytes at two positions must state one state
+and period
+([amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)).
+A month can be kept unread: a page kept as `unknown` that shows ledger rows
+(no heading, position 2 or later; `rows_unstated`), or a month page whose
+ledger shows rows under the observed third header
+`ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`, seen so far only on
+the ショッピングスキップ払い schedule page (`scheduled_payments_page`). Such a page gets no ledger, so
+its rows reach no parser, and the connection goes on to the next month. The
+manifest lists these months (`unreadMonths: [{ position, code }]`), the
+connection is `partial`, its unit `partial` with `scheduled_payments_page`
+when every unread month is under the third header and `collector_partial`
+otherwise, and the run `partial` although no failure was recorded. The credit
+menu (`detailMenu.html`) is read once, before any detail page, in the same
+session. The credit months are read one at a time in ascending
+`detailMonth` order, and a month is kept whole or not at all. When a month's
+fetch, statement state, period, ledger parse or export fails, the connection
+stops at that month ([ADR 0005's amendment](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-a-stop-ends-the-connection-and-keeps-its-captured-months)):
+it keeps the credit menu, the past-months response, the months before it and
+`discovery.json`, reads nothing further, and is `partial`. Its unit is
+`partial` with the stage's stop code (`month_fetch`, `month_parse`,
+`credit_statement_state`, `credit_statement_period`, `credit_page_repeated`
+(the same page bytes as an earlier position's page read as another state or
+period, [ADR 0005's amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)),
+`ledger_parse`, and `export_fetch` only on the fetch path the Worker does not use), and its
+manifest entry records the code, the position and the count of months kept.
+On `credit_statement_state`, `credit_statement_period` and `ledger_parse` the
+page it stopped on is also kept, redacted, as an `unknown` `credit-detail`
+with no ledger, so the stop can be diagnosed; it is not counted as a kept
+month. A connection that stops before its first month (`login`,
+`human_required`, `discovery`, `credit_menu`,
+`credit_menu_group_unrecognized`, `credit_first_detail`,
+`credit_past_months`, `no_route`, or `unclassified` for an error that names no
+stage) keeps nothing and has an `unknown` unit with that code, and so does a
+failed debit read (`debit`; a debit capture is refused in shared mode in any
+case, above). A run in which
+every connection kept nothing is `failed` and stores only its terminal, whose
+units still carry each connection's code; registration records such a run
+as blocked (`provider_run_failed`) and seals nothing, as before. The run's own code is the stop code
+when every connection that is not whole stopped at the same stage. A stopped
+connection's unit registers as `failed`, so the run is `partial` and
+`not_eligible`: its captured months are catalogued and sealed but not parsed.
+The eligibility rule is not loosened; what is kept is the evidence and the
+cause. `complete` assumes one detail page holds its whole month, which
+has not been observed or confirmed (an open limit,
+[ADR 0026](adr/0026-collector-unit-coverage.md#consequences)). A `complete` unit registers as the unit outcome
+`success`, as the importer's did, so a successful run is `success` in
+`observation_fetch_runs` and is parsed. Terminals written before ADR 0026
+declared every unit `partial`; they stay `partial` and `not_eligible`, and the
+next successful run captures their confirmed statements again. A connection that
 needs a human is a `human-required` state on its own unit with
 `safeErrorCode: human_required`, and the run-level code is `human_required`
 when every blocked connection is waiting for a person: nothing here retries a
@@ -356,13 +538,24 @@ provider was contacted and no production bucket was read or written.
 
 ### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
 
-| Artifact key                             | Role                         |
-| ---------------------------------------- | ---------------------------- |
-| `card-list.json`                         | `sanitized_provider_capture` |
-| `select-card.json`                       | `sanitized_provider_capture` |
-| `web-meisai-top.json`                    | `sanitized_provider_capture` |
-| `months/<yyyymm>/<top\|answer>-NNN.json` | `provider_response`          |
-| `manifest.json`                          | `collector_manifest`         |
+| Artifact key                             | Role                         | Unit                  |
+| ---------------------------------------- | ---------------------------- | --------------------- |
+| `card-list.json`                         | `sanitized_provider_capture` | `card-NNN`            |
+| `select-card.json`                       | `sanitized_provider_capture` | `card-NNN`            |
+| `web-meisai-top.json`                    | `sanitized_provider_capture` | `card-NNN`            |
+| `months/<yyyymm>/<top\|answer>-NNN.json` | `sanitized_provider_capture` | `card-NNN`            |
+| `manifest.json`                          | `collector_manifest`         | none (the run's)      |
+| `card-identity-binding.json`             | `collector_derived`          | `vpass-card-v2-<hex>` |
+
+The binding artifact is written only when the card tuple passes its checks
+(below).
+
+The statement pages were `provider_response` until ADR 0021. They are the
+sanitizer's output like the other three envelopes and carry the same
+`redacted` step, and CORE seals a provider role only with `decrypted` or
+`extracted` steps, so a card run with a page could never be sealed
+(`run_inventory_incomplete`). `manifest.json` names no unit, so the card's
+`artifactCount` counts its envelopes only.
 
 Sanitizer: `vpass-json-sanitizer` v1 (`src/sanitize.ts`). Unlike the other
 collectors, the retired legacy Vpass path stored the raw response envelopes in
@@ -377,14 +570,33 @@ then re-checked, so output that still holds a sensitive value fails the run
 instead of being stored. The artifact keys are the ones central storage already
 uses, so the same run registers the same way.
 
-Terminal fields: one run **per card**, `runId = <session run id>-card-NNN`,
+Terminal fields: `producer: collector-vpass`; one run **per card**, `runId = <session run id>-card-NNN`,
 all cards of one session carrying that session id as `acquisitionSessionRef`,
 so several cards stay distinguishable instead of collapsing into one run
-(G1-16). One unit per card (`unitKind: card`), a `statement-months`
-declared-coverage range over the months that were captured, one `terminal`
-report, `requestedScope.scopeKind = full_snapshot`. `coverageStatus` is
+(G1-16). One unit per card (`unitKind: card`), plus the binding unit below
+when there is a binding, a `statement-months` declared-coverage range over the
+months that were captured, one `terminal` report,
+`requestedScope.scopeKind = full_snapshot`. The run's `coverageStatus` is
 `partial` even on success: a card exposes a rolling window of statement months,
-so a finished run is not a claim about the card's whole history.
+so a finished run is not a claim about the card's whole history. The card unit
+is `complete` only when every month's captured rows (the pages' `meisaiList`
+entries) equal the total the provider states for it (`webMeisaiTopK3Vo.allCnt`
+on a finalized statement page, a string on the live site, `total` on a
+customized one, a number; both read by `providerCount` as a non-negative safe
+integer or a string of ASCII digits only); otherwise it is
+`partial`, which makes registration record the whole fetch run as `partial`,
+which neither identity nor the trusted card binding reads
+([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented),
+[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each month's `capturedRows`, `statedTotal`
+and closed `coverage` code (`complete`, `stated_total_unverified`,
+`stated_total_mismatch`) and the card's code, which the persist diagnostic
+also logs (`statement_months_absent` when no month was walked). The month
+walk (`src/statement-walk.ts`) stops a finalized month after a page whose
+`allCnt` is below its `nextPageRow` or on an empty page after the first, and a
+customized month once its rows reach `total` with `pageFlg` `1` or `3` or on
+an empty answer page; it does not read `pageNo` or `lastPage`, whose meaning
+is unobserved
+([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site)).
 `producerVersion` is `vpass-worker-card-v1`, the schema version central
 storage recorded for a card-scoped Vpass run, and `manifest.json` holds exactly
 the summary central storage held for one.
@@ -393,16 +605,55 @@ A card (or a session that failed before a card was selected, as unit `run`)
 that collected nothing persists a `failed` terminal with no artifact at all
 (G1-09).
 
-Registration of a card run: one unit, one range and one artifact per page plus
-the four fixed artifacts, registered by the Processor in process with no
+Card binding. Card purchase recognition needs a durable card identity, which
+the card ordinal is not ([Vpass card binding](vpass-card-identity.md)). The
+retired importer wrote it as a separate run; the collector writes it into the
+card's own run (`src/card-binding.ts`). Before the responses are sanitized, the
+Worker takes `externalId`, `globalid` and `cardCode` from the selection and
+discovery `header.vpSessionBean`, applies the importer's checks (a
+successful envelope, a unique card inventory, descriptors of 32, 32 and 13
+characters, the same card code and card name in selection and discovery, and
+that name at the card's ordinal in the inventory) and computes
+`vpass-card-v2-` + SHA-256 of
+`["vpass-card-binding-v2", externalId, globalid, cardCode]`, with no key
+([ADR 0029](adr/0029-data-classification-and-unkeyed-identity.md)). Only that
+token is stored: as the key of a second `card` unit (`coverageStatus:
+complete`, one artifact) and inside `card-identity-binding.json` (the token,
+the derivation `schemaVersion: vpass-card-binding-v2`, the session, the
+ordinal and the checks; never the tuple or a name). The artifact states one
+`extracted` step (`vpass-card-binding` v2) with no input artifact, because the
+responses it was read from are stored only redacted, so it registers as
+`source_bytes_not_available`; registration gives it the dataset
+`card-identity-binding` and format `vpass-card-identity-binding-json` version
+`1`, which the trusted view requires.
+
+No secret is needed. The retired importer's tokens are `vpass-card-v1-` HMACs
+under a key that is lost, so a card's collector token is never equal to its
+importer token: the two are different account entities unless the one-time
+identity-value rewrite
+([identity operations](identity-operations.md#one-time-identity-value-rewrite))
+replaced the importer's token (migration 0063). Without the tuple or when a check fails, the card run is
+stored exactly as before with no binding, and the persist diagnostic carries a
+closed `binding` code (`bound`, `binding_tuple_absent`,
+`binding_tuple_invalid`, `binding_selection_mismatch`,
+`binding_inventory_invalid`, `binding_envelope_invalid`), never a value. Whether the current provider
+responses still carry the session bean has not been observed; if they do not,
+every run logs `binding_tuple_absent` and nothing binds
+([identity operations](identity-operations.md#collector-vpass-runs-bind-in-their-own-run)).
+`services/collector-vpass/test/shared-collection.test.ts` ("ADR 0023 and ADR 0029") pins
+the derivation, the fail-closed codes and that no tuple value and no token
+outside the binding unit and artifact reaches a stored byte.
+
+Registration of a card run: one unit (two with a binding), one range and one
+artifact per page plus the four fixed artifacts (five with a binding), registered by the Processor in process with no
 Service Binding call. Each page costs about 20 operations (D1 statements and
 R2 calls) against a per-invocation budget of 500, so a card of about twenty
 pages registers in one invocation and a longer card is continued on the next
 cron tick with its progress in CORE (issue #87,
 [processor.md §3.3](processor.md#33-operation-budget-and-staged-registration-issue-87)).
 
-Every stored object carries a `redacted` transformation with no
-retained input, because the provider envelope that held the session was
+Every stored object except the binding carries a `redacted` transformation
+with no retained input, because the provider envelope that held the session was
 deliberately not kept; note that this differs from the legacy central
 descriptors, which recorded a statement page as `extracted` from the stored
 snapshot — the collector keeps no snapshot to extract from.
@@ -423,6 +674,13 @@ provider was contacted and no production bucket was read or written.
 | `vmoney-history-page-*.json` | `collector_derived` | one V Money history page each                           |
 | `collection-summary.json`    | `collector_summary` | the collector's own page/total counts                   |
 
+Each `collector_derived` artifact states one `reencoded` step by
+`collector-v-point` at the producer version with no input (ADR 0021): the
+bytes are `Response.text()` encoded again as UTF-8, the same content but not
+provably the provider's bytes, and the response is not stored, so it
+registers as `source_bytes_not_available`. Before ADR 0021 the terminal stated
+no step and the Processor refused the run (`artifact_lineage_unstated`).
+
 Sanitizer: the collector never stores a request, a header or a cookie — it
 stores the decoded JSON response text, the same bytes the retired legacy path
 wrote to its bucket and the importer forwarded to the central store. The
@@ -431,14 +689,15 @@ artifact. The collector manifest itself is _not_ stored as an artifact: the
 terminal is the run record, so `manifest.json` (role `collector_manifest` for
 legacy runs) has no equivalent.
 
-Terminal: `source: v-point`, `producer: collector-vpoint`, `producerVersion:
+Terminal: `source: v-point`, `producer: collector-v-point`, `producerVersion:
 COLLECTOR_SCHEMA_VERSION` (`vpoint-worker-poc-v2`), `runId` the collector's own
 run UUID, `attemptId: attempt-<runId>`, `requestedScope: full_snapshot` over
 unit `account`, one unit (`account`/`collection`) whose `artifactCount` is the
 stored artifact count, `providerOutcome` from the run status, `coverageStatus`
 `complete`/`partial`/`unknown` for `success`/`partial`/`failed`, and
 `safeErrorCode` from the run's first safe failure code (`collector_failed` when
-a failure carried none). `ranges`, `reports` and `transformations` are empty.
+a failure carried none). `ranges` and `reports` are empty; `transformations`
+holds the `reencoded` steps above.
 
 Not carried over: the V Point Pay email reconciliation report. It was built by
 listing the legacy `raw/v-point-pay-email/` prefix, and those notifications
@@ -460,7 +719,8 @@ from the V Point Pay sender, and the stored event records
 trusted SPF/DKIM result. The V Point _login code_ mail is never stored: it is
 parsed for the code and dropped.
 
-Terminal: `source: v-point-pay-email`, `runId` the SHA-256 of the stored
+Terminal: `source: v-point-pay-email`, `producer: collector-v-point-pay-email`
+(one Worker, but a producer per source), `runId` the SHA-256 of the stored
 message, `attemptId: message-<that digest>`, run window the message's own date,
 `providerOutcome: success`, `coverageStatus: complete`, one unit
 (`notification`/`message`), and one transformation (`extracted`,
@@ -485,6 +745,9 @@ neither merged into the other (G1-16, 03 §3).
 | `transactions-yyyyMM.json` | `collector_derived` | one statement month each, in month order         |
 | `collection-summary.json`  | `collector_summary` | the collector's own month and transaction counts |
 
+As for `v-point`, each `collector_derived` artifact states one `reencoded`
+step by `collector-v-point-pay` with no input (ADR 0021).
+
 Sanitizer: the refresh token, the device UUID and the access token live in the
 Durable Object and in the request headers `collectVPointPay` builds. None of
 them is an artifact, and a failure becomes a machine code
@@ -493,10 +756,12 @@ them is an artifact, and a failure becomes a machine code
 than the redacted provider message the legacy manifest kept — a terminal
 states codes only (12 §6).
 
-Terminal: `source: v-point-pay`, `producer: collector-vpoint-pay`,
+Terminal: `source: v-point-pay`, `producer: collector-v-point-pay`,
 `producerVersion: COLLECTOR_SCHEMA_VERSION` (`vpoint-pay-worker-poc-v1`),
 `requestedScope: month_range` from the provider's own `inquiry_period` to the
 current JST month, one matching `requested-months` range with basis `source`,
+both stated as `YYYY-MM` (the collector's `yyyyMM` was refused by the ingest
+range contract, `invalid_start_value`, until ADR 0021),
 one unit (`account`/`collection`), and `providerOutcome` from the run status.
 When the month window is unknown — a run that failed before the balance
 response — the scope is `unspecified` and no range is stated rather than a
@@ -557,6 +822,14 @@ of each response, exactly what the retired legacy path wrote to the per-source
 bucket and the importer forwarded centrally. A dataset is attributed to a unit
 by the same rule the importer used (`foreign-` prefix → `foreign`).
 
+Every dataset states one `extracted` step by `collector-sbi-securities` at the
+producer version with no input (ADR 0021): each is the collector's own
+envelope around what it read from provider responses (the MTS payload with its
+result codes, the GraphQL and main-site JSON, the foreign trade history pages
+bundled into one object), and none of those responses is stored, so it
+registers as `source_bytes_not_available`. Before ADR 0021 the terminal stated
+no step and the Processor refused every run (`artifact_lineage_unstated`).
+
 Sanitizer: the passkey credential, the handshake key and the MTS/GraphQL
 session ids stay in the secrets and in `src/sbi.ts`; none of them is an
 artifact. A failure reaches the terminal only as a machine code
@@ -575,6 +848,41 @@ other scope's data look incomplete, and a scope that produced nothing is
 `date_range` with a matching `requested-window` range when the trigger named a
 window, and `full_snapshot` with no range when it did not.
 
+### `mizuho-bank` (`services/collector-mizuho`, `kogane-mizuho-collector`)
+
+| Artifact key                                           | Role                         | Unit                                           |
+| ------------------------------------------------------ | ---------------------------- | ---------------------------------------------- |
+| `account-list.html`                                    | `sanitized_provider_capture` | `account-list`                                 |
+| `ordinary/<branch>-<account>/history/<from>-<to>.html` | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:<from>:<to>` |
+
+One daily cron (`25 21 * * *` UTC, 06:25 JST) signs in once with the Worker
+secrets and reads the account list, then the first displayed history page of
+each ordinary JPY account, at most ten accounts: a run holds up to 11
+artifacts. Accounts past the limit, and accounts whose read failed, are
+units with no artifact, `coverageStatus: unknown` and
+`safeErrorCode: collection-unit-failed`, which make the run `partial`.
+Additional authentication stops the run, and scheduled retries are disabled.
+
+Sanitizer: `sanitizeMizuhoPage` (`packages/parsers/src/parsers/mizuho-html.ts`)
+reduces each page to its account/history DOM before anything is planned, and
+`mizuhoRunPlan` refuses an artifact that is not already its own sanitizer's
+output (`unsafe-collection-artifact`). The password, cookies and form tokens
+stay in Worker secrets or invocation memory; none of them is an artifact.
+Each artifact is recorded as a `redacted` transformation by
+`collector-mizuho-bank` with no retained input.
+
+Terminal: `source: mizuho-bank`, `producer: collector-mizuho-bank`,
+`producerVersion: COLLECTOR_SCHEMA_VERSION` (`mizuho-collector-v1`),
+`requestedScope: unspecified` over every unit key and no range; units are
+`container`s. `providerOutcome` is `failed` (with no artifact and
+`safeErrorCode: collection-failed`), `partial` when any unit failed (with
+`safeErrorCode: collection-unit-failed`), else `success`. `coverageStatus` is
+`partial` when the collector recorded any issue (for example a first history
+page that is not the whole history, which leaves the outcome `success`) and
+otherwise `unknown`: no date-range coverage is claimed. The run is written
+through `persistRun`, all artifacts held in memory until the terminal is
+written, so nothing is staged.
+
 ### sbi-shinsei (`kogane-sbi-shinsei-collector-poc`)
 
 Container + Durable Object + `tamia` tunnel; one daily cron (`0 21 * * *`),
@@ -585,12 +893,20 @@ source `sbi-shinsei-bank`).
 | ----------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
 | `raw-<dataset>.json` (four CORE datasets) | `sanitized_provider_capture` | the provider response with `header.newToken` removed              |
 | `normalized.json`                         | `collector_derived`          | the collector's own normalized snapshot                           |
-| `manifest.json`                           | `collector_derived`          | the collector manifest with failures reduced to allowlisted codes |
+| `manifest.json`                           | `collector_manifest`         | the collector manifest with failures reduced to allowlisted codes |
+
+`manifest.json` was declared `collector_derived` with no step until ADR 0021,
+and the Processor refused every run on it (`artifact_lineage_unstated`); it is
+the collector's own record, so it is `collector_manifest` now.
 
 - `requestedScope`: `full_snapshot` — this source is a current snapshot and the
   trigger accepts no date range. No units, ranges or reports.
 - `transformations`: one `redacted` step per provider capture
-  (`sbi-shinsei-token-sanitizer`), one `extracted` step for `normalized.json`
+  (`sbi-shinsei-token-sanitizer` v3: the rotating CSRF token stripped, the
+  balance summary's name fields kept as sent; v2 runs replaced those with
+  `[redacted:name]`, which
+  [ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence) withdrew),
+  one `extracted` step for `normalized.json`
   (`sbi-shinsei-normalizer`), matching the central descriptors.
 - `acquisitionSessionRef`: none. The container authenticates once per run and no
   session survives it, so there is no generation to reference (12 §4).
@@ -616,22 +932,72 @@ source `sbi-shinsei-bank`).
 
 Container + Durable Object + browser binding + `tamia`/`cf1` tunnels; one daily
 cron (`17 18 * * *`), unchanged. Terminal source id `prestia-globalpass` (the
-Processor maps it to the CORE source `global-pass`).
+Processor maps it to the CORE source `global-pass`), producer
+`collector-prestia-globalpass`.
 
-| Artifact                  | Role                         | Bytes                                                      |
-| ------------------------- | ---------------------------- | ---------------------------------------------------------- |
-| `activity-<yyyy-mm>.html` | `sanitized_provider_capture` | the page `sanitizeGlobalPassActivityHtml` already produced |
-| `manifest.json`           | `collector_manifest`         | the collector manifest, the bytes legacy mode staged       |
+| Artifact                       | Role                         | Bytes                                                                              |
+| ------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------- |
+| `activity-<yyyy-mm>.html`      | `sanitized_provider_capture` | page 1 of the month, as `sanitizeGlobalPassActivityHtml` produced it               |
+| `activity-<yyyy-mm>-p<n>.html` | `sanitized_provider_capture` | page `n` (2..5) of a walked month, as `sanitizeGlobalPassActivityHtml` produced it |
+| `manifest.json`                | `collector_manifest`         | the collector manifest, the bytes legacy mode staged                               |
 
 - `requestedScope`: `month_range` over the selected months (oldest to newest),
   `unitKeys: ["account"]`. A run whose container never reported its month list
   states `unspecified` rather than inventing a range.
 - `units`: one `account` unit of kind `collection`, the same unit the central
-  descriptors use. `ranges`: one `requested` range plus one `declared_coverage`
-  month range per stored page.
-- **Coverage is `partial` even on success.** The provider exposes a rolling
-  window of statement months and `paginationStatus` is `unproven`, so a
-  finished run is a claim about persistence, never about the account's history.
+  descriptors use, counting the stored pages; `manifest.json` names no unit
+  (ADR 0021 — it named the unit without being counted, which CORE refuses at
+  the seal with `run_inventory_incomplete`). `ranges`: one `requested` range
+  plus one `declared_coverage` month range per month with a stored page.
+- **The page walk** (`paginationStatus: pages_walked`). After selecting a
+  month, the container reads the top pager (`div.nablarch_paging`) and, while
+  its Next is an enabled `a.nablarch_nextSubmit`, clicks it, waits for the
+  POST to `/p/statementInquiry/RW1313010201`, and checks that the new page
+  states the next index, the same page count and the same total and shows a
+  statement block; a click that produced no POST is retried once, and a
+  failed check throws, which ends the run as a container error. It sends one
+  `{type: "artifact", month, page, pageCount, html}` line per page, page 1
+  first, at most five pages a month (`ACTIVITY_PAGE_CAP`); a month without a
+  pager is one page with `pageCount: 1`. The Worker accepts the pages of a
+  month only as 1..min(`pageCount`, 5) in order, with one `pageCount`, before
+  the next month starts; anything else is `container_contract_invalid`.
+- **Coverage.** The `account` unit is `complete` when the run is `success`,
+  and the run is `success` only when every selected month is proven whole
+  (`monthCoverageCode` in `src/pagination.ts`): either a page with no Found
+  line, no pager and no statement block (an empty month), or pages 1..P all
+  captured, every page stating the same `N` and `P` and its own index, and
+  the statement blocks (two `table.tableStyle4` each) adding up to `N`. A
+  month that is not gets one failure `pagination` / `PaginationError` on its
+  page-1 key: `activity_pages_unwalked` (pages missing, or the five-page cap),
+  `activity_pager_unreadable` (totals, page counts or indexes disagree, or a
+  page shows statements or a Found line without a pager) or
+  `activity_total_mismatch` (blocks do not add up to `N`). The pager is read
+  in English (`Found N Result`, `[p/Ppage]`) and Japanese (「検索結果 N件」,
+  「[p/Pページ]」). The run's own coverage stays `partial`: the provider
+  exposes a rolling window of statement months. A `success` run registers as
+  `success` and its pages are eligible for `global-pass-activity`; any other
+  run is `partial` and `not_eligible`
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)).
+- Logs: before sanitizing, the Worker logs `globalpass-activity-pages` per
+  page (the month's position in the run, the walk's `page` and
+  `walkPageCount`, and the page's `statedTotal`, `pageIndex`, `pageCount`,
+  `statementBlocks`), and `globalpass-activity-coverage` per month
+  (`pagesCaptured`, `walkPageCount`, and `errorCode` when not whole); never
+  the month or any text. A page the sanitizer refuses still counts in its
+  month's decision.
+- Failure entries have the keys `operation`, `errorType`, `errorCode`,
+  `artifactKey`, and on a sanitizer refusal also `expectationCode`. A page
+  the sanitizer refuses is `sanitization` / `GlobalPassSanitizerError` with
+  the check's closed code: `globalpass_html_contract_invalid`,
+  `globalpass_html_redaction_failed`, `globalpass_html_shape_unreviewed` or
+  `globalpass_html_utf8_invalid`, and `expectationCode` names which
+  expectation failed (one of `GLOBALPASS_SANITIZER_EXPECTATIONS` in
+  `src/sanitize.ts`). The same code is the `artifact-write` diagnostic line's
+  `code`, and the first failure's code is the terminal's and the unit's
+  `safeErrorCode`. That line also carries a `shape` object: the expectation,
+  phase, element and attribute class as closed codes, and counts and
+  booleans describing the refused page's markup, never its text
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape)).
 - `transformations`: one `redacted` step per page
   (`globalpass-activity-sanitizer`); the unredacted page is never retained, so
   it has no artifact key.
@@ -671,7 +1037,11 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 | `manifest.json`  | `collector_manifest` | the collector manifest, the bytes legacy mode staged        |
 
 - `requestedScope`: `full_snapshot`, `unitKeys: ["account"]`; one `account` unit
-  of kind `collection`, the same unit the central descriptors use. No ranges.
+  of kind `collection`, the same unit the central descriptors use, counting the
+  datasets; `manifest.json` names no unit (ADR 0021 — it named the unit
+  without being counted, so every run failed its seal with
+  `run_inventory_incomplete` and was retried each tick until the ADR 0024
+  amendment of 2026-09-26 made that refusal a block). No ranges.
 - A successful run declares `coverageStatus: complete`: the collector walks
   every historical execution and cash-flow page to exhaustion and verifies the
   provider's own pagination totals before finishing.
@@ -724,6 +1094,11 @@ Terminal source id `smbc-direct` (the Processor maps it to the CORE source
 | `balance.raw.json.sjis`, `transactions/*.raw.json.sjis`     | `provider_response`  | the provider's own response bytes, verbatim |
 | `balance.normalized.json`, `transactions/*.normalized.json` | `collector_derived`  | the collector's normalized counterparts     |
 | `manifest.json`                                             | `collector_manifest` | the exact manifest bytes written to staging |
+
+One `account` unit counts the stored responses and their normalized
+counterparts; `manifest.json` names no unit (ADR 0021). Until then it named
+the unit without being counted, so a finished backfill would have failed its
+seal with `run_inventory_incomplete`; the run-plan registration test found it.
 
 **Bounded exception to one-copy.** This is the only source that still stages a
 run before its terminal, and the reason is structural, not convenience: the

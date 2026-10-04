@@ -9,6 +9,13 @@ import {
   CARD_SETTLEMENT_POLICY,
 } from "../../../packages/domain/src/card-settlement.ts";
 import { parseLocalDate } from "../../../packages/domain/src/time.ts";
+import {
+  CARD_DEBIT_ACCOUNT_POLICY,
+  candidateDebitAccountEvidence,
+  type BankAccountReference,
+  type CardDebitAccountStatement,
+} from "../../../packages/domain/src/card-debit-account.ts";
+import { debitAccountStatementForParse, knownBankAccounts } from "./card-debit-account-job.ts";
 import { cardSettlementOwnershipCtes } from "../../../packages/read-model/src/card-settlement-ownership.ts";
 
 interface Row {
@@ -22,6 +29,8 @@ interface Row {
   scale: number | null;
   payment_date: string | null;
   as_of: string | null;
+  /** The bank adapter's civil debit date (`card_bank_debit_facts`, 0052). */
+  debit_date?: string | null;
   period: string | null;
   statement_key: string;
   bank_key: string;
@@ -48,11 +57,13 @@ SELECT page.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_j
  * The bank debits within three days of one due date (`?1`, `?2`), at most `?3`
  * by id, with their owners, resolved for those debits only: joined whole, the
  * ownership view grouped every transaction identity of the store, once per
- * statement of the page.
+ * statement of the page. The window is on each adapter's own `debit_date`
+ * (migration 0052): SMBC's is the date of its midnight-JST `as_of`, the only
+ * shape the sweep ever matched, and SBI Shinsei's is its posting date.
  */
 export const CARD_SETTLEMENT_BANK_DEBITS_SQL = `WITH debits AS MATERIALIZED (
  SELECT * FROM card_bank_debit_facts
- WHERE substr(as_of,1,10) BETWEEN date(?1,'-3 days') AND date(?2,'+3 days') ORDER BY id LIMIT ?3
+ WHERE debit_date BETWEEN date(?1,'-3 days') AND date(?2,'+3 days') ORDER BY id LIMIT ?3
 ), observed AS (SELECT id AS observation_id FROM debits),
 ${cardSettlementOwnershipCtes("transaction")}
 SELECT debits.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_json FROM debits
@@ -68,10 +79,53 @@ function evidence(row: Row): string[] {
     ? parsed.filter((ref): ref is string => typeof ref === "string")
     : [];
 }
-/** Published source facts only; heuristic candidates always remain unaccepted. */
-export async function cardSettlementSweep(
+/**
+ * Appends what the card's own debit-account statement says about one
+ * candidate (ADR 0032, `card_settlement_debit_account_evidence`, migration
+ * 0060) when it differs from the candidate's latest row for that statement
+ * and policy. Evidence only: the candidate's facts and digest were fixed
+ * before this runs, and nothing here reads or writes ownership.
+ */
+const DEBIT_ACCOUNT_EVIDENCE_SQL = `INSERT INTO card_settlement_debit_account_evidence
+ (candidate_id,statement_id,policy,outcome,reason,proposal_json,evidence_digest,created_at)
+ SELECT ?1,?2,?3,?4,?5,?6,?7,?8
+ WHERE coalesce((SELECT evidence_digest FROM card_settlement_debit_account_evidence
+  WHERE candidate_id=?1 AND statement_id=?2 AND policy=?3 ORDER BY id DESC LIMIT 1),'')<>?7`;
+async function recordDebitAccountEvidence(
   db: D1Database,
-): Promise<{ scanned: number; proposed: number; written: number }> {
+  candidateId: string,
+  statement: CardDebitAccountStatement,
+  bankAccounts: readonly BankAccountReference[],
+  facts: NonNullable<ReturnType<typeof cardSettlementCandidate>>,
+): Promise<number> {
+  const evidence = candidateDebitAccountEvidence(statement, bankAccounts, facts);
+  const digest = await canonicalDigest({ policy: CARD_DEBIT_ACCOUNT_POLICY, evidence });
+  const result = await db
+    .prepare(DEBIT_ACCOUNT_EVIDENCE_SQL)
+    .bind(
+      candidateId,
+      Number(statement.ref.id.slice(statement.ref.id.indexOf(":") + 1)),
+      CARD_DEBIT_ACCOUNT_POLICY,
+      evidence.outcome,
+      evidence.reason,
+      evidence.proposal === null ? null : JSON.stringify(evidence.proposal),
+      digest,
+      new Date().toISOString(),
+    )
+    .run();
+  return result.meta.changes;
+}
+
+export interface CardSettlementSweepResult {
+  scanned: number;
+  proposed: number;
+  written: number;
+  /** Debit-account evidence rows this tick newly appended. */
+  debitAccountEvidence: number;
+}
+
+/** Published source facts only; heuristic candidates always remain unaccepted. */
+export async function cardSettlementSweep(db: D1Database): Promise<CardSettlementSweepResult> {
   const cursor = await db
     .prepare("SELECT last_statement_id FROM card_settlement_scan_cursor WHERE singleton=1")
     .first<{ last_statement_id: number }>();
@@ -93,8 +147,14 @@ export async function cardSettlementSweep(
     .all<Row>();
   let proposed = 0,
     written = 0,
+    debitAccountEvidence = 0,
     scanned = statements.results.length;
+  // Per tick: the known accounts of each bank a statement names.
+  const bankAccountsBySource = new Map<string, BankAccountReference[] | null>();
   for (const statement of statements.results) {
+    // Read once per statement, and only for a MyJCB statement: no Vpass
+    // statement API carries a debit account (observed absent).
+    let debitStatement: CardDebitAccountStatement | null | undefined;
     const total = amount(statement);
     if (
       !total ||
@@ -115,8 +175,7 @@ export async function cardSettlementSweep(
     scanned += banks.results.length;
     for (const bank of banks.results) {
       const debit = amount(bank, true);
-      const bankDate =
-        bank.as_of?.match(/^([0-9]{4}-[0-9]{2}-[0-9]{2})T00:00:00[+]09:00$/)?.[1] ?? null;
+      const bankDate = bank.debit_date ?? null;
       if (!debit || !bankDate || !parseLocalDate(bankDate)) continue;
       const facts = cardSettlementCandidate(
         {
@@ -181,7 +240,34 @@ export async function cardSettlementSweep(
         )
         .run();
       written += result.meta.changes;
-      if (written >= 500) return { scanned, proposed, written };
+      if (statement.source_id === "myjcb") {
+        if (debitStatement === undefined)
+          debitStatement = await debitAccountStatementForParse(
+            db,
+            statement.parse_run_id,
+            statement.source_account,
+          );
+        if (debitStatement) {
+          const bankSourceId = debitStatement.bankSourceId;
+          let bankAccounts: BankAccountReference[] | null = [];
+          if (bankSourceId !== null) {
+            if (!bankAccountsBySource.has(bankSourceId))
+              bankAccountsBySource.set(bankSourceId, await knownBankAccounts(db, bankSourceId));
+            bankAccounts = bankAccountsBySource.get(bankSourceId)!;
+          }
+          // More known accounts than the rule is given: uniqueness is not
+          // judged and nothing is recorded.
+          if (bankAccounts !== null)
+            debitAccountEvidence += await recordDebitAccountEvidence(
+              db,
+              "cs_" + digest,
+              debitStatement,
+              bankAccounts,
+              facts,
+            );
+        }
+      }
+      if (written >= 500) return { scanned, proposed, written, debitAccountEvidence };
     }
     await db
       .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=? WHERE singleton=1")
@@ -192,5 +278,5 @@ export async function cardSettlementSweep(
     await db
       .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1")
       .run();
-  return { scanned, proposed, written };
+  return { scanned, proposed, written, debitAccountEvidence };
 }

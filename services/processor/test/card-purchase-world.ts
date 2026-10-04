@@ -92,7 +92,11 @@ const MYJCB_LABEL = "架空";
 const myjcbCombinedCell = (row: Pick<UsageRow, "merchant" | "paymentType">): string =>
   row.paymentType === "" ? row.merchant : `${row.merchant} ${row.paymentType}`;
 
-function vpassPayload(family: "web" | "customized", month: string, rows: readonly UsageRow[]) {
+export function vpassPayload(
+  family: "web" | "customized",
+  month: string,
+  rows: readonly UsageRow[],
+) {
   if (family === "web") {
     const payload = template("web");
     payload["body"]["content"]["WebMeisaiTopDisplayServiceBean"]["meisaiList"] = rows.map(
@@ -221,6 +225,8 @@ export interface CaptureOptions {
   identify?: IdentityResolver | null;
   /** Rewrites each parsed row before it is stored (e.g. an external id with unusual characters). */
   rewrite?: (row: Observation) => Observation;
+  /** The run's producer; default `PRODUCER`, the importer's. */
+  producer?: string;
 }
 
 /** One Miniflare CORE with typed writers for card captures, publication and identity. */
@@ -243,6 +249,14 @@ export class World {
       card?: string;
       month?: string;
       token?: string | null;
+      /**
+       * Where the binding sits: `importer` (default), the retired importer's
+       * sibling run in a `vpass-worker-card-v1` session; `collector`, a second
+       * unit of the card's own run in a `shared-r2` session under the run key
+       * registration writes (ADR 0023; the shape
+       * `vpass-collector-binding.test.ts` registers from a real collector plan).
+       */
+      binding?: "importer" | "collector";
     },
   ): Promise<Capture> {
     const card = input.card ?? "card-001";
@@ -250,7 +264,10 @@ export class World {
     const run = this.id();
     const unit = this.id();
     const artifact = this.id();
-    const key = `cards/${card}/months/${month}/top-000.json`;
+    const collector = input.binding === "collector";
+    const key = collector
+      ? `months/${month}/top-000.json`
+      : `cards/${card}/months/${month}/top-000.json`;
     const payload = vpassPayload(input.family, month, input.rows);
     await seedUnitRun(this.env, {
       id: run,
@@ -258,18 +275,32 @@ export class World {
       dataset: "statement-page",
       runOutcome: "success",
       fetchedAtMs: Date.parse(input.fetchedAt),
+      producer: input.producer ?? PRODUCER,
       units: [
-        { id: unit, key: card, outcome: "success", artifacts: [{ id: artifact, key, payload }] },
+        {
+          id: unit,
+          key: card,
+          kind: "card",
+          outcome: "success",
+          artifacts: [{ id: artifact, key, payload }],
+        },
       ],
     });
     await this.db.batch([
       this.db
         .prepare("UPDATE acquisition_sessions SET producer_id=?,external_id_namespace=? WHERE id=?")
-        .bind(PRODUCER, VPASS_NAMESPACE, run),
-      this.db.prepare("UPDATE fetch_units SET unit_kind='card' WHERE id=?").bind(unit),
+        .bind(input.producer ?? PRODUCER, collector ? "shared-r2" : VPASS_NAMESPACE, run),
+      ...(collector
+        ? [
+            this.db
+              .prepare("UPDATE fetch_runs SET source_run_key=? WHERE id=?")
+              .bind(`run-${run}-${card}:terminal-registration-v1`, run),
+          ]
+        : []),
     ]);
     const token = input.token === undefined ? TOKEN_A : input.token;
-    if (token !== null) await this.bind(run, card, token);
+    if (token !== null && collector) await this.bindInRun(run, token);
+    else if (token !== null) await this.bind(run, card, token, input.producer ?? PRODUCER);
     return this.parse(
       run,
       artifact,
@@ -282,7 +313,7 @@ export class World {
   }
 
   /** The trusted importer sidecar that binds one card ordinal of a run to a durable token. */
-  private async bind(run: number, card: string, token: string): Promise<void> {
+  private async bind(run: number, card: string, token: string, producer: string): Promise<void> {
     const binding = this.id();
     const unit = this.id();
     const artifact = this.id();
@@ -291,7 +322,7 @@ export class World {
         .prepare(
           "INSERT INTO fetch_runs(id,source_id,producer_id,acquisition_session_id,source_run_key,first_recorded_at_ms) VALUES(?,'vpass',?,?,?,0)",
         )
-        .bind(binding, PRODUCER, run, `${card}-vpass-card-binding-v1`),
+        .bind(binding, producer, run, `${card}-vpass-card-binding-v1`),
       this.db
         .prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')")
         .bind(unit, binding, token),
@@ -309,6 +340,25 @@ export class World {
       this.db
         .prepare("INSERT INTO fetch_run_seals(fetch_run_id,sealed_at_ms) VALUES(?,0)")
         .bind(binding),
+    ]);
+  }
+
+  /** The collector's binding: a token unit and its artifact inside the card's own run (ADR 0023). */
+  private async bindInRun(run: number, token: string): Promise<void> {
+    const unit = this.id();
+    const artifact = this.id();
+    await this.db.batch([
+      this.db
+        .prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')")
+        .bind(unit, run, token),
+      this.db
+        .prepare("INSERT INTO fetch_unit_reports VALUES(?,'terminal','success',NULL)")
+        .bind(unit),
+      this.db
+        .prepare(
+          "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,artifact_role,format_id,format_version) VALUES(?,?,'vpass','card-identity-binding','card-identity-binding.json',?,'collector_derived','vpass-card-identity-binding-json','1')",
+        )
+        .bind(artifact, run, unit),
     ]);
   }
 
@@ -336,6 +386,7 @@ export class World {
       dataset: "credit-ledger",
       runOutcome: "success",
       fetchedAtMs: Date.parse(input.fetchedAt),
+      producer: input.producer ?? PRODUCER,
       units: [
         {
           id: unit,
@@ -348,7 +399,7 @@ export class World {
     await this.db.batch([
       this.db
         .prepare("UPDATE acquisition_sessions SET producer_id=?,external_id_namespace=? WHERE id=?")
-        .bind(PRODUCER, input.namespace ?? MYJCB_NAMESPACE, run),
+        .bind(input.producer ?? PRODUCER, input.namespace ?? MYJCB_NAMESPACE, run),
       this.db
         .prepare(
           "INSERT INTO observation_artifact_metadata(fetch_artifact_id,statement_state,period) VALUES(?,?,?)",
@@ -534,7 +585,7 @@ export class World {
           id: parse,
           artifact_id: artifact,
           source_id: source,
-          producer_id: PRODUCER,
+          producer_id: options.producer ?? PRODUCER,
           fetch_run_id: run,
         },
         resolver,

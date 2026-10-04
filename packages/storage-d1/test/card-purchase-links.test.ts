@@ -3,7 +3,7 @@
 // the 0047 sidecar and key triggers, the 0032 cross-id supersession, and the
 // `proposal:` / `card-purchase:` expected-revision subjects. Synthetic rows.
 import type { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
   cardPurchaseEventId,
   cardPurchaseMerge,
@@ -26,6 +26,13 @@ import {
 import { currentRevisionsSql, type SqlWrite } from "../src/core/operations.ts";
 import { factOf, seedCardRows, snapshot } from "./card-purchase-fixture.ts";
 import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const NOW = "2026-09-24T00:00:00.000Z";
 

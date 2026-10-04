@@ -8,14 +8,19 @@
 //      as every current list);
 //   2. the row is in the latest complete container snapshot, by the very CTEs
 //      the Transactions page composes (`sql.ts`: a Vpass card unit + statement
-//      month, a MyJCB connection + statement state + period);
+//      month, a MyJCB connection + statement state + `myjcbStatementSlot`);
 //   3. the newest representation per (resolved account, source, snapshot
 //      slot) wins, so a card ordinal or MyJCB connection that changed under one
 //      resolved account does not keep an older capture current. The slot is
 //      the part of the step-2 partition that is not the unit: the statement
 //      month for Vpass (a month's capture flips from the customized family to
-//      the web family as one snapshot), the statement state and period for
-//      MyJCB (every unconfirmed capture shares one slot, exactly as in step 2).
+//      the web family as one snapshot), the statement state and statement for
+//      MyJCB (each statement, pending or confirmed, is one slot whatever
+//      position it was captured at, exactly as in step 2). A pending MyJCB
+//      row must also come from the newest representation of its position
+//      (the ledger's file name, `credit-ledger-NN.json`), step 2's position
+//      rule across the units one account resolves, so a replaced
+//      connection's pending capture is not current beside the new one's.
 //      A representation is a fetch run: the newest run by (snapshot
 //      fetched_at, fetch run id), the step-2 Vpass order, keeps every one of
 //      its units, so two cards that one account resolves in the same run never
@@ -227,11 +232,11 @@ const PARSE_IDENTITY = `parse_identity AS MATERIALIZED (
  * with the whole store instead of with the current captures.
  */
 const CARD_ARTIFACTS = `card_artifacts AS MATERIALIZED (
-         SELECT fa.id
+         SELECT fa.id, NULL AS myjcb_slot
          FROM current_vpass_snapshots snapshot
          CROSS JOIN observation_fetch_artifacts fa ON ${VPASS_SNAPSHOT_MEMBER}
          UNION
-         SELECT fetch_artifact_id FROM current_myjcb_snapshots
+         SELECT fetch_artifact_id, statement_slot FROM current_myjcb_snapshots
        )`;
 
 /** The row's columns, in the order the result returns them. */
@@ -300,11 +305,13 @@ export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPA
                 END AS snapshot_unit,
                 coalesce(snapshot.fetched_at, fa.fetched_at) AS snapshot_fetched_at,
                 CASE WHEN snapshot.fetch_run_id IS NOT NULL THEN json_array(snapshot.statement_month)
-                  ELSE json_array(
-                    fa.statement_state,
-                    CASE WHEN fa.statement_state = 'unconfirmed' THEN '' ELSE fa.period END
-                  )
+                  ELSE json_array(fa.statement_state, candidate.myjcb_slot)
                 END AS snapshot_slot,
+                CASE WHEN snapshot.fetch_run_id IS NULL
+                  THEN substr(fa.artifact_key, instr(fa.artifact_key, '/') + 1)
+                END AS snapshot_position,
+                snapshot.fetch_run_id IS NULL AND fa.statement_state IS 'unconfirmed'
+                  AS pending_capture,
                 dv.status AS value_status, dv.coefficient, dv.scale, dv.basis AS value_basis,
                 t.currency AS unit_ref,
                 ${PAYMENT_TYPE} AS payment_type,
@@ -362,7 +369,14 @@ export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPA
                       ELSE json_array('account', account_id)
                     END
                   ORDER BY snapshot_fetched_at DESC, fetch_run_id DESC
-                ) AS newest_run
+                ) AS newest_run,
+                FIRST_VALUE(fetch_run_id) OVER (
+                  PARTITION BY source_id, snapshot_position,
+                    CASE WHEN account_id IS NULL THEN json_array('unit', snapshot_unit)
+                      ELSE json_array('account', account_id)
+                    END
+                  ORDER BY snapshot_fetched_at DESC, fetch_run_id DESC
+                ) AS newest_position_run
          FROM card_usage
        ), keyed AS (
          SELECT representations.*,
@@ -372,6 +386,7 @@ export const CURRENT_CARD_USAGE_SQL = `WITH ${MYJCB_LEDGER_SNAPSHOT_CTES}, ${VPA
                 ) AS key_rank
          FROM representations
          WHERE fetch_run_id = newest_run
+           AND (NOT pending_capture OR fetch_run_id = newest_position_run)
        )
        SELECT ${COLUMNS.join(", ")}
        FROM keyed

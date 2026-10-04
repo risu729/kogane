@@ -1,7 +1,10 @@
 // A12: migration 0034, the report job, and the facts the review asks these to
 // keep. Every fixture is synthetic: made-up security codes, made-up prices and
 // a made-up account. Nothing is copied from real evidence.
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Miniflare } from "miniflare";
 import { canonicalJson } from "../../../packages/domain/src/index.ts";
 import {
@@ -9,6 +12,7 @@ import {
   purgeRestrictedExplanations,
   reportsEnabled,
   runReportJob,
+  SNAPSHOT_PRICE_SQL,
   type ReportJobEnv,
 } from "../src/report-job.ts";
 import {
@@ -72,38 +76,63 @@ async function seedPosition(
   return parse!.id;
 }
 
+/**
+ * A synthetic promoted price and its claim (migration 0053). The claim names
+ * the position observation of `parseRunId`, so the price belongs to that
+ * snapshot: the report job values a holding only with a price claimed from the
+ * holding's own parse run (ADR 0020). Without a parse run only the price row
+ * is written, which no report selects.
+ */
 async function seedPrice(
   priceId: string,
   ref: string,
   quoteCoefficient: string,
   baseCoefficient: string,
   recordedAt: string,
+  parseRunId: number | null = null,
+  effectiveAt = "2026-09-01T00:00:00.000Z",
 ): Promise<void> {
-  await env.DB.prepare(
+  const price = env.DB.prepare(
     `INSERT INTO price_observations
-      (id,base_instrument_ref,base_quantity_coefficient,base_quantity_scale,quote_unit_ref,
-       quote_amount_coefficient,quote_amount_scale,price_kind,effective_time,source_claim_ref,
-       market_ref,adjustment_policy_ref,recorded_at)
-     VALUES (?,?,?,0,'JPY',?,0,'nav',?,?,NULL,NULL,?)`,
+        (id,base_instrument_ref,base_quantity_coefficient,base_quantity_scale,quote_unit_ref,
+         quote_amount_coefficient,quote_amount_scale,price_kind,effective_time,source_claim_ref,
+         market_ref,adjustment_policy_ref,recorded_at)
+       VALUES (?,?,?,0,'JPY',?,0,'nav',?,?,NULL,NULL,?)`,
+  ).bind(
+    priceId,
+    ref,
+    baseCoefficient,
+    quoteCoefficient,
+    JSON.stringify({ kind: "instant", value: effectiveAt, zone: "UTC", basis: "collector" }),
+    `claim:${priceId}`,
+    recordedAt,
+  );
+  if (parseRunId === null) {
+    await price.run();
+    return;
+  }
+  const position = await env.DB.prepare(
+    "SELECT min(id) AS id FROM position_observations WHERE parse_run_id=?",
   )
-    .bind(
+    .bind(parseRunId)
+    .first<{ id: number }>();
+  await env.DB.batch([
+    price,
+    env.DB.prepare(
+      `INSERT INTO price_observation_claims(price_id,rule_id,claim_kind,observation_id,parse_run_id,json_path,created_at)
+       VALUES (?,'sbi-foreign-stock-price-last-v1','position',?,?,?,?)`,
+    ).bind(
       priceId,
-      ref,
-      baseCoefficient,
-      quoteCoefficient,
-      JSON.stringify({
-        kind: "local-date",
-        value: "2026-09-01",
-        zone: "Asia/Tokyo",
-        basis: "provider",
-      }),
-      `claim:${priceId}`,
+      position!.id,
+      parseRunId,
+      `$.synthetic.${priceId.replaceAll(":", "_")}`,
       recordedAt,
-    )
-    .run();
+    ),
+  ]);
 }
 
 const FUND = "instrument:other-test:-:SYN-FUND";
+let fundParse = 0;
 
 test("migration 0034 applies in order within 0017 through 0037 and seeds the seven retention classes", async () => {
   const migrations = layerBMigrations();
@@ -210,10 +239,10 @@ test("the report job writes nothing while the flag is off", async () => {
 });
 
 test("AT30 the job stores its own valuation and the provider's cost side by side, and unvalued rows carry a typed reason", async () => {
-  await seedPosition(4001, "SYN-FUND", "12500", "9000");
+  fundParse = await seedPosition(4001, "SYN-FUND", "12500", "9000");
   // A second holding with no price at all: it must stay unvalued, not become 0.
   await seedPosition(4002, "SYN-NOPRICE", "10", null);
-  await seedPrice("price:fund:1", FUND, "8000", "10000", "2026-09-01T00:00:00.000Z");
+  await seedPrice("price:fund:1", FUND, "8000", "10000", "2026-09-01T00:00:00.000Z", fundParse);
 
   const result = await runReportJob(jobEnv, options);
   expect(result.generated).toBe(1);
@@ -305,7 +334,7 @@ test("AT36 and AT60 a corrected price makes a new context; the submitted report 
     .run();
 
   // The price source publishes a correction and a classification changes.
-  await seedPrice("price:fund:2", FUND, "8100", "10000", "2026-09-09T00:00:00.000Z");
+  await seedPrice("price:fund:2", FUND, "8100", "10000", "2026-09-09T00:00:00.000Z", fundParse);
   const second = await runReportJob(jobEnv, { ...options, now: "2026-09-09T00:00:00.000Z" });
   expect(second.generated).toBe(1);
   expect(second.contextId).not.toBe(before!.context_id);
@@ -409,4 +438,63 @@ test("instrument references keep the same code in two markets apart", () => {
   expect(instrumentRef({ source_id: "s", market: null, security_code: "1234" })).toBe(
     "instrument:s:-:1234",
   );
+});
+
+test("a holding is valued only at a price claimed from its own snapshot, never at an older or unclaimed one (ADR 0020)", async () => {
+  const ref = "instrument:other-test:-:SYN-SNAP";
+  const older = await seedPosition(4101, "SYN-SNAP", "3", null);
+  const newer = await seedPosition(4102, "SYN-SNAP", "3", null);
+  // Only the older snapshot's row passed the basis check.
+  await seedPrice("price:snap:old", ref, "500", "1", "2026-09-10T00:00:00.000Z", older);
+  // The newer snapshot's own claim is effective after the cutoff, and a price
+  // row with no claim at all is recorded later: neither values anything.
+  await seedPrice(
+    "price:snap:future",
+    ref,
+    "700",
+    "1",
+    "2026-09-10T00:00:00.000Z",
+    newer,
+    "2027-06-01T00:00:00.000Z",
+  );
+  await seedPrice("price:snap:unclaimed", ref, "900", "1", "2026-09-11T00:00:00.000Z");
+
+  const result = await runReportJob(jobEnv, { ...options, now: "2026-09-21T00:00:00.000Z" });
+  expect(result.generated).toBe(1);
+  const body = JSON.parse(
+    await (await env.EVIDENCE.get(`reports/${result.contentDigest}`))!.text(),
+  ) as {
+    rows: { subjectRef: string; valued: boolean; value?: unknown; unvaluedReason?: string }[];
+  };
+  const snap = body.rows
+    .filter((row) => row.subjectRef === ref)
+    .map((row) => (row.valued ? `valued:${JSON.stringify(row.value)}` : row.unvaluedReason))
+    .sort();
+  expect(snap).toEqual(["missing-price", 'valued:{"coefficient":"1500","scale":0}']);
+  const explanation = JSON.parse(
+    await (await env.EVIDENCE.get(`reports/${result.contentDigest}.explanation`))!.text(),
+  ) as { inputManifest: { priceObservationIds: string[] } };
+  expect(explanation.inputManifest.priceObservationIds).toContain("price:snap:old");
+  expect(explanation.inputManifest.priceObservationIds).not.toContain("price:snap:future");
+  expect(explanation.inputManifest.priceObservationIds).not.toContain("price:snap:unclaimed");
+});
+
+test("the snapshot price query reaches every table by key without statistics", () => {
+  const migrations = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
+  const db = new Database(":memory:");
+  for (const name of readdirSync(migrations)
+    .filter((entry) => entry.endsWith(".sql"))
+    .sort())
+    db.exec(readFileSync(join(migrations, name), "utf8"));
+  const plan = (
+    db
+      .query(`EXPLAIN QUERY PLAN ${SNAPSHOT_PRICE_SQL}`)
+      .all('[["instrument:s:-:X",1]]', "JPY", CUTOFF, '["sbi-foreign-stock-price-last-v1"]') as {
+      detail: string;
+    }[]
+  ).map((row) => row.detail);
+  for (const table of ["held", "po", "c", "pub"])
+    expect(plan.some((line) => line.startsWith(`SCAN ${table}`))).toBe(false);
+  expect(plan.some((line) => line.includes("price_observations_instrument"))).toBe(true);
+  db.close();
 });

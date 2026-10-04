@@ -12,6 +12,7 @@ const LABELS: Record<string, string> = {
   "global-pass": "GLOBAL PASSデビット明細",
   myjcb: "MyJCB請求口座",
   "smbc-bank": "三井住友銀行 円普通預金",
+  "mizuho-bank": "みずほ銀行 普通預金",
   "st-george": "St.George",
   "sony-bank": "ソニー銀行",
   "sbi-shinsei-bank": "SBI新生銀行 預金口座",
@@ -54,13 +55,20 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
         const binding = input.trustedVpassBinding;
         if (
           binding &&
-          /^vpass-card-v1-[0-9a-f]{64}$/u.test(binding.cardToken) &&
+          /^vpass-card-v[12]-[0-9a-f]{64}$/u.test(binding.cardToken) &&
           Number.isSafeInteger(binding.bindingArtifactId) &&
           binding.bindingArtifactId > 0 &&
           Number.isSafeInteger(binding.financialUnitId) &&
           binding.financialUnitId > 0
         ) {
-          account("card-statement", "verified-importer-durable-card-binding");
+          // The same token under the collector's producer (ADR 0023): the
+          // binding it wrote in its own run, checked by the same view.
+          account(
+            "card-statement",
+            input.producerId === "collector-vpass"
+              ? "verified-collector-durable-card-binding"
+              : "verified-importer-durable-card-binding",
+          );
           plan.account.key = ["vpass:card", binding.cardToken];
         } else snapshot("card-statement", "card-ordinal-needs-durable-provider-binding");
       }
@@ -79,6 +87,12 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
       break;
     case "smbc-bank":
       if (a === "smbc-bank:ordinary-yen") account("deposit", "audited-ordinary-yen-scope");
+      break;
+    case "mizuho-bank":
+      // The parser's reference: yen ordinary deposit, 3-digit branch code and
+      // 7-digit account number exactly as the provider displays them.
+      if (/^mizuho-bank:ordinary:\d{3}:\d{7}$/u.test(a))
+        account("deposit", "provider-branch-and-account");
       break;
     case "st-george":
       if (/^st-george:[a-f0-9]{64}$/u.test(a)) account("deposit", "sha256-provider-bsb-account");
@@ -154,6 +168,13 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
         account(
           "aggregator-mirror",
           "verified-hmac-account-service-tuple-not-direct-account-alias",
+        );
+      // The collector's unkeyed digest of the same tuple (ADR 0029): its own
+      // account, never the v1 account of the same service.
+      else if (/^moneyforward-me:moneyforward-account-v2-[0-9a-f]{64}$/u.test(a))
+        account(
+          "aggregator-mirror",
+          "verified-digest-account-service-tuple-not-direct-account-alias",
         );
       break;
     case "paypay":

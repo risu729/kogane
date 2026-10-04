@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { fromTemplate } from "./schema-template";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -37,13 +38,22 @@ const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migration
 
 /** The production schema, views included, on an in-memory SQLite. */
 function migratedDatabase(): Database {
-  const db = new Database(":memory:");
-  for (const name of readdirSync(MIGRATIONS)
-    .filter((entry) => entry.endsWith(".sql"))
-    .sort())
-    db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
-  return db;
+  return fromTemplate("core", () => {
+    const db = new Database(":memory:");
+    for (const name of readdirSync(MIGRATIONS)
+      .filter((entry) => entry.endsWith(".sql"))
+      .sort())
+      db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
+    return db;
+  });
 }
+
+// The first build of the migrated template runs every CORE migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./schema-template).
+beforeAll(() => {
+  migratedDatabase().close();
+}, 60_000);
 
 /** A second implementation of the executor contract: the reader is not tied to D1. */
 function sqliteExecutor(db: Database): SqlExecutor {
@@ -297,7 +307,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name <> 'st-george-balances'",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -308,6 +318,19 @@ describe("named concepts in the final SQL", () => {
         )
         .get(),
     ).toEqual({ policy_id: "coverage-v1" });
+    expect(
+      db
+        .query(
+          "SELECT policy_id,required_parser_version,replaces_previous_on_complete_empty FROM dataset_snapshot_policies WHERE parser_name = 'sbi-shinsei-exchange-rate' AND dataset = 'exchange-rate'",
+        )
+        .get(),
+    ).toEqual({
+      policy_id: "coverage-v1",
+      // 0053 inserted 1.0.0; 0056 moved it to 1.0.1, and 0059 to 1.0.2, the
+      // release that reads the stored boards (ADR 0028, amended).
+      required_parser_version: "1.0.2",
+      replaces_previous_on_complete_empty: 0,
+    });
     // The shadow comparison compiles on the production schema and reads the views.
     expect(db.query(snapshotPolicyComparison.sql).all()).toEqual([]);
     expect(snapshotPolicyComparison.sql).toContain("FROM observation_fetch_artifacts fa");

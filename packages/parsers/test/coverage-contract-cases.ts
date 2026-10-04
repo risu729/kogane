@@ -13,6 +13,7 @@ import { sbiAccountAssetsCurrent } from "../src/parsers/sbi-account-assets-curre
 import { sbiDomesticCashPositions } from "../src/parsers/sbi-domestic-cash-positions.ts";
 import { sbiForeignCashBalances } from "../src/parsers/sbi-foreign-cash-balances.ts";
 import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
+import { sbiShinseiExchangeRate } from "../src/parsers/sbi-shinsei-exchange-rate.ts";
 import { sbiShinseiTopBalancesAndActivity } from "../src/parsers/sbi-shinsei-top-balances-and-activity.ts";
 import { sbiShinseiYenDepositAccount } from "../src/parsers/sbi-shinsei-yen-deposit-account.ts";
 import { sbiVcAccountMargin } from "../src/parsers/sbi-vc-account-margin.ts";
@@ -250,6 +251,19 @@ const shinseiTop = fixtureJson(
 );
 const shinseiYen = fixtureJson("sbi-shinsei-parser-boundaries", "yen-deposit-account.json");
 const shinseiTopParam = shinseiTop["responseParam"] as Record<string, unknown>;
+const shinseiBoard = (rates: unknown, extra: Record<string, unknown> = {}) =>
+  json({
+    header: { adapterResultCode: "0" },
+    responseParam: {
+      exchangeRateInformation: {
+        requestParam: {},
+        responseParam: { transactionTime: "20260907090100", exchangeRates: rates, ...extra },
+        header: {},
+        errorInfo: {},
+      },
+    },
+  });
+const boardRow = { currency: "USD", buyRate: "145.00", sellRate: "147.00", midRate: "146.00" };
 const shinseiYenParam = shinseiYen["responseParam"] as Record<string, unknown>;
 
 export const SBI_SHINSEI: ContractParser[] = [
@@ -279,6 +293,12 @@ export const SBI_SHINSEI: ContractParser[] = [
         ...shinseiTop,
         responseParam: { ...shinseiTopParam, unexpected: true },
       }),
+      // The stored captures' shape (ADR 0028, observed 2026-09-27): `fromDate`
+      // in slash form, `toDate` empty, ten one-sided rows.
+      "window-end-not-stated": fixture(
+        "sbi-shinsei-parser-boundaries",
+        "top-accounts-balance-and-activity-window-end-not-stated.json",
+      ),
     },
   ),
   cases(sbiShinseiYenDepositAccount, meta("sbi-shinsei-bank", "yen-deposit-account"), {
@@ -300,6 +320,25 @@ export const SBI_SHINSEI: ContractParser[] = [
       ...shinseiYen,
       responseParam: { ...shinseiYenParam, unexpected: true },
     }),
+  }),
+  cases(sbiShinseiExchangeRate, meta("sbi-shinsei-bank", "exchange-rate"), {
+    "complete-rows": fixture("sbi-shinsei-parser-boundaries", "exchange-rate.json"),
+    // One unreadable cell breaks the board's membership; the other cells stand.
+    "unreadable-rate": shinseiBoard([{ ...boardRow, midRate: "-" }]),
+    // The provider has never been seen to send an empty board.
+    "empty-not-representable": shinseiBoard([]),
+    "unknown-fields": shinseiBoard([boardRow], { unexpected: true }),
+    "unknown-row-field": shinseiBoard([{ ...boardRow, unit: "100" }]),
+    // The stored boards' shape (ADR 0028, observed 2026-09-27): 13 currencies
+    // in 5 tiers, CHF in one, a JPY row and a 22-character transactionTime.
+    "observed-board": fixture("sbi-shinsei-parser-boundaries", "exchange-rate-observed-board.json"),
+    // A board whose only row is JPY quotes nothing.
+    "jpy-only-not-a-board": shinseiBoard([{ ...boardRow, currency: "JPY" }]),
+    // One currency twice within one tier is never resolved by picking a row.
+    "tier-duplicate": shinseiBoard([
+      { ...boardRow, customerCategory: "SYNTHETIC-TIER-1" },
+      { ...boardRow, customerCategory: "SYNTHETIC-TIER-1" },
+    ]),
   }),
 ];
 

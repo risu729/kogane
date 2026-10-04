@@ -3,7 +3,7 @@
 // written by the guarded recognition builder, a statement settled by an
 // accepted bank debit and a stage-B pending-to-posted candidate stored the way
 // the matcher stores one (card-purchase-world.ts). Synthetic values only.
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { SourceFactRef } from "../../domain/src/events.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
@@ -20,7 +20,15 @@ import {
   withoutReviewAffordances,
 } from "../src/query/purchases-explain.ts";
 import { PurchaseWorld } from "./card-purchase-world.ts";
+import { migratedDatabase } from "./sqlite-store.ts";
 import { grant } from "./fixture.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see ./sqlite-store.ts).
+beforeAll(() => {
+  migratedDatabase().close();
+}, 60_000);
 
 const worlds: PurchaseWorld[] = [];
 afterEach(() => {

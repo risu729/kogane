@@ -36,8 +36,18 @@ import {
 } from "../src/card-purchase-job.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
 import { reviseIdentity } from "../src/identity-store.ts";
-import { reconciliationSweep } from "../src/reconciliation-job.ts";
+import { RECONCILIATION_SLICES, reconciliationSweep } from "../src/reconciliation-job.ts";
 import { disposeWorlds, NOW, world, type UsageRow, type World } from "./card-purchase-world.ts";
+
+/**
+ * The reconciliation lane's Vpass and MyJCB slices with stage B named, as they
+ * ran until 2026-09-26. The deployed slices run stage A only, and their
+ * pending-to-posted pairs are the candidate pass's; the proposals the lane
+ * stored before then stay, and these tests keep proving that both lanes name a
+ * pair with one digest, so neither sends the other's again, and that a pair
+ * the lane accepted is merged once.
+ */
+const STAGE_B = RECONCILIATION_SLICES.map((slice) => ({ ...slice, stages: ["A", "B"] as const }));
 
 afterEach(disposeWorlds);
 
@@ -292,7 +302,7 @@ test("two posted rows of the same amount are two candidates and never merge by t
   expect(await w.totals()).toMatchObject({ captured: "1800", authorized: "0", unresolved: 1 });
 }, 90_000);
 
-test("MyJCB rows with only relative period labels (detailMonth-N) meet by usage month", async () => {
+test("MyJCB rows whose relative labels resolve to different periods meet by usage month", async () => {
   const w = await world();
   const matching: UsageRow = {
     date: "2026/05/10",
@@ -309,21 +319,22 @@ test("MyJCB rows with only relative period labels (detailMonth-N) meet by usage 
   });
   await w.myjcb({
     state: "confirmed",
-    period: "detailMonth-2",
+    period: "detailMonth-1",
     fetchedAt: "2026-06-12T00:00:00.000Z",
     rows: [matching, { ...matching, date: "2026/05/01", amount: "300" }],
   });
   expect(counts(await w.sweep())).toEqual({ ...NOTHING, recognized: 4, proposed: 1 });
   // The pending side's position 0 resolves from its capture time (2026-06-12
-  // JST: the cycle paid in 2026-07); the confirmed side's position 2 is one
-  // relative-statement-period-v1 does not place, so it has no period. MyJCB
-  // events are paired by usage month, so the two still meet.
+  // JST: the cycle paid in 2026-07) and the confirmed side's position 1 to
+  // 2026-06: their periods disagree (a confirmed row at a position the rule
+  // does not place is not current at all). MyJCB events are paired by usage
+  // month, so the two still meet.
   expect(
     await w.all(
       "SELECT DISTINCT source_id,json_extract(facts_json,'$.providerStatus') AS status,statement_period FROM card_purchase_recognitions ORDER BY status",
     ),
   ).toEqual([
-    { source_id: "myjcb", status: "confirmed", statement_period: null },
+    { source_id: "myjcb", status: "confirmed", statement_period: "2026-06" },
     { source_id: "myjcb", status: "unconfirmed", statement_period: "2026-07" },
   ]);
   // Exactly the matching pair is proposed: same usage day, same amount.
@@ -366,7 +377,7 @@ test("MyJCB twins of one amount and day under relative labels are both candidate
   });
   await w.myjcb({
     state: "confirmed",
-    period: "detailMonth-2",
+    period: "detailMonth-1",
     fetchedAt: "2026-06-12T00:00:00.000Z",
     rows: [matching, matching],
   });
@@ -616,12 +627,16 @@ test("the reconciliation lane and the purchase lane propose one pair once, under
       const w = await world();
       await seed(w);
       if (order === "reconciliation first") {
-        expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 1 });
+        expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
+          written: 1,
+        });
         // The purchase lane pairs the same two rows and finds the pair stored.
         expect(counts(await w.sweep())).toEqual(lane);
       } else {
         expect(counts(await w.sweep())).toEqual({ ...lane, proposed: 1 });
-        expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 0 });
+        expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
+          written: 0,
+        });
       }
       const stored = await w.all<{
         id: string;
@@ -644,7 +659,9 @@ test("the reconciliation lane and the purchase lane propose one pair once, under
         })),
       );
       expect(counts(await w.sweep())).toEqual(NOTHING);
-      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({ written: 0 });
+      expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
+        written: 0,
+      });
       await disposeWorlds();
     }
 }, 300_000);
@@ -660,7 +677,7 @@ test("both lanes leave a posted row outside the matching window unproposed", asy
     const w = await world();
     const { capture } = await pendingThenPosted(w, [early, POSTED, late]);
     if (order === "reconciliation first") {
-      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({
+      expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
         proposed: 1,
         written: 1,
       });
@@ -672,7 +689,7 @@ test("both lanes leave a posted row outside the matching window unproposed", asy
         recognized: 3,
         proposed: 1,
       });
-      expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({
+      expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
         proposed: 1,
         known: 1,
         written: 0,
@@ -700,7 +717,7 @@ test("both lanes leave a posted row outside the matching window unproposed", asy
 test("a provider-linked pair the reconciliation lane accepted is merged once, without a second acceptance", async () => {
   const w = await world();
   await pendingThenPosted(w, [POSTED], linked("provider-auth-4"));
-  expect(await reconciliationSweep(w.db, { now: NOW })).toMatchObject({
+  expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
     written: 1,
     autoAccepted: 1,
   });
