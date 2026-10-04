@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import { readFileSync } from "node:fs";
+import { retireReplacedJobsSql } from "../src/job-retirement-sql.ts";
 import { retireReplacedJobs } from "../src/worker.ts";
 
 let mf: Miniflare;
@@ -17,8 +19,10 @@ beforeAll(async () => {
   if (!binding || typeof binding !== "object" || !("prepare" in binding))
     throw new Error("missing DB");
   db = binding as D1Database;
-  await db.exec(`CREATE TABLE observation_parse_jobs(fetch_artifact_id INTEGER,parser_name TEXT,parser_version TEXT,status TEXT,last_error_code TEXT,lease_token TEXT,lease_until_ms INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(fetch_artifact_id,parser_name,parser_version));
-CREATE TABLE parse_runs(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER,parser_name TEXT,parser_version TEXT,status TEXT,error TEXT);`);
+  await db.exec(`CREATE TABLE observation_parse_jobs(fetch_artifact_id INTEGER,parser_name TEXT,parser_version TEXT,status TEXT,last_error_code TEXT,lease_token TEXT,lease_until_ms INTEGER NOT NULL DEFAULT 0,available_at_ms INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(fetch_artifact_id,parser_name,parser_version));
+CREATE TABLE parse_runs(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER,parser_name TEXT,parser_version TEXT,status TEXT,error TEXT);
+CREATE INDEX observation_jobs_ready ON observation_parse_jobs(status,available_at_ms,lease_until_ms);
+CREATE INDEX idx_parse_runs_artifact ON parse_runs(fetch_artifact_id,parser_name);`);
 });
 afterAll(async () => {
   await mf?.dispose();
@@ -126,3 +130,46 @@ test("numeric semver guards downgrade, malformed versions and unrelated identiti
   await retireReplacedJobs(db, [{ name: "fixture", version: "2.0.10" }]); // failed job without terminal parse is not replacement evidence
   expect(await state(3, "2.0.2")).toMatchObject({ status: "done" });
 });
+
+test("D1 retirement reads stay bounded by candidates instead of completed history", async () => {
+  await db
+    .prepare(`WITH RECURSIVE ids(id) AS (
+    VALUES(10000) UNION ALL SELECT id+1 FROM ids WHERE id<11999
+  ) INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status)
+    SELECT id,'fixture','2.0.2','done' FROM ids`)
+    .run();
+  await db
+    .prepare(`INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,status)
+    SELECT fetch_artifact_id,parser_name,parser_version,'ok'
+    FROM observation_parse_jobs WHERE fetch_artifact_id>=10000`)
+    .run();
+  await job(11999, "1.0.0", "failed");
+  const frozen = readFileSync(
+    new URL("./fixtures/retire-replaced-jobs-legacy.sql", import.meta.url),
+    "utf8",
+  );
+  const input = JSON.stringify([{ name: "fixture", version: "2.0.2", parts: [2, 0, 2] }]);
+  const now = Date.now();
+  const old = await db.prepare(frozen).bind(input, null, now).run();
+  await db
+    .prepare(
+      "UPDATE observation_parse_jobs SET last_error_code='parser_rejected' WHERE fetch_artifact_id=11999 AND parser_version='1.0.0'",
+    )
+    .run();
+  const updated = await db.prepare(retireReplacedJobsSql(false)).bind(input, null, now).run();
+  expect(await state(11999, "1.0.0")).toMatchObject({ last_error_code: "parser_version_retired" });
+  expect(old.meta.rows_read).toBeGreaterThan(2000);
+  expect(updated.meta.rows_read).toBeLessThan(old.meta.rows_read / 10);
+  await db
+    .prepare(
+      "UPDATE observation_parse_jobs SET last_error_code='parser_rejected' WHERE fetch_artifact_id=11999 AND parser_version='1.0.0'",
+    )
+    .run();
+  const scoped = await db.prepare(retireReplacedJobsSql(true)).bind(input, 11999, now).run();
+  expect(scoped.meta.rows_read).toBeLessThan(100);
+  console.info("retirement synthetic D1 rows_read", {
+    legacy: old.meta.rows_read,
+    global: updated.meta.rows_read,
+    artifact: scoped.meta.rows_read,
+  });
+}, 60000);

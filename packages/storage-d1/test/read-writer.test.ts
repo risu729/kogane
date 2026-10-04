@@ -10,6 +10,8 @@ import { describe, expect, test } from "bun:test";
 import {
   abandonSnapshot,
   activePointer,
+  activePointerStatement,
+  currentRevisionSnapshot,
   beginSnapshot,
   claimWriterLease,
   ensureReadInstance,
@@ -27,6 +29,7 @@ import {
   writtenRowsMatch,
   type SnapshotPlan,
 } from "../src/read/index.ts";
+import { CURRENT_REVISION_SNAPSHOT_SQL } from "../src/read/sql.ts";
 import { createSqliteReadDatabase } from "./sqlite-read-database.ts";
 import type { D1Like } from "../src/d1.ts";
 import type { Database } from "bun:sqlite";
@@ -337,4 +340,122 @@ describe("sealing and publishing", () => {
       { snapshot_id: third.snapshotId, status: "complete" },
     ]);
   });
+});
+
+test("the capture shortcut requires a published context, every release and the current instance", async () => {
+  const { db, sqlite, instanceId } = await claimed();
+  try {
+    const context = {
+      sourceRevision: 10,
+      visibilityRevision: 3,
+      coreEpoch: "core-epoch-1",
+      readInstanceId: instanceId,
+      buildDigest: DIGEST_B,
+      contractVersion: "projection-input-v1",
+      identityRelease: "identity-test-v1",
+      decimalPolicyRelease: "decimal-test-v1",
+    };
+    const snapshotPlan = await plan({
+      inputManifestJson: JSON.stringify({
+        identityRelease: context.identityRelease,
+        decimalPolicyRelease: context.decimalPolicyRelease,
+      }),
+    });
+    expect(await currentRevisionSnapshot(db, context)).toBeNull();
+    const { snapshotId } = (await beginSnapshot(db, instanceId, snapshotPlan, NOW))!;
+    // A resumable build is never evidence that capture can be skipped.
+    expect(await currentRevisionSnapshot(db, context)).toBeNull();
+    await claimWriterLease(db, snapshotId, "shortcut-lease", 1000, 60000);
+    const rows = await buildRows(1);
+    await writeRowChunk(db, snapshotId, rows, {
+      lease: "shortcut-lease",
+      fence: 1,
+      now: NOW,
+      rowsWritten: 0,
+    });
+    const outcome = await sealAndPublish(
+      db,
+      {
+        snapshotId,
+        readInstanceId: instanceId,
+        sourceRevision: 10,
+        visibilityRevision: 3,
+        coreEpoch: "core-epoch-1",
+      },
+      {
+        rowCount: 1,
+        relationCount: 0,
+        rowDigests: rows.map((entry) => entry.digest),
+      },
+      { lease: "shortcut-lease", now: NOW },
+    );
+    expect(outcome).toMatchObject({ sealed: true, published: true });
+    expect(await currentRevisionSnapshot(db, context)).toEqual({
+      snapshot_id: snapshotId,
+      input_digest: DIGEST_A,
+      row_count: 1,
+    });
+    for (const mismatch of [
+      { sourceRevision: 11 },
+      { visibilityRevision: 4 },
+      { coreEpoch: "restored-core" },
+      { readInstanceId: "other-read" },
+      { buildDigest: DIGEST_A },
+      { contractVersion: "projection-input-v2" },
+      { identityRelease: "identity-test-v2" },
+      { decimalPolicyRelease: "decimal-test-v2" },
+    ])
+      expect(await currentRevisionSnapshot(db, { ...context, ...mismatch })).toBeNull();
+
+    // After verified content-equivalent captures, the pointer carries the new
+    // context. Immutable snapshot fields deliberately retain the original one.
+    const pointer = (await activePointer(db))!;
+    for (const changed of [
+      { sourceRevision: 11 },
+      { sourceRevision: 12, visibilityRevision: 4 },
+      { sourceRevision: 1, visibilityRevision: 0, coreEpoch: "restored-core" },
+    ]) {
+      const refreshed = { ...context, ...changed };
+      await activePointerStatement(
+        db,
+        {
+          snapshotId,
+          readInstanceId: instanceId,
+          sourceRevision: refreshed.sourceRevision,
+          visibilityRevision: refreshed.visibilityRevision,
+          coreEpoch: refreshed.coreEpoch,
+          outputDigest: pointer.output_digest,
+        },
+        NOW,
+      ).run();
+      expect(await currentRevisionSnapshot(db, context)).toBeNull();
+      expect(await currentRevisionSnapshot(db, refreshed)).toMatchObject({
+        snapshot_id: snapshotId,
+      });
+    }
+
+    const details = sqlite
+      .prepare<
+        { detail: string },
+        [number, number, string, string, string, string, string, string]
+      >("EXPLAIN QUERY PLAN " + CURRENT_REVISION_SNAPSHOT_SQL)
+      .all(
+        11,
+        3,
+        context.coreEpoch,
+        instanceId,
+        DIGEST_B,
+        context.contractVersion,
+        context.identityRelease,
+        context.decimalPolicyRelease,
+      )
+      .map((row) => row.detail);
+    expect(details.some((detail) => /SEARCH p USING INTEGER PRIMARY KEY/u.test(detail))).toBe(true);
+    expect(details.some((detail) => /SEARCH s USING INDEX .*[(]snapshot_id=/u.test(detail))).toBe(
+      true,
+    );
+    expect(details.some((detail) => /SCAN /u.test(detail))).toBe(false);
+  } finally {
+    sqlite.close();
+  }
 });

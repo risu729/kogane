@@ -21,6 +21,7 @@ import {
   activePointerStatement,
   beginSnapshot,
   claimWriterLease,
+  currentRevisionSnapshot,
   ensureReadInstance,
   inputRefDigest,
   oldestBuildingSnapshot,
@@ -42,6 +43,10 @@ import {
 } from "../../../packages/storage-d1/src/read/index.ts";
 import {
   BALANCE_PROJECTION_RELEASE,
+  DECIMAL_POLICY_RELEASE,
+  LATEST_IDENTITY_RELEASE,
+  PROJECTION_INPUT_CONTRACT_VERSION,
+  type CoreRevisionRow,
   buildBalanceProjection,
   scopeRelationsFromEntityRelations,
   type ProjectionRow,
@@ -81,6 +86,7 @@ export function readDatabase(env: Env): D1Like | null {
 export interface ReadProjectionDeps {
   capture: (db: D1Database, options: BalanceProjectionOptions) => Promise<CaptureOutcome>;
   buildDigest: () => Promise<string>;
+  revision: (db: D1Database) => Promise<CoreRevisionRow>;
 }
 
 const halted = (
@@ -215,9 +221,46 @@ export async function runReadProjection(
   let build: ReadBuild;
   if (building !== null) build = building;
   else {
+    const buildDigest = await deps.buildDigest();
+    // Resume unfinished work first. Only a complete, published build under the
+    // same releases/contract and the exact CORE watermark may skip capture.
+    // The test-only capture hook explicitly asks to exercise capture itself.
+    if (!options.duringCapture) {
+      const before = await deps.revision(db);
+      const current = await currentRevisionSnapshot(read, {
+        sourceRevision: before.source_revision,
+        visibilityRevision: before.visibility_revision,
+        coreEpoch: before.core_epoch,
+        readInstanceId: instance.read_instance_id,
+        buildDigest,
+        contractVersion: PROJECTION_INPUT_CONTRACT_VERSION,
+        identityRelease: LATEST_IDENTITY_RELEASE,
+        decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
+      });
+      if (current) {
+        const after = await deps.revision(db);
+        if (
+          after.source_revision === before.source_revision &&
+          after.visibility_revision === before.visibility_revision &&
+          after.core_epoch === before.core_epoch
+        )
+          return {
+            enabled: true,
+            snapshotId: current.snapshot_id,
+            status: "unchanged",
+            written: 0,
+            rowCount: current.row_count,
+            retired: 0,
+            reasonCode: null,
+            sourceRevision: before.source_revision,
+            inputDigest: current.input_digest,
+            active: true,
+          };
+      }
+    }
     const capture = await deps.capture(db, options);
     if (!capture.ok) return halted(capture.status, capture.code);
-    const contentKey = await readContentKey(capture.captured.digest, await deps.buildDigest());
+    const contentKey = await readContentKey(capture.captured.digest, buildDigest);
     const existing = await snapshotForContent(read, contentKey);
     if (existing?.status === "complete") {
       // The content is unchanged, so this is the same snapshot; what moved is
@@ -262,7 +305,7 @@ export async function runReadProjection(
     const snapshotPlan = {
       contentKey,
       inputDigest: capture.captured.digest,
-      buildDigest: await deps.buildDigest(),
+      buildDigest,
       contractVersion: capture.captured.input.contractVersion,
       sourceRevision: capture.captured.input.sourceRevision,
       visibilityRevision: capture.captured.input.visibilityRevision,

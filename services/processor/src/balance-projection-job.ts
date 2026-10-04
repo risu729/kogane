@@ -685,6 +685,7 @@ async function projectionStep(
     env,
     {
       capture: captureFixedInput,
+      revision: currentCoreRevision,
       buildDigest: async () => options.buildDigest ?? (await projectionBuildDigest()),
     },
     options,

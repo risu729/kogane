@@ -23,6 +23,7 @@ export {
   activePointerStatement,
   beginSnapshot,
   claimWriterLease,
+  currentRevisionSnapshot,
   ensureReadInstance,
   oldestBuildingSnapshot,
   publishedSnapshotAt,
