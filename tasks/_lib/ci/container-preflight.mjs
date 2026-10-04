@@ -204,24 +204,21 @@ export async function inspectContainers({ accountId, token, fetchImpl = fetch })
 
 /** This optional diagnostic creates a short-lived credential; it never returns that credential. */
 export async function probeRegistryCredentials(options) {
-  const result = await cloudflareApi(options)(
-    "containers/registries/registry.cloudflare.com/credentials",
-    { expiration_minutes: 5, permissions: ["pull"] },
-  );
-  if (
-    !result ||
-    typeof result !== "object" ||
-    Array.isArray(result) ||
-    !["account_id", "username", "password"].every(
-      (key) => typeof result[key] === "string" && result[key].length > 0,
-    ) ||
-    result.registry_host !== "registry.cloudflare.com"
-  )
-    throw new Error("container_preflight_registry_credential_shape");
+  let httpStatus;
+  // The shared API validates the credential shape before exposing success metadata.
+  await cloudflareApi({
+    ...options,
+    reportResponse: (metadata) => {
+      httpStatus = metadata.httpStatus;
+    },
+  })("containers/registries/registry.cloudflare.com/credentials", {
+    expiration_minutes: 5,
+    permissions: ["pull"],
+  });
   return {
     operation: "registry_pull_credentials",
     method: "POST",
-    httpStatus: 200,
+    httpStatus,
     credentialShapeValid: true,
   };
 }

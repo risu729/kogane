@@ -475,6 +475,7 @@ export function cloudflareApi({
   token,
   fetchImpl = fetch,
   reportDiagnostic = (diagnostic) => console.error(JSON.stringify(diagnostic)),
+  reportResponse = () => {},
 }) {
   if (!/^[a-f0-9]{32}$/u.test(accountId ?? "") || !token) fail("credentials_missing");
   return async (path, body) => {
@@ -504,8 +505,12 @@ export function cloudflareApi({
     } catch {
       reject("api_unavailable");
     }
-    // The documented response is 200. Do not guess another successful status.
-    if (response.status !== 200) reject("api_http", response.status);
+    // Production credentials POST returns 201; every GET still requires 200.
+    if (
+      response.status !== 200 &&
+      !(operation === "registry_pull_credentials" && response.status === 201)
+    )
+      reject("api_http", response.status);
     let envelope;
     try {
       envelope = await response.json();
@@ -514,6 +519,21 @@ export function cloudflareApi({
     }
     if (envelope?.success !== true || envelope.result === undefined)
       reject("api_response", response.status);
+    if (operation === "registry_pull_credentials") {
+      const result = envelope.result;
+      if (
+        !result ||
+        typeof result !== "object" ||
+        Array.isArray(result) ||
+        !["account_id", "username", "password"].every(
+          (key) => typeof result[key] === "string" && result[key].length > 0,
+        ) ||
+        result.registry_host !== "registry.cloudflare.com"
+      )
+        reject("registry_credential_shape", response.status);
+    }
+    // This callback cannot receive the result, credential values or provider text.
+    reportResponse({ operation, method, httpStatus: response.status });
     return envelope.result;
   };
 }
