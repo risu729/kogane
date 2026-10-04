@@ -1,5 +1,10 @@
 # SBI証券: 公式データソース一次評価
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 - 調査日: 2026-08-26
 - 対象: SBI証券の証券総合口座だけ
 - 非対象: SBI新生銀行、住信SBIネット銀行、SBI VCトレード、家計簿・資産管理aggregator、注文の発注・訂正・取消
