@@ -18,6 +18,29 @@ The source spreadsheet remains private and authoritative for personal account
 state. The checked-in CSV is a sanitized planning snapshot, not a replacement
 for it.
 
+## Current owner source selection
+
+The owner confirmed these source-selection changes on 2026-10-05. They take
+precedence over an older source-sheet snapshot; they do not confirm a current
+balance or promote an unconfirmed product to a holding.
+
+| Source                                    | Selection                                                                                       | Tracking                                                          |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| GitHub Sponsors / Stripe Connect receipts | Excluded: no longer in use; its planning row was removed                                        | Re-add only after the owner confirms resumed use                  |
+| APA Hotel points                          | Included for collector work; collection is not implemented                                      | [APA points #462](https://github.com/risu729/kogane/issues/462)   |
+| d POINT CLUB                              | Included as a separate source from a bank's linked-point display; collection is not implemented | [d POINT CLUB #463](https://github.com/risu729/kogane/issues/463) |
+
+The checked-in CSV remains a source-sheet snapshot. The two new selections
+above are not fabricated as source-sheet rows. Other services discovered in
+mail remain outside the selected scope until the owner chooses them. Do not
+copy private mail bodies, balances, account labels or identifiers into this
+inventory.
+
+Work and acceptance progress live in the
+[collector backlog #440](https://github.com/risu729/kogane/issues/440). Keep this
+section limited to selected/excluded scope; update actual collector limits in
+the relevant maintained documentation when implementation lands.
+
 ## Research units
 
 A research unit is one institution or one demonstrably shared official API.
@@ -99,7 +122,10 @@ that every product offered by the institution is present.
 4. Map the nine public columns used by `data/account-inventory.csv`.
 5. Drop all balance, identifier, credential, email-alias, and aggregator-state
    columns before committing.
-6. Review the diff for digit sequences, email addresses, card suffixes, and
+6. Apply the current owner source selection above so an inactive source is
+   not restored from an older sheet. Adding a selected source to the snapshot
+   still requires its source-sheet provenance.
+7. Review the diff for digit sequences, email addresses, card suffixes, and
    personal names before pushing.
 
 The public snapshot must be regenerated, never hand-joined with credentials or
