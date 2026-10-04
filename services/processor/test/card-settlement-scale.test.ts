@@ -1,3 +1,4 @@
+import { CARD_INFORMATION_READER_VERSION } from "../src/card-debit-account-job.ts";
 import { CORE_REVISION_SQL } from "../../../packages/read-model/src/source-revision.ts";
 // The settlement sweep's statement and bank reads (src/card-settlement-job.ts)
 // on the scaled store with statement history of
@@ -413,9 +414,37 @@ test(
   "cached and uncached fresh proposal sweeps write identical evidence on random stores",
   async () => {
     let newProposals = 0;
+    let uncachedDebitEvidence = 0;
+    let cachedDebitEvidence = 0;
     for (const seed of [1, 2, 3, 4]) {
       const store = randomSettlementStore(seed, new Set()).db;
       try {
+        // Each reading is pinned to the same synthetic bytes and card as its
+        // published statement. Numberless bank fixtures still produce actual
+        // closed-reason evidence; equality must not compare two empty arrays.
+        store
+          .query(`INSERT OR IGNORE INTO card_debit_account_statement
+          (source_id,card_source_account,fetch_artifact_id,statement_parse_run_id,
+           raw_sha256,source_object_key,observed_at,reader_version,outcome,
+           bank_name,branch_name,account_type,leading_digits,masked_digit_count,created_at)
+          SELECT s.source_id,s.source_account,a.id,p.id,a.sha256,?,?,?,?,?,?,?,?,?,?
+          FROM card_statement_facts s
+          JOIN parse_runs p ON p.id=s.parse_run_id
+          JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+          WHERE s.source_id=? ORDER BY s.id`)
+          .run(
+            "synthetic-account-context",
+            "2099-01-01",
+            CARD_INFORMATION_READER_VERSION,
+            "read",
+            "三井住友銀行",
+            "架空支店",
+            "普通",
+            "1234",
+            3,
+            "2099-01-01",
+            "myjcb",
+          );
         const capture = async (disableCache: boolean) => {
           store.exec("BEGIN");
           try {
@@ -442,6 +471,10 @@ test(
         const before = await capture(true);
         newProposals += before.result.written;
         const after = await capture(false);
+        uncachedDebitEvidence += before.result.debitAccountEvidence;
+        cachedDebitEvidence += after.result.debitAccountEvidence;
+        expect(before.evidence).toHaveLength(before.result.debitAccountEvidence);
+        expect(after.evidence).toHaveLength(after.result.debitAccountEvidence);
         expect(after.result).toEqual(before.result);
         expect(after.proposals).toEqual(before.proposals);
         expect(after.evidence).toEqual(before.evidence);
@@ -451,6 +484,8 @@ test(
       }
     }
     expect(newProposals).toBeGreaterThan(0);
+    expect(uncachedDebitEvidence).toBeGreaterThan(0);
+    expect(cachedDebitEvidence).toBeGreaterThan(0);
   },
   TIMEOUT,
 );
