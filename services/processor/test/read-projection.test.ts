@@ -18,6 +18,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   balanceProjectionOutboxProcessor,
+  captureFixedInput,
   currentCoreRevision,
   runBalanceProjection,
 } from "../src/balance-projection-job.ts";
@@ -371,3 +372,74 @@ test("G0-09/G3-12: dropping every READ table leaves CORE and DATA untouched, and
   // could: the record is still the one CORE had before the reset.
   expect(await readInputRecord(env.DB, rebuilt.inputDigest!)).not.toBeNull();
 }, 90000);
+
+// The shortcut is observable as the absence of the three historical candidate
+// queries, not merely as the old "unchanged" status after doing those queries.
+test("an unchanged published context avoids historical capture; updates still capture", async () => {
+  await seedBalances(env, ["smbc:read-fast"]);
+  await runBalanceProjection(on());
+  const queries: string[] = [];
+  const counted = on({
+    ...env,
+    DB: new Proxy(env.DB, {
+      get(target, key) {
+        if (key === "prepare")
+          return (sql: string) => {
+            queries.push(sql);
+            return target.prepare(sql);
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }),
+  });
+  const first = await runBalanceProjection(counted);
+  expect(first).toMatchObject({ status: "unchanged", active: true, written: 0 });
+  expect(queries.filter((sql) => sql.includes("snapshot_policies"))).toHaveLength(0);
+  expect(queries).toHaveLength(2); // CORE revision before and after the READ lookup.
+  await seedBalances(env, ["smbc:read-new"]);
+  queries.length = 0;
+  const changed = await runBalanceProjection(counted);
+  expect(changed.status).toBe("complete");
+  expect(changed.inputDigest).not.toBe(first.inputDigest);
+  expect(queries.filter((sql) => sql.includes("snapshot_policies")).length).toBeGreaterThanOrEqual(
+    3,
+  );
+  queries.length = 0;
+  const deployed = await runBalanceProjection(counted, { buildDigest: "a".repeat(64) });
+  expect(deployed.status).toBe("complete");
+  expect(deployed.snapshotId).not.toBe(changed.snapshotId);
+  expect(queries.filter((sql) => sql.includes("snapshot_policies")).length).toBeGreaterThanOrEqual(
+    3,
+  );
+}, 60000);
+
+test("a CORE write racing the shortcut falls back to a stable capture", async () => {
+  const { runReadProjection } = await import("../src/read-projection.ts");
+  const { projectionBuildDigest } = await import("../../../packages/read-model/src/index.ts");
+  await seedBalances(env, ["smbc:read-race-before"]);
+  await runBalanceProjection(on());
+  let reads = 0;
+  let captures = 0;
+  const result = await runReadProjection(
+    on(),
+    {
+      buildDigest: projectionBuildDigest,
+      revision: async (db) => {
+        reads += 1;
+        if (reads === 2) await seedBalances(env, ["smbc:read-race-after"]);
+        return await currentCoreRevision(db);
+      },
+      capture: async (db, options) => {
+        captures += 1;
+        return await captureFixedInput(db, options);
+      },
+    },
+    {},
+    env.DATA,
+    1000,
+  );
+  expect(captures).toBe(1);
+  expect(result).toMatchObject({ status: "complete", active: true });
+  expect(result.sourceRevision).toBe((await currentCoreRevision(env.DB)).source_revision);
+}, 60000);

@@ -54,6 +54,21 @@ export const READ_POINTER_AT_REVISION_SQL = `SELECT p.snapshot_id AS snapshot_id
   WHERE p.id=1 AND (?1 IS NULL OR p.source_revision>=?1)
     AND (?2 IS NULL OR p.core_epoch=?2)`;
 
+/**
+ * A published build already covering exactly this context. The pointer's
+ * watermark can be newer than the immutable snapshot after a no-content
+ * change. All lookups are by singleton or primary key, never projection rows.
+ */
+export const CURRENT_REVISION_SNAPSHOT_SQL = `SELECT s.snapshot_id, s.input_digest, s.row_count
+  FROM balance_snapshot_pointer p
+  JOIN balance_read_snapshots s ON s.snapshot_id=p.snapshot_id
+  WHERE p.id=1 AND p.source_revision=?1 AND p.visibility_revision=?2 AND p.core_epoch=?3
+    AND p.read_instance_id=?4 AND s.read_instance_id=?4
+    AND s.status='complete' AND s.build_digest=?5 AND s.contract_version=?6
+    AND s.output_digest=p.output_digest
+    AND json_extract(s.input_manifest_json,'$.identityRelease')=?7
+    AND json_extract(s.input_manifest_json,'$.decimalPolicyRelease')=?8`;
+
 /** The build of this content that may still be continued or reused. */
 export const SNAPSHOT_FOR_CONTENT_SQL = `SELECT snapshot_id, attempt, status, row_count,
     output_digest, source_revision, visibility_revision, core_epoch, input_digest
