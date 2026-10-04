@@ -20,6 +20,7 @@ import {
 import {
   classifyParserRejection,
   classifySbiShinseiMessage,
+  globalPassReplaySelectionSql,
   replaySelectionSql,
   replayStatementMetadata,
   skipScheduleShape,
@@ -861,6 +862,12 @@ describe("replay selection against the migrated CORE schema", () => {
       [5, "smbc-bank", "balance", "d".repeat(64)],
       [6, "sbi-shinsei-bank", TOP, "e".repeat(64)],
       [7, "myjcb", "credit-schedule", "f".repeat(64)],
+      // GLOBAL PASS activity pages (globalPassReplaySelectionSql).
+      [8, "global-pass", "globalpass-activity", "1".repeat(64)],
+      [9, "global-pass", "globalpass-activity", "2".repeat(64)],
+      [10, "global-pass", "globalpass-activity", "3".repeat(64)],
+      [11, "global-pass", "globalpass-activity", "1".repeat(64)], // the same bytes as 8
+      [12, "global-pass", "globalpass-activity", "4".repeat(64)],
     ];
     for (const [id, source, dataset, sha] of artifacts)
       await db.batch([
@@ -882,12 +889,18 @@ describe("replay selection against the migrated CORE schema", () => {
           .bind(id, id, source, dataset, `k${id}`, sha),
         db.prepare("INSERT INTO fetch_run_seals(fetch_run_id,sealed_at_ms) VALUES(?,1)").bind(id),
       ]);
-    const run = (id: number, parser: string, version: string, status: string) =>
+    const run = (
+      id: number,
+      parser: string,
+      version: string,
+      status: string,
+      error = status === "error" ? "parser_rejected" : null,
+    ) =>
       db
         .prepare(
           "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,error) VALUES(?,?,?,'2026-09-10T00:00:00Z',?,?)",
         )
-        .bind(id, parser, version, status, status === "error" ? "parser_rejected" : null)
+        .bind(id, parser, version, status, error)
         .run();
     await run(1, "sbi-shinsei-top-balances-and-activity", "0.1.0", "error");
     await run(1, "sbi-shinsei-top-balances-and-activity", "0.1.1", "error");
@@ -925,6 +938,18 @@ describe("replay selection against the migrated CORE schema", () => {
         .bind(id, release, `i${id}`, json, status)
         .run();
     await run(7, "myjcb-skip-payment-schedule", "0.1.1", "error");
+    // GLOBAL PASS: 8 refused by both versions; 9 refused by 1.0.0 and accepted
+    // by 1.1.0; 10 refused by 1.1.0; 11 the bytes of 8 in a newer run, refused;
+    // 12 failed for a reason that is not the parser's.
+    const gp = "global-pass-activity";
+    await run(8, gp, "1.0.0", "error");
+    await run(8, gp, "1.1.0", "error");
+    await run(9, gp, "1.0.0", "error");
+    const accepted = await run(9, gp, "1.1.0", "ok");
+    await publishParse(db, Number(accepted.meta.last_row_id));
+    await run(10, gp, "1.1.0", "error");
+    await run(11, gp, "1.1.0", "error");
+    await run(12, gp, "1.1.0", "error", "raw_object_missing");
     // Starting Miniflare and applying every CORE migration in order is a
     // one-time cost that grows with each migration and crossed the 5 s default
     // hook budget; the budget matches every other schema hook in this suite.
@@ -984,6 +1009,32 @@ describe("replay selection against the migrated CORE schema", () => {
     expect(
       replayStatementMetadata(active as Parameters<typeof replayStatementMetadata>[0]),
     ).toEqual({ statementState: "unknown", period: "detailMonth-9" });
+  });
+  test("globalpass-activity selects pages whose latest parse was rejected, one per raw object, newest run first", async () => {
+    const all = async (filter: Parameters<typeof globalPassReplaySelectionSql>[0]) =>
+      (await db.prepare(globalPassReplaySelectionSql(filter)).all<Record<string, unknown>>())
+        .results;
+    const found = await all({});
+    expect(found.map((row) => [row["id"], row["failed_parser_version"]])).toEqual([
+      [11, "1.1.0"],
+      [10, "1.1.0"],
+    ]);
+    expect(found[0]).toMatchObject({
+      source_id: "global-pass",
+      dataset: "globalpass-activity",
+      parser_name: "global-pass-activity",
+      run_status: "success",
+      run_failure_count: 0,
+      artifact_key: "k11",
+      blob_key: "1".repeat(64),
+      byte_size: 10,
+      metadata_projection_json: null,
+    });
+    // A version argument reads that version's latest parse of each artifact.
+    expect((await all({ version: "1.0.0" })).map((row) => row["id"])).toEqual([9, 8]);
+    expect(await all({ version: "9.9.9" })).toEqual([]);
+    // The generic selection still leaves GLOBAL PASS out (REPLAY_SOURCES).
+    expect((await select({})).some((row) => row["source_id"] === "global-pass")).toBe(false);
   });
   test("the filter refuses anything but parser-name characters", () => {
     expect(() => replaySelectionSql({ parser: "x' OR '1'='1" })).toThrow(/parser name/u);

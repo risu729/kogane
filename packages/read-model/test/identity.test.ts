@@ -178,7 +178,7 @@ INSERT INTO identity_run_seals VALUES('run-2',1,'2099-02-02');`);
       decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
     });
     expect(DECIMAL_POLICY_RELEASE).toBe("decimal-v1");
-    expect(MEASURE_POLICY_RELEASE).toBe("metric-registry-v1");
+    expect(MEASURE_POLICY_RELEASE).toBe("metric-registry-v2");
     // Same keys as InterpretationContext in packages/domain (context.ts).
     expect(Object.keys(latest).sort()).toEqual(
       [

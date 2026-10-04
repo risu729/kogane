@@ -86,6 +86,13 @@ describe("dataset_snapshot_policies seed", () => {
           "../../../packages/storage-d1/migrations/core/0053_price_promotion.sql",
         ),
         "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0066_prestia_bank_snapshot_schedule.sql",
+        ),
+        "utf8",
       );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
@@ -96,6 +103,7 @@ describe("dataset_snapshot_policies seed", () => {
   test("legacy datasets retain their policies and the St.George and FX board parsers use explicit coverage", () => {
     for (const row of policyRows(database())) {
       const stGeorge = row.parser_name === "st-george-balances";
+      const prestia = row.parser_name === "prestia-bank-balances";
       const explicit = EXPLICIT_COVERAGE.has(row.parser_name);
       expect(row.policy_id).toBe(explicit ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
@@ -120,10 +128,15 @@ describe("dataset_snapshot_policies seed", () => {
           runFailureCount: 0,
           dataset: row.dataset,
           url: null,
-          mime: "application/json",
+          mime: prestia ? "text/html" : "application/json",
           fetchedAt: "2026-09-07T00:00:00.000Z",
           sha256: "0".repeat(64),
-          artifactKey: stGeorge ? "account-snapshot.json" : "balance.normalized.json",
+          artifactKey: prestia
+            ? "balance.html"
+            : stGeorge
+              ? "account-snapshot.json"
+              : "balance.normalized.json",
+          ...(prestia ? { fetchUnitKey: "balance-summary" } : {}),
         }),
         row.parser_name,
       ).toBe(true);

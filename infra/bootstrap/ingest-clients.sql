@@ -40,6 +40,13 @@ SELECT 'processor-shared-r2', 'collector-myjcb'
 WHERE NOT EXISTS (SELECT 1 FROM ingest_client_producers
   WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-myjcb');
 INSERT INTO producers (id, kind, display_name)
+SELECT 'collector-prestia-bank', 'collector', 'Shared-R2 collector collector-prestia-bank'
+WHERE NOT EXISTS (SELECT 1 FROM producers WHERE id = 'collector-prestia-bank');
+INSERT INTO ingest_client_producers (ingest_client_id, producer_id)
+SELECT 'processor-shared-r2', 'collector-prestia-bank'
+WHERE NOT EXISTS (SELECT 1 FROM ingest_client_producers
+  WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-prestia-bank');
+INSERT INTO producers (id, kind, display_name)
 SELECT 'collector-prestia-globalpass', 'collector', 'Shared-R2 collector collector-prestia-globalpass'
 WHERE NOT EXISTS (SELECT 1 FROM producers WHERE id = 'collector-prestia-globalpass');
 INSERT INTO ingest_client_producers (ingest_client_id, producer_id)
@@ -152,6 +159,15 @@ WHERE NOT EXISTS (SELECT 1 FROM ingest_client_routes
   WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-myjcb' AND source_id = 'myjcb');
 UPDATE ingest_client_routes SET active = 1
 WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-myjcb' AND source_id = 'myjcb' AND active <> 1;
+INSERT INTO producer_sources (producer_id, source_id)
+SELECT 'collector-prestia-bank', 'prestia'
+WHERE NOT EXISTS (SELECT 1 FROM producer_sources WHERE producer_id = 'collector-prestia-bank' AND source_id = 'prestia');
+INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id, active)
+SELECT 'processor-shared-r2', 'collector-prestia-bank', 'prestia', 1
+WHERE NOT EXISTS (SELECT 1 FROM ingest_client_routes
+  WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-prestia-bank' AND source_id = 'prestia');
+UPDATE ingest_client_routes SET active = 1
+WHERE ingest_client_id = 'processor-shared-r2' AND producer_id = 'collector-prestia-bank' AND source_id = 'prestia' AND active <> 1;
 INSERT INTO producer_sources (producer_id, source_id)
 SELECT 'collector-prestia-globalpass', 'global-pass'
 WHERE NOT EXISTS (SELECT 1 FROM producer_sources WHERE producer_id = 'collector-prestia-globalpass' AND source_id = 'global-pass');

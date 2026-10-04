@@ -134,7 +134,7 @@ describe("the deployment ledger describes every Worker CI validates", () => {
     const checked = order.workers.filter(
       (worker) => worker.role === "producer" && worker.deploy && worker.healthPath !== "",
     );
-    expect(checked).toHaveLength(13);
+    expect(checked).toHaveLength(14);
     expect(checked.every((worker) => worker.healthAuth === "none")).toBe(true);
   });
 
@@ -215,6 +215,7 @@ describe("consumers deploy before producers (G5-14)", () => {
       "mizuho-worker",
       "sony-bank-worker",
       "st-george-worker",
+      "prestia-bank-worker",
       "vpass-json",
       "vpoint-pay-worker",
       "vpoint-worker",
@@ -237,7 +238,7 @@ describe("consumers deploy before producers (G5-14)", () => {
     // What stays out of CD is the probe role: experiments and the bootstrap,
     // audit and test-harness configurations.
     const producers = order.workers.filter((worker) => worker.role === "producer");
-    expect(producers.length).toBe(14);
+    expect(producers.length).toBe(15);
     expect(producers.every((worker) => worker.deploy)).toBe(true);
     expect(producers.every((worker) => worker.path.startsWith("services/collector-"))).toBe(true);
     expect(order.workers.filter((worker) => worker.role === "probe").length).toBeGreaterThan(0);
@@ -248,7 +249,7 @@ describe("consumers deploy before producers (G5-14)", () => {
     const directories = trackedFiles("services")
       .map((file) => /^(services\/collector-[^/]+)\//u.exec(file)?.[1] ?? "")
       .filter((directory) => directory !== "" && directory !== "services/collector-r2-importer");
-    expect(new Set(directories).size).toBe(14);
+    expect(new Set(directories).size).toBe(15);
     for (const directory of new Set(directories))
       expect(producers.some((worker) => worker.path === directory)).toBe(true);
   });
@@ -419,6 +420,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the Mizuho collector",
       "Deploy the Sony Bank collector",
       "Deploy the St.George collector",
+      "Deploy the PRESTIA bank collector",
       "Deploy the Vpass collector",
       "Deploy the V Point Pay collector",
       "Deploy the V Point collector",

@@ -33,6 +33,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       "smbc-direct-backfill-worker",
       "mizuho-worker",
       "sony-bank-worker",
+      "prestia-bank-worker",
       "vpass-json",
       "vpoint-pay-worker",
       "vpoint-worker",

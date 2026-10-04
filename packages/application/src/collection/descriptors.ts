@@ -87,6 +87,7 @@ export const COLLECTOR_SOURCE_IDS: Readonly<Record<string, string>> = {
   "moneyforward-me": "moneyforward-me",
   myjcb: "myjcb",
   "prestia-globalpass": "global-pass",
+  "prestia-bank": "prestia",
   "sbi-securities": "sbi-securities",
   "sbi-shinsei": "sbi-shinsei-bank",
   "sbi-vc-trade": "sbi-vc-trade",
@@ -178,6 +179,14 @@ function jsonByName(
  * withheld (`WITHHELD_ARTIFACT_DATASETS`).
  */
 export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  "prestia-bank": [
+    {
+      key: "balance.html",
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: "prestia-bank-balance-html",
+    },
+  ],
   "mobile-suica": [
     // The normalized rows only. The CP932 page and the summary stay evidence:
     // registering the page as well would produce every row twice.

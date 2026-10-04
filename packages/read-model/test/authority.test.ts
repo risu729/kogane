@@ -37,6 +37,10 @@ function coreSourceIds(): Set<string> {
 }
 
 describe("source authority policy", () => {
+  test("PRESTIA bank is a direct witness, not an inferred alias of GLOBAL PASS", () => {
+    expect(authorityRank("prestia")).toBe(AUTHORITY_RANKS.direct);
+    expect(authorityRank("prestia-bank")).toBe(AUTHORITY_RANKS.unreviewed);
+  });
   const core = coreSourceIds();
 
   test("every source the policy ranks is a CORE source id", () => {
@@ -55,7 +59,7 @@ describe("source authority policy", () => {
   });
 
   test("v2 ranks MoneyForward as the aggregator and Mizuho and St.George as direct", () => {
-    expect(AUTHORITY_POLICY_RELEASE).toBe("source-authority-v2");
+    expect(AUTHORITY_POLICY_RELEASE).toBe("source-authority-v3");
     expect(authorityRank("moneyforward-me")).toBe(AUTHORITY_RANKS.aggregator);
     expect(authorityRank("mizuho-bank")).toBe(AUTHORITY_RANKS.direct);
     expect(authorityRank("st-george")).toBe(AUTHORITY_RANKS.direct);

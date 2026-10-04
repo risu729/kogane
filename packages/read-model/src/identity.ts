@@ -18,7 +18,7 @@ export { IDENTITY_READ_MODES, type IdentityReadMode, type InterpretationContext 
 
 export const DEFAULT_IDENTITY_READ_MODE: IdentityReadMode = "latest";
 /** Balance meaning comes from the fixed metric registry of `balance-semantics.ts`. */
-export const MEASURE_POLICY_RELEASE = "metric-registry-v1";
+export const MEASURE_POLICY_RELEASE = "metric-registry-v2";
 /** Exact decimals are the `decimal-v1` normalization of migration 0024. */
 export const DECIMAL_POLICY_RELEASE = "decimal-v1";
 /** `latest` reads the current mapping revision of each reference, whatever policy wrote it. */

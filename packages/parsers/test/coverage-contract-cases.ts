@@ -21,6 +21,8 @@ import { sbiVcCashBalances } from "../src/parsers/sbi-vc-cash-balances.ts";
 import { sbiVcPositionSummary } from "../src/parsers/sbi-vc-position-summary.ts";
 import { smbcDirectBalance } from "../src/parsers/smbc-direct.ts";
 import { stGeorgeBalances } from "../src/parsers/st-george.ts";
+import { prestiaBankBalances, sanitizePrestiaBankPage } from "../src/parsers/prestia-bank-html.ts";
+import { prestiaBankHtml } from "./prestia-bank-fixture.ts";
 import { sonyBankGrossBalance } from "../src/parsers/sony-bank.ts";
 import { FIXTURES_ROOT } from "./fixture-root.ts";
 
@@ -367,6 +369,20 @@ const stGeorgeSnapshot = {
 };
 
 export const BANKS: ContractParser[] = [
+  cases(
+    prestiaBankBalances,
+    meta("prestia", "prestia-bank-balance-html", {
+      mime: "text/html",
+      artifactKey: "balance.html",
+      fetchUnitKey: "balance-summary",
+    }),
+    {
+      "complete-rows": new TextEncoder().encode(sanitizePrestiaBankPage(prestiaBankHtml())),
+      "unreadable-container": new TextEncoder().encode(
+        "<html><body>synthetic unsupported page</body></html>",
+      ),
+    },
+  ),
   cases(sonyBankGrossBalance, meta("sony-bank", "gross-balance"), {
     "complete-rows": fixture("sony-bank-parser-boundaries", "gross-balance.json"),
     // The provider contract fixes the container at 11 asset and 4 loan rows;

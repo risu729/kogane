@@ -1,6 +1,7 @@
 # Current implementation status
 
-Type: maintained reference. Reviewed: 2026-10-05 against main `6d04d71`.
+Type: maintained reference. Reviewed: 2026-10-05 against main `dcf8aca` and the
+PRESTIA bank Worker integration.
 This is a code/configuration assessment, not a fresh production acceptance run.
 Implementation, configured enablement, deployment and verified real-data coverage
 are separate claims. Historical acceptance records are linked from the
@@ -8,21 +9,33 @@ are separate claims. Historical acceptance records are linked from the
 
 ## Implemented capabilities and limits
 
-| Area                 | Implemented                                                                                                                                 | Remaining boundary                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Collection           | Twelve daily collector schedules, shared raw evidence and source-specific manual paths                                                      | A collector's presence does not prove every account/data type is captured or published                                     |
-| Evidence and parsing | Immutable raw evidence, sealed inventories, versioned parsers, adoption and replay                                                          | Older permanently blocked terminals remain blocked; partial or unsupported shapes remain explicit                          |
-| Scheduling           | Fourteen active alarm jobs: twelve daily collectors, SBI VC keepalive and Processor tick; two unsupported source jobs disabled              | Maintenance research is manually refreshed; a saved setting with pending reservation is not an armed alarm                 |
-| UI                   | Evidence/history, transactions, balances, positions, reported state, card review and schedule settings                                      | A view or empty list is not proof of complete financial coverage                                                           |
-| Identity             | Source-local identities, mappings and append-only decisions                                                                                 | Cross-source account/instrument equivalence and unresolved identities still need review                                    |
-| Card flows           | Vpass/MyJCB single-payment purchase/refund recognition, pending-to-posted review, statement/debit review with SMBC and SBI Shinsei adapters | Full source coverage, installments/revolving/bonus rows, partial payments and refund allocation are incomplete             |
-| State                | Provider-reported balances, holdings, valuations and card payables on a date                                                                | Full event-reconstructed balances/positions and all liabilities are incomplete                                             |
-| Rewards              | Bucket/quantity/observed-expiry display, claim/read projections and pure simulation components                                              | Useful forecasts need actual activity, verified rules, membership and applicable offers; no external exchange is performed |
-| Valuation/reports    | Provider price claims, pure valuation components and fixed report artifacts                                                                 | No general external price/FX acquisition or complete portfolio valuation product                                           |
-| Cost basis/P&L/tax   | Typed input/policy gates and decomposition components                                                                                       | `costBasis()` always returns `needs-policy`; lots, disposal allocation and complete P&L/tax outputs are absent             |
-| AI/MCP               | Shared query/explanation/proposal service and `/mcp` transport exist                                                                        | Agent grants are empty; maintenance has no MCP tool; client access is not established by having an adapter                 |
+| Area                 | Implemented                                                                                                                                                     | Remaining boundary                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Collection           | Twelve enabled daily collector schedules, shared raw evidence and source-specific manual paths; separate PRESTIA bank Worker implemented                        | A collector's presence does not prove every account/data type is captured or published                                     |
+| Evidence and parsing | Immutable raw evidence, sealed inventories, versioned parsers, adoption and replay                                                                              | Older permanently blocked terminals remain blocked; partial or unsupported shapes remain explicit                          |
+| Scheduling           | Fourteen active alarm jobs: twelve daily collectors, SBI VC keepalive and Processor tick; two unsupported source jobs and the pending PRESTIA bank job disabled | Maintenance research is manually refreshed; a saved setting with pending reservation is not an armed alarm                 |
+| UI                   | Evidence/history, transactions, balances, positions, reported state, card review and schedule settings                                                          | A view or empty list is not proof of complete financial coverage                                                           |
+| Identity             | Source-local identities, mappings and append-only decisions                                                                                                     | Cross-source account/instrument equivalence and unresolved identities still need review                                    |
+| Card flows           | Vpass/MyJCB single-payment purchase/refund recognition, pending-to-posted review, statement/debit review with SMBC and SBI Shinsei adapters                     | Full source coverage, installments/revolving/bonus rows, partial payments and refund allocation are incomplete             |
+| State                | Provider-reported balances, holdings, valuations and card payables on a date                                                                                    | Full event-reconstructed balances/positions and all liabilities are incomplete                                             |
+| Rewards              | Bucket/quantity/observed-expiry display, claim/read projections and pure simulation components                                                                  | Useful forecasts need actual activity, verified rules, membership and applicable offers; no external exchange is performed |
+| Valuation/reports    | Provider price claims, pure valuation components and fixed report artifacts                                                                                     | No general external price/FX acquisition or complete portfolio valuation product                                           |
+| Cost basis/P&L/tax   | Typed input/policy gates and decomposition components                                                                                                           | `costBasis()` always returns `needs-policy`; lots, disposal allocation and complete P&L/tax outputs are absent             |
+| AI/MCP               | Shared query/explanation/proposal service and `/mcp` transport exist                                                                                            | Agent grants are empty; maintenance has no MCP tool; client access is not established by having an adapter                 |
 
 ## Source and execution blockers
+
+- The [PRESTIA bank Worker](../services/collector-prestia-bank/) registers sanitized
+  account-summary snapshots separately from GLOBAL PASS. Native-currency available
+  amounts and term principal are balances; bank yen equivalents and three monthly
+  qualification averages are non-additive valuations exposed through existing
+  observation details, not added to native balance rows. Synthetic tests cover the
+  production run plan through registration, parsing, publication and readback.
+  Local authenticated page evidence is not deployed Worker evidence. Deployment,
+  first production collection/publication and separate schedule activation remain
+  pending; its daily 06:30 JST alarm is disabled. See [ADR 0042](adr/0042-prestia-bank-worker.md),
+  the [plan](plans/2026-10-prestia-bank-worker.md) and the
+  [dated source update](sources/prestia.md#prestia-bank-worker-integration-2026-10-05).
 
 - Vpass collector statement pages remain withheld from a parser dataset pending
   trustworthy card-identity continuity. Saved pages are not automatically usable
@@ -30,10 +43,19 @@ are separate claims. Historical acceptance records are linked from the
   [ADR 0022](adr/0022-registration-artifact-datasets.md).
 - MyJCB partial/unsafe unit coverage is not promoted into complete statement
   evidence. GLOBAL PASS pagination support does not by itself prove that a
-  particular production month's capture and parse are complete. A GLOBAL PASS
-  month the collector proves empty (no Found line, no pager, no table) is read
-  as no rows by `global-pass-activity@1.2.0`; it was observed in English only
-  and no shared run has stored one yet. See
+  particular production month's capture and parse are complete.
+- GLOBAL PASS shared-run pages have no observations: the first run to be
+  admitted (2026-10-04, one page per selected month) had both pages refused
+  by `global-pass-activity@1.1.0` (`parser_rejected`), which still reads the
+  importer-era pages 1.0.0 read. Which check refused them is not stored; the
+  owner's counts-only replay
+  (`replay-diagnostics.ts globalpass-activity 2`, see
+  [operations](operations.md#replaying-a-parser-rejection)) names it. See
+  [observations](observations.md#global-pass-the-first-shared-run-pages-were-refused-no-parser-release).
+  A month the collector proves empty (no Found line, no pager, no table) was
+  refused by 1.1.0 too; `global-pass-activity@1.2.0` reads it as no rows. The
+  empty month was observed in English only and no shared run has stored one
+  yet. See
   [observations](observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).
 - Money Forward identity revisions and the SBI Shinsei bank adapter are
   implemented; fresh production adoption/mapping counts are not asserted here.
@@ -50,7 +72,7 @@ are separate claims. Historical acceptance records are linked from the
 The committed [App config](../services/app/wrangler.jsonc) and
 [Processor config](../services/processor/wrangler.jsonc) enable their existing
 boolean feature flags, including scheduling, operations, purchase recognition,
-rewards, reports and READ projections. CORE migrations reach 0065; READ reaches 0002. These are repository facts, not live database/deployment readback.
+rewards, reports and READ projections. CORE migrations reach 0066; READ reaches 0002. These are repository facts, not live database/deployment readback.
 
 App names a human operator in `OPERATOR_SUBJECTS`. `AGENT_GRANTS` and
 `AGENT_API_GRANTS` remain empty. The MCP handler requires an agent-API grant

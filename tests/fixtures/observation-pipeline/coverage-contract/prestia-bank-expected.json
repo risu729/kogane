@@ -1,0 +1,307 @@
+{
+  "prestia-bank-balances": {
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "prestia-bank:account:3141592:JPY",
+          "metric": "available_balance",
+          "amountText": "314",
+          "amountScale": 0,
+          "amountMinor": 314,
+          "instrument": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=yen-deposits;table=ordinary;row=1",
+          "extra": {
+            "providerProductLabel": "合成円口座",
+            "accountNumber": "3141592",
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "yen-deposits",
+              "identityOrigin": "provider-account-currency-and-deposit",
+              "timeBasis": "provider-current"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "prestia-bank:account:24682468:JPY",
+          "metric": "available_balance",
+          "amountText": "718",
+          "amountScale": 0,
+          "amountMinor": 718,
+          "instrument": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=yen-deposits;table=ordinary;row=2",
+          "extra": {
+            "providerProductLabel": "合成投資円口座",
+            "accountNumber": "24682468",
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "yen-deposits",
+              "identityOrigin": "provider-account-currency-and-deposit",
+              "timeBasis": "provider-current"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "prestia-bank:account:24682468:EUR",
+          "metric": "available_balance",
+          "amountText": "12.3400",
+          "amountScale": 4,
+          "instrument": "EUR",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=foreign-deposits;table=ordinary;row=1",
+          "extra": {
+            "providerProductLabel": "合成外貨口座",
+            "accountNumber": "24682468",
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "foreign-deposits",
+              "identityOrigin": "provider-account-currency-and-deposit",
+              "timeBasis": "provider-current"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "prestia-bank:account:13571357:CHF",
+          "metric": "available_balance",
+          "amountText": "4.123",
+          "amountScale": 3,
+          "instrument": "CHF",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=foreign-deposits;table=ordinary;row=2",
+          "extra": {
+            "providerProductLabel": "合成外貨口座",
+            "accountNumber": "13571357",
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "foreign-deposits",
+              "identityOrigin": "provider-account-currency-and-deposit",
+              "timeBasis": "provider-current"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "prestia-bank:account:86428642:KWD",
+          "metric": "available_balance",
+          "amountText": "0.00750",
+          "amountScale": 5,
+          "instrument": "KWD",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=foreign-deposits;table=ordinary;row=3",
+          "extra": {
+            "providerProductLabel": "合成外貨口座",
+            "accountNumber": "86428642",
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "foreign-deposits",
+              "identityOrigin": "provider-account-currency-and-deposit",
+              "timeBasis": "provider-current"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "prestia-bank:account:24682468:EUR:deposit:54321",
+          "metric": "term_deposit_principal",
+          "amountText": "700.230",
+          "amountScale": 3,
+          "instrument": "EUR",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=foreign-deposits;table=term;row=1",
+          "extra": {
+            "providerProductLabel": "合成外貨定期",
+            "accountNumber": "24682468",
+            "depositNumber": "54321",
+            "maturityDate": "2040-02-29",
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "foreign-deposits",
+              "identityOrigin": "provider-account-currency-and-deposit",
+              "timeBasis": "provider-current"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "prestia-bank:group:yen-deposits",
+          "subject": "yen-deposits",
+          "metric": "provider_balance_group_total",
+          "amountText": "1032",
+          "amountScale": 0,
+          "amountMinor": 1032,
+          "currency": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=yen-deposits;summary-row=1",
+          "extra": {
+            "providerLabel": "総額",
+            "providerCalculationNotes": [
+              "総額は、外貨建て預入金額を最新のTTBレートにて円換算した金額の合計を表示しております。",
+              "流動性預金とは定期預金を除いた円および外貨のすべての預金残高を示します。上記の月間平均総取引残高は前営業日時点の情報をもとに計算した参考値です。"
+            ],
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "yen-deposits",
+              "aggregationRule": "non-additive",
+              "timeBasis": "provider-current"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "prestia-bank:group:foreign-deposits",
+          "subject": "foreign-deposits",
+          "metric": "provider_yen_equivalent",
+          "amountText": "98765",
+          "amountScale": 0,
+          "amountMinor": 98765,
+          "currency": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=foreign-deposits;summary-row=1",
+          "extra": {
+            "providerLabel": "総額",
+            "providerCalculationNotes": [
+              "総額は、外貨建て預入金額を最新のTTBレートにて円換算した金額の合計を表示しております。",
+              "流動性預金とは定期預金を除いた円および外貨のすべての預金残高を示します。上記の月間平均総取引残高は前営業日時点の情報をもとに計算した参考値です。"
+            ],
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "foreign-deposits",
+              "aggregationRule": "non-additive",
+              "timeBasis": "provider-current",
+              "valuationBasis": "bank-latest-ttb",
+              "valuationScope": "foreign-deposits-group",
+              "allocation": "not-stated"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "prestia-bank:group:money-trust",
+          "subject": "money-trust",
+          "metric": "provider_balance_group_total",
+          "amountText": "42",
+          "amountScale": 0,
+          "amountMinor": 42,
+          "currency": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=money-trust;summary-row=1",
+          "extra": {
+            "providerLabel": "総額",
+            "providerCalculationNotes": [
+              "総額は、外貨建て預入金額を最新のTTBレートにて円換算した金額の合計を表示しております。",
+              "流動性預金とは定期預金を除いた円および外貨のすべての預金残高を示します。上記の月間平均総取引残高は前営業日時点の情報をもとに計算した参考値です。"
+            ],
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "money-trust",
+              "aggregationRule": "non-additive",
+              "timeBasis": "provider-current"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "prestia-bank:relationship",
+          "subject": "total-relationship",
+          "metric": "provider_monthly_average_total_relationship_balance",
+          "amountText": "125678",
+          "amountScale": 0,
+          "amountMinor": 125678,
+          "currency": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=monthly-average;summary-row=1",
+          "extra": {
+            "providerLabel": "月間平均総取引残高",
+            "providerCalculationNotes": [
+              "総額は、外貨建て預入金額を最新のTTBレートにて円換算した金額の合計を表示しております。",
+              "流動性預金とは定期預金を除いた円および外貨のすべての預金残高を示します。上記の月間平均総取引残高は前営業日時点の情報をもとに計算した参考値です。"
+            ],
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "monthly-average",
+              "aggregationRule": "non-additive",
+              "timeBasis": "provider-monthly-average",
+              "periodBasis": "provider-reference-at-previous-business-day",
+              "periodStatus": "not-stated"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "prestia-bank:relationship",
+          "subject": "foreign-currency",
+          "metric": "provider_monthly_average_foreign_currency_balance",
+          "amountText": "111111",
+          "amountScale": 0,
+          "amountMinor": 111111,
+          "currency": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=monthly-average;summary-row=2",
+          "extra": {
+            "providerLabel": "うち外貨部分",
+            "providerCalculationNotes": [
+              "総額は、外貨建て預入金額を最新のTTBレートにて円換算した金額の合計を表示しております。",
+              "流動性預金とは定期預金を除いた円および外貨のすべての預金残高を示します。上記の月間平均総取引残高は前営業日時点の情報をもとに計算した参考値です。"
+            ],
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "monthly-average",
+              "aggregationRule": "non-additive",
+              "timeBasis": "provider-monthly-average",
+              "periodBasis": "provider-reference-at-previous-business-day",
+              "periodStatus": "not-stated"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "prestia-bank:relationship",
+          "subject": "liquid-deposits",
+          "metric": "provider_monthly_average_liquid_deposit_balance",
+          "amountText": "1579",
+          "amountScale": 0,
+          "amountMinor": 1579,
+          "currency": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:group=monthly-average;summary-row=3",
+          "extra": {
+            "providerLabel": "うち流動性預金部分",
+            "providerCalculationNotes": [
+              "総額は、外貨建て預入金額を最新のTTBレートにて円換算した金額の合計を表示しております。",
+              "流動性預金とは定期預金を除いた円および外貨のすべての預金残高を示します。上記の月間平均総取引残高は前営業日時点の情報をもとに計算した参考値です。"
+            ],
+            "_kogane": {
+              "captureProvenance": "sanitized_provider_capture",
+              "group": "monthly-average",
+              "aggregationRule": "non-additive",
+              "timeBasis": "provider-monthly-average",
+              "periodBasis": "provider-reference-at-previous-business-day",
+              "periodStatus": "not-stated"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "error": true
+    }
+  }
+}
