@@ -120,7 +120,15 @@ public Ubuntu runner; each processor runner uses one serial Bun test process.
 The processor tests read Miniflare's synchronous Node-side proxy through `services/processor/test/miniflare-sync-proxy.ts`,
 preloaded by `services/processor/bunfig.toml`: under that load Miniflare's
 blocked caller could read its port before the helper thread's reply was on it,
-and that one early read failed every later call of the file. hk's `repository` check
+and that one early read failed every later call of the file. The same preload
+also restores Miniflare's locked npm Undici implementation through
+`services/processor/test/miniflare-http-proxy.ts`. Bun's built-in Undici fetch
+ignores its dispatcher, bypassing Miniflare's per-runtime connection ownership,
+original-URL routing and `reset = true` connection closure. Regression tests
+verify routing, closure and R2 usability after a separate runtime is disposed.
+This restores Miniflare's transport contract without retries or changed test
+deadlines; the exact socket-close race behind the observed CI `ECONNRESET`
+remains inferred. The change affects the test process only. hk's `repository` check
 invokes this graph, never `check` or `verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the
 deployment ledger and existing operational instructions working. Workspace
 checks use native names; `ci:<short>` aliases are not retained. New code and docs
