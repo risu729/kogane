@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { inspectContainers } from "./ci/container-preflight.mjs";
+import {
+  inspectContainers,
+  containerPreflight,
+  probeRegistryCredentials,
+} from "./ci/container-preflight.mjs";
 
 const accountId = "a".repeat(32);
 const token = "synthetic-token-must-not-appear";
@@ -414,4 +418,207 @@ test("plain Node imports the shared resource guard without running its CLI or is
     { encoding: "utf8" },
   );
   expect(stdout).toBe("guard-only");
+});
+
+test("preflight defaults to GET-only and explicit boolean true adds exactly one fixed credential POST", async () => {
+  for (const mode of [undefined, false, true]) {
+    const calls: { method: string; path: string }[] = [];
+    const credentials = {
+      account_id: "synthetic-internal-uuid",
+      username: "synthetic-private-username",
+      password: "synthetic-private-password",
+      registry_host: "registry.cloudflare.com",
+    };
+    const result = await containerPreflight({
+      accountId,
+      token,
+      registryCredentialProbe: mode,
+      fetchImpl: async (input: string, init: RequestInit) => {
+        const url = new URL(input);
+        expect(url.origin).toBe("https://api.cloudflare.com");
+        expect(url.pathname.startsWith(`/client/v4/accounts/${accountId}/`)).toBe(true);
+        expect(init.redirect).toBe("manual");
+        calls.push({ method: init.method!, path: url.pathname });
+        if (init.method === "POST") {
+          expect(url.pathname).toBe(
+            `/client/v4/accounts/${accountId}/containers/registries/registry.cloudflare.com/credentials`,
+          );
+          expect(init.body).toBe(JSON.stringify({ expiration_minutes: 5, permissions: ["pull"] }));
+          return Response.json({ success: true, result: credentials });
+        }
+        expect(init.method).toBe("GET");
+        expect(init.body).toBeUndefined();
+        return Response.json({
+          success: true,
+          result: url.pathname.endsWith("/versions") ? [] : {},
+        });
+      },
+    });
+    const posts = calls.filter((call) => call.method === "POST");
+    expect(posts).toHaveLength(mode === true ? 1 : 0);
+    expect(calls.slice(0, 10).every((call) => call.method === "GET")).toBe(true);
+    if (mode === true) {
+      expect(calls.at(-1)?.method).toBe("POST");
+      expect(result.credentialProbe).toEqual({
+        operation: "registry_pull_credentials",
+        method: "POST",
+        httpStatus: 200,
+        credentialShapeValid: true,
+      });
+    } else expect(result.credentialProbe).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("synthetic-private");
+    expect(JSON.stringify(result)).not.toContain(credentials.account_id);
+    expect(JSON.stringify(result)).not.toContain(token);
+  }
+});
+
+test("probe rejects missing or wrong required fields and never returns credentials", async () => {
+  const valid = {
+    account_id: "synthetic-internal-account",
+    username: "private-user",
+    password: "private-password",
+    registry_host: "registry.cloudflare.com",
+  };
+  for (const result of [
+    null,
+    [],
+    "private-provider-text",
+    { ...valid, account_id: undefined },
+    { ...valid, username: "" },
+    { ...valid, password: null },
+    { ...valid, registry_host: "example.invalid" },
+  ]) {
+    let calls = 0;
+    await expect(
+      probeRegistryCredentials({
+        accountId,
+        token,
+        fetchImpl: async () => {
+          calls++;
+          return Response.json({ success: true, result });
+        },
+      }),
+    ).rejects.toThrow("container_preflight_registry_credential_shape");
+    expect(calls).toBe(1);
+  }
+});
+
+test("probe preserves strict 200, reports only closed diagnostics and does not retry", async () => {
+  for (const status of [201, 302, 401, 403, 429, 500]) {
+    const diagnostics: unknown[] = [];
+    let calls = 0;
+    await expect(
+      probeRegistryCredentials({
+        accountId,
+        token,
+        reportDiagnostic: (entry: unknown) => diagnostics.push(entry),
+        fetchImpl: async () => {
+          calls++;
+          return new Response("private-provider-text", { status });
+        },
+      }),
+    ).rejects.toThrow("cf_container_api_http");
+    expect(calls).toBe(1);
+    expect(diagnostics).toEqual([
+      {
+        code: "cf_container_api_http",
+        operation: "registry_pull_credentials",
+        method: "POST",
+        httpStatus: status,
+      },
+    ]);
+    expect(JSON.stringify(diagnostics)).not.toContain(token);
+    expect(JSON.stringify(diagnostics)).not.toContain("private-provider-text");
+  }
+});
+
+test("invalid opt-in or a failing GET cannot mint a registry credential", async () => {
+  let calls = 0;
+  for (const mode of ["true", "false", 1, null]) {
+    await expect(
+      containerPreflight({
+        accountId,
+        token,
+        registryCredentialProbe: mode,
+        fetchImpl: async () => {
+          calls++;
+          throw new Error("unexpected");
+        },
+      }),
+    ).rejects.toThrow("container_preflight_probe_mode");
+  }
+  expect(calls).toBe(0);
+  await expect(
+    containerPreflight({
+      accountId,
+      token,
+      registryCredentialProbe: true,
+      fetchImpl: async (_input: string, init: RequestInit) => {
+        calls++;
+        expect(init.method).toBe("GET");
+        return new Response("private-provider-text", { status: 403 });
+      },
+    }),
+  ).rejects.toThrow("container_preflight_account_http_403");
+  expect(calls).toBe(1);
+});
+
+test("workflow keeps the registry credential probe false by default and uses only an environment value", () => {
+  const workflow = readFileSync(
+    new URL("../../.github/workflows/container-preflight.yml", import.meta.url),
+    "utf8",
+  );
+  expect(workflow).toContain("registry-credential-probe:");
+  expect(workflow).toContain("type: boolean");
+  expect(workflow).toContain("default: false");
+  expect(workflow).toContain("REGISTRY_CREDENTIAL_PROBE: ${{ inputs.registry-credential-probe }}");
+  expect(workflow).toContain("run: node tasks/_lib/ci/container-preflight.mjs");
+  expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
+});
+
+test("plain Node preflight CLI keeps default GET-only and never prints a minted credential", () => {
+  const script = new URL("./ci/container-preflight.mjs", import.meta.url).href;
+  const bootstrap = `
+    const resource = process.argv[1];
+    let posts = 0;
+    globalThis.fetch = async (input, init) => {
+      if (init.method === "POST") {
+        if (process.env.REGISTRY_CREDENTIAL_PROBE !== "true" || ++posts !== 1) throw new Error("unexpected probe");
+        if (!input.endsWith("/containers/registries/registry.cloudflare.com/credentials")) throw new Error("wrong path");
+        if (init.body !== JSON.stringify({expiration_minutes:5,permissions:["pull"]})) throw new Error("wrong body");
+        return Response.json({success:true,result:{account_id:"private-account",username:"private-user",password:"private-password",registry_host:"registry.cloudflare.com"}});
+      }
+      if (init.method !== "GET") throw new Error("unexpected method");
+      return Response.json({success:true,result:input.endsWith("/versions")?[]:{}});
+    };
+    process.argv[1] = new URL(resource).pathname;
+    await import(resource);
+    if (posts !== (process.env.REGISTRY_CREDENTIAL_PROBE === "true" ? 1 : 0)) process.exitCode = 1;
+  `;
+  for (const mode of ["false", "true"]) {
+    const stdout = execFileSync("node", ["--input-type=module", "-e", bootstrap, script], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CLOUDFLARE_ACCOUNT_ID: accountId,
+        CLOUDFLARE_API_TOKEN: token,
+        REGISTRY_CREDENTIAL_PROBE: mode,
+      },
+    });
+    const lines = stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(lines).toHaveLength(mode === "true" ? 2 : 1);
+    expect(lines[0].targets).toBe(3);
+    if (mode === "true")
+      expect(lines[1]).toEqual({
+        operation: "registry_pull_credentials",
+        method: "POST",
+        httpStatus: 200,
+        credentialShapeValid: true,
+      });
+    expect(stdout).not.toContain("private-");
+    expect(stdout).not.toContain(token);
+  }
 });

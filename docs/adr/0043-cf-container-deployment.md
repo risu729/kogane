@@ -1,6 +1,6 @@
 # ADR 0043: Deploy the remaining Container Workers through cf
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-05
 
 ## Context
@@ -29,7 +29,7 @@ source and does not wake a bank collector to verify deployment.
 
 ## Decision
 
-Prepare option 3. All seventeen entries declare cf; only the three Container
+Adopt option 3. All seventeen entries declare cf; only the three Container
 entries select `production-strategy: deploy` and explicit `deploy-triggers: true`.
 The shared Action still verifies its returned Worker version at 100%. It also
 synchronizes triggers as part of full deploy. These three configurations have no
@@ -43,11 +43,11 @@ exact v2.1.1 Action synchronizes prebuilt triggers after its 100% version
 readback; pinned cf beta12 applies the configured workers.dev/preview flags.
 PRESTIA adds no route, custom domain or schedule activation.
 
-The draft pins the approved and released Action v2.2.0 at its immutable release
-commit. Action PR #109 has been independently reviewed, approved by the owner,
-and merged. No temporary pinact exception remains. This Container migration
-still requires the authenticated preflight and validation gates below before
-merge or publication.
+The workflow pins the approved and released Action v2.2.0 at its immutable
+release commit. Action PR #109 has been independently reviewed, approved by the
+owner, and merged. No temporary pinact exception remains. PR #438 merged after
+the authenticated preflight and validation gates below.
+Every publication still requires the application and image readback gates.
 
 Each cf build creates its Docker image on the same daemon that later publishes
 it. A separate image manifest records the local tag, Docker image ID, daemon ID,
@@ -128,7 +128,7 @@ manifest/ledger entrypoints remain in use.
   both normalized St.George SQLite exports and an immutable image reference.
 - Docker is unavailable in the local development container. Hosted CI builds
   and validates the three native cf outputs and inspects actual local Docker
-  image IDs; these checks must pass before promotion from draft.
+  image IDs. The final signed PR head passed these checks before merge.
 - Read-only preflight 37231245363 observed three matches to the Cloudflare account
   ID, zero to Containers /me.id, and three registry namespaces matching
   /me.external_account_id. Strict Cloudflare-ID comparison is retained.
@@ -159,8 +159,23 @@ manifest/ledger entrypoints remain in use.
   container lacks Docker: seven Docker-dependent checks could not run. Hosted
   CI passed those same seven checks at that exact revision. The shared Action
   approval was granted and Action PR 109 merged; no further Action approval is
-  outstanding. The final Kogane revision still requires its independent review
-  and hosted checks before merge; production verification remains separate.
+  outstanding. The final signed Kogane PR head,
+  3a6ab4494d9062518df286432b85e1178890dbab, passed independent review
+  (116 focused tests, 1471 assertions) and hosted CI 37233558645, including
+  the real Docker checks. CodeQL 37233556481 also passed. PR #438 merged
+  normally as 1b484a0a082f73818b20a79aea0e49001b3465c2. Production
+  verification remains separate.
+
+- The first full cf Container release, 37235079565 at source
+  1875263d91e77e6a5fd557dc279284a091a22798, published the GlobalPass Worker,
+  then failed its Container postcheck with cf_container_api_http. The release
+  ledger correctly records GlobalPass as failed and the other sixteen Workers
+  as skipped. The original error did not retain the failing operation or HTTP
+  status, so its historical cause is not established. Quiet GET-only preflight
+  37237772405 subsequently passed on the same source at
+  2026-10-04 21:51:57 UTC: all three identity/resource/namespace and 100%
+  allocation checks matched, with zero active/assigned instances and no active
+  rollouts. This does not substitute for immutable registry image verification.
 
 Sources: [cf project configuration](https://developers.cloudflare.com/cf/projects/cloudflare-config/),
 [Container rollouts](https://developers.cloudflare.com/containers/configuration/rollouts/),
