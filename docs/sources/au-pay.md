@@ -1,5 +1,10 @@
 # au PAY API family 調査
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 - 調査日: 2026-08-26（Australia/Sydney）
 - 対象: 個人向け au PAY 残高、コード／ネット／プリペイド決済、チャージ、送金・受取・出金の read 表示、および同じ au ID から参照できる au PAY（auかんたん決済）と Ponta ポイントの境界。
 - 対象外: au PAY for BIZ、au PAY マーケットの購入台帳、au PAY スマートローン、auじぶん銀行口座、Suica、au PAY カードのクレジット台帳。アプリに表示されても別 source とする。

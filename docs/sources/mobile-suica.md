@@ -1,5 +1,10 @@
 # Mobile Suica / JRE ID / JRE POINT source assessment
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 Status: unattended Browser Rendering login, Worker collection, and private R2 storage validated, 2026-08-31
 
 Scope: consumer-owned Mobile Suica SF data and the directly related JRE ID / JRE POINT data paths
