@@ -17,6 +17,58 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## GLOBAL PASS: the first shared-run pages were refused (no parser release)
+
+2026-10-04. The first nightly GLOBAL PASS run after the page walk was
+deployed (fetch_run 989, 2026-10-04 18:18Z) registered `success` with two
+activity artifacts, one page per selected month (`activity-YYYY-MM.html`, no
+`-pN` page), so for the first time a shared-run GLOBAL PASS page was admitted
+to parsing. `global-pass-activity@1.1.0` refused both: two `error` parse runs
+with `parser_rejected`, one attempt each in the incremental lane. Aggregate
+queries only:
+
+- **The parser reads the importer-era captures as before.** The repair lane
+  re-read the 48 importer-era pages 1.0.0 had parsed, and 1.1.0 parses them
+  `ok`; the 22 that 1.0.0 refused, 1.1.0 refuses too. So what 1.1.0 refuses
+  is the collector's capture (`page.content()` through
+  `sanitizeGlobalPassActivityHtml`), not a regression of 1.1.0.
+- **Which check refused them is not stored.** `parse_runs.error` holds only
+  the closed code `parser_rejected`.
+- **The sanitizer keeps what the parser reads, on synthetic evidence.** The
+  collector's synthetic page of either reviewed variant, carrying the
+  parser's synthetic statement and the pager in its surveyed markup, parses
+  after sanitizing exactly as the statement alone (a one-page month, a walked
+  page 2, the pager in Japanese). One synthetic mismatch is known and is the
+  parser's documented limit, not a sanitizer defect: a month the collector
+  calls empty (no Found line, no pager, no table) is refused with the
+  activity-table cardinality check, because zero-table pages stay unsupported
+  until the provider's explicit empty state is established
+  ([below](#remaining-globalpass-shape-investigation-2026-09-08); 20 of the 22
+  importer-era refusals were such pages).
+
+So either both stored pages are months the collector proved empty (the
+known limit above; a one-page month is also what an empty month looks like)
+or they differ from the synthetic contract in something only their R2 bytes
+show, which this change did not read. The replay tells the two apart: an
+empty month is `table_cardinality` with no table and no pager block in its
+shape. No parser, collector or
+sanitizer changed. The counts-only replay now covers GLOBAL PASS: each
+rejection prints a closed code per throw site of `global-pass-activity` and
+a `shape` line with booleans and counts of everything its admission checks
+read ([operations](operations.md#replaying-a-parser-rejection)). The owner
+runs
+
+```sh
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts globalpass-activity 2
+```
+
+and shares the `category` and `shape` lines; the next change follows what
+they report. Until then no shared-run GLOBAL PASS page has observations, and
+the read model shows only the importer-era months. Tests:
+`services/processor/test/global-pass-rejection.test.ts`,
+`services/processor/test/parser-rejection.test.ts` (the selection),
+`packages/parsers/test/global-pass-sanitized-contract.test.ts`.
+
 ## GLOBAL PASS walked months and page-qualified external ids (activity parser 1.1.0)
 
 2026-10-04. Production (fetch_run 903, 2026-09-29) stored both selected

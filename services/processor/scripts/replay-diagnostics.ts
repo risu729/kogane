@@ -2,9 +2,14 @@
 // categories only. Never log raw payloads or provider error strings.
 //
 //   bun services/processor/scripts/replay-diagnostics.ts [parser] [maxReplays] [artifactId]
+//   bun services/processor/scripts/replay-diagnostics.ts globalpass-activity[@version] [maxReplays] [artifactId]
 //
 // `parser` is an exact registered parser name (filtered in SQL) or, as before,
-// a substring of one. Every wrangler call is a D1 SELECT or an R2 object read
+// a substring of one. `globalpass-activity` selects the stored GLOBAL PASS
+// activity pages whose latest `global-pass-activity` parse (of `version`, when
+// given) was rejected, newest fetch run first (`globalPassReplaySelectionSql`),
+// and prints each refused page's counts-only shape. Every wrangler call is a
+// D1 SELECT or an R2 object read
 // through `wrangler.diagnostic.jsonc`; nothing is written anywhere. Each
 // rejection prints its closed category (scripts/parser-rejection.ts) and the
 // last line is a count per category.
@@ -14,6 +19,10 @@ import { parseCsv } from "../../../packages/parsers/src/parsers/util.ts";
 import { decimalText } from "../../../packages/parsers/src/parsers/util.ts";
 import {
   classifyParserRejection,
+  GLOBAL_PASS_ACTIVITY_PARSER,
+  GLOBAL_PASS_SELECTION,
+  globalPassActivityShape,
+  globalPassReplaySelectionSql,
   replaySelectionSql,
   replayStatementMetadata,
   skipScheduleShape,
@@ -33,13 +42,20 @@ async function command(args: string[]): Promise<Uint8Array> {
   return output;
 }
 const parserArgument = process.argv[2] || undefined;
-const sql = replaySelectionSql(
-  parserArgument === undefined
-    ? {}
-    : PARSERS.some((parser) => parser.name === parserArgument)
-      ? { parser: parserArgument }
-      : { substring: parserArgument },
-);
+const versionAt = (parserArgument ?? "").indexOf("@");
+const selectionName = versionAt < 0 ? parserArgument : parserArgument!.slice(0, versionAt);
+const sql =
+  selectionName === GLOBAL_PASS_SELECTION
+    ? globalPassReplaySelectionSql(
+        versionAt < 0 ? {} : { version: parserArgument!.slice(versionAt + 1) },
+      )
+    : replaySelectionSql(
+        parserArgument === undefined
+          ? {}
+          : PARSERS.some((parser) => parser.name === parserArgument)
+            ? { parser: parserArgument }
+            : { substring: parserArgument },
+      );
 const result = JSON.parse(
   new TextDecoder().decode(
     await command(["d1", "execute", "kogane-raw-evidence", "--remote", "--command", sql, "--json"]),
@@ -244,6 +260,13 @@ for (const row of result[0].results) {
       console.log(JSON.stringify({ artifact: row.id, shape: topActivityShape(bytes) }));
     if (row.parser_name === "myjcb-skip-payment-schedule")
       console.log(JSON.stringify({ artifact: row.id, shape: skipScheduleShape(bytes) }));
+    if (row.parser_name === GLOBAL_PASS_ACTIVITY_PARSER)
+      console.log(
+        JSON.stringify({
+          artifact: row.id,
+          shape: globalPassActivityShape(bytes, row.artifact_key),
+        }),
+      );
     const category = classifyParserRejection(parser.name, error);
     const key = JSON.stringify([parser.name, category]);
     summary[key] = (summary[key] ?? 0) + 1;

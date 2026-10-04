@@ -848,6 +848,14 @@ source note has the detail):
     logs in with a fresh browser each run and sets no cookie.
   - Whether a page 2 keeps the month selected in its month select is not in
     the report; the parser requires it and fails the page otherwise.
+  - A month proven whole in shape (a) (no Found line, no pager, no statement
+    block) is stored, but `global-pass-activity@1.1.0` refuses its page with
+    the activity-table cardinality check: zero-table pages stay unsupported
+    ([observations](../observations.md#remaining-globalpass-shape-investigation-2026-09-08)),
+    so such a month gets no observations
+    (`packages/parsers/test/global-pass-sanitized-contract.test.ts`; noted
+    2026-10-04 with the first shared-run refusal, not a change of this
+    decision).
   - The walk cap is five pages.
   - Which page a row lands on when statements are added or removed between
     two runs has not been observed. An id that names its page moves with the

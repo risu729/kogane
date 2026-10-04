@@ -1124,3 +1124,37 @@ Limits:
   marked `activity_pages_unwalked`.
 - What the pages of a month look like when a statement is added or removed
   between two runs (which page a row moves to) has not been observed.
+
+## GLOBAL PASS first shared-run parse (2026-10-04)
+
+The first nightly run after the page walk (fetch_run 989, 2026-10-04 18:18Z)
+registered `success` with one page for each of the two selected months, so
+its pages were the first shared-run GLOBAL PASS pages admitted to parsing.
+`global-pass-activity@1.1.0` refused both (`parser_rejected`). The same
+parser reads the 48 importer-era pages 1.0.0 read and refuses the 22 that
+1.0.0 refused, so the refusal is of the collector's captures. Production
+stores only the closed code, not which check refused.
+
+On synthetic pages the sanitizer leaves everything the parser reads (doctype,
+the month select's `value` and `selected`, the pager text, the tables'
+`th`/`td`), and the collector's page with the parser's synthetic statement
+parses after sanitizing
+(`packages/parsers/test/global-pass-sanitized-contract.test.ts`). An empty month
+as the collector sees it (no Found line, no pager, no table) is refused by
+the parser's table-cardinality check: zero-table pages stay unsupported
+([observations](../observations.md#remaining-globalpass-shape-investigation-2026-09-08)).
+
+Limit: which check refused the two stored pages is not known. The owner's
+counts-only replay names it
+([operations](../operations.md#replaying-a-parser-rejection)):
+
+```sh
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts globalpass-activity 2
+```
+
+Its output is a closed code per refused page (for example
+`table_cardinality`, `month_selector_selected_cardinality`,
+`header_missing`) and a shape of counts and booleans (doctype, selects and
+options, tables by `th` count, the activity table's rows by cell count and
+how many of the parser's required and the surveyed English and Japanese
+labels it has, the pager), with no text, value or date.
