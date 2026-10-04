@@ -1,6 +1,6 @@
-// Read-only Container API shape checks. Output contains aggregate counts only.
+// GET-only by default; explicit credential probe mints and discards one five-minute pull credential.
 import { pathToFileURL } from "node:url";
-import { isBasicApplicationConfiguration } from "./cf-container-release.mjs";
+import { cloudflareApi, isBasicApplicationConfiguration } from "./cf-container-release.mjs";
 
 const targets = [
   {
@@ -202,19 +202,53 @@ export async function inspectContainers({ accountId, token, fetchImpl = fetch })
   return counts;
 }
 
+/** This optional diagnostic creates a short-lived credential; it never returns that credential. */
+export async function probeRegistryCredentials(options) {
+  const result = await cloudflareApi(options)(
+    "containers/registries/registry.cloudflare.com/credentials",
+    { expiration_minutes: 5, permissions: ["pull"] },
+  );
+  if (
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
+    !["account_id", "username", "password"].every(
+      (key) => typeof result[key] === "string" && result[key].length > 0,
+    ) ||
+    result.registry_host !== "registry.cloudflare.com"
+  )
+    throw new Error("container_preflight_registry_credential_shape");
+  return {
+    operation: "registry_pull_credentials",
+    method: "POST",
+    httpStatus: 200,
+    credentialShapeValid: true,
+  };
+}
+
+export async function containerPreflight({ registryCredentialProbe = false, ...options }) {
+  if (typeof registryCredentialProbe !== "boolean")
+    throw new Error("container_preflight_probe_mode");
+  const counts = await inspectContainers(options);
+  if (!registryCredentialProbe) return { counts };
+  return { counts, credentialProbe: await probeRegistryCredentials(options) };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    console.log(
-      JSON.stringify(
-        await inspectContainers({
-          accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-          token: process.env.CLOUDFLARE_API_TOKEN,
-        }),
-      ),
-    );
+    const mode = process.env.REGISTRY_CREDENTIAL_PROBE;
+    if (mode !== undefined && mode !== "false" && mode !== "true")
+      throw new Error("container_preflight_probe_mode");
+    const result = await containerPreflight({
+      accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+      token: process.env.CLOUDFLARE_API_TOKEN,
+      registryCredentialProbe: mode === "true",
+    });
+    console.log(JSON.stringify(result.counts));
+    if (result.credentialProbe) console.log(JSON.stringify(result.credentialProbe));
   } catch (error) {
     console.error(
-      /^container_preflight_[a-z0-9_]+$/u.test(error.message)
+      /^(?:container_preflight|cf_container)_[a-z0-9_]+$/u.test(error.message)
         ? error.message
         : "container_preflight_failed",
     );

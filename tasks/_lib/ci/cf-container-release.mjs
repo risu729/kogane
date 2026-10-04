@@ -445,32 +445,75 @@ export function containerProgress(steps) {
   return result;
 }
 
-export function cloudflareApi({ accountId, token, fetchImpl = fetch }) {
+function apiOperation(path, body) {
+  if (body !== undefined) {
+    if (
+      path === "containers/registries/registry.cloudflare.com/credentials" &&
+      same(body, { expiration_minutes: 5, permissions: ["pull"] })
+    )
+      return "registry_pull_credentials";
+    fail("api_request_unknown");
+  }
+  if (path === "containers/me") return "containers_account";
+  for (const target of CONTAINER_TARGETS) {
+    if (path === `containers/applications/${target.appId}`) return "application";
+    if (path === `containers/applications/${target.appId}/versions`) return "application_versions";
+    if (path === `workers/scripts/${target.worker}/deployments`) return "worker_deployments";
+    const prefix = `workers/scripts/${target.worker}/versions/`;
+    if (
+      path.startsWith(prefix) &&
+      /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(path.slice(prefix.length))
+    )
+      return "worker_version";
+  }
+  fail("api_request_unknown");
+}
+
+/** Failure diagnostics contain only allowlisted operations, closed codes and status numbers. */
+export function cloudflareApi({
+  accountId,
+  token,
+  fetchImpl = fetch,
+  reportDiagnostic = (diagnostic) => console.error(JSON.stringify(diagnostic)),
+}) {
   if (!/^[a-f0-9]{32}$/u.test(accountId ?? "") || !token) fail("credentials_missing");
   return async (path, body) => {
+    const operation = apiOperation(path, body);
+    const method = body === undefined ? "GET" : "POST";
+    const reject = (code, status = null) => {
+      reportDiagnostic({
+        code: `cf_container_${code}`,
+        operation,
+        method,
+        httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
+      });
+      fail(code);
+    };
     let response;
     try {
       response = await fetchImpl(
         `https://api.cloudflare.com/client/v4/accounts/${accountId}/${path}`,
         {
-          method: body ? "POST" : "GET",
+          method,
           redirect: "manual",
           signal: AbortSignal.timeout(30000),
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          ...(body ? { body: JSON.stringify(body) } : {}),
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         },
       );
     } catch {
-      fail("api_unavailable");
+      reject("api_unavailable");
     }
-    if (response.status !== 200) fail("api_http");
+    // The documented response is 200. Do not guess another successful status.
+    if (response.status !== 200) reject("api_http", response.status);
     let envelope;
     try {
       envelope = await response.json();
     } catch {
-      fail("api_response");
+      reject("api_response", response.status);
     }
-    if (envelope?.success !== true || envelope.result === undefined) fail("api_response");
+    if (envelope?.success !== true || envelope.result === undefined)
+      reject("api_response", response.status);
     return envelope.result;
   };
 }

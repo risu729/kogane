@@ -366,10 +366,125 @@ describe("registry verification keeps credentials on the controlled host and rep
       }),
     ).rejects.toThrow("registry_platform_unknown");
   });
+  test("API diagnostics distinguish only admitted operations, methods and HTTP status", async () => {
+    const version = "dddddddd-dddd-4ddd-addd-dddddddddddd";
+    const cases = [
+      ["containers/me", undefined, "containers_account", "GET"],
+      [`containers/applications/${target.appId}`, undefined, "application", "GET"],
+      [
+        `containers/applications/${target.appId}/versions`,
+        undefined,
+        "application_versions",
+        "GET",
+      ],
+      [`workers/scripts/${target.worker}/deployments`, undefined, "worker_deployments", "GET"],
+      [`workers/scripts/${target.worker}/versions/${version}`, undefined, "worker_version", "GET"],
+      [
+        "containers/registries/registry.cloudflare.com/credentials",
+        { expiration_minutes: 5, permissions: ["pull"] },
+        "registry_pull_credentials",
+        "POST",
+      ],
+    ] as const;
+    for (const [path, body, operation, method] of cases) {
+      for (const status of [201, 302, 401, 403, 429, 500]) {
+        const diagnostics: unknown[] = [];
+        let calls = 0;
+        const api = cloudflareApi({
+          accountId: account,
+          token: "synthetic-private-token",
+          reportDiagnostic: (entry: unknown) => diagnostics.push(entry),
+          fetchImpl: async (_url: string, init: RequestInit) => {
+            calls++;
+            expect(init.method).toBe(method);
+            expect(init.redirect).toBe("manual");
+            return new Response("synthetic-private-provider-body", { status });
+          },
+        });
+        await expect(api(path, body)).rejects.toThrow("cf_container_api_http");
+        expect(calls).toBe(1);
+        expect(diagnostics).toEqual([
+          { code: "cf_container_api_http", operation, method, httpStatus: status },
+        ]);
+        expect(JSON.stringify(diagnostics)).not.toContain("synthetic-private");
+        expect(JSON.stringify(diagnostics)).not.toContain(target.worker);
+        expect(JSON.stringify(diagnostics)).not.toContain(target.appId);
+      }
+    }
+  });
+  test("API failures sanitize transport and malformed envelopes without reading non-200 bodies", async () => {
+    for (const failure of ["transport", "json", "envelope", "status"]) {
+      const diagnostics: unknown[] = [];
+      let readBody = false;
+      const api = cloudflareApi({
+        accountId: account,
+        token: "synthetic-private-token",
+        reportDiagnostic: (entry: unknown) => diagnostics.push(entry),
+        fetchImpl: async () => {
+          if (failure === "transport") throw new Error("synthetic-private-token");
+          return {
+            status: failure === "status" ? 403 : 200,
+            json: async () => {
+              readBody = true;
+              if (failure === "json") throw new Error("synthetic-private-body");
+              return { success: false, errors: [{ message: "synthetic-private-body" }] };
+            },
+          };
+        },
+      });
+      const code =
+        failure === "transport"
+          ? "api_unavailable"
+          : failure === "status"
+            ? "api_http"
+            : "api_response";
+      await expect(api("containers/me")).rejects.toThrow(`cf_container_${code}`);
+      expect(diagnostics).toEqual([
+        {
+          code: `cf_container_${code}`,
+          operation: "containers_account",
+          method: "GET",
+          httpStatus: failure === "transport" ? null : failure === "status" ? 403 : 200,
+        },
+      ]);
+      expect(readBody).toBe(failure === "json" || failure === "envelope");
+    }
+  });
+  test("API refuses unadmitted routes and credential parameters before sending the token", async () => {
+    let calls = 0;
+    const api = cloudflareApi({
+      accountId: account,
+      token: "synthetic-token",
+      fetchImpl: async () => {
+        calls++;
+        return Response.json({ success: true, result: {} });
+      },
+    });
+    for (const [path, body] of [
+      ["containers/applications/unknown", undefined],
+      [`workers/scripts/${target.worker}/versions/unknown`, undefined],
+      ["containers/me", {}],
+      [
+        "containers/registries/registry.cloudflare.com/credentials",
+        { expiration_minutes: 5, permissions: ["push"] },
+      ],
+      [
+        "containers/registries/registry.cloudflare.com/credentials",
+        { expiration_minutes: 10, permissions: ["pull"] },
+      ],
+      [
+        "containers/registries/example.invalid/credentials",
+        { expiration_minutes: 5, permissions: ["pull"] },
+      ],
+    ])
+      await expect(api(path, body)).rejects.toThrow("cf_container_api_request_unknown");
+    expect(calls).toBe(0);
+  });
   test("API errors expose closed codes only", async () => {
     const api = cloudflareApi({
       accountId: account,
       token: "synthetic-token",
+      reportDiagnostic: () => {},
       fetchImpl: async () => {
         throw new Error("synthetic-token private-data");
       },

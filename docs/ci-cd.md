@@ -225,7 +225,7 @@ The three Container full-deploy steps also explicitly consent to synchronization
 All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
 
-The manual **Container account readback** workflow is a read-only diagnostic for
+The manual **Container account readback** workflow defaults to a read-only diagnostic for
 these three Container owners. Dispatch it from `main` after the production
 release has finished. It checks out that exact workflow SHA and uses the existing
 production token only for fixed Cloudflare GET requests; its output contains
@@ -238,6 +238,27 @@ A successful run means the reads completed, not that every count matched or that
 a rollout is ready: API shapes and concurrent state changes can produce lower
 counts. Interpret them before any Container migration; the reads are not an
 atomic rollout proof and make no deployment or bank request.
+
+Its optional `registry-credential-probe` boolean defaults to false. Explicit true
+adds exactly one fixed managed-registry credentials POST after the GET checks,
+requesting five minutes of pull permission. This mode creates a short-lived
+credential, validates its required response fields and registry host, then discards
+it without logging, storing or exporting it. Only the fixed operation, method,
+HTTP status and shape-validation result are printed. It does not deploy, download
+an image, invoke a collector or contact a bank. The
+[credential API](https://developers.cloudflare.com/api/resources/containers/subresources/registries/subresources/credentials/methods/generate/)
+documents HTTP 200; other statuses remain failures, with no retry.
+
+Production run [37235079565](https://github.com/risu729/kogane/actions/runs/37235079565)
+published GlobalPass but failed its after-deploy guard with
+`cf_container_api_http`. The original log did not identify the operation or status;
+its historical cause remains unknown. Quiet GET-only run
+[37237772405](https://github.com/risu729/kogane/actions/runs/37237772405) later read
+all three current application identities, resource settings, namespaces and desired
+100% allocations successfully. That current snapshot does not prove the failed
+run's image verification. Shared release API failures now report only an allowlisted
+operation, GET/POST, a bounded HTTP status (or null for transport failure), and a
+closed error code. Existing deployment, image, rollout and ledger gates remain.
 
 `deployBackend` belongs to the target commit's deployment ledger. A target that
 has no `cf` marker uses the existing v1 path, including commits predating this
