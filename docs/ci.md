@@ -89,11 +89,10 @@ The root `checks` task composes `ci:root`, all workspace `ci` tasks and
 dependencies, so independent validations overlap and shared types/client builds
 run once. There is no separate post phase that repeats those prerequisites.
 They run in parallel, so no test may depend on timing that only holds on an idle
-machine. The processor test task uses `bun test --parallel=2`: two file workers
-with a fresh global and preload for every file, while tests within each file
-remain sequential. Every discovered file stays in the suite; there is no
-changed-file selection, shard selector, retry or new test exclusion. The bound
-leaves capacity for the other workspace tasks sharing the runner.
+machine. Processor tests run sequentially in one process with `bun test`,
+retaining the complete suite and existing benchmark skip policy. There is no
+changed-file selection, shard selector, retry or new test exclusion. Independent
+workspace tasks and container dry runs still run in parallel through mise.
 
 The processor tests read Miniflare's synchronous Node-side proxy through `services/processor/test/miniflare-sync-proxy.ts`,
 preloaded by `services/processor/bunfig.toml`: under that load Miniflare's
@@ -170,9 +169,8 @@ installation still needs network access.
 The workflow runs for every pull request and every push to `main`, including
 documentation-only changes, and supports manual/reusable invocation. It has no
 path filters: skipping the entire workflow would leave a required check pending.
-There are no parallel Actions matrices duplicating the mise task graph. File
-workers share the existing runner; they do not multiply hosted runner setup or
-runner minutes. The complete graph runs on `main` as well as on pull requests.
+There are no parallel Actions matrices duplicating the mise task graph. Shared
+preparation uses the existing runner, without additional hosted jobs or setup. The complete graph runs on `main` as well as on pull requests.
 
 `CI Check` treats failure, cancellation and unexpected skips as failures. Its
 name and the existing repository rule are unchanged. Successful CI on a push
@@ -197,18 +195,41 @@ Chromium installation (103.78 seconds).
 The old post phase started only after processor tests finished and took another
 approximately 62 seconds. It regenerated 19 Worker type declarations and the
 production client before validating deployments. One graph removes that serial
-tail and those repeated preparations; two processor file workers split the
-serial file workload without changing the suite or its existing benchmark
-skip policy. Native execution-plan tests check that every declared Worker type and client build command is scheduled
-once. Existing manifest and generated-input guards still enforce full workspace,
-Worker configuration and preparation coverage, and the required status still
-rejects failure, cancellation and unexpected skips.
+tail and repeated preparation. Native execution-plan tests require every
+declared Worker type and client build command once. The new guard bounds each
+of its two mise subprocesses to ten seconds and the guard itself to thirty
+seconds; existing runtime test deadlines are unchanged.
 
-These are structural changes, not a measured speedup guarantee. Worker startup,
-per-file import isolation, CPU/memory contention, container builds, dependency
-installation and hosted runner queues can limit the gain. The single `Checks`
-job continues to consume one runner; no additional hosted jobs are introduced.
-Compare its elapsed duration, test/file counts and total job duration with this
-baseline on the new pull request and its merged `main` run before claiming a
-measured reduction. Changing task scheduling does not weaken CodeQL, signature
-verification, release gates or merged-result validation.
+[Recent main CI run 37179821065](https://github.com/risu729/kogane/actions/runs/37179821065)
+passed with a 617-second `Checks` job, a 591.62-second native graph and 616
+processor tests across 66 files (615 passed; the same benchmark was skipped).
+The processor suite took 492.52 seconds. Total job durations were 623 seconds.
+
+[The first PR #418 run 37180913140](https://github.com/risu729/kogane/actions/runs/37180913140)
+tried two isolated processor file workers while sharing preparation. The
+`Checks` job failed after 746 seconds; the graph took 705.18 seconds and the
+processor suite took 651.36 seconds for 633 tests across 68 files (630 passed,
+two failed, one error was reported and the existing benchmark was skipped). Total job durations were
+752 seconds. Shared preparation did run once: 19 Worker type commands and three
+client builds, versus 38 and four in both preceding runs. Count the original
+execution output: hk repeats failed-step output in its final diagnostics.
+
+That run timed out the new native-plan guard and existing storage/processor
+cases; a timed-out producer-switch case also left an unusable Miniflare stub.
+Compared with recent main, `Checks` was 129 seconds slower (20.9%) and the
+processor suite 158.84 seconds slower (32.3%). The combined PR adds two cost-test
+files and seventeen tests, so this is not a controlled attribution of the whole
+regression to file isolation. It does show that two file workers sharing the
+runner with container builds did not meet the waiting-time or reliability goal.
+Processor tests therefore retain their serial invocation. Existing test timeouts
+are not raised to mask contention, and failures remain failures.
+
+Shared preparation remains a structural improvement, not a measured speedup
+claim. CPU/memory contention, container builds, dependency/browser installation
+and hosted runner queues can still limit the gain. The serial fallback must pass
+the complete hosted graph with the expanded coverage, and its pull-request and
+merged `main` elapsed/total job durations must be measured before claiming a
+reduction. Existing manifest and generated-input guards still enforce complete
+workspace, Worker configuration and preparation coverage. `CI Check` still
+rejects failure, cancellation and unexpected skips; CodeQL, signature
+verification, release gates and merged-result validation remain in force.

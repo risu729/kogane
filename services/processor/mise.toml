@@ -11,11 +11,11 @@ depends = ["//services/processor:types"]
 run = "./node_modules/.bin/tsc --noEmit"
 
 [tasks."test"]
-description = "Run every processor test with two isolated file workers."
+description = "Run every processor test sequentially in one process."
 depends = ["//services/processor:types"]
-# Files use independent Miniflare stores. Keep tests inside each file serial,
-# and bound worker count because other workspace checks share the CI runner.
-run = "bun test --parallel=2"
+# Other workspace checks and container dry runs share the runner. The hosted
+# run with file workers regressed and timed out; retain the complete serial suite.
+run = "bun test"
 
 [tasks."dry-run"]
 description = "Validate the services/processor deployment without uploading it."

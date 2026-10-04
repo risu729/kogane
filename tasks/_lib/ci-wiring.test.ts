@@ -55,17 +55,26 @@ test("hk still schedules repository checks with an empty Git change selection", 
 test("the complete native plan schedules shared type and client preparation once", () => {
   const listed = Bun.spawnSync(["mise", "tasks", "ls", "--all", "--json", "--hidden"], {
     cwd: REPO_ROOT,
+    timeout: 10_000,
+    killSignal: "SIGKILL",
   });
+  expect(listed.exitedDueToTimeout).not.toBe(true);
   expect(listed.exitCode).toBe(0);
   const tasks = (JSON.parse(listed.stdout.toString()) as TaskRecord[]).filter((task) =>
     task.source?.startsWith(`${REPO_ROOT}/`),
   );
   const plan = Bun.spawnSync(["mise", "run", "--dry-run", "--jobs", "1", "checks"], {
     cwd: REPO_ROOT,
+    timeout: 10_000,
+    killSignal: "SIGKILL",
     env: { ...process.env, NO_COLOR: "1" },
   });
+  expect(plan.exitedDueToTimeout).not.toBe(true);
   expect(plan.exitCode).toBe(0);
   const output = plan.stdout.toString() + plan.stderr.toString();
+  // Two synchronous mise subprocesses can exceed Bun's default five seconds
+  // under the full verification load. Bound each process and this guard only;
+  // retain the existing runtime tests' deadlines.
   // Inspect mise's actual execution plan. A separate post graph used to launch
   // every shared types task twice and the production client build twice.
   for (const command of ["./node_modules/.bin/wrangler types", "./node_modules/.bin/vite build"]) {
@@ -75,4 +84,4 @@ test("the complete native plan schedules shared type and client preparation once
     expect(expected).toBeGreaterThan(0);
     expect(output.split(`$ ${command}`).length - 1).toBe(expected);
   }
-});
+}, 30_000);
