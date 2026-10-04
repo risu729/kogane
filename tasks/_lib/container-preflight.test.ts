@@ -73,6 +73,23 @@ test("Container preflight only issues fixed-account GETs and returns counts", as
     containersAccountMatches: 3,
     externalRegistryDigestMatches: 3,
     defaultPolicyAndResourcesMatch: 3,
+    defaultSchedulingPolicies: 3,
+    missingSchedulingPolicies: 0,
+    basicInstanceTypes: 3,
+    missingInstanceTypes: 0,
+    maxInstanceLimitsMatch: 3,
+    missingMaxInstanceLimits: 0,
+    apacRegionConstraints: 3,
+    missingRegionConstraints: 0,
+    zeroActiveInstances: 0,
+    zeroAssignedInstances: 0,
+    activeRolloutsCompleted: 0,
+    activeRolloutsPending: 0,
+    activeRolloutsProgressing: 0,
+    activeRolloutsOther: 1,
+    rolloutTargetVersionMatches: 0,
+    rolloutTargetImageMatches: 0,
+    rolloutTargetPercentageAt100: 0,
     applicationsWithActiveRollout: 1,
     applicationVersionListsAreArrays: 3,
     desiredApplicationVersionAt100: 3,
@@ -183,4 +200,156 @@ test("manual preflight stays on exact main and cannot displace production releas
   expect(workflow).toContain("run: node tasks/_lib/ci/container-preflight.mjs");
   expect(workflow).not.toContain("workflow_call:");
   expect(workflow).not.toContain("secrets: inherit");
+});
+
+test("resource shapes and active rollouts are diagnosed without accepting missing settings", async () => {
+  let current = -1;
+  let rolloutReads = 0;
+  const result = await inspectContainers({
+    accountId,
+    token,
+    fetchImpl: async (input: string, init: RequestInit) => {
+      const url = new URL(input);
+      expect(url.origin).toBe("https://api.cloudflare.com");
+      expect(init.method).toBe("GET");
+      expect(init.redirect).toBe("manual");
+      let result: unknown = {};
+      if (/\/containers\/applications\/[^/]+$/u.test(url.pathname)) {
+        current++;
+        result = {
+          configuration: { image: "synthetic-image" },
+          version: 7,
+          active_rollout_id: "eeeeeeee-eeee-4eee-aeee-eeeeeeeeeeee",
+          health: { instances: { active: 0, assigned: 0 } },
+        };
+      } else if (url.pathname.endsWith("/versions")) result = [];
+      else if (url.pathname.includes("/rollouts/")) {
+        rolloutReads++;
+        expect(url.pathname).toEndWith("/rollouts/eeeeeeee-eeee-4eee-aeee-eeeeeeeeeeee");
+        result = {
+          status: ["pending", "progressing", "completed"][current],
+          target_version: 7,
+          target_configuration: { image: "synthetic-image" },
+          ...(current === 0
+            ? { percentage: 100 }
+            : current === 1
+              ? { version_distribution: { target_version_percentage: 100 } }
+              : { progress: { version_distribution: { target_version_percentage: 100 } } }),
+        };
+      }
+      return Response.json({ success: true, result });
+    },
+  });
+  expect(rolloutReads).toBe(3);
+  expect(result.defaultPolicyAndResourcesMatch).toBe(0);
+  expect(result.missingSchedulingPolicies).toBe(3);
+  expect(result.missingInstanceTypes).toBe(3);
+  expect(result.missingMaxInstanceLimits).toBe(3);
+  expect(result.missingRegionConstraints).toBe(3);
+  expect(result.zeroActiveInstances).toBe(3);
+  expect(result.zeroAssignedInstances).toBe(3);
+  expect(result.activeRolloutsPending).toBe(1);
+  expect(result.activeRolloutsProgressing).toBe(1);
+  expect(result.activeRolloutsCompleted).toBe(1);
+  expect(result.activeRolloutsOther).toBe(0);
+  expect(result.rolloutTargetVersionMatches).toBe(3);
+  expect(result.rolloutTargetImageMatches).toBe(3);
+  expect(result.rolloutTargetPercentageAt100).toBe(3);
+  expect(Object.values(result).every((value) => Number.isInteger(value))).toBe(true);
+});
+
+test("missing or malformed rollout targets cannot match missing application values", async () => {
+  for (const [version, image] of [
+    [undefined, undefined],
+    [null, null],
+    ["7", ""],
+    [7.5, ""],
+  ]) {
+    const result = await inspectContainers({
+      accountId,
+      token,
+      fetchImpl: async (input: string) => {
+        const path = new URL(input).pathname;
+        let result: unknown = {};
+        if (/\/containers\/applications\/[^/]+$/u.test(path))
+          result = {
+            version,
+            configuration: { image },
+            active_rollout_id: "eeeeeeee-eeee-4eee-aeee-eeeeeeeeeeee",
+          };
+        else if (path.includes("/rollouts/"))
+          result = { target_version: version, target_configuration: { image } };
+        return Response.json({ success: true, result });
+      },
+    });
+    expect(result.rolloutTargetVersionMatches).toBe(0);
+    expect(result.rolloutTargetImageMatches).toBe(0);
+    expect(result.rolloutTargetPercentageAt100).toBe(0);
+    expect(result.zeroActiveInstances).toBe(0);
+    expect(result.zeroAssignedInstances).toBe(0);
+  }
+});
+
+test("malformed rollout identifiers never become GET paths or output", async () => {
+  const uuid = "eeeeeeee-eeee-4eee-aeee-eeeeeeeeeeee";
+  for (const activeRolloutId of [[uuid], { id: uuid }, `${uuid}/../${token}`, token, ""]) {
+    let rolloutReads = 0;
+    let calls = 0;
+    const result = await inspectContainers({
+      accountId,
+      token,
+      fetchImpl: async (input: string, init: RequestInit) => {
+        calls++;
+        const url = new URL(input);
+        expect(url.origin).toBe("https://api.cloudflare.com");
+        expect(url.pathname.startsWith(`/client/v4/accounts/${accountId}/`)).toBe(true);
+        expect(init.method).toBe("GET");
+        expect(init.redirect).toBe("manual");
+        expect(init.body).toBeUndefined();
+        if (url.pathname.includes("/rollouts/")) rolloutReads++;
+        const result = /\/containers\/applications\/[^/]+$/u.test(url.pathname)
+          ? { active_rollout_id: activeRolloutId }
+          : {};
+        return Response.json({ success: true, result });
+      },
+    });
+    expect(rolloutReads).toBe(0);
+    expect(calls).toBe(10);
+    expect(result.applicationsWithActiveRollout).toBe(3);
+    expect(result.activeRolloutsOther).toBe(3);
+    expect(JSON.stringify(result)).not.toContain(token);
+    expect(JSON.stringify(result)).not.toContain(uuid);
+  }
+});
+
+test("rollout GET failures remain closed codes without provider text", async () => {
+  for (const [mode, expected] of [
+    ["http", "container_preflight_rollout_http_403"],
+    ["transport", "container_preflight_rollout_unavailable"],
+    ["shape", "container_preflight_rollout_response"],
+  ]) {
+    await expect(
+      inspectContainers({
+        accountId,
+        token,
+        fetchImpl: async (input: string, init: RequestInit) => {
+          const url = new URL(input);
+          expect(url.origin).toBe("https://api.cloudflare.com");
+          expect(init.method).toBe("GET");
+          expect(init.redirect).toBe("manual");
+          expect(init.body).toBeUndefined();
+          expect(init.headers).toEqual({ Authorization: `Bearer ${token}` });
+          if (url.pathname.includes("/rollouts/")) {
+            if (mode === "transport") throw new Error(token);
+            if (mode === "http") return new Response(token, { status: 403 });
+            return Response.json({ success: false, errors: [{ message: token }] });
+          }
+          const result = /\/containers\/applications\/[^/]+$/u.test(url.pathname)
+            ? { active_rollout_id: "eeeeeeee-eeee-4eee-aeee-eeeeeeeeeeee" }
+            : {};
+          return Response.json({ success: true, result });
+        },
+      }),
+    ).rejects.toThrow(expected);
+  }
 });
