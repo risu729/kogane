@@ -900,3 +900,132 @@ source note has the detail):
   covers the page-qualified key.
 - Production was read only through the owner's report (counts, shapes and
   fixed labels); no value appears here.
+
+## Amendment 2026-10-04: GLOBAL PASS empty months are read as no rows
+
+- Status: proposed; accepted when this PR merges
+- Date: 2026-10-04
+- Carried by: `packages/parsers/src/parsers/global-pass-activity.ts`
+  (1.2.0, `emptyMonthPage`),
+  [observations](../observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120),
+  [PRESTIA / GLOBAL PASS source note](../sources/prestia.md#global-pass-pager-and-page-walk-2026-10-04),
+  the tests listed under Verification
+
+### Context
+
+The amendment above calls a month whole in shape (a): one page with no Found
+line, no pager and no statement block. That shape is the owner's live
+observation of round 8 (2026-10-04, English display): a month with no
+statement shows no `Found N Result` line, no pager and no table, while a
+month of one to ten statements shows `Found N Result [1/1page]` with both
+links disabled. The month select is on every month page (the owner selects
+months from it). So since #408 a run whose selected months include an empty
+month registers `success`, and its empty page is admitted to parsing.
+
+`global-pass-activity@1.1.0` requires exactly one twelve-header activity
+table and refuses such a page (`global-pass activity table cardinality
+drift`). The run would never show the month as empty, and with the
+per-month currentness of the amendment above the month shows nothing at all,
+the same as a month never collected. The 2026-09-08 investigation in the
+observations doc kept zero-table pages unsupported until the provider's
+explicit empty state was established; the round-8 observation establishes it.
+
+The first shared run after #408 (fetch_run 989, 2026-10-04) stored two
+one-page months and 1.1.0 refused both (`parser_rejected`). Which check
+refused them is not stored; this amendment does not assume either is an
+empty month. It removes one known, observed gap.
+
+### Options considered
+
+1. **Keep refusing zero-table pages.** Safe for the stored data, but every
+   run with an empty month keeps a refused page, and an empty month stays
+   indistinguishable from an uncollected one.
+2. **The collector registers no artifact for an empty month.** The parser
+   stays unchanged, but the evidence that the provider said "nothing" is
+   lost, and the month's absence again means "not collected" (INV05: a
+   missing value is a reason, never a silent zero or a silent gap).
+3. **The parser reads the observed empty page as an empty observation set.**
+   **Chosen.** The page is kept as evidence and its `ok` parse with no row is
+   the reading that the provider stated no statement for that month.
+
+### Decision
+
+**Option 3**, as `global-pass-activity@1.2.0`.
+
+- **Rule.** A page is the empty month only when all of these hold: the
+  doctype, the run precondition, exactly one month select with one selected
+  month and the key's month equal to it (as in 1.1.0); the key names page 1
+  (`activity-YYYY-MM.html`); no `div.nablarch_currentPageNumber`; no element
+  of the pager's classes (`nablarch_paging`, `resultCountHeader`,
+  `nablarch_currentPageNumber`, `nablarch_prevSubmit`,
+  `nablarch_nextSubmit`); no `Found N Result` / 「検索結果 N件」 and no
+  `[p/Ppage]` / 「[p/Pページ]」 in the page's visible text (script, style and
+  template text excluded, comments are not text), with the same patterns the
+  collector reads; and **no `table` element at all**.
+- **Result.** `{ observations: [], warnings: [] }`: no observation, no
+  warning, no zero amount. It is the carrier 1.1.0 already uses for a month
+  table with no row, and the one the legacy-shape parsers use for a stated
+  empty set (`myjcb-skip-payment-schedule`'s empty ledger; Vpass). The parser
+  emits no contract-v2 issues or coverage claim on any page, and
+  `globalpass-activity` is not a snapshot dataset: its currentness is the
+  read model's per-month rule over `ok` parse runs, which needs no claim. A
+  warning would say something could not be read, which is not the case.
+- **Everything else is unchanged.** Any other page without a table (a pager,
+  a Found line or a pager class present, a later page, an unreadable pager or
+  select, another month) is refused with the 1.1.0 message. Every page with a
+  table gives byte-identical output to 1.1.0.
+
+### Consequences
+
+- An empty month of a `success` run gets an `ok` parse with no observation.
+  Under the per-month currentness of the amendment above it becomes that
+  month's current snapshot when it is the newest whole capture, so the month
+  reads as having no transaction rather than as not collected.
+- **Stored pages.** Deploying rewrites nothing. The processor registers the
+  1.2.0 release at runtime (no migration: no `active_releases` row names
+  this dataset), and the repair lane's cyclic scan adds a 1.2.0 job for every
+  eligible `globalpass-activity` artifact the parser accepts. Pages with a
+  table re-parse to the same observations, and the `ok` 1.2.0 run supersedes
+  the 1.1.0 one. The two pages of fetch_run 989 are re-parsed too; whether
+  either becomes `ok` depends on why 1.1.0 refused it.
+- **Importer-era zero-table pages.** The 2026-09-08 investigation found 20
+  importer-era pages with no table that 1.0.0 (and 1.1.0) refused. Any of
+  them that shows no pager and no Found line will now parse `ok` with no row.
+  A read-only aggregate check of production (2026-10-04) found the 22
+  importer-era artifacts that 1.1.0 refuses fall in 7 months, none of which
+  has any `ok` capture with rows, so admitting them hides no stored row.
+- **Limits.**
+  - The empty month was observed in English only. The Japanese display was
+    observed for paged months; a Japanese empty page is read by the same rule
+    (it has no pager text in either language), but nobody has seen one.
+  - The parser cannot tell a provider page that failed to load its list
+    from the observed empty month: both would be the same markup. The
+    collector waits for the month-selection POST before capturing, and a
+    later capture of the same month with rows supersedes the empty reading.
+  - The empty month page has not been stored by a shared run yet; the first
+    one proves the rule against production markup.
+
+### Verification
+
+- `packages/parsers/test/global-pass-empty-month.test.ts`: the synthetic
+  empty month (the shared anonymous fixture with its tables removed) parses
+  `ok` with no observation and no warning, deterministically, also with pager
+  and Found text inside a script or comment; a zero-table page with the
+  observed pager (English or Japanese), a Found line alone (either language,
+  with or without its class), a pager alone, an empty pager container or a
+  pager link is refused with `table cardinality drift`; an unreadable pager,
+  a later page with or without a pager, another month, an unselected or
+  missing month select, a missing doctype and a non-success run keep their
+  1.1.0 refusals.
+- `packages/parsers/test/global-pass-parser.test.ts` (unchanged) passes
+  under 1.2.0.
+- Identity: the shared fixture and 24 variants (pager in both languages,
+  page 2 keys, a month table with no row, the live label set, a signed
+  amount, an unknown header, refusals) were run through 1.1.0 from
+  `origin/main` and through 1.2.0 and their serialized results compared:
+  identical except the zero-table, no-pager page, which 1.1.0 refuses and
+  1.2.0 reads as no rows.
+- `packages/parsers/src/parsers/digests.ts` regenerated; the digest test
+  passes.
+- Production was read only with read-only aggregate queries (counts); no
+  value appears here.

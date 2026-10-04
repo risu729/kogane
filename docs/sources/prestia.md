@@ -1091,3 +1091,13 @@ Limits:
   marked `activity_pages_unwalked`.
 - What the pages of a month look like when a statement is added or removed
   between two runs (which page a row moves to) has not been observed.
+
+Empty months in the parser (2026-10-04): `global-pass-activity@1.2.0` reads
+page 1 of a month with its month select and no Found line, no pager and no
+table as an `ok` parse with no observation (no warning, no zero amount); 1.1.0
+refused it. A zero-table page with any part of the pager, or a later page,
+stays refused
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-empty-months-are-read-as-no-rows),
+[observations](../observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120)).
+The empty month was observed in English only, and no shared run has stored
+one yet.

@@ -17,6 +17,48 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## GLOBAL PASS empty months are read as no rows (activity parser 1.2.0)
+
+2026-10-04. The owner observed live (round 8, English display) that a month
+with no statement shows its month select and no `Found N Result` line, no
+pager and no table. Since #408 the collector calls such a month whole, so a
+run including one registers `success`, but `global-pass-activity@1.1.0`
+refused the page (`table cardinality drift`: it needs one activity table).
+`global-pass-activity@1.2.0`
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-empty-months-are-read-as-no-rows)):
+
+- **Rule.** Page 1 of the key's month (`activity-YYYY-MM.html`) with the
+  doctype and one month select with one selected month (as before), and no
+  `table`, no pager element (`nablarch_paging`, `resultCountHeader`,
+  `nablarch_currentPageNumber`, `nablarch_prevSubmit`,
+  `nablarch_nextSubmit`), and no Found or pager text in either language
+  (script, style and template text are not page text).
+- **Result.** No observation and no warning: the carrier 1.1.0 already uses
+  for a month table with no row and the legacy-shape parsers use for a stated
+  empty set ([the skip-payment schedule's empty ledger](#myjcb-the-skip-payment-schedule-page-is-read-as-scheduled-payments-schedule-parser-010),
+  Vpass). No zero amount is written. The parser emits no coverage claim on any
+  page; `globalpass-activity`'s currentness is the read model's per-month rule
+  over `ok` parse runs, under which the empty reading becomes the month's
+  snapshot when it is the newest whole capture.
+- **Unchanged.** Any other page without a table (a pager, a Found line or a
+  pager class present, a later page, an unreadable pager or select) is
+  refused with the 1.1.0 message; every page with a table gives byte-identical
+  output to 1.1.0 (the fixture and 24 variants compared against `origin/main`).
+
+Deploying rewrites nothing. The processor registers 1.2.0 at runtime (no
+migration; no `active_releases` row names the dataset) and the repair lane
+adds a 1.2.0 job for every eligible artifact, so the stored pages, including
+the two pages of fetch_run 989 that 1.1.0 refused for a reason not stored,
+are re-read; an `ok` 1.2.0 run supersedes the 1.1.0 one. Importer-era
+zero-table pages that show no pager now parse `ok` with no row; the 22
+importer-era artifacts 1.1.0 refuses fall in 7 months none of which has an
+`ok` capture with rows (read-only count, 2026-10-04), so no stored row is
+hidden. Limits: the empty month was seen in English only; a page whose list
+failed to load would look the same as the empty month, which the parser
+cannot tell apart (a later capture with rows supersedes it); no shared run has
+stored an empty month yet. Tests:
+`packages/parsers/test/global-pass-empty-month.test.ts`.
+
 ## GLOBAL PASS walked months and page-qualified external ids (activity parser 1.1.0)
 
 2026-10-04. Production (fetch_run 903, 2026-09-29) stored both selected
@@ -69,7 +111,8 @@ parser reads only the English table labels (the Japanese labels are recorded
 in the source note), so a Japanese page would fail its parse; and whether the
 parser's table model fits the production month page is shown only by the
 first parse (the 2026-09-08 investigation below found stored pages it
-refused). Tests: `packages/parsers/test/global-pass-parser.test.ts`.
+refused). 1.1.0 refused the observed empty month (no table); 1.2.0
+[reads it as no rows](#global-pass-empty-months-are-read-as-no-rows-activity-parser-120). Tests: `packages/parsers/test/global-pass-parser.test.ts`.
 
 ## MyJCB: the menu's schedule heading is an h3, and the bonus page is not a statement (statement parser 1.4.0)
 
@@ -2724,3 +2767,10 @@ pages, establish the provider's explicit empty-state evidence or collection
 readiness signal before adding empty-snapshot support. The parser remains
 unchanged and these captures remain visible as parse failures with raw evidence.
 No live financial-institution requests were used for this diagnosis.
+
+Update 2026-10-04: the owner's live round-8 observation established the
+explicit empty state (no Found line, no pager, no table), and
+`global-pass-activity@1.2.0` reads such a page as no rows
+([above](#global-pass-empty-months-are-read-as-no-rows-activity-parser-120)).
+The zero-table captures above that show no pager and no Found line parse `ok`
+with no row under 1.2.0; the unclassified-table captures stay refused.

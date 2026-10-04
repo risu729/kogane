@@ -30,7 +30,11 @@ are separate claims. Historical acceptance records are linked from the
   [ADR 0022](adr/0022-registration-artifact-datasets.md).
 - MyJCB partial/unsafe unit coverage is not promoted into complete statement
   evidence. GLOBAL PASS pagination support does not by itself prove that a
-  particular production month's capture and parse are complete.
+  particular production month's capture and parse are complete. A GLOBAL PASS
+  month the collector proves empty (no Found line, no pager, no table) is read
+  as no rows by `global-pass-activity@1.2.0`; it was observed in English only
+  and no shared run has stored one yet. See
+  [observations](observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).
 - Money Forward identity revisions and the SBI Shinsei bank adapter are
   implemented; fresh production adoption/mapping counts are not asserted here.
 - Generic collection/session-refresh operations still reach
