@@ -63,6 +63,23 @@ export async function inspectContainers({ accountId, token, fetchImpl = fetch })
     containersAccountMatches: 0,
     externalRegistryDigestMatches: 0,
     defaultPolicyAndResourcesMatch: 0,
+    defaultSchedulingPolicies: 0,
+    missingSchedulingPolicies: 0,
+    basicInstanceTypes: 0,
+    missingInstanceTypes: 0,
+    maxInstanceLimitsMatch: 0,
+    missingMaxInstanceLimits: 0,
+    apacRegionConstraints: 0,
+    missingRegionConstraints: 0,
+    zeroActiveInstances: 0,
+    zeroAssignedInstances: 0,
+    activeRolloutsCompleted: 0,
+    activeRolloutsPending: 0,
+    activeRolloutsProgressing: 0,
+    activeRolloutsOther: 0,
+    rolloutTargetVersionMatches: 0,
+    rolloutTargetImageMatches: 0,
+    rolloutTargetPercentageAt100: 0,
     applicationsWithActiveRollout: 0,
     applicationVersionListsAreArrays: 0,
     desiredApplicationVersionAt100: 0,
@@ -94,7 +111,51 @@ export async function inspectContainers({ accountId, token, fetchImpl = fetch })
       JSON.stringify(app.constraints?.regions) === JSON.stringify(["APAC"])
     )
       counts.defaultPolicyAndResourcesMatch++;
-    if (app.active_rollout_id != null) counts.applicationsWithActiveRollout++;
+    if (app.scheduling_policy === "default") counts.defaultSchedulingPolicies++;
+    if (app.scheduling_policy == null) counts.missingSchedulingPolicies++;
+    if (app.configuration?.instance_type === "basic") counts.basicInstanceTypes++;
+    if (app.configuration?.instance_type == null) counts.missingInstanceTypes++;
+    if (app.max_instances === target.maxInstances) counts.maxInstanceLimitsMatch++;
+    if (app.max_instances == null) counts.missingMaxInstanceLimits++;
+    if (JSON.stringify(app.constraints?.regions) === JSON.stringify(["APAC"]))
+      counts.apacRegionConstraints++;
+    if (app.constraints?.regions == null) counts.missingRegionConstraints++;
+    if (app.health?.instances?.active === 0) counts.zeroActiveInstances++;
+    if (app.health?.instances?.assigned === 0) counts.zeroAssignedInstances++;
+    if (app.active_rollout_id != null) {
+      counts.applicationsWithActiveRollout++;
+      if (
+        typeof app.active_rollout_id === "string" &&
+        /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(app.active_rollout_id)
+      ) {
+        const rollout = await get(
+          `containers/applications/${target.appId}/rollouts/${app.active_rollout_id}`,
+          "rollout",
+        );
+        if (rollout.status === "completed") counts.activeRolloutsCompleted++;
+        else if (rollout.status === "pending") counts.activeRolloutsPending++;
+        else if (rollout.status === "progressing") counts.activeRolloutsProgressing++;
+        else counts.activeRolloutsOther++;
+        if (
+          Number.isSafeInteger(app.version) &&
+          app.version >= 0 &&
+          rollout.target_version === app.version
+        )
+          counts.rolloutTargetVersionMatches++;
+        if (
+          typeof image === "string" &&
+          image.length > 0 &&
+          rollout.target_configuration?.image === image
+        )
+          counts.rolloutTargetImageMatches++;
+        if (
+          rollout.percentage === 100 ||
+          rollout.version_distribution?.target_version_percentage === 100 ||
+          rollout.progress?.version_distribution?.target_version_percentage === 100
+        )
+          counts.rolloutTargetPercentageAt100++;
+      } else counts.activeRolloutsOther++;
+    }
     if (Array.isArray(versions)) {
       counts.applicationVersionListsAreArrays++;
       if (

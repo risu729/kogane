@@ -219,7 +219,10 @@ these three Container owners. Dispatch it from `main` after the production
 release has finished. It checks out that exact workflow SHA and uses the existing
 production token only for fixed Cloudflare GET requests; its output contains
 aggregate identity, configuration, version-allocation and namespace-match counts.
-Its separate concurrency group cannot replace a pending production release.
+It reports each policy/resource comparison independently and classifies a referenced
+rollout through its validated identifier, so an aggregate mismatch can be diagnosed
+without logging provider text. Its separate concurrency group cannot replace a
+pending production release.
 A successful run means the reads completed, not that every count matched or that
 a rollout is ready: API shapes and concurrent state changes can produce lower
 counts. Interpret them before any Container migration; the reads are not an
