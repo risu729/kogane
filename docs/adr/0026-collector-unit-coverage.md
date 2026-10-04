@@ -1029,6 +1029,11 @@ empty month. It removes one known, observed gap.
   1.1.0 refusals.
 - `packages/parsers/test/global-pass-parser.test.ts` (unchanged) passes
   under 1.2.0.
+- `packages/parsers/test/global-pass-sanitized-contract.test.ts` (#439): the
+  collector's synthetic empty month of either variant, after
+  `sanitizeGlobalPassActivityHtml`, parses `ok` with no observation and no
+  warning; the same page with the pager (English or Japanese) or a Found line
+  and no table, or under a page-2 key, stays refused.
 - Identity: the shared fixture and 24 variants (pager in both languages,
   page 2 keys, a month table with no row, the live label set, a signed
   amount, an unknown header, refusals) were run through 1.1.0 from
