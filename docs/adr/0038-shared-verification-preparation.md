@@ -22,7 +22,8 @@ result must be checked; required-status skips cannot count as success.
 ## Options considered
 
 1. Retain the separate deployment post graph, including repeated preparation.
-2. Share preparation in one native graph while retaining serial processor tests.
+2. Share preparation in one native graph, retaining serial processor tests
+   and ordering Docker deployment builds after workspace checks.
 3. Share preparation and add two isolated processor file workers in the same
    hosted runner. The first combined PR run tested this option and rejected it
    on observed timeout failures and elapsed time, as described below.
@@ -34,9 +35,13 @@ result must be checked; required-status skips cannot count as success.
 
 ## Decision
 
-Choose option 2. The root `checks` task schedules `dry-run` alongside repository
-and workspace checks. Existing type/build/generated-input dependencies order
-preparation and reuse it once in that graph. Processor `test` retains `bun test`
+Choose option 2. Root `checks` schedules `ci:workspaces` and `dry-run` in one
+graph. `ci:workspaces` owns repository and every workspace CI aggregate. The
+four Docker-building dry-run bodies wait for `//:ci:workspaces`, so their actual
+Docker invocations begin after its child checks complete. Non-container dry runs
+can overlap checks. `wait_for` only orders selected tasks, so standalone dry runs
+do not pull in workspace tests. Existing type/build/generated-input dependencies
+order preparation and reuse it once in that graph. Processor `test` retains `bun test`
 and its complete serial suite; the existing opt-in timing benchmark keeps its
 previous skip policy.
 
@@ -54,9 +59,10 @@ release workflows are unchanged.
 ## Consequences
 
 - Shared types and client builds run once rather than in normal and post graphs.
-  Deployment validation can overlap tests after its declared inputs exist.
+  Non-container deployment validation can overlap tests after its inputs exist;
+  Docker builds run after workspace checks, retaining a validation tail.
 - Processor files remain sequential in one process. Other workspace checks and
-  container builds still share the existing runner through mise concurrency.
+  non-container validations still share the existing runner through mise concurrency.
 - No additional hosted jobs or setup are introduced. Shared preparation can
   reduce waiting and runner time; a speedup must still be demonstrated on the
   complete hosted graph rather than inferred from the plan.
@@ -72,19 +78,31 @@ release workflows are unchanged.
   It establishes that this worker configuration failed the reliability and
   waiting-time goals. Restore serial execution rather than relax existing
   deadlines or try further worker bounds without evidence.
+- [The serial run 37181978822](https://github.com/risu729/kogane/actions/runs/37181978822)
+  still failed after 963 seconds. Its processor suite passed all 632 tests with
+  one existing skip (633 tests/68 files, 877.45 seconds). The only failure was
+  the existing 2,000-row storage identity case: 31.99 seconds exceeded its
+  30-second deadline while a Shinsei Docker build was active. Preparation ran
+  once (19 type/three build commands). Separate those Docker invocations from
+  workspace tests without raising existing deadlines. The overlap is evidence
+  for the scheduling choice, not proof of the sole cause.
+- [The direct-base run 37180511042](https://github.com/risu729/kogane/actions/runs/37180511042)
+  passed in 967 seconds, including 809.90 seconds for 616 processor tests/66
+  files. Unchanged workspace tasks also slowed substantially versus recent
+  main, illustrating hosted timing variation. No causal speedup is claimed.
 - Container builds, Chromium installation, resource contention and queueing can
-  still dominate. Complete hosted validation and measurement after the serial
-  fallback remain required before claiming a performance gain.
+  still dominate. Complete hosted validation and measurement of the phased
+  graph remain required before claiming a performance gain.
 
 ## Verification
 
 Native execution-plan tests require every declared Worker type and client build
 command once, with bounded subprocess/test execution. Existing manifest,
 generated-input and CI wiring checks preserve complete coverage, preparation
-ordering and the fail-closed required status. Focused guards validate the serial
-fallback; the combined full hk suite and Docker-capable hosted graph must then
+ordering and the fail-closed required status. Focused guards validate selected ordering, aggregate child completion and
+standalone selection; the combined full hk suite and Docker-capable hosted graph must then
 pass with all expanded tests. Compare pull-request and merged `main` elapsed and
-total job durations against both baselines in
+total job durations against the recorded baselines in
 [continuous integration](../ci.md#waiting-time-baseline-and-limits).
 
 The dependency graph remains owned by [native mise tasks](https://mise.jdx.dev/tasks/).

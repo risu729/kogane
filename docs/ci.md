@@ -84,15 +84,21 @@ mise run //packages/domain:typecheck
 mise run dry-run                      # every validated Worker configuration
 ```
 
-The root `checks` task composes `ci:root`, all workspace `ci` tasks and
-`dry-run` in one dependency graph. Each dry run declares its own preparation
-dependencies, so independent validations overlap and shared types/client builds
-run once. There is no separate post phase that repeats those prerequisites.
+The root `checks` task composes `ci:workspaces` and `dry-run` in one dependency
+graph. `ci:workspaces` includes `ci:root` and every workspace `ci` task. Each
+dry run declares its own preparation dependencies, so shared types/client builds
+run once. The four dry-run bodies whose Wrangler configurations build Docker
+images use `wait_for = ["//:ci:workspaces"]`: when full verification selects
+that aggregate, Docker builds begin after its child checks complete. Other dry
+runs can overlap checks. Standalone `dry-run` does not select workspace tests;
+`wait_for` orders only tasks already selected. There is no separate post graph
+that repeats preparation.
 They run in parallel, so no test may depend on timing that only holds on an idle
 machine. Processor tests run sequentially in one process with `bun test`,
 retaining the complete suite and existing benchmark skip policy. There is no
 changed-file selection, shard selector, retry or new test exclusion. Independent
-workspace tasks and container dry runs still run in parallel through mise.
+workspace tasks still run in parallel through mise; Docker deployment builds
+run afterward.
 
 The processor tests read Miniflare's synchronous Node-side proxy through `services/processor/test/miniflare-sync-proxy.ts`,
 preloaded by `services/processor/bunfig.toml`: under that load Miniflare's
@@ -194,8 +200,8 @@ Chromium installation (103.78 seconds).
 
 The old post phase started only after processor tests finished and took another
 approximately 62 seconds. It regenerated 19 Worker type declarations and the
-production client before validating deployments. One graph removes that serial
-tail and repeated preparation. Native execution-plan tests require every
+production client before validating deployments. One graph removes repeated preparation; Docker builds retain a later phase
+to avoid overlapping workspace tests. Native execution-plan tests require every
 declared Worker type and client build command once. The new guard bounds each
 of its two mise subprocesses to ten seconds and the guard itself to thirty
 seconds; existing runtime test deadlines are unchanged.
@@ -224,9 +230,33 @@ runner with container builds did not meet the waiting-time or reliability goal.
 Processor tests therefore retain their serial invocation. Existing test timeouts
 are not raised to mask contention, and failures remain failures.
 
+[The direct-base main run 37180511042](https://github.com/risu729/kogane/actions/runs/37180511042)
+passed with a 967-second `Checks` job, a 938.30-second graph and the same
+616 processor tests/66 files as recent main. Processor tests took 809.90 seconds;
+total job durations were 976 seconds. Several unchanged workspace tasks also
+ran substantially slower, so hosted timing variation prevents a causal speedup
+claim from comparisons with either single baseline.
+
+[The serial PR #418 run 37181978822](https://github.com/risu729/kogane/actions/runs/37181978822)
+failed after 963 seconds (`Checks`), with a 924.82-second graph and 971 seconds
+of total job durations. Processor tests passed: 632 passed, one existing benchmark
+skipped, zero failed, 633 tests/68 files in 877.45 seconds. Preparation still ran
+once (19 type commands, three client builds). The sole failure was the existing
+2,000-row storage identity case at 31.99 seconds against its 30-second deadline.
+It finished at 06:12:19 UTC while the Shinsei Docker dry run was active
+(06:11:51–06:12:35). This overlap motivates separating Docker builds from
+workspace checks; it does not establish contention as the sole cause.
+
+The final graph adds a native ordering barrier to the four Docker-building
+validation bodies, retaining shared preparation and all coverage. The guard
+checks those edges against the Worker ledger/configurations and the actual
+selected execution plan. A small concurrent native task fixture verifies that
+`wait_for` waits for aggregate children to finish and leaves standalone dry-run
+selection unchanged. Existing runtime deadlines remain unchanged.
+
 Shared preparation remains a structural improvement, not a measured speedup
 claim. CPU/memory contention, container builds, dependency/browser installation
-and hosted runner queues can still limit the gain. The serial fallback must pass
+and hosted runner queues can still limit the gain. The phased graph must pass
 the complete hosted graph with the expanded coverage, and its pull-request and
 merged `main` elapsed/total job durations must be measured before claiming a
 reduction. Existing manifest and generated-input guards still enforce complete

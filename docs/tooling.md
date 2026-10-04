@@ -42,7 +42,9 @@ fixed toolchain:
   shared lint presets plus mise tasks for repository guards, Knip, typechecks,
   tests, builds and Worker dry runs in one native dependency graph. Shared
   preparation runs once; processor tests retain the complete serial suite
-  in one process to avoid contention with other checks and container builds. `hk fix` and the staged pre-commit hook
+  in one process. Docker-building dry-run bodies wait for the selected
+  workspace CI aggregate, avoiding overlap with those tests while sharing
+  preparation. Standalone dry runs do not select CI tests. `hk fix` and the staged pre-commit hook
   retain only the lint/format steps.
 - **Vitest** with `@cloudflare/vitest-plugin` runs the Workers-runtime tests;
   **Wrangler** generates Worker types and validates deployments with

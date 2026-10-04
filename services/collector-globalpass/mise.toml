@@ -28,6 +28,8 @@ run = [
 ]
 
 [tasks."dry-run"]
+# Wait only when full verification already schedules workspace checks.
+wait_for = ["//:ci:workspaces"]
 description = "Validate the services/collector-globalpass deployment without uploading it."
 depends = ["//services/collector-globalpass:types"]
 run = [

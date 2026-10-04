@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { workflowSteps } from "./deploy-order.ts";
 import type { TaskRecord } from "./check-manifests.ts";
@@ -63,15 +65,45 @@ test("the complete native plan schedules shared type and client preparation once
   const tasks = (JSON.parse(listed.stdout.toString()) as TaskRecord[]).filter((task) =>
     task.source?.startsWith(`${REPO_ROOT}/`),
   );
+  const workers = JSON.parse(readFileSync(`${REPO_ROOT}/infra/workers-ci.json`, "utf8")) as {
+    workers: { path: string; config: string }[];
+  };
+  const containerTasks = [
+    ...new Set(
+      workers.workers
+        .filter((worker) =>
+          /"containers"\s*:/u.test(
+            readFileSync(`${REPO_ROOT}/${worker.path}/${worker.config}`, "utf8"),
+          ),
+        )
+        .map((worker) => `//${worker.path}:dry-run`),
+    ),
+  ];
+  expect(containerTasks.length).toBeGreaterThan(0);
+  for (const name of containerTasks)
+    expect(tasks.find((task) => task.name === name)?.wait_for).toContain("//:ci:workspaces");
   const plan = Bun.spawnSync(["mise", "run", "--dry-run", "--jobs", "1", "checks"], {
     cwd: REPO_ROOT,
     timeout: 10_000,
     killSignal: "SIGKILL",
-    env: { ...process.env, NO_COLOR: "1" },
+    env: { ...process.env, NO_COLOR: "1", MISE_TASK_SHOW_FULL_CMD: "true" },
   });
   expect(plan.exitedDueToTimeout).not.toBe(true);
   expect(plan.exitCode).toBe(0);
   const output = plan.stdout.toString() + plan.stderr.toString();
+  // The real selected plan must put every Docker invocation after workspace
+  // commands, including children of the workspace aggregate. A barrier on the
+  // dry-run parent alone would leave its children free to start early.
+  const commands = output.split("\n").filter((line) => line.includes("] $ "));
+  const tail = commands.slice(-containerTasks.length);
+  for (const name of containerTasks)
+    expect(
+      tail.some((line) => {
+        // mise may abbreviate long task labels even when commands are complete.
+        const prefix = line.slice(1, line.indexOf("]")).replace(/…$/u, "");
+        return name.startsWith(prefix) && line.includes("$ ./node_modules/.bin/wrangler deploy");
+      }),
+    ).toBe(true);
   // Two synchronous mise subprocesses can exceed Bun's default five seconds
   // under the full verification load. Bound each process and this guard only;
   // retain the existing runtime tests' deadlines.
@@ -85,3 +117,59 @@ test("the complete native plan schedules shared type and client preparation once
     expect(output.split(`$ ${command}`).length - 1).toBe(expected);
   }
 }, 30_000);
+
+test("native wait_for orders selected aggregate children without selecting them standalone", () => {
+  const directory = mkdtempSync(join(tmpdir(), "kogane-ci-order-"));
+  try {
+    writeFileSync(
+      join(directory, "mise.toml"),
+      `
+[tasks.types]
+run = "printf 'types\\n' >> order"
+[tasks.test]
+depends = ["types"]
+run = "sleep 0.1; printf 'test-finished\\n' >> order"
+[tasks."ci:workspaces"]
+depends = ["test"]
+[tasks."dry-run"]
+depends = ["types"]
+wait_for = ["ci:workspaces"]
+run = "printf 'docker\\n' >> order"
+[tasks.checks]
+depends = ["ci:workspaces", "dry-run"]
+`,
+    );
+    for (const [task, expected] of [
+      ["checks", ["types", "test-finished", "docker"]],
+      ["dry-run", ["types", "docker"]],
+    ] as const) {
+      writeFileSync(join(directory, "order"), "");
+      const result = Bun.spawnSync(["mise", "run", "--jobs", "2", task], {
+        cwd: directory,
+        timeout: 10_000,
+        killSignal: "SIGKILL",
+        env: { ...process.env, MISE_TRUSTED_CONFIG_PATHS: directory },
+      });
+      expect(result.exitedDueToTimeout).not.toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(readFileSync(join(directory, "order"), "utf8").trim().split("\n")).toEqual(expected);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("the native standalone dry-run plan does not select workspace checks", () => {
+  const result = Bun.spawnSync(["mise", "run", "--dry-run", "dry-run"], {
+    cwd: REPO_ROOT,
+    timeout: 10_000,
+    killSignal: "SIGKILL",
+    env: { ...process.env, NO_COLOR: "1", MISE_TASK_SHOW_FULL_CMD: "true" },
+  });
+  expect(result.exitedDueToTimeout).not.toBe(true);
+  expect(result.exitCode).toBe(0);
+  const output = result.stdout.toString() + result.stderr.toString();
+  expect(output).toContain("$ ./node_modules/.bin/wrangler deploy --dry-run");
+  for (const command of ["$ bun test", "vitest run", "node --test", "tsc --noEmit", "knip"])
+    expect(output).not.toContain(command);
+}, 15_000);

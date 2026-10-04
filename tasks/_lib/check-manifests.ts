@@ -35,6 +35,7 @@ export interface TaskRecord {
   name: string;
   depends?: string[];
   depends_post?: string[];
+  wait_for?: string[];
   dir?: string | null;
   run?: string[];
   /** The file that defines the task, absolute. */

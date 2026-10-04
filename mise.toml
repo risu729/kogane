@@ -139,11 +139,15 @@ depends = ["//services/...:bundle"]
 description = "Validate every Worker deployment without uploading it."
 depends = ["//services/...:dry-run", "//experiments/...:dry-run"]
 
+[tasks."ci:workspaces"]
+description = "Complete repository and workspace checks before container deployment builds."
+depends = ["ci:root", "//apps/...:ci", "//experiments/...:ci", "//packages/...:ci", "//services/...:ci"]
+
 [tasks.checks]
 description = "Run every repository, workspace and deployment check; called by hk."
-# Dry runs own their preparation dependencies. Scheduling them here shares the
-# same type/build tasks and avoids repeating them in a separate post graph.
-depends = ["ci:root", "//apps/...:ci", "//experiments/...:ci", "//packages/...:ci", "//services/...:ci", "dry-run"]
+# One graph shares preparation. Docker-building dry-run bodies wait for the
+# selected workspace aggregate; non-container validations can overlap checks.
+depends = ["ci:workspaces", "dry-run"]
 
 [tasks.verify]
 description = "Run the complete hk check suite."
