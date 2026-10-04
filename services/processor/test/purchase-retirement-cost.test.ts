@@ -41,6 +41,20 @@ async function settle(db: Database) {
   throw new Error("retirement proof did not settle");
 }
 
+/** Accept only the exact unconditional bridge or the proven marker latch. */
+function invalidates(sql: string, table: string, action: string): boolean {
+  const normalized = sql.replace(/\s+/g, " ").trim();
+  const header = new RegExp(`^CREATE TRIGGER \\S+ AFTER ${action} ON ${table} BEGIN (.+) END;?$`);
+  const body = normalized.match(header)?.[1];
+  return (
+    body ===
+      "UPDATE card_purchase_retirement_check SET revision=revision+1 WHERE singleton=1 AND (clean_revision=revision OR checking_revision=revision);" ||
+    body === "UPDATE core_source_revision SET source_revision=source_revision+1 WHERE id=1;" ||
+    body ===
+      "UPDATE core_source_revision SET source_revision=source_revision+1,visibility_revision=visibility_revision+1 WHERE id=1;"
+  );
+}
+
 test("the no-statistics bytecode dependency closure is covered by direct triggers or the existing source revision ledger", () => {
   const db = copy();
   try {
@@ -70,18 +84,14 @@ test("the no-statistics bytecode dependency closure is covered by direct trigger
       for (const action of ["INSERT", "UPDATE", "DELETE"])
         expect(
           triggers.some(
-            (row) =>
-              row.tbl_name === dependency &&
-              row.sql.includes(`AFTER ${action} ON ${dependency}`) &&
-              /UPDATE (core_source_revision|card_purchase_retirement_check) /.test(row.sql),
+            (row) => row.tbl_name === dependency && invalidates(row.sql, dependency!, action),
           ),
         ).toBe(true);
     expect(
       triggers.some(
         (row) =>
           row.tbl_name === "core_source_revision" &&
-          row.sql.includes("AFTER UPDATE ON core_source_revision") &&
-          row.sql.includes("UPDATE card_purchase_retirement_check"),
+          invalidates(row.sql, "core_source_revision", "UPDATE"),
       ),
     ).toBe(true);
     expect(
@@ -212,7 +222,7 @@ test("the unchanged retirement guard costs a primary-key read instead of the sca
   try {
     await settle(db);
     const sql =
-      "SELECT revision,clean_revision FROM card_purchase_retirement_check WHERE singleton=1";
+      "SELECT revision,clean_revision,clean_policy FROM card_purchase_retirement_check WHERE singleton=1";
     const plan = db.query("EXPLAIN QUERY PLAN " + sql).all() as { detail: string }[];
     expect(plan).toHaveLength(1);
     expect(plan[0]!.detail).toContain("USING INTEGER PRIMARY KEY");
@@ -231,3 +241,17 @@ test("the unchanged retirement guard costs a primary-key read instead of the sca
     db.close();
   }
 }, 60000);
+
+test("dependency coverage rejects conditional, narrowed and no-op revision triggers", () => {
+  const table = "published_parse_runs";
+  const header = `CREATE TRIGGER synthetic AFTER UPDATE ON ${table}`;
+  const bump = "UPDATE core_source_revision SET source_revision=source_revision+1 WHERE id=1;";
+  expect(invalidates(`${header} BEGIN ${bump} END`, table, "UPDATE")).toBe(true);
+  for (const trigger of [
+    `${header} WHEN NEW.parse_run_id>100 BEGIN ${bump} END`,
+    `${header} BEGIN ${bump.replace("WHERE id=1", "WHERE id=1 AND source_revision<10")} END`,
+    `${header} BEGIN ${bump.replace("source_revision+1", "source_revision")} END`,
+    `${header} BEGIN UPDATE card_purchase_retirement_check SET revision=revision+1 WHERE singleton=1 AND clean_revision=revision; END`,
+  ])
+    expect(invalidates(trigger, table, "UPDATE")).toBe(false);
+});

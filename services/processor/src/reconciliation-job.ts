@@ -16,9 +16,10 @@
 // current together (docs/economic-events.md, "Matching stages"). Proposals
 // this lane stored before stay as history: nothing deletes them, and the
 // digest lookup never sends one again. Stage A needs a provider-issued row
-// id. Stage-A-only pages use the provider-origin partial index: an empty
-// admitted set costs no observation scan. Historical, custom and future rows
-// with provider-origin ids still run; stage B keeps its ordinary page path.
+// id. Stage-A-only pages use the provider-origin partial index: a globally empty
+// provider-origin index costs no observation scan. Other sources/statuses can
+// still require index-entry checks for an empty slice. Historical, custom and
+// future provider-origin ids still run; stage B keeps its ordinary page path.
 //
 // Pending/posted pairs stay inside one source account and billing period.
 // Vpass uses unconfirmed/posted; MyJCB uses unconfirmed/confirmed. MyJCB's
