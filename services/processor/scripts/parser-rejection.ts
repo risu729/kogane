@@ -8,9 +8,12 @@
 // payload carried, or an unfiltered exception message. A label is printed only
 // for the SBI Shinsei parsers, whose every label is proved (by the test) to be
 // assembled from constants, array positions and schema keys; row positions
-// are folded to `[]` so a category is closed and does not count rows.
+// are folded to `[]` so a category is closed and does not count rows. For
+// `global-pass-activity` a label is one of three view names and a field one of
+// the parser's header constants.
 import { parse } from "parse5";
 import { SKIP_PAYMENT_SCHEDULE_HEADING } from "../../../packages/domain/src/myjcb-skip-payment-schedule.ts";
+import type { GlobalPassDomNode } from "../../../packages/parsers/src/parsers/global-pass-activity.ts";
 import { SKIP_PAYMENT_SCHEDULE_PARSER_CODES } from "../../../packages/parsers/src/parsers/myjcb-skip-payment-schedule.ts";
 
 /**
@@ -152,8 +155,8 @@ const RUNTIME_ERRORS = new Set(["TypeError", "RangeError", "ReferenceError", "Sy
 
 /**
  * The category of a thrown parser error. A plain `Error` from an SBI Shinsei
- * parser maps to its throw site; any other parser keeps the older coarse
- * reasons of `legacySafeReason`. A non-`Error` class is a runtime defect, not
+ * parser or from `global-pass-activity` maps to its throw site; any other
+ * parser keeps the older coarse reasons of `legacySafeReason`. A non-`Error` class is a runtime defect, not
  * a refusal, and is named by its standard class only.
  */
 export function classifyParserRejection(parserName: string, error: unknown): RejectionCategory {
@@ -162,6 +165,7 @@ export function classifyParserRejection(parserName: string, error: unknown): Rej
     return { reason: `runtime_${RUNTIME_ERRORS.has(error.name) ? error.name : "other"}` };
   if ((SBI_SHINSEI_PARSERS as readonly string[]).includes(parserName))
     return classifySbiShinseiMessage(error.message);
+  if (parserName === GLOBAL_PASS_ACTIVITY_PARSER) return classifyGlobalPassMessage(error.message);
   if (parserName === SKIP_PAYMENT_SCHEDULE_PARSER)
     return (SKIP_PAYMENT_SCHEDULE_PARSER_CODES as readonly string[]).includes(error.message)
       ? { reason: error.message }
@@ -764,4 +768,420 @@ export function replayStatementMetadata(row: {
     return typeof item === "string" ? item : null;
   };
   return { statementState: value("statementState"), period: value("period") };
+}
+
+// ── global-pass-activity: one closed code per throw site ─────────────────────
+//
+// `global-pass-activity` throws fixed English sentences, some with a row
+// number or a view label (`activity`, `compact N`, `expanded N`) and, for a
+// missing header, one of the parser's own header constants. The table below is
+// keyed by those sentences, written as the parser writes them with each
+// interpolation as a pattern, so the parser's messages stay the one source of
+// truth: a reworded message falls to `other` and the closure test
+// (test/global-pass-rejection.test.ts) fails. The code is a fixed token; row
+// numbers are dropped, a view label keeps only its kind, and a header is kept
+// only when it is one of the parser's constants.
+
+export const GLOBAL_PASS_ACTIVITY_PARSER = "global-pass-activity";
+
+const GP_ROW = String.raw`row \d{1,6}`;
+const GP_VIEW = String.raw`(activity|compact \d{1,6}|expanded \d{1,6})`;
+/** The header constants `global-pass-activity` requires and names in `schema is missing …`. */
+const GLOBAL_PASS_REQUIRED_HEADERS = [
+  "Transaction Date",
+  "Transaction Detail",
+  "Transaction Currency and Amount",
+  "Transaction Fee",
+  "ATM Fee",
+  "Status",
+  "Approval Number",
+] as const;
+
+/**
+ * Every message `global-pass-activity` can throw, including those of the
+ * helpers it calls on the page (`decodeUtf8`, `normalizedDate`), with its
+ * closed code. No two patterns match one message.
+ */
+export const GLOBAL_PASS_REJECTIONS: readonly (readonly [code: string, message: RegExp])[] = (
+  [
+    ["artifact_metadata_unsupported", "global-pass artifact metadata is unsupported"],
+    ["run_not_admitted", "global-pass observations require a successful failure-free fetch run"],
+    ["html_size_out_of_range", "global-pass HTML size is outside the Layer-A contract"],
+    [
+      "utf8_invalid",
+      "artifact bytes are not valid UTF-8; the artifact's encoding is not recorded, so no decoder can be selected",
+    ],
+    ["doctype_drift", "global-pass HTML doctype drift"],
+    // Two sites: a key that is not `activity-YYYY-MM(-pN).html`, and a key
+    // whose month is not the selected one. `sites` tells them apart.
+    ["artifact_key_month_mismatch", "global-pass artifact key and selected month disagree"],
+    ["pager_unreadable", "global-pass pager is unreadable"],
+    ["pager_missing_on_later_page", "global-pass later page has no pager"],
+    ["pager_page_mismatch", "global-pass pager and artifact key name different pages"],
+    ["month_selector_cardinality", "global-pass month selector cardinality drift"],
+    [
+      "month_selector_range",
+      "global-pass month selector must contain between one and 15 months and at most one unselected default",
+    ],
+    ["month_selector_duplicates", "global-pass month selector contains duplicates"],
+    ["month_option_invalid", String.raw`global-pass month option \d{1,6} is invalid`],
+    [
+      "month_selector_not_contiguous",
+      "global-pass month selector is not contiguous reverse chronology",
+    ],
+    [
+      "month_selector_selected_cardinality",
+      "global-pass month selector must have one selected option",
+    ],
+    ["table_cardinality", "global-pass activity table cardinality drift"],
+    ["unclassified_table", "global-pass contains an unclassified table"],
+    ["header_schema", `global-pass ${GP_VIEW} header schema drift`],
+    ["header_missing", `global-pass ${GP_VIEW} schema is missing (.+)`],
+    ["fee_schema", `global-pass ${GP_VIEW} must have exactly three fee fields`],
+    ["row_cardinality", "global-pass activity row cardinality drift"],
+    ["source_view_row_cardinality", "global-pass source-view row cardinality drift"],
+    ["date_cardinality", `global-pass ${GP_ROW} date cardinality drift`],
+    // `normalizedDate` (sbi-strict.ts) under the label `global-pass row N date`.
+    [
+      "date_invalid",
+      `global-pass ${GP_ROW} date (?:must be a string|is empty|is too long|has an unsupported value|is not a calendar date)`,
+    ],
+    ["date_outside_month", `global-pass ${GP_ROW} falls outside the selected month`],
+    ["date_order", "global-pass transaction dates are not in provider ascending order"],
+    ["value_cardinality", `global-pass ${GP_VIEW} value cardinality drift`],
+    ["field_too_long", `global-pass ${GP_VIEW} field is too long`],
+    ["header_value_cardinality", "global-pass header/value cardinality drift"],
+    ["source_view_amount_mismatch", `global-pass ${GP_ROW} source views disagree on amount text`],
+    ["amount_format", "global-pass transaction amount format drift"],
+    ["amount_inexact", "global-pass signed amount is not exactly representable"],
+  ] as const
+).map(([code, message]) => [code, new RegExp(`^${message}$`, "u")] as const);
+
+/**
+ * The category of one `global-pass-activity` message: its code, the view kind
+ * (`activity`, `compact`, `expanded`) when the message names one, and the
+ * missing header when it is one of the parser's constants. Anything else is
+ * `other`, with nothing taken from the message.
+ */
+export function classifyGlobalPassMessage(message: string): RejectionCategory {
+  for (const [code, pattern] of GLOBAL_PASS_REJECTIONS) {
+    const match = pattern.exec(message);
+    if (!match) continue;
+    const view = match[1]?.split(" ")[0];
+    const category: RejectionCategory = { reason: code };
+    if (view === "activity" || view === "compact" || view === "expanded") category.label = view;
+    if (code === "header_missing") {
+      const header = match[2] ?? "";
+      const known = header
+        .split(" or ")
+        .every((name) => (GLOBAL_PASS_REQUIRED_HEADERS as readonly string[]).includes(name));
+      if (known) category.field = header;
+    }
+    return category;
+  }
+  return { reason: "other" };
+}
+
+// ── structural shape of a stored GLOBAL PASS activity page ──────────────────
+//
+// One rejection names only the first failing check. This summary counts every
+// structure the parser's admission checks read, so one replay of a refused
+// page shows each of them: booleans and counts only. No header text, cell
+// text, option value, date or amount is printed; header labels are compared
+// with fixed lists and only how many match is printed.
+//
+// The parser's DOM helpers are private to `global-pass-activity.ts`, and
+// exporting them would change its code digest and so need a parser release
+// (migration 0028 refuses a new digest under the same version). The few lines
+// below read the tree the way those helpers do (`owned`, `closest`,
+// `directCells`, `text`) and validate nothing.
+
+/** The twelve English labels of the live survey of 2026-10-04 (docs/sources/prestia.md). */
+const GLOBAL_PASS_SURVEYED_ENGLISH = [
+  "Transaction Date",
+  "Transaction Detail",
+  "Transaction Currency and Amount",
+  "Transaction Fee",
+  "ATM Fee",
+  "FX commissions",
+  "Status",
+  "Approval Number",
+  "Remarks",
+  "Local Currency and Amount",
+  "Local Fee",
+  "Applicable Rate",
+] as const;
+/** The twelve Japanese labels of the same survey, a line break read as a space. */
+const GLOBAL_PASS_SURVEYED_JAPANESE = [
+  "お取引日",
+  "お取引内容",
+  "お取引通貨 金額",
+  "お取引手数料",
+  "ATM手数料",
+  "為替手数料",
+  "確定状態",
+  "承認番号",
+  "備考",
+  "ご利用通貨 金額",
+  "ご利用手数料",
+  "換算レート",
+] as const;
+/** The pager text `global-pass-activity` reads (`requirePagerPage`). */
+const GLOBAL_PASS_PAGER = /^\[\s*(\d{1,4})\s*\/\s*(\d{1,4})\s*(?:pages?|ページ)\s*\]$/iu;
+const EIGHT_DIGITS = /^\d{8}$/u;
+const DATE_CELL = /^\d{4}[/-]\d{2}[/-]\d{2}$/u;
+
+type GpNode = GlobalPassDomNode;
+
+function gpElements(root: GpNode, tagName: string): GpNode[] {
+  const found: GpNode[] = [];
+  const visit = (node: GpNode): void => {
+    if (node.tagName === tagName) found.push(node);
+    for (const child of node.childNodes ?? []) visit(child);
+  };
+  visit(root);
+  return found;
+}
+function gpClosest(node: GpNode, tagName: string): GpNode | null {
+  let parent = node.parentNode ?? null;
+  while (parent) {
+    if (parent.tagName === tagName) return parent;
+    parent = parent.parentNode ?? null;
+  }
+  return null;
+}
+function gpOwned(root: GpNode, tagName: string, ownerTag: string): GpNode[] {
+  return gpElements(root, tagName).filter((node) => gpClosest(node, ownerTag) === root);
+}
+/** Text as the parser compares it. Never printed. */
+function gpText(node: GpNode): string {
+  const values: string[] = [];
+  const visit = (current: GpNode): void => {
+    if (typeof current.value === "string") values.push(current.value);
+    for (const child of current.childNodes ?? []) visit(child);
+  };
+  visit(node);
+  return values.join(" ").replace(/\s+/gu, " ").trim();
+}
+function gpAttribute(node: GpNode, name: string): string | undefined {
+  return node.attrs?.find((item) => item.name.toLowerCase() === name)?.value;
+}
+function gpHasAttribute(node: GpNode, name: string): boolean {
+  return node.attrs?.some((item) => item.name.toLowerCase() === name) ?? false;
+}
+function gpDirectCells(row: GpNode): GpNode[] {
+  return gpElements(row, "td").filter((cell) => gpClosest(cell, "tr") === row);
+}
+
+export interface GlobalPassActivityShape {
+  utf8: boolean;
+  byteLength: number;
+  /** The page starts with `<!doctype html`, as the parser requires. */
+  doctype?: boolean;
+  select?: number;
+  option?: number;
+  optionSelected?: number;
+  optionEightDigit?: number;
+  /** `select`s owning an eight-digit option: the parser needs exactly one. */
+  monthSelects?: number;
+  /** The month select's own options, when there is exactly one such select. */
+  monthSelect?: {
+    options: number;
+    eightDigit: number;
+    other: number;
+    selected: number;
+    selectedEightDigit: number;
+    selectedOther: number;
+  };
+  /** Tables by the number of `th` each owns (a nested table's are its own). */
+  tables?: { total: number; th12: number; th4: number; th10: number; other: number };
+  /** The first table owning twelve `th`, read as the parser reads it. */
+  activityTable?: {
+    trOwned: number;
+    /** Owned rows outside `thead`: the parser's body rows. */
+    bodyRows: number;
+    /** A row holding the table's own `th` lies outside `thead`, so it counts as a body row. */
+    headerRowInBody: boolean;
+    bodyRowsByCells: { cells9: number; cells4: number; cells5: number; other: number };
+    /** Nine-cell rows by how many of their direct cells have the date form. */
+    nineCellRowsByDateCells: { one: number; none: number; several: number };
+    headers: {
+      empty: number;
+      unique: boolean;
+      /** How many of the seven headers the parser requires are present. */
+      parserRequired: number;
+      /** Headers ending in ` Fee`; the parser requires exactly three. */
+      feeSuffixed: number;
+      /** How many of the twelve English labels of the 2026-10-04 survey are present. */
+      surveyedEnglish: number;
+      /** How many of the twelve Japanese labels of that survey are present. */
+      surveyedJapanese: number;
+    };
+  };
+  /** `div.nablarch_currentPageNumber` blocks. */
+  pager?: {
+    blocks: number;
+    /** Blocks whose whole text has the form the parser reads. */
+    readable: number;
+    english: number;
+    japanese: number;
+    /** Every readable block names the page the artifact key names; null for a key of another form. */
+    agreesWithKey: boolean | null;
+  };
+}
+
+/**
+ * The structural shape of a stored `globalpass-activity` page, from the
+ * elements `global-pass-activity` reads. It tolerates any structure, so it
+ * runs on a page the parser refused. `artifactKey` only says which page the
+ * key names; nothing of it is printed.
+ */
+export function globalPassActivityShape(
+  bytes: Uint8Array,
+  artifactKey?: string | null,
+): GlobalPassActivityShape {
+  let html: string;
+  try {
+    html = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return { utf8: false, byteLength: bytes.byteLength };
+  }
+  const document = parse(html) as unknown as GpNode;
+  const options = gpElements(document, "option");
+  const eightDigit = (option: GpNode) => EIGHT_DIGITS.test(gpAttribute(option, "value") ?? "");
+  const selected = (option: GpNode) => gpHasAttribute(option, "selected");
+  const monthSelects = gpElements(document, "select").filter((select) =>
+    gpOwned(select, "option", "select").some(eightDigit),
+  );
+  const shape: GlobalPassActivityShape = {
+    utf8: true,
+    byteLength: bytes.byteLength,
+    doctype: /^\s*<!doctype\s+html\b/iu.test(html),
+    select: gpElements(document, "select").length,
+    option: options.length,
+    optionSelected: options.filter(selected).length,
+    optionEightDigit: options.filter(eightDigit).length,
+    monthSelects: monthSelects.length,
+  };
+  if (monthSelects.length === 1) {
+    const owned = gpOwned(monthSelects[0]!, "option", "select");
+    const chosen = owned.filter(selected);
+    shape.monthSelect = {
+      options: owned.length,
+      eightDigit: owned.filter(eightDigit).length,
+      other: owned.filter((option) => !eightDigit(option)).length,
+      selected: chosen.length,
+      selectedEightDigit: chosen.filter(eightDigit).length,
+      selectedOther: chosen.filter((option) => !eightDigit(option)).length,
+    };
+  }
+
+  const tables = gpElements(document, "table");
+  const thCount = (table: GpNode) => gpOwned(table, "th", "table").length;
+  const grouped = { total: tables.length, th12: 0, th4: 0, th10: 0, other: 0 };
+  for (const table of tables) {
+    const count = thCount(table);
+    if (count === 12) grouped.th12++;
+    else if (count === 4) grouped.th4++;
+    else if (count === 10) grouped.th10++;
+    else grouped.other++;
+  }
+  shape.tables = grouped;
+  const activity = tables.find((table) => thCount(table) === 12);
+  if (activity) {
+    const rows = gpOwned(activity, "tr", "table");
+    const body = rows.filter((row) => gpClosest(row, "thead") === null);
+    const headerCells = gpOwned(activity, "th", "table");
+    const headers = headerCells.map(gpText);
+    const byCells = { cells9: 0, cells4: 0, cells5: 0, other: 0 };
+    const byDates = { one: 0, none: 0, several: 0 };
+    for (const row of body) {
+      const cells = gpDirectCells(row);
+      if (cells.length === 9) {
+        byCells.cells9++;
+        const dates = cells.map(gpText).filter((value) => DATE_CELL.test(value)).length;
+        if (dates === 1) byDates.one++;
+        else if (dates === 0) byDates.none++;
+        else byDates.several++;
+      } else if (cells.length === 4) byCells.cells4++;
+      else if (cells.length === 5) byCells.cells5++;
+      else byCells.other++;
+    }
+    const present = (labels: readonly string[]) =>
+      labels.filter((label) => headers.includes(label)).length;
+    shape.activityTable = {
+      trOwned: rows.length,
+      bodyRows: body.length,
+      headerRowInBody: headerCells.some((th) => {
+        const row = gpClosest(th, "tr");
+        return row !== null && gpClosest(row, "thead") === null;
+      }),
+      bodyRowsByCells: byCells,
+      nineCellRowsByDateCells: byDates,
+      headers: {
+        empty: headers.filter((header) => header === "").length,
+        unique: new Set(headers).size === headers.length,
+        parserRequired: present(GLOBAL_PASS_REQUIRED_HEADERS),
+        feeSuffixed: headers.filter((header) => / Fee$/u.test(header)).length,
+        surveyedEnglish: present(GLOBAL_PASS_SURVEYED_ENGLISH),
+        surveyedJapanese: present(GLOBAL_PASS_SURVEYED_JAPANESE),
+      },
+    };
+  }
+
+  const pagers = gpElements(document, "div").filter((div) =>
+    (gpAttribute(div, "class") ?? "").split(/\s+/u).includes("nablarch_currentPageNumber"),
+  );
+  const key = /^activity-\d{4}-\d{2}(?:-p([2-9]))?\.html$/u.exec(artifactKey ?? "");
+  const keyPage = key ? (key[1] === undefined ? 1 : Number(key[1])) : null;
+  const readable = pagers
+    .map((pager) => GLOBAL_PASS_PAGER.exec(gpText(pager)))
+    .filter((match) => match !== null);
+  shape.pager = {
+    blocks: pagers.length,
+    readable: readable.length,
+    english: readable.filter((match) => /page/iu.test(match[0])).length,
+    japanese: readable.filter((match) => match[0].includes("ページ")).length,
+    agreesWithKey:
+      keyPage === null ? null : readable.every((match) => Number(match[1]) === keyPage),
+  };
+  return shape;
+}
+
+// ── GLOBAL PASS replay selection ─────────────────────────────────────────────
+
+/** The `replay-diagnostics.ts` selection name for GLOBAL PASS activity pages. */
+export const GLOBAL_PASS_SELECTION = "globalpass-activity";
+
+/**
+ * The read-only selection of `replay-diagnostics.ts globalpass-activity`: the
+ * stored `globalpass-activity` artifacts whose latest `global-pass-activity`
+ * parse (of any version, or of `version` when given) is `error` with
+ * `parser_rejected`, one per raw object (its newest artifact), newest fetch
+ * run first. An artifact a later parse accepted is not selected. The columns
+ * are those of `replaySelectionSql`, so the replay builds the same
+ * `ArtifactMeta`. `GLOBAL PASS` is outside `REPLAY_SOURCES`, which this
+ * selection does not widen.
+ */
+export function globalPassReplaySelectionSql(filter: { version?: string } = {}): string {
+  if (filter.version !== undefined && !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/u.test(filter.version))
+    throw new Error("parser version must be MAJOR.MINOR.PATCH");
+  const version = filter.version === undefined ? "" : ` AND p.parser_version='${filter.version}'`;
+  return `WITH latest AS (
+ SELECT p.fetch_artifact_id,p.parser_name,p.parser_version,p.status,p.error,
+ row_number() OVER(PARTITION BY p.fetch_artifact_id ORDER BY p.id DESC) AS parse_rank
+ FROM parse_runs p WHERE p.parser_name='${GLOBAL_PASS_ACTIVITY_PARSER}'${version}
+), failed AS (
+ SELECT a.*,o.blob_key,o.byte_size,l.parser_name,l.parser_version AS failed_parser_version,
+ r.status AS run_status,r.failure_count AS run_failure_count,
+ NULL AS metadata_projection_json,
+ row_number() OVER(PARTITION BY a.sha256 ORDER BY a.fetch_run_id DESC,a.id DESC) AS rank,
+ coalesce((SELECT start_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' ORDER BY q.id LIMIT 1),r.window_start) AS window_start,
+ coalesce((SELECT end_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' ORDER BY q.id LIMIT 1),r.window_end) AS window_end
+ FROM latest l JOIN observation_fetch_artifacts a ON a.id=l.fetch_artifact_id
+ JOIN observation_fetch_runs r ON r.id=a.fetch_run_id
+ JOIN raw_objects o ON o.sha256=a.sha256
+ WHERE l.parse_rank=1 AND l.status='error' AND l.error='parser_rejected'
+ AND a.source_id='global-pass' AND a.dataset='globalpass-activity'
+) SELECT * FROM failed WHERE rank=1 ORDER BY fetch_run_id DESC,id DESC LIMIT 50`;
 }
