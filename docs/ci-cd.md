@@ -214,6 +214,17 @@ Wrangler rollout. Processor alone enables trigger synchronization to preserve
 its existing Queue consumer settings. All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
 
+The manual **Container account readback** workflow is a read-only diagnostic for
+these three Container owners. Dispatch it from `main` after the production
+release has finished. It checks out that exact workflow SHA and uses the existing
+production token only for fixed Cloudflare GET requests; its output contains
+aggregate identity, configuration, version-allocation and namespace-match counts.
+Its separate concurrency group cannot replace a pending production release.
+A successful run means the reads completed, not that every count matched or that
+a rollout is ready: API shapes and concurrent state changes can produce lower
+counts. Interpret them before any Container migration; the reads are not an
+atomic rollout proof and make no deployment or bank request.
+
 `deployBackend` belongs to the target commit's deployment ledger. A target that
 has no `cf` marker uses the existing v1 path, including commits predating this
 migration. The trusted workflow normalizes a cf step's actual outcome into the
