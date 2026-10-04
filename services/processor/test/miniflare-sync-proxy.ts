@@ -25,6 +25,7 @@
 // empty past `REPLY_WAIT_MS` is an error that names the cause rather than a
 // silent hang. Installed once per process by the bunfig preload and by
 // `harness.ts`; installing twice is a no-op.
+import "./miniflare-http-proxy.ts";
 import workerThreads from "node:worker_threads";
 
 /** How long a read waits for a reply before it fails. */
