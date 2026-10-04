@@ -933,6 +933,10 @@ const DATE_CELL = /^\d{4}[/-]\d{2}[/-]\d{2}$/u;
 
 type GpNode = GlobalPassDomNode;
 
+function digits(length: number): number {
+  return length <= 0 ? 0 : String(Math.floor(length)).length;
+}
+
 function gpElements(root: GpNode, tagName: string): GpNode[] {
   const found: GpNode[] = [];
   const visit = (node: GpNode): void => {
@@ -975,7 +979,12 @@ function gpDirectCells(row: GpNode): GpNode[] {
 
 export interface GlobalPassActivityShape {
   utf8: boolean;
-  byteLength: number;
+  /**
+   * Number of decimal digits of the page's byte length (0 for an empty page),
+   * as the sanitizer's refusal shape reduces it: an exact length is not
+   * needed to read a size refusal, which has its own code.
+   */
+  byteMagnitude: number;
   /** The page starts with `<!doctype html`, as the parser requires. */
   doctype?: boolean;
   select?: number;
@@ -1044,7 +1053,7 @@ export function globalPassActivityShape(
   try {
     html = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return { utf8: false, byteLength: bytes.byteLength };
+    return { utf8: false, byteMagnitude: digits(bytes.byteLength) };
   }
   const document = parse(html) as unknown as GpNode;
   const options = gpElements(document, "option");
@@ -1055,7 +1064,7 @@ export function globalPassActivityShape(
   );
   const shape: GlobalPassActivityShape = {
     utf8: true,
-    byteLength: bytes.byteLength,
+    byteMagnitude: digits(bytes.byteLength),
     doctype: /^\s*<!doctype\s+html\b/iu.test(html),
     select: gpElements(document, "select").length,
     option: options.length,

@@ -283,11 +283,15 @@ describe("global-pass-activity: one closed code per throw site", () => {
   test("every throw in the parser source maps to a named code, never other", () => {
     // Each `throw new Error(...)` of global-pass-activity.ts, with its
     // interpolations given the values the parser builds them from.
-    const templates = [...SOURCE.matchAll(/throw new Error\(\s*(`[^`]*`|"[^"]*")/gu)].map((match) =>
-      match[1]!.slice(1, -1),
+    // The whole argument must be one literal, so a message built another way
+    // (a variable, a concatenation, another error class) is a `throw` this
+    // pattern does not match, and the count below fails.
+    const templates = [...SOURCE.matchAll(/throw new Error\(\s*(`[^`]*`|"[^"]*")\s*,?\s*\)/gu)].map(
+      (match) => match[1]!.slice(1, -1),
     );
     // 32 sites, 31 messages: the key/month disagreement is thrown at two.
     expect(templates).toHaveLength(32);
+    expect(SOURCE.match(/\bthrow\b/gu)).toHaveLength(templates.length);
     expect(new Set(templates).size).toBe(31);
     const values: Record<string, string> = {
       "index + 1": "7",
@@ -343,7 +347,7 @@ describe("global-pass-activity: the stored page's shape in counts and booleans",
   test("the synthetic page reads as the parser reads it", () => {
     expect(shapeOf(FIXTURE)).toEqual({
       utf8: true,
-      byteLength: encode(FIXTURE).byteLength,
+      byteMagnitude: String(encode(FIXTURE).byteLength).length,
       doctype: true,
       select: 1,
       option: 16,
@@ -428,7 +432,7 @@ describe("global-pass-activity: the stored page's shape in counts and booleans",
     expect(ja.monthSelect).toBeUndefined();
     expect(globalPassActivityShape(new Uint8Array([0xff]), null)).toEqual({
       utf8: false,
-      byteLength: 1,
+      byteMagnitude: 1,
     });
   });
 
