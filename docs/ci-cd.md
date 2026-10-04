@@ -192,18 +192,23 @@ caller ever drops it again.
 
 ### cf version deployment and compatible rollbacks
 
-ADR 0040 moves ten compatible Workers to `cf@1.0.0-beta.12` and the pinned
+ADR 0040 moves thirteen compatible Workers to `cf@1.0.0-beta.12` and the pinned
 `wrangler-deploy-action` v2.1.1. Their native `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared
 V Point exports. Existing Wrangler tests, bundles and dry runs remain, with
 credential-free cf builds and prebuilt version-upload dry runs added.
 
-Container deployments (GlobalPass, SBI Shinsei, St.George) and legacy DO
-migration owners (SBI VC Trade, SMBC Direct, Processor) retain v1.2.0. `cf workers
-versions create` does not update Container applications, and converting their
-DO migration history would change the rollback boundary. The release does not
-make either change. All 16 Workers keep ADR 0039's order and the authenticated
+Container deployments (GlobalPass, SBI Shinsei, St.George) retain v1.2.0 because
+`cf workers versions create` does not update Container applications. Legacy DO
+owners (SBI VC Trade, SMBC Direct, Processor) use code-only cf bindings to their
+existing self-Worker/class namespaces, with no native exports or migrations.
+Canonical migration histories remain unchanged. A build guard checks their
+actual artifacts; before publication the live migration tag must match the
+latest canonical tag, and after publication all active namespace IDs must
+match the captured baseline. Pending DO lifecycle work requires a separate
+Wrangler rollout. Processor alone enables trigger synchronization to preserve
+its existing Queue consumer settings. All 16 Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
 
 `deployBackend` belongs to the target commit's deployment ledger. A target that
@@ -426,13 +431,13 @@ first upload; a difference names the field that moved and stops the deployment.
 That is what the pipeline can honestly assert: **nothing changed between the
 build that was validated and the upload that was performed**.
 
-The ten cf Workers upload their validated prebuilt artifacts. The manifest also
+The thirteen cf Workers upload their validated prebuilt artifacts. The manifest also
 hashes each native source and build configuration and every cf build-output file,
 including Worker metadata, modules, maps and App assets. Missing metadata or an
 empty entry module fails before upload. The pinned v2 Action creates one version,
 deploys that exact version at 100%, and reads the allocation back.
 
-The six v1 Workers still re-bundle during deployment, so their recorded bundle
+The three v1 Workers still re-bundle during deployment, so their recorded bundle
 digest proves the validated build identity and unchanged inputs. The Workers API
 does not expose the uploaded script's content digest. The existing
 `<short>:bundle` tasks retain reproducible Wrangler bundles for all Workers, and

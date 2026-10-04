@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { parseJsonc } from "../../scripts/jsonc.ts";
 import { readDeployOrder, workflowSteps } from "./deploy-order.ts";
@@ -23,17 +23,20 @@ const camel = (value: unknown): any =>
       : value;
 
 describe("cf migration preserves the canonical Wrangler deployment contract", () => {
-  test("only compatible Workers use cf; legacy DO and Containers stay on v1", () => {
+  test("compatible Workers use cf while Container applications stay on v1", () => {
     expect(targets.map((worker) => worker.name)).toEqual([
       "mobile-suica-worker",
       "moneyforward-worker",
       "myjcb-worker",
       "sbi-securities-worker",
+      "sbi-vc-trade-worker",
+      "smbc-direct-backfill-worker",
       "mizuho-worker",
       "sony-bank-worker",
       "vpass-json",
       "vpoint-pay-worker",
       "vpoint-worker",
+      "processor",
       "app",
     ]);
   });
@@ -65,10 +68,26 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
               "durable_objects",
               "services",
               "assets",
+              "migrations",
+              "vpc_networks",
+              "limits",
+              "queues",
             ].includes(key),
         ),
       ).toEqual([]);
-      expect(old.migrations).toBeUndefined();
+      if (old.migrations) {
+        expect(target.doLifecycle).toBe("preserve");
+        expect(worker.exports).toBeUndefined();
+        expect((worker as any).migrations).toBeUndefined();
+      } else expect(target.doLifecycle).toBeUndefined();
+      const example = `${REPO_ROOT}/${target.path}/.dev.vars.example`;
+      const inferredSecrets =
+        target.doLifecycle === "preserve" && existsSync(example)
+          ? [...readFileSync(example, "utf8").matchAll(/^([A-Z][A-Z0-9_]*)=/gmu)].map(
+              (match) => match[1]!,
+            )
+          : [];
+      const secretNames = [...new Set([...(old.secrets?.required ?? []), ...inferredSecrets])];
       expect(old.containers).toBeUndefined();
       expect(config.accountId).toBe(old.account_id);
       expect(worker.name).toBe(old.name);
@@ -80,8 +99,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(worker.observability).toEqual(camel(old.observability));
       for (const [key, value] of Object.entries(old.vars ?? {}))
         expect(worker.env[key]).toEqual({ type: "text", value });
-      for (const key of old.secrets?.required ?? [])
-        expect(worker.env[key]).toEqual({ type: "secret" });
+      for (const key of secretNames) expect(worker.env[key]).toEqual({ type: "secret" });
       for (const binding of old.r2_buckets ?? [])
         expect(worker.env[binding.binding]).toEqual({ type: "r2", name: binding.bucket_name });
       for (const binding of old.d1_databases ?? [])
@@ -91,7 +109,11 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
           id: binding.database_id,
         });
       for (const binding of old.services ?? [])
-        expect(worker.env[binding.binding]).toEqual({ type: "worker", worker: binding.service });
+        expect(worker.env[binding.binding]).toEqual({
+          type: "worker",
+          worker: binding.service,
+          ...(binding.entrypoint ? { exportName: binding.entrypoint } : {}),
+        });
       for (const binding of old.durable_objects?.bindings ?? [])
         expect(worker.env[binding.name]).toEqual({
           type: "durable-object",
@@ -114,14 +136,28 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
           .default;
         expect(buildConfig.assetsDirectory).toBe(old.assets.directory);
       }
-      expect(worker.triggers ?? []).toEqual([]);
+      for (const binding of old.vpc_networks ?? [])
+        expect(worker.env[binding.binding]).toEqual({
+          type: "vpc-network",
+          tunnelId: binding.tunnel_id,
+          ...(binding.remote ? { dev: { remote: true } } : {}),
+        });
+      expect(worker.limits).toEqual(old.limits ? camel(old.limits) : undefined);
+      expect(worker.triggers ?? []).toEqual(
+        (old.queues?.consumers ?? []).map(({ queue, ...settings }: any) => ({
+          type: "queue",
+          name: queue,
+          ...camel(settings),
+        })),
+      );
       expect(Object.keys(worker.env).sort()).toEqual(
         [
           ...Object.keys(old.vars ?? {}),
-          ...(old.secrets?.required ?? []),
+          ...secretNames,
           ...(old.r2_buckets ?? []).map((binding: any) => binding.binding),
           ...(old.d1_databases ?? []).map((binding: any) => binding.binding),
           ...(old.services ?? []).map((binding: any) => binding.binding),
+          ...(old.vpc_networks ?? []).map((binding: any) => binding.binding),
           ...(old.durable_objects?.bindings ?? []).map((binding: any) => binding.name),
           ...(old.browser ? [old.browser.binding] : []),
           ...(old.assets ? [old.assets.binding] : []),
@@ -139,10 +175,37 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       );
       expect(cf?.body).toContain("@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1");
       expect(cf?.body).toContain(`worker: ${target.worker}`);
-      expect(cf?.body).toContain("deploy-triggers: 'false'");
+      expect(cf?.body).toContain(
+        `deploy-triggers: '${target.name === "processor" ? "true" : "false"}'`,
+      );
       expect(steps.indexOf(cf!)).toBe(steps.indexOf(legacy!) + 1);
     });
   }
+  test("legacy lifecycle stays canonical and is checked around publication", () => {
+    const history: Record<string, unknown[]> = {
+      "sbi-vc-trade-worker": [{ tag: "v1", new_sqlite_classes: ["SbiVcSessionState"] }],
+      "smbc-direct-backfill-worker": [{ tag: "v1", new_sqlite_classes: ["SmbcBackfillSession"] }],
+      processor: [{ tag: "alarm-v1", new_sqlite_classes: ["ScheduleAlarm"] }],
+    };
+    for (const target of targets.filter((entry) => entry.doLifecycle === "preserve")) {
+      const old = parseJsonc(readFileSync(`${REPO_ROOT}/${target.path}/${target.config}`, "utf8"));
+      expect(old.migrations).toEqual(history[target.name]);
+    }
+    const capture = steps.find(
+      (step) => step.name === "Capture the existing DO namespaces and lifecycle",
+    )!;
+    const verify = steps.find(
+      (step) => step.name === "Verify the existing DO namespaces and lifecycle",
+    )!;
+    expect(capture.body).toContain("cf-do-identity.mjs capture");
+    expect(verify.body).toContain("cf-do-identity.mjs verify");
+    expect(steps.indexOf(capture)).toBeLessThan(
+      steps.findIndex((step) => step.name === "Open the deployment record"),
+    );
+    expect(steps.indexOf(verify)).toBeGreaterThan(
+      steps.findIndex((step) => step.body.includes("id: cf-deploy-app")),
+    );
+  });
   test("the trusted progress adapter works with a legacy ledger on rollback", () => {
     const progress = steps.find((step) => step.name === "Record what this run deployed")!;
     const expression = /STEPS_JSON=\$\(jq -c '([^']+)'/u.exec(progress.body)![1]!;

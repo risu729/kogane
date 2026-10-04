@@ -118,7 +118,9 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "sbi-vc-trade-worker:bundle",
       "bundleDir": "dist/sbi-vc-trade-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf",
+      "doLifecycle": "preserve"
     },
     {
       "name": "smbc-direct-backfill-worker",
@@ -131,7 +133,9 @@
       "healthAuth": "none",
       "bundleTask": "smbc-direct-backfill-worker:bundle",
       "bundleDir": "dist/smbc-direct-backfill-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf",
+      "doLifecycle": "preserve"
     },
     {
       "name": "mizuho-worker",
@@ -248,7 +252,9 @@
         "vpass-json",
         "vpoint-pay-worker",
         "vpoint-worker"
-      ]
+      ],
+      "deployBackend": "cf",
+      "doLifecycle": "preserve"
     },
     {
       "name": "app",

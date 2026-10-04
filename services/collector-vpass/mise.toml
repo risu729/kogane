@@ -29,13 +29,17 @@ run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/vpass-j
 
 [tasks."ci"]
 description = "Every check CI runs for services/collector-vpass."
-depends = ["//services/collector-vpass:typecheck", "//services/collector-vpass:test"]
+depends = ["//services/collector-vpass:cf-typecheck", "//services/collector-vpass:typecheck", "//services/collector-vpass:test"]
 
 [tasks."cf-build"]
 description = "Build and validate the prebuilt cf production artifact without credentials."
 depends = ["//services/collector-vpass:types"]
 run = [
-	"./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json",
 	"./node_modules/.bin/cf build --mode production",
 	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-vpass-collector-poc --dry-run",
 ]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-vpass:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

@@ -285,6 +285,15 @@ jobs:
             exit 1
           fi
           echo "The production Cloudflare credentials are in scope." | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: Capture the existing DO namespaces and lifecycle
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [[ -f tasks/_lib/ci/cf-do-identity.mjs ]]; then
+            node tasks/_lib/ci/cf-do-identity.mjs capture "${RUNNER_TEMP}/cf-do-identity.json"
+          fi
       - name: Compute the release manifest
         if: steps.decide.outputs.proceed == 'true'
         env:
@@ -542,7 +551,7 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the SBI VC Trade collector
         id: deploy-sbi-vc-trade-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-vc-trade-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-vc-trade-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sbi-vc-trade-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -550,14 +559,38 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the SBI VC Trade collector with cf
+        id: cf-deploy-sbi-vc-trade-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-vc-trade-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-vc-trade-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-sbi-vc-trade
+          worker: kogane-sbi-vc-session-poc
+          build-mode: production
+          deploy-triggers: 'false'
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the SMBC Direct collector
         id: deploy-smbc-direct-backfill-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'smbc-direct-backfill-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'smbc-direct-backfill-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'smbc-direct-backfill-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
           working-directory: services/collector-smbc-direct
           config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the SMBC Direct collector with cf
+        id: cf-deploy-smbc-direct-backfill-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'smbc-direct-backfill-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'smbc-direct-backfill-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-smbc-direct
+          worker: kogane-smbc-direct-backfill-poc
+          build-mode: production
+          deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Mizuho collector
@@ -684,12 +717,24 @@ jobs:
         id: deploy-processor
         # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
         # from the job's `steps` context to record, per Worker, what happened.
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor') && !contains(fromJson(steps.select.outputs.cf-selected), 'processor')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
           working-directory: services/processor
           config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Processor with cf
+        id: cf-deploy-processor
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor') && contains(fromJson(steps.select.outputs.cf-selected), 'processor')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/processor
+          worker: kogane-observation-pipeline
+          build-mode: production
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the App
@@ -718,6 +763,15 @@ jobs:
           deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify the existing DO namespaces and lifecycle
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [[ -f tasks/_lib/ci/cf-do-identity.mjs ]]; then
+            node tasks/_lib/ci/cf-do-identity.mjs verify "${RUNNER_TEMP}/cf-do-identity.json"
+          fi
       - name: Postcheck the public health routes
         # The Workers this run deployed whose health route needs no
         # authentication: every collector with a

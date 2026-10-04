@@ -32,13 +32,17 @@ run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/mobile-
 
 [tasks."ci"]
 description = "Every check CI runs for services/collector-mobile-suica."
-depends = ["//services/collector-mobile-suica:typecheck", "//services/collector-mobile-suica:test"]
+depends = ["//services/collector-mobile-suica:cf-typecheck", "//services/collector-mobile-suica:typecheck", "//services/collector-mobile-suica:test"]
 
 [tasks."cf-build"]
 description = "Build and validate the prebuilt cf production artifact without credentials."
 depends = ["//services/collector-mobile-suica:types"]
 run = [
-	"./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json",
 	"./node_modules/.bin/cf build --mode production",
 	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-mobile-suica-collector-poc --dry-run",
 ]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-mobile-suica:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

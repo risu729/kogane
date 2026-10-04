@@ -398,13 +398,14 @@ describe("the deploy workflow follows the ledger", () => {
     );
   });
 
-  test("only credential preflight, migrations, deployment and trigger readback see the Cloudflare token (G5-17)", () => {
+  test("only credential preflight, migrations, deployment and identity/trigger readback see the Cloudflare token (G5-17)", () => {
     const usingToken = workflowSteps(deployWorkflow)
       .filter((step) => step.body.includes("secrets.CLOUDFLARE_API_TOKEN"))
       .map((step) => step.name.replace(/ with cf$/u, ""))
       .filter((name, index, names) => names.indexOf(name) === index);
     expect(usingToken).toEqual([
       "Confirm the production credentials reached this job",
+      "Capture the existing DO namespaces and lifecycle",
       "Apply the CORE migrations",
       "Apply the READ migrations",
       "Deploy the GlobalPass collector",
@@ -423,6 +424,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the V Point collector",
       "Deploy the Processor",
       "Deploy the App",
+      "Verify the existing DO namespaces and lifecycle",
       "Reconcile future schedule alarms",
     ]);
   });

@@ -29,17 +29,17 @@ run = "bun test --shard=2/2"
 
 [tasks."dry-run"]
 description = "Validate the services/processor deployment without uploading it."
-depends = ["//services/processor:types"]
+depends = ["//services/processor:cf-build", "//services/processor:types"]
 run = ["./node_modules/.bin/wrangler deploy --dry-run"]
 
 [tasks."bundle"]
 description = "Emit the deployable bundle of services/processor for the release manifest."
-depends = ["//services/processor:types"]
+depends = ["//services/processor:cf-build", "//services/processor:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/processor --config wrangler.jsonc"
 
 [tasks."ci"]
 description = "Every check CI runs for services/processor."
-depends = ["//services/processor:typecheck", "//services/processor:test"]
+depends = ["//services/processor:cf-typecheck", "//services/processor:typecheck", "//services/processor:test"]
 
 [tasks."ops"]
 description = "Inspect or operate the deployed processor through its authenticated service binding."
@@ -48,3 +48,17 @@ run = "node scripts/ops.ts"
 [tasks."settlement:shadow"]
 description = "Read aggregate card settlement automation prerequisites without adopting anything."
 run = "bun scripts/card-settlement-shadow.ts"
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/processor:types"]
+run = [
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-observation-pipeline --dry-run",
+	"node ../../tasks/_lib/ci/cf-do-identity.mjs validate processor",
+]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/processor:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

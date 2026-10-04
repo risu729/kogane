@@ -4,5 +4,5 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "include": ["worker-configuration.d.ts", "cloudflare.config.ts", "wrangler.config.ts"]
+  "include": ["worker-configuration.d.ts", "env.d.ts", "cloudflare.config.ts", "wrangler.config.ts"]
 }
