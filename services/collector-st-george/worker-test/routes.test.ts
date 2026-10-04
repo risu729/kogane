@@ -104,3 +104,35 @@ test("nonempty streamed input is cancelled before coordinator access", async () 
   expect(response.status).toBe(400);
   expect(cancel).toHaveBeenCalledOnce();
 });
+
+test("daily collection disables platform retries before entering the shared coordinator", async () => {
+  for (const status of [200, 409]) {
+    const noRetry = vi.fn();
+    const fetch = vi.fn(async (request: Request) => {
+      expect(noRetry).toHaveBeenCalledOnce();
+      expect(request.url).toBe("https://state/trigger");
+      expect(request.method).toBe("POST");
+      return new Response(null, { status });
+    });
+    const idFromName = vi.fn((name: string) => {
+      expect(noRetry).toHaveBeenCalledOnce();
+      expect(name).toBe("st-george");
+      return "test";
+    });
+    const get = vi.fn((id: string) => {
+      expect(noRetry).toHaveBeenCalledOnce();
+      expect(id).toBe("test");
+      return { fetch };
+    });
+    const env = {
+      ...bindings(),
+      SESSION_STATE: { idFromName, get },
+    } as unknown as Env;
+    const result = worker.scheduled({ noRetry } as unknown as ScheduledController, env);
+    if (status === 200) await expect(result).resolves.toBeUndefined();
+    else await expect(result).rejects.toThrow("st-george-collection-not-completed");
+    expect(idFromName).toHaveBeenCalledOnce();
+    expect(get).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+  }
+});
