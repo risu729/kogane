@@ -29,7 +29,7 @@
     }
   ],
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "smbc-direct-backfill-worker-poc-v1",
+    "COLLECTOR_SCHEMA_VERSION": "smbc-direct-backfill-worker-poc-v2",
     "SMBC_DIRECT_BASE_URL": "https://direct3.smbc.co.jp",
     "SMBC_DIRECT_LOGIN_BASE_URL": "https://direct.smbc.co.jp",
     "DEFAULT_BACKFILL_FROM": "2019-01-01"

@@ -315,9 +315,9 @@ test("with the release flag off a targeted job publishes normally and no command
       currency: "JPY",
       observedAt: "2026-09-07T00:00:00.000Z",
     });
-    const identity = await releaseIdentity({ name: "smbc-direct-balance", version: "1.0.0" });
+    const identity = await releaseIdentity({ name: "smbc-direct-balance", version: "1.1.0" });
     await off.env.DB.prepare(
-      "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,target_release) VALUES(60,'smbc-direct-balance','1.0.0','pending',?)",
+      "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,target_release) VALUES(60,'smbc-direct-balance','1.1.0','pending',?)",
     )
       .bind(identity.releaseId)
       .run();
@@ -327,7 +327,7 @@ test("with the release flag off a targeted job publishes normally and no command
         {
           fetch_artifact_id: 60,
           parser_name: "smbc-direct-balance",
-          parser_version: "1.0.0",
+          parser_version: "1.1.0",
           attempts: 0,
           target_release: identity.releaseId,
         },

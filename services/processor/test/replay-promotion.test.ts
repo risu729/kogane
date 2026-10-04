@@ -64,12 +64,12 @@ test("explicit replay attaches only untouched same-target repair work and cancel
   ] of cases) {
     await env.DB.prepare(`INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,
       lane,status,attempts,lease_token,lease_until_ms,target_release,replay_plan_id,available_at_ms,priority,created_at_ms)
-      VALUES(?,'smbc-direct-balance','1.0.0',?,?,?,?,?,?,?,7777777777777,7,123)`)
+      VALUES(?,'smbc-direct-balance','1.1.0',?,?,?,?,?,?,?,7777777777777,7,123)`)
       .bind(id, lane, status, attempts, leaseToken, leaseUntil, targetRelease, replayPlanId)
       .run();
   }
   await env.DB.prepare(`INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
-    VALUES(108,'smbc-direct-balance','1.0.0','2026-09-13','ok','[]')`).run();
+    VALUES(108,'smbc-direct-balance','1.1.0','2026-09-13','ok','[]')`).run();
   const originals = await Promise.all(cases.map(([id]) => job(id as number)));
   const facts = async () => ({
     raw: (await env.DB.prepare("SELECT * FROM fetch_artifacts ORDER BY id").all()).results,
@@ -80,7 +80,7 @@ test("explicit replay attaches only untouched same-target repair work and cancel
     source: "smbc-bank",
     dataset: "balance-normalized",
     parser: "smbc-direct-balance",
-    version: "1.0.0",
+    version: "1.1.0",
     reason: "synthetic bounded priority review",
     artifactIdFrom: 100,
   });
@@ -129,13 +129,13 @@ test("explicit replay attaches only untouched same-target repair work and cancel
 test("a candidate replay never retargets untouched normal repair work", async () => {
   await seed(201);
   await env.DB.prepare(`INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,lane,status)
-    VALUES(201,'smbc-direct-balance','1.0.0','repair','pending')`).run();
+    VALUES(201,'smbc-direct-balance','1.1.0','repair','pending')`).run();
   const before = await job(201);
   const plan = await post("plan", {
     source: "smbc-bank",
     dataset: "balance-normalized",
     parser: "smbc-direct-balance",
-    version: "1.0.0",
+    version: "1.1.0",
     reason: "candidate target isolation",
     artifactIdFrom: 200,
     targetRelease: "registered-candidate-placeholder",
@@ -156,12 +156,12 @@ test("a candidate replay never retargets untouched normal repair work", async ()
 test("normal replay publishes attached repair work even with candidate mode enabled", async () => {
   await seed(301);
   await env.DB.prepare(`INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,lane,status)
-    VALUES(301,'smbc-direct-balance','1.0.0','repair','pending')`).run();
+    VALUES(301,'smbc-direct-balance','1.1.0','repair','pending')`).run();
   const plan = await post("plan", {
     source: "smbc-bank",
     dataset: "balance-normalized",
     parser: "smbc-direct-balance",
-    version: "1.0.0",
+    version: "1.1.0",
     reason: "ordinary deployed parser backfill",
     artifactIdFrom: 300,
   });

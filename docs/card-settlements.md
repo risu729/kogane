@@ -112,7 +112,7 @@ new rows. The lane runs under `RECONCILIATION_ENABLED`, right before
 `card_settlement_sweep`, and logs `scanned`, `read`, `refused`, `written`.
 
 **The rule** (`proposeCardDebitAccount`, policy
-`card-debit-account-statement-v2`). The displayed bank name resolves to a CORE
+`card-debit-account-statement-v3`). The displayed bank name resolves to a CORE
 source id only through a table of the banks Kogane models (みずほ銀行,
 三井住友銀行, SBI新生銀行, ソニー銀行, compared after NFKC and whitespace
 removal); any other name is `bank_not_resolved`. 普通 is `ordinary` and 当座 is
@@ -147,13 +147,16 @@ Limits:
   `カード照合` review or its API: showing them needs a new field in the review
   contract (`packages/observation-shared/src/card-settlement-contract.ts`) and
   the web page, which this change does not make.
-- **Adapter banks cannot be matched.** SMBC's reference
-  (`smbc-bank:ordinary-yen`) carries no account digits, and SBI Shinsei's
-  `accountNo` layout next to a displayed account number is unverified, so a
-  page naming either bank yields `no_comparable_bank_account`. Mizuho's
-  reference (`mizuho-bank:ordinary:<branch>:<account>`) is comparable, but
-  Mizuho is not an adapter, so a Mizuho proposal can name another account
-  (`names_other_account`) and never `supports` a candidate today.
+- **Historical SMBC and SBI Shinsei references remain uncomparable.**
+  SMBC's legacy reference carries no account digits. New captures retain the
+  successful request's branch, ordinary account type and number in normalized
+  artifacts; parser 1.1.0 preserves this context. Policy v3 compares only the
+  candidate debit's own published transaction/parse context and cites that
+  observation. A later balance or another capture never supplies missing
+  historical digits (ADR 0034). Unenriched account lists are cached once per
+  bank per sweep; enrichment creates candidate-local copies.
+  SBI Shinsei's accountNo layout next to a displayed account number remains
+  unverified. Mizuho is comparable but has no bank debit adapter.
 - **Branch names are not compared** (above), so two known accounts at one bank
   with the same four leading digits are `ambiguous_accounts`.
 - **Vpass**: none of the statement APIs (`web_meisai_top/v1`,
@@ -528,3 +531,27 @@ unchanged).
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.
+
+## Automation prerequisites (ADR 0034)
+
+The pure assessSettlementAutomation function is a separately tested rule
+evaluator. It checks explicit account/period authorization, current ownership
+and facts, candidate-local bank evidence, complete acquisition and candidate
+sets, two-sided uniqueness, allocation availability, and previous decisions.
+Its would_accept result is a simulation verdict only; no production writer
+or policy loader calls it yet.
+
+The processor's settlement:shadow task (with --remote) performs one read-only
+D1 query and emits aggregate prerequisite counts. It inspects at most 1,001
+newest candidate rows and marks truncation above 1,000. These counts describe
+the sampled current candidate graph; they are not auto-acceptance counts and
+do not establish full acquisition coverage or authorization.
+The debit_context_present count measures presence only, not validity.
+The command does not run the domain evaluator, configure policy, call AI,
+or accept anything.
+
+Remaining rollout: obtain a new authenticated SMBC capture through its existing
+Safety Pass flow, verify retained account context, configure initial ownership
+and effective account scope, connect the evaluator to a complete read-only
+candidate adapter, then add the versioned authorized atomic acceptance lane.
+Workers AI is deferred until unresolved deterministic cases are measured.

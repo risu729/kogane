@@ -126,6 +126,8 @@ export interface CardSettlementSweepResult {
 
 /** Published source facts only; heuristic candidates always remain unaccepted. */
 export async function cardSettlementSweep(db: D1Database): Promise<CardSettlementSweepResult> {
+  // Cache only numberless baseline references. Observed context stays debit-local.
+  const bankAccountsBySource = new Map<string, BankAccountReference[] | null>();
   const cursor = await db
     .prepare("SELECT last_statement_id FROM card_settlement_scan_cursor WHERE singleton=1")
     .first<{ last_statement_id: number }>();
@@ -149,8 +151,7 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     written = 0,
     debitAccountEvidence = 0,
     scanned = statements.results.length;
-  // Per tick: the known accounts of each bank a statement names.
-  const bankAccountsBySource = new Map<string, BankAccountReference[] | null>();
+  // Account context is pinned to each debit; never reuse it across captures.
   for (const statement of statements.results) {
     // Read once per statement, and only for a MyJCB statement: no Vpass
     // statement API carries a debit account (observed absent).
@@ -253,7 +254,16 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
           if (bankSourceId !== null) {
             if (!bankAccountsBySource.has(bankSourceId))
               bankAccountsBySource.set(bankSourceId, await knownBankAccounts(db, bankSourceId));
-            bankAccounts = bankAccountsBySource.get(bankSourceId)!;
+            bankAccounts = await knownBankAccounts(
+              db,
+              bankSourceId,
+              {
+                sourceId: facts.bankDebit.sourceId,
+                sourceAccount: facts.bankDebit.sourceAccount,
+                ref: facts.bankDebit.ref,
+              },
+              bankAccountsBySource.get(bankSourceId),
+            );
           }
           // More known accounts than the rule is given: uniqueness is not
           // judged and nothing is recorded.

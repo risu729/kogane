@@ -1,3 +1,7 @@
+import {
+  smbcAccountContext,
+  type SmbcAccountContext,
+} from "../../../packages/domain/src/smbc-account-context.ts";
 import iconv from "iconv-lite";
 import { renderSVG } from "uqr";
 import { compactDate } from "./dates";
@@ -39,6 +43,7 @@ export interface NormalizedTransaction {
 }
 
 export interface TransactionResult {
+  account: SmbcAccountContext | null;
   range: DateRange;
   depositsTotal: number;
   withdrawalsTotal: number;
@@ -48,6 +53,7 @@ export interface TransactionResult {
 }
 
 export interface BalanceResult {
+  account: SmbcAccountContext | null;
   amount: number;
   currency: "JPY";
   displayValue: string;
@@ -554,6 +560,8 @@ export class DirectProfile {
   }
 
   async getBalance(): Promise<BalanceResult> {
+    const branch = this.credentials.branchNo;
+    const accountNumber = this.credentials.accountNo;
     const { topForm } = this.#topForms();
     const url = new URL("/ib/ajax/top/TPALTOPAjaxSavingBalance.smbc", this.origins.baseURL);
     url.searchParams.set("_TOKEN", required(topForm, "_TOKEN"));
@@ -570,9 +578,9 @@ export class DirectProfile {
           "x-requested-with": "XMLHttpRequest",
         },
         body: JSON.stringify({
-          accountBranchCode: this.credentials.branchNo.padStart(4, "0"),
+          accountBranchCode: branch.padStart(4, "0"),
           accountItemCode: ACCOUNT_ITEM_CODE,
-          accountNo: this.credentials.accountNo,
+          accountNo: accountNumber,
         }),
       },
       this.jar,
@@ -580,10 +588,14 @@ export class DirectProfile {
     );
     const rawBytes = await readBoundedBytes(response, MAX_JSON_BYTES, "balance");
     const text = iconv.decode(Buffer.from(rawBytes), "Shift_JIS");
-    const body = JSON.parse(text) as { response?: { ajaxSavingAccountBalance?: unknown } };
+    const body = JSON.parse(text) as {
+      success?: unknown;
+      response?: { ajaxSavingAccountBalance?: unknown };
+    };
     const displayValue = body.response?.ajaxSavingAccountBalance;
     if (typeof displayValue !== "string") throw new Error("balance_value_missing");
     return {
+      account: body.success === true ? smbcAccountContext(branch, accountNumber) : null,
       amount: parseYen(displayValue, "balance"),
       currency: "JPY",
       displayValue,
@@ -593,6 +605,8 @@ export class DirectProfile {
   }
 
   async getTransactions(range: DateRange): Promise<TransactionResult> {
+    const branch = this.credentials.branchNo;
+    const accountNumber = this.credentials.accountNo;
     const startDate = compactDate(range.start);
     const endDate = compactDate(range.end);
     await this.continueSession();
@@ -609,11 +623,11 @@ export class DirectProfile {
         },
         body: new URLSearchParams({
           ...topForm,
-          moudaiBrNo: this.credentials.branchNo.padStart(4, "0"),
-          moudaiAcNo: this.credentials.accountNo,
-          accountBranchCode: this.credentials.branchNo.padStart(4, "0"),
+          moudaiBrNo: branch.padStart(4, "0"),
+          moudaiAcNo: accountNumber,
+          accountBranchCode: branch.padStart(4, "0"),
           accountItemCode: ACCOUNT_ITEM_CODE,
-          accountNo: this.credentials.accountNo,
+          accountNo: accountNumber,
         }),
       },
       this.jar,
@@ -694,6 +708,7 @@ export class DirectProfile {
     });
     await this.continueSession();
     return {
+      account: smbcAccountContext(branch, accountNumber),
       range,
       depositsTotal: parseYen(result.response.nyukinGoukei, "deposits_total"),
       withdrawalsTotal: parseYen(result.response.syukkinGoukei, "withdrawals_total"),
