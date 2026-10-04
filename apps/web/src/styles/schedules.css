@@ -1,0 +1,162 @@
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 20px;
+}
+.schedule-card,
+.schedule-section {
+  border: 1px solid var(--border, #ddd);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  padding: 24px;
+}
+.schedule-card header,
+.schedule-section > header,
+.maintenance-list li {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.schedule-card h2 {
+  font-size: 18px;
+  margin: 0;
+}
+.schedule-state {
+  font-size: 12px;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #f1f1ee;
+}
+.schedule-state.armed {
+  background: #edf4ed;
+  color: #315d39;
+}
+.schedule-state.pending {
+  background: #fff4d9;
+  color: #735315;
+}
+.schedule-card form,
+.maintenance-editor {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0;
+}
+.schedule-card label,
+.maintenance-editor label,
+.schedule-section > label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.schedule-card input:not([type="checkbox"]),
+.schedule-card select,
+.maintenance-editor input:not([type="checkbox"]),
+.maintenance-editor select,
+.schedule-section select {
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: white;
+  color: #222;
+  font: inherit;
+}
+.schedule-toggle,
+.schedule-days label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+}
+.schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.schedule-card fieldset,
+.maintenance-editor fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.schedule-card legend,
+.maintenance-editor legend {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.schedule-card dl {
+  font-size: 13px;
+  display: grid;
+  gap: 4px;
+}
+.schedule-card dt {
+  color: #666;
+}
+.schedule-card dd {
+  margin: 0 0 8px;
+}
+.schedule-provenance,
+.schedule-receipt {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.schedule-receipt a,
+.schedule-receipt > span {
+  display: block;
+}
+.schedule-section {
+  margin-top: 24px;
+}
+.maintenance-list {
+  list-style: none;
+  padding: 0;
+}
+.maintenance-list li {
+  padding: 16px 0;
+  border-bottom: 1px solid #ddd;
+  line-height: 1.7;
+}
+.maintenance-list small {
+  color: #666;
+}
+.schedule-history {
+  padding: 12px 0;
+  border-bottom: 1px solid #ddd;
+}
+.schedule-actions {
+  display: flex;
+  gap: 10px;
+}
+.maintenance-editor {
+  padding: 20px;
+  background: #f5f5f1;
+  border-radius: 8px;
+  max-width: 650px;
+}
+.schedule-card .button {
+  justify-self: start;
+}
+.schedule-history button {
+  margin: 10px;
+}
+.schedule-card .muted {
+  font-size: 13px;
+  color: #666;
+}
+@media (max-width: 500px) {
+  .schedule-card,
+  .schedule-section {
+    padding: 16px;
+  }
+  .maintenance-list li {
+    flex-direction: column;
+  }
+  .schedule-card header {
+    flex-wrap: wrap;
+  }
+  .schedule-section > header {
+    flex-wrap: wrap;
+  }
+}

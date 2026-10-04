@@ -1,3 +1,4 @@
+import { SchedulesPage } from "./pages/Schedules";
 import { useEffect, useRef, type ReactNode } from "react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -14,6 +15,7 @@ import type { ApiMetadata } from "../../../packages/observation-shared/src/api-c
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 
 function routeFor(path: string) {
+  if (path === "/schedules") return { kind: "schedules" as const, title: "収集スケジュール" };
   const artifact = /^\/runs\/(r_[1-9]\d*)\/artifacts\/(a_[1-9]\d*)$/u.exec(path);
   if (artifact)
     return {
@@ -37,6 +39,7 @@ export function EvidenceContent({
 }): ReactNode {
   const route = routeFor(usePath());
   const metadata = useEvidenceMeta();
+  if (route.kind === "schedules") return <SchedulesPage />;
   return (
     <>
       {route.kind !== "history" ? (
@@ -51,6 +54,7 @@ export function EvidenceContent({
         </nav>
       ) : null}
       <div className="page-head">
+        {route.kind === "history" ? <Link to="/schedules">収集スケジュールを管理</Link> : null}
         <h1>{route.title}</h1>
         <p className="lede">保存済みの記録と、取得時に残されたファイルを確認できます。</p>
       </div>
@@ -110,6 +114,12 @@ export function EvidenceApp({
   }, [path, route.title]);
 
   const navItems: NavItem[] = [
+    {
+      to: "/schedules",
+      label: "収集スケジュール",
+      icon: NAV_ICONS.evidence,
+      current: route.kind === "schedules",
+    },
     ...(observationsAvailable
       ? [
           { to: "/", label: "ホーム", icon: NAV_ICONS.home, current: false },
@@ -128,6 +138,7 @@ export function EvidenceApp({
   ];
   return (
     <AppShell
+      modeLabel={route.kind === "schedules" ? "管理者による設定変更" : "閲覧専用"}
       tagline="保存された記録を、たどる。"
       navItems={navItems}
       note={{

@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { timingSafeEqual } from "node:crypto";
 import type { PersistRunResult } from "../../../packages/collection/src/index";
 import {
@@ -167,133 +172,135 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionOutcome> {
-  const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
-  const diagnostic = createDiagnostics("mobile-suica", runId);
-  try {
-    const artifacts: StoredArtifact[] = [];
-    const collected: RawArtifact[] = [];
-    const failures: CollectionFailure[] = [];
-    let transactionCount = 0;
-    let pageCount = 0;
-    let complete = false;
-    let capturedSessionAt: string | undefined;
+  return withCollectionLease(env, "mobile-suica", async () => {
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
+    const diagnostic = createDiagnostics("mobile-suica", runId);
     try {
-      const credential = await diagnostic.step("configuration", () =>
-        parseStoredJreCredential(
-          requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
-        ),
-      );
-      const session = await diagnostic.step("browser-bootstrap", async () =>
-        parseSessionEnvelope(
-          JSON.stringify(await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential)),
-        ),
-      );
-      capturedSessionAt = session.capturedAt;
-      const collection = await diagnostic.step("history-collection", () =>
-        collectMobileSuica({ session, asOfDateJst }),
-      );
-      transactionCount = collection.rows.length;
-      pageCount = collection.pageCount;
-      complete = collection.complete;
-      if (!collection.complete) {
-        diagnostic.failure("pagination", new Error("history_boundary_unproven"));
-        failures.push({
-          operation: "pagination",
-          errorType: "HistoryBoundaryError",
-          errorCode: "history_boundary_unproven",
-        });
+      const artifacts: StoredArtifact[] = [];
+      const collected: RawArtifact[] = [];
+      const failures: CollectionFailure[] = [];
+      let transactionCount = 0;
+      let pageCount = 0;
+      let complete = false;
+      let capturedSessionAt: string | undefined;
+      try {
+        const credential = await diagnostic.step("configuration", () =>
+          parseStoredJreCredential(
+            requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
+          ),
+        );
+        const session = await diagnostic.step("browser-bootstrap", async () =>
+          parseSessionEnvelope(
+            JSON.stringify(await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential)),
+          ),
+        );
+        capturedSessionAt = session.capturedAt;
+        const collection = await diagnostic.step("history-collection", () =>
+          collectMobileSuica({ session, asOfDateJst }),
+        );
+        transactionCount = collection.rows.length;
+        pageCount = collection.pageCount;
+        complete = collection.complete;
+        if (!collection.complete) {
+          diagnostic.failure("pagination", new Error("history_boundary_unproven"));
+          failures.push({
+            operation: "pagination",
+            errorType: "HistoryBoundaryError",
+            errorCode: "history_boundary_unproven",
+          });
+        }
+        {
+          // One terminal-last run replaces the per-artifact writes below.
+          collected.push(...collection.artifacts);
+        }
+      } catch (error) {
+        failures.push(failure("collect", error, "collection_failed"));
       }
+      const completedAt = new Date().toISOString();
+      const storedCount = collected.length;
+      const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
+      const manifest: CollectionManifest = {
+        schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+        source: "mobile-suica",
+        runId,
+        startedAt,
+        completedAt,
+        status,
+        asOfDateJst,
+        ...(capturedSessionAt ? { capturedSessionAt } : {}),
+        transactionCount,
+        pageCount,
+        complete,
+        artifacts,
+        failures,
+      };
       {
-        // One terminal-last run replaces the per-artifact writes below.
-        collected.push(...collection.artifacts);
+        const persisted = await diagnostic.step("terminal-write", () =>
+          persistMobileSuicaRun(env.DATA, {
+            runId,
+            producerVersion: manifest.schemaVersion,
+            attemptId: `attempt-${runId}`,
+            startedAt,
+            completedAt,
+            status,
+            asOfDateJst,
+            complete,
+            artifacts: collected,
+            failureCodes: failures.map((entry) => entry.errorCode),
+          }),
+        );
+        const succeeded =
+          persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
+        const objects = persisted.outcome === "conflict" ? [] : persisted.objects;
+        const described = new Map(collected.map((artifact) => [artifact.filename, artifact]));
+        const terminal: SharedTerminalSummary = {
+          outcome: persisted.outcome,
+          persisted: succeeded,
+          terminalKey: persisted.terminalKey,
+          terminalDigest: persisted.terminalDigest,
+          objectCount: objects.length,
+          ...(succeeded ? {} : { reasonCode: reasonCodeOf(persisted) }),
+        };
+        console.log(
+          JSON.stringify({
+            event: "mobile-suica-collection-persisted",
+            runId,
+            status,
+            transactionCount,
+            pageCount,
+            artifactCount: collected.length,
+            failureCount: failures.length,
+            terminalOutcome: terminal.outcome,
+            terminalKey: terminal.terminalKey,
+            terminalDigest: terminal.terminalDigest,
+            objectCount: terminal.objectCount,
+            ...(terminal.reasonCode === undefined ? {} : { reasonCode: terminal.reasonCode }),
+          }),
+        );
+        diagnostic.finish(succeeded ? status : "failed");
+        return {
+          target: "shared",
+          manifest: {
+            ...manifest,
+            artifacts: succeeded
+              ? objects.map((object) => ({
+                  dataset: described.get(object.artifactKey)?.dataset ?? object.artifactKey,
+                  key: object.key,
+                  mediaType: described.get(object.artifactKey)?.mediaType ?? "application/json",
+                  sha256: object.sha256,
+                  bytes: object.byteSize,
+                }))
+              : [],
+          },
+          terminal,
+        };
       }
     } catch (error) {
-      failures.push(failure("collect", error, "collection_failed"));
+      diagnostic.finish("failed");
+      throw error;
     }
-    const completedAt = new Date().toISOString();
-    const storedCount = collected.length;
-    const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
-    const manifest: CollectionManifest = {
-      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-      source: "mobile-suica",
-      runId,
-      startedAt,
-      completedAt,
-      status,
-      asOfDateJst,
-      ...(capturedSessionAt ? { capturedSessionAt } : {}),
-      transactionCount,
-      pageCount,
-      complete,
-      artifacts,
-      failures,
-    };
-    {
-      const persisted = await diagnostic.step("terminal-write", () =>
-        persistMobileSuicaRun(env.DATA, {
-          runId,
-          producerVersion: manifest.schemaVersion,
-          attemptId: `attempt-${runId}`,
-          startedAt,
-          completedAt,
-          status,
-          asOfDateJst,
-          complete,
-          artifacts: collected,
-          failureCodes: failures.map((entry) => entry.errorCode),
-        }),
-      );
-      const succeeded =
-        persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
-      const objects = persisted.outcome === "conflict" ? [] : persisted.objects;
-      const described = new Map(collected.map((artifact) => [artifact.filename, artifact]));
-      const terminal: SharedTerminalSummary = {
-        outcome: persisted.outcome,
-        persisted: succeeded,
-        terminalKey: persisted.terminalKey,
-        terminalDigest: persisted.terminalDigest,
-        objectCount: objects.length,
-        ...(succeeded ? {} : { reasonCode: reasonCodeOf(persisted) }),
-      };
-      console.log(
-        JSON.stringify({
-          event: "mobile-suica-collection-persisted",
-          runId,
-          status,
-          transactionCount,
-          pageCount,
-          artifactCount: collected.length,
-          failureCount: failures.length,
-          terminalOutcome: terminal.outcome,
-          terminalKey: terminal.terminalKey,
-          terminalDigest: terminal.terminalDigest,
-          objectCount: terminal.objectCount,
-          ...(terminal.reasonCode === undefined ? {} : { reasonCode: terminal.reasonCode }),
-        }),
-      );
-      diagnostic.finish(succeeded ? status : "failed");
-      return {
-        target: "shared",
-        manifest: {
-          ...manifest,
-          artifacts: succeeded
-            ? objects.map((object) => ({
-                dataset: described.get(object.artifactKey)?.dataset ?? object.artifactKey,
-                key: object.key,
-                mediaType: described.get(object.artifactKey)?.mediaType ?? "application/json",
-                sha256: object.sha256,
-                bytes: object.byteSize,
-              }))
-            : [],
-        },
-        terminal,
-      };
-    }
-  } catch (error) {
-    diagnostic.finish("failed");
-    throw error;
-  }
+  });
 }
 function outcomeManifest(outcome: CollectionOutcome): CollectionManifest {
   return outcome.manifest;
@@ -373,4 +380,18 @@ function publicResult(outcome: CollectionOutcome): object {
       },
     },
   };
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    const outcome = await runCollection(env, tokyoDate(new Date()));
+    return scheduledResult({ ...outcomeManifest(outcome), terminal: outcome.terminal });
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
 }

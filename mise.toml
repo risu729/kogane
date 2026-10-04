@@ -180,3 +180,7 @@ depends = ["ci:workspaces", "dry-run"]
 [tasks.verify]
 description = "Run the complete hk check suite."
 depends = ["check"]
+
+[tasks."automation:alarm-bootstrap"]
+description = "Reconcile and verify future production schedule alarms."
+run = "node tasks/_lib/ci/alarm-bootstrap.mjs"

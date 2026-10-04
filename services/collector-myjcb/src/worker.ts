@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { collectConnection, connectionStopCode, parseCredentialSecrets } from "./collector";
 import {
@@ -76,107 +81,109 @@ async function runSharedCollection(
   env: MyJcbEnv,
   trigger: CollectionManifest["trigger"],
 ): Promise<SharedResult> {
-  const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
-  const diagnostic = createDiagnostics("myjcb", runId);
-  try {
-    const credentials = await diagnostic.step("configuration", () =>
-      parseCredentialSecrets(connectionSecretValues(env)),
-    );
-    const connections: SharedConnectionRun[] = [];
-    const failures: CollectionFailure[] = [];
-    let artifactCount = 0;
-    for (const credential of credentials) {
-      try {
-        const collected = await diagnostic.step("connection-collection", () =>
-          collectConnection({
-            browserBinding: env.BROWSER,
-            credential,
-            diagnostic,
-          }),
-        );
-        artifactCount += collected.artifacts.length;
-        connections.push({ summary: collected.summary, artifacts: collected.artifacts });
-        // A connection that stopped at a month keeps the months before it
-        // and is recorded as a failure with its stage and position
-        // (ADR 0005's amendment).
-        const { stopCode, stopPosition } = collected.summary;
-        if (stopCode !== undefined) {
-          failures.push({
-            connectionId: credential.connectionId,
-            operation: "collect",
-            code: stopCode,
-            ...(stopPosition === undefined ? {} : { position: stopPosition }),
+  return withCollectionLease(env, "myjcb", async () => {
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
+    const diagnostic = createDiagnostics("myjcb", runId);
+    try {
+      const credentials = await diagnostic.step("configuration", () =>
+        parseCredentialSecrets(connectionSecretValues(env)),
+      );
+      const connections: SharedConnectionRun[] = [];
+      const failures: CollectionFailure[] = [];
+      let artifactCount = 0;
+      for (const credential of credentials) {
+        try {
+          const collected = await diagnostic.step("connection-collection", () =>
+            collectConnection({
+              browserBinding: env.BROWSER,
+              credential,
+              diagnostic,
+            }),
+          );
+          artifactCount += collected.artifacts.length;
+          connections.push({ summary: collected.summary, artifacts: collected.artifacts });
+          // A connection that stopped at a month keeps the months before it
+          // and is recorded as a failure with its stage and position
+          // (ADR 0005's amendment).
+          const { stopCode, stopPosition } = collected.summary;
+          if (stopCode !== undefined) {
+            failures.push({
+              connectionId: credential.connectionId,
+              operation: "collect",
+              code: stopCode,
+              ...(stopPosition === undefined ? {} : { position: stopPosition }),
+            });
+          }
+        } catch (error) {
+          // Stopped before its first credit month: nothing is kept.
+          const code = connectionStopCode(error);
+          connections.push({
+            summary: {
+              connectionId: credential.connectionId,
+              bootstrapMode: credential.bootstrapMode,
+              status: code === "human_required" ? "human-required" : "failed",
+              cardCount: 0,
+              periodCount: 0,
+              artifactCount: 0,
+              stopCode: code,
+              capturedMonthCount: 0,
+            },
+            artifacts: [],
           });
+          failures.push({ connectionId: credential.connectionId, operation: "collect", code });
         }
-      } catch (error) {
-        // Stopped before its first credit month: nothing is kept.
-        const code = connectionStopCode(error);
-        connections.push({
-          summary: {
-            connectionId: credential.connectionId,
-            bootstrapMode: credential.bootstrapMode,
-            status: code === "human_required" ? "human-required" : "failed",
-            cardCount: 0,
-            periodCount: 0,
-            artifactCount: 0,
-            stopCode: code,
-            capturedMonthCount: 0,
-          },
-          artifacts: [],
-        });
-        failures.push({ connectionId: credential.connectionId, operation: "collect", code });
       }
+      const completedAt = new Date().toISOString();
+      // A connection that reports itself partial makes the run partial even
+      // without a failure (ADR 0026).
+      const whole =
+        failures.length === 0 &&
+        connections.every((connection) => connection.summary.status === "success");
+      const status = whole ? "success" : artifactCount === 0 ? "failed" : "partial";
+      const input = {
+        schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+        runId,
+        startedAt,
+        completedAt,
+        status,
+        trigger,
+        connections,
+        failures,
+      } as const;
+      const outcome = await diagnostic.step("artifact-write", () =>
+        persistSharedRun(sharedBucket(env.DATA), input),
+      );
+      console.log(JSON.stringify(sharedRunDiagnostic(input, outcome)));
+      diagnostic.finish(status);
+      return {
+        runId,
+        status,
+        connectionCount: connections.length,
+        artifactCount: outcome.artifactCount,
+        failureCount: failures.length,
+        // The blocker is reported as a code, never as upstream text.
+        blockers: connections.flatMap((connection) =>
+          connection.summary.status === "success"
+            ? []
+            : [
+                {
+                  connectionId: connection.summary.connectionId,
+                  // The unit's code: the stop code, or for a connection that
+                  // ran to the end but kept months unread,
+                  // `scheduled_payments_page` or `collector_partial`.
+                  code: connectionErrorCode(connection.summary) ?? "collector_partial",
+                },
+              ],
+        ),
+        persistence: outcome.result.outcome,
+        terminalKey: outcome.result.terminalKey,
+      };
+    } catch (error) {
+      diagnostic.finish("failed");
+      throw error;
     }
-    const completedAt = new Date().toISOString();
-    // A connection that reports itself partial makes the run partial even
-    // without a failure (ADR 0026).
-    const whole =
-      failures.length === 0 &&
-      connections.every((connection) => connection.summary.status === "success");
-    const status = whole ? "success" : artifactCount === 0 ? "failed" : "partial";
-    const input = {
-      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-      runId,
-      startedAt,
-      completedAt,
-      status,
-      trigger,
-      connections,
-      failures,
-    } as const;
-    const outcome = await diagnostic.step("artifact-write", () =>
-      persistSharedRun(sharedBucket(env.DATA), input),
-    );
-    console.log(JSON.stringify(sharedRunDiagnostic(input, outcome)));
-    diagnostic.finish(status);
-    return {
-      runId,
-      status,
-      connectionCount: connections.length,
-      artifactCount: outcome.artifactCount,
-      failureCount: failures.length,
-      // The blocker is reported as a code, never as upstream text.
-      blockers: connections.flatMap((connection) =>
-        connection.summary.status === "success"
-          ? []
-          : [
-              {
-                connectionId: connection.summary.connectionId,
-                // The unit's code: the stop code, or for a connection that
-                // ran to the end but kept months unread,
-                // `scheduled_payments_page` or `collector_partial`.
-                code: connectionErrorCode(connection.summary) ?? "collector_partial",
-              },
-            ],
-      ),
-      persistence: outcome.result.outcome,
-      terminalKey: outcome.result.terminalKey,
-    };
-  } catch (error) {
-    diagnostic.finish("failed");
-    throw error;
-  }
+  });
 }
 async function authorized(request: Request, expected: string | undefined): Promise<boolean> {
   const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
@@ -221,4 +228,17 @@ function connectionSecretValues(env: MyJcbEnv): string[] {
     }
     return value;
   });
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    return scheduledResult(await runSharedCollection(env, "scheduled"));
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
 }

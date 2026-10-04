@@ -6,7 +6,7 @@ re-examine all history, and one job budget for everything. This change keeps
 the existing D1 job table, lease/claim/publish fencing, retry policy and
 parser-version retirement exactly as they were, and adds three independently
 budgeted lanes on top of them. No new Queue or Worker; D1 plus the existing
-five-minute cron.
+five-minute alarm by default (configurable in [schedule management](schedules.md)).
 
 Nothing here changes stored Layer A/B semantics, parser versions, publication
 or supersession rules, or what readers see. A job's lane only decides which
@@ -184,7 +184,8 @@ and the identity stage would fail on every tick.
 ### Repair budget and drain rate
 
 The repair lane is how history is re-parsed after a parser version bump, so
-its budget is the drain rate. It executes `REPAIR_JOBS_PER_SWEEP` = 28 jobs a
+its budget is the drain rate. The arithmetic below assumes the default five-minute
+alarm interval; changing that interval changes the hourly drain rate proportionally. It executes `REPAIR_JOBS_PER_SWEEP` = 28 jobs a
 tick:
 
 ```text
@@ -241,7 +242,7 @@ with counting D1 and R2 proxies, and on production counts read on 2026-09-24:
 | Production page size                    | 3,314 pages, 2.6-2.8 KB on average, 23 KB at most                          |
 | Production wall time per job            | 0.32-1.1 s (gaps between consecutive 1.2.0 parse runs, 6 ticks)            |
 
-Against the limits of one scheduled invocation, per Cloudflare's
+The original budget was sized against the former Cron invocation limits, per Cloudflare's
 [Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 (last updated 2026-09-05, the page `docs/vpass-card-identity.md` cites):
 
@@ -252,8 +253,9 @@ Against the limits of one scheduled invocation, per Cloudflare's
 | Wall time, Cron Trigger: 15 minutes; the cadence: 5 minutes | at most 31 s at the slowest production job |
 
 `limits.cpu_ms` (300,000) in `wrangler.jsonc` raises the HTTP ceiling; the
-page lists the cron trigger ceiling separately, so the budget is sized against
-30 s. [D1's limits page](https://developers.cloudflare.com/d1/platform/limits/)
+page lists the Cron trigger ceiling separately, so the original budget used
+30 s. ADR 0039 now dispatches the same bounded tick through private RPC from
+a Durable Object alarm; the conservative budget is unchanged. [D1's limits page](https://developers.cloudflare.com/d1/platform/limits/)
 (last updated 2026-04-21) still lists 1,000 queries per invocation for Workers
 Paid by reference to the subrequest limit the Workers page has since raised to
 10,000, and counts a batch as one query.
@@ -414,7 +416,7 @@ required and the old Worker does not need it removed.
 
 Flags: none. The incremental and repair lanes are on by default because they
 only change scheduling, not results. Replay plans exist only when an operator
-creates one through the internal route; the cron never starts a plan.
+creates one through the internal route; the scheduled tick never starts a plan.
 
 ## Verified locally / not verified
 
@@ -424,8 +426,7 @@ repair budget was sized from the measurements in
 [Repair budget and drain rate](#repair-budget-and-drain-rate). Not verified:
 D1 query cost of `/status` on the real catalogue, and the CPU and wall time of
 a 48-job worst-case sweep (incremental 12 + repair 28 + replay 8) inside a
-whole production tick, which the Workers dashboard's cron invocation metrics
-show; and whether D1's 1,000 queries per invocation still applies. A tick at
+whole production tick through the alarm and private RPC path; and whether D1's 1,000 queries per invocation still applies. A tick at
 every budget measured 1,470 D1 calls, above it
 ([Repair budget and drain rate](#repair-budget-and-drain-rate)). If that limit
 applies, such a tick fails partway, and every stage after the point logs its

@@ -179,3 +179,5 @@ how to read it back are in [`docs/research/`](docs/research/).
 - [OCI/WSL Vpass browser comparison](docs/research/oci-browser.md)
 - [Camoufox Windows/macOS fingerprint controls](docs/research/camoufox.md)
 - [Kameleo Windows Chrome container control](docs/research/kameleo.md)
+
+- [Schedule administration](docs/schedules.md): alarms, public maintenance windows and execution history.

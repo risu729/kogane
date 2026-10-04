@@ -19,6 +19,8 @@ const INCREMENTAL_JOBS_PER_SWEEP = 12;
 /**
  * Repair jobs executed per scheduled tick. The repair lane is how history is
  * re-parsed after a parser version bump, so this budget is the drain rate.
+ * The arithmetic assumes the default five-minute alarm interval; an operator
+ * cadence change changes the hourly drain rate proportionally.
  * vpass-statement-page 1.2.0 left 3,133 published artifacts at 1.1.0 on
  * 2026-09-24; the former 4 jobs a tick would have drained them in
  * 3,133 / (4 x 12 ticks/hour) = 65 hours. Now:
@@ -37,7 +39,8 @@ const INCREMENTAL_JOBS_PER_SWEEP = 12;
  * statements, one D1 batch, one R2 get), so 28 jobs make about 450 of the
  * 10,000 a Workers Paid invocation may make; a job costs at most about 65 ms
  * of CPU even counted on the test side of Miniflare, proxy work included, so
- * under 2 s of the 30 s a cron trigger under an hour gets; production jobs
+ * under 2 s of the conservative 30 s ceiling used when sizing the former
+ * Cron tick; production jobs
  * took 0.3-1.1 s of wall time each, at most 31 s of the five-minute cadence.
  * A whole tick at every budget measured 1,470 D1 calls, above the
  * 1,000 queries per invocation D1's own limits page still lists; whether that

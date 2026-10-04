@@ -19,6 +19,7 @@ import {
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
+import { scheduleRoute } from "./schedule-store";
 import { internalHealthRoute } from "./internal-health.ts";
 import { runBatch } from "../../../packages/storage-d1/src/d1.ts";
 import { dispatchDecisionOutbox } from "./decision-outbox.ts";
@@ -2040,6 +2041,8 @@ export default {
     // Worker is published on no hostname, so the App asks it over the
     // `PIPELINE` service binding after authenticating the caller; a request
     // that did not arrive that way is refused, not answered. Read-only.
+    const scheduling = await scheduleRoute(request, env, url);
+    if (scheduling) return scheduling;
     const health = await internalHealthRoute(request, env, path);
     if (health) return health;
     if (request.method === "POST" && path === "/identity-sweep") {

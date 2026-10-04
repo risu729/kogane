@@ -10,9 +10,9 @@ const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
  * A user session carries a subject. A **service token** carries none:
  * Cloudflare issues it with an empty `sub` and names the token in
  * `common_name`, so a service token is deliberately *not* a subject and can
- * never be the actor of a write. It exists here for one reason — the release
- * postcheck needs an authenticated, non-human caller for the health route
- * (unified plan 11 §6) — and `authenticate` below still refuses it.
+ * never be the actor of a write. It supports narrowly scoped deployment housekeeping — the release
+ * postcheck needs an authenticated, non-human caller for the health route and bodyless future alarm bootstrap (ADR 0039) — and
+ * `authenticate` below still refuses it.
  */
 export interface AccessIdentity {
   /** The verified subject of a user session, or "" for a service token. */

@@ -419,71 +419,13 @@ and a health route. `tasks/_lib/deploy-order.test.ts` keeps it in step with
 `_deploy-workers.yml` — same configurations, same order — so the workflow
 cannot drift into a second, different order.
 
-Consumers deploy before producers: a reader must understand the contract before
-a writer starts using it. The two consumers come first, then every collector:
-
-| Order | Worker                            | Directory                           | Health route                | Reachable by    |
-| ----- | --------------------------------- | ----------------------------------- | --------------------------- | --------------- |
-| 1     | `kogane-observation-pipeline`     | `services/processor`                | `/internal/health`, binding | through the App |
-| 2     | `kogane-evidence-browser`         | `services/app`                      | `/api/ops/v1/health`        | Access token    |
-| 3     | `kogane-globalpass-collector-poc` | `services/collector-globalpass`     | `/health`                   | unauthenticated |
-| 4     | `kogane-mobile-suica-...-poc`     | `services/collector-mobile-suica`   | `/health`                   | unauthenticated |
-| 5     | `kogane-moneyforward-...-poc`     | `services/collector-moneyforward`   | `/health`                   | unauthenticated |
-| 6     | `kogane-myjcb-collector-poc`      | `services/collector-myjcb`          | `/health`                   | unauthenticated |
-| 7     | `kogane-sbi-collector-poc`        | `services/collector-sbi-securities` | `/health`                   | unauthenticated |
-| 8     | `kogane-sbi-shinsei-...-poc`      | `services/collector-sbi-shinsei`    | `/health`                   | unauthenticated |
-| 9     | `kogane-sbi-vc-session-poc`       | `services/collector-sbi-vc-trade`   | `/healthz`                  | unauthenticated |
-| 10    | `kogane-smbc-direct-backfill-poc` | `services/collector-smbc-direct`    | none                        | —               |
-| 11    | `kogane-sony-bank-collector-poc`  | `services/collector-sony-bank`      | `/health`                   | unauthenticated |
-| 12    | `kogane-vpass-collector-poc`      | `services/collector-vpass`          | `/health`                   | unauthenticated |
-| 13    | `kogane-vpoint-pay-...-poc`       | `services/collector-vpoint-pay`     | `/health`                   | unauthenticated |
-| 14    | `kogane-vpoint-collector-poc`     | `services/collector-vpoint`         | `/health`                   | unauthenticated |
-
-Every collector is a CD target: leaving them out meant a merged collector
-change was live in the repository and not in production, which is a worse
-failure than deploying one. `services/collector-globalpass` and
-`services/collector-sbi-shinsei` carry a container image, so their upload — like
-their `mise run dry-run` and `<short>:bundle` — needs Docker on the runner.
-
-The `wrangler dev` helpers, the audit configurations, the test harness config,
-the bootstrap configs and the three experiments stay `deploy: false` and are
-excluded from CI in `infra/workers-ci.json`; a configuration CI excludes may
-never be marked deployable.
-
-#### Deploying a collector starts nothing (plan 11 §6)
-
-An upload replaces a collector's script and its declared triggers; it is not an
-invocation. What was checked, in the code as it is:
-
-- **No `scheduled` event is triggered by a deploy.** Every collector's
-  collection path is behind `scheduled` (or an authenticated admin POST), and
-  the crons come from the same `wrangler.jsonc` the deploy carries, so a
-  release re-declares the existing schedule rather than adding a run. A cron
-  change is a configuration change, visible in pull request review.
-- **No Durable Object alarm is set at startup.** The only collector that uses
-  alarms is `services/collector-smbc-direct`, and every `setAlarm` sits inside
-  a Durable Object method reached from a request or from a previous alarm
-  (`src/session.ts`). The Durable Object constructors of the V Point, V Point
-  Pay, SBI VC Trade and SMBC Direct collectors assign fields and nothing else —
-  no `blockConcurrencyWhile`, no storage write, no alarm. An alarm an earlier
-  run already set still fires on its own schedule; a deploy neither sets one nor
-  brings one forward.
-- **No module-level side effect.** No collector entry point runs code at import
-  time: the modules export a handler, the container classes only set ports and
-  log lifecycle callbacks.
-- **No credential is touched.** CD never writes a Worker secret, never calls a
-  re-authentication route and never runs a backfill; the release postcheck reads
-  health routes only (below).
-
-What a deploy of a collector _does_ change is which code will run the next time
-its cron fires — and that code runs with the source's bank credentials. That is
-why the same CI and branch rules apply to collector changes and their
-dependencies before automatic deployment.
-
-The ledger records the Wrangler `name` of each configuration and the test
-asserts it still matches the file. A directory rename therefore cannot turn
-into a new Worker, Durable Object class, queue, bucket or cron by accident
-(G5-15); the resource identities live in `infra/resources.json`.
+ADR 0039 changes the upload dependency order to collectors, Processor, App.
+The collectors must export the named scheduling RPC entrypoint before the
+Processor binds it. The acquisition/terminal protocol is unchanged, so the
+previous Processor continues to understand new collector evidence during the
+upload. Explicit dependencies in `infra/deploy-order.json` are validated against
+the actual workflow order. All health postchecks precede future alarm bootstrap;
+the initial twenty-minute floor covers Cron propagation. See [schedules](schedules.md).
 
 ### Postcheck
 
@@ -783,7 +725,7 @@ cannot be proven offline and is verified on the first live pull request.
 | G5-11      | Tests: a changed lockfile, configuration, migration or bundle is reported by field name. The workflow re-verifies the manifest immediately before the first upload.                                                                                                                     |
 | G5-12      | Tests: a commit every Worker is already recorded at stops without deploying, a partial record resumes with the missing Workers only, a Worker at a newer commit is left alone, and a diverged history fails. Live: the Deployments API is the record it reads.                          |
 | G5-13      | `production-deploy` with `cancel-in-progress: false` on both callers, and a migration step that only a run holding that group can reach. Live only.                                                                                                                                     |
-| G5-14      | Tests: the ledger is ordered consumer-before-producer and the workflow's deploy steps follow it. The PoC collectors stay `deploy: false` until U09.                                                                                                                                     |
+| G5-14      | Tests: explicit RPC dependencies are ordered and the workflow deploy steps follow them (ADR 0039).                                                                                                                                                                                      |
 | G5-15      | Tests: every ledger entry still carries the Wrangler `name` its configuration declares, so a directory move cannot create a new resource.                                                                                                                                               |
 | G5-16      | Tests: the trusted pre-checkout floor rejects pre-retirement targets and API failures; rollback also refuses a target that is not an ancestor or whose migration list is not a prefix; its record keeps the deployed migration list and is per target. No workflow restores a database. |
 | G5-17      | Tests: only the credential preflight, the migration steps and the deploy steps reference the Cloudflare token, `secrets-json` is never used, and no collector secret name appears in an Actions file.                                                                                   |
@@ -797,3 +739,7 @@ already pins versions, automerges minor and digest updates, and keeps
 only a Cloudflare Workers group (wrangler, Miniflare, `@cloudflare/*`) and keeps
 the type packages in the shared `typescript` group. Renovate pull requests use
 `CI Check` and native auto-merge, subject to the same configured branch rules.
+
+The trusted workflow refuses pre-alarm release/rollback targets before checkout
+and before any production mutation. Removing the ScheduleAlarm class requires a
+separate retirement migration; it is not an ordinary old-commit rollback.

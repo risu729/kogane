@@ -534,10 +534,20 @@ function readWorker(root: string, configPath: string): WorkerResources {
   const liveBuckets = LIVE_INVENTORY.buckets as readonly string[];
   const liveD1 = LIVE_INVENTORY.d1Databases.map((entry) => entry.id);
   const mainPath = main === undefined ? undefined : join(dirname(absolute), main);
-  const emailHandler =
-    mainPath !== undefined &&
-    existsSync(mainPath) &&
-    /\basync email\s*\(/u.test(readFileSync(mainPath, "utf8"));
+  let handlerText = mainPath && existsSync(mainPath) ? readFileSync(mainPath, "utf8") : "";
+  // The alarm entrypoint re-exports the existing default handler. Follow that
+  // exact local default import once, without treating unrelated imports as handlers.
+  const defaultName = /export default (\w+);/u.exec(handlerText)?.[1];
+  if (defaultName && mainPath) {
+    const imports = /import\s+(\w+)(?:\s*,[^;]*?)?\s+from\s+["'](\.\/[^"']+)["'];/gu;
+    for (const match of handlerText.matchAll(imports))
+      if (match[1] === defaultName) {
+        const target = join(dirname(mainPath), `${match[2]}.ts`);
+        if (existsSync(target)) handlerText = readFileSync(target, "utf8");
+        break;
+      }
+  }
+  const emailHandler = /\basync email\s*\(/u.test(handlerText);
   const queues = object(config["queues"]);
   return {
     config: configPath,

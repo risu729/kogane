@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { DurableObject } from "cloudflare:workers";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { collectSbiVcTrade } from "./collector";
@@ -52,31 +57,37 @@ export class SbiVcSessionState extends DurableObject<Env> {
     return { ...INITIAL_HEALTH, ...(await this.ctx.storage.get<HealthState>("health")) };
   }
   async runKeepAlive(): Promise<HealthState> {
-    if (this.#running) return this.#running;
-    this.#running = this.#exclusive(() => this.#performKeepAlive());
-    try {
-      return await this.#running;
-    } finally {
-      this.#running = null;
-    }
+    return withCollectionLease(this.env, "sbi-vc-trade", async () => {
+      if (this.#running) return this.#running;
+      this.#running = this.#exclusive(() => this.#performKeepAlive());
+      try {
+        return await this.#running;
+      } finally {
+        this.#running = null;
+      }
+    });
   }
   async runReauthenticate(force = false): Promise<HealthState> {
-    if (this.#reauthRunning) return this.#reauthRunning;
-    this.#reauthRunning = this.#exclusive(() => this.#performReauthenticate(force));
-    try {
-      return await this.#reauthRunning;
-    } finally {
-      this.#reauthRunning = null;
-    }
+    return withCollectionLease(this.env, "sbi-vc-trade", async () => {
+      if (this.#reauthRunning) return this.#reauthRunning;
+      this.#reauthRunning = this.#exclusive(() => this.#performReauthenticate(force));
+      try {
+        return await this.#reauthRunning;
+      } finally {
+        this.#reauthRunning = null;
+      }
+    });
   }
   async runCollection(): Promise<CollectionSummary> {
-    if (this.#collectionRunning) return this.#collectionRunning;
-    this.#collectionRunning = this.#exclusive(() => this.#performCollection());
-    try {
-      return await this.#collectionRunning;
-    } finally {
-      this.#collectionRunning = null;
-    }
+    return withCollectionLease(this.env, "sbi-vc-trade", async () => {
+      if (this.#collectionRunning) return this.#collectionRunning;
+      this.#collectionRunning = this.#exclusive(() => this.#performCollection());
+      try {
+        return await this.#collectionRunning;
+      } finally {
+        this.#collectionRunning = null;
+      }
+    });
   }
   /**
    * U09: record a collection that could not start because the session was
@@ -584,4 +595,29 @@ async function readBoundedText(response: Response, limit: number): Promise<strin
     offset += chunk.byteLength;
   }
   return new TextDecoder().decode(body);
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    const stub = env.SESSION_STATE.getByName("singleton");
+    const health = await ensureHealthySession(stub);
+    if (cron === KEEPALIVE_CRON)
+      return {
+        status: health.lastErrorCode === null ? "completed" : "failed",
+        runIds: [],
+        failureCode: health.lastErrorCode === null ? null : "session_unavailable",
+      };
+    if (health.lastErrorCode !== null) {
+      const blocked = await stub.recordBlockedCollection();
+      return { ...scheduledResult(blocked), status: "failed", failureCode: "session_unavailable" };
+    }
+    return scheduledResult(await stub.runCollection());
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
 }

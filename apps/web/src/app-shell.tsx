@@ -33,6 +33,7 @@ export const NAV_ICONS = {
 } as const;
 
 export function AppShell({
+  modeLabel = "閲覧専用",
   tagline,
   navItems,
   note,
@@ -45,6 +46,7 @@ export function AppShell({
 }: {
   /** Line under the brand name. */
   tagline: string;
+  modeLabel?: string;
   navItems: readonly NavItem[];
   /** Sidebar note: a short title and one sentence. */
   note: { title: string; body: string };
@@ -102,7 +104,7 @@ export function AppShell({
           </span>
           <strong>{note.title}</strong>
           <p>{note.body}</p>
-          <span className="read-only-label">閲覧専用</span>
+          <span className="read-only-label">{modeLabel}</span>
         </div>
         <div className="sidebar-footer">
           KOGANE <span>EVIDENCE BROWSER</span>

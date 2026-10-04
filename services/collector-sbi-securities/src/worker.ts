@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import type { PersistRunResult } from "../../../packages/collection/src/index";
 import {
   createDiagnostics,
@@ -91,153 +96,155 @@ async function runCollection(
     to: string;
   },
 ): Promise<CollectionOutcome> {
-  const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
-  const diagnostic = createDiagnostics("sbi-securities", runId);
-  try {
-    const endpoints = SBI_ENDPOINTS;
-    const credential = await diagnostic.step("configuration", () =>
-      parseCredential(requiredSecret(env.SBI_CREDENTIAL_JSON, "SBI_CREDENTIAL_JSON")),
-    );
-    const handshakeKey = await diagnostic.step("configuration", () =>
-      parseHandshakeKey(requiredSecret(env.SBI_HANDSHAKE_KEY_JSON, "SBI_HANDSHAKE_KEY_JSON")),
-    );
-    const artifacts: Artifact[] = [];
-    const failures: CollectionFailure[] = [];
-    const safeFailures: SharedFailure[] = [];
-    if (scope === "all" || scope === "domestic") {
-      try {
-        const domestic = await diagnostic.step("domestic-collection", () =>
-          collectDomesticArtifacts({
-            endpoints,
-            credential,
-            handshakeKey,
-          }),
-        );
-        artifacts.push(...domestic.artifacts);
-        const mainSiteBaseUrl = endpoints.mainSiteBaseUrl;
-        if (mainSiteBaseUrl) {
-          try {
-            artifacts.push(
-              ...(await diagnostic.step("main-site-collection", () =>
-                collectMainSiteArtifacts({
-                  session: domestic.session,
-                  mainSiteBaseUrl,
-                  ...(window ?? {}),
-                }),
-              )),
-            );
-          } catch (error) {
-            failures.push(failure("domestic", "main-site", error));
-            safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
-          }
-        }
-      } catch (error) {
-        failures.push(failure("domestic", "passkey-mts", error));
-        safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
-      }
-    }
-    if (scope === "all" || scope === "foreign") {
-      try {
-        artifacts.push(
-          ...(await diagnostic.step("foreign-collection", () =>
-            collectForeignArtifacts({
+  return withCollectionLease(env, "sbi-securities", async () => {
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
+    const diagnostic = createDiagnostics("sbi-securities", runId);
+    try {
+      const endpoints = SBI_ENDPOINTS;
+      const credential = await diagnostic.step("configuration", () =>
+        parseCredential(requiredSecret(env.SBI_CREDENTIAL_JSON, "SBI_CREDENTIAL_JSON")),
+      );
+      const handshakeKey = await diagnostic.step("configuration", () =>
+        parseHandshakeKey(requiredSecret(env.SBI_HANDSHAKE_KEY_JSON, "SBI_HANDSHAKE_KEY_JSON")),
+      );
+      const artifacts: Artifact[] = [];
+      const failures: CollectionFailure[] = [];
+      const safeFailures: SharedFailure[] = [];
+      if (scope === "all" || scope === "domestic") {
+        try {
+          const domestic = await diagnostic.step("domestic-collection", () =>
+            collectDomesticArtifacts({
               endpoints,
               credential,
               handshakeKey,
-              ...(window ?? {}),
             }),
-          )),
-        );
-      } catch (error) {
-        failures.push(failure("foreign", "passkey-graphql", error));
-        safeFailures.push({ scope: "foreign", code: safeFailureCode(error) });
+          );
+          artifacts.push(...domestic.artifacts);
+          const mainSiteBaseUrl = endpoints.mainSiteBaseUrl;
+          if (mainSiteBaseUrl) {
+            try {
+              artifacts.push(
+                ...(await diagnostic.step("main-site-collection", () =>
+                  collectMainSiteArtifacts({
+                    session: domestic.session,
+                    mainSiteBaseUrl,
+                    ...(window ?? {}),
+                  }),
+                )),
+              );
+            } catch (error) {
+              failures.push(failure("domestic", "main-site", error));
+              safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
+            }
+          }
+        } catch (error) {
+          failures.push(failure("domestic", "passkey-mts", error));
+          safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
+        }
       }
-    }
-    const artifactManifests: ArtifactManifest[] = [];
-    const completedAt = new Date().toISOString();
-    // The shared target stores every collected artifact in one terminal-last
-    // run, so what it collected is what it will store.
-    const storedCount = artifacts.length;
-    const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
-    const manifest: CollectionManifest = {
-      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-      source: "sbi-securities",
-      runId,
-      scope,
-      startedAt,
-      completedAt,
-      status,
-      artifacts: artifactManifests,
-      failures,
-    };
-    {
-      const persisted = await diagnostic.step("terminal-write", () =>
-        persistSbiRun(env.DATA, {
-          runId,
-          producerVersion: manifest.schemaVersion,
-          attemptId: `attempt-${runId}`,
-          startedAt,
-          completedAt,
-          status,
-          scope,
-          ...(window === undefined ? {} : { window }),
-          artifacts,
-          failures: safeFailures,
-        }),
-      );
-      const succeeded =
-        persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
-      const objects = persisted.outcome === "conflict" ? [] : persisted.objects;
-      const described = new Map<string, Artifact>(
-        artifacts.map((artifact) => [`${artifact.dataset}.json`, artifact]),
-      );
-      const terminal: SharedTerminalSummary = {
-        outcome: persisted.outcome,
-        persisted: succeeded,
-        terminalKey: persisted.terminalKey,
-        terminalDigest: persisted.terminalDigest,
-        objectCount: objects.length,
-        ...(succeeded ? {} : { reasonCode: reasonCodeOf(persisted) }),
+      if (scope === "all" || scope === "foreign") {
+        try {
+          artifacts.push(
+            ...(await diagnostic.step("foreign-collection", () =>
+              collectForeignArtifacts({
+                endpoints,
+                credential,
+                handshakeKey,
+                ...(window ?? {}),
+              }),
+            )),
+          );
+        } catch (error) {
+          failures.push(failure("foreign", "passkey-graphql", error));
+          safeFailures.push({ scope: "foreign", code: safeFailureCode(error) });
+        }
+      }
+      const artifactManifests: ArtifactManifest[] = [];
+      const completedAt = new Date().toISOString();
+      // The shared target stores every collected artifact in one terminal-last
+      // run, so what it collected is what it will store.
+      const storedCount = artifacts.length;
+      const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
+      const manifest: CollectionManifest = {
+        schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+        source: "sbi-securities",
+        runId,
+        scope,
+        startedAt,
+        completedAt,
+        status,
+        artifacts: artifactManifests,
+        failures,
       };
-      console.log(
-        JSON.stringify({
-          event: "sbi-collection-persisted",
-          runId,
-          scope,
-          status,
-          artifactCount: artifacts.length,
-          failureCount: failures.length,
-          terminalOutcome: terminal.outcome,
-          terminalKey: terminal.terminalKey,
-          terminalDigest: terminal.terminalDigest,
-          objectCount: terminal.objectCount,
-          ...(terminal.reasonCode === undefined ? {} : { reasonCode: terminal.reasonCode }),
-        }),
-      );
-      diagnostic.finish(succeeded ? status : "failed");
-      return {
-        target: "shared",
-        ...manifest,
-        artifacts: succeeded
-          ? objects.map((object) => {
-              const source = described.get(object.artifactKey);
-              return {
-                dataset: source?.dataset ?? object.artifactKey,
-                key: object.key,
-                sha256: object.sha256,
-                bytes: object.byteSize,
-                ...(source?.window ? { window: source.window } : {}),
-              };
-            })
-          : [],
-        terminal,
-      };
+      {
+        const persisted = await diagnostic.step("terminal-write", () =>
+          persistSbiRun(env.DATA, {
+            runId,
+            producerVersion: manifest.schemaVersion,
+            attemptId: `attempt-${runId}`,
+            startedAt,
+            completedAt,
+            status,
+            scope,
+            ...(window === undefined ? {} : { window }),
+            artifacts,
+            failures: safeFailures,
+          }),
+        );
+        const succeeded =
+          persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
+        const objects = persisted.outcome === "conflict" ? [] : persisted.objects;
+        const described = new Map<string, Artifact>(
+          artifacts.map((artifact) => [`${artifact.dataset}.json`, artifact]),
+        );
+        const terminal: SharedTerminalSummary = {
+          outcome: persisted.outcome,
+          persisted: succeeded,
+          terminalKey: persisted.terminalKey,
+          terminalDigest: persisted.terminalDigest,
+          objectCount: objects.length,
+          ...(succeeded ? {} : { reasonCode: reasonCodeOf(persisted) }),
+        };
+        console.log(
+          JSON.stringify({
+            event: "sbi-collection-persisted",
+            runId,
+            scope,
+            status,
+            artifactCount: artifacts.length,
+            failureCount: failures.length,
+            terminalOutcome: terminal.outcome,
+            terminalKey: terminal.terminalKey,
+            terminalDigest: terminal.terminalDigest,
+            objectCount: terminal.objectCount,
+            ...(terminal.reasonCode === undefined ? {} : { reasonCode: terminal.reasonCode }),
+          }),
+        );
+        diagnostic.finish(succeeded ? status : "failed");
+        return {
+          target: "shared",
+          ...manifest,
+          artifacts: succeeded
+            ? objects.map((object) => {
+                const source = described.get(object.artifactKey);
+                return {
+                  dataset: source?.dataset ?? object.artifactKey,
+                  key: object.key,
+                  sha256: object.sha256,
+                  bytes: object.byteSize,
+                  ...(source?.window ? { window: source.window } : {}),
+                };
+              })
+            : [],
+          terminal,
+        };
+      }
+    } catch (error) {
+      diagnostic.finish("failed");
+      throw error;
     }
-  } catch (error) {
-    diagnostic.finish("failed");
-    throw error;
-  }
+  });
 }
 function reasonCodeOf(result: PersistRunResult): string {
   return result.outcome === "conflict" || result.outcome === "incomplete"
@@ -294,4 +301,17 @@ function redactError(value: string): string {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/giu, "Bearer [redacted]")
     .replace(/(token|sid|cookie)=?[^\s,;]+/giu, "$1=[redacted]");
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    return scheduledResult(await runCollection(env, "all"));
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
 }

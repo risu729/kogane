@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { Container, getContainer } from "@cloudflare/containers";
 import { DurableObject } from "cloudflare:workers";
 import type { R2BucketLike } from "../../../packages/collection/src/index";
@@ -33,7 +38,7 @@ export class StGeorgeCollectionState extends DurableObject<Env> {
     super(ctx, env);
     this.coordinator = new CollectionCoordinator(
       ctx.storage as unknown as StateStorage,
-      () => collect(env),
+      () => withCollectionLease(env, "st-george", () => collect(env)),
       (run) => persistSharedRun(env.DATA as unknown as R2BucketLike, run),
     );
   }
@@ -202,4 +207,19 @@ function relayTcp(request: Request, env: Env, ctx: ExecutionContext, url: URL): 
     waitUntil: (promise) => ctx.waitUntil(promise),
   });
   return new Response(null, { status: 101, webSocket: pair[0] });
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    const state = env.SESSION_STATE.get(env.SESSION_STATE.idFromName("st-george"));
+    const response = await state.fetch(new Request("https://state/trigger", { method: "POST" }));
+    return scheduledResult(await response.json());
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
 }

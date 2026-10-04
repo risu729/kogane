@@ -50,7 +50,16 @@ test("the registration path makes no Service Binding call", () => {
   );
   expect(processor).toHaveLength(1);
   expect(processor[0]!.name).toBe("kogane-observation-pipeline");
-  expect(processor[0]!.serviceBindings).toEqual([]);
+  expect(processor[0]!.serviceBindings).toHaveLength(12);
+  expect(
+    processor[0]!.serviceBindings.every((binding) => binding.binding.startsWith("SCHEDULE_")),
+  ).toBe(true);
+  // The registration implementation is still in-process; only ScheduleAlarm dispatches RPC.
+  const registration = readFileSync(
+    join(REPO_ROOT, "services/processor/src/collection/index.ts"),
+    "utf8",
+  );
+  expect(registration).not.toContain("SCHEDULE_");
 });
 
 test("no collector calls another Worker", () => {
@@ -60,13 +69,13 @@ test("no collector calls another Worker", () => {
     expect([collector.config, collector.serviceBindings]).toEqual([collector.config, []]);
 });
 
-test("no request can chain more than two Worker invocations, far below the documented 32", () => {
+test("no request can chain more than three Worker invocations, far below the documented 32", () => {
   const chains = [...edges.keys()].map((name) => [name, longestChain(name)] as const);
   const longest = Math.max(...chains.map(([, length]) => length));
-  expect(longest).toBe(2);
+  expect(longest).toBe(3);
   expect(longest).toBeLessThan(32);
   // The only chains of two end at the Processor: the App's `PIPELINE`
   // binding and the local operations configuration's.
   for (const [name, length] of chains)
-    if (length === 2) expect([...(edges.get(name) ?? [])]).toEqual(["kogane-observation-pipeline"]);
+    if (length === 3) expect([...(edges.get(name) ?? [])]).toEqual(["kogane-observation-pipeline"]);
 });

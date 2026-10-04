@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
@@ -231,49 +236,51 @@ async function runCollection(
     operationId?: string;
   } = {},
 ): Promise<CollectionResult> {
-  const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
-  const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
-  const diagnostics = createDiagnostics("prestia-globalpass", runId);
-  try {
-    const result = await collectWithContainer(
-      env,
-      mode,
-      container,
-      startedAt,
-      runId,
-      diagnostics,
-      identity,
-    );
-    diagnostics.finish(result.status);
-    return result;
-  } catch (error) {
-    diagnostics.failure("collection", error);
-    diagnostics.finish("failed");
-    throw error;
-  } finally {
+  return withCollectionLease(env, "prestia-globalpass", async () => {
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
+    const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
+    const diagnostics = createDiagnostics("prestia-globalpass", runId);
     try {
-      await diagnostics.step("container-destroy", () => container.destroy());
-      logEvent(
-        "log",
-        JSON.stringify({
-          event: "globalpass-collection-container-destroyed",
-          runId,
-          mode,
-        }),
+      const result = await collectWithContainer(
+        env,
+        mode,
+        container,
+        startedAt,
+        runId,
+        diagnostics,
+        identity,
       );
+      diagnostics.finish(result.status);
+      return result;
     } catch (error) {
-      logEvent(
-        "warn",
-        JSON.stringify({
-          event: "globalpass-collection-container-destroy-failed",
-          runId,
-          mode,
-          ...safeErrorDetails(error),
-        }),
-      );
+      diagnostics.failure("collection", error);
+      diagnostics.finish("failed");
+      throw error;
+    } finally {
+      try {
+        await diagnostics.step("container-destroy", () => container.destroy());
+        logEvent(
+          "log",
+          JSON.stringify({
+            event: "globalpass-collection-container-destroyed",
+            runId,
+            mode,
+          }),
+        );
+      } catch (error) {
+        logEvent(
+          "warn",
+          JSON.stringify({
+            event: "globalpass-collection-container-destroy-failed",
+            runId,
+            mode,
+            ...safeErrorDetails(error),
+          }),
+        );
+      }
     }
-  }
+  });
 }
 async function collectWithContainer(
   env: Env,
@@ -896,4 +903,17 @@ function redactText(value: string): string {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/giu, "Bearer [redacted]")
     .replace(/(token|cookie|password|usrId)=?[^\s,;]+/giu, "$1=[redacted]");
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    return scheduledResult(await runCollection(env, "daily"));
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
 }

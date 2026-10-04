@@ -58,6 +58,30 @@ interface ClassificationEntry {
  * them on purpose.
  */
 export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
+  collection_schedules: {
+    classification: "operational-mutable",
+    planRow: "alarm configuration and reservations",
+  },
+  collection_schedule_revisions: {
+    classification: "core-keep",
+    planRow: "append-only schedule configuration audit",
+  },
+  collection_schedule_occurrences: {
+    classification: "operational-mutable",
+    planRow: "claimed scheduling receipts; no financial evidence",
+  },
+  provider_maintenance_references: {
+    classification: "operational-mutable",
+    planRow: "current public maintenance provenance",
+  },
+  provider_maintenance_rules: {
+    classification: "core-keep",
+    planRow: "append-only public maintenance revisions",
+  },
+  collection_execution_leases: {
+    classification: "operational-mutable",
+    planRow: "provider execution exclusion",
+  },
   // acquisition_sessions, fetch_runs/units/reports/ranges/page groups → CORE
   acquisition_sessions: { classification: "core-keep", planRow: "acquisition and fetch history" },
   artifact_ranges: { classification: "core-keep", planRow: "acquisition and fetch history" },
