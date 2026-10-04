@@ -46,8 +46,12 @@ queries only:
   ([below](#remaining-globalpass-shape-investigation-2026-09-08); 20 of the 22
   importer-era refusals were such pages).
 
-So the refused pages differ from the synthetic contract in something only
-their R2 bytes show, which this change did not read. No parser, collector or
+So either both stored pages are months the collector proved empty (the
+known limit above; a one-page month is also what an empty month looks like)
+or they differ from the synthetic contract in something only their R2 bytes
+show, which this change did not read. The replay tells the two apart: an
+empty month is `table_cardinality` with no table and no pager block in its
+shape. No parser, collector or
 sanitizer changed. The counts-only replay now covers GLOBAL PASS: each
 rejection prints a closed code per throw site of `global-pass-activity` and
 a `shape` line with booleans and counts of everything its admission checks
