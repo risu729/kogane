@@ -273,11 +273,11 @@ const PAGER_CLASSES = [
  */
 function emptyMonthPage(document: Node, page: number, pagerCount: number): boolean {
   if (page !== 1 || pagerCount !== 0) return false;
-  const pagerParts = elements(document, "div")
-    .concat(elements(document, "a"))
-    .filter((node) =>
-      (attribute(node, "class") ?? "").split(/\s+/u).some((name) => PAGER_CLASSES.includes(name)),
-    );
+  // Any element carrying a pager class, whatever its tag (the observed pager
+  // is `div` and `a`; a pager part on another tag is not the empty month).
+  const pagerParts = classedElements(document).filter((node) =>
+    (attribute(node, "class") ?? "").split(/\s+/u).some((name) => PAGER_CLASSES.includes(name)),
+  );
   if (pagerParts.length !== 0) return false;
   const visible = visibleText(document);
   return !STATED_TOTAL.test(visible) && !PAGER_TEXT.test(visible);
@@ -420,6 +420,20 @@ function elements(root: Node, tagName: string): Element[] {
   const result: Element[] = [];
   const visit = (node: Node): void => {
     if (node.tagName === tagName) result.push(node as Element);
+    if ("childNodes" in node) for (const child of node.childNodes) visit(child);
+  };
+  visit(root);
+  return result;
+}
+/** Every element with a `class` attribute, in document order. */
+function classedElements(root: Node): Element[] {
+  const result: Element[] = [];
+  const visit = (node: Node): void => {
+    if (
+      node.tagName !== undefined &&
+      node.attrs?.some((item) => item.name.toLowerCase() === "class")
+    )
+      result.push(node as Element);
     if ("childNodes" in node) for (const child of node.childNodes) visit(child);
   };
   visit(root);

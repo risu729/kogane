@@ -81,6 +81,9 @@ describe("global-pass-activity 1.2.0: the observed empty month", () => {
       "<p>[1/1ページ]</p>",
       '<div class="nablarch_paging"></div>',
       '<a class="nablarch_nextSubmit" href="#">Next</a>',
+      // A pager class on any other tag, even empty.
+      '<span class="resultCountHeader"></span>',
+      '<p class="x nablarch_prevSubmit"></p>',
     ]) {
       expect(() => parse(withMarkup(markup))).toThrow(/table cardinality drift/u);
     }
