@@ -3,7 +3,12 @@ import { after, before, test } from "node:test";
 import { once } from "node:events";
 import http from "node:http";
 import { chromium } from "playwright";
-import { collectFromPage, publicFailure, validateRequest } from "./browser.mjs";
+import {
+  collectFromPage,
+  createRuntimeDiagnostics,
+  publicFailure,
+  validateRequest,
+} from "./browser.mjs";
 import { createServer } from "./server.mjs";
 
 const secret = "SYNTHETIC_PRIVATE_CREDENTIAL_729";
@@ -137,6 +142,8 @@ test("validates a fixed egress and never reflects invalid credentials", () => {
 
 test("rejects a changed login destination before filling credentials", async () => {
   const context = await offlineContext();
+  const events = [];
+  const diagnostic = createRuntimeDiagnostics({ emit: (value) => events.push(JSON.parse(value)) });
   let posts = 0;
   try {
     await routeFixture(context, (route) => {
@@ -147,10 +154,22 @@ test("rejects a changed login destination before filling credentials", async () 
       });
     });
     const page = await context.newPage();
-    const result = await collectFromPage(page, credential, extractors).catch(publicFailure);
+    const result = await collectFromPage(
+      page,
+      credential,
+      extractors,
+      diagnostic.stage,
+      diagnostic.loginPost,
+    ).catch((error) => {
+      diagnostic.failure(error);
+      return publicFailure(error);
+    });
     assert.deepEqual(result, { status: "failed", reason: "login-layout-unknown" });
     assert.equal(await page.locator("#access-number").inputValue(), "");
     assert.equal(posts, 0);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].stage, "login-form");
+    assert.equal(events[0].loginPostCount, 0);
   } finally {
     await context.close();
   }
@@ -217,6 +236,165 @@ test("normal form handlers run once and only schema projection leaves the browse
     assert.equal("detailsUrl" in result.snapshot.accounts[0], false);
     assert.equal(JSON.stringify(result).includes(secret), false);
     assert.equal(JSON.stringify(result).includes("devicePrint"), false);
+  } finally {
+    await context.close();
+  }
+});
+
+test("native form POST and 302 redirect complete once without upstream bank I/O", async () => {
+  // Fetch interception includes the native POST's server redirect, which
+  // Playwright context.route deliberately does not intercept. The global
+  // rejecting loopback proxy still blocks any accidental upstream connection.
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const session = await context.newCDPSession(page);
+  const pending = [];
+  const fixtureFailures = [];
+  const requests = [];
+  const pausedRequests = [];
+  page.on("request", (request) => requests.push(request));
+  let submits = 0;
+  let handlersRan = false;
+  let portfolioGets = 0;
+  let detailsGets = 0;
+  const stages = [];
+  let loginPostsObserved = 0;
+  const nativeLogin =
+    login.slice(0, login.indexOf("<script>")) +
+    `<script>
+    for (const id of ['securityNumber','internet-password'])
+      document.getElementById(id).addEventListener('blur', event => { event.target.value = 'mapped'; });
+    </script>`;
+  session.on("Fetch.requestPaused", (event) => {
+    pausedRequests.push({ url: event.request.url, method: event.request.method });
+    const send = (method, params) =>
+      pending.push(
+        session.send(method, params).catch((error) => {
+          fixtureFailures.push(error);
+        }),
+      );
+    const url = new URL(event.request.url);
+    let body = portfolio;
+    let responseCode = 200;
+    const responseHeaders = [{ name: "content-type", value: "text/html" }];
+    if (url.origin !== "https://ibanking.stgeorge.com.au") {
+      send("Fetch.failRequest", { requestId: event.requestId, errorReason: "BlockedByClient" });
+      return;
+    }
+    if (url.pathname === "/ibank/loginPage.action" && event.request.method === "GET")
+      body = nativeLogin;
+    else if (
+      url.pathname === "/ibank/logonActionSimple.action" &&
+      event.request.method === "POST"
+    ) {
+      submits++;
+      const form = new URLSearchParams(event.request.postData);
+      handlersRan =
+        form.get("securityNumber") === "mapped" &&
+        form.get("password") === "mapped" &&
+        form.get("devicePrint") === "normal-handler";
+      responseCode = 302;
+      body = "";
+      responseHeaders.push({ name: "location", value: "/ibank/viewAccountPortfolio.html" });
+    } else if (
+      url.pathname === "/ibank/viewAccountPortfolio.html" &&
+      event.request.method === "GET"
+    )
+      portfolioGets++;
+    else if (url.pathname === "/ibank/accountDetails.action" && event.request.method === "GET")
+      detailsGets++;
+    else {
+      send("Fetch.failRequest", { requestId: event.requestId, errorReason: "BlockedByClient" });
+      return;
+    }
+    send("Fetch.fulfillRequest", {
+      requestId: event.requestId,
+      responseCode,
+      responseHeaders,
+      body: Buffer.from(body).toString("base64"),
+    });
+  });
+  try {
+    await session.send("Fetch.enable", { patterns: [{ requestStage: "Request" }] });
+    const result = await collectFromPage(
+      page,
+      credential,
+      extractors,
+      (value) => stages.push(value),
+      () => loginPostsObserved++,
+    );
+    assert.equal(result.status, "success");
+    assert.equal(submits, 1);
+    assert.equal(loginPostsObserved, 1);
+    assert.equal(handlersRan, true);
+    assert.equal(portfolioGets, 1);
+    assert.equal(detailsGets, 1);
+    const submitted = requests.find((request) => request.method() === "POST");
+    const redirected = requests.find((request) => request.redirectedFrom() === submitted);
+    assert.equal((await submitted.response()).status(), 302);
+    assert.equal(redirected.method(), "GET");
+    assert.equal(
+      redirected.url(),
+      "https://ibanking.stgeorge.com.au/ibank/viewAccountPortfolio.html",
+    );
+    assert.ok(
+      requests.every((request) =>
+        pausedRequests.some(
+          (paused) => paused.url === request.url() && paused.method === request.method(),
+        ),
+      ),
+    );
+    await Promise.all(pending);
+    assert.equal(fixtureFailures.length, 0);
+    assert.ok(stages.includes("login-submit"));
+    assert.ok(stages.includes("login-result-state"));
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  } finally {
+    await Promise.allSettled(pending);
+    await session.detach().catch(() => {});
+    await context.close();
+  }
+});
+
+test("a page evaluation failure after submit is diagnosed at login-result-state", async () => {
+  const context = await offlineContext();
+  const events = [];
+  const diagnostic = createRuntimeDiagnostics({ emit: (value) => events.push(JSON.parse(value)) });
+  let submits = 0;
+  try {
+    await routeFixture(context, (route) => {
+      const posted = route.request().method() === "POST";
+      if (posted) submits++;
+      return route.fulfill({
+        contentType: "text/html",
+        body:
+          new URL(route.request().url()).pathname === "/ibank/loginPage.action" ? login : portfolio,
+      });
+    });
+    const page = await context.newPage();
+    const evaluate = page.evaluate.bind(page);
+    page.evaluate = (...args) => {
+      if (page.url().endsWith("/ibank/viewAccountPortfolio.html"))
+        return Promise.reject(new Error(secret));
+      return evaluate(...args);
+    };
+    const result = await collectFromPage(
+      page,
+      credential,
+      extractors,
+      diagnostic.stage,
+      diagnostic.loginPost,
+    ).catch((error) => {
+      diagnostic.failure(error);
+      return publicFailure(error);
+    });
+    assert.deepEqual(result, { status: "failed", reason: "runtime-failed" });
+    assert.equal(submits, 1);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].stage, "login-result-state");
+    assert.equal(events[0].errorType, "Error");
+    assert.equal(events[0].loginPostCount, 1);
+    assert.equal(JSON.stringify(events).includes(secret), false);
   } finally {
     await context.close();
   }

@@ -54,6 +54,93 @@ export function publicFailure(error) {
         : "runtime-failed",
   };
 }
+const RUNTIME_STAGES = new Set([
+  "request-validation",
+  "profile-create",
+  "relay-start",
+  "display-start",
+  "browser-start",
+  "browser-ready",
+  "browser-connect",
+  "extractor-load",
+  "login-navigate",
+  "login-state",
+  "login-form",
+  "credential-user-id",
+  "credential-security-number",
+  "credential-password",
+  "login-pre-submit-state",
+  "login-submit",
+  "login-navigation",
+  "login-result-state",
+  "portfolio-extract",
+  "portfolio-result-state",
+  "portfolio-validate",
+  "account-validate",
+  "account-navigate",
+  "account-state",
+  "account-extract",
+  "account-result-state",
+  "snapshot-validate",
+]);
+const RUNTIME_ERROR_TYPES = new Set([
+  "Error",
+  "TypeError",
+  "SyntaxError",
+  "RangeError",
+  "TimeoutError",
+  "AbortError",
+  "DOMException",
+]);
+// Mirror collector-diagnostics' closed-label policy in this standalone Node
+// container. No exception message, stack, URL, credential or DOM value is read.
+export function createRuntimeDiagnostics({
+  emit = (value) => console.error(value),
+  now = Date.now,
+} = {}) {
+  const startedAt = now();
+  let stage = "request-validation";
+  let emitted = false;
+  let loginPostCount = 0;
+  return {
+    stage(value) {
+      stage = RUNTIME_STAGES.has(value) ? value : "unknown";
+    },
+    loginPost() {
+      // Two represents two or more browser-issued login requests. Observing a
+      // request does not establish that the bank received or accepted it.
+      loginPostCount = Math.min(2, loginPostCount + 1);
+    },
+    failure(error) {
+      if (emitted) return;
+      emitted = true;
+      try {
+        let errorType = "unknown";
+        try {
+          if (error instanceof CollectionError) errorType = "CollectionError";
+          else {
+            const name = error?.name;
+            if (RUNTIME_ERROR_TYPES.has(name)) errorType = name;
+          }
+        } catch {
+          /* Throwing accessors and proxies remain unknown. */
+        }
+        const elapsed = now() - startedAt;
+        emit(
+          JSON.stringify({
+            event: "st-george-runtime-failure",
+            stage,
+            errorType,
+            loginPostCount,
+            durationMs: Number.isSafeInteger(elapsed) && elapsed >= 0 ? elapsed : 0,
+          }),
+        );
+      } catch {
+        /* Diagnostics never replace the collection result or prevent cleanup. */
+      }
+    },
+  };
+}
 const exactKeys = (value, keys) =>
   value &&
   typeof value === "object" &&
@@ -208,8 +295,18 @@ export async function navigateReadOnly(page, url) {
   }
 }
 
-export async function collectFromPage(page, credential, extractors) {
+export async function collectFromPage(
+  page,
+  credential,
+  extractors,
+  stage = () => {},
+  onLoginPost = () => {},
+) {
   let stopReason = null;
+  const request = (event) => {
+    if (event.method() === "POST" && event.url() === ORIGIN + "/ibank/logonActionSimple.action")
+      onLoginPost();
+  };
   const response = (event) => {
     try {
       if ([401, 403, 429].includes(event.status()) && new URL(event.url()).origin === ORIGIN)
@@ -224,6 +321,7 @@ export async function collectFromPage(page, credential, extractors) {
   };
   page.on("response", response);
   page.on("download", download);
+  page.on("request", request);
   const check = async () => {
     if (stopReason) fail(stopReason);
     const before = routeOf(page.url());
@@ -236,42 +334,58 @@ export async function collectFromPage(page, credential, extractors) {
   };
   try {
     page.setDefaultTimeout(10_000);
+    stage("login-navigate");
     await navigateReadOnly(page, LOGIN);
+    stage("login-state");
     const initial = await check();
     if (initial.route !== "login" || !initial.login) fail("login-layout-unknown");
+    stage("login-form");
     if (!(await page.evaluate(hasExpectedLoginForm))) fail("login-layout-unknown");
+    stage("credential-user-id");
     await page.locator("#access-number").fill(credential.userId);
+    stage("credential-security-number");
     await page.locator("#securityNumber").fill(credential.securityNumber);
     await page.locator("#securityNumber").press("Tab");
+    stage("credential-password");
     await page.locator("#internet-password").fill(credential.password);
     await page.locator("#internet-password").press("Tab");
+    stage("login-pre-submit-state");
     await check();
     // Exactly one genuine button click: blur mapping and onclick device-print
     // handlers belong to the bank. Never form.submit(), guessed POST, or retry.
+    stage("login-submit");
     await page.locator("#logonButton").click({ timeout: 30_000 });
     if (routeOf(page.url()) === "login") {
+      stage("login-navigation");
       await page
         .waitForURL((url) => url.pathname !== "/ibank/loginPage.action", {
           waitUntil: "domcontentloaded",
           timeout: 30_000,
         })
         .catch(async () => {
+          stage("login-result-state");
           await check();
           fail("login-rejected");
         });
     }
+    stage("login-result-state");
     const authenticated = await check();
     if (authenticated.login || authenticated.route === "login") fail("login-rejected");
     if (authenticated.route !== "portfolio" || !authenticated.portfolio) fail("unexpected-route");
+    stage("portfolio-extract");
     const portfolio = await page.evaluate(extractors.extractPortfolio);
+    stage("portfolio-result-state");
     const portfolioState = await check();
     if (portfolioState.route !== "portfolio" || !portfolioState.portfolio) fail("unexpected-route");
+    stage("portfolio-validate");
     if (!Array.isArray(portfolio) || portfolio.length === 0) fail("snapshot-shape");
     if (portfolio.length > MAX_ACCOUNTS) fail("account-limit");
     const accounts = [];
     const seen = new Set();
     for (const account of portfolio) {
+      stage("account-state");
       await check();
+      stage("account-validate");
       if (typeof account.accountKey !== "string" || seen.has(account.accountKey))
         fail("snapshot-shape");
       seen.add(account.accountKey);
@@ -282,10 +396,14 @@ export async function collectFromPage(page, credential, extractors) {
         !/^[0-9]+$/u.test(details.searchParams.get("index") ?? "")
       )
         fail("snapshot-shape");
+      stage("account-navigate");
       await navigateReadOnly(page, details.href);
+      stage("account-state");
       const state = await check();
       if (state.login) fail("session-expired");
+      stage("account-extract");
       const projected = await page.evaluate(extractors.extractAccountDetails);
+      stage("account-result-state");
       const projectedState = await check();
       if (projectedState.login) fail("session-expired");
       if (projectedState.route !== "transactions") fail("unexpected-route");
@@ -302,6 +420,7 @@ export async function collectFromPage(page, credential, extractors) {
         closingBalanceText: projected.closingBalanceText,
       });
     }
+    stage("snapshot-validate");
     const snapshot = {
       schema: "st-george-browser-v1",
       observedAt: new Date().toISOString(),
@@ -314,6 +433,7 @@ export async function collectFromPage(page, credential, extractors) {
   } finally {
     page.off("response", response);
     page.off("download", download);
+    page.off("request", request);
   }
 }
 
@@ -342,6 +462,7 @@ async function stopChild(child, lifecycle) {
 }
 
 export async function runBrowserCollection(input) {
+  const diagnostic = createRuntimeDiagnostics();
   let browser, chromeChild, chromeLifecycle, xvfbChild, xvfbLifecycle, relay, profile;
   let expired = false;
   const timer = setTimeout(() => {
@@ -350,15 +471,20 @@ export async function runBrowserCollection(input) {
     chromeChild?.kill("SIGTERM");
   }, RUN_TIMEOUT_MS);
   try {
+    diagnostic.stage("request-validation");
     const options = validateRequest(input);
     if (process.env.DEBUG || process.env.PWDEBUG) fail("runtime-unavailable");
+    diagnostic.stage("profile-create");
     profile = await mkdtemp(path.join(os.tmpdir(), "kogane-st-george-"));
-    if (options.egress === "tamia")
+    if (options.egress === "tamia") {
+      diagnostic.stage("relay-start");
       relay = await startConnectRelay({
         relayToken: options.relayToken,
         relayUrl: options.relayUrl,
         allowedHosts: PROXY_HOSTS,
       });
+    }
+    diagnostic.stage("display-start");
     xvfbChild = spawn("Xvfb", [":99", "-screen", "0", "1365x768x24", "-nolisten", "tcp"], {
       stdio: "ignore",
     });
@@ -367,6 +493,7 @@ export async function runBrowserCollection(input) {
     xvfbLifecycle.assertRunning();
     const port = await freePort();
     const endpoint = `http://127.0.0.1:${port}`;
+    diagnostic.stage("browser-start");
     chromeChild = spawn(
       process.env.CHROMIUM_PATH || chromium.executablePath(),
       [
@@ -386,6 +513,7 @@ export async function runBrowserCollection(input) {
     chromeLifecycle = observeChildProcess(chromeChild, "chrome");
     const readyDeadline = Date.now() + 15_000;
     let ready = false;
+    diagnostic.stage("browser-ready");
     while (!ready && Date.now() < readyDeadline) {
       if (expired) break;
       chromeLifecycle.assertRunning();
@@ -397,14 +525,23 @@ export async function runBrowserCollection(input) {
       if (!ready) await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (!ready || expired) fail(expired ? "deadline-exceeded" : "runtime-unavailable");
+    diagnostic.stage("browser-connect");
     browser = await chromium.connectOverCDP(endpoint, { timeout: 10_000 });
     const page = browser.contexts()[0]?.pages()[0];
     if (!page) fail("runtime-unavailable");
+    diagnostic.stage("extractor-load");
     const extractors = await import("./extract.mjs");
-    const result = await collectFromPage(page, options.credential, extractors);
+    const result = await collectFromPage(
+      page,
+      options.credential,
+      extractors,
+      diagnostic.stage,
+      diagnostic.loginPost,
+    );
     if (expired) fail("deadline-exceeded");
     return result;
   } catch (error) {
+    diagnostic.failure(error);
     return expired ? publicFailure(new CollectionError("deadline-exceeded")) : publicFailure(error);
   } finally {
     clearTimeout(timer);

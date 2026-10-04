@@ -29,6 +29,15 @@ fallback. A Durable Object serializes collection, records interrupted attempts,
 and retains only a validated financial snapshot while its storage is incomplete.
 A later trigger retries storing that same snapshot rather than logging in again.
 
+When a collection failure is caught, the container attempts to emit one `st-george-runtime-failure` event with
+`stage`, `errorType`, `loginPostCount` and `durationMs`. Stage and exception type
+are closed labels; exception messages, stacks, URLs, provider text and credentials
+are excluded. `loginPostCount` observes browser-issued requests to the known login
+POST route: 0 means none observed, 1 means one, and 2 means two or more. It does not
+prove bank receipt or acceptance. Logging failure cannot replace the collection
+result or prevent cleanup. Public failure codes and the single-login policy are
+unchanged; diagnostics do not clear a blocked run or authorize another attempt.
+
 ## Configuration and operations
 
 Wrangler generates binding types. Secret names are declared in `env.d.ts`:
