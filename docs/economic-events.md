@@ -332,11 +332,15 @@ carry a provider link id) pairs them as follows:
   statement under the month its page names is current, and the candidate pass
   pairs its rows.
 
-Both sources' external ids are collector fingerprints, so stage A proposes
-nothing for either; it runs for the day a slice carries provider row ids. A
-stage-A-only slice reads its page and leaves every group with no
-provider-issued id unread (`pairable`), so for Vpass and MyJCB a tick reads
-its pages and nothing else, and writes nothing.
+Both deployed parsers' external ids are collector fingerprints, so stage A
+proposes nothing from their rows. Stage-A-only pages start in migration 0064's
+partial index of actual provider-origin ids: a globally fingerprint-only set
+reads no observation page or group. An empty source page can still inspect
+provider-origin index entries from other sources or unsupported statuses;
+its `scanned` count is the returned page size, not D1 rows read. Historical, custom and future provider-issued ids
+still run automatically. Stage B keeps its ordinary page. A touched group's
+count includes every published member as before, so mixed-origin groups still
+obey the same bound ([ADR 0037](adr/0037-reconciliation-purchase-cost.md)).
 
 These are the only pairs in the deployed parser set where both sides of a
 pending/posted revision exist in one identifier namespace, so no cross-source
@@ -722,6 +726,16 @@ limit) and only until the write budget is full. A tick therefore issues at most
 about 320 guarded batches, and a deferred tick pairs nothing: the candidate
 pass follows the page.
 
+Before the retire pass materializes current usage, it reads the operational
+clean proof from migration 0064. An unchanged revision under the same read
+contract skips only retirement; recognition and candidates continue. Only an
+empty stale-key read can establish that proof, and its write checks that no
+input mutation overlapped the read. Publication, identity, decimal, decisions,
+restrictions, CORE epoch and live-recognition changes invalidate it. Failed,
+conflicting and deferred retirement pages never become clean. The invalidation
+latch reuses the existing CORE revision ledger and covers the remaining read
+dependencies directly ([ADR 0037](adr/0037-reconciliation-purchase-cost.md)).
+
 Recognition waits for the retire pass only while that pass fills its page and
 retires every event on it. The wait is bounded: each such tick takes 100 keys
 out of the live `authorized` and `captured` set, and nothing refills that set
@@ -1049,7 +1063,8 @@ account, then observation id) every tick, and rows past them were never paired.
 Per slice, one tick:
 
 1. reads at most 1,000 published rows after the cursor, by observation id
-   (`SCAN_LIMIT`);
+   (`SCAN_LIMIT`); stage-A-only pages admit provider-origin ids through the
+   partial index before paging, while stage B uses the original page;
 2. counts the published rows of every group (source account, statement
    period; for MyJCB the payment month its label resolves to) those rows
    belong to, when a row is one the slice's stages can pair (`pairable`: any
@@ -1110,8 +1125,8 @@ run, which was not repeated here. With
 stage B (the slices until 2026-09-26), ten ticks read 2,000 rows each and took
 2.6 s per tick; they paired 34 groups and skipped 146 with more than 200
 published rows, because every capture of a month counts, and proposed 1,380
-candidates (one per pair of captures of a purchase). With the deployed
-stage-A-only slices, the same ten ticks read the same pages, 2,000 rows each,
+candidates (one per pair of captures of a purchase). With the stage-A-only slices as deployed on 2026-09-26, before migration 0064,
+the same ten ticks read the same pages, 2,000 rows each,
 in 0.43 s per tick, and read no group, look up no digest and write nothing:
 no Vpass or MyJCB row carries a provider-issued id. These figures are what
 the test prints in that mode; it asserts none of them. On the CI store (2,070
@@ -1122,9 +1137,12 @@ per tick with stage B (33 groups paired, 17 skipped, 228 candidates) and
 50 ms without (no group, no candidate). Built capture by capture with both lanes after each day, as
 production runs them, that store gave the lane's stage B 292 proposals over
 its history against the candidate pass's 26, one per purchase pair
-([where stage B runs](#matching-stages)). What still grows with history is
-the page walk: every published capture is paged through, a cycle a little
-longer each day, and a tick's cost stays that of reading its pages.
+([where stage B runs](#matching-stages)). Those historical measurements predate
+the indexed stage-A page: migration 0064 removes the fingerprint-only page
+walk. `reconciliation-cost.test.ts` measures the new path on a scaled complete
+schema and compares full-cycle proposals with frozen shipped SQL on random
+stores; [ADR 0037](adr/0037-reconciliation-purchase-cost.md) records its local
+measurements and their limits.
 
 ## Verified locally (synthetic data only)
 

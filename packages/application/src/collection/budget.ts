@@ -105,15 +105,161 @@ export function inventoryChunkReserve(items: number): number {
   return INVENTORY_CHUNK_BASE + INVENTORY_ITEM_RESERVE * items;
 }
 
-/** Counts of operations against Cloudflare services, never their content. */
+/** Numeric provider subtotal with coverage; absence is unknown, never zero. */
+class ReportedMetric {
+  private sum = 0;
+  statements = 0;
+
+  add(value: unknown, integer = true): void {
+    if (
+      typeof value !== "number" ||
+      !Number.isFinite(value) ||
+      value < 0 ||
+      (integer && !Number.isSafeInteger(value))
+    )
+      return;
+    this.sum += value;
+    this.statements += 1;
+  }
+
+  summary(attempted: number) {
+    return {
+      reported: this.statements === 0 ? null : this.sum,
+      statements: this.statements,
+      missing: attempted - this.statements,
+    };
+  }
+}
+
+/** Metadata is observational: a malformed accessor is unavailable, never a source failure. */
+function observedProperty(value: unknown, property: PropertyKey): unknown {
+  if (value === null || (typeof value !== "object" && typeof value !== "function"))
+    return undefined;
+  try {
+    return Reflect.get(value, property);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Observe completion, preserving the original return value, Promise and errors. */
+function observeOperation(
+  call: () => unknown,
+  settled: (result: unknown, durationMs: number, rejected: boolean) => void,
+): unknown {
+  let started: number;
+  try {
+    started = performance.now();
+  } catch {
+    return call();
+  }
+  let completed = false;
+  const done = (result: unknown, rejected: boolean) => {
+    if (completed) return;
+    completed = true;
+    try {
+      settled(result, Math.max(0, performance.now() - started), rejected);
+    } catch {
+      // Observer failures must neither replace the source return/error nor
+      // reject the detached Promise reaction. Keep no exception text.
+    }
+  };
+  let result: unknown;
+  try {
+    result = call();
+  } catch (error) {
+    done(undefined, true);
+    throw error;
+  }
+  const then = observedProperty(result, "then");
+  if (typeof then === "function") {
+    try {
+      // Read then once: re-assimilating a thenable may invoke its accessor
+      // again and manufacture a rejection that the source never returned.
+      Reflect.apply(then, result, [
+        (value: unknown) => done(value, false),
+        () => done(undefined, true),
+      ]);
+    } catch {
+      // Unexpected observer setup is unavailable, without changing the call.
+    }
+  } else done(result, false);
+  return result;
+}
+
+/** Counts and numeric metadata only; no SQL, rows or error text is retained. */
 export class OperationMeter {
   d1Statements = 0;
   d1Batches = 0;
   r2Operations = 0;
+  #d1FailedStatements = 0;
+  #d1SettledStatements = 0;
+  #r2FailedOperations = 0;
+  #r2SettledOperations = 0;
+  #d1ElapsedMs = 0;
+  #r2ElapsedMs = 0;
+  readonly #rowsRead = new ReportedMetric();
+  readonly #rowsWritten = new ReportedMetric();
+  readonly #sqlDuration = new ReportedMetric();
+  readonly #retries = new ReportedMetric();
 
-  /** Everything counted: every D1 statement plus every R2 call. */
+  /** Every D1 statement plus every R2 call. */
   get total(): number {
     return this.d1Statements + this.r2Operations;
+  }
+
+  executeD1(call: () => unknown, count: number, metadata: "result" | "batch" | "none"): unknown {
+    this.d1Statements += count;
+    return observeOperation(call, (result, durationMs, rejected) => {
+      this.#d1ElapsedMs += durationMs;
+      this.#d1SettledStatements += count;
+      for (let index = 0; index < count; index += 1) {
+        const entry =
+          metadata === "batch"
+            ? Array.isArray(result)
+              ? observedProperty(result, index)
+              : undefined
+            : metadata === "result"
+              ? result
+              : undefined;
+        if (rejected || observedProperty(entry, "success") === false) this.#d1FailedStatements += 1;
+        const meta = observedProperty(entry, "meta");
+        this.#rowsRead.add(observedProperty(meta, "rows_read"));
+        this.#rowsWritten.add(observedProperty(meta, "rows_written"));
+        this.#sqlDuration.add(observedProperty(meta, "duration"), false);
+        const attempts = observedProperty(meta, "total_attempts");
+        if (typeof attempts === "number" && Number.isSafeInteger(attempts) && attempts >= 1)
+          this.#retries.add(attempts - 1);
+      }
+    });
+  }
+
+  executeR2(call: () => unknown): unknown {
+    this.r2Operations += 1;
+    return observeOperation(call, (_result, durationMs, rejected) => {
+      this.#r2ElapsedMs += durationMs;
+      this.#r2SettledOperations += 1;
+      if (rejected) this.#r2FailedOperations += 1;
+    });
+  }
+
+  summary() {
+    return {
+      operations: this.total,
+      d1Statements: this.d1Statements,
+      d1Batches: this.d1Batches,
+      r2Operations: this.r2Operations,
+      d1SettledStatements: this.#d1SettledStatements,
+      d1FailedStatements: this.#d1FailedStatements,
+      r2SettledOperations: this.#r2SettledOperations,
+      r2FailedOperations: this.#r2FailedOperations,
+      d1ElapsedMs: this.#d1ElapsedMs,
+      r2ElapsedMs: this.#r2ElapsedMs,
+      d1RowsRead: this.#rowsRead.summary(this.d1Statements),
+      d1RowsWritten: this.#rowsWritten.summary(this.d1Statements),
+      d1SqlDurationMs: this.#sqlDuration.summary(this.d1Statements),
+      d1Retries: this.#retries.summary(this.d1Statements),
+    };
   }
 }
 
@@ -153,8 +299,11 @@ export function meterD1<T extends object>(database: T, meter: OperationMeter): T
           return (...args: unknown[]) => statement(method.apply(inner, args) as object);
         if (D1_EXECUTING.has(property))
           return (...args: unknown[]) => {
-            meter.d1Statements += 1;
-            return method.apply(inner, args);
+            return meter.executeD1(
+              () => method.apply(inner, args),
+              1,
+              property === "all" || property === "run" ? "result" : "none",
+            );
           };
         return method.bind(inner);
       },
@@ -162,25 +311,33 @@ export function meterD1<T extends object>(database: T, meter: OperationMeter): T
     originals.set(proxy, target);
     return proxy;
   };
-  return new Proxy(database, {
-    get(inner, property) {
-      const value: unknown = Reflect.get(inner, property, inner);
-      if (typeof value !== "function") return value;
-      const method = value as AnyFunction;
-      if (property === "prepare")
-        return (...args: unknown[]) => statement(method.apply(inner, args) as object);
-      if (property === "batch")
-        return (statements: readonly object[]) => {
-          meter.d1Batches += 1;
-          meter.d1Statements += statements.length;
-          return method.call(
-            inner,
-            statements.map((entry) => originals.get(entry) ?? entry),
-          );
-        };
-      return method.bind(inner);
-    },
-  });
+  const binding = (target: object): object =>
+    new Proxy(target, {
+      get(inner, property) {
+        const value: unknown = Reflect.get(inner, property, inner);
+        if (typeof value !== "function") return value;
+        const method = value as AnyFunction;
+        if (property === "withSession")
+          return (...args: unknown[]) => binding(method.apply(inner, args) as object);
+        if (property === "prepare")
+          return (...args: unknown[]) => statement(method.apply(inner, args) as object);
+        if (property === "batch")
+          return (statements: readonly object[]) => {
+            meter.d1Batches += 1;
+            return meter.executeD1(
+              () =>
+                method.call(
+                  inner,
+                  statements.map((entry) => originals.get(entry) ?? entry),
+                ),
+              statements.length,
+              "batch",
+            );
+          };
+        return method.bind(inner);
+      },
+    });
+  return binding(database) as T;
 }
 
 /** The same R2 binding, counting every call that reaches the service into `meter`. */
@@ -192,8 +349,7 @@ export function meterBucket<T extends object>(bucket: T, meter: OperationMeter):
       const method = value as AnyFunction;
       if (R2_OPERATIONS.has(property))
         return (...args: unknown[]) => {
-          meter.r2Operations += 1;
-          return method.apply(inner, args);
+          return meter.executeR2(() => method.apply(inner, args));
         };
       return method.bind(inner);
     },

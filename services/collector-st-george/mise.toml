@@ -21,6 +21,8 @@ dir = "container"
 run = ["npm ci --ignore-scripts", "node --test *.node-test.mjs *.test.mjs"]
 
 [tasks.dry-run]
+# Wait only when full verification already schedules workspace checks.
+wait_for = ["//:ci:workspaces", "//:ci:remainder:workspaces", "//packages/storage-d1:test"]
 description = "Validate the St.George Worker bundle without uploading."
 depends = ["//services/collector-st-george:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run"

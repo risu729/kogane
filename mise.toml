@@ -139,10 +139,43 @@ depends = ["//services/...:bundle"]
 description = "Validate every Worker deployment without uploading it."
 depends = ["//services/...:dry-run", "//experiments/...:dry-run"]
 
-[tasks.checks]
-description = "Run repository and workspace checks, then deployment dry runs; called by hk."
+[tasks."ci:workspaces"]
+description = "Complete repository and workspace checks before container deployment builds."
 depends = ["ci:root", "//apps/...:ci", "//experiments/...:ci", "//packages/...:ci", "//services/...:ci"]
-depends_post = ["dry-run"]
+
+# Hosted CI partitions the full graph; the leaf-union guard rejects omissions.
+# Keep new workspaces here as well as in the automatically discovered local graph.
+[tasks."ci:remainder:workspaces"]
+description = "Check every workspace except the isolated processor and storage test suites."
+depends = [
+	"ci:root",
+	"//apps/...:ci",
+	"//experiments/...:ci",
+	"//services/app:ci",
+	"//services/collector-*:ci",
+	"//services/processor:typecheck",
+	"//packages/application:ci",
+	"//packages/collection:ci",
+	"//packages/collector-diagnostics:ci",
+	"//packages/domain:ci",
+	"//packages/evidence-contract:ci",
+	"//packages/identity:ci",
+	"//packages/observation-shared:ci",
+	"//packages/parsers:ci",
+	"//packages/read-model:ci",
+	"//packages/sbi-vc-trade-client:ci",
+	"//packages/storage-d1:typecheck",
+]
+
+[tasks."ci:remainder"]
+description = "Run the hosted remainder, then isolated storage tests and Docker validations."
+depends = ["ci:remainder:workspaces", "//packages/storage-d1:test", "dry-run"]
+
+[tasks.checks]
+description = "Run every repository, workspace and deployment check; called by hk."
+# One graph shares preparation. Docker-building dry-run bodies wait for the
+# selected workspace aggregate; non-container validations can overlap checks.
+depends = ["ci:workspaces", "dry-run"]
 
 [tasks.verify]
 description = "Run the complete hk check suite."

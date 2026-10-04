@@ -563,7 +563,7 @@ test("the deployed slices pair no pending row with a posted one, read no group, 
     known: 0,
     written: 0,
   });
-  expect(result.scanned).toBeGreaterThan(0);
+  expect(result.scanned).toBe(0);
   // Nothing is looked up or sent, and every stored proposal stays as it was.
   expect(sent).toEqual({ inserts: 0, lookups: 0, batches: 0 });
   expect(await proposals()).toEqual(stored);

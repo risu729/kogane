@@ -15,6 +15,8 @@ description = "Type-check the container side of experiments/cloudflare-runtime-p
 run = "./node_modules/.bin/tsc -p tsconfig.container.json --noEmit"
 
 [tasks."dry-run"]
+# Wait only when full verification already schedules workspace checks.
+wait_for = ["//:ci:workspaces", "//:ci:remainder:workspaces", "//packages/storage-d1:test"]
 description = "Validate the experiments/cloudflare-runtime-probe deployment without uploading it."
 depends = ["//experiments/cloudflare-runtime-probe:types"]
 run = [

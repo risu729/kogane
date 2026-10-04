@@ -21,7 +21,7 @@ export function identitySweepFixture(
     },
     run(sql: string, values: (string | number | null)[]) {
       statements.push({ sql, values });
-      return actual.run(sql, values);
+      return actual.query(sql).run(...values);
     },
     transaction: actual.transaction.bind(actual),
   };

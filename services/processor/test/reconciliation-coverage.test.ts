@@ -17,7 +17,7 @@
 //   - not recognised: a row the purchase lane does not recognise (its
 //     classification reason counted), so no event of it can be paired.
 //
-// Nothing else is allowed. The deployed lane then reads its pages and pairs
+// Nothing else is allowed. The deployed lane then reads no fingerprint rows and pairs
 // nothing. CI builds `CI_SCALE`; KOGANE_RECONCILIATION_SCALE=full builds
 // `FULL_SCALE` without the history (the coverage needs every capture's lanes,
 // which takes hours there) and prints the tick costs docs/economic-events.md
@@ -297,7 +297,7 @@ describe("the purchase lane's candidate pass covers the reconciliation lane's st
   );
 
   test(
-    "the deployed lane reads its pages and nothing else, and writes no proposal",
+    "the deployed lane reads no fingerprint rows or groups, and writes no proposal",
     async () => {
       const before = db.query("SELECT count(*) AS n FROM reconciliation_proposals").get();
       const sent: Sent = { groupReads: 0, lookups: 0, batches: 0 };
@@ -308,7 +308,7 @@ describe("the purchase lane's candidate pass covers the reconciliation lane's st
         sent,
         maxTicks,
       });
-      expect(cycle.totals.scanned).toBeGreaterThan(0);
+      expect(cycle.totals.scanned).toBe(0);
       expect(cycle.totals).toMatchObject({
         groups: 0,
         groupsSkipped: 0,

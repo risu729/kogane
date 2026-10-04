@@ -20,21 +20,21 @@ budgets, the retention classes and the drills.
 Root review 08 section 2 asks for coverage of the same subject range from
 Layer A through to the read model, not just "no failed jobs".
 
-| Signal (review 08 section 2)                    | Where it is served today                                                                                | Gap                                                         |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Latest sealed artifact arrival                  | pipeline `GET /status`: `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`       | -                                                           |
-| Eligible / unsupported / oversized reasons      | evidence-browser metadata API (parse health); pipeline safe failure codes on jobs                       | Not aggregated into one "why is there no job" counter       |
-| Oldest pending age, per-lane backlog            | pipeline `GET /status`: `lanes.<lane>.{pending,running,done,failed}`, `lanes.<lane>.oldestPendingAgeMs` | -                                                           |
-| Parsed Layer B versus sealed identity           | identity audit (`docs/identity-audit.md`)                                                               | Not exposed as a single coverage percentage per source      |
-| Candidate versus active                         | `published_parse_runs` versus successful `parse_runs`; `GET /publication/consistency`                   | Candidate releases themselves are the next step (A04)       |
-| Latest complete snapshot                        | complete-snapshot projection used by every reader                                                       | Not surfaced as a freshness signal on `/status`             |
-| Raw integrity verification result               | raw-evidence verification tables                                                                        | Not summarised on `/status`                                 |
-| Notification backlog                            | pipeline `GET /status`: `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                     | -                                                           |
-| Unregistered shared-R2 terminals                | Processor `GET /internal/health`: `registration.unregistered`, `.pending`, `.oldestPendingAgeMs`        | Not summarised on `/status`                                 |
-| Operations per invocation vs. documented limits | Processor `invocation_budget` log line per cron and queue invocation (§1.1)                             | Workers Logs only; not persisted                            |
-| Lane liveness and replay progress               | pipeline `GET /status`: `laneState[]`, `replayPlans[]`                                                  | -                                                           |
-| Event-lane ticks and their counts               | pipeline `GET /status` and `GET /internal/health`: `laneTicks[]`; `processor_lane_ticks` (last day)     | The latest tick per lane only; older ticks are read from D1 |
-| Report generation                               | `report_job` scheduled stage log line (only while `REPORTS_ENABLED` is on)                              | Not on `/status`; add when the flag becomes the default     |
+| Signal (review 08 section 2)                        | Where it is served today                                                                                | Gap                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Latest sealed artifact arrival                      | pipeline `GET /status`: `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`       | -                                                           |
+| Eligible / unsupported / oversized reasons          | evidence-browser metadata API (parse health); pipeline safe failure codes on jobs                       | Not aggregated into one "why is there no job" counter       |
+| Oldest pending age, per-lane backlog                | pipeline `GET /status`: `lanes.<lane>.{pending,running,done,failed}`, `lanes.<lane>.oldestPendingAgeMs` | -                                                           |
+| Parsed Layer B versus sealed identity               | identity audit (`docs/identity-audit.md`)                                                               | Not exposed as a single coverage percentage per source      |
+| Candidate versus active                             | `published_parse_runs` versus successful `parse_runs`; `GET /publication/consistency`                   | Candidate releases themselves are the next step (A04)       |
+| Latest complete snapshot                            | complete-snapshot projection used by every reader                                                       | Not surfaced as a freshness signal on `/status`             |
+| Raw integrity verification result                   | raw-evidence verification tables                                                                        | Not summarised on `/status`                                 |
+| Notification backlog                                | pipeline `GET /status`: `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                     | -                                                           |
+| Unregistered shared-R2 terminals                    | Processor `GET /internal/health`: `registration.unregistered`, `.pending`, `.oldestPendingAgeMs`        | Not summarised on `/status`                                 |
+| Operations and covered D1 costs per invocation/lane | Processor `invocation_budget` log line per cron and queue invocation (§1.1)                             | Workers Logs only; not persisted                            |
+| Lane liveness and replay progress                   | pipeline `GET /status`: `laneState[]`, `replayPlans[]`                                                  | -                                                           |
+| Event-lane ticks and their counts                   | pipeline `GET /status` and `GET /internal/health`: `laneTicks[]`; `processor_lane_ticks` (last day)     | The latest tick per lane only; older ticks are read from D1 |
+| Report generation                                   | `report_job` scheduled stage log line (only while `REPORTS_ENABLED` is on)                              | Not on `/status`; add when the flag becomes the default     |
 
 Addendum 12 section 5 also asks the operational metrics to separate freshness,
 coverage, resolution, publication and safety. Today `/status` covers freshness,
@@ -55,7 +55,8 @@ and the deployed Processor measures what it actually does, so the documented
 numbers and the runtime can be compared rather than assumed.
 
 Every cron and queue invocation of the Processor runs its bindings through a
-meter and ends with one log line, however the invocation ends:
+meter and ends with one log line, however the invocation ends. The retained
+base fields look like this (additional cost and lane fields are described below):
 
 ```json
 {
@@ -84,7 +85,7 @@ meter and ends with one log line, however the invocation ends:
 }
 ```
 
-(The numbers above are illustrative.) The line carries counts, booleans and
+(The numbers above are illustrative.) The line carries counts, booleans, explicit unknown metadata and
 the documented constants only — never a key, a statement, an identifier or an
 exception message. `d1Statements` counts every statement of a batch, the
 conservative reading of D1's "queries per Worker invocation"; `d1Batches` says
@@ -109,6 +110,68 @@ How to read it, in Workers Logs for `kogane-observation-pipeline`, filtered on
 - A queue line with `registration.deferred > 0` is a batch whose later
   messages were retried because the first ones spent the budget; the
   registrations themselves are in the `collection_notification` lines.
+
+The same line also contains an `operations` total, completion/failure counts,
+operation elapsed milliseconds, covered D1 metadata, and a `lanes` map with
+one fixed-name entry per wired scheduled stage (including disabled stages) or
+one aggregate `collection_notification` entry for the queue batch
+([ADR 0036](adr/0036-lane-cost-observability.md)). No extra query or persistent
+write collects these costs.
+
+Each lane reports `runs`, `failed`, `skipped`, `limitErrors` and
+`durationMs`. A stage returning `enabled: false`, `status: skipped` or queue
+`outcome: flag_off` is skipped; a resolved stage with returned job failures
+still ran. `resultCounts` keeps only returned
+nonnegative integer `failed`, `error`, `retried` and `deferred` fields;
+an absent field stays absent. `deferredFlags.yes/no` counts ticks returning
+a boolean `deferred` flag, distinct from a number of deferred jobs.
+`resultOutcomes` counts only closed returned status/outcome codes, including
+`refused`, `blocked`, `retryable` and `pending`; a business refusal is a
+resolved result rather than a thrown lane failure. These are stage-reported
+outcomes, distinct from binding rejection, a thrown stage failure or provider
+retry. Queue `acknowledgements` and
+`retries` count successful calls to the respective message action, including
+retryable and budget-deferred results; they do not prove eventual redelivery.
+The queue entry aggregates every message and never stores a message identifier.
+
+Invocation and lane meters report:
+
+- `d1Statements`, `d1Batches`, `r2Operations`: attempted calls, including
+  failures. Every statement in a batch counts once. `d1SettledStatements`
+  and `r2SettledOperations` count completed calls; unsettled calls have no
+  completion claim. `d1FailedStatements` counts rejected/thrown statements
+  and returned `success: false`; rejection of a batch counts every member
+  as failed, without claiming which member executed before rollback.
+- `d1ElapsedMs` and `r2ElapsedMs`: summed caller elapsed time per call,
+  including rejection, with a batch timed once. Overlapping calls can make
+  these sums exceed lane elapsed time. They are neither CPU time nor billing.
+- `d1RowsRead`, `d1RowsWritten`, `d1SqlDurationMs`, `d1Retries`: each
+  has `reported`, `statements` and `missing`. `reported` is the subtotal
+  of available valid metadata, or `null` if no statement reported it.
+  `statements` is coverage and `missing` is attempted statements without
+  that metric, including rejected or unsettled ones. Interpret a subtotal as
+  complete only if `missing: 0`. An explicit reported zero remains zero.
+
+D1 `all`, `run` and `batch` expose `rows_read`, `rows_written`,
+`duration` and, when present, `total_attempts`; the last contributes
+`total_attempts - 1` provider retries. The
+[Cloudflare return-object contract](https://developers.cloudflare.com/d1/worker-api/return-object/)
+defines those fields. `first` and `raw` return row values rather than
+metadata, so their costs and retry counts remain unknown. A row named `meta`
+is never mistaken for provider metadata. Methods are never changed, and
+queries are never repeated, to improve coverage. Missing/invalid fields are
+unknown, including local stand-ins that expose only `changes`; that field
+is not used to estimate rows written.
+
+Lane scopes end before tick-record audit writes. Those writes appear only in
+invocation totals, so summing lane operations can be below the invocation
+total. D1 session `prepare`/`batch` calls are also covered without changing
+bookmarks. The meter covers the prepared-statement methods and batch calls
+used by these lanes; D1 `exec` and R2 multipart handle calls, R2 body reads,
+fetch routes, infrastructure retries without returned metadata, and Workers
+CPU are not measured. No cost estimate or dollar amount is inferred.
+Metadata and costs remain Workers Logs only; persisted lane ticks retain
+their existing counts and retention.
 
 The Processor's `fetch` routes (the App's service-binding calls) are not
 metered: registration does not run there. The Processor declares no Service

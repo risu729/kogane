@@ -17,6 +17,8 @@ defaults:
     shell: bash
 env:
   CI: "true"
+  # Public ubuntu-24.04 runners have four CPUs; avoid eight native tasks competing.
+  MISE_JOBS: "4"
 jobs:
   checks:
     name: Checks
@@ -33,17 +35,47 @@ jobs:
         uses: jdx/mise-action@94c60b39bc2d90ab2f9bab27f38d3cc4812c1834 # v5.1.0
         with:
           version: 2026.10.1
-      - name: Run every check
-        # hk owns lint and the mise verification graph, including all workspace
-        # tests, builds and Worker dry runs. Local verification is the same command.
-        run: mise exec -- hk check --all --no-fail-fast
+      - name: Run repository checks and linters
+        # All lint steps plus the guarded native remainder. The two processor
+        # shards on separate runners complete the same local hk check graph.
+        run: |
+          lint_result=0
+          mise exec -- hk check --all --skip-step repository --no-fail-fast || lint_result=$?
+          graph_result=0
+          mise run --continue-on-error ci:remainder || graph_result=$?
+          test "${lint_result}" -eq 0 && test "${graph_result}" -eq 0
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          WRANGLER_SEND_METRICS: "false"
+  processor:
+    name: Processor (${{ matrix.shard }}/2)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read # for checkout
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install mise
+        uses: jdx/mise-action@94c60b39bc2d90ab2f9bab27f38d3cc4812c1834 # v5.1.0
+        with:
+          version: 2026.10.1
+      - name: Run the complete native processor shard
+        run: mise run --continue-on-error "//services/processor:test-shard-${SHARD}"
+        env:
+          SHARD: ${{ matrix.shard }}
           WRANGLER_SEND_METRICS: "false"
   ci-check:
     name: CI Check
     needs:
       - checks
+      - processor
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -52,9 +84,10 @@ jobs:
       - name: Require every check to have succeeded
         # Failure, cancellation and an unexpected skip must all fail the
         # existing required status. This remains separate from the checks job.
-        run: test "${CHECKS_RESULT}" = success
+        run: test "${CHECKS_RESULT}" = success && test "${PROCESSOR_RESULT}" = success
         env:
           CHECKS_RESULT: ${{ needs.checks.result }}
+          PROCESSOR_RESULT: ${{ needs.processor.result }}
   actions-timeline:
     name: Generate Actions Timeline
     needs:

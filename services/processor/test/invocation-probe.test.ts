@@ -25,6 +25,7 @@ import {
   invocationContext,
   invocationProbe,
   meteredEnv,
+  observeLane,
   platformLimitError,
 } from "../src/invocation-probe.ts";
 import { consumeTerminalNotifications, meteredInvocation, runScheduled } from "../src/worker.ts";
@@ -65,6 +66,7 @@ function leaves(value: unknown, path: string[] = []): [string, unknown][] {
 function expectCountsOnly(line: Record<string, unknown>): void {
   for (const [path, value] of leaves(line)) {
     if (path === "event" || path === "trigger") continue;
+    if (value === null) continue; // Unknown provider metadata is explicit.
     expect(["number", "boolean"]).toContain(typeof value);
   }
 }
@@ -136,6 +138,16 @@ test("a cron invocation through the metered bindings runs every lane as it does 
     registration: { budget: REGISTRATION_OPERATION_BUDGET, deferred: 0 },
   });
   expect(probe["d1Statements"]).toBeGreaterThan(0);
+  expect(probe["d1RowsRead"]["statements"]).toBeGreaterThan(0);
+  expect(probe["d1RowsRead"]["missing"]).toBeGreaterThan(0);
+  expect(probe["lanes"]["observation_sweep"]["d1Statements"]).toBeGreaterThan(0);
+  expect(probe["lanes"]["identity_sweep"]["runs"]).toBe(1);
+  expect(probe["lanes"]["reconciliation_sweep"]["skipped"]).toBe(1);
+  const laneStatements = Object.values(
+    probe["lanes"] as Record<string, { d1Statements: number }>,
+  ).reduce((sum, lane) => sum + lane.d1Statements, 0);
+  // Tick audit writes belong to the invocation rather than any stage.
+  expect(probe["d1Statements"]).toBeGreaterThan(laneStatements);
   expect(typeof probe["overDocumentedD1Queries"]).toBe("boolean");
   expectCountsOnly(probe);
 }, 60_000);
@@ -201,6 +213,12 @@ test("a queue batch shares one budget: what it cannot start is retried, and the 
     registration: { started: 1, yielded: 1, deferred: 2 },
   });
   expect(probe["registration"]["operations"]).toBeLessThanOrEqual(REGISTRATION_OPERATION_BUDGET);
+  expect(probe["lanes"]["collection_notification"]).toMatchObject({
+    runs: 3,
+    failed: 0,
+    acknowledgements: 1,
+    retries: 2,
+  });
   // Everything the registration spent went through the invocation's meter too.
   expect(probe["d1Statements"] + probe["r2Operations"]).toBeGreaterThanOrEqual(
     probe["registration"]["operations"],
@@ -267,7 +285,11 @@ test("a failure that names a platform limit is counted, and its text is not kept
   );
   expect(context.limitErrors).toBe(1);
   const probe = invocationProbe("scheduled", new OperationMeter(), context);
-  expect(probe).toMatchObject({ limitErrors: 1, overDocumentedD1Queries: false });
+  expect(probe).toMatchObject({
+    limitErrors: 1,
+    overDocumentedD1Queries: false,
+    lanes: { observation_sweep: { failed: 1, limitErrors: 1 } },
+  });
   expect(JSON.stringify(probe)).not.toContain("Too many");
 });
 
@@ -291,4 +313,427 @@ test("a binding the deployment lacks stays absent through the meter", () => {
   ) as unknown as Record<string, unknown>;
   expect("DB" in env).toBe(false);
   expect(env["RELEASE_SHA"]).toBe("");
+});
+
+test("provider metadata is a covered subtotal and first/raw never expose row content as metadata", async () => {
+  const result = {
+    success: true,
+    meta: {
+      rows_read: 12,
+      rows_written: 3,
+      duration: 0.25,
+      total_attempts: 3,
+      served_by: "private-provider-detail",
+    },
+    results: [{ secret: "private-row" }],
+  };
+  const first = { meta: { rows_read: 999, rows_written: 999, duration: 999 } };
+  const calls: string[] = [];
+  const original = {
+    bind(...args: unknown[]) {
+      expect(this).toBe(original);
+      calls.push("bind");
+      expect(args).toEqual([7]);
+      return original;
+    },
+    run() {
+      expect(this).toBe(original);
+      calls.push("run");
+      return Promise.resolve(result);
+    },
+    all() {
+      expect(this).toBe(original);
+      calls.push("all");
+      return Promise.resolve(result);
+    },
+    first() {
+      expect(this).toBe(original);
+      calls.push("first");
+      return Promise.resolve(first);
+    },
+    raw() {
+      expect(this).toBe(original);
+      calls.push("raw");
+      return Promise.resolve([[1]]);
+    },
+  };
+  const meter = new OperationMeter();
+  const db = meterD1(
+    {
+      prepare(_sql: string) {
+        return original;
+      },
+    },
+    meter,
+  );
+  expect(await db.prepare("synthetic SQL").bind(7).run()).toBe(result);
+  expect(await db.prepare("synthetic SQL").all()).toBe(result);
+  expect(await db.prepare("synthetic SQL").first()).toBe(first);
+  expect(await db.prepare("synthetic SQL").raw()).toEqual([[1]]);
+  expect(calls).toEqual(["bind", "run", "all", "first", "raw"]);
+  expect(meter.summary()).toMatchObject({
+    d1Statements: 4,
+    d1SettledStatements: 4,
+    d1FailedStatements: 0,
+    d1RowsRead: { reported: 24, statements: 2, missing: 2 },
+    d1RowsWritten: { reported: 6, statements: 2, missing: 2 },
+    d1SqlDurationMs: { reported: 0.5, statements: 2, missing: 2 },
+    d1Retries: { reported: 4, statements: 2, missing: 2 },
+  });
+  expect(JSON.stringify(meter.summary())).not.toContain("private");
+});
+
+test("nested meters preserve promise identity, batch statements, session semantics and independent coverage", async () => {
+  const entries = [
+    { success: true, meta: { rows_read: 4, rows_written: 0, duration: 0.5, total_attempts: 1 } },
+    {
+      success: false,
+      meta: { rows_read: -1, rows_written: "private", duration: NaN, total_attempts: 0 },
+    },
+  ];
+  const promise = Promise.resolve(entries);
+  const original = {
+    bind() {
+      return original;
+    },
+  };
+  const session = {
+    prepare() {
+      expect(this).toBe(session);
+      return original;
+    },
+    batch(statements: object[]) {
+      expect(this).toBe(session);
+      expect(statements).toEqual([original, original]);
+      return promise;
+    },
+    getBookmark() {
+      expect(this).toBe(session);
+      return "synthetic-bookmark";
+    },
+  };
+  const database = {
+    withSession(bookmark: string) {
+      expect(this).toBe(database);
+      expect(bookmark).toBe("synthetic");
+      return session;
+    },
+  };
+  const inner = new OperationMeter();
+  const outer = new OperationMeter();
+  const db = meterD1(meterD1(database, inner), outer).withSession("synthetic");
+  expect(db.getBookmark()).toBe("synthetic-bookmark");
+  expect(db.batch([db.prepare().bind(), db.prepare()])).toBe(promise);
+  await promise;
+  for (const meter of [inner, outer])
+    expect(meter.summary()).toMatchObject({
+      d1Statements: 2,
+      d1Batches: 1,
+      d1SettledStatements: 2,
+      d1FailedStatements: 1,
+      d1RowsRead: { reported: 4, statements: 1, missing: 1 },
+      d1RowsWritten: { reported: 0, statements: 1, missing: 1 },
+      d1SqlDurationMs: { reported: 0.5, statements: 1, missing: 1 },
+      d1Retries: { reported: 0, statements: 1, missing: 1 },
+    });
+});
+
+test("rejected batches and synchronous failures keep original errors and missing costs", async () => {
+  const failure = new Error("private failure detail");
+  const meter = new OperationMeter();
+  const original = {
+    run() {
+      throw failure;
+    },
+  };
+  const db = meterD1(
+    {
+      prepare() {
+        return original;
+      },
+      batch(_statements: object[]) {
+        return Promise.reject(failure);
+      },
+    },
+    meter,
+  );
+  expect(() => db.prepare().run()).toThrow(failure);
+  try {
+    await db.batch([db.prepare(), db.prepare()]);
+    throw new Error("expected failure");
+  } catch (error) {
+    expect(error).toBe(failure);
+  }
+  const bucket = meterBucket(
+    {
+      get() {
+        return Promise.reject(failure);
+      },
+    },
+    meter,
+  );
+  try {
+    await bucket.get();
+    throw new Error("expected failure");
+  } catch (error) {
+    expect(error).toBe(failure);
+  }
+  expect(meter.summary()).toMatchObject({
+    d1Statements: 3,
+    d1SettledStatements: 3,
+    d1FailedStatements: 3,
+    r2Operations: 1,
+    r2SettledOperations: 1,
+    r2FailedOperations: 1,
+    d1RowsRead: { reported: null, statements: 0, missing: 3 },
+    d1RowsWritten: { reported: null, statements: 0, missing: 3 },
+    d1Retries: { reported: null, statements: 0, missing: 3 },
+  });
+  expect(meter.summary().d1ElapsedMs).toBeGreaterThanOrEqual(0);
+  expect(meter.summary().r2ElapsedMs).toBeGreaterThanOrEqual(0);
+  expect(JSON.stringify(meter.summary())).not.toContain("private");
+  // Legacy spreads used by budget fixtures still contain exactly these counters.
+  expect({ ...meter }).toEqual({ d1Statements: 3, d1Batches: 1, r2Operations: 1 });
+});
+
+test("lane aggregates isolate failures and copy only known numeric outcome fields", async () => {
+  const context = invocationContext();
+  const failure = new Error("private exception");
+  const original = {
+    run() {
+      return Promise.resolve({ success: true, meta: { rows_read: 8, rows_written: 2 } });
+    },
+  };
+  const env = {
+    DB: {
+      prepare() {
+        return original;
+      },
+    },
+  } as unknown as Env;
+  const lines: string[] = [];
+  await runScheduled(
+    env,
+    {
+      parse: async (laneEnv) => {
+        await laneEnv.DB.prepare("synthetic").run();
+        return { error: 2, deferred: 1, secret: "private", retried: "private" };
+      },
+      identity: async () => {
+        throw failure;
+      },
+      balanceProjection: async () => ({ enabled: false }),
+      operations: async () => ({ enabled: false, failed: 0 }),
+    },
+    (line) => lines.push(line),
+    context,
+  );
+  const probe = invocationProbe("scheduled", new OperationMeter(), context) as any;
+  expect(probe.lanes.observation_sweep).toMatchObject({
+    runs: 1,
+    failed: 0,
+    d1Statements: 1,
+    resultCounts: { error: 2, deferred: 1 },
+    d1RowsRead: { reported: 8, statements: 1, missing: 0 },
+  });
+  expect(probe.lanes.identity_sweep).toMatchObject({ runs: 0, failed: 1 });
+  expect(probe.lanes.operation_dispatch).toMatchObject({ runs: 0, skipped: 1 });
+  expect(probe.lanes.observation_sweep.durationMs).toBeGreaterThanOrEqual(0);
+  expect(JSON.stringify(probe)).not.toContain("private");
+  expectCountsOnly(probe);
+  expect(() => observeLane(env, context, "private-lane")).toThrow("unknown_observation_lane");
+  expect(Object.keys(context.lanes)).toHaveLength(4);
+});
+
+test("stage-owned skipped results, deferred flags and refused outcomes stay distinct", () => {
+  const env = {} as Env;
+  const context = invocationContext();
+  observeLane(env, context, "balance_projection").finish("ran", { status: "skipped" });
+  observeLane(env, context, "collection_scan").finish("ran", { enabled: false, status: "skipped" });
+  observeLane(env, context, "purchase_recognition").finish("ran", { deferred: true });
+  observeLane(env, context, "purchase_recognition").finish("ran", { deferred: false });
+  observeLane(env, context, "reward_read_projection").finish("ran", { status: "refused" });
+  observeLane(env, context, "collection_notification").finish("ran", { outcome: "flag_off" });
+  observeLane(env, context, "collection_notification").finish("ran", { outcome: "private-status" });
+  const probe = invocationProbe("scheduled", new OperationMeter(), context) as any;
+  expect(probe.lanes.balance_projection).toMatchObject({ runs: 0, skipped: 1 });
+  expect(probe.lanes.collection_scan).toMatchObject({ runs: 0, skipped: 1 });
+  expect(probe.lanes.purchase_recognition).toMatchObject({
+    runs: 2,
+    deferredFlags: { yes: 1, no: 1 },
+    resultCounts: {},
+  });
+  expect(probe.lanes.reward_read_projection).toMatchObject({
+    runs: 1,
+    failed: 0,
+    resultOutcomes: { refused: 1 },
+  });
+  expect(probe.lanes.collection_notification).toMatchObject({
+    runs: 1,
+    skipped: 1,
+    resultOutcomes: { flag_off: 1 },
+  });
+  expect(JSON.stringify(probe)).not.toContain("private");
+  expectCountsOnly(probe);
+});
+
+test("throwing metadata accessors cannot change source results or reject the observer", async () => {
+  const failure = new Error("private metadata failure");
+  const result = {
+    success: true,
+    get meta(): Record<string, unknown> {
+      throw failure;
+    },
+  };
+  const meter = new OperationMeter();
+  const sync = meterD1({ prepare: () => ({ run: () => result }) }, meter);
+  expect(sync.prepare().run()).toBe(result);
+  const promise = Promise.resolve(result);
+  const asyncDb = meterD1({ prepare: () => ({ all: () => promise }) }, meter);
+  expect(asyncDb.prepare().all()).toBe(promise);
+  expect(await promise).toBe(result);
+  // Flush observer reactions; Bun also fails the run for unhandled rejections.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(meter.summary()).toMatchObject({
+    d1Statements: 2,
+    d1SettledStatements: 2,
+    d1FailedStatements: 0,
+    d1RowsRead: { reported: null, statements: 0, missing: 2 },
+    d1RowsWritten: { reported: null, statements: 0, missing: 2 },
+  });
+  expect(JSON.stringify(meter.summary())).not.toContain("private");
+});
+
+test("throwing individual metadata fields remain missing while valid fields are covered", async () => {
+  const result = {
+    get success(): boolean {
+      throw new Error("private status");
+    },
+    meta: {
+      get rows_read(): number {
+        throw new Error("private rows");
+      },
+      rows_written: 0,
+      duration: 0.5,
+      total_attempts: 1,
+    },
+  };
+  const meter = new OperationMeter();
+  const db = meterD1({ batch: (_statements: object[]) => Promise.resolve([result]) }, meter);
+  const entries = await db.batch([{}]);
+  expect(entries[0]).toBe(result);
+  expect(meter.summary()).toMatchObject({
+    d1Statements: 1,
+    d1SettledStatements: 1,
+    d1FailedStatements: 0,
+    d1RowsRead: { reported: null, statements: 0, missing: 1 },
+    d1RowsWritten: { reported: 0, statements: 1, missing: 0 },
+    d1SqlDurationMs: { reported: 0.5, statements: 1, missing: 0 },
+    d1Retries: { reported: 0, statements: 1, missing: 0 },
+  });
+  expect(JSON.stringify(meter.summary())).not.toContain("private");
+});
+
+test("a failed queue acknowledgement counts the lane exception and only the successful retry", async () => {
+  const context = invocationContext();
+  const lines: string[] = [];
+  let acknowledgements = 0;
+  let retries = 0;
+  await consumeTerminalNotifications(
+    [
+      {
+        body: { invalid: true },
+        ack() {
+          acknowledgements += 1;
+          throw new Error("Too many subrequests. private queue detail");
+        },
+        retry() {
+          retries += 1;
+        },
+      },
+      message({ invalid: true }),
+    ],
+    {} as Env,
+    context,
+    (line) => lines.push(line),
+  );
+  expect([acknowledgements, retries]).toEqual([1, 1]);
+  expect(lines.map((line) => JSON.parse(line).event)).toEqual([
+    "collection_notification_failed",
+    "collection_notification",
+  ]);
+  expect(invocationProbe("queue", new OperationMeter(), context)).toMatchObject({
+    limitErrors: 1,
+    lanes: {
+      collection_notification: {
+        runs: 0,
+        skipped: 1,
+        failed: 1,
+        limitErrors: 1,
+        acknowledgements: 1,
+        retries: 1,
+        resultOutcomes: { flag_off: 1 },
+      },
+    },
+  });
+  expect(lines.join("\n")).not.toContain("private");
+});
+
+test("thenable introspection and observer setup never replace a source result or error", async () => {
+  const failure = new Error("private setup error");
+  const result = {
+    success: true,
+    get then(): unknown {
+      throw failure;
+    },
+  };
+  const meter = new OperationMeter();
+  const db = meterD1({ prepare: () => ({ run: () => result }) }, meter);
+  expect(db.prepare().run()).toBe(result);
+  const setupFailure = {
+    then() {
+      throw failure;
+    },
+  };
+  const bucket = meterBucket(
+    {
+      get: () => setupFailure,
+      head() {
+        throw failure;
+      },
+    },
+    meter,
+  );
+  expect(bucket.get()).toBe(setupFailure);
+  try {
+    bucket.head();
+    throw new Error("expected source failure");
+  } catch (error) {
+    expect(error).toBe(failure);
+  }
+  const value = { success: true, meta: { rows_read: 1 } };
+  let reads = 0;
+  const thenable = {
+    get then() {
+      reads += 1;
+      if (reads > 1) throw failure;
+      return (fulfilled: (value: unknown) => void) => {
+        fulfilled(value);
+        fulfilled(value); // A malformed thenable cannot double-count settlement.
+      };
+    },
+  };
+  const once = meterD1({ prepare: () => ({ all: () => thenable }) }, meter);
+  expect(once.prepare().all()).toBe(thenable);
+  expect(reads).toBe(1);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(meter.summary()).toMatchObject({
+    d1Statements: 2,
+    d1SettledStatements: 2,
+    d1FailedStatements: 0,
+    d1RowsRead: { reported: 1, statements: 1, missing: 1 },
+    r2Operations: 2,
+    r2SettledOperations: 1,
+    r2FailedOperations: 1,
+  });
 });
