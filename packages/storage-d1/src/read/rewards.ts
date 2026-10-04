@@ -112,6 +112,53 @@ export const ACTIVE_REWARD_SNAPSHOT_SQL = `SELECT ${snapshotColumns("s.")}
   JOIN reward_expiry_snapshots s ON s.snapshot_id=p.snapshot_id AND s.status='complete'
   WHERE p.id=1`;
 
+/**
+ * The pointer is the verified context after a content-equivalent refresh;
+ * immutable snapshot revision fields may be older. The evaluation day and
+ * every release must still match, even when CORE has not changed.
+ */
+export const CURRENT_REWARD_CONTEXT_SQL = `SELECT ${snapshotColumns("s.")}
+  FROM reward_snapshot_pointer p
+  JOIN reward_expiry_snapshots s ON s.snapshot_id=p.snapshot_id
+  WHERE p.id=1 AND p.source_revision=?1 AND p.visibility_revision=?2 AND p.core_epoch=?3
+    AND p.read_instance_id=?4 AND s.read_instance_id=?4
+    AND s.status='complete' AND s.output_digest=p.output_digest
+    AND s.build_digest=?5 AND s.contract_version=?6
+    AND p.evaluated_at=?7 AND s.evaluated_at=?7 AND s.calendar_rule_id=?8
+    AND s.claims_release=?9 AND s.policy_release=?10`;
+
+export async function currentRewardContext(
+  db: D1Like,
+  context: {
+    sourceRevision: number;
+    visibilityRevision: number;
+    coreEpoch: string;
+    readInstanceId: string;
+    buildDigest: string;
+    contractVersion: string;
+    evaluatedAt: string;
+    calendarRuleId: string;
+    claimsRelease: string;
+    policyRelease: string;
+  },
+): Promise<RewardSnapshotRow | null> {
+  return await db
+    .prepare(CURRENT_REWARD_CONTEXT_SQL)
+    .bind(
+      context.sourceRevision,
+      context.visibilityRevision,
+      context.coreEpoch,
+      context.readInstanceId,
+      context.buildDigest,
+      context.contractVersion,
+      context.evaluatedAt,
+      context.calendarRuleId,
+      context.claimsRelease,
+      context.policyRelease,
+    )
+    .first<RewardSnapshotRow>();
+}
+
 /** A snapshot a cursor names; absent or retired means the context expired. */
 export const REWARD_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS} FROM reward_expiry_snapshots
   WHERE snapshot_id=?1 AND status='complete'`;

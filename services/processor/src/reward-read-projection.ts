@@ -35,6 +35,7 @@ import {
   activeRewardSnapshot,
   beginRewardSnapshot,
   claimRewardWriterLease,
+  currentRewardContext,
   ensureReadInstance,
   inputRefDigest,
   oldestBuildingRewardSnapshot,
@@ -386,7 +387,8 @@ export async function runRewardReadProjection(
   const read = rewardReadDatabase(env);
   if (!read) return halted("retryable", "read_binding_missing");
   const db = env.DB as unknown as D1Like;
-  const now = (options.now ?? (() => new Date().toISOString()))();
+  const clock = options.now ?? (() => new Date().toISOString());
+  const now = clock();
   const lease = options.writerToken ?? crypto.randomUUID();
   const instance = await ensureReadInstance(read, now);
   // The database has the shape of another baseline (06 §2). Building into it
@@ -401,9 +403,50 @@ export async function runRewardReadProjection(
   let build: RewardBuild;
   if (resumed !== null) build = resumed;
   else {
+    const buildDigest = await rewardProjectionBuildDigest();
+    // Continue unfinished builds first. A quiet context on the same UTC day
+    // needs no claim/rule reads. The capture test hook explicitly requests
+    // capture, so it continues to exercise the optimistic retry protocol.
+    if (!options.duringCapture) {
+      const before = await currentCoreRevision(db);
+      const current = await currentRewardContext(read, {
+        sourceRevision: before.source_revision,
+        visibilityRevision: before.visibility_revision,
+        coreEpoch: before.core_epoch,
+        readInstanceId: instance.read_instance_id,
+        buildDigest,
+        contractVersion: REWARD_PROJECTION_CONTRACT_VERSION,
+        evaluatedAt: evaluationInstant(now),
+        calendarRuleId: REWARD_EVALUATION_CALENDAR,
+        claimsRelease: PROMOTION_RELEASE,
+        policyRelease: REWARD_PROJECTION_RELEASE,
+      });
+      if (current) {
+        const after = await currentCoreRevision(db);
+        if (
+          after.source_revision === before.source_revision &&
+          after.visibility_revision === before.visibility_revision &&
+          after.core_epoch === before.core_epoch &&
+          evaluationInstant(clock()) === current.evaluated_at
+        )
+          return {
+            enabled: true,
+            snapshotId: current.snapshot_id,
+            status: "unchanged",
+            written: 0,
+            estimateCount: current.estimate_count,
+            simulationCount: current.simulation_count,
+            retired: 0,
+            reasonCode: null,
+            sourceRevision: before.source_revision,
+            inputDigest: current.input_digest,
+            evaluatedAt: current.evaluated_at,
+            active: true,
+          };
+      }
+    }
     const capture = await captureRewardInput(db, options);
     if (!capture.ok) return halted(capture.status, capture.code);
-    const buildDigest = await rewardProjectionBuildDigest();
     const contentKey = await readContentKey(
       capture.captured.digest,
       buildDigest,

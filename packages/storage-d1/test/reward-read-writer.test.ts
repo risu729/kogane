@@ -13,6 +13,7 @@ import {
   activeRewardSnapshot,
   beginRewardSnapshot,
   claimRewardWriterLease,
+  currentRewardContext,
   ensureReadInstance,
   readContentKey,
   retireOldRewardSnapshots,
@@ -483,5 +484,62 @@ describe("publication", () => {
         limit: 100,
       }),
     ).toEqual([]);
+  });
+});
+
+describe("the unchanged reward context", () => {
+  test("every revision, release and evaluation field invalidates reuse", async () => {
+    const { db, instanceId } = await claimed();
+    expect(
+      await currentRewardContext(db, {
+        ...(await plan()),
+        readInstanceId: instanceId,
+      }),
+    ).toBeNull();
+    const current = await build(db, instanceId);
+    const context = { ...(await plan()), readInstanceId: instanceId };
+    expect((await currentRewardContext(db, context))?.snapshot_id).toBe(current.snapshotId);
+    const changes = {
+      sourceRevision: 11,
+      visibilityRevision: 4,
+      coreEpoch: "core-epoch-2",
+      readInstanceId: "another-read-instance",
+      buildDigest: REWARD_DIGEST_A,
+      contractVersion: "reward-projection-input-v2",
+      evaluatedAt: "2026-09-12T00:00:00.000Z",
+      calendarRuleId: "another-calendar",
+      claimsRelease: "reward-promotion-v2",
+      policyRelease: "reward-projection-v2",
+    };
+    for (const [field, value] of Object.entries(changes))
+      expect(await currentRewardContext(db, { ...context, [field]: value })).toBeNull();
+  });
+
+  test("a verified pointer refresh supports reuse despite older immutable snapshot revisions", async () => {
+    const { db, instanceId } = await claimed();
+    const current = await build(db, instanceId);
+    const context = { ...(await plan()), readInstanceId: instanceId };
+    const refreshed = {
+      ...context,
+      sourceRevision: 11,
+      visibilityRevision: 4,
+      coreEpoch: "epoch-new",
+    };
+    await rewardPointerStatement(
+      db,
+      {
+        ...refreshed,
+        snapshotId: current.snapshotId,
+        outputDigest: (await activeRewardSnapshot(db))!.output_digest!,
+      },
+      NOW,
+    ).run();
+    expect(await currentRewardContext(db, context)).toBeNull();
+    expect(await currentRewardContext(db, refreshed)).toMatchObject({
+      snapshot_id: current.snapshotId,
+      source_revision: 10,
+      visibility_revision: 3,
+      core_epoch: "core-epoch-1",
+    });
   });
 });
