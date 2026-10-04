@@ -45,6 +45,21 @@ describe("the required CI status fails closed", () => {
   }
 });
 
+test("the processor matrix dispatches both distinct native shard tasks", () => {
+  const processor = ci.split("\n  processor:\n")[1]?.split(/\n  [\w-]+:\n/u)[0] ?? "";
+  expect(processor).toContain(
+    "    strategy:\n      fail-fast: false\n      matrix:\n        shard: [1, 2]\n    steps:",
+  );
+  expect(processor).not.toMatch(/^\s*(?:include|exclude|if|continue-on-error):/mu);
+  const step = workflowSteps(processor).find(
+    (candidate) => candidate.name === "Run the complete native processor shard",
+  );
+  expect(step).toBeDefined();
+  const command = /^        run: (.+)$/mu.exec(step?.body ?? "")?.[1];
+  expect(command).toBe('mise run --continue-on-error "//services/processor:test-shard-${SHARD}"');
+  expect(step?.body).toContain("SHARD: ${{ matrix.shard }}");
+});
+
 test("hk's full plan preserves linters alongside the repository graph", () => {
   const result = Bun.spawnSync(["hk", "check", "--all", "--plan", "--json"], { cwd: REPO_ROOT });
   expect(result.exitCode).toBe(0);
