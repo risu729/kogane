@@ -83,6 +83,18 @@ const RUNTIME_STAGES = new Set([
   "account-result-state",
   "snapshot-validate",
 ]);
+const RUNTIME_REFUSALS = new Set([
+  "response-inspection",
+  "route-other-origin",
+  "route-userinfo",
+  "route-fragment",
+  "route-path",
+  "route-invalid",
+  "route-login-post",
+  "route-changed",
+  "result-route-not-portfolio",
+  "portfolio-marker-missing",
+]);
 const RUNTIME_ERROR_TYPES = new Set([
   "Error",
   "TypeError",
@@ -102,9 +114,13 @@ export function createRuntimeDiagnostics({
   let stage = "request-validation";
   let emitted = false;
   let loginPostCount = 0;
+  let refusal = "unknown";
   return {
     stage(value) {
       stage = RUNTIME_STAGES.has(value) ? value : "unknown";
+    },
+    refusal(value) {
+      refusal = RUNTIME_REFUSALS.has(value) ? value : "unknown";
     },
     loginPost() {
       // Two represents two or more browser-issued login requests. Observing a
@@ -131,6 +147,7 @@ export function createRuntimeDiagnostics({
             event: "st-george-runtime-failure",
             stage,
             errorType,
+            refusal,
             loginPostCount,
             durationMs: Number.isSafeInteger(elapsed) && elapsed >= 0 ? elapsed : 0,
           }),
@@ -192,17 +209,26 @@ export function validateRequest(value) {
   return value;
 }
 
-function routeOf(raw) {
+function inspectRoute(raw) {
+  const rejected = (refusal) => ({ route: "unknown", refusal });
   try {
     const url = new URL(raw);
-    if (url.origin !== ORIGIN || url.username || url.password || url.hash) return "unknown";
-    if (url.pathname === "/ibank/loginPage.action") return "login";
-    if (url.pathname === "/ibank/viewAccountPortfolio.html") return "portfolio";
-    if (url.pathname === "/ibank/accountDetails.action") return "transactions";
+    if (url.origin !== ORIGIN) return rejected("route-other-origin");
+    if (url.username || url.password) return rejected("route-userinfo");
+    if (url.hash) return rejected("route-fragment");
+    if (url.pathname === "/ibank/loginPage.action") return { route: "login" };
+    if (url.pathname === "/ibank/viewAccountPortfolio.html") return { route: "portfolio" };
+    if (url.pathname === "/ibank/accountDetails.action") return { route: "transactions" };
+    // Recognize the existing form destination for diagnostics only. It remains
+    // an unsupported landing/read route and is never added to the allowlist.
+    if (url.pathname === "/ibank/logonActionSimple.action") return rejected("route-login-post");
+    return rejected("route-path");
   } catch {
-    /* Never include the offending URL in errors. */
+    return rejected("route-invalid");
   }
-  return "unknown";
+}
+function routeOf(raw) {
+  return inspectRoute(raw).route;
 }
 
 // Runs in the page, returning fixed labels/booleans only. No body or value leaves it.
@@ -301,8 +327,17 @@ export async function collectFromPage(
   extractors,
   stage = () => {},
   onLoginPost = () => {},
+  onRefusal = () => {},
 ) {
   let stopReason = null;
+  const rejectRoute = (refusal) => {
+    try {
+      onRefusal(refusal);
+    } catch {
+      /* Diagnostics cannot replace the existing refusal or prevent cleanup. */
+    }
+    fail("unexpected-route");
+  };
   const request = (event) => {
     if (event.method() === "POST" && event.url() === ORIGIN + "/ibank/logonActionSimple.action")
       onLoginPost();
@@ -323,14 +358,16 @@ export async function collectFromPage(
   page.on("download", download);
   page.on("request", request);
   const check = async () => {
+    if (stopReason === "unexpected-route") rejectRoute("response-inspection");
     if (stopReason) fail(stopReason);
-    const before = routeOf(page.url());
-    if (before === "unknown") fail("unexpected-route");
+    const before = inspectRoute(page.url());
+    if (before.route === "unknown") rejectRoute(before.refusal);
     const state = await page.evaluate(readState);
+    if (stopReason === "unexpected-route") rejectRoute("response-inspection");
     if (stopReason) fail(stopReason);
     if (state.reason) fail(state.reason);
-    if (before !== routeOf(page.url())) fail("unexpected-route");
-    return { ...state, route: before };
+    if (before.route !== routeOf(page.url())) rejectRoute("route-changed");
+    return { ...state, route: before.route };
   };
   try {
     page.setDefaultTimeout(10_000);
@@ -369,9 +406,18 @@ export async function collectFromPage(
         });
     }
     stage("login-result-state");
-    const authenticated = await check();
-    if (authenticated.login || authenticated.route === "login") fail("login-rejected");
-    if (authenticated.route !== "portfolio" || !authenticated.portfolio) fail("unexpected-route");
+    // The known portfolio URL can commit before its account cards render.
+    // Wait only for DOM readiness on that already-allowed route, checking the
+    // existing refusal/challenge guards each time. Never navigate or resubmit.
+    const portfolioDeadline = Date.now() + 10_000;
+    for (;;) {
+      const authenticated = await check();
+      if (authenticated.login || authenticated.route === "login") fail("login-rejected");
+      if (authenticated.route !== "portfolio") rejectRoute("result-route-not-portfolio");
+      if (authenticated.portfolio) break;
+      if (Date.now() >= portfolioDeadline) rejectRoute("portfolio-marker-missing");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     stage("portfolio-extract");
     const portfolio = await page.evaluate(extractors.extractPortfolio);
     stage("portfolio-result-state");
@@ -537,6 +583,7 @@ export async function runBrowserCollection(input) {
       extractors,
       diagnostic.stage,
       diagnostic.loginPost,
+      diagnostic.refusal,
     );
     if (expired) fail("deadline-exceeded");
     return result;
