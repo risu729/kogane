@@ -49,6 +49,8 @@ export interface DeployEntry {
    * when `healthPath` is "".
    */
   healthIdentity?: string;
+  /** Explicit RPC dependency order (ADR 0039); empty means no dependency. */
+  after?: string[];
   bundleTask?: string;
   bundleDir?: string;
 }
@@ -159,17 +161,31 @@ export function coverageViolations(
  * yet understand.
  */
 export function orderViolations(order: readonly DeployEntry[]): string[] {
-  const rank = { consumer: 0, producer: 1, probe: 2 } as const;
   const errors: string[] = [];
-  for (let index = 1; index < order.length; index += 1) {
-    const previous = order[index - 1] as DeployEntry;
-    const current = order[index] as DeployEntry;
-    const before = rank[previous.role];
-    const after = rank[current.role];
-    if (before !== undefined && after !== undefined && after < before) {
-      errors.push(
-        `infra/deploy-order.json: ${current.name} (${current.role}) is listed after ${previous.name} (${previous.role}); consumers deploy first`,
-      );
+  if (order.some((entry) => entry.after !== undefined)) {
+    const deployed = order.filter((entry) => entry.deploy);
+    for (const [index, current] of deployed.entries()) {
+      if (!Array.isArray(current.after)) {
+        errors.push(`infra/deploy-order.json: ${current.name} is missing explicit dependencies`);
+        continue;
+      }
+      for (const dependency of current.after) {
+        const dependencyIndex = deployed.findIndex((entry) => entry.name === dependency);
+        if (dependencyIndex < 0 || dependencyIndex >= index)
+          errors.push(
+            `infra/deploy-order.json: ${current.name} requires ${dependency} to deploy first`,
+          );
+      }
+    }
+  } else {
+    const rank = { consumer: 0, producer: 1, probe: 2 } as const;
+    for (let index = 1; index < order.length; index++) {
+      const previous = order[index - 1]!,
+        current = order[index]!;
+      if (rank[current.role] < rank[previous.role])
+        errors.push(
+          `infra/deploy-order.json: ${current.name} (${current.role}) is listed after ${previous.name} (${previous.role}); consumers deploy first`,
+        );
     }
   }
   return errors;

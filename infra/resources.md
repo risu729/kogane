@@ -27,7 +27,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | test | `00000000-0000-0000-0000-000000000001` | no | kogane-evidence-browser-test |
 | test-read | `00000000-0000-0000-0000-000000000002` | no | kogane-evidence-browser-test |
 | kogane-read | `320ebe31-a031-48a1-985f-0e6fabbd517a` | yes | kogane-evidence-browser<br>kogane-observation-pipeline<br>kogane-read-migrations |
-| kogane-raw-evidence | `b335a887-250d-45c9-bd72-af83f35fdc60` | yes | kogane-evidence-browser<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic |
+| kogane-raw-evidence | `b335a887-250d-45c9-bd72-af83f35fdc60` | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mizuho-collector<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-sony-bank-collector-poc<br>kogane-st-george-collector<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc |
 
 ## R2 buckets
 
@@ -47,6 +47,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | worker | class | migration tag | storage |
 | --- | --- | --- | --- |
 | kogane-globalpass-collector-poc | GlobalPassCollectorContainer | v1 | sqlite |
+| kogane-observation-pipeline | ScheduleAlarm | alarm-v1 | sqlite |
 | kogane-sbi-shinsei-collector-poc | SbiShinseiCollectorContainer | v1 | sqlite |
 | kogane-sbi-vc-session-poc | SbiVcSessionState | v1 | sqlite |
 | kogane-smbc-direct-backfill-poc | SmbcBackfillSession | v1 | sqlite |
@@ -60,20 +61,6 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 | worker | cron (UTC) | deployed |
 | --- | --- | --- |
-| kogane-globalpass-collector-poc | `17 18 * * *` | yes |
-| kogane-mizuho-collector | `25 21 * * *` | no |
-| kogane-mobile-suica-collector-poc | `10 21 * * *` | yes |
-| kogane-moneyforward-collector-poc | `15 21 * * *` | yes |
-| kogane-myjcb-collector-poc | `0 21 * * *` | yes |
-| kogane-observation-pipeline | `*/5 * * * *` | yes |
-| kogane-sbi-collector-poc | `0 21 * * *` | yes |
-| kogane-sbi-shinsei-collector-poc | `0 21 * * *` | yes |
-| kogane-sbi-vc-session-poc | `*/15 * * * *` | yes |
-| kogane-sbi-vc-session-poc | `5 21 * * *` | yes |
-| kogane-sony-bank-collector-poc | `0 21 * * *` | yes |
-| kogane-st-george-collector | `35 21 * * *` | no |
-| kogane-vpass-collector-poc | `0 21 * * *` | yes |
-| kogane-vpoint-collector-poc | `15 21 * * *` | yes |
 
 ## Executed plan rows that left the table
 
@@ -271,7 +258,7 @@ No wrangler config.
 - Service bindings: PIPELINE → kogane-observation-pipeline
 - Crons: —
 - Assets: `../../apps/web/dist-production` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>HEALTH_PROBE_TOKENS<br>OPERATOR_SUBJECTS<br>OPS_API_ENABLED<br>RELEASE_SHA<br>REWARDS_V2_ENABLED<br>SESSION_REFRESH_POLICY
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>DEPLOYMENT_SCHEDULE_TOKENS<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>HEALTH_PROBE_TOKENS<br>OPERATOR_SUBJECTS<br>OPS_API_ENABLED<br>RELEASE_SHA<br>REWARDS_V2_ENABLED<br>SCHEDULES_ENABLED<br>SESSION_REFRESH_POLICY
 - Required secrets (names only): —
 
 #### `kogane-evidence-browser-test` — `services/app/wrangler.test.jsonc`
@@ -303,8 +290,8 @@ No wrangler config.
 #### `kogane-globalpass-collector-poc` — `services/collector-globalpass/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -314,7 +301,7 @@ No wrangler config.
 - Browser binding: BROWSER
 - VPC networks: MESH → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33<br>CF_EGRESS → cf1:network
 - Service bindings: —
-- Crons: `17 18 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
@@ -329,8 +316,8 @@ No wrangler config.
 #### `kogane-mizuho-collector` — `services/collector-mizuho/wrangler.jsonc`
 
 - Role: not-deployed; exists in the account: no
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -340,7 +327,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: —
 - Service bindings: —
-- Crons: `25 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>MIZUHO_CUSTOMER_NUMBER<br>MIZUHO_LOGIN_PASSWORD
@@ -355,8 +342,8 @@ No wrangler config.
 #### `kogane-mobile-suica-collector-poc` — `services/collector-mobile-suica/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -366,7 +353,7 @@ No wrangler config.
 - Browser binding: BROWSER
 - VPC networks: —
 - Service bindings: —
-- Crons: `10 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>JRE_ID_CREDENTIAL_JSON
@@ -381,8 +368,8 @@ No wrangler config.
 #### `kogane-moneyforward-collector-poc` — `services/collector-moneyforward/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -392,7 +379,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: —
 - Service bindings: —
-- Crons: `15 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
@@ -407,8 +394,8 @@ No wrangler config.
 #### `kogane-myjcb-collector-poc` — `services/collector-myjcb/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -418,7 +405,7 @@ No wrangler config.
 - Browser binding: BROWSER
 - VPC networks: —
 - Service bindings: —
-- Crons: `0 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
@@ -433,8 +420,8 @@ No wrangler config.
 #### `kogane-sbi-collector-poc` — `services/collector-sbi-securities/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -444,7 +431,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: —
 - Service bindings: —
-- Crons: `0 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
@@ -459,8 +446,8 @@ No wrangler config.
 #### `kogane-sbi-shinsei-collector-poc` — `services/collector-sbi-shinsei/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -470,7 +457,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: MESH → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
 - Service bindings: —
-- Crons: `0 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
@@ -485,8 +472,8 @@ No wrangler config.
 #### `kogane-sbi-vc-session-poc` — `services/collector-sbi-vc-trade/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -496,7 +483,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: —
 - Service bindings: —
-- Crons: `*/15 * * * *`<br>`5 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
@@ -537,8 +524,8 @@ No wrangler config.
 #### `kogane-sony-bank-collector-poc` — `services/collector-sony-bank/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -548,7 +535,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: —
 - Service bindings: —
-- Crons: `0 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
@@ -563,8 +550,8 @@ No wrangler config.
 #### `kogane-st-george-collector` — `services/collector-st-george/wrangler.jsonc`
 
 - Role: not-deployed; exists in the account: no
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -574,7 +561,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: TAMIA → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
 - Service bindings: —
-- Crons: `35 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>EGRESS_MODE<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
@@ -589,8 +576,8 @@ No wrangler config.
 #### `kogane-vpass-collector-poc` — `services/collector-vpass/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
+- Entry point: src/schedule-entrypoint.ts
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -600,7 +587,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: —
 - Service bindings: —
-- Crons: `0 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): —
 - Required secrets (names only): —
@@ -615,8 +602,8 @@ No wrangler config.
 #### `kogane-vpoint-collector-poc` — `services/collector-vpoint/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts; has an `email()` handler
-- D1: —
+- Entry point: src/schedule-entrypoint.ts; has an `email()` handler
+- D1: SCHEDULE_DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
 - R2: DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -626,7 +613,7 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: —
 - Service bindings: —
-- Crons: `15 21 * * *`
+- Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_EMAIL_FORWARD_TO<br>VPOINT_EMAIL_RECIPIENT<br>VPOINT_MEMBER_NUMBER
@@ -686,20 +673,20 @@ No wrangler config.
 #### `kogane-observation-pipeline` — `services/processor/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
+- Entry point: src/schedule-entrypoint.ts
 - D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../../packages/storage-d1/migrations/core`)<br>READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a`
 - R2: EVIDENCE → kogane-raw-evidence<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: consume kogane-collection-terminals (dlq kogane-collection-terminals-dlq)
-- Durable Objects: —
-- DO migration tags: —
+- Durable Objects: SCHEDULE_ALARMS → ScheduleAlarm
+- DO migration tags: alarm-v1: ScheduleAlarm
 - Containers: —
 - Browser binding: —
 - VPC networks: —
-- Service bindings: —
-- Crons: `*/5 * * * *`
+- Service bindings: SCHEDULE_GLOBALPASS → kogane-globalpass-collector-poc<br>SCHEDULE_VPASS → kogane-vpass-collector-poc<br>SCHEDULE_MYJCB → kogane-myjcb-collector-poc<br>SCHEDULE_SBI_SECURITIES → kogane-sbi-collector-poc<br>SCHEDULE_SBI_SHINSEI → kogane-sbi-shinsei-collector-poc<br>SCHEDULE_SONY_BANK → kogane-sony-bank-collector-poc<br>SCHEDULE_SBI_VC_TRADE → kogane-sbi-vc-session-poc<br>SCHEDULE_MOBILE_SUICA → kogane-mobile-suica-collector-poc<br>SCHEDULE_MONEYFORWARD → kogane-moneyforward-collector-poc<br>SCHEDULE_VPOINT → kogane-vpoint-collector-poc<br>SCHEDULE_MIZUHO → kogane-mizuho-collector<br>SCHEDULE_ST_GEORGE → kogane-st-george-collector
+- Crons: —
 - Assets: —
-- Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>PURCHASE_RECOGNITION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>RELEASE_SHA<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SHARED_R2_INGEST_ENABLED
+- Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>PURCHASE_RECOGNITION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>RELEASE_SHA<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SCHEDULES_ENABLED<br>SHARED_R2_INGEST_ENABLED
 - Required secrets (names only): —
 
 #### `kogane-observation-ops-local` — `services/processor/wrangler.ops.jsonc`

@@ -1,3 +1,5 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import { type ScheduledResult } from "../../../packages/collection/src/schedule-result";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import {
   AUTH_KEY_SHA256,
@@ -26,7 +28,7 @@ const MOBILE_UA =
   `com.smbc_card.vpass.android_v${APP_VERSION} ` +
   "Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP3A.241105.008; wv) " +
   "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36";
-interface Env {
+export interface Env {
   /** The central bucket; written only when COLLECTION_TARGET is `shared`. */
   DATA: R2Bucket;
   VPASS_ID: string;
@@ -35,6 +37,7 @@ interface Env {
   VPASS_AUTH_PUBLIC_KEY_B64: string;
   VPASS_CONFIG_PUBLIC_KEY_B64: string;
   ADMIN_TRIGGER_TOKEN: string;
+  SCHEDULE_DB?: D1Database;
 }
 type JsonObject = Record<string, unknown>;
 interface RawJsonResponse {
@@ -280,6 +283,7 @@ async function captureCard(
   selectedCardZeroBased: number,
   started: Date,
   runId: string,
+  onPersisted?: (runId: string) => void,
 ): Promise<RunSummary> {
   const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
 
@@ -353,6 +357,7 @@ async function captureCard(
       console.log(JSON.stringify(sharedRunDiagnostic(runId, cardLabel, outcome)));
       // A run whose terminal was not written is not a finished run (G1-01).
       if (!sharedRunPersisted(outcome)) throw new Error("shared_persist_incomplete");
+      onPersisted?.(`${runId}-${cardLabel}`);
       return summary;
     }
   } catch (error) {
@@ -362,7 +367,10 @@ async function captureCard(
       // an empty success (G1-09). A persist failure here is reported as the
       // original failure: the terminal is simply absent.
       if (stage !== "shared-persist") {
-        await persistFailedCard(env, runId, cardLabel, started).catch(() => {});
+        const persisted = await persistFailedCard(env, runId, cardLabel, started).catch(
+          () => false,
+        );
+        if (persisted) onPersisted?.(`${runId}-${cardLabel}`);
       }
       throw error;
     }
@@ -375,7 +383,7 @@ async function persistFailedCard(
   runId: string,
   unitKey: string,
   started: Date,
-): Promise<void> {
+): Promise<boolean> {
   const outcome = await persistFailedRun(sharedBucket(env.DATA), {
     sessionRunId: runId,
     unitKey,
@@ -383,86 +391,96 @@ async function persistFailedCard(
     failedAt: new Date().toISOString(),
   });
   console.log(JSON.stringify(sharedRunDiagnostic(runId, unitKey, outcome)));
+  return sharedRunPersisted(outcome);
 }
 async function collectOneCard(
   env: Env,
   selectedCardZeroBased: number,
   scheduledTime = Date.now(),
 ): Promise<RunSummary> {
-  const started = new Date(scheduledTime);
-  const runId = safeRunId(started);
-  const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
+  return withCollectionLease(env, "vpass", async () => {
+    const started = new Date(scheduledTime);
+    const runId = safeRunId(started);
+    const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
 
-  const diagnostic = createDiagnostics("vpass", runId);
-  let session: VpassSession;
-  try {
-    session = await diagnostic.step("session-open", () => openSession(env));
-  } catch (error) {
-    diagnostic.finish("failed");
-    {
-      await persistFailedCard(env, runId, cardLabel, started).catch(() => {});
-      throw error;
-    }
-  }
-  try {
-    const result = await diagnostic.step("card-collection", () =>
-      captureCard(env, session, selectedCardZeroBased, started, runId),
-    );
-    diagnostic.finish("success");
-    return result;
-  } catch (error) {
-    diagnostic.finish("failed");
-    throw error;
-  }
-}
-async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCardsRunSummary> {
-  const started = new Date(scheduledTime);
-  const runId = safeRunId(started);
-
-  const diagnostic = createDiagnostics("vpass", runId);
-  let session: VpassSession;
-  try {
-    session = await diagnostic.step("session-open", () => openSession(env));
-  } catch (error) {
-    diagnostic.finish("failed");
-    {
-      await persistFailedCard(env, runId, "run", started).catch(() => {});
-      throw error;
-    }
-  }
-  const summaries: RunSummary[] = [];
-  const failures: number[] = [];
-  for (let index = 0; index < session.cards.length; index += 1) {
+    const diagnostic = createDiagnostics("vpass", runId);
+    let session: VpassSession;
     try {
-      summaries.push(
-        await diagnostic.step("card-collection", () =>
-          captureCard(env, session, index, started, runId),
-        ),
-      );
-    } catch {
-      failures.push(index + 1);
+      session = await diagnostic.step("session-open", () => openSession(env));
+    } catch (error) {
+      diagnostic.finish("failed");
+      {
+        await persistFailedCard(env, runId, cardLabel, started).catch(() => {});
+        throw error;
+      }
     }
-  }
-  const summary: AllCardsRunSummary = {
-    runId,
-    startedAt: started.toISOString(),
-    completedAt: new Date().toISOString(),
-    cardCount: session.cards.length,
-    successCount: summaries.length,
-    failureCount: failures.length,
-    monthCount: summaries.reduce((total, item) => total + item.monthCount, 0),
-    pageCount: summaries.reduce((total, item) => total + item.pageCount, 0),
-    transactionCount: summaries.reduce((total, item) => total + item.transactionCount, 0),
-    objectCount: summaries.reduce((total, item) => total + item.objectCount, 0) + failures.length,
-  };
-  console.log(JSON.stringify({ event: "vpass-daily-collection-complete", ...summary }));
-  diagnostic.finish(
-    failures.length === 0 ? "success" : summaries.length === 0 ? "failed" : "partial",
-  );
-  if (failures.length > 0) {
-    throw new Error(`${failures.length} of ${session.cards.length} card collections failed`);
-  }
-  return summary;
+    try {
+      const result = await diagnostic.step("card-collection", () =>
+        captureCard(env, session, selectedCardZeroBased, started, runId),
+      );
+      diagnostic.finish("success");
+      return result;
+    } catch (error) {
+      diagnostic.finish("failed");
+      throw error;
+    }
+  });
+}
+async function collectAllCards(
+  env: Env,
+  scheduledTime: number,
+  onPersisted?: (runId: string) => void,
+): Promise<AllCardsRunSummary> {
+  return withCollectionLease(env, "vpass", async () => {
+    const started = new Date(scheduledTime);
+    const runId = safeRunId(started);
+
+    const diagnostic = createDiagnostics("vpass", runId);
+    let session: VpassSession;
+    try {
+      session = await diagnostic.step("session-open", () => openSession(env));
+    } catch (error) {
+      diagnostic.finish("failed");
+      {
+        const persisted = await persistFailedCard(env, runId, "run", started).catch(() => false);
+        if (persisted) onPersisted?.(`${runId}-run`);
+        throw error;
+      }
+    }
+    const summaries: RunSummary[] = [];
+    const failures: number[] = [];
+    for (let index = 0; index < session.cards.length; index += 1) {
+      try {
+        summaries.push(
+          await diagnostic.step("card-collection", () =>
+            captureCard(env, session, index, started, runId, onPersisted),
+          ),
+        );
+      } catch {
+        failures.push(index + 1);
+      }
+    }
+    const summary: AllCardsRunSummary = {
+      runId,
+      startedAt: started.toISOString(),
+      completedAt: new Date().toISOString(),
+      cardCount: session.cards.length,
+      successCount: summaries.length,
+      failureCount: failures.length,
+      monthCount: summaries.reduce((total, item) => total + item.monthCount, 0),
+      pageCount: summaries.reduce((total, item) => total + item.pageCount, 0),
+      transactionCount: summaries.reduce((total, item) => total + item.transactionCount, 0),
+      objectCount: summaries.reduce((total, item) => total + item.objectCount, 0) + failures.length,
+    };
+    console.log(JSON.stringify({ event: "vpass-daily-collection-complete", ...summary }));
+    diagnostic.finish(
+      failures.length === 0 ? "success" : summaries.length === 0 ? "failed" : "partial",
+    );
+    if (failures.length > 0) {
+      throw new Error(`${failures.length} of ${session.cards.length} card collections failed`);
+    }
+    return summary;
+  });
 }
 export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
@@ -509,4 +527,19 @@ async function authorized(request: Request, configured: string | undefined): Pro
     difference |= expected[index]! ^ actual[index]!;
   }
   return difference === 0;
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  scheduledTime: number,
+): Promise<ScheduledResult> {
+  const runIds: string[] = [];
+  try {
+    await collectAllCards(env, scheduledTime, (runId) => runIds.push(runId));
+    return { status: "completed", runIds, failureCode: null };
+  } catch {
+    return { status: "failed", runIds, failureCode: "collection_failed" };
+  }
 }

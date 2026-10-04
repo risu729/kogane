@@ -2,14 +2,15 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "kogane-observation-pipeline",
   "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
-  "main": "src/worker.ts",
+  "main": "src/schedule-entrypoint.ts",
   "compatibility_date": "2026-09-07",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "enable_ctx_exports"],
   "workers_dev": false,
   "preview_urls": false,
   "observability": { "enabled": true, "head_sampling_rate": 1 },
-  "triggers": { "crons": ["*/5 * * * *"] },
+  "triggers": { "crons": [] },
   "vars": {
+    "SCHEDULES_ENABLED": "true",
     "RECONCILIATION_ENABLED": "true",
     // Card purchase recognition (docs/economic-events.md): adopted Vpass and
     // MyJCB usage rows become purchase/refund events with rule decisions.
@@ -88,5 +89,69 @@
   "r2_buckets": [
     { "binding": "EVIDENCE", "bucket_name": "kogane-raw-evidence" },
     { "binding": "DATA", "bucket_name": "kogane-raw-evidence" }
-  ]
+  ],
+  "services": [
+    {
+      "binding": "SCHEDULE_GLOBALPASS",
+      "service": "kogane-globalpass-collector-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_VPASS",
+      "service": "kogane-vpass-collector-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_MYJCB",
+      "service": "kogane-myjcb-collector-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_SBI_SECURITIES",
+      "service": "kogane-sbi-collector-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_SBI_SHINSEI",
+      "service": "kogane-sbi-shinsei-collector-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_SONY_BANK",
+      "service": "kogane-sony-bank-collector-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_SBI_VC_TRADE",
+      "service": "kogane-sbi-vc-session-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_MOBILE_SUICA",
+      "service": "kogane-mobile-suica-collector-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_MONEYFORWARD",
+      "service": "kogane-moneyforward-collector-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_VPOINT",
+      "service": "kogane-vpoint-collector-poc",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_MIZUHO",
+      "service": "kogane-mizuho-collector",
+      "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_ST_GEORGE",
+      "service": "kogane-st-george-collector",
+      "entrypoint": "ScheduledCollection"
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "SCHEDULE_ALARMS", "class_name": "ScheduleAlarm" }] },
+  "migrations": [{ "tag": "alarm-v1", "new_sqlite_classes": ["ScheduleAlarm"] }]
 }

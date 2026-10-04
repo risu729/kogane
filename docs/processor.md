@@ -25,10 +25,10 @@ is still unregistered.
 
 ## 2. Two ways in, one use case
 
-| Path                        | Trigger                                                              | Boundedness                                                                                                      |
-| --------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Queue consumer              | R2 event notification on the DATA bucket, `runs/` + `/terminal.json` | one batch of at most 10 messages, all sharing one registration budget of 500 operations (§3.3)                   |
-| `collection_scan` cron lane | every 5 minutes                                                      | up to 5 staged registrations continued first, then one R2 list page (25 keys) and at most 5 registrations (§3.3) |
+| Path                         | Trigger                                                              | Boundedness                                                                                                      |
+| ---------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Queue consumer               | R2 event notification on the DATA bucket, `runs/` + `/terminal.json` | one batch of at most 10 messages, all sharing one registration budget of 500 operations (§3.3)                   |
+| `collection_scan` alarm lane | every 5 minutes                                                      | up to 5 staged registrations continued first, then one R2 list page (25 keys) and at most 5 registrations (§3.3) |
 
 Both call `registerTerminal(source, runId)`
 (`packages/application/src/collection/register-terminal.ts`). The queue only
@@ -632,7 +632,7 @@ or provider wording can be stored. A tick killed mid-lane (a Worker limit)
 leaves no row for that lane, and the gap is the signal.
 
 The table is bounded: each insert deletes that lane's rows beyond the latest
-288 (one day of the five-minute cron) in the same batch. Rows are never
+288 (one day of the five-minute alarm) in the same batch. Rows are never
 updated. It is `operational-mutable` in the CORE ledger and outside the
 source-revision ledger, so recording a tick never makes a projection stale. A
 row that cannot be written is logged as
@@ -723,7 +723,7 @@ as a stage rather than blocking the run.
 
 ## 11. Deploy order and rollback
 
-GitHub Actions applies CORE then READ migrations and deploys consumers before
+GitHub Actions applies CORE then READ migrations. ADR 0039 deploys named collector RPC entrypoints before the Processor and App, replacing the former order of consumers before
 collectors. The current collection Queue, notification rule and 13 registration
 routes are configured. Deploying a Worker does not invoke a collector.
 
@@ -805,3 +805,6 @@ not turn the answer into a 503, and before migration 0049 the list is empty.
   `ops_request_stages` is unwritten; the projection publisher completes it.
 - **U15** completed the legacy resource and source retirement; historical
   originals remain recoverable through the central archive mapping.
+
+Scheduling is managed by [alarm schedules](schedules.md), with the private
+`ScheduledPipeline` loopback preserving the existing tick implementation.

@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { timingSafeEqual } from "node:crypto";
 import { atStage, emitDiagnostic, failure } from "./diagnostics";
 import { persistSharedRun, sharedBucket, sharedRunDiagnostic } from "./shared-collection";
@@ -73,64 +78,67 @@ async function runSharedCollection(
     to: string;
   },
 ): Promise<SharedResult> {
-  const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
-  const failures: CollectionFailure[] = [];
-  let artifacts: readonly RawArtifact[] = [];
-  let transactionCount = 0;
-  try {
-    const credential = await atStage("credential", async () =>
-      parseCredential(requiredSecret(env.SONY_BANK_CREDENTIAL_JSON, "SONY_BANK_CREDENTIAL_JSON")),
+  return withCollectionLease(env, "sony-bank", async () => {
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
+    const failures: CollectionFailure[] = [];
+    let artifacts: readonly RawArtifact[] = [];
+    let transactionCount = 0;
+    try {
+      const credential = await atStage("credential", async () =>
+        parseCredential(requiredSecret(env.SONY_BANK_CREDENTIAL_JSON, "SONY_BANK_CREDENTIAL_JSON")),
+      );
+      const collection = await collectSonyBank({
+        credential,
+        from: window.from,
+        to: window.to,
+        runId,
+      });
+      transactionCount = collection.transactionCount;
+      artifacts = collection.artifacts;
+    } catch (error) {
+      failures.push(failure("collect", error));
+    }
+    for (const entry of failures) {
+      emitDiagnostic("error", {
+        event: "sony-bank-collection-failure",
+        runId,
+        phase: "collection",
+        ...entry,
+      });
+    }
+    const completedAt = new Date().toISOString();
+    const status =
+      failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+    const input = {
+      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+      runId,
+      startedAt,
+      completedAt,
+      status,
+      window,
+      transactionCount,
+      artifacts,
+      failures,
+    } as const;
+    const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
+    emitDiagnostic(
+      outcome.result.outcome === "persisted" || outcome.result.outcome === "already_persisted"
+        ? "log"
+        : "error",
+      sharedRunDiagnostic(input, outcome),
     );
-    const collection = await collectSonyBank({
-      credential,
-      from: window.from,
-      to: window.to,
+    return {
       runId,
-    });
-    transactionCount = collection.transactionCount;
-    artifacts = collection.artifacts;
-  } catch (error) {
-    failures.push(failure("collect", error));
-  }
-  for (const entry of failures) {
-    emitDiagnostic("error", {
-      event: "sony-bank-collection-failure",
-      runId,
-      phase: "collection",
-      ...entry,
-    });
-  }
-  const completedAt = new Date().toISOString();
-  const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
-  const input = {
-    schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-    runId,
-    startedAt,
-    completedAt,
-    status,
-    window,
-    transactionCount,
-    artifacts,
-    failures,
-  } as const;
-  const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
-  emitDiagnostic(
-    outcome.result.outcome === "persisted" || outcome.result.outcome === "already_persisted"
-      ? "log"
-      : "error",
-    sharedRunDiagnostic(input, outcome),
-  );
-  return {
-    runId,
-    status,
-    window,
-    transactionCount,
-    artifactCount: outcome.artifactCount,
-    failureCount: failures.length,
-    persistence: outcome.result.outcome,
-    terminalKey: outcome.result.terminalKey,
-  };
+      status,
+      window,
+      transactionCount,
+      artifactCount: outcome.artifactCount,
+      failureCount: failures.length,
+      persistence: outcome.result.outcome,
+      terminalKey: outcome.result.terminalKey,
+    };
+  });
 }
 function parseWindow(
   from: string | null,
@@ -184,4 +192,18 @@ function publicError(error: unknown): string {
     .replace(/Bearer\s+[^\s,;]+/giu, "Bearer [redacted]")
     .replace(/(password|loginPwd|cookie|csrf|token)=?[^\s,;]+/giu, "$1=[redacted]")
     .slice(0, 300);
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    const window = defaultWindow(new Date());
+    return scheduledResult(await runSharedCollection(env, window));
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
 }

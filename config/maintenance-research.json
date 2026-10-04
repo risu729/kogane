@@ -1,0 +1,289 @@
+{
+  "verifiedAt": "2026-10-04T14:40:00.000Z",
+  "references": [
+    {
+      "source": "prestia-globalpass",
+      "status": "confirmed",
+      "referenceUrl": "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006"
+    },
+    {
+      "source": "vpass",
+      "status": "confirmed",
+      "referenceUrl": "https://www.smbc-card.com/mem/index.jsp"
+    },
+    {
+      "source": "myjcb",
+      "status": "confirmed",
+      "referenceUrl": "https://www.jcb.co.jp/jcb_mente/mente_service.html"
+    },
+    {
+      "source": "sbi-securities",
+      "status": "confirmed",
+      "referenceUrl": "https://search.sbisec.co.jp/v2/popwin/info/home/pop6040_maintenance.html"
+    },
+    {
+      "source": "sbi-shinsei",
+      "status": "no-applicable-rule",
+      "referenceUrl": "https://www.sbishinseibank.co.jp/news/news22.html"
+    },
+    {
+      "source": "sony-bank",
+      "status": "confirmed",
+      "referenceUrl": "https://sonybank.jp/guide/hours.html"
+    },
+    {
+      "source": "sbi-vc-trade",
+      "status": "confirmed",
+      "referenceUrl": "https://www.sbivc.co.jp/assets/docs/manual_tt.pdf"
+    },
+    {
+      "source": "mobile-suica",
+      "status": "confirmed",
+      "referenceUrl": "https://www.jreast.co.jp/mobilesuica/use/sf/chk_account.html"
+    },
+    {
+      "source": "moneyforward-me",
+      "status": "not-found",
+      "referenceUrl": "https://support.me.moneyforward.com/hc/ja"
+    },
+    {
+      "source": "vpoint",
+      "status": "not-found",
+      "referenceUrl": "https://t-point.tsite.jp/get/service/vrank/"
+    },
+    {
+      "source": "st-george",
+      "status": "not-found",
+      "referenceUrl": "https://www.stgeorge.com.au/online-services/internet-banking"
+    },
+    {
+      "source": "mizuho-bank",
+      "status": "confirmed",
+      "referenceUrl": "https://www.mizuhobank.co.jp/direct/time.html"
+    },
+    {
+      "source": "smbc-direct",
+      "status": "confirmed",
+      "referenceUrl": "https://www.smbc.co.jp/kojin/direct/jikan/"
+    },
+    {
+      "source": "vpoint-pay",
+      "status": "not-found",
+      "referenceUrl": "https://www.smbc-card.com/prepaid/vpoint/index.jsp"
+    }
+  ],
+  "rules": [
+    {
+      "id": "globalpass-members",
+      "source": "prestia-globalpass",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "monthly",
+        "weekday": 6,
+        "nth": 3,
+        "offsetDays": 1,
+        "start": "01:00",
+        "end": "05:00"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "GLOBAL PASS会員サイト。第3土曜日の翌日。"
+    },
+    {
+      "id": "vpass-weekly",
+      "source": "vpass",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "weekly",
+        "weekdays": [1],
+        "start": "00:00",
+        "end": "08:00"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://www.smbc-card.com/mem/index.jsp",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "一部サービス停止。明細取得への影響を避けるため収集全体を延期。"
+    },
+    {
+      "id": "sony-login",
+      "source": "sony-bank",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "monthly",
+        "weekday": 1,
+        "nth": 2,
+        "offsetDays": 0,
+        "start": "00:00",
+        "end": "05:00"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://sonybank.jp/guide/hours.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "ログイン停止。第2月曜日。"
+    },
+    {
+      "id": "sony-wallet",
+      "source": "sony-bank",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "monthly",
+        "weekday": 6,
+        "nth": 3,
+        "offsetDays": 1,
+        "start": "01:00",
+        "end": "05:00"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://sonybank.jp/guide/hours.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "デビット明細。第3土曜日の翌日。"
+    },
+    {
+      "id": "mizuho-weekly",
+      "source": "mizuho-bank",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "weekly",
+        "weekdays": [6],
+        "start": "22:00",
+        "end": "08:00"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://www.mizuhobank.co.jp/direct/time.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "みずほダイレクトの停止時間。"
+    },
+    {
+      "id": "suica-night",
+      "source": "mobile-suica",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "weekly",
+        "weekdays": [0, 1, 2, 3, 4, 5, 6],
+        "start": "00:50",
+        "end": "05:00"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://www.jreast.co.jp/mobilesuica/use/sf/chk_account.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "PC会員サイトの利用可能時間外。"
+    },
+    {
+      "id": "sbi-weekly",
+      "source": "sbi-securities",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "weekly",
+        "weekdays": [0],
+        "start": "13:00",
+        "end": "18:00"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://search.sbisec.co.jp/v2/popwin/info/home/pop6040_maintenance.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "全チャネルで一時的エラーの可能性がある案内時間。"
+    },
+    {
+      "id": "sbi-20261010",
+      "source": "sbi-securities",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "once",
+        "to": "2026-10-11T21:00:00.000Z",
+        "from": "2026-10-09T21:00:00.000Z"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://search.sbisec.co.jp/v2/popwin/info/home/pop6040_maintenance.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "ログイン後の全サービス停止。"
+    },
+    {
+      "id": "myjcb-payment-20261015",
+      "source": "myjcb",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "once",
+        "to": "2026-10-16T00:00:00.000Z",
+        "from": "2026-10-15T10:50:00.000Z"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://www.jcb.co.jp/jcb_mente/mente_service.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "お支払い状況照会。"
+    },
+    {
+      "id": "myjcb-points-20261006",
+      "source": "myjcb",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "once",
+        "to": "2026-10-06T23:10:00.000Z",
+        "from": "2026-10-06T14:50:00.000Z"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://www.jcb.co.jp/jcb_mente/mente_service.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "ポイント照会・履歴。"
+    },
+    {
+      "id": "myjcb-points-20261020",
+      "source": "myjcb",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "once",
+        "to": "2026-10-21T04:00:00.000Z",
+        "from": "2026-10-20T14:50:00.000Z"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://www.jcb.co.jp/jcb_mente/mente_service.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "ポイント照会・履歴。"
+    },
+    {
+      "id": "sbi-vc-weekly",
+      "source": "sbi-vc-trade",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "weekly",
+        "weekdays": [3],
+        "start": "12:00",
+        "end": "13:00"
+      },
+      "scope": "session",
+      "referenceUrl": "https://www.sbivc.co.jp/assets/docs/manual_tt.pdf",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "取引システムの定例停止。セッション維持と収集を保守的に延期。"
+    },
+    {
+      "id": "smbc-weekly",
+      "source": "smbc-direct",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "weekly",
+        "weekdays": [0],
+        "start": "21:00",
+        "end": "07:00"
+      },
+      "scope": "feature-only",
+      "referenceUrl": "https://www.smbc.co.jp/kojin/direct/jikan/",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "一部の照会は可能。自動収集は未対応のため有効化しない。"
+    },
+    {
+      "id": "sbi-account-daily",
+      "source": "sbi-securities",
+      "timezone": "Asia/Tokyo",
+      "pattern": {
+        "kind": "weekly",
+        "weekdays": [0, 1, 2, 3, 4, 5, 6],
+        "start": "19:00",
+        "end": "19:30"
+      },
+      "scope": "collection",
+      "referenceUrl": "https://search.sbisec.co.jp/v2/popwin/info/home/pop6040_maintenance.html",
+      "verifiedAt": "2026-10-04T14:40:00.000Z",
+      "note": "PC口座管理の全サービス。毎日19:00〜19:30。"
+    }
+  ]
+}

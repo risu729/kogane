@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { timingSafeEqual } from "node:crypto";
 import type { PersistRunResult } from "../../../packages/collection/src/index";
 import { logEvent, logFailure, logStage, type CollectionStage } from "./diagnostics";
@@ -177,92 +182,94 @@ async function runCollection(
     acquisitionSessionRef?: string;
   },
 ): Promise<CollectionOutcome> {
-  const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
+  return withCollectionLease(env, "vpoint", async () => {
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
 
-  const artifacts: StoredArtifact[] = [];
-  const collected: RawArtifact[] = [];
-  const failures: CollectionFailure[] = [];
-  let historyTotal = 0;
-  let historyPageCount = 0;
-  let vMoneyHistoryTotal = 0;
-  let vMoneyHistoryPageCount = 0;
-  const session = sessionStub(env);
-  let stage: CollectionStage = "session-load";
-  const onStage = (next: CollectionStage) => {
-    stage = next;
-    logStage(runId, stage);
-  };
-  onStage(stage);
-  if (acquisition?.parentRunId) {
-    logEvent({
-      event: "vpoint-post-auth-collection",
-      runId,
-      parentRunId: acquisition.parentRunId,
-    });
-  }
-  try {
-    const sessionCookie = await session.getSession();
-    if (!sessionCookie) {
-      onStage("email-challenge-request");
-      await session.ensureEmailChallenge(runId);
-      throw new VPointReauthenticationPendingError();
+    const artifacts: StoredArtifact[] = [];
+    const collected: RawArtifact[] = [];
+    const failures: CollectionFailure[] = [];
+    let historyTotal = 0;
+    let historyPageCount = 0;
+    let vMoneyHistoryTotal = 0;
+    let vMoneyHistoryPageCount = 0;
+    const session = sessionStub(env);
+    let stage: CollectionStage = "session-load";
+    const onStage = (next: CollectionStage) => {
+      stage = next;
+      logStage(runId, stage);
+    };
+    onStage(stage);
+    if (acquisition?.parentRunId) {
+      logEvent({
+        event: "vpoint-post-auth-collection",
+        runId,
+        parentRunId: acquisition.parentRunId,
+      });
     }
-    const collection = await collectVPoint({
-      sessionCookie,
-      onStage,
-    });
-    historyTotal = collection.historyTotal;
-    historyPageCount = collection.historyPageCount;
-    vMoneyHistoryTotal = collection.vMoneyHistoryTotal;
-    vMoneyHistoryPageCount = collection.vMoneyHistoryPageCount;
-    onStage("artifact-store");
-    {
-      // The shared target stores every artifact in one terminal-last run, so
-      // there is nothing to write here; `persistRun` does the writing below.
-      collected.push(...collection.artifacts);
-    }
-  } catch (error) {
-    failures.push(failure("collect", error, runId, stage));
-    if (error instanceof VPointSessionExpiredError) {
-      try {
-        onStage("session-invalidate");
-        await session.invalidateSession();
+    try {
+      const sessionCookie = await session.getSession();
+      if (!sessionCookie) {
         onStage("email-challenge-request");
         await session.ensureEmailChallenge(runId);
-      } catch (authError) {
-        failures.push(failure("reauthenticate", authError, runId, stage));
+        throw new VPointReauthenticationPendingError();
+      }
+      const collection = await collectVPoint({
+        sessionCookie,
+        onStage,
+      });
+      historyTotal = collection.historyTotal;
+      historyPageCount = collection.historyPageCount;
+      vMoneyHistoryTotal = collection.vMoneyHistoryTotal;
+      vMoneyHistoryPageCount = collection.vMoneyHistoryPageCount;
+      onStage("artifact-store");
+      {
+        // The shared target stores every artifact in one terminal-last run, so
+        // there is nothing to write here; `persistRun` does the writing below.
+        collected.push(...collection.artifacts);
+      }
+    } catch (error) {
+      failures.push(failure("collect", error, runId, stage));
+      if (error instanceof VPointSessionExpiredError) {
+        try {
+          onStage("session-invalidate");
+          await session.invalidateSession();
+          onStage("email-challenge-request");
+          await session.ensureEmailChallenge(runId);
+        } catch (authError) {
+          failures.push(failure("reauthenticate", authError, runId, stage));
+        }
       }
     }
-  }
-  const completedAt = new Date().toISOString();
-  const storedCount = collected.length;
-  const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
-  const manifest: CollectionManifest = {
-    schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-    source: "v-point",
-    runId,
-    startedAt,
-    completedAt,
-    status,
-    historyTotal,
-    historyPageCount,
-    vMoneyHistoryTotal,
-    vMoneyHistoryPageCount,
-    artifacts,
-    failures,
-  };
-  {
-    return await persistSharedRun({
-      env,
-      manifest,
-      collected,
-      onStage,
-      ...(acquisition?.acquisitionSessionRef === undefined
-        ? {}
-        : { acquisitionSessionRef: acquisition.acquisitionSessionRef }),
-    });
-  }
+    const completedAt = new Date().toISOString();
+    const storedCount = collected.length;
+    const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
+    const manifest: CollectionManifest = {
+      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+      source: "v-point",
+      runId,
+      startedAt,
+      completedAt,
+      status,
+      historyTotal,
+      historyPageCount,
+      vMoneyHistoryTotal,
+      vMoneyHistoryPageCount,
+      artifacts,
+      failures,
+    };
+    {
+      return await persistSharedRun({
+        env,
+        manifest,
+        collected,
+        onStage,
+        ...(acquisition?.acquisitionSessionRef === undefined
+          ? {}
+          : { acquisitionSessionRef: acquisition.acquisitionSessionRef }),
+      });
+    }
+  });
 }
 /**
  * Writes the run into the shared DATA bucket: every artifact first, the
@@ -403,5 +410,19 @@ class VPointReauthenticationPendingError extends Error {
   constructor() {
     super("V Point email reauthentication is pending");
     this.name = "VPointReauthenticationPendingError";
+  }
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    const outcome = await runCollection(env);
+    return scheduledResult(outcome);
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
   }
 }

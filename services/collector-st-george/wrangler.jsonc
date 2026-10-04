@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "kogane-st-george-collector",
-  "main": "src/worker.ts",
+  "main": "src/schedule-entrypoint.ts",
   "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
   "compatibility_date": "2026-09-07",
   "compatibility_flags": ["nodejs_compat"],
@@ -64,6 +64,13 @@
   ],
   "triggers": {
     // Daily at 06:35 JST (21:35 UTC), after the Mizuho scheduled trigger.
-    "crons": ["35 21 * * *"]
-  }
+    "crons": []
+  },
+  "d1_databases": [
+    {
+      "binding": "SCHEDULE_DB",
+      "database_name": "kogane-raw-evidence",
+      "database_id": "b335a887-250d-45c9-bd72-af83f35fdc60"
+    }
+  ]
 }

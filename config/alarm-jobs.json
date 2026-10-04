@@ -1,0 +1,256 @@
+[
+  {
+    "id": "prestia-globalpass",
+    "source": "prestia-globalpass",
+    "workspace": "collector-globalpass",
+    "worker": "kogane-globalpass-collector-poc",
+    "cron": "17 18 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "03:17",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "vpass",
+    "source": "vpass",
+    "workspace": "collector-vpass",
+    "worker": "kogane-vpass-collector-poc",
+    "cron": "0 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:00",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "myjcb",
+    "source": "myjcb",
+    "workspace": "collector-myjcb",
+    "worker": "kogane-myjcb-collector-poc",
+    "cron": "0 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:00",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "sbi-securities",
+    "source": "sbi-securities",
+    "workspace": "collector-sbi-securities",
+    "worker": "kogane-sbi-collector-poc",
+    "cron": "0 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:00",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "sbi-shinsei",
+    "source": "sbi-shinsei",
+    "workspace": "collector-sbi-shinsei",
+    "worker": "kogane-sbi-shinsei-collector-poc",
+    "cron": "0 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:00",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "sony-bank",
+    "source": "sony-bank",
+    "workspace": "collector-sony-bank",
+    "worker": "kogane-sony-bank-collector-poc",
+    "cron": "0 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:00",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "sbi-vc-trade",
+    "source": "sbi-vc-trade",
+    "workspace": "collector-sbi-vc-trade",
+    "worker": "kogane-sbi-vc-session-poc",
+    "cron": "5 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:05",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "mobile-suica",
+    "source": "mobile-suica",
+    "workspace": "collector-mobile-suica",
+    "worker": "kogane-mobile-suica-collector-poc",
+    "cron": "10 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:10",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "moneyforward-me",
+    "source": "moneyforward-me",
+    "workspace": "collector-moneyforward",
+    "worker": "kogane-moneyforward-collector-poc",
+    "cron": "15 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:15",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "vpoint",
+    "source": "vpoint",
+    "workspace": "collector-vpoint",
+    "worker": "kogane-vpoint-collector-poc",
+    "cron": "15 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:15",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "mizuho-bank",
+    "source": "mizuho-bank",
+    "workspace": "collector-mizuho",
+    "worker": "kogane-mizuho-collector",
+    "cron": "25 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:25",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "st-george",
+    "source": "st-george",
+    "workspace": "collector-st-george",
+    "worker": "kogane-st-george-collector",
+    "cron": "35 21 * * *",
+    "kind": "collection",
+    "enabled": true,
+    "supported": true,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:35",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "sbi-vc-keepalive",
+    "source": "sbi-vc-trade",
+    "workspace": "collector-sbi-vc-trade",
+    "worker": "kogane-sbi-vc-session-poc",
+    "cron": "*/15 * * * *",
+    "kind": "keepalive",
+    "enabled": true,
+    "supported": true,
+    "timezone": "UTC",
+    "pattern": {
+      "kind": "interval",
+      "minutes": 15
+    }
+  },
+  {
+    "id": "processor-tick",
+    "source": null,
+    "workspace": "processor",
+    "worker": "kogane-observation-pipeline",
+    "cron": "*/5 * * * *",
+    "kind": "processor",
+    "enabled": true,
+    "supported": true,
+    "timezone": "UTC",
+    "pattern": {
+      "kind": "interval",
+      "minutes": 5
+    }
+  },
+  {
+    "id": "smbc-direct",
+    "source": "smbc-direct",
+    "workspace": null,
+    "worker": null,
+    "cron": null,
+    "kind": "manual",
+    "enabled": false,
+    "supported": false,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:00",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  },
+  {
+    "id": "vpoint-pay",
+    "source": "vpoint-pay",
+    "workspace": null,
+    "worker": null,
+    "cron": null,
+    "kind": "email",
+    "enabled": false,
+    "supported": false,
+    "timezone": "Asia/Tokyo",
+    "pattern": {
+      "kind": "daily",
+      "time": "06:00",
+      "weekdays": [0, 1, 2, 3, 4, 5, 6]
+    }
+  }
+]

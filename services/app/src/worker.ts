@@ -1,3 +1,4 @@
+import { schedulesApi, scheduleBootstrapApi } from "./schedules-api";
 import {
   EVIDENCE_API_VERSION,
   type EvidenceMeta,
@@ -46,13 +47,17 @@ function classify(path: string): string {
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // The release postcheck's route (unified plan 11 §6, docs/ci-cd.md), before
-  // every subject-based path because it is the only route an Access *service
+  // every subject-based path because health and future alarm bootstrap are the only routes an Access *service
   // token* may reach — a service token has no subject, so `authenticate`
   // refuses it. Read-only, and outside `OPS_API_ENABLED`: a postcheck that
   // needs an unrelated flag on is not a postcheck.
   const healthResponse = await healthApi(request, env, url);
   if (healthResponse) return healthResponse;
+  const bootstrapResponse = await scheduleBootstrapApi(request, env, url);
+  if (bootstrapResponse) return bootstrapResponse;
   const subject = await authenticate(request, env);
+  const schedulesResponse = await schedulesApi(request, env, url, subject);
+  if (schedulesResponse) return schedulesResponse;
   // The only non-GET boundary of this Worker: three explicit allow-lists of
   // authenticated POST paths, each checking its own grant — the agent API
   // (docs/agent-api.md), the change lifecycle (A09) and the operations API

@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "kogane-vpass-collector-poc",
-  "main": "src/worker.ts",
+  "main": "src/schedule-entrypoint.ts",
   "compatibility_date": "2026-08-25",
   "compatibility_flags": ["nodejs_compat"],
   "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
@@ -23,6 +23,13 @@
   ],
   "vars": {},
   "triggers": {
-    "crons": ["0 21 * * *"]
-  }
+    "crons": []
+  },
+  "d1_databases": [
+    {
+      "binding": "SCHEDULE_DB",
+      "database_name": "kogane-raw-evidence",
+      "database_id": "b335a887-250d-45c9-bd72-af83f35fdc60"
+    }
+  ]
 }

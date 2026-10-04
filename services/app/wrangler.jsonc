@@ -8,6 +8,8 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
+    "SCHEDULES_ENABLED": "true",
+    "DEPLOYMENT_SCHEDULE_TOKENS": "[\"32f6a8d0612c6a657eb74dc066cefbcf.access\"]",
     "BALANCE_PROJECTION_ENABLED": "1",
     // U11: with this off the v2 balance routes read the CORE projection of
     // migration 0030; with it on they read the READ database below, and a

@@ -118,6 +118,19 @@ jobs:
               exit 1
               ;;
           esac
+      - name: Confirm the target supports alarm scheduling
+        # Trusted workflow gate before target code or any production write.
+        # Pre-alarm rollback targets cannot retain the new Durable Object class.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          for path in config/alarm-jobs.json services/processor/src/schedule-entrypoint.ts tasks/_lib/ci/alarm-bootstrap.mjs packages/storage-d1/migrations/core/0065_alarm_schedules.sql; do
+            if ! gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${SHA}" --silent; then
+              echo "The target predates the alarm architecture; no production change was made." >&2
+              exit 1
+            fi
+          done
       - name: Checkout the exact commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -415,39 +428,9 @@ jobs:
             release_tool=(mise run --no-deps automation:release-manifest)
           fi
           "${release_tool[@]}" verify --manifest "${RUNNER_TEMP}/release-manifest.json"
-      - name: Deploy the Processor
-        id: deploy-processor
-        # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
-        # from the job's `steps` context to record, per Worker, what happened.
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor')
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
-        with:
-          mode: production
-          working-directory: services/processor
-          config: wrangler.jsonc
-          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      - name: Deploy the App
-        id: deploy-app
-        # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
-        # from the job's `steps` context to record, per Worker, what happened.
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app')
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
-        with:
-          mode: production
-          working-directory: services/app
-          config: wrangler.jsonc
-          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      # The collectors, in the ledger's order, after every consumer of the
-      # shared contract (unified plan 11 §4). Uploading a collector replaces
-      # its script and nothing else: its crons stay as its configuration
-      # declares them, no Durable Object alarm is set at startup and no
-      # `scheduled` event is triggered by a deploy, so a release never starts a
-      # collection, a re-authentication or a backfill (docs/ci-cd.md, G5-14).
-      # Two of them build a container image, so the runner needs Docker — the
-      # same requirement `mise run dry-run` already has. Native branch rules
-      # govern reviews of collector changes; the upload itself is automatic.
+      # ADR 0039: the named RPC entrypoints must exist before the Processor
+      # binds them. The acquisition/terminal protocol is unchanged. Uploads
+      # execute no collection; future alarms are activated after all postchecks.
       - name: Deploy the GlobalPass collector
         id: deploy-globalpass-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker')
@@ -588,6 +571,30 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Processor
+        id: deploy-processor
+        # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
+        # from the job's `steps` context to record, per Worker, what happened.
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/processor
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the App
+        id: deploy-app
+        # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
+        # from the job's `steps` context to record, per Worker, what happened.
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/app
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Postcheck the public health routes
         # The Workers this run deployed whose health route needs no
         # authentication: every collector with a
@@ -699,6 +706,16 @@ jobs:
             echo "${worker}${path}: 200 (release ${SHA}, CORE through ${expected})"
             jq -r '"processor: \(.processor.releaseSha // "absent"), read required=\(.read.required), marker=\(.data.markerPresent)"' "${body}"
           } | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: Reconcile future schedule alarms
+        # Explicit deployment-only authority; no settings write or immediate
+        # collection. First activation waits beyond Cron propagation.
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: mise run --no-deps automation:alarm-bootstrap
       - name: Record what this run deployed
         id: progress
         # The deployment payload was fixed when the deployment was opened, so it

@@ -1,3 +1,4 @@
+import { SchedulesPage } from "./pages/Schedules";
 // Read-only navigation. Connection metadata describes the API, not freshness
 // of financial observations or whether a collector is currently running.
 
@@ -55,6 +56,7 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
   },
   { to: "/identities", label: "口座・銘柄", icon: NAV_ICONS.identities, feature: "identities" },
   { to: "/rewards", label: "ポイント・前払式残高", icon: NAV_ICONS.rewards, feature: "rewards" },
+  { to: "/schedules", label: "収集スケジュール", icon: NAV_ICONS.evidence },
   { to: "/evidence", label: "取得履歴", icon: NAV_ICONS.evidence, feature: "evidenceHistory" },
 ];
 
@@ -76,6 +78,8 @@ function isActive(navPath: string, currentPath: string): boolean {
 
 function View({ route }: { route: Route }): ReactNode {
   switch (route.name) {
+    case "schedules":
+      return <SchedulesPage />;
     case "overview":
       return <OverviewPage />;
     case "transactions":
@@ -166,7 +170,8 @@ export function App(): ReactNode {
         title: "数字の先に、原本を。",
         body: "取引や残高から、取得時の記録と保存された原本を確認できます。",
       }}
-      caption="保存された記録"
+      caption={path === "/schedules" ? "収集スケジュール" : "保存された記録"}
+      modeLabel={path === "/schedules" ? "管理者による設定変更" : "閲覧専用"}
       connection={{
         connected,
         label: connectionLabel,
@@ -211,20 +216,24 @@ export function App(): ReactNode {
       mainRef={main}
     >
       {!synthetic ? <ParsingHealthNotice health={metadata.data?.parsingHealth} /> : null}
-      <QueryBoundary query={metadata} label="接続情報">
-        {() =>
-          synthetic ? (
-            <section>
-              <h1>表示対象の記録がありません</h1>
-              <p>接続先を確認してください。</p>
-            </section>
-          ) : evidenceRoute ? (
-            <EvidenceContent observationsAvailable />
-          ) : (
-            <View key={path + window.location.search} route={route} />
-          )
-        }
-      </QueryBoundary>
+      {path === "/schedules" ? (
+        <SchedulesPage />
+      ) : (
+        <QueryBoundary query={metadata} label="接続情報">
+          {() =>
+            synthetic ? (
+              <section>
+                <h1>表示対象の記録がありません</h1>
+                <p>接続先を確認してください。</p>
+              </section>
+            ) : evidenceRoute ? (
+              <EvidenceContent observationsAvailable />
+            ) : (
+              <View key={path + window.location.search} route={route} />
+            )
+          }
+        </QueryBoundary>
+      )}
     </AppShell>
   );
 }

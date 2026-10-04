@@ -25,7 +25,7 @@ afterAll(async () => {
   await mf?.dispose();
 });
 
-const TICKS_PER_HOUR = 12; // the cron in wrangler.jsonc, pinned below
+const TICKS_PER_HOUR = 12; // the default processor alarm cadence, pinned below
 // identitySweep's own bound on runs per call, held against the function below.
 const IDENTITY_SWEEP_MAX_RUNS = 40;
 // vpass-statement-page 1.2.0: artifacts still published at 1.1.0 (2026-09-24).
@@ -59,10 +59,15 @@ test("the repair budget, the identity budget that keeps pace with it and the har
   expect(LANE_BUDGETS.incremental + LANE_BUDGETS.repair).toBeLessThanOrEqual(
     IDENTITY_SWEEP_MAX_RUNS,
   );
-  // The drain rate counts ticks of the deployed cron.
-  const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
-  const minutes = /"crons": \["\*\/(\d+) \* \* \* \*"\]/u.exec(wrangler)?.[1];
-  expect(60 / Number(minutes)).toBe(TICKS_PER_HOUR);
+  // Drain-rate arithmetic assumes the preserved default alarm cadence.
+  // Operators can change the cadence; a slower interval drains proportionally slower.
+  const jobs = JSON.parse(
+    readFileSync(new URL("../../../config/alarm-jobs.json", import.meta.url), "utf8"),
+  );
+  const tick = jobs.find((job: { id: string }) => job.id === "processor-tick");
+  expect(tick.enabled).toBe(true);
+  expect(tick.pattern.kind).toBe("interval");
+  expect(60 / tick.pattern.minutes).toBe(TICKS_PER_HOUR);
 });
 
 test("the comments above the budgets state the arithmetic of the constants", () => {

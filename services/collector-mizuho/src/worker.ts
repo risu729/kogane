@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { timingSafeEqual } from "node:crypto";
 import {
   collectMizuho,
@@ -74,55 +79,64 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
     ...overrides,
   };
   async function execute(env: Env, suppliedSession?: MizuhoSession) {
-    const runId = crypto.randomUUID(),
-      startedAt = new Date().toISOString();
-    let collection: MizuhoCollection | undefined;
-    let errorCode: string | undefined;
-    try {
-      let session = suppliedSession;
-      if (session === undefined) {
-        if (!env.MIZUHO_CUSTOMER_NUMBER || !env.MIZUHO_LOGIN_PASSWORD)
-          throw new MizuhoClientError("mizuho-credentials-missing");
-        session = await deps.login({
-          customerNumber: env.MIZUHO_CUSTOMER_NUMBER,
-          password: env.MIZUHO_LOGIN_PASSWORD,
-        });
+    return withCollectionLease(env, "mizuho-bank", async () => {
+      const runId = crypto.randomUUID(),
+        startedAt = new Date().toISOString();
+      let collection: MizuhoCollection | undefined;
+      let errorCode: string | undefined;
+      try {
+        let session = suppliedSession;
+        if (session === undefined) {
+          if (!env.MIZUHO_CUSTOMER_NUMBER || !env.MIZUHO_LOGIN_PASSWORD)
+            throw new MizuhoClientError("mizuho-credentials-missing");
+          session = await deps.login({
+            customerNumber: env.MIZUHO_CUSTOMER_NUMBER,
+            password: env.MIZUHO_LOGIN_PASSWORD,
+          });
+        }
+        collection = await deps.collect({ session });
+      } catch (error) {
+        errorCode = safeMizuhoErrorCode(error);
       }
-      collection = await deps.collect({ session });
-    } catch (error) {
-      errorCode = safeMizuhoErrorCode(error);
-    }
-    const status = collection === undefined ? "failed" : collection.partial ? "partial" : "success";
-    const artifactCount = collection?.artifacts.length ?? 0;
-    try {
-      const persisted = await deps.persist(env.DATA, {
-        runId,
-        startedAt,
-        completedAt: new Date().toISOString(),
-        version: env.COLLECTOR_SCHEMA_VERSION,
-        artifacts: collection?.artifacts ?? [],
-        failedUnits: collection?.failedUnits ?? ["account-list"],
-        failed: collection === undefined,
-        partial: collection?.partial ?? false,
-      });
-      const complete =
-        persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
-      return {
-        httpStatus: !complete || status === "failed" ? 502 : status === "partial" ? 207 : 200,
-        body: {
+      const status =
+        collection === undefined ? "failed" : collection.partial ? "partial" : "success";
+      const artifactCount = collection?.artifacts.length ?? 0;
+      try {
+        const persisted = await deps.persist(env.DATA, {
           runId,
-          status,
-          persistence: persisted.outcome,
-          artifactCount,
-          ...(errorCode ? { error: errorCode } : {}),
-        },
-      };
-    } catch {
-      return {
-        httpStatus: 502,
-        body: { runId, status, artifactCount, persistence: "failed", error: "persistence-failed" },
-      };
-    }
+          startedAt,
+          completedAt: new Date().toISOString(),
+          version: env.COLLECTOR_SCHEMA_VERSION,
+          artifacts: collection?.artifacts ?? [],
+          failedUnits: collection?.failedUnits ?? ["account-list"],
+          failed: collection === undefined,
+          partial: collection?.partial ?? false,
+        });
+        const complete =
+          persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
+        return {
+          httpStatus: !complete || status === "failed" ? 502 : status === "partial" ? 207 : 200,
+          body: {
+            runId,
+            status,
+            persistence: persisted.outcome,
+            artifactCount,
+            ...(errorCode ? { error: errorCode } : {}),
+          },
+        };
+      } catch {
+        return {
+          httpStatus: 502,
+          body: {
+            runId,
+            status,
+            artifactCount,
+            persistence: "failed",
+            error: "persistence-failed",
+          },
+        };
+      }
+    });
   }
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
@@ -146,6 +160,10 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
       const result = await execute(env, session);
       return Response.json(result.body, { status: result.httpStatus });
     },
+    async alarmCollection(env: Env): Promise<ScheduledResult> {
+      const result = await execute(env);
+      return scheduledResult(result.body);
+    },
     async scheduled(controller: ScheduledController, env: Env): Promise<void> {
       // A failed daily invocation must not submit the password again through
       // a platform retry; the next configured daily event is independent.
@@ -164,7 +182,20 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
       );
       if (result.httpStatus === 502) throw new Error("mizuho-scheduled-collection-failed");
     },
-  } satisfies ExportedHandler<Env>;
+  } satisfies ExportedHandler<Env> & { alarmCollection(env: Env): Promise<ScheduledResult> };
 }
 
 export default createHandler();
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    return createHandler().alarmCollection(env);
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
+}

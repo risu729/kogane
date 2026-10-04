@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { timingSafeEqual } from "node:crypto";
 import { logEvent, logFailure, logStage, type Stage } from "./diagnostics";
 import { collectMoneyForward } from "./moneyforward";
@@ -65,56 +70,59 @@ function sharedRunFailed(result: SharedResult): boolean {
  * called, so the run's bytes exist once (G1-15).
  */
 async function runSharedCollection(env: Env): Promise<SharedResult> {
-  const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
-  const failures: CollectionFailure[] = [];
-  let artifacts: readonly RawArtifact[] = [];
-  let accountDetailCount = 0;
-  let monthlyFragmentCount = 0;
-  let stage: Stage = "credential-load";
-  const onStage = (next: Stage) => {
-    stage = next;
-    logStage(runId, stage);
-  };
-  onStage(stage);
-  try {
-    const collection = await collectMoneyForward({
-      onStage,
-      credential: parseCredential(
-        requiredSecret(env.MONEYFORWARD_CREDENTIAL_JSON, "MONEYFORWARD_CREDENTIAL_JSON"),
-      ),
-    });
-    accountDetailCount = collection.accountDetailCount;
-    monthlyFragmentCount = collection.monthlyFragmentCount;
-    artifacts = collection.artifacts;
-  } catch (error) {
-    failures.push(failure("collect", error, runId, stage));
-  }
-  const completedAt = new Date().toISOString();
-  const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
-  const input = {
-    schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-    runId,
-    startedAt,
-    completedAt,
-    status,
-    accountDetailCount,
-    monthlyFragmentCount,
-    artifacts,
-    failures,
-  } as const;
-  const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
-  logEvent(sharedRunDiagnostic(input, outcome));
-  return {
-    runId,
-    status,
-    accountDetailCount,
-    monthlyFragmentCount,
-    artifactCount: outcome.artifactCount,
-    failureCount: failures.length,
-    persistence: outcome.result.outcome,
-    terminalKey: outcome.result.terminalKey,
-  };
+  return withCollectionLease(env, "moneyforward-me", async () => {
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
+    const failures: CollectionFailure[] = [];
+    let artifacts: readonly RawArtifact[] = [];
+    let accountDetailCount = 0;
+    let monthlyFragmentCount = 0;
+    let stage: Stage = "credential-load";
+    const onStage = (next: Stage) => {
+      stage = next;
+      logStage(runId, stage);
+    };
+    onStage(stage);
+    try {
+      const collection = await collectMoneyForward({
+        onStage,
+        credential: parseCredential(
+          requiredSecret(env.MONEYFORWARD_CREDENTIAL_JSON, "MONEYFORWARD_CREDENTIAL_JSON"),
+        ),
+      });
+      accountDetailCount = collection.accountDetailCount;
+      monthlyFragmentCount = collection.monthlyFragmentCount;
+      artifacts = collection.artifacts;
+    } catch (error) {
+      failures.push(failure("collect", error, runId, stage));
+    }
+    const completedAt = new Date().toISOString();
+    const status =
+      failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+    const input = {
+      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+      runId,
+      startedAt,
+      completedAt,
+      status,
+      accountDetailCount,
+      monthlyFragmentCount,
+      artifacts,
+      failures,
+    } as const;
+    const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
+    logEvent(sharedRunDiagnostic(input, outcome));
+    return {
+      runId,
+      status,
+      accountDetailCount,
+      monthlyFragmentCount,
+      artifactCount: outcome.artifactCount,
+      failureCount: failures.length,
+      persistence: outcome.result.outcome,
+      terminalKey: outcome.result.terminalKey,
+    };
+  });
 }
 function authorized(request: Request, expected: string | undefined): boolean {
   const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
@@ -135,4 +143,17 @@ function failure(
 ): CollectionFailure {
   const detail = logFailure(runId, stage, error);
   return { operation, ...detail, message: detail.failureCode, stage };
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    return scheduledResult(await runSharedCollection(env));
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
 }

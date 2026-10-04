@@ -172,6 +172,26 @@ describe("consumers deploy before producers (G5-14)", () => {
     expect(orderViolations(order.workers)).toEqual([]);
   });
 
+  test("explicit RPC dependencies cannot be reversed or omitted", () => {
+    expect(
+      orderViolations([
+        entry({ name: "collector", role: "producer", deploy: true, after: [] }),
+        entry({ name: "processor", role: "consumer", deploy: true, after: ["collector"] }),
+      ]),
+    ).toEqual([]);
+    expect(
+      orderViolations([
+        entry({ name: "processor", role: "consumer", deploy: true, after: ["collector"] }),
+        entry({ name: "collector", role: "producer", deploy: true, after: [] }),
+      ]),
+    ).toHaveLength(1);
+    expect(
+      orderViolations([
+        entry({ name: "collector", role: "producer", deploy: true, after: [] }),
+        entry({ name: "processor", role: "consumer", deploy: true }),
+      ]),
+    ).toHaveLength(1);
+  });
   test("a producer listed before a consumer is reported", () => {
     const violations = orderViolations([
       entry({ name: "collector", role: "producer" }),
@@ -184,8 +204,6 @@ describe("consumers deploy before producers (G5-14)", () => {
   test("the deployed Workers are the consumers of the shared contract", () => {
     const deployed = order.workers.filter((worker) => worker.deploy);
     expect(deployed.map((worker) => worker.name)).toEqual([
-      "processor",
-      "app",
       "globalpass-worker",
       "mobile-suica-worker",
       "moneyforward-worker",
@@ -200,11 +218,16 @@ describe("consumers deploy before producers (G5-14)", () => {
       "vpass-json",
       "vpoint-pay-worker",
       "vpoint-worker",
+      "processor",
+      "app",
     ]);
     // The two consumers of the shared contract come first, then every
     // collector: a reader understands the contract before a writer uses it.
-    expect(deployed.slice(0, 2).every((worker) => worker.role === "consumer")).toBe(true);
-    expect(deployed.slice(2).every((worker) => worker.role === "producer")).toBe(true);
+    expect(deployed.slice(0, -2).every((worker) => worker.role === "producer")).toBe(true);
+    expect(deployed.slice(-2).every((worker) => worker.role === "consumer")).toBe(true);
+    expect(order.workers.find((worker) => worker.name === "processor")?.after).toEqual(
+      deployed.slice(0, -2).map((worker) => worker.name),
+    );
   });
 
   test("every collector is a CD target, and only the experiments are not", () => {
@@ -246,7 +269,7 @@ describe("consumers deploy before producers (G5-14)", () => {
       triggers?: { crons?: unknown[] };
       secrets?: { required?: string[] };
     };
-    expect(config.triggers?.crons).toEqual(["25 21 * * *"]);
+    expect(config.triggers?.crons).toEqual([]);
     expect(config.secrets?.required).toEqual([
       "ADMIN_TRIGGER_TOKEN",
       "MIZUHO_CUSTOMER_NUMBER",
@@ -375,7 +398,7 @@ describe("the deploy workflow follows the ledger", () => {
     );
   });
 
-  test("only the preflight, migration and deploy steps see the Cloudflare token (G5-17)", () => {
+  test("only credential preflight, migrations, deployment and trigger readback see the Cloudflare token (G5-17)", () => {
     const usingToken = workflowSteps(deployWorkflow)
       .filter((step) => step.body.includes("secrets.CLOUDFLARE_API_TOKEN"))
       .map((step) => step.name);
@@ -383,8 +406,6 @@ describe("the deploy workflow follows the ledger", () => {
       "Confirm the production credentials reached this job",
       "Apply the CORE migrations",
       "Apply the READ migrations",
-      "Deploy the Processor",
-      "Deploy the App",
       "Deploy the GlobalPass collector",
       "Deploy the Mobile Suica collector",
       "Deploy the Money Forward collector",
@@ -399,6 +420,9 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the Vpass collector",
       "Deploy the V Point Pay collector",
       "Deploy the V Point collector",
+      "Deploy the Processor",
+      "Deploy the App",
+      "Reconcile future schedule alarms",
     ]);
   });
 
@@ -446,7 +470,7 @@ describe("the deploy workflow follows the ledger", () => {
 
   test("both postchecks run after the last upload, and only one holds the Access token", () => {
     const names = workflowSteps(deployWorkflow).map((step) => step.name);
-    const lastDeploy = names.lastIndexOf("Deploy the V Point collector");
+    const lastDeploy = names.lastIndexOf("Deploy the App");
     expect(lastDeploy).toBeGreaterThan(-1);
     expect(names.indexOf("Postcheck the public health routes")).toBeGreaterThan(lastDeploy);
     expect(names.indexOf("Postcheck the App and the Processor")).toBeGreaterThan(
@@ -459,14 +483,34 @@ describe("the deploy workflow follows the ledger", () => {
       const usingToken = workflowSteps(deployWorkflow)
         .filter((step) => step.body.includes(`secrets.${secret}`))
         .map((step) => step.name);
-      expect(usingToken).toEqual(["Postcheck the App and the Processor"]);
+      expect(usingToken).toEqual([
+        "Postcheck the App and the Processor",
+        "Reconcile future schedule alarms",
+      ]);
+      expect(names.indexOf("Reconcile future schedule alarms")).toBeGreaterThan(
+        names.indexOf("Postcheck the App and the Processor"),
+      );
     }
   });
 
+  test("pre-alarm rollback targets are rejected by the trusted workflow before checkout", () => {
+    const steps = workflowSteps(deployWorkflow),
+      names = steps.map((step) => step.name);
+    const gate = steps.find((step) => step.name === "Confirm the target supports alarm scheduling");
+    expect(names.indexOf(gate!.name)).toBeLessThan(names.indexOf("Checkout the exact commit"));
+    for (const path of [
+      "config/alarm-jobs.json",
+      "services/processor/src/schedule-entrypoint.ts",
+      "tasks/_lib/ci/alarm-bootstrap.mjs",
+      "0065_alarm_schedules.sql",
+    ])
+      expect(gate?.body).toContain(path);
+    expect(gate?.body).toContain("exit 1");
+  });
   test("the manifest is re-verified immediately before the first upload (G5-11)", () => {
     const names = workflowSteps(deployWorkflow).map((step) => step.name);
     expect(names.indexOf("Re-verify the release manifest")).toBe(
-      names.indexOf("Deploy the Processor") - 1,
+      names.indexOf("Deploy the GlobalPass collector") - 1,
     );
   });
 });

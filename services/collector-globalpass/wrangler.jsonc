@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "kogane-globalpass-collector-poc",
-  "main": "src/worker.ts",
+  "main": "src/schedule-entrypoint.ts",
   "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat"],
@@ -11,7 +11,7 @@
     "region": "aws:ap-northeast-1"
   },
   "triggers": {
-    "crons": ["17 18 * * *"]
+    "crons": []
   },
   "observability": {
     "enabled": true,
@@ -69,6 +69,13 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["GlobalPassCollectorContainer"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "SCHEDULE_DB",
+      "database_name": "kogane-raw-evidence",
+      "database_id": "b335a887-250d-45c9-bd72-af83f35fdc60"
     }
   ]
 }

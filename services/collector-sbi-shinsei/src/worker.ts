@@ -1,3 +1,8 @@
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  scheduledResult,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { Container, getContainer, type StopParams } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
@@ -103,184 +108,187 @@ async function runCollection(
     operationId?: string;
   } = {},
 ): Promise<CollectionResult> {
-  const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
-  const attemptId = `attempt-${crypto.randomUUID()}`;
-  const diagnostic = stageDiagnostics(runId);
-  const prefix = runPrefix(startedAt, runId);
-  // U09: decided once per run. `shared` writes the run only into DATA — the
-  // staging bucket is not written at all — and skips the central upload
-  // (plan 00: one canonical copy; G1-15). `legacy` is byte-for-byte the path
-  // this collector has always taken.
-  const target = "shared";
-  const artifacts = [];
-  // Every artifact admitted to this run, kept in memory for the shared-mode
-  // terminal; they never include the container handoff.
-  const collected: RawArtifact[] = [];
-  const failures: CollectionFailure[] = [];
-  const container = getContainer(env.COLLECTOR_CONTAINER, `run-${runId}`);
-  let stage = "credential-validation";
-  try {
-    const output = await diagnostic.step(
-      "collection",
-      () =>
-        collectSbiShinsei({
-          credentialJson: env.SBI_SHINSEI_CREDENTIAL_JSON,
-          collectHandoff: async (credentialJson) => {
-            stage = "container-start";
-            await diagnostic.step(stage, () => container.startAndWaitForPorts());
-            stage = "container-request";
-            const relayUrl = new URL(env.RELAY_PUBLIC_URL);
-            relayUrl.searchParams.set("runId", runId);
-            const response = await diagnostic.step(stage, async () => {
-              const response = await container.fetch(
-                new Request("http://container/collect", {
-                  method: "POST",
-                  headers: { "content-type": "application/json; charset=utf-8" },
-                  body: JSON.stringify({
-                    credentialJson,
-                    relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
-                    relayUrl: relayUrl.href,
+  return withCollectionLease(env, "sbi-shinsei", async () => {
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
+    const attemptId = `attempt-${crypto.randomUUID()}`;
+    const diagnostic = stageDiagnostics(runId);
+    const prefix = runPrefix(startedAt, runId);
+    // U09: decided once per run. `shared` writes the run only into DATA — the
+    // staging bucket is not written at all — and skips the central upload
+    // (plan 00: one canonical copy; G1-15). `legacy` is byte-for-byte the path
+    // this collector has always taken.
+    const target = "shared";
+    const artifacts = [];
+    // Every artifact admitted to this run, kept in memory for the shared-mode
+    // terminal; they never include the container handoff.
+    const collected: RawArtifact[] = [];
+    const failures: CollectionFailure[] = [];
+    const container = getContainer(env.COLLECTOR_CONTAINER, `run-${runId}`);
+    let stage = "credential-validation";
+    try {
+      const output = await diagnostic.step(
+        "collection",
+        () =>
+          collectSbiShinsei({
+            credentialJson: env.SBI_SHINSEI_CREDENTIAL_JSON,
+            collectHandoff: async (credentialJson) => {
+              stage = "container-start";
+              await diagnostic.step(stage, () => container.startAndWaitForPorts());
+              stage = "container-request";
+              const relayUrl = new URL(env.RELAY_PUBLIC_URL);
+              relayUrl.searchParams.set("runId", runId);
+              const response = await diagnostic.step(stage, async () => {
+                const response = await container.fetch(
+                  new Request("http://container/collect", {
+                    method: "POST",
+                    headers: { "content-type": "application/json; charset=utf-8" },
+                    body: JSON.stringify({
+                      credentialJson,
+                      relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
+                      relayUrl: relayUrl.href,
+                    }),
                   }),
-                }),
+                );
+                if (!response.ok) {
+                  const reason = await containerResponseReason(response);
+                  emitDiagnostic("error", {
+                    event: "sbi-shinsei-container-response-failure",
+                    runId,
+                    httpStatus: response.status,
+                    reason,
+                  });
+                  throw new ContainerResponseError(response.status, reason);
+                }
+                return response;
+              });
+              stage = "container-response";
+              const handoff = await diagnostic.step(stage, () =>
+                readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES),
               );
-              if (!response.ok) {
-                const reason = await containerResponseReason(response);
-                emitDiagnostic("error", {
-                  event: "sbi-shinsei-container-response-failure",
-                  runId,
-                  httpStatus: response.status,
-                  reason,
-                });
-                throw new ContainerResponseError(response.status, reason);
-              }
-              return response;
-            });
-            stage = "container-response";
-            const handoff = await diagnostic.step(stage, () =>
-              readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES),
-            );
-            stage = "browser-handoff";
-            return handoff;
-          },
-        }),
-      (value) =>
-        value.failures.length === 0
-          ? "success"
-          : value.artifacts.length === 0
-            ? "failed"
-            : "partial",
-    );
-    failures.push(...output.failures);
-    for (const artifact of output.artifacts) {
+              stage = "browser-handoff";
+              return handoff;
+            },
+          }),
+        (value) =>
+          value.failures.length === 0
+            ? "success"
+            : value.artifacts.length === 0
+              ? "failed"
+              : "partial",
+      );
+      failures.push(...output.failures);
+      for (const artifact of output.artifacts) {
+        try {
+          artifacts.push(
+            // The manifest entry only: the bytes reach DATA content-addressed
+            // when the terminal is written, and nothing is staged.
+            (await describeArtifact({ prefix, artifact })).record,
+          );
+          collected.push(artifact);
+        } catch (error) {
+          // `r2:<dataset>` is the manifest's operation name for "this artifact
+          // was not admitted to the run"; in shared mode that is a validation
+          // failure of the artifact itself rather than a staging put.
+          failures.push(failure(`r2:${artifact.dataset}`, error));
+        }
+      }
+    } catch (error) {
+      failures.push(failure("collect", error, stage));
+    } finally {
+      // Emit before teardown and before central import so a later failure cannot hide the cause.
+      for (const entry of failures) {
+        emitDiagnostic("error", {
+          event: "sbi-shinsei-collection-failure",
+          runId,
+          phase: "collection",
+          ...entry,
+        });
+      }
+      emitDiagnostic("log", {
+        event: "sbi-shinsei-container-teardown-start",
+        runId,
+        phase: "teardown",
+        collectionFailed: failures.length > 0,
+      });
       try {
-        artifacts.push(
-          // The manifest entry only: the bytes reach DATA content-addressed
-          // when the terminal is written, and nothing is staged.
-          (await describeArtifact({ prefix, artifact })).record,
-        );
-        collected.push(artifact);
+        await diagnostic.step("teardown", () => container.destroy());
+        emitDiagnostic("log", {
+          event: "sbi-shinsei-container-destroyed",
+          runId,
+          phase: "teardown",
+        });
       } catch (error) {
-        // `r2:<dataset>` is the manifest's operation name for "this artifact
-        // was not admitted to the run"; in shared mode that is a validation
-        // failure of the artifact itself rather than a staging put.
-        failures.push(failure(`r2:${artifact.dataset}`, error));
+        emitDiagnostic("warn", {
+          event: "sbi-shinsei-container-destroy-failed",
+          runId,
+          phase: "teardown",
+          errorType: safeErrorType(error),
+        });
       }
     }
-  } catch (error) {
-    failures.push(failure("collect", error, stage));
-  } finally {
-    // Emit before teardown and before central import so a later failure cannot hide the cause.
-    for (const entry of failures) {
-      emitDiagnostic("error", {
-        event: "sbi-shinsei-collection-failure",
+    const completedAt = new Date().toISOString();
+    const status =
+      failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+    const manifest: CollectionManifest = {
+      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+      source: "sbi-shinsei",
+      runId,
+      startedAt,
+      completedAt,
+      status,
+      liveReadsEnabled: liveReadsEnabled(),
+      artifacts,
+      failures,
+    };
+    let manifestKey: string;
+    let shared: SharedRunSummary | undefined;
+    {
+      // U09: the run's completion record is the terminal this Worker writes into
+      // DATA, after the content-addressed objects; the staging bucket is not
+      // written and the central upload is skipped, so exactly one copy exists
+      // and the Processor reads it (G1-15). Source collection and persistence
+      // are separate outcomes.
+      diagnostic.terminal(status);
+      shared = await diagnostic.step("shared-persist", () =>
+        persistSharedRun(dataBucket(env.DATA), {
+          manifest,
+          artifacts: collected,
+          identity: {
+            attemptId,
+            ...(identity.operationId === undefined ? {} : { operationId: identity.operationId }),
+          },
+        }),
+      );
+      emitDiagnostic(sharedRunPersisted(shared) ? "log" : "error", {
+        event: "sbi-shinsei-shared-persist",
         runId,
-        phase: "collection",
-        ...entry,
+        phase: "shared-persist",
+        outcome: shared.outcome,
+        objectCount: shared.objectCount,
+        waitingForHuman: shared.waitingForHuman,
+        ...(shared.reasonCode ? { errorCode: shared.reasonCode } : {}),
       });
+      // No terminal means the run did not finish persisting; it is never
+      // reported as stored (G1-01).
+      if (!sharedRunPersisted(shared)) throw new Error("shared_persist_incomplete");
+      // The collector manifest lives in DATA, content-addressed, like every
+      // other artifact of the run.
+      manifestKey = shared.manifestObjectKey;
     }
     emitDiagnostic("log", {
-      event: "sbi-shinsei-container-teardown-start",
+      event: "sbi-shinsei-collection-stored",
       runId,
-      phase: "teardown",
-      collectionFailed: failures.length > 0,
+      status,
+      artifactCount: artifacts.length,
+      failureCount: failures.length,
+      liveReadsEnabled: manifest.liveReadsEnabled,
+      manifestKey,
+      collectionTarget: target,
+      ...(shared ? { terminalKey: shared.terminalKey, terminalDigest: shared.terminalDigest } : {}),
     });
-    try {
-      await diagnostic.step("teardown", () => container.destroy());
-      emitDiagnostic("log", {
-        event: "sbi-shinsei-container-destroyed",
-        runId,
-        phase: "teardown",
-      });
-    } catch (error) {
-      emitDiagnostic("warn", {
-        event: "sbi-shinsei-container-destroy-failed",
-        runId,
-        phase: "teardown",
-        errorType: safeErrorType(error),
-      });
-    }
-  }
-  const completedAt = new Date().toISOString();
-  const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
-  const manifest: CollectionManifest = {
-    schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-    source: "sbi-shinsei",
-    runId,
-    startedAt,
-    completedAt,
-    status,
-    liveReadsEnabled: liveReadsEnabled(),
-    artifacts,
-    failures,
-  };
-  let manifestKey: string;
-  let shared: SharedRunSummary | undefined;
-  {
-    // U09: the run's completion record is the terminal this Worker writes into
-    // DATA, after the content-addressed objects; the staging bucket is not
-    // written and the central upload is skipped, so exactly one copy exists
-    // and the Processor reads it (G1-15). Source collection and persistence
-    // are separate outcomes.
-    diagnostic.terminal(status);
-    shared = await diagnostic.step("shared-persist", () =>
-      persistSharedRun(dataBucket(env.DATA), {
-        manifest,
-        artifacts: collected,
-        identity: {
-          attemptId,
-          ...(identity.operationId === undefined ? {} : { operationId: identity.operationId }),
-        },
-      }),
-    );
-    emitDiagnostic(sharedRunPersisted(shared) ? "log" : "error", {
-      event: "sbi-shinsei-shared-persist",
-      runId,
-      phase: "shared-persist",
-      outcome: shared.outcome,
-      objectCount: shared.objectCount,
-      waitingForHuman: shared.waitingForHuman,
-      ...(shared.reasonCode ? { errorCode: shared.reasonCode } : {}),
-    });
-    // No terminal means the run did not finish persisting; it is never
-    // reported as stored (G1-01).
-    if (!sharedRunPersisted(shared)) throw new Error("shared_persist_incomplete");
-    // The collector manifest lives in DATA, content-addressed, like every
-    // other artifact of the run.
-    manifestKey = shared.manifestObjectKey;
-  }
-  emitDiagnostic("log", {
-    event: "sbi-shinsei-collection-stored",
-    runId,
-    status,
-    artifactCount: artifacts.length,
-    failureCount: failures.length,
-    liveReadsEnabled: manifest.liveReadsEnabled,
-    manifestKey,
-    collectionTarget: target,
-    ...(shared ? { terminalKey: shared.terminalKey, terminalDigest: shared.terminalDigest } : {}),
+    return { ...manifest, manifestKey };
   });
-  return { ...manifest, manifestKey };
 }
 async function readBoundedText(response: Response, maximumBytes: number): Promise<string> {
   const declared = response.headers.get("content-length");
@@ -390,4 +398,17 @@ function publicResult(result: CollectionResult): object {
     failureCount: result.failures.length,
     manifestKey: result.manifestKey,
   };
+}
+
+/** Private service-binding collection; public token/Access routes keep their checks. */
+export async function alarmCollection(
+  env: Env,
+  _cron: string,
+  _scheduledTime: number,
+): Promise<ScheduledResult> {
+  try {
+    return scheduledResult(await runCollection(env));
+  } catch {
+    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  }
 }

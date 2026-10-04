@@ -415,6 +415,7 @@
             "AGENT_GRANTS",
             "BALANCE_PROJECTION_ENABLED",
             "COMMANDS_ENABLED",
+            "DEPLOYMENT_SCHEDULE_TOKENS",
             "EVENTS_V2_ENABLED",
             "EVIDENCE_SOURCE_ID",
             "HEALTH_PROBE_TOKENS",
@@ -422,6 +423,7 @@
             "OPS_API_ENABLED",
             "RELEASE_SHA",
             "REWARDS_V2_ENABLED",
+            "SCHEDULES_ENABLED",
             "SESSION_REFRESH_POLICY"
           ],
           "requiredSecretNames": [],
@@ -506,14 +508,19 @@
         {
           "config": "services/collector-globalpass/wrangler.jsonc",
           "name": "kogane-globalpass-collector-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "17 18 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -585,14 +592,19 @@
         {
           "config": "services/collector-mizuho/wrangler.jsonc",
           "name": "kogane-mizuho-collector",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "not-deployed",
           "liveWorker": false,
-          "crons": [
-            "25 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -637,14 +649,19 @@
         {
           "config": "services/collector-mobile-suica/wrangler.jsonc",
           "name": "kogane-mobile-suica-collector-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "10 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -689,14 +706,19 @@
         {
           "config": "services/collector-moneyforward/wrangler.jsonc",
           "name": "kogane-moneyforward-collector-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "15 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -737,14 +759,19 @@
         {
           "config": "services/collector-myjcb/wrangler.jsonc",
           "name": "kogane-myjcb-collector-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "0 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -786,14 +813,19 @@
         {
           "config": "services/collector-sbi-securities/wrangler.jsonc",
           "name": "kogane-sbi-collector-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "0 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -834,14 +866,19 @@
         {
           "config": "services/collector-sbi-shinsei/wrangler.jsonc",
           "name": "kogane-sbi-shinsei-collector-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "0 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -908,15 +945,19 @@
         {
           "config": "services/collector-sbi-vc-trade/wrangler.jsonc",
           "name": "kogane-sbi-vc-session-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "*/15 * * * *",
-            "5 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -1037,14 +1078,19 @@
         {
           "config": "services/collector-sony-bank/wrangler.jsonc",
           "name": "kogane-sony-bank-collector-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "0 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -1085,14 +1131,19 @@
         {
           "config": "services/collector-st-george/wrangler.jsonc",
           "name": "kogane-st-george-collector",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "not-deployed",
           "liveWorker": false,
-          "crons": [
-            "35 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -1165,14 +1216,19 @@
         {
           "config": "services/collector-vpass/wrangler.jsonc",
           "name": "kogane-vpass-collector-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "0 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -1211,14 +1267,19 @@
         {
           "config": "services/collector-vpoint/wrangler.jsonc",
           "name": "kogane-vpoint-collector-poc",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "15 21 * * *"
-          ],
+          "crons": [],
           "emailHandler": true,
-          "d1": [],
+          "d1": [
+            {
+              "binding": "SCHEDULE_DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            }
+          ],
           "r2": [
             {
               "binding": "DATA",
@@ -1370,12 +1431,10 @@
         {
           "config": "services/processor/wrangler.jsonc",
           "name": "kogane-observation-pipeline",
-          "main": "src/worker.ts",
+          "main": "src/schedule-entrypoint.ts",
           "role": "deployed",
           "liveWorker": true,
-          "crons": [
-            "*/5 * * * *"
-          ],
+          "crons": [],
           "emailHandler": false,
           "d1": [
             {
@@ -1415,12 +1474,74 @@
               "maxConcurrency": 2
             }
           ],
-          "durableObjects": [],
+          "durableObjects": [
+            {
+              "name": "SCHEDULE_ALARMS",
+              "className": "ScheduleAlarm"
+            }
+          ],
           "durableObjectExports": [],
-          "durableObjectMigrations": [],
+          "durableObjectMigrations": [
+            {
+              "tag": "alarm-v1",
+              "newSqliteClasses": [
+                "ScheduleAlarm"
+              ],
+              "newClasses": []
+            }
+          ],
           "containers": [],
           "vpcNetworks": [],
-          "serviceBindings": [],
+          "serviceBindings": [
+            {
+              "binding": "SCHEDULE_GLOBALPASS",
+              "service": "kogane-globalpass-collector-poc"
+            },
+            {
+              "binding": "SCHEDULE_VPASS",
+              "service": "kogane-vpass-collector-poc"
+            },
+            {
+              "binding": "SCHEDULE_MYJCB",
+              "service": "kogane-myjcb-collector-poc"
+            },
+            {
+              "binding": "SCHEDULE_SBI_SECURITIES",
+              "service": "kogane-sbi-collector-poc"
+            },
+            {
+              "binding": "SCHEDULE_SBI_SHINSEI",
+              "service": "kogane-sbi-shinsei-collector-poc"
+            },
+            {
+              "binding": "SCHEDULE_SONY_BANK",
+              "service": "kogane-sony-bank-collector-poc"
+            },
+            {
+              "binding": "SCHEDULE_SBI_VC_TRADE",
+              "service": "kogane-sbi-vc-session-poc"
+            },
+            {
+              "binding": "SCHEDULE_MOBILE_SUICA",
+              "service": "kogane-mobile-suica-collector-poc"
+            },
+            {
+              "binding": "SCHEDULE_MONEYFORWARD",
+              "service": "kogane-moneyforward-collector-poc"
+            },
+            {
+              "binding": "SCHEDULE_VPOINT",
+              "service": "kogane-vpoint-collector-poc"
+            },
+            {
+              "binding": "SCHEDULE_MIZUHO",
+              "service": "kogane-mizuho-collector"
+            },
+            {
+              "binding": "SCHEDULE_ST_GEORGE",
+              "service": "kogane-st-george-collector"
+            }
+          ],
           "varNames": [
             "BALANCE_PROJECTION_ENABLED",
             "COLLECTION_ACCOUNT_ID",
@@ -1434,6 +1555,7 @@
             "REPORTS_ENABLED",
             "REWARD_CLAIMS_ENABLED",
             "REWARD_READ_PROJECTION_ENABLED",
+            "SCHEDULES_ENABLED",
             "SHARED_R2_INGEST_ENABLED"
           ],
           "requiredSecretNames": [],
@@ -1502,78 +1624,7 @@
   "summary": {
     "configCount": 25,
     "deployedWorkerCount": 14,
-    "crons": [
-      {
-        "worker": "kogane-globalpass-collector-poc",
-        "cron": "17 18 * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-mizuho-collector",
-        "cron": "25 21 * * *",
-        "live": false
-      },
-      {
-        "worker": "kogane-mobile-suica-collector-poc",
-        "cron": "10 21 * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-moneyforward-collector-poc",
-        "cron": "15 21 * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-myjcb-collector-poc",
-        "cron": "0 21 * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-observation-pipeline",
-        "cron": "*/5 * * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-sbi-collector-poc",
-        "cron": "0 21 * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-sbi-shinsei-collector-poc",
-        "cron": "0 21 * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-sbi-vc-session-poc",
-        "cron": "*/15 * * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-sbi-vc-session-poc",
-        "cron": "5 21 * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-sony-bank-collector-poc",
-        "cron": "0 21 * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-st-george-collector",
-        "cron": "35 21 * * *",
-        "live": false
-      },
-      {
-        "worker": "kogane-vpass-collector-poc",
-        "cron": "0 21 * * *",
-        "live": true
-      },
-      {
-        "worker": "kogane-vpoint-collector-poc",
-        "cron": "15 21 * * *",
-        "live": true
-      }
-    ],
+    "crons": [],
     "queues": [
       {
         "queue": "kogane-collection-terminals",
@@ -1592,6 +1643,12 @@
         "worker": "kogane-globalpass-collector-poc",
         "className": "GlobalPassCollectorContainer",
         "tag": "v1",
+        "storage": "sqlite"
+      },
+      {
+        "worker": "kogane-observation-pipeline",
+        "className": "ScheduleAlarm",
+        "tag": "alarm-v1",
         "storage": "sqlite"
       },
       {
@@ -1708,8 +1765,20 @@
         "live": true,
         "bindings": [
           "kogane-evidence-browser",
+          "kogane-globalpass-collector-poc",
+          "kogane-mizuho-collector",
+          "kogane-mobile-suica-collector-poc",
+          "kogane-moneyforward-collector-poc",
+          "kogane-myjcb-collector-poc",
           "kogane-observation-pipeline",
-          "kogane-observation-read-diagnostic"
+          "kogane-observation-read-diagnostic",
+          "kogane-sbi-collector-poc",
+          "kogane-sbi-shinsei-collector-poc",
+          "kogane-sbi-vc-session-poc",
+          "kogane-sony-bank-collector-poc",
+          "kogane-st-george-collector",
+          "kogane-vpass-collector-poc",
+          "kogane-vpoint-collector-poc"
         ]
       }
     ],
