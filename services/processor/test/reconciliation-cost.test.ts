@@ -40,6 +40,25 @@ async function cycle(store: Database, legacy: boolean, sourceId = "vpass") {
   throw new Error("cycle did not finish");
 }
 
+function seedOtherProviderRows(db: Database, count: number, unsupportedStatus = false) {
+  const source = unsupportedStatus ? "vpass" : "smbc-bank";
+  const template = db
+    .query(`SELECT t.id FROM transaction_observations t
+    JOIN parse_runs p ON p.id=t.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+    WHERE a.source_id=? LIMIT 1`)
+    .get(source) as { id: number };
+  db.transaction(() => {
+    for (let row = 0; row < count; row += 1)
+      db.query(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,description,counterparty,as_of,observed_at,raw_locator,extra_json)
+ SELECT parse_run_id,'synthetic-other',?,?,-100,'-100',0,'JPY',NULL,'synthetic','2026-10-01',observed_at,raw_locator,? FROM transaction_observations WHERE id=?`).run(
+        `other-${row}`,
+        unsupportedStatus ? "unsupported" : "posted",
+        JSON.stringify({ _kogane: { identityOrigin: "provider", statementMonth: "202610" } }),
+        template.id,
+      );
+  })();
+}
+
 function seedProviderRows(db: Database, seed: number) {
   const template = db
     .query(
@@ -102,6 +121,8 @@ test("stage A preserves full-cycle proposals on random complete-schema stores; B
       const current = Database.deserialize(built.store.db.serialize());
       current.exec("PRAGMA foreign_keys=ON");
       seedProviderRows(current, seed);
+      seedOtherProviderRows(current, 20);
+      seedOtherProviderRows(current, 20, true);
       const legacy = Database.deserialize(current.serialize());
       legacy.exec("PRAGMA foreign_keys=ON");
       try {
@@ -173,6 +194,11 @@ test("scaled fingerprint-only A pages use the partial index without statistics, 
       shipped,
       indexed,
     });
+    seedOtherProviderRows(db, 4000);
+    seedOtherProviderRows(db, 200, true);
+    const mixed = measure(stageAFactPageQuery);
+    expect(mixed.rows).toBe(0);
+    console.log("synthetic mixed-provider A page cost", { globallyAdmittedExtraRows: 4200, mixed });
   } finally {
     db.close();
   }

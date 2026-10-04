@@ -63,8 +63,12 @@ guards still apply.
 
 ## Consequences
 
-An empty admitted stage-A set reads no observation page. Provider-id history,
-custom sources and future capability transitions continue automatically.
+A globally empty provider-origin index reads no observation page. A source
+with no eligible provider ids can still walk provider-origin index entries
+from other sources or unsupported statuses before returning its empty page;
+this index is ordered by observation id, not partitioned by source. The
+`scanned` result counts returned fact rows, not SQLite/D1 rows read. Provider-id
+history, custom sources and future capability transitions continue automatically.
 Per-tick page composition and scanned counts change; a complete cycle's
 proposals and stored history remain the same. Group bounds remain conservative.
 
@@ -85,8 +89,8 @@ invalidation closure; a test enforces this from the complete schema's bytecode.
   the existing fact origin, and compare full-cycle stored proposals under
   bounded pages, group reads and a one-proposal write budget. Malformed,
   missing, non-text, overlong and collector origins, duplicate provider ids,
-  and an over-limit mixed-origin group participate. Stage B retains the exact
-  shipped SQL.
+  an over-limit mixed-origin group, provider-origin rows from another source,
+  and unsupported statuses participate. Stage B retains the exact shipped SQL.
 - Full-schema scaled stores use every CORE migration, foreign keys and no
   `ANALYZE`. Plans assert the provider-id partial index and the retirement
   singleton primary-key lookup. The index predicate is compared to the code.
@@ -95,6 +99,10 @@ invalidation closure; a test enforces this from the complete schema's bytecode.
   for the indexed page (zero admitted rows). Ten empty stale-key reads took
   333.6 ms; ten clean marker reads took 0.033 ms. These are local SQLite
   measurements, not production D1 billing or a whole-tick benchmark.
+  A separate mixed-index measurement added 4,000 provider-origin bank rows
+  and 200 Vpass rows with unsupported statuses: ten empty Vpass pages took
+  13.4 ms, versus 100.3 ms for ten shipped pages on the same base store. This
+  exercises remaining index-entry work and does not claim it is constant.
 - Retirement tests derive all base read dependencies from `EXPLAIN` root
   pages and assert trigger coverage via direct invalidation or the existing
   source revision ledger. They exercise low-id publication updates, epoch

@@ -334,8 +334,10 @@ carry a provider link id) pairs them as follows:
 
 Both deployed parsers' external ids are collector fingerprints, so stage A
 proposes nothing from their rows. Stage-A-only pages start in migration 0064's
-partial index of actual provider-origin ids: a fingerprint-only set reads no
-observation page or group. Historical, custom and future provider-issued ids
+partial index of actual provider-origin ids: a globally fingerprint-only set
+reads no observation page or group. An empty source page can still inspect
+provider-origin index entries from other sources or unsupported statuses;
+its `scanned` count is the returned page size, not D1 rows read. Historical, custom and future provider-issued ids
 still run automatically. Stage B keeps its ordinary page. A touched group's
 count includes every published member as before, so mixed-origin groups still
 obey the same bound ([ADR 0037](adr/0037-reconciliation-purchase-cost.md)).
