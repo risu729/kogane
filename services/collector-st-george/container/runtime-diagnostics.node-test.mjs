@@ -27,7 +27,7 @@ test("runtime failure emits once with fixed stage/type and no exception details"
   for (const key of ["message", "stack", "url"])
     Object.defineProperty(error, key, {
       get() {
-        assert.fail(`diagnostics must not inspect ${key}`);
+        return assert.fail(`diagnostics must not inspect ${key}`);
       },
     });
   diagnostic.failure(error);
