@@ -1140,9 +1140,18 @@ the month select's `value` and `selected`, the pager text, the tables'
 `th`/`td`), and the collector's page with the parser's synthetic statement
 parses after sanitizing
 (`packages/parsers/test/global-pass-sanitized-contract.test.ts`). An empty month
-as the collector sees it (no Found line, no pager, no table) is refused by
-the parser's table-cardinality check: zero-table pages stay unsupported
-([observations](../observations.md#remaining-globalpass-shape-investigation-2026-09-08)).
+as the collector sees it (no Found line, no pager, no table) was refused by
+1.1.0's table-cardinality check; 1.2.0 reads it as no rows (below).
+
+Empty months in the parser (2026-10-04, after the above): `global-pass-activity@1.2.0` reads
+page 1 of a month with its month select and no Found line, no pager and no
+table as an `ok` parse with no observation (no warning, no zero amount); 1.1.0
+refused it. A zero-table page with any part of the pager, or a later page,
+stays refused
+([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-empty-months-are-read-as-no-rows),
+[observations](../observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120)).
+The empty month was observed in English only, and no shared run has stored
+one yet.
 
 Limit: which check refused the two stored pages is not known. The owner's
 counts-only replay names it

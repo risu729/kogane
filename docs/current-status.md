@@ -50,10 +50,13 @@ are separate claims. Historical acceptance records are linked from the
   importer-era pages 1.0.0 read. Which check refused them is not stored; the
   owner's counts-only replay
   (`replay-diagnostics.ts globalpass-activity 2`, see
-  [operations](operations.md#replaying-a-parser-rejection)) names it. A month
-  the collector proves empty (no Found line, no pager, no table) is refused
-  too: the parser does not support zero-table pages. See
+  [operations](operations.md#replaying-a-parser-rejection)) names it. See
   [observations](observations.md#global-pass-the-first-shared-run-pages-were-refused-no-parser-release).
+  A month the collector proves empty (no Found line, no pager, no table) was
+  refused by 1.1.0 too; `global-pass-activity@1.2.0` reads it as no rows. The
+  empty month was observed in English only and no shared run has stored one
+  yet. See
+  [observations](observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).
 - Money Forward identity revisions and the SBI Shinsei bank adapter are
   implemented; fresh production adoption/mapping counts are not asserted here.
 - Generic collection/session-refresh operations still reach
