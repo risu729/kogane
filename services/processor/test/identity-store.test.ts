@@ -12,6 +12,17 @@ import {
   type IdentityResolver,
 } from "../src/identity-store.ts";
 import { publishParse } from "./harness.ts";
+import { identitySweepCandidatesSql } from "../../../packages/storage-d1/src/core/identity-sweep-sql.ts";
+const legacyCandidates = readFileSync(
+  new URL("../../../packages/storage-d1/test/fixtures/identity-sweep-legacy.sql", import.meta.url),
+  "utf8",
+);
+async function compareVpassCandidates() {
+  const old = await db.prepare(legacyCandidates).bind("vpass", 8).all();
+  const current = await db.prepare(identitySweepCandidatesSql(true)).bind("vpass", 8).all();
+  expect(current.results).toEqual(old.results);
+  return current.results;
+}
 // Storage tests deliberately do not depend on a provider policy PR.
 function otherIdentity(input: IdentityInput): IdentityPlan {
   const unit = input.instrument ?? input.currency;
@@ -193,6 +204,7 @@ test("Vpass missing sidecars complete at baseline; late sealed binding upgrades 
     identifiedRuns: 0,
     identifiedObservations: 0,
   });
+  expect(await compareVpassCandidates()).toEqual([]);
   const before = await db
     .prepare(
       "SELECT sa.reference_json FROM current_identity_observations o JOIN source_accounts sa ON sa.id=o.source_account_id WHERE parse_run_id=500",
@@ -201,7 +213,9 @@ test("Vpass missing sidecars complete at baseline; late sealed binding upgrades 
   expect(JSON.parse(before!)).toEqual(["vpass:card-001", "fetch-run", "500"]);
   await sidecar(1500, 500, undefined, undefined, false);
   expect(await count("trusted_vpass_card_bindings")).toBe(0);
+  expect(await compareVpassCandidates()).toEqual([]);
   await db.prepare("INSERT INTO fetch_run_seals VALUES(1500)").run();
+  expect(await compareVpassCandidates()).toMatchObject([{ id: 500, required_policy: 2 }]);
   expect((await identitySweep(db, providerIdentity, 8, "vpass")).identifiedRuns).toBe(1);
   const pin = await db
     .prepare("SELECT * FROM identity_vpass_bindings")
@@ -214,6 +228,17 @@ test("Vpass missing sidecars complete at baseline; late sealed binding upgrades 
       .first<number>("policy_version"),
   ).toBe(2);
   expect(await identifyParse(db, financial, providerIdentity)).toBe(0);
+  const oldCandidates = await db.prepare(legacyCandidates).bind("vpass", 8).all();
+  const updatedCandidates = await db
+    .prepare(identitySweepCandidatesSql(true))
+    .bind("vpass", 8)
+    .all();
+  expect(updatedCandidates.results).toEqual(oldCandidates.results);
+  expect(updatedCandidates.meta.rows_read).toBeLessThan(oldCandidates.meta.rows_read / 2);
+  console.info("sealed Vpass synthetic D1 rows_read", {
+    legacy: oldCandidates.meta.rows_read,
+    updated: updatedCandidates.meta.rows_read,
+  });
   for (const sql of [
     "UPDATE identity_vpass_bindings SET card_token=card_token",
     "DELETE FROM identity_vpass_bindings",

@@ -53,6 +53,7 @@ export {
   activeRewardSnapshot,
   beginRewardSnapshot,
   claimRewardWriterLease,
+  currentRewardContext,
   oldestBuildingRewardSnapshot,
   releaseRewardWriterLease,
   retireOldRewardSnapshots,

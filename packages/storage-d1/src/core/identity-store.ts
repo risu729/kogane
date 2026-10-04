@@ -1,3 +1,7 @@
+import {
+  EMPTY_IDENTITY_PARSE_SQL as EMPTY_PARSE_SQL,
+  identitySweepCandidatesSql,
+} from "./identity-sweep-sql.ts";
 import type { D1Like } from "../d1.ts";
 import type {
   AccountIdentity,
@@ -30,12 +34,6 @@ export {
   requiredIdentityPolicySql,
 };
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
-const EMPTY_PARSE_SQL = kinds
-  .map(
-    (kind) =>
-      `NOT EXISTS(SELECT 1 FROM ${kind}_observations empty_row WHERE empty_row.parse_run_id=p.id)`,
-  )
-  .join(" AND ");
 
 /** Automatic policy yields to the latest effective decision (migration 0029):
  * an active manual override, or a manual row the log does not describe. */
@@ -488,15 +486,7 @@ export async function identitySweep(
   if (!Number.isInteger(maxRuns) || maxRuns < 1 || maxRuns > 40)
     throw new Error("identity_batch_invalid");
   const candidates = await db
-    .prepare(`SELECT p.id,a.id AS artifact_id,a.source_id,r.producer_id,a.fetch_run_id,
-      ${requiredIdentityPolicySql("a")} AS required_policy,
-      (${EMPTY_PARSE_SQL}) AS is_empty
-    FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN financial_fetch_runs r ON r.id=a.fetch_run_id
-    JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
-    WHERE p.status='ok' AND f.status='success' AND f.failure_count=0 AND (?1 IS NULL OR a.source_id=?1) AND NOT EXISTS(
-      SELECT 1 FROM identity_runs i JOIN identity_run_seals s ON s.identity_run_id=i.id
-      WHERE i.parse_run_id=p.id AND i.policy_version>=${requiredIdentityPolicySql("a")})
-    ORDER BY NOT EXISTS(SELECT 1 FROM published_parse_runs pub WHERE pub.parse_run_id=p.id),p.id LIMIT ?2`)
+    .prepare(identitySweepCandidatesSql(source !== undefined))
     .bind(source ?? null, maxRuns)
     .all<ParseIdentity & { required_policy: number; is_empty: number }>();
   let observations = 0;

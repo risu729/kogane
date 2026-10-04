@@ -72,7 +72,9 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   "services/processor/src/release-adoption.ts": 3,
   // Identity writer: interprets every successful run, published or not.
   // Moved to the shared CORE package by U05; the SQL is unchanged.
-  "packages/storage-d1/src/core/identity-store.ts": 5,
+  "packages/storage-d1/src/core/identity-store.ts": 4,
+  // The historical identity candidate writer query extracted from identity-store.
+  "packages/storage-d1/src/core/identity-sweep-sql.ts": 1,
   // Identity audit: coverage over interpreted runs, not over what readers see.
   "packages/storage-d1/src/core/identity-audit.ts": 2,
   // Operator diagnostics over parse attempts per artifact; no reader path.
