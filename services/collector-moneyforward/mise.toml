@@ -17,16 +17,25 @@ run = "bun test"
 
 [tasks."dry-run"]
 description = "Validate the services/collector-moneyforward deployment without uploading it."
-depends = ["//services/collector-moneyforward:types"]
+depends = ["//services/collector-moneyforward:cf-build", "//services/collector-moneyforward:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 [tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-moneyforward for the release manifest."
-depends = ["//services/collector-moneyforward:types"]
+depends = ["//services/collector-moneyforward:cf-build", "//services/collector-moneyforward:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/moneyforward-worker --config wrangler.jsonc"
 
 [tasks."ci"]
 description = "Every check CI runs for services/collector-moneyforward."
 depends = ["//services/collector-moneyforward:typecheck", "//services/collector-moneyforward:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/collector-moneyforward:types"]
+run = [
+	"./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json",
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-moneyforward-collector-poc --dry-run",
+]

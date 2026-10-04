@@ -9,6 +9,7 @@
   ],
   "type": "module",
   "devDependencies": {
+    "cf": "1.0.0-beta.12",
     "dependency-cruiser": "18.5.0",
     "knip": "6.39.0",
     "typescript": "6.0.3",

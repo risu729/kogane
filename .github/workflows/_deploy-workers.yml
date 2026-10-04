@@ -219,6 +219,22 @@ jobs:
       - name: Install the locked dependencies
         if: steps.decide.outputs.proceed == 'true'
         run: mise run install
+      - name: Stamp the release sha into the deployed configurations
+        # A deployed Worker can only answer "which commit are you" if the sha is
+        # in its configuration, and the pinned deploy Action has no input for a
+        # variable. This writes it into the runner's checkout *before* the
+        # manifest is computed, so the manifest records exactly the
+        # configuration that is uploaded and the re-verification below still
+        # holds (unified plan 11 §6, docs/ci-cd.md § Postcheck).
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          release_tool=(node .github/scripts/release-sha.mjs)
+          if [[ -f tasks/automation/release-sha ]]; then
+            release_tool=(mise run --no-deps automation:release-sha)
+          fi
+          "${release_tool[@]}" --sha "${SHA}"
       - name: Build every deployable bundle
         if: steps.decide.outputs.proceed == 'true'
         run: mise run bundle
@@ -269,22 +285,6 @@ jobs:
             exit 1
           fi
           echo "The production Cloudflare credentials are in scope." | tee -a "${GITHUB_STEP_SUMMARY}"
-      - name: Stamp the release sha into the deployed configurations
-        # A deployed Worker can only answer "which commit are you" if the sha is
-        # in its configuration, and the pinned deploy Action has no input for a
-        # variable. This writes it into the runner's checkout *before* the
-        # manifest is computed, so the manifest records exactly the
-        # configuration that is uploaded and the re-verification below still
-        # holds (unified plan 11 §6, docs/ci-cd.md § Postcheck).
-        if: steps.decide.outputs.proceed == 'true'
-        env:
-          SHA: ${{ inputs.sha }}
-        run: |
-          release_tool=(node .github/scripts/release-sha.mjs)
-          if [[ -f tasks/automation/release-sha ]]; then
-            release_tool=(mise run --no-deps automation:release-sha)
-          fi
-          "${release_tool[@]}" --sha "${SHA}"
       - name: Compute the release manifest
         if: steps.decide.outputs.proceed == 'true'
         env:
@@ -355,6 +355,7 @@ jobs:
           printf 'Left at the commit the ledger records: %s\n' "$(jq -r '[.kept[] | "\(.name)@\(.sha[0:12])"] | join(" ")' "${plan}")" | tee -a "${GITHUB_STEP_SUMMARY}"
           {
             printf 'selected=%s\n' "$(jq -c '.selected' "${plan}")"
+            printf 'cf-selected=%s\n' "$(jq -c '[.workers[] | select(.deployBackend == "cf") | .name]' "${order}")"
             printf 'core-config=%s\n' "$(jq -r '.schema.core | "\(.path)/\(.config)"' "${order}")"
             printf 'core-database=%s\n' "$(jq -r '.schema.core.database' "${order}")"
             printf 'read-config=%s\n' "$(jq -r 'if .schema.read == null then "" else "\(.schema.read.path)/\(.schema.read.config)" end' "${order}")"
@@ -443,7 +444,7 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Mobile Suica collector
         id: deploy-mobile-suica-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mobile-suica-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mobile-suica-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'mobile-suica-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -451,9 +452,21 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Mobile Suica collector with cf
+        id: cf-deploy-mobile-suica-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mobile-suica-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'mobile-suica-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-mobile-suica
+          worker: kogane-mobile-suica-collector-poc
+          build-mode: production
+          deploy-triggers: 'false'
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Money Forward collector
         id: deploy-moneyforward-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'moneyforward-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'moneyforward-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'moneyforward-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -461,9 +474,21 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Money Forward collector with cf
+        id: cf-deploy-moneyforward-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'moneyforward-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'moneyforward-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-moneyforward
+          worker: kogane-moneyforward-collector-poc
+          build-mode: production
+          deploy-triggers: 'false'
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the MyJCB collector
         id: deploy-myjcb-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'myjcb-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'myjcb-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'myjcb-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -471,14 +496,38 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the MyJCB collector with cf
+        id: cf-deploy-myjcb-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'myjcb-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'myjcb-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-myjcb
+          worker: kogane-myjcb-collector-poc
+          build-mode: production
+          deploy-triggers: 'false'
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the SBI Securities collector
         id: deploy-sbi-securities-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-securities-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-securities-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sbi-securities-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
           working-directory: services/collector-sbi-securities
           config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the SBI Securities collector with cf
+        id: cf-deploy-sbi-securities-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-securities-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-securities-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-sbi-securities
+          worker: kogane-sbi-collector-poc
+          build-mode: production
+          deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the SBI Shinsei collector
@@ -513,7 +562,7 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Mizuho collector
         id: deploy-mizuho-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mizuho-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mizuho-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'mizuho-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -521,14 +570,38 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Mizuho collector with cf
+        id: cf-deploy-mizuho-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mizuho-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'mizuho-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-mizuho
+          worker: kogane-mizuho-collector
+          build-mode: production
+          deploy-triggers: 'false'
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Sony Bank collector
         id: deploy-sony-bank-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sony-bank-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sony-bank-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sony-bank-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
           working-directory: services/collector-sony-bank
           config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Sony Bank collector with cf
+        id: cf-deploy-sony-bank-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sony-bank-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sony-bank-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-sony-bank
+          worker: kogane-sony-bank-collector-poc
+          build-mode: production
+          deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the St.George collector
@@ -543,7 +616,7 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Vpass collector
         id: deploy-vpass-json
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpass-json')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpass-json') && !contains(fromJson(steps.select.outputs.cf-selected), 'vpass-json')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -551,9 +624,21 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Vpass collector with cf
+        id: cf-deploy-vpass-json
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpass-json') && contains(fromJson(steps.select.outputs.cf-selected), 'vpass-json')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-vpass
+          worker: kogane-vpass-collector-poc
+          build-mode: production
+          deploy-triggers: 'false'
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the V Point Pay collector
         id: deploy-vpoint-pay-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-pay-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-pay-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-pay-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -561,14 +646,38 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the V Point Pay collector with cf
+        id: cf-deploy-vpoint-pay-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-pay-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-pay-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-vpoint-pay
+          worker: kogane-vpoint-pay-collector-poc
+          build-mode: production
+          deploy-triggers: 'false'
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the V Point collector
         id: deploy-vpoint-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
           working-directory: services/collector-vpoint
           config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the V Point collector with cf
+        id: cf-deploy-vpoint-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-vpoint
+          worker: kogane-vpoint-collector-poc
+          build-mode: production
+          deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Processor
@@ -587,12 +696,26 @@ jobs:
         id: deploy-app
         # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
         # from the job's `steps` context to record, per Worker, what happened.
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app') && !contains(fromJson(steps.select.outputs.cf-selected), 'app')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
           working-directory: services/app
           config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the App with cf
+        id: cf-deploy-app
+        # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
+        # from the job's `steps` context to record, per Worker, what happened.
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app') && contains(fromJson(steps.select.outputs.cf-selected), 'app')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/app
+          worker: kogane-evidence-browser
+          build-mode: production
+          deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Postcheck the public health routes
@@ -733,6 +856,9 @@ jobs:
           if [[ -f tasks/automation/release-ledger ]]; then
             release_tool=(mise run --no-deps automation:release-ledger)
           fi
+          # Older rollback helpers only know deploy-<name>. Never map skipped aliases.
+          STEPS_JSON=$(jq -c 'reduce (to_entries[] | select(.key | startswith("cf-deploy-")) | select(.value.outcome != "skipped")) as $step (.; .[$step.key | sub("^cf-deploy-"; "deploy-")] = $step.value)' <<<"${STEPS_JSON}")
+          export STEPS_JSON
           "${release_tool[@]}" progress \
             --record "${RUNNER_TEMP}/release-record.json" \
             --out "${RUNNER_TEMP}/release-progress.json"

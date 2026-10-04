@@ -51,6 +51,7 @@ export interface DeployEntry {
   healthIdentity?: string;
   /** Explicit RPC dependency order (ADR 0039); empty means no dependency. */
   after?: string[];
+  deployBackend?: "cf";
   bundleTask?: string;
   bundleDir?: string;
 }
@@ -219,7 +220,11 @@ export function workflowSteps(text: string): { name: string; body: string }[] {
 /** The production deploy steps of `_deploy-workers.yml`, in file order. */
 export function deploySteps(text: string): DeployStep[] {
   return workflowSteps(text)
-    .filter((step) => step.body.includes("risu729/wrangler-deploy-action@"))
+    .filter(
+      (step) =>
+        step.body.includes("risu729/wrangler-deploy-action@") &&
+        !field(step.body, "id").startsWith("cf-deploy-"),
+    )
     .map((step) => ({
       name: step.name,
       id: field(step.body, "id"),

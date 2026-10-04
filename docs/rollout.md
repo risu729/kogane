@@ -247,15 +247,17 @@ rename, because that would make the move unreviewable.
 - [ ] Environment **`production`** (Settings → Environments → New environment).
       Deployment branch rules may be left open: the workflow already refuses a
       commit that is not on the default branch. Required reviewers are optional.
-- [ ] Environment **secret** `CLOUDFLARE_API_TOKEN`, scoped to the account that
-      holds the Workers, with `Workers Scripts: Edit`, `D1: Edit`,
-      `Workers R2 Storage: Read`, `Containers: Edit`, `Connectivity Directory: Admin` and
-      `Account Settings: Read`. The Container permission is required by the
-      GlobalPass and SBI Shinsei deployments; Connectivity Directory Admin is
-      required by their existing direct Tunnel VPC bindings. Add `Queues: Edit` or
-      `Workers R2 Storage: Edit` **only** when a deployment must create one;
-      existing R2 bindings need Read for Wrangler's metadata check. No Workers KV, no
-      Tail, no zone permissions.
+- [ ] Environment **secret** `CLOUDFLARE_API_TOKEN`, with Editor on the 16
+      individual deployed Workers, plus account `D1: Edit`, `Queues: Edit`,
+      `Containers: Edit` and `Connectivity Directory: Admin`. D1 applies CORE/READ
+      migrations; Queues updates the existing Processor consumer; Containers
+      publishes GlobalPass/SBI Shinsei/St.George images and applications; direct
+      Tunnel VPC bindings require Connectivity Directory Admin. Existing
+      Worker-bound R2/D1 resources need no extra storage role
+      ([binding authorization](https://developers.cloudflare.com/workers/authorization/#bindings)).
+      Account Settings Read and R2 Storage Read were removed on 2026-10-05;
+      verify through a full changed-commit release, since an already-recorded
+      commit can end as "nothing to do". No Previews, KV, Tail or zone permission.
 - [ ] Environment (or repository) **variable** `CLOUDFLARE_ACCOUNT_ID` — the
       account id already recorded in `infra/resources.json`.
 

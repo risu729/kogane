@@ -28,7 +28,7 @@ run = "./node_modules/.bin/vitest run"
 description = "Validate the services/app deployment without uploading it."
 # The production config serves built assets, so the dry run builds them first.
 # The synthetic export remains a local test/typecheck fixture.
-depends = ["//services/app:types", "//apps/web:build-production", "//experiments/observation-pipeline-local:export-demo"]
+depends = ["//services/app:cf-build", "//services/app:types", "//apps/web:build-production", "//experiments/observation-pipeline-local:export-demo"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.test.jsonc",
@@ -36,9 +36,18 @@ run = [
 
 [tasks."bundle"]
 description = "Emit the deployable bundle of services/app for the release manifest."
-depends = ["//services/app:types", "//apps/web:build-production"]
+depends = ["//services/app:cf-build", "//services/app:types", "//apps/web:build-production"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/app --config wrangler.jsonc"
 
 [tasks."ci"]
 description = "Every check CI runs for services/app."
 depends = ["//services/app:typecheck", "//services/app:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/app:types", "//apps/web:build-production"]
+run = [
+	"./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json",
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-evidence-browser --dry-run",
+]

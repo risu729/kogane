@@ -20,16 +20,25 @@ run = [
 
 [tasks."dry-run"]
 description = "Validate the services/collector-vpoint-pay deployment without uploading it."
-depends = ["//services/collector-vpoint-pay:types"]
+depends = ["//services/collector-vpoint-pay:cf-build", "//services/collector-vpoint-pay:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 [tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-vpoint-pay for the release manifest."
-depends = ["//services/collector-vpoint-pay:types"]
+depends = ["//services/collector-vpoint-pay:cf-build", "//services/collector-vpoint-pay:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/vpoint-pay-worker --config wrangler.jsonc"
 
 [tasks."ci"]
 description = "Every check CI runs for services/collector-vpoint-pay."
 depends = ["//services/collector-vpoint-pay:typecheck", "//services/collector-vpoint-pay:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/collector-vpoint-pay:types"]
+run = [
+	"./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json",
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-vpoint-pay-collector-poc --dry-run",
+]

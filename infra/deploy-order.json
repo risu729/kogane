@@ -44,7 +44,8 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "mobile-suica-worker:bundle",
       "bundleDir": "dist/mobile-suica-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "moneyforward-worker",
@@ -58,7 +59,8 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "moneyforward-worker:bundle",
       "bundleDir": "dist/moneyforward-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "myjcb-worker",
@@ -72,7 +74,8 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "myjcb-worker:bundle",
       "bundleDir": "dist/myjcb-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "sbi-securities-worker",
@@ -86,7 +89,8 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "sbi-securities-worker:bundle",
       "bundleDir": "dist/sbi-securities-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "sbi-shinsei-worker",
@@ -141,7 +145,8 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "mizuho-worker:bundle",
       "bundleDir": "dist/mizuho-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "sony-bank-worker",
@@ -155,7 +160,8 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "sony-bank-worker:bundle",
       "bundleDir": "dist/sony-bank-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "st-george-worker",
@@ -183,7 +189,8 @@
       "healthIdentity": "service",
       "bundleTask": "vpass-json:bundle",
       "bundleDir": "dist/vpass-json",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "vpoint-pay-worker",
@@ -197,7 +204,8 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "vpoint-pay-worker:bundle",
       "bundleDir": "dist/vpoint-pay-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "vpoint-worker",
@@ -211,7 +219,8 @@
       "healthIdentity": "schemaVersion",
       "bundleTask": "vpoint-worker:bundle",
       "bundleDir": "dist/vpoint-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "processor",
@@ -253,7 +262,8 @@
       "healthIdentity": "releaseSha",
       "bundleTask": "app:bundle",
       "bundleDir": "dist/app",
-      "after": ["processor"]
+      "after": ["processor"],
+      "deployBackend": "cf"
     },
     {
       "name": "app-test",

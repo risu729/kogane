@@ -16,14 +16,23 @@ run = ["bun test ./test", "./node_modules/.bin/vitest run"]
 
 [tasks.dry-run]
 description = "Validate the Mizuho Worker without uploading it."
-depends = ["//services/collector-mizuho:types"]
+depends = ["//services/collector-mizuho:cf-build", "//services/collector-mizuho:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run"
 
 [tasks."bundle"]
 description = "Build the Mizuho collector deployment bundle."
-depends = ["//services/collector-mizuho:types"]
+depends = ["//services/collector-mizuho:cf-build", "//services/collector-mizuho:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/mizuho-worker"
 
 [tasks.ci]
 description = "Run Mizuho collector verification."
 depends = ["//services/collector-mizuho:typecheck", "//services/collector-mizuho:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/collector-mizuho:types"]
+run = [
+	"./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json",
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-mizuho-collector --dry-run",
+]
