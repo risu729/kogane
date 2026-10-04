@@ -2,7 +2,7 @@
 
 `hk check --all` is the common verification entrypoint for local development and
 GitHub Actions. It runs lint and formatting checks, repository guards, Knip,
-every workspace's typechecks, tests and builds, then every Worker dry run.
+every workspace's typechecks, tests and builds, and every Worker dry run.
 `CI Check` remains the required merge status.
 
 **mise is the only task runner.** No `package.json` carries a `scripts` field.
@@ -84,10 +84,18 @@ mise run //packages/domain:typecheck
 mise run dry-run                      # every validated Worker configuration
 ```
 
-The root `checks` task composes `ci:root` and all workspace `ci` tasks, followed
-by `dry-run`. They run in parallel, so no test may depend on timing that only
-holds on an idle machine. The processor tests read Miniflare's synchronous
-Node-side proxy through `services/processor/test/miniflare-sync-proxy.ts`,
+The root `checks` task composes `ci:root`, all workspace `ci` tasks and
+`dry-run` in one dependency graph. Each dry run declares its own preparation
+dependencies, so independent validations overlap and shared types/client builds
+run once. There is no separate post phase that repeats those prerequisites.
+They run in parallel, so no test may depend on timing that only holds on an idle
+machine. The processor test task uses `bun test --parallel=2`: two file workers
+with a fresh global and preload for every file, while tests within each file
+remain sequential. Every discovered file stays in the suite; there is no
+changed-file selection, shard selector, retry or new test exclusion. The bound
+leaves capacity for the other workspace tasks sharing the runner.
+
+The processor tests read Miniflare's synchronous Node-side proxy through `services/processor/test/miniflare-sync-proxy.ts`,
 preloaded by `services/processor/bunfig.toml`: under that load Miniflare's
 blocked caller could read its port before the helper thread's reply was on it,
 and that one early read failed every later call of the file. hk's `repository` check
@@ -162,7 +170,9 @@ installation still needs network access.
 The workflow runs for every pull request and every push to `main`, including
 documentation-only changes, and supports manual/reusable invocation. It has no
 path filters: skipping the entire workflow would leave a required check pending.
-There are no parallel Actions matrices duplicating the mise task graph.
+There are no parallel Actions matrices duplicating the mise task graph. File
+workers share the existing runner; they do not multiply hosted runner setup or
+runner minutes. The complete graph runs on `main` as well as on pull requests.
 
 `CI Check` treats failure, cancellation and unexpected skips as failures. Its
 name and the existing repository rule are unchanged. Successful CI on a push
@@ -171,3 +181,34 @@ request check never gains production credentials.
 
 The model follows the official [hk CI guide](https://hk.jdx.dev/ci.html) and
 [mise monorepo tasks](https://mise.jdx.dev/tasks/monorepo.html).
+
+## Waiting-time baseline and limits
+
+[PR #417 CI run 37178388756](https://github.com/risu729/kogane/actions/runs/37178388756)
+on 2026-10-04 passed with a 632-second `Checks` job and a 622-second check step.
+Its mise verification graph took 606.43 seconds. Processor tests dominated that
+graph: 607 tests across 64 files completed sequentially in 510.40 seconds
+(606 passed; the existing opt-in full-scale timing benchmark was skipped).
+The longest individual file was approximately 61 seconds; test-file timestamps, rather than
+isolated benchmarks, provide that estimate. Other substantial tasks were the
+local observation pipeline (123.88 seconds), app tests (111.08 seconds), and
+Chromium installation (103.78 seconds).
+
+The old post phase started only after processor tests finished and took another
+approximately 62 seconds. It regenerated 19 Worker type declarations and the
+production client before validating deployments. One graph removes that serial
+tail and those repeated preparations; two processor file workers split the
+serial file workload without changing the suite or its existing benchmark
+skip policy. Native execution-plan tests check that every declared Worker type and client build command is scheduled
+once. Existing manifest and generated-input guards still enforce full workspace,
+Worker configuration and preparation coverage, and the required status still
+rejects failure, cancellation and unexpected skips.
+
+These are structural changes, not a measured speedup guarantee. Worker startup,
+per-file import isolation, CPU/memory contention, container builds, dependency
+installation and hosted runner queues can limit the gain. The single `Checks`
+job continues to consume one runner; no additional hosted jobs are introduced.
+Compare its elapsed duration, test/file counts and total job duration with this
+baseline on the new pull request and its merged `main` run before claiming a
+measured reduction. Changing task scheduling does not weaken CodeQL, signature
+verification, release gates or merged-result validation.

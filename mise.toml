@@ -140,9 +140,10 @@ description = "Validate every Worker deployment without uploading it."
 depends = ["//services/...:dry-run", "//experiments/...:dry-run"]
 
 [tasks.checks]
-description = "Run repository and workspace checks, then deployment dry runs; called by hk."
-depends = ["ci:root", "//apps/...:ci", "//experiments/...:ci", "//packages/...:ci", "//services/...:ci"]
-depends_post = ["dry-run"]
+description = "Run every repository, workspace and deployment check; called by hk."
+# Dry runs own their preparation dependencies. Scheduling them here shares the
+# same type/build tasks and avoids repeating them in a separate post graph.
+depends = ["ci:root", "//apps/...:ci", "//experiments/...:ci", "//packages/...:ci", "//services/...:ci", "dry-run"]
 
 [tasks.verify]
 description = "Run the complete hk check suite."

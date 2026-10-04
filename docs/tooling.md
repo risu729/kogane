@@ -40,7 +40,9 @@ fixed toolchain:
   until then that workspace is type-checked by TypeScript 6.0.3.
 - **hk** is the complete verification entrypoint: `hk check --all` runs the
   shared lint presets plus mise tasks for repository guards, Knip, typechecks,
-  tests, builds and Worker dry runs. `hk fix` and the staged pre-commit hook
+  tests, builds and Worker dry runs in one native dependency graph. Shared
+  preparation runs once, and processor tests use two isolated file workers
+  with every file included. `hk fix` and the staged pre-commit hook
   retain only the lint/format steps.
 - **Vitest** with `@cloudflare/vitest-plugin` runs the Workers-runtime tests;
   **Wrangler** generates Worker types and validates deployments with
