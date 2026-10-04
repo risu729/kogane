@@ -39,7 +39,8 @@ RPC surface using the direct API. Concurrent startup calls share one promise.
 After constructor recovery, allocation, inactivity-timeout configuration,
 readiness GETs, and health-body cancellation share a hard 20-second deadline.
 Each allocation/readiness await is bounded; a late result cannot resume a
-canceled or timed-out startup. The old SDK
+canceled or timed-out startup. A late health response is canceled without
+extending the deadline or affecting a newer process. The old SDK
 used nominal 8-second allocation and 20-second readiness retry budgets; this
 changes the allocation budget and bounds actual startup rather than reproducing
 its retry-count timing. Application POSTs are sent

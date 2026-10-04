@@ -104,16 +104,7 @@ export class ContainerController {
       }
       if (generation !== this.generation) throw new Error("container-start-canceled");
       try {
-        const response = await this.beforeDeadline(
-          this.process.getTcpPort(8080).fetch(
-            new Request("http://container/health", {
-              signal: AbortSignal.timeout(
-                Math.max(1, Math.min(this.timing.pingMs, deadline - Date.now())),
-              ),
-            }),
-          ),
-          deadline,
-        );
+        const response = await this.healthCheck(deadline);
         if (response.body) await this.beforeDeadline(response.body.cancel(), deadline);
         if (!response.ok) throw new Error("container-health-unavailable");
         if (generation !== this.generation) throw new Error("container-start-canceled");
@@ -137,6 +128,23 @@ export class ContainerController {
     const error = new StartupTimeout();
     this.error(error);
     throw error;
+  }
+  private async healthCheck(deadline: number): Promise<Response> {
+    const pending = this.process.getTcpPort(8080).fetch(
+      new Request("http://container/health", {
+        signal: AbortSignal.timeout(
+          Math.max(1, Math.min(this.timing.pingMs, deadline - Date.now())),
+        ),
+      }),
+    );
+    try {
+      return await this.beforeDeadline(pending, deadline);
+    } catch (error) {
+      // A response can arrive at or after the deadline. Release its port stream
+      // without waiting for cleanup or letting it affect a newer process.
+      void pending.then((response) => response.body?.cancel()).catch(() => {});
+      throw error;
+    }
   }
   private pause(deadline: number): Promise<void> {
     return new Promise((resolve) =>

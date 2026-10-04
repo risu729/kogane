@@ -536,4 +536,33 @@ describe("direct container lifecycle", () => {
     await next;
     expect(f.counts().starts).toBe(2);
   });
+  test("a late health response is canceled without affecting a newer process", async () => {
+    for (const failedCancel of [false, true]) {
+      const f = fixture();
+      const health = deferred<Response>();
+      let canceled = 0;
+      f.check(() => health.promise);
+      const first = f.controller.startAndWaitForPorts().catch((error: Error) => error.message);
+      const outcome = await Promise.race([first, Bun.sleep(120).then(() => "still pending")]);
+      expect(outcome).toBe("container-start-timeout");
+      await f.controller.destroy();
+      f.check(async () => new Response("ready"));
+      await f.controller.startAndWaitForPorts();
+      health.resolve(
+        new Response(
+          new ReadableStream({
+            cancel() {
+              canceled++;
+              if (failedCancel) throw new Error("private-cancel-failure");
+            },
+          }),
+        ),
+      );
+      await Bun.sleep(0);
+      expect(canceled).toBe(1);
+      expect(f.started).toHaveLength(1);
+      expect(f.errors).toHaveLength(1);
+      expect(f.counts().posts).toBe(0);
+    }
+  });
 });
