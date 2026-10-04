@@ -576,3 +576,164 @@ test("stage-owned skipped results, deferred flags and refused outcomes stay dist
   expect(JSON.stringify(probe)).not.toContain("private");
   expectCountsOnly(probe);
 });
+
+test("throwing metadata accessors cannot change source results or reject the observer", async () => {
+  const failure = new Error("private metadata failure");
+  const result = {
+    success: true,
+    get meta(): Record<string, unknown> {
+      throw failure;
+    },
+  };
+  const meter = new OperationMeter();
+  const sync = meterD1({ prepare: () => ({ run: () => result }) }, meter);
+  expect(sync.prepare().run()).toBe(result);
+  const promise = Promise.resolve(result);
+  const asyncDb = meterD1({ prepare: () => ({ all: () => promise }) }, meter);
+  expect(asyncDb.prepare().all()).toBe(promise);
+  expect(await promise).toBe(result);
+  // Flush observer reactions; Bun also fails the run for unhandled rejections.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(meter.summary()).toMatchObject({
+    d1Statements: 2,
+    d1SettledStatements: 2,
+    d1FailedStatements: 0,
+    d1RowsRead: { reported: null, statements: 0, missing: 2 },
+    d1RowsWritten: { reported: null, statements: 0, missing: 2 },
+  });
+  expect(JSON.stringify(meter.summary())).not.toContain("private");
+});
+
+test("throwing individual metadata fields remain missing while valid fields are covered", async () => {
+  const result = {
+    get success(): boolean {
+      throw new Error("private status");
+    },
+    meta: {
+      get rows_read(): number {
+        throw new Error("private rows");
+      },
+      rows_written: 0,
+      duration: 0.5,
+      total_attempts: 1,
+    },
+  };
+  const meter = new OperationMeter();
+  const db = meterD1({ batch: (_statements: object[]) => Promise.resolve([result]) }, meter);
+  const entries = await db.batch([{}]);
+  expect(entries[0]).toBe(result);
+  expect(meter.summary()).toMatchObject({
+    d1Statements: 1,
+    d1SettledStatements: 1,
+    d1FailedStatements: 0,
+    d1RowsRead: { reported: null, statements: 0, missing: 1 },
+    d1RowsWritten: { reported: 0, statements: 1, missing: 0 },
+    d1SqlDurationMs: { reported: 0.5, statements: 1, missing: 0 },
+    d1Retries: { reported: 0, statements: 1, missing: 0 },
+  });
+  expect(JSON.stringify(meter.summary())).not.toContain("private");
+});
+
+test("a failed queue acknowledgement counts the lane exception and only the successful retry", async () => {
+  const context = invocationContext();
+  const lines: string[] = [];
+  let acknowledgements = 0;
+  let retries = 0;
+  await consumeTerminalNotifications(
+    [
+      {
+        body: { invalid: true },
+        ack() {
+          acknowledgements += 1;
+          throw new Error("Too many subrequests. private queue detail");
+        },
+        retry() {
+          retries += 1;
+        },
+      },
+      message({ invalid: true }),
+    ],
+    {} as Env,
+    context,
+    (line) => lines.push(line),
+  );
+  expect([acknowledgements, retries]).toEqual([1, 1]);
+  expect(lines.map((line) => JSON.parse(line).event)).toEqual([
+    "collection_notification_failed",
+    "collection_notification",
+  ]);
+  expect(invocationProbe("queue", new OperationMeter(), context)).toMatchObject({
+    limitErrors: 1,
+    lanes: {
+      collection_notification: {
+        runs: 0,
+        skipped: 1,
+        failed: 1,
+        limitErrors: 1,
+        acknowledgements: 1,
+        retries: 1,
+        resultOutcomes: { flag_off: 1 },
+      },
+    },
+  });
+  expect(lines.join("\n")).not.toContain("private");
+});
+
+test("thenable introspection and observer setup never replace a source result or error", async () => {
+  const failure = new Error("private setup error");
+  const result = {
+    success: true,
+    get then(): unknown {
+      throw failure;
+    },
+  };
+  const meter = new OperationMeter();
+  const db = meterD1({ prepare: () => ({ run: () => result }) }, meter);
+  expect(db.prepare().run()).toBe(result);
+  const setupFailure = {
+    then() {
+      throw failure;
+    },
+  };
+  const bucket = meterBucket(
+    {
+      get: () => setupFailure,
+      head() {
+        throw failure;
+      },
+    },
+    meter,
+  );
+  expect(bucket.get()).toBe(setupFailure);
+  try {
+    bucket.head();
+    throw new Error("expected source failure");
+  } catch (error) {
+    expect(error).toBe(failure);
+  }
+  const value = { success: true, meta: { rows_read: 1 } };
+  let reads = 0;
+  const thenable = {
+    get then() {
+      reads += 1;
+      if (reads > 1) throw failure;
+      return (fulfilled: (value: unknown) => void) => {
+        fulfilled(value);
+        fulfilled(value); // A malformed thenable cannot double-count settlement.
+      };
+    },
+  };
+  const once = meterD1({ prepare: () => ({ all: () => thenable }) }, meter);
+  expect(once.prepare().all()).toBe(thenable);
+  expect(reads).toBe(1);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(meter.summary()).toMatchObject({
+    d1Statements: 2,
+    d1SettledStatements: 2,
+    d1FailedStatements: 0,
+    d1RowsRead: { reported: 1, statements: 1, missing: 1 },
+    r2Operations: 2,
+    r2SettledOperations: 1,
+    r2FailedOperations: 1,
+  });
+});

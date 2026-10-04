@@ -131,14 +131,39 @@ class ReportedMetric {
   }
 }
 
+/** Metadata is observational: a malformed accessor is unavailable, never a source failure. */
+function observedProperty(value: unknown, property: PropertyKey): unknown {
+  if (value === null || (typeof value !== "object" && typeof value !== "function"))
+    return undefined;
+  try {
+    return Reflect.get(value, property);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Observe completion, preserving the original return value, Promise and errors. */
 function observeOperation(
   call: () => unknown,
   settled: (result: unknown, durationMs: number, rejected: boolean) => void,
 ): unknown {
-  const started = performance.now();
-  const done = (result: unknown, rejected: boolean) =>
-    settled(result, Math.max(0, performance.now() - started), rejected);
+  let started: number;
+  try {
+    started = performance.now();
+  } catch {
+    return call();
+  }
+  let completed = false;
+  const done = (result: unknown, rejected: boolean) => {
+    if (completed) return;
+    completed = true;
+    try {
+      settled(result, Math.max(0, performance.now() - started), rejected);
+    } catch {
+      // Observer failures must neither replace the source return/error nor
+      // reject the detached Promise reaction. Keep no exception text.
+    }
+  };
   let result: unknown;
   try {
     result = call();
@@ -146,15 +171,18 @@ function observeOperation(
     done(undefined, true);
     throw error;
   }
-  if (
-    result !== null &&
-    typeof result === "object" &&
-    typeof (result as { then?: unknown }).then === "function"
-  ) {
-    void Promise.resolve(result).then(
-      (value) => done(value, false),
-      () => done(undefined, true),
-    );
+  const then = observedProperty(result, "then");
+  if (typeof then === "function") {
+    try {
+      // Read then once: re-assimilating a thenable may invoke its accessor
+      // again and manufacture a rejection that the source never returned.
+      Reflect.apply(then, result, [
+        (value: unknown) => done(value, false),
+        () => done(undefined, true),
+      ]);
+    } catch {
+      // Unexpected observer setup is unavailable, without changing the call.
+    }
   } else done(result, false);
   return result;
 }
@@ -189,21 +217,17 @@ export class OperationMeter {
         const entry =
           metadata === "batch"
             ? Array.isArray(result)
-              ? result[index]
+              ? observedProperty(result, index)
               : undefined
             : metadata === "result"
               ? result
               : undefined;
-        const record =
-          entry !== null && typeof entry === "object"
-            ? (entry as { success?: unknown; meta?: Record<string, unknown> })
-            : undefined;
-        if (rejected || record?.success === false) this.#d1FailedStatements += 1;
-        const meta = record?.meta;
-        this.#rowsRead.add(meta?.["rows_read"]);
-        this.#rowsWritten.add(meta?.["rows_written"]);
-        this.#sqlDuration.add(meta?.["duration"], false);
-        const attempts = meta?.["total_attempts"];
+        if (rejected || observedProperty(entry, "success") === false) this.#d1FailedStatements += 1;
+        const meta = observedProperty(entry, "meta");
+        this.#rowsRead.add(observedProperty(meta, "rows_read"));
+        this.#rowsWritten.add(observedProperty(meta, "rows_written"));
+        this.#sqlDuration.add(observedProperty(meta, "duration"), false);
+        const attempts = observedProperty(meta, "total_attempts");
         if (typeof attempts === "number" && Number.isSafeInteger(attempts) && attempts >= 1)
           this.#retries.add(attempts - 1);
       }
