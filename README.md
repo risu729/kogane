@@ -5,85 +5,12 @@ brokers, exchanges, and reward programs, and keep it re-processable so that
 balances, valuations, P&L, and tax views can be recomputed later under
 different rules.
 
-- [Design](docs/design.md)
-- [Agent instructions](AGENTS.md)
-- [ADR 0001: provenance classification plus domain axes](docs/adr/0001-domain-axes.md)
-- [ADR 0002: card purchases per provider row, one live holder per key](docs/adr/0002-card-purchase-recognition.md)
-- [ADR 0003: relative period labels are evidence](docs/adr/0003-relative-period-labels.md)
-- [ADR 0004: payment-type shapes from production evidence](docs/adr/0004-payment-type-shapes-from-evidence.md)
-- [ADR 0005: MyJCB statement state from the page](docs/adr/0005-myjcb-statement-state-from-page.md)
-- [ADR 0006: reconciliation lane scope](docs/adr/0006-reconciliation-lane-scope.md)
-- [ADR 0007: MyJCB statement identity by the named payment month](docs/adr/0007-myjcb-statement-identity.md)
-- [ADR 0008: repair lane throughput and identity pairing](docs/adr/0008-repair-lane-throughput.md)
-- [ADR 0009: lane tick records are operational state](docs/adr/0009-lane-tick-records.md)
-- [ADR 0010: terminal registration operation budget](docs/adr/0010-terminal-registration-budget.md)
-- [ADR 0011: keyed ownership CTEs](docs/adr/0011-keyed-ownership-ctes.md)
-- [ADR 0012: Mizuho identity policy version 2](docs/adr/0012-mizuho-identity-policy-v2.md)
-- [ADR 0013: agent read access to card purchases](docs/adr/0013-agent-card-purchase-read.md)
-- [ADR 0015: source authority v2 names CORE source ids](docs/adr/0015-source-authority-v2.md)
-- [ADR 0016: MyJCB pending statements keyed by payment month, current while their position shows them](docs/adr/0016-myjcb-pending-statement-slots.md)
-- [ADR 0017: card purchase review command kinds](docs/adr/0017-card-purchase-review-commands.md)
-- [ADR 0018: SBI Shinsei as the second bank debit adapter (proposed)](docs/adr/0018-sbi-shinsei-bank-debit-adapter.md)
-- [ADR 0019: reported state on a date](docs/adr/0019-dated-reported-state.md)
-- [ADR 0020: prices are provider observations promoted by rule (proposed)](docs/adr/0020-price-promotion-by-rule.md)
-- [ADR 0021: collectors state the registration contract](docs/adr/0021-collector-registration-contract.md)
-- [ADR 0022: parser datasets for registered shared-R2 artifacts (proposed)](docs/adr/0022-registration-artifact-datasets.md)
-- [ADR 0023: the Vpass collector writes its own trusted card binding](docs/adr/0023-vpass-collector-card-binding.md)
-- [ADR 0024: the collection scan does not spend registrations on judged terminals](docs/adr/0024-collection-scan-judged-terminals.md)
-- [ADR 0025: the MyJCB metadata extractor reads both manifest shapes (proposed)](docs/adr/0025-myjcb-shared-manifest-metadata.md)
-- [ADR 0026: a collector's unit coverage is a claim about what the run set out to collect (proposed)](docs/adr/0026-collector-unit-coverage.md)
-- [ADR 0027: the MoneyForward collector derives the account identity the parser requires (proposed)](docs/adr/0027-moneyforward-collector-account-identity.md)
-- [ADR 0028: the SBI Shinsei parsers accept the stored captures' shapes, with the unknowns kept as reasons (proposed; amended for parser 1.0.2)](docs/adr/0028-sbi-shinsei-observed-capture-shapes.md)
-- [ADR 0029: data classification for central storage; Vpass and MoneyForward identities derived without a secret (proposed)](docs/adr/0029-data-classification-and-unkeyed-identity.md)
-- [ADR 0031: the owner's SBI Shinsei stage category, as the same run states it, selects the FX board tier (proposed)](docs/adr/0031-sbi-shinsei-stage-category-fx-tier.md)
-- [ADR 0032: the card provider's stated debit account is settlement evidence, proposed and never accepted by rule (proposed)](docs/adr/0032-provider-stated-debit-accounts.md)
-- [Next-milestone plan (proposed)](docs/plans/2026-09-next-milestone.md)
-- [Domain contracts (`packages/domain`)](docs/domain-contracts.md)
-- [Package layout and import boundaries](docs/package-layout.md)
-- [Evidence collection](docs/collection.md)
-- [Raw evidence store](docs/raw-store.md)
-- [Collection contract (`packages/collection`)](docs/collection-contract.md)
-- [Evidence ingest contract](docs/evidence-contract.md)
-- [Observation layer](docs/observations.md)
-- [Parser coverage contract](docs/parser-coverage.md)
-- [Observation job lanes and scheduled stages](docs/observation-lanes.md)
-- [Publication gate: adopted parse results](docs/publication-gate.md)
-- [Release adoption, candidate results and rollback](docs/release-adoption.md)
-- [Decision log, identity commands and read modes](docs/decision-log.md)
-- [Change lifecycle: plan, simulate, approve, commit](docs/change-lifecycle.md)
-- [Balance read model](docs/balance-read-model.md)
-- [Fixed projection input, snapshot identity and completion](docs/projection-input.md)
-- [CORE storage (`packages/storage-d1`)](docs/storage-d1.md)
-- [The READ database](docs/read-model-d1.md)
-- [Runbook: rebuilding the READ database](docs/read-rebuild-runbook.md)
-- [Economic events, allocations and reconciliation](docs/economic-events.md)
-- [Card statement settlement review](docs/card-settlements.md)
-- [Points, miles and prepaid balances](docs/rewards.md)
-- [Prices, calculation policies and report artifacts](docs/calculation-and-reports.md)
-- [Read model (`packages/read-model`)](docs/read-model.md)
-- [Evidence browser](docs/evidence-browser.md)
-- [Agent API and the shared query service](docs/agent-api.md)
-- [Operations API (`/api/ops/v1`) and MCP parity](docs/ops-api.md)
-- [The Processor: shared-R2 terminals, registration and job lanes](docs/processor.md)
-- [Frontend stack and API handoff](docs/frontend.md)
-- [Development checks and CI](docs/ci.md)
-- [CI/CD automation: auto-merge and production deploys](docs/ci-cd.md)
-- [Infrastructure ledgers: resources, CORE schema, dependencies, retention](docs/infra-ledgers.md)
-- [Operations: health signals, load, retention and drills](docs/operations.md)
-- [Rollout: every flag, its prerequisites, order and rollback](docs/rollout.md)
-- [Runbook: retiring the legacy ingest, importer and buckets](docs/legacy-retirement.md)
-- [Authenticated collectors](docs/authenticated-collectors.md)
-- [Credential delivery](docs/credentials.md)
-- [Library decisions](docs/libraries.md)
-- [Existing tools and reuse](docs/tooling.md)
-- [Prior art: self-hosted finance software](docs/prior-art.md)
-- [Vpass aggregator alternatives](docs/vpass-aggregators.md)
-- [Vpass Android app API](docs/vpass-android-api.md)
-- [Account and source inventory](docs/account-inventory.md)
-- [Direct source policy](docs/source-policy.md)
-- [Source research board](docs/source-research.md)
-- [Per-source research records](docs/sources/README.md)
+- [Documentation index](docs/README.md)
+- [Current implementation and limits](docs/current-status.md)
 - [Roadmap](docs/roadmap.md)
+- [Design](docs/design.md)
+- [Architecture decision records](docs/adr/README.md)
+- [Agent instructions](AGENTS.md)
 
 ## Product status and next milestone
 
@@ -93,11 +20,11 @@ pure calculation functions do not yet provide complete transaction matching,
 portfolio valuation, cost basis, P&L or tax reporting.
 
 The first [card settlement review](docs/card-settlements.md) connects authoritative
-**Vpass/MyJCB statement totals to SMBC bank debits**. Operators can review,
+**Vpass/MyJCB statement totals to SMBC and SBI Shinsei bank debits**. Operators can review,
 accept, reject and withdraw a correspondence while preserving evidence and
 history. Unknown ownership or stale evidence blocks acceptance; payment allocation
-adds no duplicate cash movement or purchase expense. Complete purchase-event
-recognition, other bank adapters, partial payments and refunds remain to implement.
+adds no duplicate cash movement or purchase expense. Source coverage, additional
+bank adapters, partial payments and refund allocation remain incomplete.
 
 [Card purchase recognition](docs/economic-events.md#card-purchase-recognition)
 is the first purchase-event writer: on in production since 2026-09-24
@@ -122,6 +49,11 @@ settlement was accepted, to the bank debit. Captured, pending, refund and
 unresolved figures stay apart, a statement total is shown beside them but never
 compared with them, and a settlement adds no purchase expense. An empty list is
 not proof that there were no purchases.
+
+[Schedule administration](docs/schedules.md) connects alarm settings, public
+maintenance revisions and execution history. Maintenance can be edited through
+the operator HTTP API; research is not automatically refreshed. MCP code exists,
+but agent grants are empty and maintenance has no MCP tool.
 
 ## Getting started
 
@@ -153,6 +85,8 @@ each of them needs, and why, is in the
 - [SBI VC TRADE](services/collector-sbi-vc-trade/README.md)
   (and its [local read-only client](packages/sbi-vc-trade-client/README.md))
 - [Sony銀行](services/collector-sony-bank/README.md)
+- [みずほ銀行](services/collector-mizuho/README.md)
+- [St.George](services/collector-st-george/README.md)
 - [三井住友銀行 SMBCダイレクト](services/collector-smbc-direct/README.md)
 - [PRESTIA GLOBAL PASS](services/collector-globalpass/README.md)
 - [MyJCB](services/collector-myjcb/README.md)
@@ -179,5 +113,3 @@ how to read it back are in [`docs/research/`](docs/research/).
 - [OCI/WSL Vpass browser comparison](docs/research/oci-browser.md)
 - [Camoufox Windows/macOS fingerprint controls](docs/research/camoufox.md)
 - [Kameleo Windows Chrome container control](docs/research/kameleo.md)
-
-- [Schedule administration](docs/schedules.md): alarms, public maintenance windows and execution history.

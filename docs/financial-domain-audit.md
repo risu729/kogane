@@ -1,5 +1,10 @@
 # 金融データの意味の監査（2026-09-08）
 
+> Historical record: 2026-09-08. Scope, counts, resources and rollout
+> instructions below describe that record, not a current production check.
+> Use [current status](current-status.md), [rollout controls](rollout.md) and
+> the [documentation index](README.md) for maintained references.
+
 表示モデルは観測の格納テーブル名ではなく、その記録が何を測っているかで決める。A/Bの値を保持し、根拠のあるC解釈として追加する。ユーザーの合計や税務値を、異なる意味の観測を足して作らない。
 
 | 種類       | 例                                           | 同一視しないもの                   |

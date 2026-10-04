@@ -7,8 +7,10 @@ unconditional permanent storage) and AR18 (protecting the record of truth
 treated as forbidding a fast derived read model).
 
 Nothing here concludes anything about tax, and nothing fetches a price from
-outside. Everything below was exercised locally against synthetic data; no
-production claim is made.
+outside. The verification section records synthetic component tests. The committed
+Processor enables `REPORTS_ENABLED`, but that does not establish a complete
+portfolio/P&L/tax product or fresh real-data coverage. See
+[current status](current-status.md).
 
 ## Product implementation boundary
 
@@ -269,6 +271,11 @@ authorization outranks a past context: returning a stored report already
 requires the Access gate the Worker applies before any of this runs.
 
 ## 7. Deploy order and rollback
+
+The migration/first-activation sequence below is historical. Current releases
+follow [rollout controls](rollout.md#4-deployment-order), and rollback targets
+must satisfy its current schema/resource/alarm floor. An old component-level
+compatibility test does not authorize a pre-alarm production rollback.
 
 1. Apply migration `0034_reports.sql` (additive; no existing table, view,
    trigger or row is touched).

@@ -395,6 +395,11 @@ trigger present.
 
 ## Deploy order and rollback
 
+The migration/first-activation sequence below is historical. Current releases
+follow [rollout controls](rollout.md#4-deployment-order), and rollback targets
+must satisfy its current schema/resource/alarm floor. An old component-level
+compatibility test does not authorize a pre-alarm production rollback.
+
 1. Apply `packages/storage-d1/migrations/core/0035_observation_job_lanes.sql`
    (additive: `ALTER TABLE … ADD COLUMN` with defaults, three new tables, one
    trigger, one index). The running pre-0035 Worker keeps working during and

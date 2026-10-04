@@ -17,8 +17,12 @@ transport and nothing else: it is a different tool set, graded by the change
 lifecycle's operator capability rather than by a grant here, published only
 while its own flag is on, and no capability in the table below reaches it.
 
-**Everything here is off by default.** With `AGENT_API_GRANTS` absent or
-empty, every agent route answers 403 for every authenticated principal.
+**Agent access is not configured in the committed deployment.**
+`AGENT_API_GRANTS` and `AGENT_GRANTS` are empty. With an absent or empty
+agent-API grant map, every agent route and the shared `/mcp` transport answers
+403 after authentication. An enabled operations flag does not bypass that
+transport gate. Schedule/maintenance settings currently have an operator HTTP
+API but no MCP tool; see [schedules](schedules.md#settings-api).
 
 ## Why the application service exists
 
@@ -487,6 +491,12 @@ check is not a completion criterion (addendum 10 §10).
 
 ## Deploy order and rollback
 
+The original component migration/activation sequence below is historical.
+Current releases follow [rollout controls](rollout.md#4-deployment-order);
+rollback targets must satisfy its current schema/resource/alarm floor.
+Component-level compatibility with an old schema does not authorize an old
+production Worker rollback.
+
 Schema: none. Migration 0029 already provides both tables the proposal path
 writes; this change adds no migration.
 
@@ -504,6 +514,6 @@ writes; this change adds no migration.
    recognised card purchase, its statement and its bank debit.
 
 Rollback: set `AGENT_API_GRANTS` to `""` (immediate, no redeploy of code needed if
-it is a secret), or redeploy the previous Worker build. Proposals already
+it is a secret), or deploy a compatible build under the current rollback floor. Proposals already
 written stay as `proposed` rows; they are inert, and removing the capability
 does not need to remove them.
