@@ -36,7 +36,7 @@ with real data; do not infer product completion from a schema or a pure function
 - [Collection contract (`packages/collection`)](collection-contract.md)
 - [Evidence ingest contract (descriptor-v1)](evidence-contract.md)
 - [Authenticated Collectors](authenticated-collectors.md)
-- PRESTIA bank snapshots: [implementation decision](adr/0040-prestia-bank-worker.md),
+- PRESTIA bank snapshots: [implementation decision](adr/0042-prestia-bank-worker.md),
   [delivery plan](plans/2026-10-prestia-bank-worker.md) and
   [dated source evidence](sources/prestia.md#prestia-bank-worker-integration-2026-10-05)
   (implemented; production verification pending)

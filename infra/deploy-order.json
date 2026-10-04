@@ -193,7 +193,8 @@
       "healthIdentity": "releaseSha",
       "bundleTask": "prestia-bank-worker:bundle",
       "bundleDir": "dist/prestia-bank-worker",
-      "after": []
+      "after": [],
+      "deployBackend": "cf"
     },
     {
       "name": "vpass-json",

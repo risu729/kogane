@@ -1,4 +1,4 @@
-# ADR 0040: PRESTIA bank snapshots and non-additive provider measures
+# ADR 0042: PRESTIA bank snapshots and non-additive provider measures
 
 - Status: proposed
 - Date: 2026-10-05
@@ -44,7 +44,12 @@ Production values are not copied into fixtures or documentation.
   in the current balance screen.
 - `source-authority-v3` reviews `prestia` as the institution's direct witness.
   Rank alone does not establish overlap or authorize adoption.
-- Deploy `kogane-prestia-bank-collector` before its Processor RPC consumer.
+- Deploy `kogane-prestia-bank-collector` before its Processor RPC consumer through
+  the prebuilt cf backend established by [ADR 0040](0040-compatible-cf-version-deployment.md).
+  Native configuration mirrors canonical Wrangler bindings, required-secret names
+  and variables; `RELEASE_SHA` comes from the stamped canonical config. Both
+  credential-free cf build/version-upload dry runs and canonical Wrangler checks
+  remain. No native routes, Worker Crons or trigger synchronization are added.
   Processor-managed scheduling uses `SCHEDULE_PRESTIA_BANK` and the shared
   execution lease. The daily 06:30 Asia/Tokyo job is seeded disabled; Worker
   Cron triggers stay empty. First production collection and downstream parse

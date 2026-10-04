@@ -54,7 +54,7 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 PRESTIA's original level/cost are historical research scores, not a new rating
 for the implemented bank Worker. The [dated bank update](sources/prestia.md#prestia-bank-worker-integration-2026-10-05)
 separates local accepted transport from pending production verification and from
-GLOBAL PASS's own evidence; [ADR 0040](adr/0040-prestia-bank-worker.md) records the
+GLOBAL PASS's own evidence; [ADR 0042](adr/0042-prestia-bank-worker.md) records the
 snapshot/metric decision.
 
 Long-tail reward-only services stay in `data/account-inventory.csv`. Add them

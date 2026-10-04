@@ -2,7 +2,7 @@
 
 - Status: implementation in progress; production deployment/verification pending
 - Date: 2026-10-05
-- Decision: [ADR 0040](../adr/0040-prestia-bank-worker.md)
+- Decision: [ADR 0042](../adr/0042-prestia-bank-worker.md)
 
 ## Implemented scope
 

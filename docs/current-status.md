@@ -1,6 +1,6 @@
 # Current implementation status
 
-Type: maintained reference. Reviewed: 2026-10-05 against main `810a309` and the
+Type: maintained reference. Reviewed: 2026-10-05 against main `dcf8aca` and the
 PRESTIA bank Worker integration.
 This is a code/configuration assessment, not a fresh production acceptance run.
 Implementation, configured enablement, deployment and verified real-data coverage
@@ -33,7 +33,7 @@ are separate claims. Historical acceptance records are linked from the
   production run plan through registration, parsing, publication and readback.
   Local authenticated page evidence is not deployed Worker evidence. Deployment,
   first production collection/publication and separate schedule activation remain
-  pending; its daily 06:30 JST alarm is disabled. See [ADR 0040](adr/0040-prestia-bank-worker.md),
+  pending; its daily 06:30 JST alarm is disabled. See [ADR 0042](adr/0042-prestia-bank-worker.md),
   the [plan](plans/2026-10-prestia-bank-worker.md) and the
   [dated source update](sources/prestia.md#prestia-bank-worker-integration-2026-10-05).
 

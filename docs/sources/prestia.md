@@ -33,7 +33,7 @@ metadata remain valuation evidence accessible through artifact parse-run
 references and observation details, separate from the native balance screen.
 No transaction-history or empty-account completeness is claimed.
 
-The [decision](../adr/0040-prestia-bank-worker.md) is proposed until merge and the
+The [decision](../adr/0042-prestia-bank-worker.md) is proposed until merge and the
 [delivery plan](../plans/2026-10-prestia-bank-worker.md) remains pending production
 verification. The Processor-managed 06:30 JST alarm is seeded disabled; Worker
 Cron triggers are empty. Full checks/independent review, merge, exact deployment,

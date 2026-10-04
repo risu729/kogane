@@ -88,6 +88,10 @@ export default defineConfig({
         worker: "kogane-st-george-collector",
         exportName: "ScheduledCollection",
       }),
+      SCHEDULE_PRESTIA_BANK: bindings.worker({
+        worker: "kogane-prestia-bank-collector",
+        exportName: "ScheduledCollection",
+      }),
       SCHEDULE_ALARMS: bindings.durableObject({
         worker: "kogane-observation-pipeline",
         exportName: "ScheduleAlarm",

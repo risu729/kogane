@@ -72,7 +72,7 @@ writer fencing and captured CORE references; the contract is in
    aggregator lines and provider-local labels seen through a second route are
    deliberately absent, so their overlap stays unknown (INV06).
 6. **Authority.** `packages/read-model/src/authority.ts`
-   (`source-authority-v3`, [ADR 0040](adr/0040-prestia-bank-worker.md); v2 origin in [ADR 0015](adr/0015-source-authority-v2.md))
+   (`source-authority-v3`, [ADR 0042](adr/0042-prestia-bank-worker.md); v2 origin in [ADR 0015](adr/0015-source-authority-v2.md))
    supplies the caller policy `selectAdoptedSet` takes. It names sources by
    CORE `sources.id`:
 

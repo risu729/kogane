@@ -192,7 +192,9 @@ caller ever drops it again.
 
 ### cf version deployment and compatible rollbacks
 
-ADR 0040 moves thirteen compatible Workers to `cf@1.0.0-beta.12` and the pinned
+[ADR 0040](adr/0040-compatible-cf-version-deployment.md) established prebuilt deployment
+for thirteen compatible Workers; [ADR 0042](adr/0042-prestia-bank-worker.md) adds the
+PRESTIA bank Worker, making fourteen compatible Workers to `cf@1.0.0-beta.12` and the pinned
 `wrangler-deploy-action` v2.1.1. Their native `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared
@@ -208,7 +210,7 @@ actual artifacts; before publication the live migration tag must match the
 latest canonical tag, and after publication all active namespace IDs must
 match the captured baseline. Pending DO lifecycle work requires a separate
 Wrangler rollout. Processor alone enables trigger synchronization to preserve
-its existing Queue consumer settings. All 16 Workers keep ADR 0039's order and the authenticated
+its existing Queue consumer settings. All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
 
 `deployBackend` belongs to the target commit's deployment ledger. A target that

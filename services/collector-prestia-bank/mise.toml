@@ -16,14 +16,27 @@ run = ["bun test ./test", "./node_modules/.bin/vitest run"]
 
 [tasks.dry-run]
 description = "Validate PRESTIA bank deployment without uploading it."
-depends = ["//services/collector-prestia-bank:types"]
+depends = ["//services/collector-prestia-bank:cf-build", "//services/collector-prestia-bank:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run"
 
 [tasks."bundle"]
 description = "Build the PRESTIA bank Worker deployment bundle."
-depends = ["//services/collector-prestia-bank:types"]
+depends = ["//services/collector-prestia-bank:cf-build", "//services/collector-prestia-bank:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/prestia-bank-worker"
 
 [tasks.ci]
 description = "Verify the PRESTIA bank collector."
-depends = ["//services/collector-prestia-bank:typecheck", "//services/collector-prestia-bank:test"]
+depends = ["//services/collector-prestia-bank:cf-typecheck", "//services/collector-prestia-bank:typecheck", "//services/collector-prestia-bank:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/collector-prestia-bank:types"]
+run = [
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-prestia-bank-collector --dry-run",
+]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-prestia-bank:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

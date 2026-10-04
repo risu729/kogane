@@ -649,12 +649,24 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the PRESTIA bank collector
         id: deploy-prestia-bank-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'prestia-bank-worker')
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'prestia-bank-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'prestia-bank-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
           working-directory: services/collector-prestia-bank
           config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the PRESTIA bank collector with cf
+        id: cf-deploy-prestia-bank-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'prestia-bank-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'prestia-bank-worker')
+        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        with:
+          mode: production
+          working-directory: services/collector-prestia-bank
+          worker: kogane-prestia-bank-collector
+          build-mode: production
+          deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Vpass collector
