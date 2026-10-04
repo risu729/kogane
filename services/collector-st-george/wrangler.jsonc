@@ -63,7 +63,7 @@
     }
   ],
   "triggers": {
-    // Daily at 06:35 JST (21:35 UTC), after the Mizuho collection.
+    // Daily at 06:35 JST (21:35 UTC), after the Mizuho scheduled trigger.
     "crons": ["35 21 * * *"]
   }
 }
