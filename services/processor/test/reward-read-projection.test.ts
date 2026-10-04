@@ -25,6 +25,8 @@ import { runScheduled } from "../src/worker.ts";
 import { currentCoreRevision } from "../src/balance-projection-job.ts";
 import { readInputRecord } from "../src/projection-input.ts";
 import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations.ts";
+import { CURRENT_REWARD_CONTEXT_SQL } from "../../../packages/storage-d1/src/read/rewards.ts";
+import type { D1Like, D1StatementLike } from "../../../packages/storage-d1/src/d1.ts";
 import { checkReadCursor } from "../../../packages/storage-d1/src/read/index.ts";
 import { sha256Hex } from "../../../packages/domain/src/context.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
@@ -467,3 +469,146 @@ test("G0-09: dropping the reward READ tables leaves every CORE claim intact and 
   // Not one claim, rule, offer or saved simulation moved.
   expect(await coreDigest()).toBe(before);
 }, 90000);
+
+/** Count actual capture queries rather than inferring work from unchanged status. */
+function observedCore() {
+  const queries: string[] = [];
+  const db = env.DB as unknown as D1Like;
+  return {
+    queries,
+    base: on({
+      ...env,
+      DB: {
+        prepare(sql: string) {
+          queries.push(sql);
+          return db.prepare(sql);
+        },
+        batch: db.batch.bind(db),
+      },
+    } as unknown as Env),
+    captures: () => queries.filter((sql) => sql.includes("FROM reward_bucket_claims")).length,
+  };
+}
+
+async function newMembershipProbe(id: string) {
+  await env.DB.prepare(`INSERT INTO membership_state_claims
+    (claim_digest,parse_run_id,program_id,holding_ref,tier,valid_json,source,evidence_refs_json,recorded_at)
+    VALUES(?1,NULL,'program:v-point','program:v-point:member','probe',
+    '{"kind":"unknown","reasonCode":"synthetic"}','self-reported','[]','2026-12-01T00:00:00.000Z')`)
+    .bind(await sha256Hex(id))
+    .run();
+}
+
+test("a quiet same-day tick skips claim capture; the next UTC day captures again", async () => {
+  const first = await run("2026-12-01T01:00:00.000Z");
+  const observed = observedCore();
+  const again = await runRewardReadProjection(observed.base, store(), {
+    now: () => "2026-12-01T23:59:00.000Z",
+  });
+  expect(again).toMatchObject({ status: "unchanged", snapshotId: first.snapshotId, active: true });
+  expect(observed.captures()).toBe(0);
+  expect(observed.queries.some((sql) => sql.includes("FROM expiry_rules"))).toBe(false);
+  const tomorrow = await runRewardReadProjection(observed.base, store(), {
+    now: () => "2026-12-02T00:00:00.000Z",
+  });
+  expect(tomorrow.evaluatedAt).toBe("2026-12-02T00:00:00.000Z");
+  expect(tomorrow.snapshotId).not.toBe(first.snapshotId);
+  expect(observed.captures()).toBeGreaterThan(0);
+}, 30000);
+
+test("a tick crossing midnight falls through to the new day's capture", async () => {
+  const observed = observedCore();
+  let calls = 0;
+  const result = await runRewardReadProjection(observed.base, store(), {
+    now: () => (++calls === 1 ? "2026-12-02T23:59:59.999Z" : "2026-12-03T00:00:00.001Z"),
+  });
+  expect(result.evaluatedAt).toBe("2026-12-03T00:00:00.000Z");
+  expect(observed.captures()).toBeGreaterThan(0);
+}, 30000);
+
+test("a source change captures again and a visibility-only refresh then becomes reusable", async () => {
+  await newMembershipProbe("shortcut-source-change");
+  const observed = observedCore();
+  const changed = await runRewardReadProjection(observed.base, store(), {
+    now: () => "2026-12-03T01:00:00.000Z",
+  });
+  expect(["complete", "unchanged"]).toContain(changed.status);
+  expect(observed.captures()).toBeGreaterThan(0);
+  observed.queries.length = 0;
+  await env.DB.prepare(`INSERT INTO evidence_use_restrictions
+    (evidence_ref,restriction,since,affected_manifests_json,actor,reason)
+    VALUES('balance:reward-shortcut-probe','no-reuse','2026-12-03','[]','operator:1','synthetic')`).run();
+  const refreshed = await runRewardReadProjection(observed.base, store(), {
+    now: () => "2026-12-03T02:00:00.000Z",
+  });
+  expect(refreshed).toMatchObject({
+    status: "unchanged",
+    active: true,
+    snapshotId: changed.snapshotId,
+  });
+  expect(observed.captures()).toBeGreaterThan(0);
+  observed.queries.length = 0;
+  const reusable = await runRewardReadProjection(observed.base, store(), {
+    now: () => "2026-12-03T03:00:00.000Z",
+  });
+  expect(reusable).toMatchObject({
+    status: "unchanged",
+    active: true,
+    snapshotId: changed.snapshotId,
+  });
+  expect(observed.captures()).toBe(0);
+}, 30000);
+
+test("a CORE revision racing the shortcut cannot return the old context", async () => {
+  const observed = observedCore();
+  const read = env.READ as unknown as D1Like;
+  let raced = false;
+  const wrap = (statement: D1StatementLike): D1StatementLike => ({
+    bind: (...args) => wrap(statement.bind(...args)),
+    async first<T>() {
+      const result = await statement.first<T>();
+      if (!raced) {
+        raced = true;
+        await newMembershipProbe("shortcut-racing-change");
+      }
+      return result;
+    },
+    all: statement.all.bind(statement),
+    run: statement.run.bind(statement),
+    raw: statement.raw.bind(statement),
+  });
+  const base = {
+    ...observed.base,
+    READ: {
+      prepare(sql: string) {
+        const statement = read.prepare(sql);
+        return sql === CURRENT_REWARD_CONTEXT_SQL ? wrap(statement) : statement;
+      },
+      batch: read.batch.bind(read),
+    },
+  } as unknown as Env;
+  const result = await runRewardReadProjection(base, store(), {
+    now: () => "2026-12-03T04:00:00.000Z",
+  });
+  expect(raced).toBe(true);
+  expect(observed.captures()).toBeGreaterThan(0);
+  expect(result.sourceRevision).toBe((await currentCoreRevision(env.DB)).source_revision);
+  expect(["complete", "unchanged"]).toContain(result.status);
+}, 30000);
+
+test("an unfinished build resumes before a matching published context can shortcut", async () => {
+  const partial = await run("2026-12-04T00:00:00.000Z", { writeBudget: 1 });
+  expect(partial.status).toBe("building");
+  // The previous day's published context still matches CORE and this clock;
+  // the unfinished build nevertheless has priority and retains its own day.
+  const observed = observedCore();
+  const resumed = await runRewardReadProjection(observed.base, store(), {
+    now: () => "2026-12-03T05:00:00.000Z",
+  });
+  expect(resumed).toMatchObject({
+    status: "complete",
+    snapshotId: partial.snapshotId,
+    evaluatedAt: "2026-12-04T00:00:00.000Z",
+  });
+  expect(observed.captures()).toBe(0);
+}, 30000);

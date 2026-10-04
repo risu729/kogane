@@ -485,3 +485,65 @@ test("HTTP runtime serializes runs and sanitizes thrown errors", async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+for (const [outcome, expected] of [
+  ["portfolio", "success"],
+  ["challenge", "authentication-challenge"],
+])
+  test(`waits for delayed portfolio rendering and stops a delayed ${outcome}`, async () => {
+    const context = await offlineContext();
+    let submits = 0;
+    let sawEmptyPortfolio = false;
+    let extractionCalls = 0;
+    const delayedBody = `<main id="delayed"></main><script>
+      setTimeout(() => {
+        document.querySelector('#delayed').innerHTML = ${JSON.stringify(
+          outcome === "portfolio"
+            ? portfolio
+            : '<h1>Verify your identity</h1><input autocomplete="one-time-code">',
+        )};
+      }, 750);
+    </script>`;
+    try {
+      await routeFixture(context, (route) => {
+        const request = route.request();
+        if (request.method() === "POST") submits++;
+        const pathname = new URL(request.url()).pathname;
+        return route.fulfill({
+          contentType: "text/html",
+          body:
+            pathname === "/ibank/loginPage.action"
+              ? login
+              : pathname === "/ibank/viewAccountPortfolio.html"
+                ? delayedBody
+                : portfolio,
+        });
+      });
+      const page = await context.newPage();
+      const evaluate = page.evaluate.bind(page);
+      page.evaluate = async (fn, ...args) => {
+        if (fn === extractors.extractPortfolio) extractionCalls++;
+        const value = await evaluate(fn, ...args);
+        if (
+          fn.name === "readState" &&
+          page.url().endsWith("/ibank/viewAccountPortfolio.html") &&
+          value.portfolio === false
+        )
+          sawEmptyPortfolio = true;
+        return value;
+      };
+      const result = await collectFromPage(page, credential, extractors).catch(publicFailure);
+      assert.equal(sawEmptyPortfolio, true);
+      assert.equal(submits, 1);
+      if (expected === "success") {
+        assert.equal(result.status, "success");
+        assert.equal(extractionCalls, 1);
+      } else {
+        assert.deepEqual(result, { status: "failed", reason: expected });
+        assert.equal(extractionCalls, 0);
+      }
+      assert.equal(JSON.stringify(result).includes(secret), false);
+    } finally {
+      await context.close();
+    }
+  });
