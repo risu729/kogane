@@ -1,5 +1,10 @@
 # ソニー銀行: 公式 Web / 公式アプリ一次評価
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 - 調査日: 2026-08-26（Australia/Sydney）
 - 対象: 個人向けソニー銀行口座だけ
 - 非対象: 他行、証券会社、家計簿・資産管理 aggregator、振込・振替・売買・

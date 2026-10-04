@@ -1,5 +1,10 @@
 # SBI VCトレード（VCTRADE）調査
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 - 調査日: 2026-08-26（Australia/Sydney）
 - 対象: SBI VCトレード株式会社が提供する **VCTRADE** の日本円・暗号資産口座データ取得面
 - 対象外: 同社の別サービス、SBI証券、カード、外部アグリゲーター

@@ -1,5 +1,10 @@
 # St.George Bank Australia source research
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 調査日: 2026-08-26 (Australia/Sydney)
 
 ## Collector integration (2026-09-13)

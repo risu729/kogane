@@ -1,5 +1,10 @@
 # 三井住友銀行: SMBCダイレクト / Oliveの銀行口座側
 
+> Dated source research and implementation notes. Earlier runtime/schedule
+> claims may be superseded by later changes. See the [research scope](README.md),
+> [current status](../current-status.md) and [schedules](../schedules.md) before
+> using these notes as operational instructions.
+
 調査日: 2026-08-26、追試: 2026-08-31、実装検証: 2026-09-01
 
 本書は初期調査と追試の記録を含む。実装状況は下記の「Kogane Workers PoC live result（2026-09-01）」と[現行PoC README](../../services/collector-smbc-direct/README.md)を優先する。2026-09-05の文書統合では、既存の実装・検証記録との整合性を確認した。銀行への再ログインや取得は行っていない。
