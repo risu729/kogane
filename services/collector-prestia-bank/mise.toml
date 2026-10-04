@@ -1,0 +1,42 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.types]
+description = "Generate PRESTIA bank Worker binding types."
+run = "./node_modules/.bin/wrangler types worker-configuration.d.ts --env-file .dev.vars.example --strict-vars false"
+
+[tasks.typecheck]
+description = "Type-check the read-only PRESTIA bank collector."
+depends = ["//services/collector-prestia-bank:types"]
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks.test]
+description = "Test PRESTIA bank collection without contacting the bank."
+depends = ["//services/collector-prestia-bank:types"]
+run = ["bun test ./test", "./node_modules/.bin/vitest run"]
+
+[tasks.dry-run]
+description = "Validate PRESTIA bank deployment without uploading it."
+depends = ["//services/collector-prestia-bank:cf-build", "//services/collector-prestia-bank:types"]
+run = "./node_modules/.bin/wrangler deploy --dry-run"
+
+[tasks."bundle"]
+description = "Build the PRESTIA bank Worker deployment bundle."
+depends = ["//services/collector-prestia-bank:cf-build", "//services/collector-prestia-bank:types"]
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/prestia-bank-worker"
+
+[tasks.ci]
+description = "Verify the PRESTIA bank collector."
+depends = ["//services/collector-prestia-bank:cf-typecheck", "//services/collector-prestia-bank:typecheck", "//services/collector-prestia-bank:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/collector-prestia-bank:types"]
+run = [
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-prestia-bank-collector --dry-run",
+]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-prestia-bank:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

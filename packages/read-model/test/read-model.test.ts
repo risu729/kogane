@@ -307,7 +307,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -318,6 +318,18 @@ describe("named concepts in the final SQL", () => {
         )
         .get(),
     ).toEqual({ policy_id: "coverage-v1" });
+    expect(
+      db
+        .query(
+          "SELECT policy_id,required_parser_version,replaces_previous_on_complete_empty,unit_scope FROM dataset_snapshot_policies WHERE source_id='prestia' AND dataset='prestia-bank-balance-html' AND parser_name='prestia-bank-balances'",
+        )
+        .get(),
+    ).toEqual({
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.0",
+      replaces_previous_on_complete_empty: 0,
+      unit_scope: "run",
+    });
     expect(
       db
         .query(

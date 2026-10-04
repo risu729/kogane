@@ -17,16 +17,29 @@ run = "bun test"
 
 [tasks."dry-run"]
 description = "Validate the services/collector-sony-bank deployment without uploading it."
-depends = ["//services/collector-sony-bank:types"]
+depends = ["//services/collector-sony-bank:cf-build", "//services/collector-sony-bank:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 [tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-sony-bank for the release manifest."
-depends = ["//services/collector-sony-bank:types"]
+depends = ["//services/collector-sony-bank:cf-build", "//services/collector-sony-bank:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/sony-bank-worker --config wrangler.jsonc"
 
 [tasks."ci"]
 description = "Every check CI runs for services/collector-sony-bank."
-depends = ["//services/collector-sony-bank:typecheck", "//services/collector-sony-bank:test"]
+depends = ["//services/collector-sony-bank:cf-typecheck", "//services/collector-sony-bank:typecheck", "//services/collector-sony-bank:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/collector-sony-bank:types"]
+run = [
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-sony-bank-collector-poc --dry-run",
+]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-sony-bank:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

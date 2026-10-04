@@ -72,15 +72,15 @@ writer fencing and captured CORE references; the contract is in
    aggregator lines and provider-local labels seen through a second route are
    deliberately absent, so their overlap stays unknown (INV06).
 6. **Authority.** `packages/read-model/src/authority.ts`
-   (`source-authority-v2`, [ADR 0015](adr/0015-source-authority-v2.md))
+   (`source-authority-v3`, [ADR 0042](adr/0042-prestia-bank-worker.md); v2 origin in [ADR 0015](adr/0015-source-authority-v2.md))
    supplies the caller policy `selectAdoptedSet` takes. It names sources by
    CORE `sources.id`:
 
-   | Rank | Class      | Sources                                                                                                                                                                               |
-   | ---- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | 0    | direct     | `global-pass`, `mizuho-bank`, `mobile-suica`, `myjcb`, `sbi-securities`, `sbi-shinsei-bank`, `sbi-vc-trade`, `smbc-bank`, `sony-bank`, `st-george`, `v-point`, `v-point-pay`, `vpass` |
-   | 1    | aggregator | `moneyforward-me`                                                                                                                                                                     |
-   | 2    | unreviewed | every other source id                                                                                                                                                                 |
+   | Rank | Class      | Sources                                                                                                                                                                                          |
+   | ---- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | 0    | direct     | `global-pass`, `prestia`, `mizuho-bank`, `mobile-suica`, `myjcb`, `sbi-securities`, `sbi-shinsei-bank`, `sbi-vc-trade`, `smbc-bank`, `sony-bank`, `st-george`, `v-point`, `v-point-pay`, `vpass` |
+   | 1    | aggregator | `moneyforward-me`                                                                                                                                                                                |
+   | 2    | unreviewed | every other source id                                                                                                                                                                            |
 
    A rank never establishes that two scopes are the same measurement; it
    only decides which side of an unproven overlap stays adopted, and equal

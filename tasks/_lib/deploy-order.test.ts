@@ -134,7 +134,7 @@ describe("the deployment ledger describes every Worker CI validates", () => {
     const checked = order.workers.filter(
       (worker) => worker.role === "producer" && worker.deploy && worker.healthPath !== "",
     );
-    expect(checked).toHaveLength(13);
+    expect(checked).toHaveLength(14);
     expect(checked.every((worker) => worker.healthAuth === "none")).toBe(true);
   });
 
@@ -215,6 +215,7 @@ describe("consumers deploy before producers (G5-14)", () => {
       "mizuho-worker",
       "sony-bank-worker",
       "st-george-worker",
+      "prestia-bank-worker",
       "vpass-json",
       "vpoint-pay-worker",
       "vpoint-worker",
@@ -237,7 +238,7 @@ describe("consumers deploy before producers (G5-14)", () => {
     // What stays out of CD is the probe role: experiments and the bootstrap,
     // audit and test-harness configurations.
     const producers = order.workers.filter((worker) => worker.role === "producer");
-    expect(producers.length).toBe(14);
+    expect(producers.length).toBe(15);
     expect(producers.every((worker) => worker.deploy)).toBe(true);
     expect(producers.every((worker) => worker.path.startsWith("services/collector-"))).toBe(true);
     expect(order.workers.filter((worker) => worker.role === "probe").length).toBeGreaterThan(0);
@@ -248,7 +249,7 @@ describe("consumers deploy before producers (G5-14)", () => {
     const directories = trackedFiles("services")
       .map((file) => /^(services\/collector-[^/]+)\//u.exec(file)?.[1] ?? "")
       .filter((directory) => directory !== "" && directory !== "services/collector-r2-importer");
-    expect(new Set(directories).size).toBe(14);
+    expect(new Set(directories).size).toBe(15);
     for (const directory of new Set(directories))
       expect(producers.some((worker) => worker.path === directory)).toBe(true);
   });
@@ -398,12 +399,14 @@ describe("the deploy workflow follows the ledger", () => {
     );
   });
 
-  test("only credential preflight, migrations, deployment and trigger readback see the Cloudflare token (G5-17)", () => {
+  test("only credential preflight, migrations, deployment and identity/trigger readback see the Cloudflare token (G5-17)", () => {
     const usingToken = workflowSteps(deployWorkflow)
       .filter((step) => step.body.includes("secrets.CLOUDFLARE_API_TOKEN"))
-      .map((step) => step.name);
+      .map((step) => step.name.replace(/ with cf$/u, ""))
+      .filter((name, index, names) => names.indexOf(name) === index);
     expect(usingToken).toEqual([
       "Confirm the production credentials reached this job",
+      "Capture the existing DO namespaces and lifecycle",
       "Apply the CORE migrations",
       "Apply the READ migrations",
       "Deploy the GlobalPass collector",
@@ -417,11 +420,13 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the Mizuho collector",
       "Deploy the Sony Bank collector",
       "Deploy the St.George collector",
+      "Deploy the PRESTIA bank collector",
       "Deploy the Vpass collector",
       "Deploy the V Point Pay collector",
       "Deploy the V Point collector",
       "Deploy the Processor",
       "Deploy the App",
+      "Verify the existing DO namespaces and lifecycle",
       "Reconcile future schedule alarms",
     ]);
   });
@@ -464,7 +469,8 @@ describe("the deploy workflow follows the ledger", () => {
     // make the re-verification before the first upload fail (plan 11 §6).
     const names = workflowSteps(deployWorkflow).map((step) => step.name);
     const stamp = names.indexOf("Stamp the release sha into the deployed configurations");
-    expect(stamp).toBeGreaterThan(names.indexOf("Validate every Worker without uploading"));
+    expect(stamp).toBeGreaterThan(names.indexOf("Install the locked dependencies"));
+    expect(stamp).toBeLessThan(names.indexOf("Build every deployable bundle"));
     expect(stamp).toBeLessThan(names.indexOf("Compute the release manifest"));
   });
 

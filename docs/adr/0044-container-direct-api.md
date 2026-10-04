@@ -1,4 +1,4 @@
-# ADR 0042: Use the direct Container API with existing applications
+# ADR 0044: Use the direct Container API with existing applications
 
 - Status: proposed
 - Date: 2026-10-05

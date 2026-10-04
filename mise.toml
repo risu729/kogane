@@ -154,6 +154,7 @@ depends = [
 	"//services/app:ci",
 	"//services/collector-*:ci",
 	"//services/processor:typecheck",
+	"//services/processor:cf-typecheck",
 	"//packages/application:ci",
 	"//packages/collection:ci",
 	"//packages/collector-diagnostics:ci",

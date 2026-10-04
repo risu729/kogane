@@ -150,6 +150,11 @@
       "binding": "SCHEDULE_ST_GEORGE",
       "service": "kogane-st-george-collector",
       "entrypoint": "ScheduledCollection"
+    },
+    {
+      "binding": "SCHEDULE_PRESTIA_BANK",
+      "service": "kogane-prestia-bank-collector",
+      "entrypoint": "ScheduledCollection"
     }
   ],
   "durable_objects": { "bindings": [{ "name": "SCHEDULE_ALARMS", "class_name": "ScheduleAlarm" }] },

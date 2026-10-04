@@ -7,6 +7,7 @@
       "displayName": "Processor shared-R2 registration (in-process, U08)",
       "active": true,
       "routes": [
+        { "source": "prestia", "producer": "collector-prestia-bank", "active": true },
         { "source": "global-pass", "producer": "collector-prestia-globalpass", "active": true },
         { "source": "mizuho-bank", "producer": "collector-mizuho-bank", "active": true },
         { "source": "mobile-suica", "producer": "collector-mobile-suica", "active": true },

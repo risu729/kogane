@@ -20,16 +20,29 @@ run = [
 
 [tasks."dry-run"]
 description = "Validate the services/collector-vpoint deployment without uploading it."
-depends = ["//services/collector-vpoint:types"]
+depends = ["//services/collector-vpoint:cf-build", "//services/collector-vpoint:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 [tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-vpoint for the release manifest."
-depends = ["//services/collector-vpoint:types"]
+depends = ["//services/collector-vpoint:cf-build", "//services/collector-vpoint:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/vpoint-worker --config wrangler.jsonc"
 
 [tasks."ci"]
 description = "Every check CI runs for services/collector-vpoint."
-depends = ["//services/collector-vpoint:typecheck", "//services/collector-vpoint:test"]
+depends = ["//services/collector-vpoint:cf-typecheck", "//services/collector-vpoint:typecheck", "//services/collector-vpoint:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/collector-vpoint:types"]
+run = [
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-vpoint-collector-poc --dry-run",
+]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-vpoint:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

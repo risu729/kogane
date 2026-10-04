@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kogane-prestia-bank-collector",
+  "main": "src/schedule-entrypoint.ts",
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "workers_dev": true,
+  "preview_urls": false,
+  "secrets": {
+    "required": ["ADMIN_TRIGGER_TOKEN", "PRESTIA_BANK_USER_ID", "PRESTIA_BANK_PASSWORD"]
+  },
+  "triggers": { "crons": [] },
+  "observability": { "enabled": true },
+  "r2_buckets": [{ "binding": "DATA", "bucket_name": "kogane-raw-evidence" }],
+  "d1_databases": [
+    {
+      "binding": "SCHEDULE_DB",
+      "database_name": "kogane-raw-evidence",
+      "database_id": "b335a887-250d-45c9-bd72-af83f35fdc60"
+    }
+  ],
+  "vars": {
+    "RELEASE_SHA": "",
+    "COLLECTOR_SCHEMA_VERSION": "prestia-bank-collector-v1",
+    "PRESTIA_BANK_USER_AGENT": "Mozilla/5.0 (Linux; Android 15; XIG03 Build/AQ3A.240912.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/153.0.8010.36 Mobile Safari/537.36"
+  }
+}

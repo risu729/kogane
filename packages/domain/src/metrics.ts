@@ -15,7 +15,7 @@ import {
   type Rounding,
 } from "./values.ts";
 
-export const METRIC_REGISTRY_RELEASE = "metric-registry-v1";
+export const METRIC_REGISTRY_RELEASE = "metric-registry-v2";
 
 export const MEASUREMENT_KINDS = [
   "stock",
@@ -204,6 +204,12 @@ const balance = (sourceId: string, parserName: string, metrics: readonly string[
   parserName,
   metrics,
 });
+// These bank provider measures are valuation observations. The balance selector
+// retains the shared legacy classifier parity without reclassifying transactions.
+const prestiaValuation = (metrics: readonly string[]): Selector[] => [
+  { ...balance("prestia", "prestia-bank-balances", metrics), family: "valuation" },
+  balance("prestia", "prestia-bank-balances", metrics),
+];
 const transaction = (sourceId: string, parserName: string, amountBasis?: string): Selector => ({
   family: "transaction",
   sourceId,
@@ -231,6 +237,100 @@ export const UNKNOWN_METRIC: MetricDefinition = {
 
 // Order matters and mirrors the branch order of classifyBalance / classifyActivity.
 export const METRIC_REGISTRY: readonly RegistryEntry[] = [
+  entry([balance("prestia", "prestia-bank-balances", ["available_balance"])], {
+    metricId: "prestia.available-balance",
+    measurementKind: "capacity",
+    subjectKind: "account",
+    unitDimension: "currency",
+    signMeaning: "unsigned",
+    timeBasis: "point-in-time",
+    aggregationRule: "non-additive",
+    overlapGroup: "prestia:native-vs-provider-total",
+    sourceAuthority: "provider-reported",
+    legacyBalance: LEGACY_CAPACITY,
+  }),
+  entry([balance("prestia", "prestia-bank-balances", ["term_deposit_principal"])], {
+    metricId: "prestia.term-deposit-principal",
+    measurementKind: "stock",
+    subjectKind: "account",
+    unitDimension: "currency",
+    signMeaning: "asset-positive",
+    timeBasis: "point-in-time",
+    aggregationRule: "non-additive",
+    overlapGroup: "prestia:native-vs-provider-total",
+    sourceAuthority: "provider-reported",
+    legacyBalance: LEGACY_DEPOSIT,
+  }),
+  entry([...prestiaValuation(["provider_yen_equivalent"])], {
+    metricId: "prestia.provider-yen-equivalent",
+    measurementKind: "valuation",
+    subjectKind: "connection",
+    unitDimension: "currency",
+    signMeaning: "provider-sign",
+    timeBasis: "point-in-time",
+    aggregationRule: "non-additive",
+    overlapGroup: "prestia:native-vs-provider-total",
+    sourceAuthority: "provider-reported",
+    legacyBalance: {
+      kind: "aggregate",
+      measurementKind: "aggregate_balance",
+      assetClass: "mixed",
+      timeBasis: "reported_snapshot",
+    },
+  }),
+  entry([...prestiaValuation(["provider_balance_group_total"])], {
+    metricId: "prestia.provider-balance-group-total",
+    measurementKind: "valuation",
+    subjectKind: "connection",
+    unitDimension: "currency",
+    signMeaning: "provider-sign",
+    timeBasis: "point-in-time",
+    aggregationRule: "non-additive",
+    overlapGroup: "prestia:native-vs-provider-total",
+    sourceAuthority: "provider-reported",
+    legacyBalance: {
+      kind: "aggregate",
+      measurementKind: "aggregate_balance",
+      assetClass: "mixed",
+      timeBasis: "reported_snapshot",
+    },
+  }),
+  entry([...prestiaValuation(["provider_monthly_average_total_relationship_balance"])], {
+    metricId: "prestia.monthly-average-total-relationship",
+    measurementKind: "qualification",
+    subjectKind: "program",
+    unitDimension: "currency",
+    signMeaning: "provider-sign",
+    timeBasis: "period",
+    aggregationRule: "non-additive",
+    overlapGroup: "prestia:relationship-monthly-average",
+    sourceAuthority: "provider-reported",
+    legacyBalance: LEGACY_UNKNOWN,
+  }),
+  entry([...prestiaValuation(["provider_monthly_average_foreign_currency_balance"])], {
+    metricId: "prestia.monthly-average-foreign-currency",
+    measurementKind: "qualification",
+    subjectKind: "program",
+    unitDimension: "currency",
+    signMeaning: "provider-sign",
+    timeBasis: "period",
+    aggregationRule: "non-additive",
+    overlapGroup: "prestia:relationship-monthly-average",
+    sourceAuthority: "provider-reported",
+    legacyBalance: LEGACY_UNKNOWN,
+  }),
+  entry([...prestiaValuation(["provider_monthly_average_liquid_deposit_balance"])], {
+    metricId: "prestia.monthly-average-liquid-deposit",
+    measurementKind: "qualification",
+    subjectKind: "program",
+    unitDimension: "currency",
+    signMeaning: "provider-sign",
+    timeBasis: "period",
+    aggregationRule: "non-additive",
+    overlapGroup: "prestia:relationship-monthly-average",
+    sourceAuthority: "provider-reported",
+    legacyBalance: LEGACY_UNKNOWN,
+  }),
   entry(
     [balance("myjcb", "myjcb-credit-past-month-balances", ["credit_statement_payment_amount"])],
     {

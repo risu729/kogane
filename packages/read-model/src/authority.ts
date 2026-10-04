@@ -17,7 +17,7 @@
 // silently to `unreviewed`. v2 (ADR 0015) corrected the MoneyForward id and
 // added the Mizuho and St.George direct sources.
 
-export const AUTHORITY_POLICY_RELEASE = "source-authority-v2";
+export const AUTHORITY_POLICY_RELEASE = "source-authority-v3";
 
 export const AUTHORITY_RANKS = {
   /** The institution's own screen or API for its own accounts. */
@@ -39,6 +39,7 @@ const AGGREGATOR_SOURCES: readonly string[] = ["moneyforward-me"];
 /** Direct sources whose reports are the institution's own statement. */
 const DIRECT_SOURCES: readonly string[] = [
   "global-pass",
+  "prestia",
   "mizuho-bank",
   "mobile-suica",
   "myjcb",

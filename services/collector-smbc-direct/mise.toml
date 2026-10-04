@@ -25,16 +25,30 @@ run = [
 
 [tasks."dry-run"]
 description = "Validate the services/collector-smbc-direct deployment without uploading it."
-depends = ["//services/collector-smbc-direct:types"]
+depends = ["//services/collector-smbc-direct:cf-build", "//services/collector-smbc-direct:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 [tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-smbc-direct for the release manifest."
-depends = ["//services/collector-smbc-direct:types"]
+depends = ["//services/collector-smbc-direct:cf-build", "//services/collector-smbc-direct:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/smbc-direct-backfill-worker --config wrangler.jsonc"
 
 [tasks."ci"]
 description = "Every check CI runs for services/collector-smbc-direct."
-depends = ["//services/collector-smbc-direct:typecheck", "//services/collector-smbc-direct:test"]
+depends = ["//services/collector-smbc-direct:cf-typecheck", "//services/collector-smbc-direct:typecheck", "//services/collector-smbc-direct:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/collector-smbc-direct:types"]
+run = [
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-smbc-direct-backfill-poc --dry-run",
+	"node ../../tasks/_lib/ci/cf-do-identity.mjs validate smbc-direct-backfill-worker",
+]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-smbc-direct:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

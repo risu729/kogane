@@ -23,6 +23,7 @@ export const SNAPSHOT_DATASETS = [
   ["sony-bank-gross-balance", "gross-balance"],
   ["smbc-direct-balance", "balance-normalized"],
   ["st-george-balances", "account-snapshot"],
+  ["prestia-bank-balances", "prestia-bank-balance-html"],
 ] as const;
 
 /**

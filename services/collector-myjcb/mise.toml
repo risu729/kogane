@@ -20,16 +20,29 @@ run = "bun test"
 
 [tasks."dry-run"]
 description = "Validate the services/collector-myjcb deployment without uploading it."
-depends = ["//services/collector-myjcb:types"]
+depends = ["//services/collector-myjcb:cf-build", "//services/collector-myjcb:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 [tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-myjcb for the release manifest."
-depends = ["//services/collector-myjcb:types"]
+depends = ["//services/collector-myjcb:cf-build", "//services/collector-myjcb:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/myjcb-worker --config wrangler.jsonc"
 
 [tasks."ci"]
 description = "Every check CI runs for services/collector-myjcb."
-depends = ["//services/collector-myjcb:typecheck", "//services/collector-myjcb:test"]
+depends = ["//services/collector-myjcb:cf-typecheck", "//services/collector-myjcb:typecheck", "//services/collector-myjcb:test"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt cf production artifact without credentials."
+depends = ["//services/collector-myjcb:types"]
+run = [
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-myjcb-collector-poc --dry-run",
+]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-myjcb:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

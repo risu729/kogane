@@ -1,12 +1,9 @@
 // The release manifest of one production deployment (unified plan 11 §2).
 //
-// CD deploys the exact commit CI passed on, and the pinned Wrangler deploy
-// Action re-bundles the Worker rather than uploading a prebuilt artefact. There
-// is therefore no way to assert "the live script is byte-identical to the bundle
-// that was tested": the Workers API exposes a version id, an author and a
-// source, not a content digest of the uploaded script (`wrangler versions
-// list|view`). What CD *can* prove is that nothing changed between the build it
-// measured and the upload it performed, so this script
+// CD deploys the exact commit CI passed on. Compatible Workers upload a cf
+// prebuilt artifact; the three Container Workers retain the Wrangler Action's
+// re-bundling path. The manifest records both artifacts and canonical inputs,
+// then proves they remain unchanged immediately before upload.
 //
 //   * records, for one commit, the digest of every input that decides what the
 //     deployment contains — the root lockfile, every Wrangler configuration,
@@ -107,6 +104,34 @@ export function bundleDigest(directory) {
 }
 
 /**
+ * Require the cf build-output metadata and a nonempty emitted entry module
+ * before recording every uploadable byte. An empty output cannot be a release.
+ *
+ * @param {string} directory
+ * @returns {{file: string, sha256: string}[]}
+ */
+export function cfArtifactFiles(directory) {
+  const files = listFiles(directory);
+  for (const required of ["config.json", "workers/default/worker.config.json"]) {
+    if (!files.includes(required) || readFileSync(join(directory, required)).length === 0) {
+      throw new Error(`${directory} lacks nonempty cf metadata ${required}`);
+    }
+  }
+  const config = JSON.parse(
+    readFileSync(join(directory, "workers/default/worker.config.json"), "utf8"),
+  );
+  const main = config.manifest?.mainModule;
+  if (typeof main !== "string" || config.manifest?.modules?.[main] === undefined) {
+    throw new Error(`${directory} declares no cf entry module`);
+  }
+  const module = `workers/default/bundle/${main}`;
+  if (!files.includes(module) || readFileSync(join(directory, module)).length === 0) {
+    throw new Error(`${directory} lacks nonempty cf entry module ${module}`);
+  }
+  return files.map((file) => ({ file, sha256: sha256(readFileSync(join(directory, file))) }));
+}
+
+/**
  * The migrations directory a Wrangler configuration declares for one binding,
  * resolved the way Wrangler resolves it: relative to the configuration file.
  *
@@ -203,6 +228,15 @@ export function buildManifest({ root, sha, bundles = true }) {
           sha256: bundleDigest(join(root, worker.bundleDir)),
         }))
       : [],
+    cfArtifacts: deployed
+      .filter((worker) => worker.deployBackend === "cf")
+      .map((worker) => ({
+        name: worker.name,
+        config: `${worker.path}/cloudflare.config.ts`,
+        configSha256: sha256(readFileSync(join(root, worker.path, "cloudflare.config.ts"))),
+        buildConfigSha256: sha256(readFileSync(join(root, worker.path, "wrangler.config.ts"))),
+        files: bundles ? cfArtifactFiles(join(root, worker.path, ".cloudflare/output/v0")) : [],
+      })),
     workers: deployed.map((worker) => ({
       name: worker.name,
       worker: worker.worker,

@@ -146,7 +146,13 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
       { cwd: REPO_ROOT },
     );
     expect(result.exitCode).toBe(0);
-    const tracked = result.stdout.toString().split("\0").filter(Boolean).sort();
+    // wrangler.config.ts controls cf bundling; canonical runtime identities
+    // remain in the JSON/TOML configs and native parity is guarded separately.
+    const tracked = result.stdout
+      .toString()
+      .split("\0")
+      .filter((path) => /\/wrangler[^/]*\.(?:jsonc|json|toml)$/u.test(path))
+      .sort();
     expect(tracked.length).toBeGreaterThan(0);
     expect(
       ledger.directories.flatMap((entry) => entry.workers.map((w) => w.config)).sort(),
@@ -207,6 +213,7 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
           "kogane-myjcb-collector-poc",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
+          "kogane-prestia-bank-collector",
           "kogane-sbi-collector-poc",
           "kogane-sbi-shinsei-collector-poc",
           "kogane-sbi-vc-session-poc",
@@ -299,12 +306,13 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
  * with its comment. `vars=` lists names only, so only `sha256=` moved; the
  * Worker name, bindings, queue consumer and cron are the pre-move values still.
  */
-// Approved retirement removes only obsolete projection target vars. Resource identities stay fixed.
+// ADR 0040 adds only the PRESTIA bank RPC service binding and corresponding Processor config digest.
+// Approved retirement removes only obsolete projection target vars. Other resource identities stay fixed.
 const FROZEN_MOVED_IDENTITIES = [
   "kogane-evidence-browser config=wrangler.jsonc live=true role=deployed email=false crons=- d1=DB>kogane-raw-evidence#b335a887-250d-45c9-bd72-af83f35fdc60,READ>kogane-read#320ebe31-a031-48a1-985f-0e6fabbd517a r2=EVIDENCE>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=PIPELINE>kogane-observation-pipeline assets=../../apps/web/dist-production>ASSETS vars=ACCESS_AUDIENCE,ACCESS_ISSUER,AGENT_API_GRANTS,AGENT_GRANTS,BALANCE_PROJECTION_ENABLED,COMMANDS_ENABLED,DEPLOYMENT_SCHEDULE_TOKENS,EVENTS_V2_ENABLED,EVIDENCE_SOURCE_ID,HEALTH_PROBE_TOKENS,OPERATOR_SUBJECTS,OPS_API_ENABLED,RELEASE_SHA,REWARDS_V2_ENABLED,SCHEDULES_ENABLED,SESSION_REFRESH_POLICY secrets=- sha256=2ba1e21bb506a43b1fafd802e7b37fb3c52890631ee78d11241b1203fbc8b854",
   "kogane-evidence-browser-test config=wrangler.test.jsonc live=false role=test-only email=false crons=- d1=DB>test#00000000-0000-0000-0000-000000000001,READ>test-read#00000000-0000-0000-0000-000000000002 r2=EVIDENCE>test kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=test/assets>ASSETS vars=ACCESS_AUDIENCE,ACCESS_ISSUER,AGENT_API_GRANTS,AGENT_GRANTS,BALANCE_PROJECTION_ENABLED,COMMANDS_ENABLED,EVENTS_V2_ENABLED,EVIDENCE_SOURCE_ID,HEALTH_PROBE_TOKENS,OPERATOR_SUBJECTS,OPS_API_ENABLED,RELEASE_SHA,REWARDS_V2_ENABLED,SESSION_REFRESH_POLICY secrets=- sha256=f5ac6668e9ef957256309f4349b650f604d33e28496cd3ccf5244ed136f95372",
   "kogane-observation-ops-local config=wrangler.ops.jsonc live=false role=binding-only email=false crons=- d1=- r2=- kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=OBSERVATIONS>kogane-observation-pipeline assets=- vars=- secrets=- sha256=902d4629a87b356b9fbecc55e816a13de9f008add7b5d911b61c0908cbb8cfbf",
-  "kogane-observation-pipeline config=wrangler.jsonc live=true role=deployed email=false crons=- d1=DB>kogane-raw-evidence#b335a887-250d-45c9-bd72-af83f35fdc60@../../packages/storage-d1/migrations/core,READ>kogane-read#320ebe31-a031-48a1-985f-0e6fabbd517a r2=EVIDENCE>kogane-raw-evidence,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=kogane-collection-terminals[dlq:kogane-collection-terminals-dlq,batch:10,retries:5,concurrency:2] do=SCHEDULE_ALARMS>ScheduleAlarm do-migrations=alarm-v1[sqlite:ScheduleAlarm] do-exports=- containers=- browser=- vpc=- services=SCHEDULE_GLOBALPASS>kogane-globalpass-collector-poc,SCHEDULE_VPASS>kogane-vpass-collector-poc,SCHEDULE_MYJCB>kogane-myjcb-collector-poc,SCHEDULE_SBI_SECURITIES>kogane-sbi-collector-poc,SCHEDULE_SBI_SHINSEI>kogane-sbi-shinsei-collector-poc,SCHEDULE_SONY_BANK>kogane-sony-bank-collector-poc,SCHEDULE_SBI_VC_TRADE>kogane-sbi-vc-session-poc,SCHEDULE_MOBILE_SUICA>kogane-mobile-suica-collector-poc,SCHEDULE_MONEYFORWARD>kogane-moneyforward-collector-poc,SCHEDULE_VPOINT>kogane-vpoint-collector-poc,SCHEDULE_MIZUHO>kogane-mizuho-collector,SCHEDULE_ST_GEORGE>kogane-st-george-collector assets=- vars=BALANCE_PROJECTION_ENABLED,COLLECTION_ACCOUNT_ID,COLLECTION_DATA_BUCKET,COLLECTION_INGEST_CLIENT,OPS_DISPATCH_ENABLED,PURCHASE_RECOGNITION_ENABLED,RECONCILIATION_ENABLED,RELEASE_CANDIDATES_ENABLED,RELEASE_SHA,REPORTS_ENABLED,REWARD_CLAIMS_ENABLED,REWARD_READ_PROJECTION_ENABLED,SCHEDULES_ENABLED,SHARED_R2_INGEST_ENABLED secrets=- sha256=2624169e67c0d8f39431aa4e716fd82574c6fee77af8f4122bb2e77f6f8f0d43",
+  "kogane-observation-pipeline config=wrangler.jsonc live=true role=deployed email=false crons=- d1=DB>kogane-raw-evidence#b335a887-250d-45c9-bd72-af83f35fdc60@../../packages/storage-d1/migrations/core,READ>kogane-read#320ebe31-a031-48a1-985f-0e6fabbd517a r2=EVIDENCE>kogane-raw-evidence,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=kogane-collection-terminals[dlq:kogane-collection-terminals-dlq,batch:10,retries:5,concurrency:2] do=SCHEDULE_ALARMS>ScheduleAlarm do-migrations=alarm-v1[sqlite:ScheduleAlarm] do-exports=- containers=- browser=- vpc=- services=SCHEDULE_GLOBALPASS>kogane-globalpass-collector-poc,SCHEDULE_VPASS>kogane-vpass-collector-poc,SCHEDULE_MYJCB>kogane-myjcb-collector-poc,SCHEDULE_SBI_SECURITIES>kogane-sbi-collector-poc,SCHEDULE_SBI_SHINSEI>kogane-sbi-shinsei-collector-poc,SCHEDULE_SONY_BANK>kogane-sony-bank-collector-poc,SCHEDULE_SBI_VC_TRADE>kogane-sbi-vc-session-poc,SCHEDULE_MOBILE_SUICA>kogane-mobile-suica-collector-poc,SCHEDULE_MONEYFORWARD>kogane-moneyforward-collector-poc,SCHEDULE_VPOINT>kogane-vpoint-collector-poc,SCHEDULE_MIZUHO>kogane-mizuho-collector,SCHEDULE_ST_GEORGE>kogane-st-george-collector,SCHEDULE_PRESTIA_BANK>kogane-prestia-bank-collector assets=- vars=BALANCE_PROJECTION_ENABLED,COLLECTION_ACCOUNT_ID,COLLECTION_DATA_BUCKET,COLLECTION_INGEST_CLIENT,OPS_DISPATCH_ENABLED,PURCHASE_RECOGNITION_ENABLED,RECONCILIATION_ENABLED,RELEASE_CANDIDATES_ENABLED,RELEASE_SHA,REPORTS_ENABLED,REWARD_CLAIMS_ENABLED,REWARD_READ_PROJECTION_ENABLED,SCHEDULES_ENABLED,SHARED_R2_INGEST_ENABLED secrets=- sha256=02d0d8a678b2e98cf2652c17b9bcc1b83dd2224d7f3cf160d6d0296fb850a1c2",
   "kogane-observation-read-diagnostic config=wrangler.diagnostic.jsonc live=false role=binding-only email=false crons=- d1=DB>kogane-raw-evidence#b335a887-250d-45c9-bd72-af83f35fdc60 r2=EVIDENCE>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=- vars=- secrets=- sha256=7256ac0f0d3807296d2c7c532ced593a2495ecc3e7dc8086a4f396b055f621ba",
   "kogane-read-migrations config=wrangler.read-migrations.jsonc live=false role=binding-only email=false crons=- d1=READ>kogane-read#320ebe31-a031-48a1-985f-0e6fabbd517a@../../packages/storage-d1/migrations/read r2=- kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=- vars=- secrets=- sha256=e5c9c2695790db0a397980644d222574a8006302aec28aee7a379ca5330ede89",
 ];
@@ -401,6 +409,7 @@ describe("G0-06/G0-07/G5-15 a moved directory keeps its resource identities", ()
         // Added after the directory promotions; no historical identity changed.
         "kogane-mizuho-collector wrangler.jsonc",
         "kogane-st-george-collector wrangler.jsonc",
+        "kogane-prestia-bank-collector wrangler.jsonc",
       ].sort(),
     );
   });
