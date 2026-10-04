@@ -177,7 +177,7 @@ test("a replay of 200 artifacts does not block incremental jobs in the same swee
     source: "smbc-bank",
     dataset: "balance-normalized",
     parser: "smbc-direct-balance",
-    version: "1.0.0",
+    version: "1.1.0",
     artifactIdFrom: 999,
     reason: "synthetic backlog",
   });
@@ -302,7 +302,7 @@ test("pause/resume is idempotent, leases are fenced, and nothing publishes twice
       source: "smbc-bank",
       dataset: "transactions-normalized",
       parser: "smbc-direct-transactions",
-      version: "1.0.0",
+      version: "1.1.0",
       reason: "synthetic pause test",
     })
   ).json.plan as { id: number };
@@ -356,7 +356,7 @@ test("pause/resume is idempotent, leases are fenced, and nothing publishes twice
     ).toBe(1);
     await expect(
       env.DB.prepare(
-        "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,'smbc-direct-transactions','1.0.0','2026-09-08T00:00:00.000Z','ok','[]')",
+        "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,'smbc-direct-transactions','1.1.0','2026-09-08T00:00:00.000Z','ok','[]')",
       )
         .bind(id)
         .run(),
@@ -375,7 +375,7 @@ test("the replay high-water is fixed at plan time and later evidence never grows
       source: "smbc-bank",
       dataset: "balance-normalized",
       parser: "smbc-direct-balance",
-      version: "1.0.0",
+      version: "1.1.0",
       artifactIdFrom: 999,
       reason: "synthetic high-water",
     })
@@ -643,7 +643,7 @@ test("replay and sweep commands validate their input and stay off unknown routes
       await post("/replay/plan", {
         source: "SMBC",
         parser: "smbc-direct-balance",
-        version: "1.0.0",
+        version: "1.1.0",
         reason: "x",
       })
     ).status,
@@ -653,7 +653,7 @@ test("replay and sweep commands validate their input and stay off unknown routes
       await post("/replay/plan", {
         source: "smbc-bank",
         parser: "smbc-direct-balance",
-        version: "1.0.0",
+        version: "1.1.0",
         reason: "x",
         fetchedFrom: "yesterday",
       })
@@ -687,7 +687,7 @@ test("operator signals count published parses, not unadopted successes", async (
         source: "smbc-bank",
         dataset: "balance-normalized",
         parser: "smbc-direct-balance",
-        version: "1.0.0",
+        version: "1.1.0",
         artifactIdFrom: 1499,
         reason: "synthetic publication signal",
       })
@@ -697,7 +697,7 @@ test("operator signals count published parses, not unadopted successes", async (
   // What a candidate looks like: a successful run the gate never adopted. It
   // is an execution attempt, not work an operator may consider done.
   const unadopted = await env.DB.prepare(
-    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(1500,'smbc-direct-balance','1.0.0','2099-01-01T00:00:00.000Z','ok','[]') RETURNING id",
+    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(1500,'smbc-direct-balance','1.1.0','2099-01-01T00:00:00.000Z','ok','[]') RETURNING id",
   ).first<{ id: number }>();
   expect(await freshness()).toBe(beforeParsedAt);
   expect(await plan()).toMatchObject({ estimated_artifacts: 1, already_parsed: 0 });

@@ -237,3 +237,35 @@ describe("SMBC Direct canonical Layer-B routing", () => {
     });
   });
 });
+
+test("request context survives parsing without changing legacy identity or values", () => {
+  const account = {
+    basis: "authenticated-request-v1",
+    accountType: "ordinary",
+    branchCode: "123",
+    accountNumber: "1234000",
+  };
+  for (const [parser, dataset] of [
+    [smbcDirectBalance, "balance-normalized"],
+    [smbcDirectTransactions, "transactions-normalized"],
+  ] as const) {
+    const old = parser.parse(fixture(dataset), artifact(dataset));
+    const modern = parser.parse(encode({ ...value(dataset), account }), artifact(dataset));
+    expect(modern.observations.length).toBe(old.observations.length);
+    for (const [i, row] of modern.observations.entries()) {
+      expect(row.sourceAccount).toBe(old.observations[i]!.sourceAccount);
+      expect(row.extra._kogane).toMatchObject({ bankAccount: account });
+      expect(row).toMatchObject(old.observations[i]!);
+    }
+    for (const malformed of [
+      null,
+      {},
+      { ...account, accountNumber: "123" },
+      { ...account, password: "synthetic" },
+      { ...account, basis: "guess" },
+    ])
+      expect(() =>
+        parser.parse(encode({ ...value(dataset), account: malformed }), artifact(dataset)),
+      ).toThrow("smbc_account_context_invalid");
+  }
+});

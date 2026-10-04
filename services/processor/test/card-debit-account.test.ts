@@ -1,3 +1,4 @@
+import { CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL } from "../src/card-settlement-shadow.ts";
 // The MyJCB 「カード情報」 reader, the `card_debit_account_statement` lane and
 // the evidence the settlement sweep attaches to candidates (ADR 0032,
 // 2026-09-27 amendment). Every page is synthetic: the table's shape mirrors
@@ -10,6 +11,7 @@ import {
   CARD_INFORMATION_READER_VERSION,
   cardDebitAccountSweep,
   parseCardInformation,
+  knownBankAccounts,
 } from "../src/card-debit-account-job.ts";
 import { cardSettlementSweep } from "../src/card-settlement-job.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
@@ -254,7 +256,12 @@ test("the lane writes one row per card and raw object, append-only, never twice"
 }, 60000);
 
 /** A MyJCB statement total from page `id` and an SMBC debit of the same amount. */
-async function seedCandidate(statementId: number, bankId: number, connection = "conn-a") {
+async function seedCandidate(
+  statementId: number,
+  bankId: number,
+  connection = "conn-a",
+  account?: Record<string, string>,
+) {
   await db
     .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
  VALUES(?,?,'credit_statement_payment_amount',3000,'3000',0,'JPY','2026-09-10','synthetic-total',?)`)
@@ -273,13 +280,14 @@ async function seedCandidate(statementId: number, bankId: number, connection = "
   await seedArtifact(env, bankId, "smbc-bank", "synthetic", "synthetic-" + bankId, {});
   await db
     .prepare(
-      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'smbc-direct-transactions','1','2026-09-12','ok','[]')",
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'smbc-direct-transactions','1.1.0','2026-09-12','ok','[]')",
     )
     .bind(bankId, bankId)
     .run();
   const parsed = await smbcDirectTransactions.parse(
     bytes(
       JSON.stringify({
+        ...(account === undefined ? {} : { account }),
         range: { start: "2026-09-01", end: "2026-09-30" },
         depositsTotal: 0,
         withdrawalsTotal: 3000,
@@ -380,7 +388,7 @@ test("the sweep attaches the statement's debit account as evidence and changes n
   // provider states another account, recorded as evidence against the pair.
   expect(row).toMatchObject({
     candidate_id: candidate.id,
-    policy: "card-debit-account-statement-v2",
+    policy: "card-debit-account-statement-v3",
     outcome: "names_other_account",
     reason: null,
   });
@@ -489,9 +497,81 @@ test("evidence must cite a reading of the candidate's own card", async () => {
     db
       .prepare(
         `INSERT INTO card_settlement_debit_account_evidence(candidate_id,statement_id,policy,outcome,reason,proposal_json,evidence_digest,created_at)
-         VALUES(?,?,'card-debit-account-statement-v2','not_proposed','bank_not_resolved',NULL,?,'t')`,
+         VALUES(?,?,'card-debit-account-statement-v3','not_proposed','bank_not_resolved',NULL,?,'t')`,
       )
       .bind(candidate, otherCard, "b".repeat(64))
       .run(),
   ).rejects.toThrow();
+}, 60000);
+
+test("SMBC supports only the debit whose own published parse records its selected account", async () => {
+  await seedPage(
+    809,
+    "conn-number/credit-detail-01.html",
+    page(replace("金融機関名", "三井住友銀行")),
+  );
+  await cardDebitAccountSweep(env);
+  await seedCandidate(809, 909, "conn-number", {
+    basis: "authenticated-request-v1",
+    accountType: "ordinary",
+    branchCode: "123",
+    accountNumber: "1234000",
+  });
+  await db.prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=0").run();
+  await cardSettlementSweep(db);
+  const id = (await db
+    .prepare("SELECT id FROM transaction_observations WHERE parse_run_id=909")
+    .first<number>("id"))!;
+  const ref = { kind: "transaction" as const, id: "transaction:" + id, revision: "parse_run:909" };
+  const known = await knownBankAccounts(db, "smbc-bank", {
+    sourceId: "smbc-bank",
+    sourceAccount: "smbc-bank:ordinary-yen",
+    ref,
+  });
+  expect(known).toEqual([
+    expect.objectContaining({ comparable: true, accountNumber: "1234000", evidenceRefs: [ref] }),
+  ]);
+  const supporting = (await evidence()).filter((row) => row.outcome === "supports");
+  expect(supporting.length).toBeGreaterThan(0);
+  expect(JSON.parse(supporting[0]!.proposal_json!).evidenceRefs).toContainEqual(ref);
+  // Global lookups and earlier numberless debits stay uncomparable.
+  expect(await knownBankAccounts(db, "smbc-bank")).toEqual([
+    expect.objectContaining({ comparable: false }),
+  ]);
+  const oldId = (await db
+    .prepare("SELECT id FROM transaction_observations WHERE parse_run_id=902")
+    .first<number>("id"))!;
+  expect(
+    await knownBankAccounts(db, "smbc-bank", {
+      sourceId: "smbc-bank",
+      sourceAccount: "smbc-bank:ordinary-yen",
+      ref: { kind: "transaction", id: "transaction:" + oldId, revision: "parse_run:902" },
+    }),
+  ).toEqual([expect.objectContaining({ comparable: false })]);
+  // Pairing a real observation with the wrong parse never acquires evidence.
+  expect(
+    await knownBankAccounts(db, "smbc-bank", {
+      sourceId: "smbc-bank",
+      sourceAccount: "smbc-bank:ordinary-yen",
+      ref: { ...ref, revision: "parse_run:902" },
+    }),
+  ).toEqual([expect.objectContaining({ comparable: false })]);
+  expect(
+    await db.prepare("SELECT count(*) n FROM card_settlement_decisions").first<number>("n"),
+  ).toBe(0);
+}, 60000);
+
+test("automation prerequisite diagnostics return only counts and do not adopt decisions", async () => {
+  const before = await db
+    .prepare("SELECT count(*) n FROM card_settlement_decisions")
+    .first<number>("n");
+  const result = await db
+    .prepare(CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL)
+    .first<Record<string, number>>();
+  expect(result!.distinct_pairs).toBeGreaterThan(0);
+  expect(result!.debit_context_present).toBeGreaterThan(0);
+  expect(Object.values(result!).every(Number.isSafeInteger)).toBe(true);
+  expect(
+    await db.prepare("SELECT count(*) n FROM card_settlement_decisions").first<number>("n"),
+  ).toBe(before);
 }, 60000);

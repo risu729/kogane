@@ -1,3 +1,4 @@
+import { validSmbcAccountContext } from "./smbc-account-context.ts";
 // A card provider's own statement of the bank account a payment is debited
 // from, and the rule that turns it into a proposed card -> bank account
 // relation (ADR 0032 and its 2026-09-27 amendment). The rule only proposes: an
@@ -12,7 +13,7 @@
 import { validSourceFactRef, type SourceFactRef } from "./events.ts";
 import type { CardSettlementFacts } from "./card-settlement.ts";
 
-export const CARD_DEBIT_ACCOUNT_POLICY = "card-debit-account-statement-v2";
+export const CARD_DEBIT_ACCOUNT_POLICY = "card-debit-account-statement-v3";
 
 /** Account types the reader resolves from the provider's 科目 text. */
 export type DebitAccountType = "ordinary" | "current";
@@ -89,6 +90,8 @@ export type BankAccountReference =
       accountType: DebitAccountType;
       branchCode: string | null;
       accountNumber: string;
+      /** Evidence of a request selection belongs only to this observed debit. */
+      evidenceRefs?: SourceFactRef[];
     }
   | {
       comparable: false;
@@ -149,6 +152,37 @@ export function bankAccountReference(
     default:
       return unusable("reference_unrecognised");
   }
+}
+
+/** Enrich only the SMBC debit whose own parser retained its request context.
+ * The caller supplies a published smbc-direct-transactions observation. A
+ * newer balance or another debit cannot establish this historical selection. */
+export function observedBankAccountReference(input: {
+  sourceId: string;
+  sourceAccount: string;
+  context: unknown;
+  ref: SourceFactRef;
+}): BankAccountReference {
+  const legacy = bankAccountReference(input.sourceId, input.sourceAccount);
+  if (
+    input.sourceId !== "smbc-bank" ||
+    input.sourceAccount !== "smbc-bank:ordinary-yen" ||
+    !validSmbcAccountContext(input.context) ||
+    !validSourceFactRef(input.ref) ||
+    input.ref.kind !== "transaction" ||
+    !/^transaction:[1-9][0-9]*$/u.test(input.ref.id) ||
+    !/^parse_run:[1-9][0-9]*$/u.test(input.ref.revision)
+  )
+    return legacy;
+  return {
+    comparable: true,
+    sourceId: input.sourceId,
+    sourceAccount: input.sourceAccount,
+    accountType: input.context.accountType,
+    branchCode: input.context.branchCode,
+    accountNumber: input.context.accountNumber,
+    evidenceRefs: [input.ref],
+  };
 }
 
 export interface CardDebitAccountProposal {
@@ -234,7 +268,7 @@ export function proposeCardDebitAccount(
       cardSourceAccount: statement.sourceAccount,
       bankSourceId: match.sourceId,
       bankSourceAccount: match.sourceAccount,
-      evidenceRefs: [statement.ref],
+      evidenceRefs: [statement.ref, ...(match.evidenceRefs ?? [])],
       visibleDigitCount: digits.length,
       rationaleCodes: [
         "provider_stated_debit_account",

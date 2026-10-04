@@ -93,7 +93,7 @@ test("one account at the stated bank starting with the visible digits is propose
   expect(outcome).toEqual({
     outcome: "proposed",
     proposal: {
-      policy: "card-debit-account-statement-v2",
+      policy: "card-debit-account-statement-v3",
       status: "proposed",
       cardSourceId: "myjcb",
       cardSourceAccount: "myjcb:synthetic:root",

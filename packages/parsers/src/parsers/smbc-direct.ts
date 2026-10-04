@@ -1,3 +1,7 @@
+import {
+  validSmbcAccountContext,
+  type SmbcAccountContext,
+} from "../../../domain/src/smbc-account-context.ts";
 import type {
   ArtifactMeta,
   BalanceObservation,
@@ -34,7 +38,7 @@ interface NormalizedTransaction {
 
 export const smbcDirectBalance: Parser = {
   name: "smbc-direct-balance",
-  version: "1.0.0",
+  version: "1.1.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return accepts(artifact, "balance-normalized");
@@ -44,7 +48,12 @@ export const smbcDirectBalance: Parser = {
     requireSuccessfulRun(artifact);
     requireArtifactKey(artifact, "balance.normalized.json");
     const input = parseObject(bytes, "balance-normalized");
-    exactKeys(input, ["amount", "currency", "observedAt"], "balance-normalized");
+    const bankAccount = readAccount(input);
+    exactKeys(
+      input,
+      ["amount", "currency", "observedAt", ...(bankAccount === null ? [] : ["account"])],
+      "balance-normalized",
+    );
     const amount = safeInteger(input["amount"], "balance-normalized.amount");
     if (input["currency"] !== "JPY") {
       throw new Error("balance-normalized.currency must be JPY");
@@ -69,6 +78,7 @@ export const smbcDirectBalance: Parser = {
           canonicalDataset: "balance-normalized",
           derivedFromDataset: "balance-raw",
           balanceScope: "ordinary_yen_account",
+          ...(bankAccount === null ? {} : { bankAccount }),
         },
       },
     };
@@ -93,7 +103,7 @@ export const smbcDirectBalance: Parser = {
 
 export const smbcDirectTransactions: Parser = {
   name: "smbc-direct-transactions",
-  version: "1.0.0",
+  version: "1.1.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return accepts(artifact, "transactions-normalized");
@@ -102,7 +112,12 @@ export const smbcDirectTransactions: Parser = {
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     requireSuccessfulRun(artifact);
     const input = parseObject(bytes, "transactions-normalized");
-    exactKeys(input, ROOT_KEYS, "transactions-normalized");
+    const bankAccount = readAccount(input);
+    exactKeys(
+      input,
+      [...ROOT_KEYS, ...(bankAccount === null ? [] : ["account"])],
+      "transactions-normalized",
+    );
     const range = parseRange(input["range"]);
     requireArtifactKey(
       artifact,
@@ -168,6 +183,7 @@ export const smbcDirectTransactions: Parser = {
           direction: row.direction === "credit" ? "inflow" : "outflow",
           amountSignSource: "direction",
           identityOrigin: "provider-id",
+          ...(bankAccount === null ? {} : { bankAccount }),
           balanceAfterMetric: "ordinary_yen_balance_after_transaction",
         },
       },
@@ -314,4 +330,12 @@ function utcInstant(value: unknown, label: string): string {
     throw new Error(`${label} must be a canonical UTC instant`);
   }
   return value;
+}
+
+/** Legacy artifacts carry no account selection. A supplied malformed one is
+ * refused rather than silently dropped or used to relabel the old account. */
+function readAccount(input: Record<string, unknown>): SmbcAccountContext | null {
+  if (!Object.hasOwn(input, "account")) return null;
+  if (!validSmbcAccountContext(input["account"])) throw new Error("smbc_account_context_invalid");
+  return input["account"];
 }

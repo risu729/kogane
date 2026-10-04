@@ -14,6 +14,7 @@
 //   * The account holder's name and the card name are never read: nothing
 //     uses them. The log line and tick record carry counts only.
 import { parse } from "parse5";
+import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
 import {
   readMyJcbCardInformation,
   type CardInformationReading,
@@ -21,6 +22,7 @@ import {
 import type { StatementPageNode } from "../../../packages/domain/src/myjcb-statement-page.ts";
 import {
   bankAccountReference,
+  observedBankAccountReference,
   bankSourceIdForDisplayedName,
   debitAccountTypeForDisplayedText,
   type BankAccountReference,
@@ -220,14 +222,54 @@ const KNOWN_BANK_ACCOUNT_LIMIT = 100;
 export async function knownBankAccounts(
   db: D1Database,
   bankSourceId: string,
+  debit?: { sourceId: string; sourceAccount: string; ref: SourceFactRef },
+  baseline?: readonly BankAccountReference[] | null,
 ): Promise<BankAccountReference[] | null> {
-  const rows = await db
-    .prepare(
-      `SELECT DISTINCT json_extract(reference_json,'$[0]') AS source_account FROM source_accounts
+  if (baseline === undefined) {
+    const rows = await db
+      .prepare(
+        `SELECT DISTINCT json_extract(reference_json,'$[0]') AS source_account FROM source_accounts
        WHERE source_id=?1 AND json_type(reference_json,'$[0]')='text' ORDER BY 1 LIMIT ?2`,
-    )
-    .bind(bankSourceId, KNOWN_BANK_ACCOUNT_LIMIT + 1)
-    .all<{ source_account: string }>();
-  if (rows.results.length > KNOWN_BANK_ACCOUNT_LIMIT) return null;
-  return rows.results.map((row) => bankAccountReference(bankSourceId, row.source_account));
+      )
+      .bind(bankSourceId, KNOWN_BANK_ACCOUNT_LIMIT + 1)
+      .all<{ source_account: string }>();
+    if (rows.results.length > KNOWN_BANK_ACCOUNT_LIMIT) return null;
+    baseline = rows.results.map((row) => bankAccountReference(bankSourceId, row.source_account));
+  }
+  if (baseline === null) return null;
+  // Never look up the newest bank account globally: old history must not
+  // inherit the current selection. The ref and parse are both pinned.
+  let observed: BankAccountReference | undefined;
+  if (debit?.sourceId === "smbc-bank" && bankSourceId === debit.sourceId) {
+    const id = /^transaction:([1-9][0-9]*)$/u.exec(debit.ref.id)?.[1];
+    const parseRun = /^parse_run:([1-9][0-9]*)$/u.exec(debit.ref.revision)?.[1];
+    if (id && parseRun) {
+      const evidence = await db
+        .prepare(`SELECT t.extra_json FROM transaction_observations t
+        JOIN published_parse_runs pub ON pub.parse_run_id=t.parse_run_id
+        JOIN parse_runs p ON p.id=t.parse_run_id
+        JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+        WHERE t.id=?1 AND t.parse_run_id=?2 AND t.source_account=?3
+          AND a.source_id='smbc-bank' AND p.parser_name='smbc-direct-transactions'
+          AND p.parser_version='1.1.0'`)
+        .bind(Number(id), Number(parseRun), debit.sourceAccount)
+        .first<{ extra_json: string }>();
+      if (evidence) {
+        const extra: unknown = JSON.parse(evidence.extra_json);
+        const context =
+          extra !== null &&
+          typeof extra === "object" &&
+          "_kogane" in extra &&
+          extra._kogane !== null &&
+          typeof extra._kogane === "object" &&
+          "bankAccount" in extra._kogane
+            ? extra._kogane.bankAccount
+            : null;
+        observed = observedBankAccountReference({ ...debit, context });
+      }
+    }
+  }
+  return baseline.map((account) =>
+    observed?.sourceAccount === account.sourceAccount ? observed : account,
+  );
 }
