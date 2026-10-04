@@ -194,8 +194,9 @@ caller ever drops it again.
 
 [ADR 0040](adr/0040-compatible-cf-version-deployment.md) established prebuilt deployment
 for thirteen compatible Workers; [ADR 0042](adr/0042-prestia-bank-worker.md) adds the
-PRESTIA bank Worker, making fourteen compatible Workers to `cf@1.0.0-beta.12` and the pinned
-`wrangler-deploy-action` v2.1.1. Their native `cloudflare.config.ts` and
+PRESTIA bank Worker, bringing the compatible fleet to fourteen Workers using
+`cf@1.0.0-beta.12` and the pinned `wrangler-deploy-action` v2.1.1. Their native
+`cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared
 V Point exports. Existing Wrangler tests, bundles and dry runs remain, with
