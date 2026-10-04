@@ -15,18 +15,32 @@ describe("the required CI status fails closed", () => {
   const command = /^        run: (.+)$/mu.exec(gate?.body ?? "")?.[1] ?? "";
 
   test("the gate always waits on the complete hk check", () => {
-    expect(ci).toContain("run: mise exec -- hk check --all --no-fail-fast");
-    expect(ci).toContain("name: CI Check\n    needs:\n      - checks\n    if: ${{ always() }}");
+    expect(ci).toContain("mise exec -- hk check --all --skip-step repository --no-fail-fast");
+    expect(ci).toContain("mise run --continue-on-error ci:remainder");
+    expect(ci).toContain("fail-fast: false");
+    expect(ci).toContain("shard: [1, 2]");
+    expect(ci).toContain(
+      "name: CI Check\n    needs:\n      - checks\n      - processor\n    if: ${{ always() }}",
+    );
     expect(gate?.body).toContain("CHECKS_RESULT: ${{ needs.checks.result }}");
+    expect(gate?.body).toContain("PROCESSOR_RESULT: ${{ needs.processor.result }}");
     expect(command).not.toBe("");
   });
 
   for (const status of ["success", "failure", "cancelled", "skipped", ""]) {
     test(`the actual gate command handles ${status || "an absent result"}`, () => {
       const result = Bun.spawnSync(["bash", "-c", command], {
-        env: { ...process.env, CHECKS_RESULT: status },
+        env: { ...process.env, CHECKS_RESULT: status, PROCESSOR_RESULT: "success" },
       });
       expect(result.exitCode === 0).toBe(status === "success");
+    });
+  }
+  for (const status of ["failure", "cancelled", "skipped", ""]) {
+    test(`a processor shard result of ${status || "absent"} fails the gate`, () => {
+      const result = Bun.spawnSync(["bash", "-c", command], {
+        env: { ...process.env, CHECKS_RESULT: "success", PROCESSOR_RESULT: status },
+      });
+      expect(result.exitCode).not.toBe(0);
     });
   }
 });

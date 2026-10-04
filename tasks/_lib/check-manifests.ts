@@ -296,7 +296,10 @@ function dependencyNames(reference: string, owner: string, names: readonly strin
 }
 
 /** Every task reachable through normal and post dependencies, including wildcard tasks. */
-function dependencyClosure(name: string, byName: ReadonlyMap<string, TaskRecord>): Set<string> {
+export function dependencyClosure(
+  name: string,
+  byName: ReadonlyMap<string, TaskRecord>,
+): Set<string> {
   const seen = new Set<string>();
   const names = [...byName.keys()];
   const queue = [name];

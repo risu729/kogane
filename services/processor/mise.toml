@@ -13,9 +13,19 @@ run = "./node_modules/.bin/tsc --noEmit"
 [tasks."test"]
 description = "Run every processor test sequentially in one process."
 depends = ["//services/processor:types"]
-# Other workspace checks and container dry runs share the runner. The hosted
-# run with file workers regressed and timed out; retain the complete serial suite.
+# Local full verification retains the complete serial suite. Hosted native
+# shards each run serially on a separate runner, with the same preload.
 run = "bun test"
+
+[tasks."test-shard-1"]
+description = "Run the first native processor file shard serially on its own hosted runner."
+depends = ["//services/processor:types"]
+run = "bun test --shard=1/2"
+
+[tasks."test-shard-2"]
+description = "Run the second native processor file shard serially on its own hosted runner."
+depends = ["//services/processor:types"]
+run = "bun test --shard=2/2"
 
 [tasks."dry-run"]
 description = "Validate the services/processor deployment without uploading it."

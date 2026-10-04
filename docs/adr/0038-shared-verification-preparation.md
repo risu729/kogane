@@ -1,108 +1,91 @@
-# ADR 0038: Share verification preparation in one native graph
+# ADR 0038: Isolate complete hosted verification while sharing preparation
 
 - Status: proposed until this PR merges; accepted upon merge
 - Date: 2026-10-04
 
 ## Context
 
-[PR #417 CI run 37178388756](https://github.com/risu729/kogane/actions/runs/37178388756)
-passed with a 632-second `Checks` job and a 606.43-second native graph.
-Processor tests dominated the graph (510.40-second task, 607 tests across 64
-files, 606 passed and one existing opt-in benchmark skipped). A separate dry-run
-post graph regenerated 19 Worker type declarations and the production client,
-then validated deployments, adding approximately 62 seconds after the suite.
-[Recent main run 37179821065](https://github.com/risu729/kogane/actions/runs/37179821065)
-passed in 617 seconds with 616 processor tests across 66 files and the same
-38 type/four client-build launches. Total job durations were 623 seconds.
+[PR #417 CI](https://github.com/risu729/kogane/actions/runs/37178388756) passed
+in 632 seconds. Its 606.43-second native graph included 607 processor tests/64
+files (606 passed, one existing benchmark skipped) and a separate deployment
+post graph that repeated 19 Worker type commands and the production client.
+[Recent main](https://github.com/risu729/kogane/actions/runs/37179821065) passed
+in 617 seconds; [direct base](https://github.com/risu729/kogane/actions/runs/37180511042)
+passed in 967 seconds with the same 616 processor tests/66 files. Several
+unchanged tasks also slowed, so individual hosted runs are not controlled
+performance comparisons.
 
-Local and hosted verification must retain every linter, repository guard,
-workspace check and Worker validation. Every pull request and merged `main`
-result must be checked; required-status skips cannot count as success.
+Three combined PR attempts failed existing storage/processor deadlines:
+[two file workers](https://github.com/risu729/kogane/actions/runs/37180913140),
+[serial](https://github.com/risu729/kogane/actions/runs/37181978822), and
+[serial with later Docker builds](https://github.com/risu729/kogane/actions/runs/37183370112).
+They took 746, 963 and 1,010 seconds respectively. Shared preparation worked
+(19 types/three builds), but the latest storage case exceeded 30 seconds before
+Docker began, disproving Docker overlap as a sufficient explanation. Its
+processor suite passed all 632 tests plus one existing skip across 68 files in
+870.83 seconds; processor execution remains the critical path.
+
+A separate investigation found repeated SQLite compilation in synthetic
+storage seeding. Reusing prepared statements preserves the fixture SQL, values,
+ordering, migrations and comparison assertions while removing setup overhead.
+That targeted repair does not establish a shorter processor critical path.
+Local and hosted verification must retain all checks and existing deadlines.
 
 ## Options considered
 
-1. Retain the separate deployment post graph, including repeated preparation.
-2. Share preparation in one native graph, retaining serial processor tests
-   and ordering Docker deployment builds after workspace checks.
-3. Share preparation and add two isolated processor file workers in the same
-   hosted runner. The first combined PR run tested this option and rejected it
-   on observed timeout failures and elapsed time, as described below.
-4. Divide checks among hosted jobs with full coverage guards. This provides
-   more CPU capacity but adds runner minutes, repeated setup and partition
-   coverage responsibilities; it is not adopted by this change.
-5. Select tests by changed paths or omit slow synthetic/scale cases. Rejected:
-   all checks protect repository-wide invariants, including merged results.
+1. Keep the separate post graph and repeated preparation. Rejected duplication.
+2. Share preparation on one runner, optionally with two file workers or later
+   Docker builds. Executed attempts retained coverage but failed reliability
+   and elapsed-time goals; do not accept another blind rerun as an optimization.
+3. Isolate two native processor file shards on separate hosted runners, plus a
+   complete remainder runner. Adopted with exact coverage and fail-closed gates.
+4. Omit slow cases, use changed-path selection, raise existing deadlines or
+   accept retries/skips. Rejected: these weaken the requested validation.
 
 ## Decision
 
-Choose option 2. Root `checks` schedules `ci:workspaces` and `dry-run` in one
-graph. `ci:workspaces` owns repository and every workspace CI aggregate. The
-four Docker-building dry-run bodies wait for `//:ci:workspaces`, so their actual
-Docker invocations begin after its child checks complete. Non-container dry runs
-can overlap checks. `wait_for` only orders selected tasks, so standalone dry runs
-do not pull in workspace tests. Existing type/build/generated-input dependencies
-order preparation and reuse it once in that graph. Processor `test` retains `bun test`
-and its complete serial suite; the existing opt-in timing benchmark keeps its
-previous skip policy.
+Local `mise exec -- hk check --all --no-fail-fast` and its complete native graph
+remain in force. Hosted `Checks` runs all hk lint steps and native `ci:remainder`.
+Two `Processor` matrix jobs run `bun test --shard=1/2` and `--shard=2/2` through
+native workspace tasks, retaining their working directory, preload and serial
+within-runner behavior. Bun's default discovery sorts paths and assigns files
+by index modulo two; no custom/manual file list or test-name filter is used.
 
-The new native-plan guard runs two synchronous mise subprocesses. It bounds each
-subprocess to ten seconds and the test to thirty seconds, allowing task discovery
-and planning under full load while still failing a hung command. Existing runtime
-test timeouts remain unchanged.
+The remainder owns every other executable leaf, including processor/storage
+typechecks. Its full storage suite waits for the selected remainder workspace
+aggregate, and Docker bodies wait for storage. Preparation runs once within
+that graph; standalone dry runs do not select tests. A native leaf-union guard
+compares all hosted partitions to local `checks` and rejects missing/extra
+leaves, including future workspace or processor/storage check additions. An
+executed Bun fixture verifies all default discovery suffixes, exclusions,
+preload behavior, sequential tests and disjoint shard union. Since native Bun
+can return success for an empty shard, required coverage validation rejects
+that state and guards against unaccounted discovery overrides. Newly discovered processor files join automatically.
 
-`mise exec -- hk check --all --no-fail-fast` remains the complete local and hosted
-command. `Checks`, required `CI Check`, fail-closed aggregation, triggers and
-permissions remain in force. There are no path filters, optional shards,
-retry-based acceptance or task-result caches. Other security, signature and
-release workflows are unchanged.
+The public Ubuntu runner provides four CPUs. Hosted native task concurrency is
+bounded at four; each processor shard uses one serial Bun process. The processor
+matrix disables fail-fast. Required `CI Check` always runs and requires both
+`Checks` and the entire processor matrix to return exactly `success`, rejecting
+failure, cancellation and unexpected skips. Every PR and merged `main` runs the
+same complete union. Workflow permissions, other security/signature checks,
+release gates and production credential boundaries remain in force.
 
-## Consequences
+## Consequences and verification
 
-- Shared types and client builds run once rather than in normal and post graphs.
-  Non-container deployment validation can overlap tests after its inputs exist;
-  Docker builds run after workspace checks, retaining a validation tail.
-- Processor files remain sequential in one process. Other workspace checks and
-  non-container validations still share the existing runner through mise concurrency.
-- No additional hosted jobs or setup are introduced. Shared preparation can
-  reduce waiting and runner time; a speedup must still be demonstrated on the
-  complete hosted graph rather than inferred from the plan.
-- [The first PR #418 run 37180913140](https://github.com/risu729/kogane/actions/runs/37180913140)
-  failed with two file workers: `Checks` took 746 seconds, the graph 705.18
-  seconds, and 633 processor tests across 68 files took 651.36 seconds with
-  630 passed, two failed, one error reported and the same benchmark skipped. Total job durations
-  were 752 seconds. Preparation deduplication succeeded (19 types/three builds),
-  but the native-plan guard and existing storage/processor cases timed out;
-  disposal following one timeout also invalidated a Miniflare stub.
-- The combined PR adds two cost-test files and seventeen tests compared with
-  recent main, so one run does not attribute every added second to isolation.
-  It establishes that this worker configuration failed the reliability and
-  waiting-time goals. Restore serial execution rather than relax existing
-  deadlines or try further worker bounds without evidence.
-- [The serial run 37181978822](https://github.com/risu729/kogane/actions/runs/37181978822)
-  still failed after 963 seconds. Its processor suite passed all 632 tests with
-  one existing skip (633 tests/68 files, 877.45 seconds). The only failure was
-  the existing 2,000-row storage identity case: 31.99 seconds exceeded its
-  30-second deadline while a Shinsei Docker build was active. Preparation ran
-  once (19 type/three build commands). Separate those Docker invocations from
-  workspace tests without raising existing deadlines. The overlap is evidence
-  for the scheduling choice, not proof of the sole cause.
-- [The direct-base run 37180511042](https://github.com/risu729/kogane/actions/runs/37180511042)
-  passed in 967 seconds, including 809.90 seconds for 616 processor tests/66
-  files. Unchanged workspace tasks also slowed substantially versus recent
-  main, illustrating hosted timing variation. No causal speedup is claimed.
-- Container builds, Chromium installation, resource contention and queueing can
-  still dominate. Complete hosted validation and measurement of the phased
-  graph remain required before claiming a performance gain.
+- Three validation runners add two checkout/tool/dependency setups and repeated
+  processor type generation. Each remainder graph still shares preparation.
+  Total runner durations may increase while elapsed waiting decreases.
+- The latest 68 processor file-header intervals would split into approximately
+  402 and 469 seconds by sorted modulo assignment. This estimates capacity;
+  it is not a hosted measurement, guaranteed 2x gain or achieved latency goal.
+- Focused guards require exact leaf coverage, both native shard commands,
+  selected storage/Docker ordering, standalone behavior and fail-closed gates.
+  Existing runtime deadlines are unchanged; only new process-plan guards use
+  explicit bounded subprocess/test deadlines.
+- The complete partitioned PR and merged-result graphs must pass. Record actual
+  elapsed and summed job durations against the recorded baselines before
+  claiming a waiting-time benefit. Hosted variation remains a confounder.
 
-## Verification
-
-Native execution-plan tests require every declared Worker type and client build
-command once, with bounded subprocess/test execution. Existing manifest,
-generated-input and CI wiring checks preserve complete coverage, preparation
-ordering and the fail-closed required status. Focused guards validate selected ordering, aggregate child completion and
-standalone selection; the combined full hk suite and Docker-capable hosted graph must then
-pass with all expanded tests. Compare pull-request and merged `main` elapsed and
-total job durations against the recorded baselines in
-[continuous integration](../ci.md#waiting-time-baseline-and-limits).
-
-The dependency graph remains owned by [native mise tasks](https://mise.jdx.dev/tasks/).
+See [CI measurements and limits](../ci.md#waiting-time-baseline-and-limits),
+[native mise tasks](https://mise.jdx.dev/tasks/task-configuration.html#wait_for)
+and [native Bun sharding](https://bun.com/docs/test/parallel#splitting-a-suite-across-ci-machines-with-shard).

@@ -38,14 +38,15 @@ fixed toolchain:
   `compare-turnstile-probes.mjs`). A Renovate rule keeps both manifests
   below 7. Porting those scripts off the compiler API is a separate decision;
   until then that workspace is type-checked by TypeScript 6.0.3.
-- **hk** is the complete verification entrypoint: `hk check --all` runs the
-  shared lint presets plus mise tasks for repository guards, Knip, typechecks,
-  tests, builds and Worker dry runs in one native dependency graph. Shared
-  preparation runs once; processor tests retain the complete serial suite
-  in one process. Docker-building dry-run bodies wait for the selected
-  workspace CI aggregate, avoiding overlap with those tests while sharing
-  preparation. Standalone dry runs do not select CI tests. `hk fix` and the staged pre-commit hook
-  retain only the lint/format steps.
+- **hk** is the complete local verification entrypoint: `hk check --all` runs
+  lint presets plus native tasks for repository guards, typechecks, tests,
+  builds and Worker dry runs. Local processor tests remain serial and complete.
+  Hosted CI runs every lint step and an exact guarded native partition union:
+  the complete remainder plus two native Bun processor shards on separate
+  runners. Storage tests finish after other remainder checks and before Docker
+  builds. Each runner reuses its own preparation; hosted runner isolation adds
+  repeated setup and processor types. `hk fix` and the staged pre-commit hook
+  retain only lint/format steps.
 - **Vitest** with `@cloudflare/vitest-plugin` runs the Workers-runtime tests;
   **Wrangler** generates Worker types and validates deployments with
   `--dry-run` through workspace mise tasks in both local checks and CI.

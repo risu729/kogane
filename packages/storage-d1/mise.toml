@@ -6,6 +6,8 @@ description = "Type-check packages/storage-d1."
 run = "./node_modules/.bin/tsc --noEmit"
 
 [tasks."test"]
+# Selected only by the hosted remainder; standalone and local full checks stay complete.
+wait_for = ["//:ci:remainder:workspaces"]
 description = "Run the packages/storage-d1 tests: codecs, atomic commands and the migration parity."
 run = "bun test"
 
