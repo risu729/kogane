@@ -96,5 +96,4 @@ category,provider_or_service,asset_or_reward_type,unit,official_surface,ownershi
 ポイント・マイル,ヨドバシ ゴールドポイント,ポイント,pt,ヨドバシ.com,個人,account-indicated-product-unconfirmed,P3,direct-official-source
 ポイント・マイル,一休.com ポイント,ポイント,pt,一休.com,個人,account-indicated-product-unconfirmed,P3,direct-official-source
 ポイント・マイル,楽天ポイント / 楽天キャッシュ,ポイント / 残高,pt/JPY,楽天PointClub,個人,confirmed-in-source-sheet,P3,direct-official-source
-収入,Stripe Connect,売上残高（GitHub Sponsors の受取）,JPY/USD,Stripe ダッシュボード,個人,account-indicated-product-unconfirmed,P3,direct-official-source
 海外送金,Wise,マルチカレンシー残高（通貨別）+ Jars,多通貨,Wise app,個人,account-indicated-product-unconfirmed,P3,direct-official-source
