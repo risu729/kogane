@@ -242,7 +242,11 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
         // Positional, not derived from the key: an artifact key may contain a
         // path separator, which a transformation id may not.
         transformationId: `extracted-${String(index).padStart(4, "0")}`,
-        stepKind: "extracted",
+        // v2 retains authenticated request context as well as response extraction.
+        stepKind:
+          input.manifest.schemaVersion === "smbc-direct-backfill-worker-poc-v1"
+            ? "extracted"
+            : "generated",
         transformerId: "smbc-direct-normalizer",
         transformerVersion: input.manifest.schemaVersion,
         inputArtifactKeys: input.manifest.artifacts.some(

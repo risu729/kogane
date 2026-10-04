@@ -218,6 +218,9 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             key: `${prefix}/balance.normalized.json`,
             value: {
               observedAt: startedAt,
+              ...(balance.account === null || balance.account === undefined
+                ? {}
+                : { account: balance.account }),
               currency: balance.currency,
               amount: balance.amount,
             },
@@ -297,6 +300,9 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             key: `${prefix}/transactions/${rangeName}.normalized.json`,
             value: {
               range,
+              ...(result.account === null || result.account === undefined
+                ? {}
+                : { account: result.account }),
               depositsTotal: result.depositsTotal,
               withdrawalsTotal: result.withdrawalsTotal,
               transactions: result.transactions,

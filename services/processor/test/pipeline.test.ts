@@ -369,7 +369,7 @@ test("successful concurrent sweeps publish once, preserve provenance, supersede 
   ).first<{ id: number }>();
   await publishParse(env.DB, previous!.id);
   await env.DB.prepare(
-    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(10,'smbc-direct-balance','1.0.0','2026-01-01T00:00:00.000Z','pending','[]')",
+    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(10,'smbc-direct-balance','1.1.0','2026-01-01T00:00:00.000Z','pending','[]')",
   ).run();
   await env.DB.prepare("UPDATE observation_scan_state SET cursor=0").run();
   await Promise.all([sweep(env), sweep(env)]);
@@ -383,7 +383,7 @@ test("successful concurrent sweeps publish once, preserve provenance, supersede 
     await env.DB.prepare(
       "SELECT p.parser_version FROM published_parse_runs x JOIN parse_runs p ON p.id=x.parse_run_id WHERE x.fetch_artifact_id=10 AND x.parser_name='smbc-direct-balance'",
     ).first<string>("parser_version"),
-  ).toBe("1.0.0");
+  ).toBe("1.1.0");
   expect(
     await env.DB.prepare(
       "SELECT count(*) AS n FROM publication_events WHERE fetch_artifact_id=10 AND kind='normal' AND previous_parse_run_id=?",

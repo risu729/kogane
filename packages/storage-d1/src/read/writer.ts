@@ -26,6 +26,7 @@ import {
   type SnapshotInputRef,
 } from "./identity.ts";
 import {
+  CURRENT_REVISION_SNAPSHOT_SQL,
   NEXT_ATTEMPT_SQL,
   OLDEST_BUILDING_SNAPSHOT_SQL,
   READ_INSTANCE_SQL,
@@ -77,6 +78,35 @@ export async function ensureReadInstance(
   const claimed = await db.prepare(READ_INSTANCE_SQL).bind().first<ReadInstance>();
   if (!claimed) throw new Error("storage-d1: the read instance could not be claimed");
   return claimed;
+}
+
+/** A constant-size check before recapturing all historical input. */
+export async function currentRevisionSnapshot(
+  db: D1Like,
+  context: {
+    sourceRevision: number;
+    visibilityRevision: number;
+    coreEpoch: string;
+    readInstanceId: string;
+    buildDigest: string;
+    contractVersion: string;
+    identityRelease: string;
+    decimalPolicyRelease: string;
+  },
+): Promise<{ snapshot_id: string; input_digest: string; row_count: number } | null> {
+  return await db
+    .prepare(CURRENT_REVISION_SNAPSHOT_SQL)
+    .bind(
+      context.sourceRevision,
+      context.visibilityRevision,
+      context.coreEpoch,
+      context.readInstanceId,
+      context.buildDigest,
+      context.contractVersion,
+      context.identityRelease,
+      context.decimalPolicyRelease,
+    )
+    .first<{ snapshot_id: string; input_digest: string; row_count: number }>();
 }
 
 export interface ContentSnapshotRow {

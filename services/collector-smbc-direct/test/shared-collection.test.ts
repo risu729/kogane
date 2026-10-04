@@ -376,3 +376,51 @@ describe("provider bytes are stored verbatim", () => {
     expect([...new Uint8Array(await staged!.arrayBuffer())]).toEqual([...manifestBytes(manifest)]);
   });
 });
+
+test("v2 account context round-trips with generated lineage and unchanged raw bytes", async () => {
+  const legacy = await buildSharedRunPlan(inputOf(await manifestOf()));
+  expect(legacy.run.transformations.map((step) => step.stepKind)).toEqual([
+    "extracted",
+    "extracted",
+  ]);
+  const manifest = await manifestOf({ schemaVersion: "smbc-direct-backfill-worker-poc-v2" });
+  const account = {
+    basis: "authenticated-request-v1",
+    accountType: "ordinary",
+    branchCode: "123",
+    accountNumber: "0012345",
+  };
+  manifest.artifacts = await Promise.all(
+    manifest.artifacts.map(async (entry) => {
+      if (!entry.dataset.endsWith("-normalized")) return entry;
+      const original = JSON.parse(new TextDecoder().decode(BODIES.get(entry.key)!));
+      const bytes = encoder.encode(JSON.stringify({ ...original, account }));
+      BODIES.set(entry.key, bytes);
+      return { ...entry, bytes: bytes.byteLength, sha256: await sha256Hex(bytes) };
+    }),
+  );
+  const input = inputOf(manifest);
+  const bucket = new FakeR2Bucket();
+  expect((await persistSharedRun(bucket, input)).outcome).toBe("persisted");
+  const read = await readTerminal(bucket, "smbc-direct", RUN_ID);
+  if (read.outcome !== "found") throw new Error("terminal missing");
+  expect(read.manifest.transformations.map((step) => step.stepKind)).toEqual([
+    "generated",
+    "generated",
+  ]);
+  for (const entry of manifest.artifacts) {
+    const stored = await bucket.get("objects/" + entry.sha256.slice(0, 2) + "/" + entry.sha256);
+    const bytes = new Uint8Array(await stored!.arrayBuffer());
+    expect(Array.from(bytes)).toEqual(Array.from(input.bytesByKey.get(entry.key)!));
+    if (entry.dataset.endsWith("-normalized")) {
+      const decoded = JSON.parse(new TextDecoder().decode(bytes));
+      expect(decoded.account).toEqual(account);
+      expect(Object.keys(decoded.account).sort()).toEqual([
+        "accountNumber",
+        "accountType",
+        "basis",
+        "branchCode",
+      ]);
+    }
+  }
+});
