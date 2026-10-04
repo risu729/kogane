@@ -16,9 +16,9 @@
 // current together (docs/economic-events.md, "Matching stages"). Proposals
 // this lane stored before stay as history: nothing deletes them, and the
 // digest lookup never sends one again. Stage A needs a provider-issued row
-// id, which neither source has, so for them a tick reads its page and pairs
-// nothing; the cursor, group read, digest lookup and write budget stay for a
-// source that does carry provider ids.
+// id. Stage-A-only pages use the provider-origin partial index: an empty
+// admitted set costs no observation scan. Historical, custom and future rows
+// with provider-origin ids still run; stage B keeps its ordinary page path.
 //
 // Pending/posted pairs stay inside one source account and billing period.
 // Vpass uses unconfirmed/posted; MyJCB uses unconfirmed/confirmed. MyJCB's
@@ -258,6 +258,25 @@ ${sliceJoins}
  AND t.id>?3
 ORDER BY t.id
 LIMIT ?4)
+${factsOfIds}`;
+
+/**
+ * Exactly originOf's provider branch, including its bounded-text read. This
+ * predicate is also the partial index of migration 0064 (tested byte for
+ * byte). A source capability inferred from today's parser would lose old or
+ * custom evidence and would need updating when a parser starts emitting ids.
+ */
+export const PROVIDER_ID_PREDICATE = `t.external_id IS NOT NULL
+ AND (${jsonText("$._kogane.identityOrigin")}) IS NOT NULL
+ AND instr((${jsonText("$._kogane.identityOrigin")}), 'fingerprint')=0
+ AND instr((${jsonText("$._kogane.identityOrigin")}), 'occurrence')=0`;
+
+/** Stage A pages start in the admitted-id index, including ids below a previous cursor on wrap. */
+export const stageAFactPageQuery = `WITH ids(id) AS (
+ SELECT t.id FROM transaction_observations t INDEXED BY reconciliation_provider_ids
+ ${sliceJoins}
+ AND ${PROVIDER_ID_PREDICATE} AND t.id>?3
+ ORDER BY t.id LIMIT ?4)
 ${factsOfIds}`;
 
 /**
@@ -547,7 +566,7 @@ async function sweepSlice(
   const statuses = JSON.stringify([...slice.pendingStatuses, ...slice.postedStatuses]);
   const page = (
     await db
-      .prepare(factPageQuery)
+      .prepare(slice.stages.includes("B") ? factPageQuery : stageAFactPageQuery)
       .bind(slice.sourceId, statuses, cursor, limits.scan)
       .all<FactRow>()
   ).results;

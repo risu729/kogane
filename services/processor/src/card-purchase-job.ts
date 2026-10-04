@@ -239,6 +239,10 @@ export function cardUsageFactOf(row: CurrentCardUsageRow): CardUsageFact {
   };
 }
 
+// Bump when the retirement read's selection semantics change. A deployment
+// must not reuse an empty-result proof produced under a different contract.
+const RETIREMENT_CHECK_POLICY = "card-purchase-retirement-v1";
+
 type Outcome = "written" | "conflict" | "failed";
 
 /** One guarded batch; the first statement carries every guard. */
@@ -300,7 +304,36 @@ async function retirePass(
   limit: number,
   now: string,
 ): Promise<boolean> {
+  const check = await db
+    .prepare(
+      "SELECT revision,clean_revision,clean_policy FROM card_purchase_retirement_check WHERE singleton=1",
+    )
+    .first<{ revision: number; clean_revision: number | null; clean_policy: string | null }>();
+  if (
+    check &&
+    check.revision === check.clean_revision &&
+    check.clean_policy === RETIREMENT_CHECK_POLICY
+  )
+    return false;
+  // Arm a fresh proof before the read. A concurrent input mutation bumps this
+  // revision once; marking the old revision clean then writes nothing. A dirty
+  // interval's later mutations are latched, avoiding a write for every row.
+  const checking = await db
+    .prepare(
+      "UPDATE card_purchase_retirement_check SET checking_revision=revision WHERE singleton=1 RETURNING revision",
+    )
+    .first<{ revision: number }>();
   const stale = await page<StaleCardPurchaseKeyRow>(db, staleCardPurchaseKeysSql(limit));
+  if (stale.length === 0 && checking) {
+    await db
+      .prepare(
+        "UPDATE card_purchase_retirement_check SET clean_revision=?1,clean_policy=?2 WHERE singleton=1 AND revision=?1",
+      )
+      .bind(checking.revision, RETIREMENT_CHECK_POLICY)
+      .run();
+  }
+  // A nonempty page never establishes a clean proof: deferred, failed and
+  // conflicting retirements keep their next attempt, including partial keys.
   const byEvent = new Map<string, StaleCardPurchaseKeyRow[]>();
   for (const row of stale) byEvent.set(row.event_id, [...(byEvent.get(row.event_id) ?? []), row]);
   const live = await loadLiveCardPurchases(readerOf(db), [...byEvent.keys()]);

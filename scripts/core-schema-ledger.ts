@@ -237,6 +237,10 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "core-keep",
     planRow: "card purchase recognition evidence",
   },
+  card_purchase_retirement_check: {
+    classification: "operational-mutable",
+    planRow: "latched clean proof for purchase retirement; invalidate by clearing clean_revision",
+  },
   card_purchase_scan_cursor: {
     classification: "operational-mutable",
     planRow: "bounded card purchase scan progress",

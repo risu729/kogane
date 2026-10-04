@@ -854,6 +854,17 @@
         }
       ],
       "sha256": "19892d24a2169c319dea1af2d98dbaa8ce255307a3f743395303e24c3d505110"
+    },
+    {
+      "file": "0064_purchase_retirement_and_reconciliation_cost.sql",
+      "statementCount": 43,
+      "insertStatements": [
+        {
+          "table": "card_purchase_retirement_check",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "8336a22247f8ec130ae55c5aa8f18e5508c05c1071d299476ed0e7e6801ce69d"
     }
   ],
   "tables": [
@@ -1289,7 +1300,10 @@
         "acquisition_session_requires_active_route",
         "acquisition_sessions_no_delete",
         "acquisition_sessions_no_update",
-        "acquisition_sessions_reject_duplicate_insert"
+        "acquisition_sessions_reject_duplicate_insert",
+        "purchase_retirement_acquisition_sessions_delete",
+        "purchase_retirement_acquisition_sessions_insert",
+        "purchase_retirement_acquisition_sessions_update"
       ],
       "noUpdateTriggers": [
         "acquisition_sessions_no_update"
@@ -3111,7 +3125,10 @@
         "card_purchase_recognition_keys_no_delete",
         "card_purchase_recognition_keys_no_replace",
         "card_purchase_recognition_keys_no_update",
-        "card_purchase_recognition_keys_one_live_holder"
+        "card_purchase_recognition_keys_one_live_holder",
+        "purchase_retirement_card_purchase_recognition_keys_delete",
+        "purchase_retirement_card_purchase_recognition_keys_insert",
+        "purchase_retirement_card_purchase_recognition_keys_update"
       ],
       "noUpdateTriggers": [
         "card_purchase_recognition_keys_no_update"
@@ -3241,7 +3258,10 @@
         "card_purchase_recognitions_guard",
         "card_purchase_recognitions_no_delete",
         "card_purchase_recognitions_no_replace",
-        "card_purchase_recognitions_no_update"
+        "card_purchase_recognitions_no_update",
+        "purchase_retirement_card_purchase_recognitions_delete",
+        "purchase_retirement_card_purchase_recognitions_insert",
+        "purchase_retirement_card_purchase_recognitions_update"
       ],
       "noUpdateTriggers": [
         "card_purchase_recognitions_no_update"
@@ -3251,6 +3271,60 @@
       ],
       "appendOnly": true,
       "sqlSha256": "5aefb9bc04e2a310"
+    },
+    {
+      "name": "card_purchase_retirement_check",
+      "classification": "operational-mutable",
+      "planRow": "latched clean proof for purchase retirement; invalidate by clearing clean_revision",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "singleton",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "checking_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "clean_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "clean_policy",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "singleton"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "84d3f6259379d67a"
     },
     {
       "name": "card_purchase_scan_cursor",
@@ -4513,7 +4587,8 @@
       "triggers": [
         "core_source_revision_forward_only",
         "core_source_revision_no_delete",
-        "core_source_revision_single_row"
+        "core_source_revision_single_row",
+        "purchase_retirement_core_revision_update"
       ],
       "noUpdateTriggers": [],
       "noDeleteTriggers": [
@@ -5173,7 +5248,10 @@
         "economic_event_revisions_no_delete",
         "economic_event_revisions_no_replace",
         "economic_event_revisions_provenance",
-        "economic_event_revisions_supersede_only"
+        "economic_event_revisions_supersede_only",
+        "purchase_retirement_economic_event_revisions_delete",
+        "purchase_retirement_economic_event_revisions_insert",
+        "purchase_retirement_economic_event_revisions_update"
       ],
       "noUpdateTriggers": [],
       "noDeleteTriggers": [
@@ -6006,7 +6084,10 @@
         "fetch_artifact_requires_active_route",
         "fetch_artifacts_no_delete",
         "fetch_artifacts_no_update",
-        "fetch_artifacts_reject_duplicate_insert"
+        "fetch_artifacts_reject_duplicate_insert",
+        "purchase_retirement_fetch_artifacts_delete",
+        "purchase_retirement_fetch_artifacts_insert",
+        "purchase_retirement_fetch_artifacts_update"
       ],
       "noUpdateTriggers": [
         "fetch_artifacts_no_update"
@@ -6473,7 +6554,10 @@
         "fetch_run_report_requires_active_route",
         "fetch_run_reports_no_delete",
         "fetch_run_reports_no_update",
-        "fetch_run_reports_reject_duplicate_insert"
+        "fetch_run_reports_reject_duplicate_insert",
+        "purchase_retirement_fetch_run_reports_delete",
+        "purchase_retirement_fetch_run_reports_insert",
+        "purchase_retirement_fetch_run_reports_update"
       ],
       "noUpdateTriggers": [
         "fetch_run_reports_no_update"
@@ -6683,7 +6767,10 @@
         "fetch_run_requires_active_route",
         "fetch_runs_no_delete",
         "fetch_runs_no_update",
-        "fetch_runs_reject_duplicate_insert"
+        "fetch_runs_reject_duplicate_insert",
+        "purchase_retirement_fetch_runs_delete",
+        "purchase_retirement_fetch_runs_insert",
+        "purchase_retirement_fetch_runs_update"
       ],
       "noUpdateTriggers": [
         "fetch_runs_no_update"
@@ -6850,7 +6937,10 @@
         "fetch_unit_report_requires_active_route",
         "fetch_unit_reports_no_delete",
         "fetch_unit_reports_no_update",
-        "fetch_unit_reports_reject_duplicate_insert"
+        "fetch_unit_reports_reject_duplicate_insert",
+        "purchase_retirement_fetch_unit_reports_delete",
+        "purchase_retirement_fetch_unit_reports_insert",
+        "purchase_retirement_fetch_unit_reports_update"
       ],
       "noUpdateTriggers": [
         "fetch_unit_reports_no_update"
@@ -7001,7 +7091,10 @@
         "fetch_unit_requires_active_route",
         "fetch_units_no_delete",
         "fetch_units_no_update",
-        "fetch_units_reject_duplicate_insert"
+        "fetch_units_reject_duplicate_insert",
+        "purchase_retirement_fetch_units_delete",
+        "purchase_retirement_fetch_units_insert",
+        "purchase_retirement_fetch_units_update"
       ],
       "noUpdateTriggers": [
         "fetch_units_no_update"
@@ -7398,7 +7491,10 @@
         "identity_run_policies_no_delete",
         "identity_run_policies_no_replace",
         "identity_run_policies_no_update",
-        "identity_run_policies_provenance"
+        "identity_run_policies_provenance",
+        "purchase_retirement_identity_run_policies_delete",
+        "purchase_retirement_identity_run_policies_insert",
+        "purchase_retirement_identity_run_policies_update"
       ],
       "noUpdateTriggers": [
         "identity_run_policies_no_update"
@@ -7599,7 +7695,10 @@
         "identity_vpass_binding_provenance",
         "identity_vpass_bindings_no_delete",
         "identity_vpass_bindings_no_replace",
-        "identity_vpass_bindings_no_update"
+        "identity_vpass_bindings_no_update",
+        "purchase_retirement_identity_vpass_bindings_delete",
+        "purchase_retirement_identity_vpass_bindings_insert",
+        "purchase_retirement_identity_vpass_bindings_update"
       ],
       "noUpdateTriggers": [
         "identity_vpass_bindings_no_update"
@@ -8758,7 +8857,10 @@
       "indexes": [],
       "triggers": [
         "observation_artifact_metadata_no_delete",
-        "observation_artifact_metadata_no_update"
+        "observation_artifact_metadata_no_update",
+        "purchase_retirement_observation_artifact_metadata_delete",
+        "purchase_retirement_observation_artifact_metadata_insert",
+        "purchase_retirement_observation_artifact_metadata_update"
       ],
       "noUpdateTriggers": [
         "observation_artifact_metadata_no_update"
@@ -13341,9 +13443,20 @@
           "columns": [
             "parse_run_id"
           ]
+        },
+        {
+          "name": "reconciliation_provider_ids",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "id"
+          ]
         }
       ],
       "triggers": [
+        "purchase_retirement_transaction_observations_delete",
+        "purchase_retirement_transaction_observations_insert",
+        "purchase_retirement_transaction_observations_update",
         "transaction_decimals_v1",
         "transaction_observations_no_delete",
         "transaction_observations_no_update"
@@ -16537,6 +16650,286 @@
       "sqlSha256": "0907bfd50cbf75a7"
     },
     {
+      "name": "purchase_retirement_acquisition_sessions_delete",
+      "table": "acquisition_sessions",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "96328e1a716e01e2"
+    },
+    {
+      "name": "purchase_retirement_acquisition_sessions_insert",
+      "table": "acquisition_sessions",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "b7fef205e2ce374a"
+    },
+    {
+      "name": "purchase_retirement_acquisition_sessions_update",
+      "table": "acquisition_sessions",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "a8592585f061d585"
+    },
+    {
+      "name": "purchase_retirement_card_purchase_recognition_keys_delete",
+      "table": "card_purchase_recognition_keys",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "33a2c2f24e474706"
+    },
+    {
+      "name": "purchase_retirement_card_purchase_recognition_keys_insert",
+      "table": "card_purchase_recognition_keys",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "fa1a9c0179ed1be4"
+    },
+    {
+      "name": "purchase_retirement_card_purchase_recognition_keys_update",
+      "table": "card_purchase_recognition_keys",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "139b606bd8202114"
+    },
+    {
+      "name": "purchase_retirement_card_purchase_recognitions_delete",
+      "table": "card_purchase_recognitions",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "33794636c45f634e"
+    },
+    {
+      "name": "purchase_retirement_card_purchase_recognitions_insert",
+      "table": "card_purchase_recognitions",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "31e7203bd45b6caa"
+    },
+    {
+      "name": "purchase_retirement_card_purchase_recognitions_update",
+      "table": "card_purchase_recognitions",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "8be3e33070f8c03c"
+    },
+    {
+      "name": "purchase_retirement_core_revision_update",
+      "table": "core_source_revision",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "2973f01873dff8fd"
+    },
+    {
+      "name": "purchase_retirement_economic_event_revisions_delete",
+      "table": "economic_event_revisions",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "862a9b120d9ae687"
+    },
+    {
+      "name": "purchase_retirement_economic_event_revisions_insert",
+      "table": "economic_event_revisions",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "6e991da157f84fb7"
+    },
+    {
+      "name": "purchase_retirement_economic_event_revisions_update",
+      "table": "economic_event_revisions",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "063b318df84ae6f2"
+    },
+    {
+      "name": "purchase_retirement_fetch_artifacts_delete",
+      "table": "fetch_artifacts",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "f945f984ebb0d7ad"
+    },
+    {
+      "name": "purchase_retirement_fetch_artifacts_insert",
+      "table": "fetch_artifacts",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "1e80326d34945712"
+    },
+    {
+      "name": "purchase_retirement_fetch_artifacts_update",
+      "table": "fetch_artifacts",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "553f809d54506f35"
+    },
+    {
+      "name": "purchase_retirement_fetch_run_reports_delete",
+      "table": "fetch_run_reports",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "1fd08cb6acd86019"
+    },
+    {
+      "name": "purchase_retirement_fetch_run_reports_insert",
+      "table": "fetch_run_reports",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "a163f41576d17197"
+    },
+    {
+      "name": "purchase_retirement_fetch_run_reports_update",
+      "table": "fetch_run_reports",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "6e28c8b147622191"
+    },
+    {
+      "name": "purchase_retirement_fetch_runs_delete",
+      "table": "fetch_runs",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "230c9f32f265c106"
+    },
+    {
+      "name": "purchase_retirement_fetch_runs_insert",
+      "table": "fetch_runs",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "b587500cda6a59e0"
+    },
+    {
+      "name": "purchase_retirement_fetch_runs_update",
+      "table": "fetch_runs",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "8b78deb444b79cf0"
+    },
+    {
+      "name": "purchase_retirement_fetch_unit_reports_delete",
+      "table": "fetch_unit_reports",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "ee151a17435de182"
+    },
+    {
+      "name": "purchase_retirement_fetch_unit_reports_insert",
+      "table": "fetch_unit_reports",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "65cb1b07cde62b58"
+    },
+    {
+      "name": "purchase_retirement_fetch_unit_reports_update",
+      "table": "fetch_unit_reports",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "9f26a33d0e6190e6"
+    },
+    {
+      "name": "purchase_retirement_fetch_units_delete",
+      "table": "fetch_units",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "56b5344a404d1506"
+    },
+    {
+      "name": "purchase_retirement_fetch_units_insert",
+      "table": "fetch_units",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "cc9b8f28f30a893a"
+    },
+    {
+      "name": "purchase_retirement_fetch_units_update",
+      "table": "fetch_units",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "6124cb5c40318b3f"
+    },
+    {
+      "name": "purchase_retirement_identity_run_policies_delete",
+      "table": "identity_run_policies",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "2eabfbd830541f4f"
+    },
+    {
+      "name": "purchase_retirement_identity_run_policies_insert",
+      "table": "identity_run_policies",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "15c9f7a272736cbb"
+    },
+    {
+      "name": "purchase_retirement_identity_run_policies_update",
+      "table": "identity_run_policies",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "a69975c151366fd3"
+    },
+    {
+      "name": "purchase_retirement_identity_vpass_bindings_delete",
+      "table": "identity_vpass_bindings",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "e1de751d8911a400"
+    },
+    {
+      "name": "purchase_retirement_identity_vpass_bindings_insert",
+      "table": "identity_vpass_bindings",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "208370606be78141"
+    },
+    {
+      "name": "purchase_retirement_identity_vpass_bindings_update",
+      "table": "identity_vpass_bindings",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "8cec8f8dbadd6cac"
+    },
+    {
+      "name": "purchase_retirement_observation_artifact_metadata_delete",
+      "table": "observation_artifact_metadata",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "d13ebf03c5a3aad8"
+    },
+    {
+      "name": "purchase_retirement_observation_artifact_metadata_insert",
+      "table": "observation_artifact_metadata",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "7fc2a055e3160539"
+    },
+    {
+      "name": "purchase_retirement_observation_artifact_metadata_update",
+      "table": "observation_artifact_metadata",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "f2fbc0c5f4a081bf"
+    },
+    {
+      "name": "purchase_retirement_transaction_observations_delete",
+      "table": "transaction_observations",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "a1916343023ac734"
+    },
+    {
+      "name": "purchase_retirement_transaction_observations_insert",
+      "table": "transaction_observations",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "48b2b530fb3cecf8"
+    },
+    {
+      "name": "purchase_retirement_transaction_observations_update",
+      "table": "transaction_observations",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "e14ecaf83cb9a06f"
+    },
+    {
       "name": "raw_object_verification_events_no_delete",
       "table": "raw_object_verification_events",
       "timing": "BEFORE",
@@ -17482,6 +17875,11 @@
       "sqlSha256": "648ffa4c25ecec4c"
     },
     {
+      "name": "reconciliation_provider_ids",
+      "table": "transaction_observations",
+      "sqlSha256": "260bd2ad3194d296"
+    },
+    {
       "name": "release_activation_events_scope",
       "table": "release_activation_events",
       "sqlSha256": "38c32ba6d19c3902"
@@ -17538,10 +17936,10 @@
     }
   ],
   "summary": {
-    "tableCount": 116,
+    "tableCount": 117,
     "viewCount": 39,
-    "triggerCount": 410,
-    "explicitIndexCount": 117,
+    "triggerCount": 450,
+    "explicitIndexCount": 118,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -17648,6 +18046,7 @@
       ],
       "read-candidate": [],
       "operational-mutable": [
+        "card_purchase_retirement_check",
         "card_purchase_scan_cursor",
         "card_settlement_scan_cursor",
         "collection_scan_state",
@@ -17672,6 +18071,7 @@
       "allocations",
       "approvals",
       "calculation_runs",
+      "card_purchase_retirement_check",
       "card_purchase_scan_cursor",
       "card_settlement_scan_cursor",
       "change_plans",
@@ -17757,8 +18157,9 @@
       "0057_vpass_card_token_v2.sql",
       "0058_identity_crosswalk.sql",
       "0062_identity_value_rewrite_staging.sql",
-      "0063_identity_value_rewrite_apply.sql"
+      "0063_identity_value_rewrite_apply.sql",
+      "0064_purchase_retirement_and_reconciliation_cost.sql"
     ],
-    "schemaSha256": "9912706b9c19164e45352159d1fdebe961a9372996f6814ff3ae8cd895795a76"
+    "schemaSha256": "9ea29d84534b0a5b959b6f799f219702bc39c9cad1c7d676bb047010733b58a9"
   }
 }

@@ -168,6 +168,19 @@ as the provider showed it.
 
 #### Cost
 
+The processor now reuses an empty stale-key result through migration 0064's
+latched retirement proof ([ADR 0037](adr/0037-reconciliation-purchase-cost.md)).
+A clean unchanged tick reads one operational singleton instead of invoking
+`staleCardPurchaseKeysSql`; changed or unfinished retirement work still runs
+this exact query, and recognition still reads its own current-usage page.
+The proof listens to the existing CORE source/visibility revision and every
+remaining current-usage/live-key dependency, including low-id changes. Its
+contract version and conditional clean write protect deployments and races.
+`purchase-retirement-cost.test.ts` derives the full-schema dependency closure
+from SQLite bytecode, exercises overlapping checks and retries, and measures
+the clean primary-key path without table statistics. The historical query
+measurements below concern the query when it is invoked, not the clean skip.
+
 D1 never runs `ANALYZE`, so its planner has no table statistics. Measured on
 that basis: every CORE migration from 0001, no `sqlite_stat*` table, on
 `bun:sqlite` and on workerd's SQLite through Miniflare, over the synthetic store
