@@ -1,8 +1,9 @@
 # Continuous integration
 
-`hk check --all` is the common verification entrypoint for local development and
-GitHub Actions. It runs lint and formatting checks, repository guards, Knip,
-every workspace's typechecks, tests and builds, and every Worker dry run.
+`hk check --all` is the complete local verification entrypoint. It runs lint
+and formatting checks, repository guards, Knip, every workspace's typechecks,
+tests and builds, and every Worker dry run. GitHub Actions runs the same full
+coverage as a guarded native partition union across three validation runners.
 `CI Check` remains the required merge status.
 
 **mise is the only task runner.** No `package.json` carries a `scripts` field.
