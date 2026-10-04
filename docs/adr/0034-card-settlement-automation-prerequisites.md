@@ -1,6 +1,6 @@
 # ADR 0034: Account evidence before automatic card settlement
 
-- Status: proposed
+- Status: accepted; read-cost amendment proposed until its PR merges, then accepted
 - Date: 2026-10-04
 - Related: ADR 0032, ADR 0001 INV07, card-settlements.md
 
@@ -90,3 +90,32 @@ parser compatibility, retained account evidence, candidate-specific comparison
 and a refusal to enrich old evidence from another capture. Automation checks
 cover competition, incomplete inputs and manual decisions. No provider values
 are used as fixtures.
+
+## Read-cost amendment: repeated due dates
+
+The settlement sweep shares bank results only within one invocation and one
+CORE source/visibility revision and epoch. It reads that tuple before every
+use, brackets a cache miss with another tuple read, and never stores a result
+if the tuple changed during the query. Any changed or unavailable tuple clears
+the cache. The existing bank SQL, ordering, 1,000-row limit and logical scanned
+count remain unchanged. The cache retains at most 32 dates and 2,000 rows,
+evicts least recently used entries, and never truncates query results.
+
+All bank query inputs are covered by the existing revision contract: transaction
+inserts create decimal rows whose triggers advance the source revision;
+publication, identity, mappings and owner decisions advance it directly.
+Evidence becomes visible at sealing, and later exclusion advances the visibility
+revision. Sealed source records are immutable. No new revision counter,
+migration, cross-tick cache or ownership inference is introduced.
+
+A write after the revision read may occur before a proposal is recorded, just
+as it could after the original bank query. Proposals retain their fact revisions,
+and the existing guarded acceptance path remains authoritative. This cache
+does not authorize acceptance.
+
+Frozen query text, existing scaled/random-store differential and plan tests,
+and new production-schema cache invalidation tests cover preservation.
+At the committed CI-scale fixture an existing-candidate replay makes 10 bank
+queries instead of 15 with identical results. Fresh-proposal sweeps on random
+stores also compare the complete proposed facts and debit-account evidence. This synthetic query-count reduction is not a
+production billing forecast.

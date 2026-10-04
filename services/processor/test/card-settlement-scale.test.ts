@@ -1,3 +1,4 @@
+import { CORE_REVISION_SQL } from "../../../packages/read-model/src/source-revision.ts";
 // The settlement sweep's statement and bank reads (src/card-settlement-job.ts)
 // on the scaled store with statement history of
 // packages/read-model/test/card-usage-scale-fixture.ts (`statements`): the
@@ -51,7 +52,7 @@ function rows(store: Database, sql: string, args: readonly unknown[]): unknown[]
 }
 
 /** `D1Database` over bun:sqlite: the calls the sweep makes, nothing more. */
-function d1(store: Database): D1Database {
+function d1(store: Database, probe?: { bankReads: number; disableCache?: boolean }): D1Database {
   const prepare = (sql: string) => {
     let binds: SQLQueryBindings[] = [];
     const statement = {
@@ -59,8 +60,14 @@ function d1(store: Database): D1Database {
         binds = values;
         return statement;
       },
-      first: async () => store.query(sql).get(...binds) ?? null,
-      all: async () => ({ results: store.query(sql).all(...binds) }),
+      first: async () =>
+        probe?.disableCache && sql === CORE_REVISION_SQL
+          ? null
+          : (store.query(sql).get(...binds) ?? null),
+      all: async () => {
+        if (probe && sql === CARD_SETTLEMENT_BANK_DEBITS_SQL) probe.bankReads++;
+        return { results: store.query(sql).all(...binds) };
+      },
       run: async () => ({ meta: { changes: store.query(sql).run(...binds).changes } }),
     };
     return statement;
@@ -377,3 +384,73 @@ describe("the settlement sweep's reads on random stores", () => {
     ]);
   }, 180_000);
 });
+
+test(
+  "revision-bound sharing preserves an existing-candidate replay and reduces repeated bank queries",
+  async () => {
+    const run = async (disableCache: boolean) => {
+      db.exec("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1");
+      const probe = { bankReads: 0, disableCache };
+      const result = await cardSettlementSweep(d1(db, probe));
+      return { result, bankReads: probe.bankReads };
+    };
+    const uncached = await run(true);
+    const cached = await run(false);
+    expect(cached.result).toEqual(uncached.result);
+    expect(cached.result.written).toBe(0);
+    expect(cached.bankReads).toBeGreaterThan(0);
+    expect(cached.bankReads).toBeLessThan(uncached.bankReads);
+    console.log(
+      JSON.stringify({
+        syntheticSettlementBankQueries: { uncached: uncached.bankReads, cached: cached.bankReads },
+      }),
+    );
+  },
+  TIMEOUT,
+);
+
+test(
+  "cached and uncached fresh proposal sweeps write identical evidence on random stores",
+  async () => {
+    let newProposals = 0;
+    for (const seed of [1, 2, 3, 4]) {
+      const store = randomSettlementStore(seed, new Set()).db;
+      try {
+        const capture = async (disableCache: boolean) => {
+          store.exec("BEGIN");
+          try {
+            store.exec(
+              "UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1",
+            );
+            const probe = { bankReads: 0, disableCache };
+            const result = await cardSettlementSweep(d1(store, probe));
+            const proposals = store
+              .query(
+                "SELECT id,proposal_digest,facts_json FROM card_settlement_candidates ORDER BY id",
+              )
+              .all();
+            const evidence = store
+              .query(
+                "SELECT candidate_id,statement_id,policy,outcome,reason,proposal_json,evidence_digest FROM card_settlement_debit_account_evidence ORDER BY id",
+              )
+              .all();
+            return { result, proposals, evidence, reads: probe.bankReads };
+          } finally {
+            store.exec("ROLLBACK");
+          }
+        };
+        const before = await capture(true);
+        newProposals += before.result.written;
+        const after = await capture(false);
+        expect(after.result).toEqual(before.result);
+        expect(after.proposals).toEqual(before.proposals);
+        expect(after.evidence).toEqual(before.evidence);
+        expect(after.reads).toBeLessThanOrEqual(before.reads);
+      } finally {
+        store.close();
+      }
+    }
+    expect(newProposals).toBeGreaterThan(0);
+  },
+  TIMEOUT,
+);

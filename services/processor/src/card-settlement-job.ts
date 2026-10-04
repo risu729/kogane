@@ -1,3 +1,8 @@
+import {
+  CORE_REVISION_SQL,
+  type CoreRevisionRow,
+} from "../../../packages/read-model/src/source-revision.ts";
+import { createSettlementBankReader } from "./card-settlement-bank-cache.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import {
   exactQuantity,
@@ -151,6 +156,12 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     written = 0,
     debitAccountEvidence = 0,
     scanned = statements.results.length;
+  const readBanks = createSettlementBankReader<Row>(
+    () => db.prepare(CORE_REVISION_SQL).first<CoreRevisionRow>(),
+    async (date) =>
+      (await db.prepare(CARD_SETTLEMENT_BANK_DEBITS_SQL).bind(date, date, LIMIT).all<Row>())
+        .results,
+  );
   // Account context is pinned to each debit; never reuse it across captures.
   for (const statement of statements.results) {
     // Read once per statement, and only for a MyJCB statement: no Vpass
@@ -169,12 +180,10 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
         .run();
       continue;
     }
-    const banks = await db
-      .prepare(CARD_SETTLEMENT_BANK_DEBITS_SQL)
-      .bind(statement.payment_date, statement.payment_date, LIMIT)
-      .all<Row>();
-    scanned += banks.results.length;
-    for (const bank of banks.results) {
+    const banks = await readBanks(statement.payment_date);
+    // Preserve the existing logical scan count, including shared rows.
+    scanned += banks.length;
+    for (const bank of banks) {
       const debit = amount(bank, true);
       const bankDate = bank.debit_date ?? null;
       if (!debit || !bankDate || !parseLocalDate(bankDate)) continue;

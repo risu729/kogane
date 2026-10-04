@@ -555,3 +555,15 @@ Safety Pass flow, verify retained account context, configure initial ownership
 and effective account scope, connect the evaluator to a complete read-only
 candidate adapter, then add the versioned authorized atomic acceptance lane.
 Workers AI is deferred until unresolved deterministic cases are measured.
+
+### Sharing bank reads for repeated due dates
+
+Within a sweep invocation, bank rows for the same due date are reused only
+while CORE's source revision, visibility revision and epoch match. A miss is
+cached only if the tuple is stable across its query. Source, publication,
+identity, mapping, ownership or visibility changes therefore cause a fresh
+bank read. No cache survives a tick. Retention is bounded to 32 dates and
+2,000 rows; results are evicted rather than truncated. The original keyed SQL,
+adapter behavior, row order, 1,000-row query limit and candidate semantics are
+unchanged. The scanned counter continues to count logical candidate rows,
+including reused rows, rather than claiming to measure D1 rows_read.
