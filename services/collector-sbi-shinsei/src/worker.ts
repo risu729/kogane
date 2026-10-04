@@ -1,9 +1,14 @@
+import { DurableObject } from "cloudflare:workers";
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
-import { Container, getContainer, type StopParams } from "@cloudflare/containers";
+import {
+  ContainerController,
+  type ContainerStop,
+} from "../../../packages/collection/src/container-controller";
+import { getContainer } from "../../../packages/collection/src/container-stub";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
 import {
@@ -34,23 +39,46 @@ const RELAY_HOSTS = new Set([
   "diproxy.cafisbrain.com",
   "platform-websdk.transmitsecurity.io",
 ]);
-export class SbiShinseiCollectorContainer extends Container<Env> {
-  override defaultPort = 8080;
-  override requiredPorts = [8080];
-  override sleepAfter = "30s";
-  override enableInternet = true;
-  override envVars = { TZ: "Asia/Tokyo" };
-  override onStart(): void {
+export class SbiShinseiCollectorContainer extends DurableObject<Env> {
+  private readonly controller: ContainerController;
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.controller = new ContainerController(
+      ctx,
+      { TZ: "Asia/Tokyo" },
+      {
+        onStart: () => this.onStart(),
+        onStop: (details) => this.onStop(details),
+        onError: (error) => this.onError(error),
+      },
+    );
+  }
+  startAndWaitForPorts(): Promise<void> {
+    return this.controller.startAndWaitForPorts();
+  }
+  destroy(): Promise<void> {
+    return this.controller.destroy();
+  }
+  stop(): Promise<void> {
+    return this.controller.stop();
+  }
+  override fetch(request: Request): Promise<Response> {
+    return this.controller.fetch(request);
+  }
+  override alarm(): Promise<void> {
+    return this.controller.retireAlarm();
+  }
+  onStart(): void {
     emitDiagnostic("log", { event: "sbi-shinsei-container-start" });
   }
-  override onStop(params: StopParams): void {
+  onStop(params: ContainerStop): void {
     const details = containerStopDetails(params);
     emitDiagnostic(details.exitCode === 0 ? "log" : "warn", {
       event: "sbi-shinsei-container-stop",
       ...details,
     });
   }
-  override onError(error: unknown): void {
+  onError(error: unknown): void {
     emitDiagnostic("error", {
       event: "sbi-shinsei-container-error",
       ...containerLifecycleDetails(error),

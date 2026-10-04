@@ -189,7 +189,6 @@
     "services/collector-globalpass": {
       "name": "@kogane/poc-globalpass-worker",
       "dependencies": {
-        "@cloudflare/containers": "0.3.7",
         "@cloudflare/puppeteer": "1.4.0",
       },
       "devDependencies": {
@@ -270,9 +269,6 @@
     },
     "services/collector-sbi-shinsei": {
       "name": "@kogane/poc-sbi-shinsei-worker",
-      "dependencies": {
-        "@cloudflare/containers": "0.3.7",
-      },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.3.5",
         "@types/bun": "1.4.2",
@@ -318,9 +314,6 @@
     },
     "services/collector-st-george": {
       "name": "@kogane/collector-st-george",
-      "dependencies": {
-        "@cloudflare/containers": "0.3.7",
-      },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.3.5",
         "@types/bun": "1.4.2",

@@ -1,3 +1,4 @@
+mock.module("cloudflare:workers", () => ({ DurableObject: class {} }));
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 
@@ -7,8 +8,7 @@ let relayUrl = "";
 let fetchFails = false;
 let destroyCalls = 0;
 let responseStatus = 200;
-mock.module("@cloudflare/containers", () => ({
-  Container: class {},
+mock.module("../../../packages/collection/src/container-stub", () => ({
   getContainer: () => ({
     startAndWaitForPorts: async () => {},
     fetch: async (request: Request) => {
