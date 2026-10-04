@@ -31,6 +31,16 @@ are separate claims. Historical acceptance records are linked from the
 - MyJCB partial/unsafe unit coverage is not promoted into complete statement
   evidence. GLOBAL PASS pagination support does not by itself prove that a
   particular production month's capture and parse are complete.
+- GLOBAL PASS shared-run pages have no observations: the first run to be
+  admitted (2026-10-04, one page per selected month) had both pages refused
+  by `global-pass-activity@1.1.0` (`parser_rejected`), which still reads the
+  importer-era pages 1.0.0 read. Which check refused them is not stored; the
+  owner's counts-only replay
+  (`replay-diagnostics.ts globalpass-activity 2`, see
+  [operations](operations.md#replaying-a-parser-rejection)) names it. A month
+  the collector proves empty (no Found line, no pager, no table) is refused
+  too: the parser does not support zero-table pages. See
+  [observations](observations.md#global-pass-the-first-shared-run-pages-were-refused-no-parser-release).
 - Money Forward identity revisions and the SBI Shinsei bank adapter are
   implemented; fresh production adoption/mapping counts are not asserted here.
 - Generic collection/session-refresh operations still reach
