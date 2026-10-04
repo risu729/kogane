@@ -85,7 +85,7 @@ function meta(artifactKey = "activity-2099-02.html"): ArtifactMeta {
 const parse = (html: string, artifactKey?: string) =>
   globalPassActivity.parse(new TextEncoder().encode(html), meta(artifactKey));
 
-describe("sanitized collector page → global-pass-activity@1.1.0", () => {
+describe("sanitized collector page → global-pass-activity@1.2.0", () => {
   for (const variant of ["a", "b"] as const) {
     test(`variant ${variant}: a one-page month reads as the statement alone`, () => {
       const raw = collectorPage(variant, pager(1, 1) + TABLES + pager(1, 1));
@@ -120,13 +120,33 @@ describe("sanitized collector page → global-pass-activity@1.1.0", () => {
     expect(parse(stored)).toEqual(parse(STATEMENT));
   });
 
-  test("limit: a month the collector calls empty (no Found line, no pager, no table) is refused", () => {
-    // The collector proves a month whole when its page shows no Found line, no
-    // pager and no statement block (ADR 0026, amendment of 2026-10-04). The
-    // parser refuses a page without its activity table: zero-table pages stay
-    // unsupported until the provider's explicit empty state is established
-    // (docs/observations.md, "Remaining GlobalPass shape investigation").
-    const stored = sanitizeGlobalPassActivityHtml(collectorPage("a", ""));
-    expect(() => parse(stored)).toThrow("global-pass activity table cardinality drift");
+  for (const variant of ["a", "b"] as const) {
+    test(`variant ${variant}: a month the collector calls empty (no Found line, no pager, no table) reads as no rows`, () => {
+      // The collector proves a month whole when its page shows no Found line,
+      // no pager and no statement block (ADR 0026, amendment of 2026-10-04);
+      // 1.2.0 reads that observed empty month as zero observations, no warning
+      // (ADR 0026, empty-month amendment of 2026-10-04). 1.1.0 refused it.
+      const stored = sanitizeGlobalPassActivityHtml(collectorPage(variant, ""));
+      expect(stored).not.toContain("<table");
+      expect(stored).toContain('<option value="20990299" selected>2099-02</option>');
+      expect(parse(stored)).toEqual({ observations: [], warnings: [] });
+    });
+  }
+
+  test("a zero-table page that still shows a pager or a Found line stays refused", () => {
+    for (const list of [
+      pager(1, 1) + pager(1, 1),
+      pager(1, 1, "ja") + pager(1, 1, "ja"),
+      '<div class="resultCountHeader">Found 1 Result</div>',
+      '<div class="resultCountHeader">検索結果 1件</div>',
+    ]) {
+      const stored = sanitizeGlobalPassActivityHtml(collectorPage("a", list));
+      expect(() => parse(stored)).toThrow("global-pass activity table cardinality drift");
+    }
+    // A later page without a table is never the empty month.
+    const pageTwo = sanitizeGlobalPassActivityHtml(collectorPage("a", ""));
+    expect(() => parse(pageTwo, "activity-2099-02-p2.html")).toThrow(
+      "global-pass later page has no pager",
+    );
   });
 });

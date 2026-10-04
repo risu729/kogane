@@ -855,7 +855,9 @@ source note has the detail):
     so such a month gets no observations
     (`packages/parsers/test/global-pass-sanitized-contract.test.ts`; noted
     2026-10-04 with the first shared-run refusal, not a change of this
-    decision).
+    decision). `global-pass-activity@1.2.0` lifts this limit: it reads such a
+    page as no rows
+    ([amendment below](#amendment-2026-10-04-global-pass-empty-months-are-read-as-no-rows)).
   - The walk cap is five pages.
   - Which page a row lands on when statements are added or removed between
     two runs has not been observed. An id that names its page moves with the
