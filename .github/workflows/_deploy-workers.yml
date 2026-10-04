@@ -140,7 +140,7 @@ jobs:
       - name: Install node
         # The checkout is a commit on the release branch, confirmed above, so
         # its mise configuration and the scripts below are reviewed code.
-        uses: jdx/mise-action@94c60b39bc2d90ab2f9bab27f38d3cc4812c1834 # v5.1.0
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.10.2
           # No tool cache anywhere in this job: its cache scope is shared with
@@ -199,7 +199,7 @@ jobs:
             --plan "${RUNNER_TEMP}/release-plan.json"
       - name: Install the rest of the toolchain
         if: steps.decide.outputs.proceed == 'true'
-        uses: jdx/mise-action@94c60b39bc2d90ab2f9bab27f38d3cc4812c1834 # v5.1.0
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.10.2
           cache: false
