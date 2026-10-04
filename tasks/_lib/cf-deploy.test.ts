@@ -4,10 +4,11 @@ import { parseJsonc } from "../../scripts/jsonc.ts";
 import { readDeployOrder, workflowSteps } from "./deploy-order.ts";
 import { REPO_ROOT } from "./repo-root.ts";
 import { releaseProgress } from "./ci/release-ledger.mjs";
-import { spawnSync } from "node:child_process";
+import { containerProgress } from "./ci/cf-container-release.mjs";
 
 const order = readDeployOrder();
-const targets = order.workers.filter((worker) => worker.deployBackend === "cf");
+const allTargets = order.workers.filter((worker) => worker.deployBackend === "cf");
+const targets = allTargets.filter((worker) => worker.productionStrategy !== "deploy");
 const workflow = readFileSync(`${REPO_ROOT}/.github/workflows/_deploy-workers.yml`, "utf8");
 const steps = workflowSteps(workflow);
 const camel = (value: unknown): any =>
@@ -23,7 +24,7 @@ const camel = (value: unknown): any =>
       : value;
 
 describe("cf migration preserves the canonical Wrangler deployment contract", () => {
-  test("compatible Workers use cf while Container applications stay on v1", () => {
+  test("code-only Workers keep the versions strategy", () => {
     expect(targets.map((worker) => worker.name)).toEqual([
       "mobile-suica-worker",
       "moneyforward-worker",
@@ -40,6 +41,22 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       "processor",
       "app",
     ]);
+  });
+  test("only Processor and PRESTIA opt into version-strategy trigger synchronization", async () => {
+    const opted = targets.filter((target) =>
+      steps
+        .find((step) => step.body.includes(`id: cf-deploy-${target.name}\n`))
+        ?.body.includes("deploy-triggers: 'true'"),
+    );
+    expect(opted.map((target) => target.name).sort()).toEqual(["prestia-bank-worker", "processor"]);
+    const prestia = opted.find((target) => target.name === "prestia-bank-worker")!;
+    const worker = (await import(`${REPO_ROOT}/${prestia.path}/cloudflare.config.ts`)).default
+      .worker;
+    expect(worker.name).toBe("kogane-prestia-bank-collector");
+    expect(worker.workersDev).toBe(true);
+    expect(worker.previewUrls).toBe(false);
+    expect(worker.routes ?? []).toEqual([]);
+    expect(worker.domains ?? []).toEqual([]);
   });
   for (const target of targets) {
     test(`${target.name} keeps bindings, settings and existing exports`, async () => {
@@ -177,7 +194,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(cf?.body).toContain("@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1");
       expect(cf?.body).toContain(`worker: ${target.worker}`);
       expect(cf?.body).toContain(
-        `deploy-triggers: '${target.name === "processor" ? "true" : "false"}'`,
+        `deploy-triggers: '${["processor", "prestia-bank-worker"].includes(target.name) ? "true" : "false"}'`,
       );
       expect(steps.indexOf(cf!)).toBe(steps.indexOf(legacy!) + 1);
     });
@@ -209,15 +226,10 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
   });
   test("the trusted progress adapter works with a legacy ledger on rollback", () => {
     const progress = steps.find((step) => step.name === "Record what this run deployed")!;
-    const expression = /STEPS_JSON=\$\(jq -c '([^']+)'/u.exec(progress.body)![1]!;
+    expect(progress.body).toContain('STEPS_JSON=$(node "${CONTAINER_GUARD}" progress)');
     for (const outcome of ["success", "failure", "skipped"]) {
       const context = { "deploy-app": { outcome: "skipped" }, "cf-deploy-app": { outcome } };
-      const result = spawnSync("jq", ["-c", expression], {
-        input: JSON.stringify(context),
-        encoding: "utf8",
-      });
-      expect(result.status).toBe(0);
-      const adapted = JSON.parse(result.stdout);
+      const adapted = containerProgress(context);
       expect(adapted["deploy-app"].outcome).toBe(outcome);
       const record = {
         recordVersion: "release-record-v2",

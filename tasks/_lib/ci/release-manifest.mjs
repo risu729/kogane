@@ -1,8 +1,9 @@
 // The release manifest of one production deployment (unified plan 11 §2).
 //
 // CD deploys the exact commit CI passed on. Compatible Workers upload a cf
-// prebuilt artifact; the three Container Workers retain the Wrangler Action's
-// re-bundling path. The manifest records both artifacts and canonical inputs,
+// prebuilt artifact; Container Docker IDs/context hashes are bound separately
+// by the trusted compatibility adapter, including legacy rollback targets.
+// The manifest records both artifacts and canonical inputs,
 // then proves they remain unchanged immediately before upload.
 //
 //   * records, for one commit, the digest of every input that decides what the

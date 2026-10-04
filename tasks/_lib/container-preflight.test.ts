@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { inspectContainers } from "./ci/container-preflight.mjs";
 
 const accountId = "a".repeat(32);
@@ -38,7 +39,7 @@ test("Container preflight only issues fixed-account GETs and returns counts", as
           name: appName,
           account_id: "synthetic-internal-account",
           scheduling_policy: "default",
-          configuration: { image, instance_type: "basic" },
+          configuration: { image, vcpu: 0.25, memory_mib: 1024, disk: { size_mb: 4000 } },
           max_instances: maxInstances,
           constraints: { regions: ["APAC"] },
           durable_objects: { namespace_id: namespace },
@@ -75,8 +76,9 @@ test("Container preflight only issues fixed-account GETs and returns counts", as
     defaultPolicyAndResourcesMatch: 3,
     defaultSchedulingPolicies: 3,
     missingSchedulingPolicies: 0,
-    basicInstanceTypes: 3,
-    missingInstanceTypes: 0,
+    basicInstanceTypes: 0,
+    basicResourceSizesMatch: 3,
+    missingInstanceTypes: 3,
     maxInstanceLimitsMatch: 3,
     missingMaxInstanceLimits: 0,
     apacRegionConstraints: 3,
@@ -352,4 +354,64 @@ test("rollout GET failures remain closed codes without provider text", async () 
       }),
     ).rejects.toThrow(expected);
   }
+});
+
+test("shared resource guard rejects partial, numeric-string, alias and conflicting API sizes", async () => {
+  const expected = { vcpu: 0.25, memory_mib: 1024, disk: { size_mb: 4000 } };
+  for (const config of [
+    { ...expected, vcpu: "0.25" },
+    { ...expected, memory_mib: 2048 },
+    { ...expected, disk: { size_mb: 4096 } },
+    { ...expected, disk: undefined },
+    { ...expected, instance_type: null },
+    { ...expected, instance_type: "lite" },
+    { ...expected, instance_type: "basic", vcpu: 1 },
+  ]) {
+    let current = -1;
+    const counts = await inspectContainers({
+      accountId,
+      token,
+      fetchImpl: async (input: string) => {
+        const path = new URL(input).pathname;
+        let result: unknown = {};
+        if (/\/containers\/applications\/[^/]+$/u.test(path)) {
+          current++;
+          result = {
+            scheduling_policy: "default",
+            configuration: config,
+            max_instances: shapes[current][2],
+            constraints: { regions: ["APAC"] },
+          };
+        } else if (path.endsWith("/versions")) result = [];
+        return Response.json({ success: true, result });
+      },
+    });
+    expect(counts.defaultSchedulingPolicies).toBe(3);
+    expect(counts.maxInstanceLimitsMatch).toBe(3);
+    expect(counts.apacRegionConstraints).toBe(3);
+    expect(counts.basicResourceSizesMatch).toBe(0);
+    expect(counts.defaultPolicyAndResourcesMatch).toBe(0);
+  }
+});
+
+test("plain Node imports the shared resource guard without running its CLI or issuing requests", () => {
+  const resource = new URL("./ci/cf-container-release.mjs", import.meta.url).href;
+  const stdout = execFileSync(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `
+    globalThis.fetch = () => { throw new Error("unexpected network request"); };
+    const resource = process.argv[1];
+    process.argv[1] = new URL("./container-preflight.mjs", resource).pathname;
+    const { isBasicApplicationConfiguration } = await import(resource);
+    if (!isBasicApplicationConfiguration({vcpu:0.25,memory_mib:1024,disk:{size_mb:4000}})) process.exit(1);
+    process.stdout.write("guard-only");
+  `,
+      resource,
+    ],
+    { encoding: "utf8" },
+  );
+  expect(stdout).toBe("guard-only");
 });

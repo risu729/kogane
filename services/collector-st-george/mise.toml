@@ -24,14 +24,28 @@ run = ["npm ci --ignore-scripts", "node --test *.node-test.mjs *.test.mjs"]
 # Wait only when full verification already schedules workspace checks.
 wait_for = ["//:ci:workspaces", "//:ci:remainder:workspaces", "//packages/storage-d1:test"]
 description = "Validate the St.George Worker bundle without uploading."
-depends = ["//services/collector-st-george:types"]
+depends = ["//services/collector-st-george:cf-build", "//services/collector-st-george:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run"
 
 [tasks."bundle"]
 description = "Emit the St.George release bundle."
-depends = ["//services/collector-st-george:types"]
+depends = ["//services/collector-st-george:cf-build", "//services/collector-st-george:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/st-george-worker --config wrangler.jsonc"
 
 [tasks.ci]
 description = "Every CI check for the St.George collector."
-depends = ["//services/collector-st-george:typecheck", "//services/collector-st-george:test", "//services/collector-st-george:container"]
+depends = ["//services/collector-st-george:cf-typecheck", "//services/collector-st-george:typecheck", "//services/collector-st-george:test", "//services/collector-st-george:container"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt Worker and Container production artifacts without credentials."
+depends = ["//services/collector-st-george:types"]
+run = [
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf deploy --prebuilt --mode production --worker kogane-st-george-collector --dry-run",
+	"node ../../tasks/_lib/ci/cf-container-release.mjs validate st-george-worker",
+]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-st-george:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

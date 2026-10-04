@@ -52,6 +52,7 @@ export interface DeployEntry {
   /** Explicit RPC dependency order (ADR 0039); empty means no dependency. */
   after?: string[];
   deployBackend?: "cf";
+  productionStrategy?: "deploy";
   doLifecycle?: "preserve";
   bundleTask?: string;
   bundleDir?: string;

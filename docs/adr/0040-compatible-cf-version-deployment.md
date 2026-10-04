@@ -1,14 +1,14 @@
 # ADR 0040: Deploy compatible Workers through prebuilt cf versions
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-05
 
 ## Context
 
 The shared deployment Action v2.1.1 uploads Cloudflare Build Output through
 `cf workers versions create`, deploys the exact returned version at 100%, and
-reads its allocation back. Kogane currently deploys all 16 Workers through v1,
-which rebuilds from Wrangler configuration during publication.
+reads its allocation back. Before this stage, Kogane deployed all 16 Workers
+through v1, which rebuilt from Wrangler configuration during publication.
 
 Three Workers own Container applications, and three others own legacy DO
 migration histories. Version upload does not apply Container applications.
@@ -77,3 +77,6 @@ Sources: [cf Build Output](https://developers.cloudflare.com/workers/build-outpu
 [cf migration](https://developers.cloudflare.com/cf/wrangler/migrate/),
 [cf deployment](https://developers.cloudflare.com/cf/projects/),
 [existing DO namespace considerations](https://developers.cloudflare.com/workers/platform/infrastructure-as-code/#considerations-with-durable-objects).
+
+ADR 0043 proposes the subsequent migration of the three default-policy Container
+owners. This ADR records the earlier thirteen-Worker stage.

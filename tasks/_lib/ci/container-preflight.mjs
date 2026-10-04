@@ -1,5 +1,6 @@
 // Read-only Container API shape checks. Output contains aggregate counts only.
 import { pathToFileURL } from "node:url";
+import { isBasicApplicationConfiguration } from "./cf-container-release.mjs";
 
 const targets = [
   {
@@ -66,6 +67,7 @@ export async function inspectContainers({ accountId, token, fetchImpl = fetch })
     defaultSchedulingPolicies: 0,
     missingSchedulingPolicies: 0,
     basicInstanceTypes: 0,
+    basicResourceSizesMatch: 0,
     missingInstanceTypes: 0,
     maxInstanceLimitsMatch: 0,
     missingMaxInstanceLimits: 0,
@@ -106,7 +108,7 @@ export async function inspectContainers({ accountId, token, fetchImpl = fetch })
       counts.externalRegistryDigestMatches++;
     if (
       app.scheduling_policy === "default" &&
-      app.configuration?.instance_type === "basic" &&
+      isBasicApplicationConfiguration(app.configuration) &&
       app.max_instances === target.maxInstances &&
       JSON.stringify(app.constraints?.regions) === JSON.stringify(["APAC"])
     )
@@ -114,6 +116,7 @@ export async function inspectContainers({ accountId, token, fetchImpl = fetch })
     if (app.scheduling_policy === "default") counts.defaultSchedulingPolicies++;
     if (app.scheduling_policy == null) counts.missingSchedulingPolicies++;
     if (app.configuration?.instance_type === "basic") counts.basicInstanceTypes++;
+    if (isBasicApplicationConfiguration(app.configuration)) counts.basicResourceSizesMatch++;
     if (app.configuration?.instance_type == null) counts.missingInstanceTypes++;
     if (app.max_instances === target.maxInstances) counts.maxInstanceLimitsMatch++;
     if (app.max_instances == null) counts.missingMaxInstanceLimits++;

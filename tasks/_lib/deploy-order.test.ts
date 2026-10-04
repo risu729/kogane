@@ -407,19 +407,23 @@ describe("the deploy workflow follows the ledger", () => {
     expect(usingToken).toEqual([
       "Confirm the production credentials reached this job",
       "Capture the existing DO namespaces and lifecycle",
+      "Capture Container identity and pin rollback images",
       "Apply the CORE migrations",
       "Apply the READ migrations",
       "Deploy the GlobalPass collector",
+      "Verify the GlobalPass Container application and image",
       "Deploy the Mobile Suica collector",
       "Deploy the Money Forward collector",
       "Deploy the MyJCB collector",
       "Deploy the SBI Securities collector",
       "Deploy the SBI Shinsei collector",
+      "Verify the SBI Shinsei Container application and image",
       "Deploy the SBI VC Trade collector",
       "Deploy the SMBC Direct collector",
       "Deploy the Mizuho collector",
       "Deploy the Sony Bank collector",
       "Deploy the St.George collector",
+      "Verify the St.George Container application and image",
       "Deploy the PRESTIA bank collector",
       "Deploy the Vpass collector",
       "Deploy the V Point Pay collector",
@@ -436,7 +440,8 @@ describe("the deploy workflow follows the ledger", () => {
     const validate = names.indexOf("Validate every Worker without uploading");
     const firstCredential = names.indexOf("Confirm the production credentials reached this job");
     expect(validate).toBeGreaterThan(-1);
-    expect(firstCredential).toBe(validate + 1);
+    expect(names.indexOf("Capture the exact local Container images")).toBe(validate + 1);
+    expect(firstCredential).toBe(validate + 2);
   });
 
   test("the credentials are checked before a deployment record or a migration", () => {
