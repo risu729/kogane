@@ -30,13 +30,22 @@ and retains only a validated financial snapshot while its storage is incomplete.
 A later trigger retries storing that same snapshot rather than logging in again.
 
 When a collection failure is caught, the container attempts to emit one `st-george-runtime-failure` event with
-`stage`, `errorType`, `loginPostCount` and `durationMs`. Stage and exception type
+`stage`, `errorType`, `refusal`, `loginPostCount` and `durationMs`. Stage and exception type
 are closed labels; exception messages, stacks, URLs, provider text and credentials
 are excluded. `loginPostCount` observes browser-issued requests to the known login
 POST route: 0 means none observed, 1 means one, and 2 means two or more. It does not
 prove bank receipt or acceptance. Logging failure cannot replace the collection
 result or prevent cleanup. Public failure codes and the single-login policy are
 unchanged; diagnostics do not clear a blocked run or authorize another attempt.
+After reaching the known portfolio route, the collector allows up to 10 seconds
+for visible account cards to render. Every observation retains the existing
+route and challenge checks; this wait does not navigate or submit another login.
+The closed `refusal` label distinguishes response inspection, unrecognized route
+components, a route changing during inspection, a non-portfolio landing route,
+and absent portfolio markers. The known login POST destination is labeled but
+remains disallowed as a landing/read route. Other failures use `unknown`. No
+rejected URL or provider text is emitted, and a route refusal alone does not
+establish whether authentication succeeded or a challenge was displayed.
 
 ## Configuration and operations
 

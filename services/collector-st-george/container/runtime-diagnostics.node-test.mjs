@@ -37,6 +37,7 @@ test("runtime failure emits once with fixed stage/type and no exception details"
       event: "st-george-runtime-failure",
       stage: "login-result-state",
       errorType: "TimeoutError",
+      refusal: "unknown",
       loginPostCount: 0,
       durationMs: 25,
     },
@@ -66,8 +67,10 @@ test("unexpected labels, unsafe accessors and throw values remain closed", () =>
   ]) {
     const { diagnostic, events } = capture();
     diagnostic.stage(secret);
+    diagnostic.refusal(secret);
     diagnostic.failure(error);
     assert.equal(events[0].stage, "unknown");
+    assert.equal(events[0].refusal, "unknown");
     assert.equal(events[0].errorType, "unknown");
     assert.equal(JSON.stringify(events).includes(secret), false);
   }
@@ -129,6 +132,7 @@ test("runtime wrapper logs validation failure once and keeps its public result",
       "errorType",
       "event",
       "loginPostCount",
+      "refusal",
       "stage",
     ]);
     assert.equal(events[0].event, "st-george-runtime-failure");
