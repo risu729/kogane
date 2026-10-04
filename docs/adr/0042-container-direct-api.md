@@ -36,7 +36,10 @@ namespace, persistent uncertainty, resume path, and leases are unchanged.
 Each Container class now extends `DurableObject`. A controller in
 `packages/collection` supplies the existing startup, fetch, stop, and destroy
 RPC surface using the direct API. Concurrent startup calls share one promise.
-Allocation and readiness GETs share a hard 20-second deadline. The old SDK
+After constructor recovery, allocation, inactivity-timeout configuration,
+readiness GETs, and health-body cancellation share a hard 20-second deadline.
+Each allocation/readiness await is bounded; a late result cannot resume a
+canceled or timed-out startup. The old SDK
 used nominal 8-second allocation and 20-second readiness retry budgets; this
 changes the allocation budget and bounds actual startup rather than reproducing
 its retry-count timing. Application POSTs are sent
@@ -54,8 +57,11 @@ continuity must still be verified before merging.
 
 A separate monitor token prevents late results from an old process from
 changing the new process's diagnostics. Readiness logs a start once per
-observed process. SIGTERM is idempotent until the next process starts. Manual
-destroy logs the closed reason `destroyed`, with no invented exit code;
+observed process. SIGTERM is idempotent after a successful signal until the
+next process starts; a failed signal remains retryable and never claims a
+signal outcome. A failed
+destroy reattaches monitoring when the same process remains running, without
+reporting another start. Manual destroy logs the closed reason `destroyed`, with no invented exit code;
 normal monitor completion and failures retain the observed native exit code.
 Diagnostic callback failures cannot interrupt collection.
 
@@ -81,9 +87,11 @@ removed from these three services.
 ## Verification
 
 Focused tests cover shared startup, allocation/readiness retry without POST,
-no application retry after failure, delayed streams and cancellation/error
+no application retry after failure, delayed/backpressured streams and cancellation/error
 release, constructor recovery, alarm retirement, graceful stop, forced
-teardown, bounded startup, and old-monitor/new-process races. Existing
+teardown, bounded startup (including stalled timeout configuration and health
+responses), old-monitor/new-process races, late startup completion behind a
+destroy barrier, failed-destroy monitor recovery, and failed-signal retries. Existing
 collection tests retain their failure/partial evidence, leases and teardown
 contracts. Source typechecks cover the shared controller and three Workers. Lock updates
 used `bun install --lockfile-only`; the automatic dependency check reported no

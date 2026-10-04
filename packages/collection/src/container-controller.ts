@@ -89,25 +89,32 @@ export class ContainerController {
           started = true;
           this.stoppedBySignal = false;
           this.observe(generation, true);
-          await this.process.setInactivityTimeout(30_000);
+          await this.beforeDeadline(this.process.setInactivityTimeout(30_000), deadline);
         } catch (error) {
+          if (generation !== this.generation)
+            throw new Error("container-start-canceled", { cause: error });
+          if (error instanceof StartupTimeout) break;
           if (!allocationUnavailable(error)) {
             this.error(error);
             throw new Error("container-start-failed", { cause: error });
           }
-          await this.pause();
+          await this.pause(deadline);
           continue;
         }
       }
+      if (generation !== this.generation) throw new Error("container-start-canceled");
       try {
-        const response = await this.process.getTcpPort(8080).fetch(
-          new Request("http://container/health", {
-            signal: AbortSignal.timeout(
-              Math.max(1, Math.min(this.timing.pingMs, deadline - Date.now())),
-            ),
-          }),
+        const response = await this.beforeDeadline(
+          this.process.getTcpPort(8080).fetch(
+            new Request("http://container/health", {
+              signal: AbortSignal.timeout(
+                Math.max(1, Math.min(this.timing.pingMs, deadline - Date.now())),
+              ),
+            }),
+          ),
+          deadline,
         );
-        await response.body?.cancel();
+        if (response.body) await this.beforeDeadline(response.body.cancel(), deadline);
         if (!response.ok) throw new Error("container-health-unavailable");
         if (generation !== this.generation) throw new Error("container-start-canceled");
         if (this.healthyToken !== this.monitorToken) {
@@ -118,20 +125,40 @@ export class ContainerController {
       } catch (error) {
         if (generation !== this.generation)
           throw new Error("container-start-canceled", { cause: error });
+        if (error instanceof StartupTimeout) break;
         if (!this.process.running) {
           if (allocationUnavailable(this.lastFailure) || allocationUnavailable(error))
             started = false;
           else throw new Error("container-start-process-exit", { cause: error });
         }
-        await this.pause();
+        await this.pause(deadline);
       }
     }
-    const error = new Error("container-start-timeout");
+    const error = new StartupTimeout();
     this.error(error);
     throw error;
   }
-  private pause(): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, this.timing.pollMs));
+  private pause(deadline: number): Promise<void> {
+    return new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, Math.min(this.timing.pollMs, deadline - Date.now()))),
+    );
+  }
+  private async beforeDeadline<T>(operation: Promise<T>, deadline: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const remaining = deadline - Date.now();
+    const timeout =
+      remaining <= 0
+        ? Promise.reject<never>(new StartupTimeout())
+        : new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new StartupTimeout()), remaining);
+          });
+    try {
+      const result = await Promise.race([timeout, operation]);
+      if (Date.now() >= deadline) throw new StartupTimeout();
+      return result;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
   private observe(generation: number, force = false): void {
     if (this.monitoring && !force) return;
@@ -218,9 +245,9 @@ export class ContainerController {
   }
   async stop(): Promise<void> {
     await this.ready;
-    if (this.stoppedBySignal) return;
+    if (this.stoppedBySignal || !this.process.running) return;
+    this.process.signal(15);
     this.stoppedBySignal = true;
-    if (this.process.running) this.process.signal(15);
   }
   destroy(): Promise<void> {
     if (!this.destroying) {
@@ -235,13 +262,28 @@ export class ContainerController {
     return this.destroying;
   }
   private async destroyProcess(): Promise<void> {
+    const wasHealthy = this.healthyToken === this.monitorToken;
     this.generation++;
     this.monitorToken++;
     this.monitoring = false;
     this.starting = undefined;
     // Initialization failure must not prevent the caller's finally teardown.
     await this.ready.catch(() => {});
-    await this.process.destroy();
+    try {
+      await this.process.destroy();
+    } catch (error) {
+      // A rejected destroy may leave the old process running. Keep observing it
+      // under the new generation without restoring any canceled startup.
+      if (this.process.running) {
+        try {
+          this.observe(this.generation);
+          if (wasHealthy) this.healthyToken = this.monitorToken;
+        } catch (monitorError) {
+          this.error(monitorError);
+        }
+      }
+      throw error;
+    }
     this.safe(() => this.hooks.onStop?.({ reason: "destroyed" }));
   }
 
@@ -254,6 +296,11 @@ export class ContainerController {
     } catch {
       /* Diagnostics cannot interrupt collection. */
     }
+  }
+}
+class StartupTimeout extends Error {
+  constructor() {
+    super("container-start-timeout");
   }
 }
 function allocationUnavailable(error: unknown): boolean {

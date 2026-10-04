@@ -205,6 +205,41 @@ describe("direct container lifecycle", () => {
     expect(f.counts().posts).toBe(1);
     expect(f.counts().destroys).toBe(0);
   });
+  test("response backpressure bounds upstream reads and cancellation releases lifetime", async () => {
+    const f = fixture();
+    let reads = 0,
+      canceled = 0;
+    f.reply(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull(stream) {
+                reads++;
+                stream.enqueue(new Uint8Array([1]));
+              },
+              cancel() {
+                canceled++;
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+        ),
+    );
+    const response = await f.controller.fetch(new Request("http://container/collect"));
+    let finished = false;
+    const lifetime = f.waits.at(-1)!;
+    void lifetime.then(() => {
+      finished = true;
+    });
+    await Bun.sleep(0);
+    expect(reads).toBe(1);
+    expect(finished).toBe(false);
+    await response.body!.cancel();
+    await lifetime;
+    expect(canceled).toBe(1);
+    expect(finished).toBe(true);
+  });
   test("body cancel and body failure both release lifetime", async () => {
     for (const failure of [false, true]) {
       const f = fixture();
@@ -374,5 +409,131 @@ describe("direct container lifecycle", () => {
     expect(f.counts().starts).toBeGreaterThan(0);
     expect(f.counts().posts).toBe(0);
     expect(f.counts().health).toBe(0);
+  });
+  test("timeout configuration shares the hard deadline and cannot resume an old startup", async () => {
+    const f = fixture();
+    const timeout = deferred<void>();
+    const current = deferred<void>();
+    let timeouts = 0,
+      monitors = 0;
+    Object.assign(f.process, {
+      setInactivityTimeout: () => (++timeouts === 1 ? timeout.promise : Promise.resolve()),
+      monitor: () => (++monitors === 1 ? f.monitor.promise : current.promise),
+    });
+    const start = f.controller.startAndWaitForPorts().then(
+      () => "ready",
+      (error: Error) => error.message,
+    );
+    const outcome = await Promise.race([start, Bun.sleep(120).then(() => "still pending")]);
+    await f.controller.destroy();
+    await f.controller.startAndWaitForPorts();
+    const healthChecks = f.counts().health;
+    timeout.resolve();
+    await start;
+    await Bun.sleep(0);
+    expect(outcome).toBe("container-start-timeout");
+    expect(f.counts().health).toBe(healthChecks);
+    expect(f.started).toHaveLength(1);
+    current.reject(Object.assign(new Error("current"), { exitCode: 4 }));
+    await Bun.sleep(0);
+    expect(f.stops).toEqual([{ reason: "destroyed" }, { reason: "exit", exitCode: 4 }]);
+  });
+  test("stalled readiness fetch and health-body cancellation obey the hard deadline", async () => {
+    for (const stalledBody of [false, true]) {
+      const f = fixture();
+      const health = deferred<Response>();
+      const canceled = deferred<void>();
+      f.check(() =>
+        stalledBody
+          ? Promise.resolve(new Response(new ReadableStream({ cancel: () => canceled.promise })))
+          : health.promise,
+      );
+      const start = f.controller.startAndWaitForPorts().then(
+        () => "ready",
+        (error: Error) => error.message,
+      );
+      const outcome = await Promise.race([start, Bun.sleep(120).then(() => "still pending")]);
+      health.resolve(new Response("ready"));
+      canceled.resolve();
+      await start;
+      expect(outcome).toBe("container-start-timeout");
+      expect(f.started).toEqual([]);
+      expect(f.counts().posts).toBe(0);
+    }
+  });
+  test("failed destruction restores monitoring of the still-running process", async () => {
+    const f = fixture();
+    await f.controller.startAndWaitForPorts();
+    Object.assign(f.process, {
+      destroy: async () => {
+        throw new Error("destroy-failed");
+      },
+    });
+    await expect(f.controller.destroy()).rejects.toThrow("destroy-failed");
+    await f.controller.startAndWaitForPorts();
+    expect(f.started).toHaveLength(1);
+    f.monitor.reject(Object.assign(new Error("current"), { exitCode: 7 }));
+    await Bun.sleep(0);
+    expect(f.stops).toEqual([{ reason: "exit", exitCode: 7 }]);
+  });
+  test("failed SIGTERM can be retried and is recorded only after a successful signal", async () => {
+    const f = fixture();
+    await f.controller.startAndWaitForPorts();
+    let signals = 0;
+    Object.assign(f.process, {
+      signal: () => {
+        if (++signals === 1) throw new Error("signal-failed");
+      },
+    });
+    await expect(f.controller.stop()).rejects.toThrow("signal-failed");
+    await f.controller.stop();
+    await f.controller.stop();
+    expect(signals).toBe(2);
+    f.monitor.resolve();
+    await Bun.sleep(0);
+    expect(f.stops).toEqual([{ reason: "runtime_signal", exitCode: 0 }]);
+  });
+  test("stopping an already-exited process does not invent a signal outcome", async () => {
+    const f = fixture();
+    await f.controller.startAndWaitForPorts();
+    Object.assign(f.process, { running: false });
+    await f.controller.stop();
+    f.monitor.resolve();
+    await Bun.sleep(0);
+    expect(f.signals).toEqual([]);
+    expect(f.stops).toEqual([{ reason: "exit", exitCode: 0 }]);
+  });
+
+  test("a startup timeout never releases an in-flight destroy barrier", async () => {
+    const f = fixture();
+    const timeout = deferred<void>();
+    const destroyed = deferred<void>();
+    let configurations = 0;
+    Object.assign(f.process, {
+      setInactivityTimeout: () => (++configurations === 1 ? timeout.promise : Promise.resolve()),
+      destroy: async () => {
+        await destroyed.promise;
+        Object.assign(f.process, { running: false });
+      },
+    });
+    const first = f.controller.startAndWaitForPorts().catch((error: Error) => error.message);
+    await Bun.sleep(0);
+    const teardown = f.controller.destroy();
+    let restarted = false;
+    const next = f.controller.startAndWaitForPorts().then(() => {
+      restarted = true;
+    });
+    await Bun.sleep(70);
+    expect(await first).toBe("container-start-canceled");
+    expect(restarted).toBe(false);
+    expect(f.counts().starts).toBe(1);
+    timeout.resolve();
+    await Bun.sleep(0);
+    expect(restarted).toBe(false);
+    expect(f.counts().health).toBe(0);
+    destroyed.resolve();
+    await teardown;
+    await next;
+    expect(f.counts().starts).toBe(2);
   });
 });
