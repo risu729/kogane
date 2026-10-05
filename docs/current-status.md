@@ -49,10 +49,12 @@ are separate claims. Historical acceptance records are linked from the
   captured two empty months (no Found line, no pager, no table). 1.1.0
   refused both; `global-pass-activity@1.2.0` (deployed 2026-10-04) reads them
   `ok` with no row, and they are those months' current empty snapshots. Of the
-  72 stored activity pages, 1.2.0 reads 70 `ok` (48 importer-era pages with
-  the same 372 rows as 1.1.0, and 22 empty months: 20 importer-era, 2 from run 989) and refuses 2 importer-era pages (`parser_rejected`, as under 1.0.0
-  and 1.1.0). Which check refused those 2 is not stored; the owner's
-  counts-only replay (`replay-diagnostics.ts globalpass-activity 2`, see
+  72 parse-eligible activity pages, 1.2.0 reads 70 `ok` (48 importer-era
+  pages with the same 372 rows as 1.1.0, and 22 empty pages in 7 months: 20
+  importer-era, 2 from run 989) and refuses 2 importer-era pages
+  (`parser_rejected`, as under 1.0.0 and 1.1.0). Which check refused those 2
+  is not stored; the owner's counts-only replay
+  (`replay-diagnostics.ts globalpass-activity 2`, see
   [operations](operations.md#replaying-a-parser-rejection)) names it. The
   empty month was observed in English only. See
   [observations](observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).

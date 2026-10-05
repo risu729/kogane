@@ -1053,9 +1053,10 @@ eligible `globalpass-activity` artifacts (70 importer-era, 2 from fetch_run
 - Both fetch_run 989 pages: `ok` with no warning and no observation, so both
   were empty months; the first empty month a shared run has stored.
 
-In all, 70 `ok` (48 with rows, 22 empty months) and 2 `parser_rejected`. The
-22 empty months are current empty snapshots; none of those months had an
-`ok` capture with rows, so no stored row is hidden. Shared runs have no
+In all, 70 `ok` (48 with rows, 22 empty pages) and 2 `parser_rejected`. The
+22 empty pages fall in 7 months, which are current empty snapshots; none of
+those months has an `ok` capture with rows (re-counted 2026-10-05, run 989's
+months included), so no stored row is hidden. Shared runs have no
 transaction observation yet.
 
 ### Verification

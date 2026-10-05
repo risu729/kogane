@@ -91,11 +91,12 @@ importer-era, 2 from fetch_run 989), and all 72 were terminal by 2026-10-05
   is known without the replay.
 
 In all, `global-pass-activity@1.2.0` has 70 `ok` runs (48 with rows, 22 empty
-months) and 2 `parser_rejected`. The 22 empty months (20 importer-era, 2 from
-run 989) are now current empty snapshots in the read model; none of those
-months had an `ok` capture with rows (the 2026-10-04 count above), so no
-stored row is hidden. Shared runs still have no transaction observation: the
-only admitted run captured two empty months.
+pages) and 2 `parser_rejected`. The 22 empty pages (20 importer-era, 2 from
+run 989) fall in 7 months, which are now current empty snapshots in the read
+model; none of those 7 months has an `ok` capture with rows (re-counted
+2026-10-05, covering run 989's months as well as the 2026-10-04 count above),
+so no stored row is hidden. Shared runs still have no transaction
+observation: the only admitted run captured two empty months.
 
 ## GLOBAL PASS: the first shared-run pages were refused (no parser release)
 
