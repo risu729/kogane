@@ -1,6 +1,6 @@
 # ADR 0026: A collector's unit coverage is a claim about what the run set out to collect
 
-- Status: proposed
+- Status: accepted (#272, merged 2026-09-27)
 - Date: 2026-09-26
 - Carried by:
   `services/collector-myjcb/src/shared-collection.ts`,
@@ -211,7 +211,7 @@ eligibility rules and registration are unchanged.
 
 ## Amendment: Vpass proves each month against its stated total (#273)
 
-- Status: proposed; accepted when #273 merges
+- Status: accepted (#273, merged 2026-09-27)
 - Date: 2026-09-27
 - Carried by: `services/collector-vpass/src/shared-collection.ts`
   (`monthCheck`, `cardCoverage`),
@@ -244,7 +244,7 @@ exact counts; the walk's stops and what stays unobserved are in
 
 ## Amendment 2026-09-27: GLOBAL PASS pagination observed; sanitizer refusals get closed codes
 
-- Status: proposed; accepted when #281 merges. Its page-1-only decision, and
+- Status: accepted (#281, merged 2026-09-27). Its page-1-only decision, and
   its note that a month of ten or fewer shows no pager, are superseded by the
   [amendment of 2026-10-04](#amendment-2026-10-04-global-pass-walks-every-page-of-a-month).
 - Date: 2026-09-27
@@ -410,7 +410,7 @@ Two sentences of the MyJCB section above change.
 
 ## Amendment: MyJCB schedule pages are outside the coverage (2026-09-27)
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#337, merged 2026-09-27)
 - Date: 2026-09-27
 - Carried by: [ADR 0005's amendment (c)](0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-c-the-menus-schedule-pages-are-not-months),
   `readCreditMenuGroups` in `services/collector-myjcb/src/parsers.ts`
@@ -432,7 +432,7 @@ claims coverage over a grouping nobody observed.
 
 ## Amendment 2026-09-28: GLOBAL PASS sanitizer refusals log a counts-only shape
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (#355, merged 2026-09-28)
 - Date: 2026-09-28
 - Carried by: `services/collector-globalpass/src/sanitize.ts`
   (`GLOBALPASS_SANITIZER_EXPECTATIONS`, `GlobalPassSanitizerError.detail`,
@@ -569,7 +569,7 @@ without someone fetching the page by hand.
 
 ## Amendment 2026-09-29: GLOBAL PASS activity pages in English
 
-- Status: proposed; accepted when #366 merges
+- Status: accepted (#366, merged 2026-09-29)
 - Date: 2026-09-29
 - Carried by: `services/collector-globalpass/src/sanitize.ts`
   (`ACTIVITY_HEADING`, `isStaticAction`, `MENU_TOGGLE_ONCLICK`),
@@ -915,7 +915,7 @@ source note has the detail):
 
 ## Amendment 2026-10-04: GLOBAL PASS empty months are read as no rows
 
-- Status: proposed; accepted when this PR merges
+- Status: accepted (#474, merged 2026-10-04)
 - Date: 2026-10-04
 - Carried by: `packages/parsers/src/parsers/global-pass-activity.ts`
   (1.2.0, `emptyMonthPage`),
@@ -999,7 +999,8 @@ empty month. It removes one known, observed gap.
   eligible `globalpass-activity` artifact the parser accepts. Pages with a
   table re-parse to the same observations, and the `ok` 1.2.0 run supersedes
   the 1.1.0 one. The two pages of fetch_run 989 are re-parsed too; whether
-  either becomes `ok` depends on why 1.1.0 refused it.
+  either becomes `ok` depends on why 1.1.0 refused it. (Both did: see
+  _Production result_ below.)
 - **Importer-era zero-table pages.** The 2026-09-08 investigation found 20
   importer-era pages with no table that 1.0.0 (and 1.1.0) refused. Any of
   them that shows no pager and no Found line will now parse `ok` with no row.
@@ -1026,8 +1027,37 @@ empty month. It removes one known, observed gap.
     empty month ... supersedes an older capture with rows") so a change to
     it is visible. A guard would change the read model's query and needs its
     own frozen-SQL differential proof; it is not part of this amendment.
-  - The empty month page has not been stored by a shared run yet; the first
-    one proves the rule against production markup.
+  - The rule has met production markup only in the two empty months of
+    fetch_run 989 (English display) and the 20 importer-era zero-table
+    pages; a Japanese empty page has still not been seen.
+  - Two importer-era pages stay refused under 1.2.0, as under 1.0.0 and
+    1.1.0. Which check refused them is not stored; the counts-only replay
+    (`replay-diagnostics.ts globalpass-activity 2`,
+    [operations](../operations.md#replaying-a-parser-rejection)) names it.
+
+### Production result (2026-10-05)
+
+#474 was deployed in Deploy run 269 (2026-10-04, after the deploy-pipeline
+fixes #511 and #512); 1.2.0 is registered in `parser_releases` at runtime,
+with no migration. The repair lane queued a 1.2.0 job for each of the 72
+eligible `globalpass-activity` artifacts (70 importer-era, 2 from fetch_run
+989), all terminal by 2026-10-05 05:00Z. Read-only aggregate queries:
+
+- 48 importer-era pages with a table: `ok` with warnings, 372 transaction
+  observations, the same pages and row count as 1.1.0; each 1.1.0 `ok` run is
+  superseded by its 1.2.0 run.
+- 20 importer-era pages (the 2026-09-08 investigation's zero-table pages):
+  `ok` with no warning and no observation. So 20 of the 22 importer-era
+  refusals were the observed empty month.
+- 2 importer-era pages: `parser_rejected`.
+- Both fetch_run 989 pages: `ok` with no warning and no observation, so both
+  were empty months; the first empty month a shared run has stored.
+
+In all, 70 `ok` (48 with rows, 22 empty pages) and 2 `parser_rejected`. The
+22 empty pages fall in 7 months, which are current empty snapshots; none of
+those months has an `ok` capture with rows (re-counted 2026-10-05, run 989's
+months included), so no stored row is hidden. Shared runs have no
+transaction observation yet.
 
 ### Verification
 
@@ -1061,4 +1091,6 @@ empty month. It removes one known, observed gap.
 - `packages/parsers/src/parsers/digests.ts` regenerated; the digest test
   passes.
 - Production was read only with read-only aggregate queries (counts); no
-  value appears here.
+  value appears here. The production result above was re-queried the same
+  way (parse runs of 1.2.0 by fetch run, status, warnings and observation
+  count; 1.1.0 runs by supersession).
