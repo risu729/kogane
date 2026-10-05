@@ -1,0 +1,45 @@
+name: Container account readback
+# GET-only by default. The explicit probe mints one five-minute pull credential.
+# Neither mode deploys a Worker/Container or invokes a bank.
+on:
+  workflow_dispatch:
+    inputs:
+      registry-credential-probe:
+        description: Mint and discard one five-minute managed-registry pull credential
+        type: boolean
+        required: false
+        default: false
+permissions: {}
+concurrency:
+  group: container-readonly-preflight
+  cancel-in-progress: false
+jobs:
+  readback:
+    name: Read Container account shapes
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: production
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - name: Checkout the reviewed workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install the pinned Node interpreter
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.10.2
+          cache: false
+        env:
+          MISE_ENABLE_TOOLS: node
+      - name: Compare operational shapes and optionally probe a pull credential
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          REGISTRY_CREDENTIAL_PROBE: ${{ inputs.registry-credential-probe }}
+        run: node tasks/_lib/ci/container-preflight.mjs

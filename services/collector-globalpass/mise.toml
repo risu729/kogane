@@ -31,16 +31,30 @@ run = [
 # Wait only when full verification already schedules workspace checks.
 wait_for = ["//:ci:workspaces", "//:ci:remainder:workspaces", "//packages/storage-d1:test"]
 description = "Validate the services/collector-globalpass deployment without uploading it."
-depends = ["//services/collector-globalpass:types"]
+depends = ["//services/collector-globalpass:cf-build", "//services/collector-globalpass:types"]
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 [tasks."bundle"]
 description = "Emit the deployable bundle of services/collector-globalpass for the release manifest."
-depends = ["//services/collector-globalpass:types"]
+depends = ["//services/collector-globalpass:cf-build", "//services/collector-globalpass:types"]
 run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/globalpass-worker --config wrangler.jsonc"
 
 [tasks."ci"]
 description = "Every check CI runs for services/collector-globalpass."
-depends = ["//services/collector-globalpass:typecheck", "//services/collector-globalpass:test", "//services/collector-globalpass:container"]
+depends = ["//services/collector-globalpass:cf-typecheck", "//services/collector-globalpass:typecheck", "//services/collector-globalpass:test", "//services/collector-globalpass:container"]
+
+[tasks."cf-build"]
+description = "Build and validate the prebuilt Worker and Container production artifacts without credentials."
+depends = ["//services/collector-globalpass:types"]
+run = [
+	"./node_modules/.bin/cf build --mode production",
+	"./node_modules/.bin/cf deploy --prebuilt --mode production --worker kogane-globalpass-collector-poc --dry-run",
+	"node ../../tasks/_lib/ci/cf-container-release.mjs validate globalpass-worker",
+]
+
+[tasks."cf-typecheck"]
+description = "Type-check the native cf build and production configurations."
+depends = ["//services/collector-globalpass:types"]
+run = "./node_modules/.bin/tsc --noEmit --project tsconfig.cloudflare.json"

@@ -137,6 +137,11 @@ the per-key ranking made, and the expected-page count and the current pages
 reached by `idx_fetch_artifacts_run_role` (`fetch_run_id=?`), never by a scan
 per month
 ([ADR 0026's amendment of 2026-10-04](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)).
+The rule does not look at row counts: since `global-pass-activity@1.2.0` an
+empty month is an `ok` parse with no row, so a newer run's empty page is its
+month's current snapshot and an older run's rows for that month stop being
+current, with no reason shown. That limit is pinned by a test of the same file
+([ADR 0026's empty-month amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-empty-months-are-read-as-no-rows)).
 
 `currentCardUsageSql({ afterId, limit })` (`src/card-usage.ts`) composes the
 same CTEs for purchase recognition: every current Vpass and MyJCB usage row with

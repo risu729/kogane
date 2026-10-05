@@ -202,17 +202,69 @@ cover bindings, variables, observability, assets and the two already-declared
 V Point exports. Existing Wrangler tests, bundles and dry runs remain, with
 credential-free cf builds and prebuilt version-upload dry runs added.
 
-Container deployments (GlobalPass, SBI Shinsei, St.George) retain v1.2.0 because
-`cf workers versions create` does not update Container applications. Legacy DO
+The three Container deployments (GlobalPass, SBI Shinsei, St.George) use the
+pinned Action v2.2.0 full-deploy strategy under [ADR 0043](adr/0043-cf-container-deployment.md),
+because `cf workers versions create` does not update Container applications.
+They retain the default scheduling policy, existing app/namespaces and
+APAC/basic/max-instance settings. Their image manifest binds the Docker image,
+daemon and source measurement; identity, immutable registry digest and complete
+control-plane allocation readback are required after publication. An unverified
+Container is recorded as failed for resume. Existing older source targets use
+the trusted, strict SQLite-exports/image-reference rollback adapter; actual
+production readback and controlled rollback remain verification gates. Legacy DO
 owners (SBI VC Trade, SMBC Direct, Processor) use code-only cf bindings to their
 existing self-Worker/class namespaces, with no native exports or migrations.
 Canonical migration histories remain unchanged. A build guard checks their
 actual artifacts; before publication the live migration tag must match the
 latest canonical tag, and after publication all active namespace IDs must
 match the captured baseline. Pending DO lifecycle work requires a separate
-Wrangler rollout. Processor alone enables trigger synchronization to preserve
-its existing Queue consumer settings. All 17 deployed Workers keep ADR 0039's order and the authenticated
+Wrangler rollout. Processor and PRESTIA opt into trigger synchronization on the
+versions strategy: Processor preserves its Queue consumer settings; PRESTIA
+applies its checked-in workersDev:true/previewUrls:false after version upload.
+The three Container full-deploy steps also explicitly consent to synchronization.
+All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
+
+The manual **Container account readback** workflow defaults to a read-only diagnostic for
+these three Container owners. Dispatch it from `main` after the production
+release has finished. It checks out that exact workflow SHA and uses the existing
+production token only for fixed Cloudflare GET requests; its output contains
+aggregate identity, configuration, version-allocation and namespace-match counts.
+It reports each policy/resource comparison independently and classifies a referenced
+rollout through its validated identifier, so an aggregate mismatch can be diagnosed
+without logging provider text. Its separate concurrency group cannot replace a
+pending production release.
+A successful run means the reads completed, not that every count matched or that
+a rollout is ready: API shapes and concurrent state changes can produce lower
+counts. Interpret them before any Container migration; the reads are not an
+atomic rollout proof and make no deployment or bank request.
+
+Its optional `registry-credential-probe` boolean defaults to false. Explicit true
+adds exactly one fixed managed-registry credentials POST after the GET checks,
+requesting five minutes of pull permission. This mode creates a short-lived
+credential, validates its required response fields and registry host, then discards
+it without logging, storing or exporting it. Only the fixed operation, method,
+HTTP status and shape-validation result are printed. It does not deploy, download
+an image, invoke a collector or contact a bank. The
+[credential API](https://developers.cloudflare.com/api/resources/containers/subresources/registries/subresources/credentials/methods/generate/)
+shows a 200 example. Explicit probe
+[37240919803](https://github.com/risu729/kogane/actions/runs/37240919803) reproduced
+HTTP 201 from the fixed credentials POST at 2026-10-04 22:40:56 UTC. The shared
+API now accepts only 200/201 for that fixed five-minute, pull-only POST, requires a
+successful envelope and nonempty documented account/username/password fields plus
+the exact registry host before use, and reports the actual status. All GET requests
+still require 200. Other statuses remain failures, with no retry.
+
+Production run [37235079565](https://github.com/risu729/kogane/actions/runs/37235079565)
+published GlobalPass but failed its after-deploy guard with
+`cf_container_api_http`. The original log did not identify the operation or status;
+its historical cause remains unknown. Quiet GET-only run
+[37237772405](https://github.com/risu729/kogane/actions/runs/37237772405) later read
+all three current application identities, resource settings, namespaces and desired
+100% allocations successfully. That current snapshot does not prove the failed
+run's image verification. Shared release API failures now report only an allowlisted
+operation, GET/POST, a bounded HTTP status (or null for transport failure), and a
+closed error code. Existing deployment, image, rollout and ledger gates remain.
 
 `deployBackend` belongs to the target commit's deployment ledger. A target that
 has no `cf` marker uses the existing v1 path, including commits predating this
@@ -225,8 +277,10 @@ the same identity. The manifest digests the native source and build config and
 every file in cf Build Output, including assets and Worker metadata. It is
 rechecked before the first upload. v2 uploads that prebuilt artifact, deploys
 the returned version at 100%, and reads that exact deployment back. Trigger
-synchronization is explicitly disabled; existing schedules and queue consumers
-stay under the existing deployment paths. No preview lane is introduced.
+synchronization is disabled for the other code-only Workers. Processor/PRESTIA
+and the three full-deploy Container owners explicitly enable it as described
+above. No preview lane, route/domain addition or bank-secret synchronization
+is introduced.
 
 ### What the release job does, in order
 

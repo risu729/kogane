@@ -48,7 +48,10 @@ export function createGlobalPassActivity(
     // 1.1.0: reads the page-qualified keys of a walked month
     // (`activity-YYYY-MM-pN.html`) and qualifies a later page's external id
     // and raw locator by its page; page 1 is read exactly as in 1.0.0.
-    version: "1.1.0",
+    // 1.2.0: reads the observed empty month (page 1 with no table, no pager
+    // and no Found line) as zero observations; every page with a table is
+    // read exactly as in 1.1.0.
+    version: "1.2.0",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (
@@ -75,8 +78,14 @@ export function createGlobalPassActivity(
       if (keyMonth !== selectedMonth) {
         throw new Error("global-pass artifact key and selected month disagree");
       }
-      requirePagerPage(document, page);
+      const pagerCount = requirePagerPage(document, page);
       const tables = elements(document, "table");
+      if (tables.length === 0 && emptyMonthPage(document, page, pagerCount)) {
+        // The provider's observed empty month (ADR 0026's empty-month amendment of
+        // 2026-10-04): the month states no statement, so the page is a
+        // complete reading of nothing. No amount is invented.
+        return { observations: [], warnings: [] };
+      }
       const outer = tables.filter((table) => owned(table, "th", "table").length === 12);
       const compact = tables.filter((table) => owned(table, "th", "table").length === 4);
       const expanded = tables.filter((table) => owned(table, "th", "table").length === 10);
@@ -226,7 +235,7 @@ function parseArtifactKey(artifactKey: string | null | undefined): {
  * `[p/Pページ]` in Japanese, two per page) must name the page its key names.
  * Page 1 of a month without statements shows no pager; any later page must.
  */
-function requirePagerPage(document: Node, page: number): void {
+function requirePagerPage(document: Node, page: number): number {
   const pagers = elements(document, "div").filter((div) =>
     (attribute(div, "class") ?? "").split(/\s+/u).includes("nablarch_currentPageNumber"),
   );
@@ -239,6 +248,39 @@ function requirePagerPage(document: Node, page: number): void {
   if (indices.some((index) => index !== page)) {
     throw new Error("global-pass pager and artifact key name different pages");
   }
+  return indices.length;
+}
+
+/** `Found N Result` (English) or `検索結果 N件` (Japanese), as the collector reads it. */
+const STATED_TOTAL = /\bFound\s+\d{1,5}\s+Results?\b|検索結果\s*\d{1,5}\s*件/iu;
+/** `[p/Ppage]` (English) or `[p/Pページ]` (Japanese) anywhere in the page's text. */
+const PAGER_TEXT = /\[\s*\d{1,4}\s*\/\s*\d{1,4}\s*(?:pages?|ページ)\s*\]/iu;
+/** The classes of the observed pager (`div.nablarch_paging` and its four children). */
+const PAGER_CLASSES = [
+  "nablarch_paging",
+  "resultCountHeader",
+  "nablarch_currentPageNumber",
+  "nablarch_prevSubmit",
+  "nablarch_nextSubmit",
+];
+
+/**
+ * The observed empty month (owner's live observation, 2026-10-04): a month
+ * with no statement shows no Found line, no pager and no table; its month
+ * select is present as on every month page. Only page 1 of a month can be
+ * one, and only when nothing of the pager shows, in either language.
+ * Any other page without a table stays refused.
+ */
+function emptyMonthPage(document: Node, page: number, pagerCount: number): boolean {
+  if (page !== 1 || pagerCount !== 0) return false;
+  // Any element carrying a pager class, whatever its tag (the observed pager
+  // is `div` and `a`; a pager part on another tag is not the empty month).
+  const pagerParts = classedElements(document).filter((node) =>
+    (attribute(node, "class") ?? "").split(/\s+/u).some((name) => PAGER_CLASSES.includes(name)),
+  );
+  if (pagerParts.length !== 0) return false;
+  const visible = visibleText(document);
+  return !STATED_TOTAL.test(visible) && !PAGER_TEXT.test(visible);
 }
 
 function parseMonthSelector(document: Node): string {
@@ -383,6 +425,20 @@ function elements(root: Node, tagName: string): Element[] {
   visit(root);
   return result;
 }
+/** Every element with a `class` attribute, in document order. */
+function classedElements(root: Node): Element[] {
+  const result: Element[] = [];
+  const visit = (node: Node): void => {
+    if (
+      node.tagName !== undefined &&
+      node.attrs?.some((item) => item.name.toLowerCase() === "class")
+    )
+      result.push(node as Element);
+    if ("childNodes" in node) for (const child of node.childNodes) visit(child);
+  };
+  visit(root);
+  return result;
+}
 function owned(root: Element, tagName: string, ownerTag: string): Element[] {
   return elements(root, tagName).filter((node) => closest(node, ownerTag) === root);
 }
@@ -402,6 +458,22 @@ function text(node: Node): string {
   };
   visit(node);
   return values.join(" ").replace(/\s+/gu, " ").trim();
+}
+/** Text a reader sees: the text of every node outside `script`, `style` and `template`. */
+function visibleText(node: Node): string {
+  const values: string[] = [];
+  const visit = (current: Node): void => {
+    if (
+      current.tagName === "script" ||
+      current.tagName === "style" ||
+      current.tagName === "template"
+    )
+      return;
+    if (typeof current.value === "string") values.push(current.value);
+    if ("childNodes" in current) for (const child of current.childNodes) visit(child);
+  };
+  visit(node);
+  return values.join(" ").replace(/\s+/gu, " ");
 }
 function attribute(node: Element, name: string): string | undefined {
   return node.attrs.find((item) => item.name.toLowerCase() === name)?.value;

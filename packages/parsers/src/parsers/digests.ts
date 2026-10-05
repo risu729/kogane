@@ -39,7 +39,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/global-pass-activity-parser.ts":
       "3d7af7b4650168811c424f69c7a76cf21ee2c2a04d278064a80a9c7f2e8df74a",
     "poc/observation-pipeline/src/parsers/global-pass-activity.ts":
-      "d102a4e9ebc80e73383d59cd360ef4ee98cb6192feea8a7c5212252ff3c4de9f",
+      "a45b16f2f0b2e213a2820bb0349ac882e36a628d25f3bd99fecd2d3832e5f44c",
     "poc/observation-pipeline/src/parsers/mizuho-html.ts":
       "ff2aae8faea491f655d50f0101adfa7af96922aa44c397da7fe5e4dc41fd5d40",
     "poc/observation-pipeline/src/parsers/mizuho.ts":
@@ -119,8 +119,8 @@ export const PARSER_DIGESTS: ParserDigests = {
   },
   releases: {
     "global-pass-activity": {
-      version: "1.1.0",
-      codeDigest: "dd049e35800e7ae3908f3b1fe46958403512d30242a9469f25f63056d7811647",
+      version: "1.2.0",
+      codeDigest: "7c4c39a928af9c14ea5c538e1af21fd60e6fa233587b1448312a6854a795cd8c",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
