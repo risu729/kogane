@@ -352,6 +352,26 @@
       "deploy": false,
       "healthPath": "",
       "healthAuth": "none"
+    },
+    {
+      "name": "container-api-verification-sdk",
+      "path": "experiments/container-api-verification",
+      "config": "wrangler.sdk.jsonc",
+      "worker": "kogane-container-api-verification",
+      "role": "probe",
+      "deploy": false,
+      "healthPath": "",
+      "healthAuth": "none"
+    },
+    {
+      "name": "container-api-verification-native",
+      "path": "experiments/container-api-verification",
+      "config": "wrangler.native.jsonc",
+      "worker": "kogane-container-api-verification",
+      "role": "probe",
+      "deploy": false,
+      "healthPath": "",
+      "healthAuth": "none"
     }
   ]
 }

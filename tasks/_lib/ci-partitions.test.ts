@@ -73,8 +73,9 @@ test("hosted partitions cover exactly the executable leaves of local full verifi
   const commands = plan.split("\n").filter((line) => line.includes("] $ "));
   const storage = commands.findIndex((line) => line.includes("[//packages/storage-d1:test]"));
   expect(storage).toBeGreaterThan(0);
-  // Storage is the last workspace command; only the four Docker bodies follow.
-  expect(commands.slice(storage + 1)).toHaveLength(4);
+  // Storage is the last workspace command; the four existing Docker bodies
+  // and both isolated Container API verification variants follow.
+  expect(commands.slice(storage + 1)).toHaveLength(6);
   for (const line of commands.slice(storage + 1))
     expect(line).toContain("$ ./node_modules/.bin/wrangler deploy --dry-run");
   expect(plan).not.toContain("[//services/processor:test]");

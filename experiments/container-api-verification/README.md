@@ -1,0 +1,98 @@
+# Container API synthetic verification
+
+Prepared source and driver only. No temporary Worker/application exists and no
+remote command has been run. This does not prove Cloudflare runtime behavior.
+
+The SDK and native configs intentionally have the same Worker, exported class,
+SQLite migration, binding, explicit app name, basic/APAC/max1 configuration and
+Docker image. Only the Worker entrypoint and revision marker differ. The native
+variant uses the actual shared ContainerController, with a thin adapter forcing
+Internet access off. The labelled unmonitored comparison omits native monitor()
+through that adapter; it does not represent the production monitor behavior.
+The SDK also disables Internet access. The synthetic image has no dependencies,
+outbound fetch, bank hostname, secrets or VPC binding.
+
+The public Worker requires a separately approved HARNESS_KEY before any DO lookup.
+It strips headers before the fixed named DO reaches the image. Configuration
+contains no key. An empty key refuses every request. The driver accepts only the
+fixed temporary Worker on a supplied workers.dev subdomain and uses manual
+redirects; bearer credentials cannot follow an arbitrary host redirect.
+
+## Approval and integration prerequisites
+
+The current deployment token is scoped to seventeen existing Workers and cannot
+create this Worker. Temporary creation, exact temporary Worker Admin scope,
+Container application/registry write, SQLite namespace creation and eventual
+cleanup must be separately reviewed. The driver needs only read access to the
+temporary Worker version/bindings and Container application, plus its synthetic
+endpoint key. No permission expansion, secret retrieval or deployment is built
+into the driver. Account/application selectors are supplied after an approved
+creation; they are never logged. Do not reuse bank or collector secrets.
+
+The workspace is registered in the lockfile, CI task graph and resource ledger.
+The CI workflow exposes an opt-in `container-verification` dispatch input and a
+dedicated `container-api-verification` environment. Normal CI does not run the
+remote job. Docker build and both dry-runs need hosted Docker, since local Docker
+is absent. Synthetic/local tests are distinct from actual Container verification.
+
+## Controlled sequence
+
+After independent review and explicit temporary-resource approval, deploy SDK
+wrangler.sdk.jsonc, set HARNESS_KEY without exposing it, and record the synthetic
+app ID. Configure HARNESS_SUBDOMAIN, HARNESS_KEY, CLOUDFLARE_ACCOUNT_ID,
+HARNESS_API_TOKEN and HARNESS_APPLICATION_ID in a protected runner; never print
+them. The hosted runner invokes the driver once per HARNESS_PHASE, with
+RUNNER_TEMP selecting a protected ephemeral directory. baseline_sdk writes only
+validated synthetic app ID, namespace ID and immutable image reference to
+container-api-verification-baseline.json (mode 0600); later stages compare this
+same baseline. It contains no credentials and is not printed or uploaded.
+The driver performs no deployment:
+
+1. Deploy SDK with HARNESS_REVISION=baseline_sdk, then verify baseline_sdk.
+2. Deploy native with HARNESS_REVISION=native and HARNESS_MONITOR=enabled;
+   verify native.
+3. Deploy native with HARNESS_REVISION=native_unmonitored and monitor disabled;
+   verify native_unmonitored.
+4. Run node driver.mjs recovery-hold in the background against that revision.
+   Wait for the closed verification_recovery_stream_open marker. It holds one
+   synthetic stream for at most five minutes. While it is active, deploy native
+   with HARNESS_REVISION=native_recovered and monitor enabled, then verify
+   native_recovered. Stop the holder with SIGTERM and await its exit.
+5. Roll back to the exact original SDK Worker version at 100%, keeping the
+   immutable application image unchanged; verify phase rollback_sdk. It expects
+   the original baseline_sdk revision marker and exact baseline Worker version,
+   as well as class/app/namespace/image and sentinels.
+6. The runner deletes its application and waits for absence, deploys an empty
+   teardown Worker with a `deleted_classes` migration, confirms namespace
+   absence, deletes the fixed Worker and unique image tag, and checks absence.
+   The workflow runs a separate cleanup step even after verification failure.
+   Retire the temporary token and GitHub environment after resource readback.
+
+`run-hosted.mjs` stops on any unsuccessful stage and attempts cleanup on failure.
+It never translates a failed stage into runtime success. Forced runner
+termination can prevent cleanup and requires separate absence confirmation. Worker,
+class, application, binding, migration and image stay fixed. Each state wait is
+bounded, and there is no application-request retry. Deployment flags, temporary
+credentials, workflow/job permissions and cleanup are outside this driver.
+
+Every phase verifies identity and persistent synthetic KV/SQL sentinels. All
+phases except `native_recovered` also verify concurrent startup and POST counts,
+a 35-second delayed response, a 40-second stream, a 35-second paused consumer
+with a bounded 256 MiB upstream cap and observed backpressure plateau,
+cancellation, stream failure, eventual idle stop, destroy/reallocation, SIGTERM,
+nonzero exit and SDK alarm recreation where applicable. `native_recovered`
+verifies the same still-running process after a revision switch. The harness
+responses and driver reports contain closed codes, revisions,
+status and counts. The Worker discards non-200 SDK response bodies/headers.
+The original SDK may still write its own internal runtime error messages;
+observability is disabled and no bank data, bearer key or API token reaches
+that SDK/container request. No global SDK logging override changes the baseline.
+
+Idle observations are bounded process-state checks. They do not establish
+billable runtime or DO eviction. Compare independently read aggregate billing
+and lifecycle observations before asserting cost/timing equivalence. Collector
+browser/relay compatibility and real old-source rollback remain separate gates.
+The recovery helper records a synthetic process UUID in a protected ephemeral
+file, never stdout. A held HTTP stream may disconnect during Worker replacement;
+that alone is not failure. Recovery requires the same still-running synthetic
+process UUID after redeploy. This does not assume an old HTTP response survives.

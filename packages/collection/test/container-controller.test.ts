@@ -15,8 +15,13 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-function fixture(running = false) {
+const idleKey = "__kogane_container_idle_v1";
+function fixture(running = false, idleMs = 30_000, saved = new Map<string, unknown>()) {
   const monitor = deferred<void>();
+  let alarmAt: number | undefined;
+  const alarmWrites: number[] = [];
+  const storageKeys: string[] = [];
+  saved.set("sdk-sentinel", "synthetic-sdk-state");
   const waits: Promise<unknown>[] = [];
   let starts = 0,
     deletes = 0,
@@ -73,8 +78,22 @@ function fixture(running = false) {
     container: process,
     blockConcurrencyWhile: (callback) => callback(),
     storage: {
+      get: async (key) => saved.get(key),
+      put: async (key, value) => {
+        storageKeys.push(key);
+        saved.set(key, value);
+      },
+      delete: async (key) => {
+        storageKeys.push(key);
+        return saved.delete(key);
+      },
+      setAlarm: async (timestamp) => {
+        alarmAt = timestamp;
+        alarmWrites.push(timestamp);
+      },
       deleteAlarm: async () => {
         deletes++;
+        alarmAt = undefined;
       },
     },
     waitUntil: (promise) => {
@@ -91,12 +110,16 @@ function fixture(running = false) {
       onStop: (value) => stops.push(value),
       onError: (error) => errors.push(error),
     },
-    { startupMs: 40, pollMs: 1, pingMs: 5 },
+    { startupMs: 40, pollMs: 1, pingMs: 5, idleMs },
   );
   return {
     ctx,
     process,
     controller,
+    saved,
+    storageKeys,
+    alarmWrites,
+    alarmAt: () => alarmAt,
     monitor,
     waits,
     timeouts,
@@ -263,7 +286,7 @@ describe("direct container lifecycle", () => {
       await lifetime;
     }
   });
-  test("constructor reattaches timeout/monitor and only deletes SDK alarm", async () => {
+  test("constructor reattaches timeout/monitor and replaces only the SDK alarm", async () => {
     const f = fixture(true);
     await f.waits[0];
     expect(f.counts().starts).toBe(0);
@@ -274,8 +297,10 @@ describe("direct container lifecycle", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(f.stops).toEqual([{ reason: "exit", exitCode: 7 }]);
     expect(f.errors).toEqual([]);
-    await f.controller.retireAlarm();
-    expect(f.counts().deletes).toBe(2);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+    expect(f.saved.get("sdk-sentinel")).toBe("synthetic-sdk-state");
+    expect(f.storageKeys.every((key) => key === idleKey)).toBe(true);
   });
   test("graceful stop uses SIGTERM and records native exit code", async () => {
     const f = fixture();
@@ -564,5 +589,327 @@ describe("direct container lifecycle", () => {
       expect(f.errors).toHaveLength(1);
       expect(f.counts().posts).toBe(0);
     }
+  });
+});
+
+describe("explicit Container idle alarms", () => {
+  test("standalone startup persists the thirty-second deadline without waiting for its monitor", async () => {
+    const f = fixture();
+    const before = Date.now();
+    await f.controller.startAndWaitForPorts();
+    expect(f.alarmAt()).toBeGreaterThanOrEqual(before + 30_000);
+    expect(f.alarmAt()).toBeLessThanOrEqual(Date.now() + 30_000);
+    expect(f.saved.get(idleKey)).toEqual({ deadline: f.alarmAt() });
+    expect(f.saved.get("sdk-sentinel")).toBe("synthetic-sdk-state");
+    expect(f.storageKeys.every((key) => key === idleKey)).toBe(true);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+
+    const short = fixture(false, 10);
+    await short.controller.startAndWaitForPorts();
+    await Bun.sleep(15);
+    await short.controller.alarm();
+    expect(short.signals).toEqual([15]);
+    // The synthetic process ignores SIGTERM: retry on its next idle deadline.
+    await Bun.sleep(15);
+    await short.controller.alarm();
+    expect(short.signals).toEqual([15, 15]);
+    expect(short.counts().posts).toBe(0);
+  });
+
+  test("headers remain active beyond the idle timeout and a bodyless response starts a fresh window", async () => {
+    const f = fixture(false, 10);
+    const headers = deferred<Response>();
+    f.reply(() => headers.promise);
+    const pending = f.controller.fetch(new Request("http://container/collect", { method: "POST" }));
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+    expect(f.alarmAt()).toBeUndefined();
+    headers.resolve(new Response(null, { status: 204 }));
+    await pending;
+    const finished = Date.now();
+    expect(f.alarmAt()).toBeGreaterThanOrEqual(finished + 8);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([15]);
+    expect(f.counts().posts).toBe(1);
+  });
+
+  test("EOF, cancellation and stream error each release an idle window only after the body ends", async () => {
+    for (const mode of ["eof", "cancel", "error"]) {
+      const f = fixture(false, 10);
+      let source!: ReadableStreamDefaultController<Uint8Array>;
+      f.reply(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                source = controller;
+              },
+            }),
+          ),
+      );
+      const response = await f.controller.fetch(
+        new Request("http://container/collect", { method: "POST" }),
+      );
+      await Bun.sleep(15);
+      await f.controller.alarm();
+      expect(f.signals).toEqual([]);
+      expect(f.alarmAt()).toBeUndefined();
+      if (mode === "cancel") await response.body!.cancel();
+      else if (mode === "error") {
+        source.error(new Error("synthetic-stream-error"));
+        await expect(response.text()).rejects.toThrow("synthetic-stream-error");
+      } else {
+        source.close();
+        await response.text();
+      }
+      await f.waits.at(-1);
+      await f.controller.alarm();
+      expect(f.signals).toEqual([]);
+      await Bun.sleep(15);
+      await f.controller.alarm();
+      expect(f.signals).toEqual([15]);
+      expect(f.counts().posts).toBe(1);
+    }
+  });
+
+  test("one completed concurrent response cannot make another backpressured response idle", async () => {
+    const f = fixture(false, 10);
+    f.reply(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1]));
+            },
+          }),
+        ),
+    );
+    const [a, b] = await Promise.all([
+      f.controller.fetch(new Request("http://container/collect", { method: "POST" })),
+      f.controller.fetch(new Request("http://container/collect", { method: "POST" })),
+    ]);
+    await a.body!.cancel();
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+    await b.body!.cancel();
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([15]);
+    expect(f.counts().posts).toBe(2);
+  });
+
+  test("an alarm whose storage read overlaps new activity cannot signal that request", async () => {
+    const f = fixture(false, 10);
+    await f.controller.startAndWaitForPorts();
+    await Bun.sleep(15);
+    const old = f.saved.get(idleKey);
+    const read = deferred<unknown>();
+    const get = f.ctx.storage.get;
+    f.ctx.storage.get = () => read.promise;
+    const alarm = f.controller.alarm();
+    await Bun.sleep(0);
+    const headers = deferred<Response>();
+    f.reply(() => headers.promise);
+    const request = f.controller.fetch(new Request("http://container/collect", { method: "POST" }));
+    await Bun.sleep(0);
+    read.resolve(old);
+    await alarm;
+    f.ctx.storage.get = get;
+    expect(f.signals).toEqual([]);
+    headers.resolve(new Response(null));
+    await request;
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+    expect(f.counts().posts).toBe(1);
+  });
+
+  test("a previous process alarm cannot stop its successor", async () => {
+    const f = fixture(false, 10);
+    await f.controller.startAndWaitForPorts();
+    await Bun.sleep(15);
+    const old = f.saved.get(idleKey);
+    const read = deferred<unknown>();
+    const get = f.ctx.storage.get;
+    f.ctx.storage.get = () => read.promise;
+    const alarm = f.controller.alarm();
+    await Bun.sleep(0);
+    await f.controller.destroy();
+    const monitor = deferred<void>();
+    Object.assign(f.process, { monitor: () => monitor.promise });
+    const headers = deferred<Response>();
+    f.reply(() => headers.promise);
+    const request = f.controller.fetch(new Request("http://container/collect", { method: "POST" }));
+    await Bun.sleep(0);
+    read.resolve(old);
+    await alarm;
+    f.ctx.storage.get = get;
+    expect(f.signals).toEqual([]);
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+    headers.resolve(new Response(null));
+    await request;
+    expect(f.counts().posts).toBe(1);
+  });
+
+  test("an old response completion cannot idle a newer process with an active request", async () => {
+    const f = fixture(false, 10);
+    f.reply(async () => new Response(new ReadableStream<Uint8Array>()));
+    const old = await f.controller.fetch(
+      new Request("http://container/collect", { method: "POST" }),
+    );
+    await f.controller.destroy();
+    const monitor = deferred<void>();
+    Object.assign(f.process, { monitor: () => monitor.promise });
+    const headers = deferred<Response>();
+    f.reply(() => headers.promise);
+    const request = f.controller.fetch(new Request("http://container/collect", { method: "POST" }));
+    await Bun.sleep(0);
+    await old.body!.cancel();
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+    expect(f.alarmAt()).toBeUndefined();
+    headers.resolve(new Response(null));
+    await request;
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([15]);
+    expect(f.counts().posts).toBe(2);
+  });
+
+  test("a request waiting behind destroy keeps its new response active until cancellation", async () => {
+    const f = fixture(false, 10);
+    await f.controller.startAndWaitForPorts();
+    const destroyed = deferred<void>();
+    Object.assign(f.process, {
+      destroy: async () => {
+        await destroyed.promise;
+        Object.assign(f.process, { running: false });
+      },
+      monitor: () => deferred<void>().promise,
+    });
+    f.reply(async () => new Response(new ReadableStream<Uint8Array>()));
+    const teardown = f.controller.destroy();
+    const pending = f.controller.fetch(new Request("http://container/collect", { method: "POST" }));
+    await Bun.sleep(0);
+    expect(f.counts().posts).toBe(0);
+    destroyed.resolve();
+    await teardown;
+    const response = await pending;
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+    expect(f.alarmAt()).toBeUndefined();
+    await response.body!.cancel();
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([15]);
+    expect(f.counts().posts).toBe(1);
+  });
+
+  test("stalled idle writes cannot extend readiness or forward an application request later", async () => {
+    for (const fetch of [false, true]) {
+      const f = fixture();
+      await f.waits[0];
+      const write = deferred<void>();
+      const remove = f.ctx.storage.delete;
+      f.ctx.storage.delete = () => write.promise;
+      const started = Date.now();
+      const pending = fetch
+        ? f.controller.fetch(new Request("http://container/collect", { method: "POST" }))
+        : f.controller.startAndWaitForPorts();
+      const outcome = await Promise.race([
+        pending.then(
+          () => "ready",
+          (error: Error) => error.message,
+        ),
+        Bun.sleep(120).then(() => "still pending"),
+      ]);
+      expect(outcome).toBe("container-start-timeout");
+      expect(Date.now() - started).toBeLessThan(120);
+      expect(f.counts().posts).toBe(0);
+      f.ctx.storage.delete = remove;
+      write.resolve();
+      await Bun.sleep(0);
+      expect(f.counts().starts).toBe(0);
+      expect(f.counts().posts).toBe(0);
+    }
+  });
+
+  test("destroy during idle storage setup cancels that startup before forwarding", async () => {
+    const f = fixture();
+    await f.waits[0];
+    const write = deferred<void>();
+    const remove = f.ctx.storage.delete;
+    let removes = 0;
+    f.ctx.storage.delete = (key) => (++removes === 1 ? write.promise : remove(key));
+    const pending = f.controller.fetch(new Request("http://container/collect", { method: "POST" }));
+    await Bun.sleep(0);
+    const destroyed = f.controller.destroy();
+    write.resolve();
+    await expect(pending).rejects.toThrow("container-start-canceled");
+    await destroyed;
+    expect(f.counts().starts).toBe(0);
+    expect(f.counts().posts).toBe(0);
+  });
+
+  test("failed idle signals retry and failed destroy restores the explicit idle alarm", async () => {
+    const f = fixture(false, 10);
+    await f.controller.startAndWaitForPorts();
+    let attempts = 0;
+    Object.assign(f.process, {
+      signal: (value: number) => {
+        if (++attempts === 1) throw new Error("synthetic-signal-failed");
+        f.signals.push(value);
+      },
+    });
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([]);
+    expect(f.errors).toHaveLength(1);
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([15]);
+    Object.assign(f.process, {
+      destroy: async () => {
+        throw new Error("synthetic-destroy-failed");
+      },
+    });
+    await expect(f.controller.destroy()).rejects.toThrow("synthetic-destroy-failed");
+    await Bun.sleep(0);
+    expect(f.alarmAt()).toBeGreaterThan(Date.now());
+    await Bun.sleep(15);
+    await f.controller.alarm();
+    expect(f.signals).toEqual([15, 15]);
+    expect(f.counts().posts).toBe(0);
+  });
+
+  test("constructor restores its own deadline and preserves SDK state across recovery", async () => {
+    const deadline = Date.now() + 10_000;
+    const saved = new Map<string, unknown>([[idleKey, { deadline }]]);
+    const f = fixture(true, 30_000, saved);
+    await f.waits[0];
+    expect(f.alarmAt()).toBe(deadline);
+    expect(f.timeouts).toEqual([30_000]);
+    expect(f.counts().starts).toBe(0);
+    expect(saved.get("sdk-sentinel")).toBe("synthetic-sdk-state");
+    expect(f.storageKeys.every((key) => key === idleKey)).toBe(true);
+    const orphaned = fixture(true, 10, new Map([[idleKey, { deadline: null }]]));
+    await orphaned.waits[0];
+    expect(orphaned.alarmAt()).toBeGreaterThan(Date.now());
+    await Bun.sleep(15);
+    await orphaned.controller.alarm();
+    expect(orphaned.signals).toEqual([15]);
+    const stopped = fixture(false, 10, new Map([[idleKey, { deadline }]]));
+    await stopped.waits[0];
+    expect(stopped.saved.has(idleKey)).toBe(false);
+    expect(stopped.alarmAt()).toBeUndefined();
   });
 });

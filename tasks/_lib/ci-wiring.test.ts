@@ -124,15 +124,25 @@ test("the complete native plan schedules shared type and client preparation once
   // commands, including children of the workspace aggregate. A barrier on the
   // dry-run parent alone would leave its children free to start early.
   const commands = output.split("\n").filter((line) => line.includes("] $ "));
-  const tail = commands.slice(-containerTasks.length);
-  for (const name of containerTasks)
+  // A workspace can contain several Docker-backed configs. Count every
+  // executable deployment command rather than assuming one per task.
+  const dockerInvocations = containerTasks.map((name) => ({
+    name,
+    count:
+      tasks
+        .find((task) => task.name === name)
+        ?.run?.filter((run) => run.startsWith("./node_modules/.bin/wrangler deploy")).length ?? 0,
+  }));
+  expect(dockerInvocations.every((entry) => entry.count > 0)).toBe(true);
+  const tail = commands.slice(-dockerInvocations.reduce((total, entry) => total + entry.count, 0));
+  for (const { name, count } of dockerInvocations)
     expect(
-      tail.some((line) => {
+      tail.filter((line) => {
         // mise may abbreviate long task labels even when commands are complete.
         const prefix = line.slice(1, line.indexOf("]")).replace(/…$/u, "");
         return name.startsWith(prefix) && line.includes("$ ./node_modules/.bin/wrangler deploy");
-      }),
-    ).toBe(true);
+      }).length,
+    ).toBe(count);
   // Two synchronous mise subprocesses can exceed Bun's default five seconds
   // under the full verification load. Bound each process and this guard only;
   // retain the existing runtime tests' deadlines.

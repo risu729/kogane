@@ -239,6 +239,113 @@
       ]
     },
     {
+      "directory": "experiments/container-api-verification",
+      "workspace": "experiments",
+      "disposition": {
+        "source": "ADR 0044 direct Container API runtime verification",
+        "proposedAction": "isolated-as-experiment",
+        "proposedTarget": "experiments/container-api-verification",
+        "requiredVerification": "synthetic SDK/native/exact-version rollback with unchanged identity, idle timing, streams and sentinels; approved temporary resources only",
+        "executionStatus": "PREPARED_NOT_DEPLOYED",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "NO_LIVE_RESOURCE"
+      },
+      "workers": [
+        {
+          "config": "experiments/container-api-verification/wrangler.native.jsonc",
+          "name": "kogane-container-api-verification",
+          "main": "src/native.ts",
+          "role": "not-deployed",
+          "liveWorker": false,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [],
+          "r2": [],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [
+            {
+              "name": "HARNESS",
+              "className": "VerificationContainer"
+            }
+          ],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [
+            {
+              "tag": "v1",
+              "newSqliteClasses": [
+                "VerificationContainer"
+              ],
+              "newClasses": []
+            }
+          ],
+          "containers": [
+            {
+              "className": "VerificationContainer",
+              "image": "./Dockerfile",
+              "instanceType": "basic",
+              "maxInstances": 1
+            }
+          ],
+          "vpcNetworks": [],
+          "serviceBindings": [],
+          "varNames": [
+            "HARNESS_MONITOR",
+            "HARNESS_REVISION"
+          ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        },
+        {
+          "config": "experiments/container-api-verification/wrangler.sdk.jsonc",
+          "name": "kogane-container-api-verification",
+          "main": "src/sdk.ts",
+          "role": "not-deployed",
+          "liveWorker": false,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [],
+          "r2": [],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [
+            {
+              "name": "HARNESS",
+              "className": "VerificationContainer"
+            }
+          ],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [
+            {
+              "tag": "v1",
+              "newSqliteClasses": [
+                "VerificationContainer"
+              ],
+              "newClasses": []
+            }
+          ],
+          "containers": [
+            {
+              "className": "VerificationContainer",
+              "image": "./Dockerfile",
+              "instanceType": "basic",
+              "maxInstances": 1
+            }
+          ],
+          "vpcNetworks": [],
+          "serviceBindings": [],
+          "varNames": [
+            "HARNESS_MONITOR",
+            "HARNESS_REVISION"
+          ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        }
+      ]
+    },
+    {
       "directory": "experiments/mizuho-direct",
       "workspace": "experiments",
       "disposition": {
@@ -1685,7 +1792,7 @@
     }
   ],
   "summary": {
-    "configCount": 26,
+    "configCount": 28,
     "deployedWorkerCount": 14,
     "crons": [],
     "queues": [
@@ -1702,6 +1809,18 @@
       }
     ],
     "durableObjectClasses": [
+      {
+        "worker": "kogane-container-api-verification",
+        "className": "VerificationContainer",
+        "tag": "v1",
+        "storage": "sqlite"
+      },
+      {
+        "worker": "kogane-container-api-verification",
+        "className": "VerificationContainer",
+        "tag": "v1",
+        "storage": "sqlite"
+      },
       {
         "worker": "kogane-globalpass-collector-poc",
         "className": "GlobalPassCollectorContainer",

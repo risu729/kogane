@@ -66,7 +66,7 @@ export class SbiShinseiCollectorContainer extends DurableObject<Env> {
     return this.controller.fetch(request);
   }
   override alarm(): Promise<void> {
-    return this.controller.retireAlarm();
+    return this.controller.alarm();
   }
   onStart(): void {
     emitDiagnostic("log", { event: "sbi-shinsei-container-start" });

@@ -410,6 +410,8 @@ describe("G0-06/G0-07/G5-15 a moved directory keeps its resource identities", ()
         "kogane-mizuho-collector wrangler.jsonc",
         "kogane-st-george-collector wrangler.jsonc",
         "kogane-prestia-bank-collector wrangler.jsonc",
+        "kogane-container-api-verification wrangler.sdk.jsonc",
+        "kogane-container-api-verification wrangler.native.jsonc",
       ].sort(),
     );
   });

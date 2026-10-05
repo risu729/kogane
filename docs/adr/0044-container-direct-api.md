@@ -5,144 +5,136 @@
 
 ## Context
 
-GlobalPass, SBI Shinsei, and St.George currently extend `Container` from
-`@cloudflare/containers`. Cloudflare will maintain this abstraction through
-2026-12-31; existing deployments continue running afterward. The supported
-replacement is a Durable Object using `ctx.container` directly.
+GlobalPass, SBI Shinsei and St.George extend `Container` from
+`@cloudflare/containers`. Cloudflare maintains that abstraction through
+2026-12-31 and recommends the direct Durable Object Container API for new work.
+Existing deployments continue running after SDK maintenance ends.
 
-All three existing applications use the default scheduling policy, the basic
-instance size, APAC constraints, and maximum instance counts of 2, 2, and 1.
-Their browser images use a local CONNECT proxy and authenticated WebSocket
-relay through the Worker and its existing MESH/TAMIA VPC binding. The SDK's
-outbound interception and scheduling helpers are not used by application code.
+The existing applications use the default scheduling policy, basic instance
+size, APAC constraints and maximum instance counts of 2, 2 and 1. Their browser
+images use a local CONNECT proxy and authenticated WebSocket relay through the
+Worker's existing MESH/TAMIA VPC binding. Application code does not use the SDK's
+outbound interception or scheduling helpers.
 
 ## Options considered
 
-1. Keep the SDK until its maintenance ends. This postpones the lifecycle work.
-2. Replace only the operation API, retaining existing applications and identity.
+1. Retain SDK 0.3.7 until its maintenance ends.
+2. Replace the operation API while preserving current applications and identity.
 3. Also adopt `durable_object` scheduling. This requires new applications and DO
-   namespaces, loses APAC constraints and the application-wide instance cap,
-   and does not support the current basic instance size. It is a separate design.
+   namespaces, loses APAC constraints and the application-wide instance cap, and
+   does not support the current basic instance size. It is a separate decision.
 
 ## Decision
 
-Choose option 2. Keep canonical Wrangler configuration, images, Worker names,
-exported class names, DO bindings, migration tags, and named-object identities
-unchanged. The API change adds no migration and performs no exports conversion.
-GlobalPass keeps its fixed collection name; Shinsei and St.George keep run UUID
-names. St.George's separate `StGeorgeCollectionState` and `SESSION_STATE`
-namespace, persistent uncertainty, resume path, and leases are unchanged.
+Choose option 2. Preserve canonical production Wrangler/cf configuration,
+Dockerfiles, Worker names, exported classes, bindings, migration tags and named
+object identities. Add no production migration. GlobalPass keeps its fixed
+collection name; Shinsei and St.George keep run UUID names. St.George's separate
+`StGeorgeCollectionState`/`SESSION_STATE` namespace, leases, uncertainty and
+resume behavior remain unchanged.
 
-Each Container class now extends `DurableObject`. A controller in
-`packages/collection` supplies the existing startup, fetch, stop, and destroy
-RPC surface using the direct API. Concurrent startup calls share one promise.
-After constructor recovery, allocation, inactivity-timeout configuration,
-readiness GETs, and health-body cancellation share a hard 20-second deadline.
-Each allocation/readiness await is bounded; a late result cannot resume a
-canceled or timed-out startup. A late health response is canceled without
-extending the deadline or affecting a newer process. The old SDK
-used nominal 8-second allocation and 20-second readiness retry budgets; this
-changes the allocation budget and bounds actual startup rather than reproducing
-its retry-count timing. Application POSTs are sent
-exactly once, even on a transport error. The health GET checks port 8080;
-Internet access and each service's timezone remain unchanged.
+The three classes extend `DurableObject` and use a shared
+`ContainerController`. Concurrent startup calls share a promise. After
+constructor recovery, allocation, native timeout configuration, readiness GETs
+on port 8080 and health-body cancellation share a hard 20-second deadline.
+Only allocation/readiness are retried. Each application POST is forwarded once,
+including on transport failure. Late startup and monitor results cannot alter a
+new process or release an in-flight destroy barrier. Internet access and each
+service's timezone are preserved.
 
-Initialization uses the DO input gate to retire only the old SDK alarm and
-reattach timeout/monitor to an already-running process. The Container-class
-alarm handler also deletes this obsolete alarm. Neither SDK KV state nor the
-`container_schedules` SQL table is modified or deleted. No alarm operation is
-performed on St.George's collection-state class. Retaining the SDK state and
-unchanged identity/configuration permits old-source rollback; the SDK
-recreates its runtime alarm when that class starts again. Runtime rollback
-continuity must still be verified before merging.
+### Idle lifetime
 
-A separate monitor token prevents late results from an old process from
-changing the new process's diagnostics. Readiness logs a start once per
-observed process. SIGTERM is idempotent after a successful signal until the
-next process starts; a failed signal remains retryable and never claims a
-signal outcome. A failed
-destroy reattaches monitoring when the same process remains running, without
-reporting another start. Manual destroy logs the closed reason `destroyed`, with no invented exit code;
-normal monitor completion and failures retain the observed native exit code.
-Diagnostic callback failures cannot interrupt collection.
+SDK 0.3.7 uses a wall-clock alarm to call SIGTERM after 30 seconds without an
+in-flight request. `setInactivityTimeout(30_000)` alone is not equivalent: its
+clock starts when the DO becomes inactive, and a pending native monitor can
+prevent eviction for up to 15 minutes. This matters to GlobalPass probe paths
+that do not explicitly destroy their Container.
 
-The existing collection callers retain their finally-destroy paths. HTTP body
-consumption holds a promise on **DurableObjectState.waitUntil**, not the outer
-Worker ExecutionContext. EOF, cancellation, and stream failure release that
-promise. The long monitor has handlers but is not placed in this waitUntil.
-A pending native monitor itself prevents eviction for up to 15 minutes,
-regardless of waitUntil. Eviction and Container inactivity are separate; this
-change does not claim identical idle timing or billing from mock tests.
+The controller therefore retains the native timeout as a fallback and owns a
+separate idle deadline and DO alarm. Startup and HTTP header/body consumption
+are activity; the native monitor is not. EOF, cancellation and stream error
+release activity. The alarm rechecks current activity and process generation
+before requesting SIGTERM. A failed signal remains retryable. Destroy and
+recovery preserve the barrier against old response/monitor completions.
+
+The old SDK alarm is retired, but its KV values and `container_schedules` SQL
+are preserved. Only a separate native idle key is owned by the new controller.
+St.George's collection-state class receives no alarm operation. Exact SDK
+version rollback must prove that its alarm resumes and both synthetic KV and
+SQL state survive; source inspection alone does not establish this.
+
+### Diagnostics and teardown
+
+Normal monitor completion/failure reports observed native exit codes. Manual
+destroy reports the closed `destroyed` reason without inventing an exit code.
+A failed destroy restores monitoring and idle control if its process remains
+running. Diagnostic callback failures cannot interrupt collection. Existing
+collection callers retain their finally-destroy paths.
+
+Response-body consumption holds a promise on DurableObjectState.waitUntil,
+released on EOF/cancel/error. The long native monitor is not put in waitUntil.
+The explicit idle alarm avoids relying on DO eviction to stop the process;
+actual Container timing and resource usage still require hosted verification.
 
 ## Consequences
 
-This PR does not adopt the faster-start scheduling policy or filesystem
-snapshots. It does not change Dockerfiles, browser/relay routing, secrets,
-collection storage, production triggers, or deployment workflows. Native
-operation semantics replace the SDK implementation, so real inactivity,
-eviction, allocation-after-destroy, and old-source rollback remain runtime
-verification gates. The direct API dependencies are already in the generated
-Worker types from pinned Wrangler 4.146.0. The unused SDK dependencies are
-removed from these three services.
+This change does not adopt faster-start scheduling or snapshots. Production
+images, browser/relay routing, secrets, collection storage and triggers are
+unchanged. The native API types come from pinned Wrangler 4.146.0. The unused
+SDK dependency is removed from the three production collectors and retained
+only by the isolated verification experiment as its rollback baseline.
+
+A temporary, authenticated synthetic Worker verifies behavior without bank
+code, bank credentials or VPC bindings. Its Container denies outbound Internet
+access. Its fixed identity, default/basic/APAC configuration and single-instance
+cap are declared in `experiments/container-api-verification`. It is absent from
+the production deployment order. Normal CI validates both configurations;
+remote execution requires an explicitly selected manual job and a dedicated
+GitHub environment/token, never production credentials.
+
+The test runner owns only its fixed temporary Worker, application, namespace
+and uniquely tagged image. It rejects pre-existing application/namespace state
+and verifies cleanup. Forced runner termination can prevent cleanup; a failed
+or interrupted job requires separate resource-absence confirmation. The
+experiment's expiry and stop condition are recorded in its EXPERIMENT.md.
 
 ## Verification
 
-Focused tests cover shared startup, allocation/readiness retry without POST,
-no application retry after failure, delayed/backpressured streams and cancellation/error
-release, constructor recovery, alarm retirement, graceful stop, forced
-teardown, bounded startup (including stalled timeout configuration and health
-responses), old-monitor/new-process races, late startup completion behind a
-destroy barrier, failed-destroy monitor recovery, and failed-signal retries. Existing
-collection tests retain their failure/partial evidence, leases and teardown
-contracts. Source typechecks cover the shared controller and three Workers. Lock updates
-used `bun install --lockfile-only`; the automatic dependency check reported no
-installed-package changes. Full checks are deferred while the shared host is busy.
-The canonical configuration and Dockerfiles must be byte-identical to the
-base revision; binding/namespace identity is therefore not changed by this PR.
+Focused source tests cover bounded startup, no application retries, stream
+lifetime, idle alarms, constructor recovery, stop/destroy failures and stale
+process completions. Existing collector tests cover evidence, leases, teardown
+and St.George persistence/resume. Shared package and Worker typechecks validate
+the direct API integration. Production configuration and Dockerfiles must be
+byte-identical to current main. Fresh independent review checks the final
+controller, experiment and manual runner together.
 
-Local Docker is unavailable (`docker: not found`). No real Container has been
-built, run, uploaded or switched by this work. Mock tests do not prove native
-idle timing, billable duration, Cloudflare allocation behavior, actual browser
-network compatibility, or historical rollback continuity. Independent review,
-full repository/hosted CI, and the following runtime checks remain required
-before merge/deployment approval.
+The main-integration head `89d3a3ee614c2ff91e2dee73b2f37d3698ff671e` passed
+[hosted CI](https://github.com/risu729/kogane/actions/runs/37259363263).
+That result predates the idle-alarm correction and synthetic harness; it does
+not validate those additions. Local Docker is unavailable. Hosted execution,
+final CI and the following runtime gates are still pending:
 
-### Hosted synthetic verification plan
+1. Deploy SDK 0.3.7 with a fixed class/migration/image; seed synthetic KV and SQL
+   sentinels and record application, namespace and exact Worker version.
+2. Deploy the actual shared native controller on the same identity/image.
+   Verify one startup for concurrent callers and one POST per caller.
+3. Verify responses longer than 30 seconds, slow consumers/backpressure, cancel
+   and stream failure. Observe idle stop with and without the native monitor.
+   Process-state timings are not billing evidence.
+4. Redeploy during a bounded synthetic stream and verify process recovery;
+   destroy and allocate again; test SIGTERM and nonzero exit diagnostics.
+5. Restore the exact original SDK Worker version and verify its 100% allocation,
+   sentinels, identity/image, requests, idle stop, alarm and teardown.
+6. Remove only temporary resources and confirm absence. Record the actual
+   production release separately after final review and merge.
 
-Use a separate temporary application and SQLite DO class, with synthetic-only
-HTTP server image and no bank secrets, bank domains, or VPC bindings. Match the
-current default/basic/APAC configuration. Authenticate the harness endpoint.
-Keep one fixed named DO throughout the following test revisions:
-
-1. Deploy the old SDK harness and write a synthetic KV/SQL sentinel. Record its
-   DO namespace ID, application ID, and configuration. Trigger startup once.
-2. Deploy the direct API harness with the **same** name/class/binding/image and
-   migration tag. Confirm IDs and sentinels persist. Send concurrent requests;
-   confirm one process startup and one POST per caller using closed counters.
-3. Test a response delayed beyond 30 seconds and a backpressured stream lasting
-   beyond 30 seconds. Neither may lose its process mid-response. Cancel and
-   fail a stream; confirm eventual idle shutdown. With no requests, record idle
-   stop timing and billable runtime, both with and without a pending monitor.
-   Compare against the SDK harness; do not infer timing from DO eviction alone.
-4. Redeploy during an active process and verify constructor recovery. Destroy
-   and immediately allocate again. Retry only startup/readiness, never POST.
-   Test SIGTERM, unexpected nonzero exit and forced destroy diagnostics.
-5. Roll back to the exact old SDK revision using the same class/application.
-   Confirm sentinels and identity, SDK alarm reinitialization, requests, idle
-   stop, and teardown still work. Delete only the temporary app after review.
-
-After those gates, deploy one actual collector without triggering a bank
-login, verify IDs/config/image and health, then use the existing explicit
-collection operation to verify browser/relay and persisted closed outcomes. GlobalPass probes have no
-finally-destroy path and depend on idle shutdown; explicitly verify the
-existing probe completes and its Container then stops without further requests.
-Proceed to the other collectors only after the first is verified. Recheck
-current main before rebasing: another GlobalPass migration may supersede this
-collector. Merge and production operations are outside this draft's scope.
+No real bank collection, authenticated browser login or production rollback has
+been performed for this API migration. Synthetic runtime evidence must not be
+reported as proof of complete bank/browser/VPC behavior or billing equivalence.
 
 References:
 
 - [API migration guide](https://developers.cloudflare.com/containers/guides/migrate-to-durable-object-container-api/)
 - [Direct API and monitor semantics](https://developers.cloudflare.com/containers/api/durable-object-container/)
-- [Scheduling policy migration constraints](https://developers.cloudflare.com/containers/guides/migrate-to-durable-object-scheduling-policy/)
+- [Scheduling policy constraints](https://developers.cloudflare.com/containers/guides/migrate-to-durable-object-scheduling-policy/)
 - [SDK maintenance announcement](https://blog.cloudflare.com/faster-agent-sandboxes/)

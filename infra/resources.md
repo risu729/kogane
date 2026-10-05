@@ -14,7 +14,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Summary
 
-- Wrangler configs: 26
+- Wrangler configs: 28
 - Distinct Workers that exist in the account: 14
 - Live Workers with no config in this repository: —
 - Live R2 buckets no config references: —
@@ -46,6 +46,8 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 | worker | class | migration tag | storage |
 | --- | --- | --- | --- |
+| kogane-container-api-verification | VerificationContainer | v1 | sqlite |
+| kogane-container-api-verification | VerificationContainer | v1 | sqlite |
 | kogane-globalpass-collector-poc | GlobalPassCollectorContainer | v1 | sqlite |
 | kogane-observation-pipeline | ScheduleAlarm | alarm-v1 | sqlite |
 | kogane-sbi-shinsei-collector-poc | SbiShinseiCollectorContainer | v1 | sqlite |
@@ -161,6 +163,51 @@ No wrangler config.
 - Crons: —
 - Assets: —
 - Vars (names only): —
+- Required secrets (names only): —
+
+### `experiments/container-api-verification`
+
+- Disposition (ADR 0044 direct Container API runtime verification): `isolated-as-experiment` → experiments/container-api-verification
+- Required verification: synthetic SDK/native/exact-version rollback with unchanged identity, idle timing, streams and sentinels; approved temporary resources only
+- Execution status: PREPARED_NOT_DEPLOYED (plan recorded `NOT_VERIFIED`)
+- Live resources: NO_LIVE_RESOURCE
+
+#### `kogane-container-api-verification` — `experiments/container-api-verification/wrangler.native.jsonc`
+
+- Role: not-deployed; exists in the account: no
+- Entry point: src/native.ts
+- D1: —
+- R2: —
+- KV: —
+- Queues: —
+- Durable Objects: HARNESS → VerificationContainer
+- DO migration tags: v1: VerificationContainer
+- Containers: VerificationContainer (./Dockerfile, basic, max 1)
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: —
+- Vars (names only): HARNESS_MONITOR<br>HARNESS_REVISION
+- Required secrets (names only): —
+
+#### `kogane-container-api-verification` — `experiments/container-api-verification/wrangler.sdk.jsonc`
+
+- Role: not-deployed; exists in the account: no
+- Entry point: src/sdk.ts
+- D1: —
+- R2: —
+- KV: —
+- Queues: —
+- Durable Objects: HARNESS → VerificationContainer
+- DO migration tags: v1: VerificationContainer
+- Containers: VerificationContainer (./Dockerfile, basic, max 1)
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: —
+- Vars (names only): HARNESS_MONITOR<br>HARNESS_REVISION
 - Required secrets (names only): —
 
 ### `experiments/mizuho-direct`

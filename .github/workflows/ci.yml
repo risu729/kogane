@@ -8,8 +8,14 @@ on:
       - main
   workflow_call:
   workflow_dispatch:
+    inputs:
+      container-verification:
+        description: Run the separately approved synthetic Container verification
+        type: boolean
+        required: false
+        default: false
 concurrency:
-  group: ci-${{ case(github.event_name == 'pull_request', github.event.pull_request.number, github.ref) }}
+  group: ci-${{ case(github.event_name == 'workflow_dispatch' && inputs.container-verification, github.run_id, github.event_name == 'pull_request', github.event.pull_request.number, github.ref) }}
   cancel-in-progress: true
 permissions: {}
 defaults:
@@ -100,3 +106,44 @@ jobs:
     steps:
       - name: actions-timeline
         uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+  container-verification:
+    name: Synthetic Container verification
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.container-verification }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: container-api-verification
+    concurrency:
+      group: container-api-verification
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the selected reviewed commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install mise
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.10.2
+      - name: Install pinned verification dependencies
+        timeout-minutes: 5
+        run: mise exec -- bun install --frozen-lockfile
+      - name: Verify the synthetic runtime and exact SDK rollback
+        timeout-minutes: 32
+        run: mise exec -- node experiments/container-api-verification/run-hosted.mjs
+        env:
+          # These names have no production-secret fallback. Environment approval
+          # and exact temporary Worker/token scope are prerequisites.
+          CONTAINER_VERIFICATION_API_TOKEN: ${{ secrets.CONTAINER_VERIFICATION_API_TOKEN }}
+          CONTAINER_VERIFICATION_ACCOUNT_ID: ${{ vars.CONTAINER_VERIFICATION_ACCOUNT_ID }}
+          CONTAINER_VERIFICATION_SUBDOMAIN: ${{ vars.CONTAINER_VERIFICATION_SUBDOMAIN }}
+      - name: Confirm cleanup of owned temporary resources
+        if: ${{ always() }}
+        timeout-minutes: 8
+        run: mise exec -- node experiments/container-api-verification/run-hosted.mjs cleanup
+        env:
+          CONTAINER_VERIFICATION_API_TOKEN: ${{ secrets.CONTAINER_VERIFICATION_API_TOKEN }}
+          CONTAINER_VERIFICATION_ACCOUNT_ID: ${{ vars.CONTAINER_VERIFICATION_ACCOUNT_ID }}
+          CONTAINER_VERIFICATION_SUBDOMAIN: ${{ vars.CONTAINER_VERIFICATION_SUBDOMAIN }}

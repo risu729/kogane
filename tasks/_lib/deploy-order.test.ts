@@ -602,3 +602,98 @@ describe("no preview lane and no collector secret in automation (G5-10, G5-17)",
     expect(automationViolations([{ file: "x.yml", text }], [])).toHaveLength(1);
   });
 });
+
+describe("the synthetic environment is an exact manual capability exception", () => {
+  const ci = readFileSync(`${REPO_ROOT}/.github/workflows/ci.yml`, "utf8");
+  const check = (text: string, file = ".github/workflows/ci.yml") =>
+    automationViolations([{ file, text }], []);
+
+  test("the reviewed fixed job and two non-CD config decisions are present", () => {
+    expect(check(ci)).toEqual([]);
+    const experiments = order.workers.filter(
+      (entry) => entry.path === "experiments/container-api-verification",
+    );
+    expect(experiments.map((entry) => [entry.config, entry.worker, entry.deploy]).sort()).toEqual([
+      ["wrangler.native.jsonc", "kogane-container-api-verification", false],
+      ["wrangler.sdk.jsonc", "kogane-container-api-verification", false],
+    ]);
+  });
+
+  for (const [name, from, to] of [
+    ["automatic opt-in", "default: false", "default: true"],
+    [
+      "non-manual invocation",
+      "github.event_name == 'workflow_dispatch' && inputs.container-verification }}",
+      "always() }}",
+    ],
+    [
+      "main workflow cancellation",
+      "inputs.container-verification, github.run_id,",
+      "inputs.container-verification, github.ref,",
+    ],
+    [
+      "cancelling shared synthetic jobs",
+      "group: container-api-verification\n      cancel-in-progress: false",
+      "group: container-api-verification\n      cancel-in-progress: true",
+    ],
+    ["changed timeout", "timeout-minutes: 45", "timeout-minutes: 46"],
+    ["branch checkout", "ref: ${{ github.sha }}", "ref: ${{ github.ref }}"],
+    [
+      "persisted checkout credentials",
+      "ref: ${{ github.sha }}\n          persist-credentials: false",
+      "ref: ${{ github.sha }}\n          persist-credentials: true",
+    ],
+    [
+      "production token fallback",
+      "secrets.CONTAINER_VERIFICATION_API_TOKEN",
+      "secrets.CLOUDFLARE_API_TOKEN",
+    ],
+    [
+      "production environment",
+      "environment: container-api-verification",
+      "environment: production",
+    ],
+    [
+      "another runner command",
+      "node experiments/container-api-verification/run-hosted.mjs\n",
+      "node experiments/container-api-verification/run-hosted.mjs --other-target\n",
+    ],
+    [
+      "cleanup skipped on failure",
+      "if: ${{ always() }}\n        timeout-minutes: 8",
+      "if: ${{ success() }}\n        timeout-minutes: 8",
+    ],
+  ])
+    test(name ?? "mutation", () => {
+      expect(ci).toContain(from);
+      expect(check(ci.replace(from, to)).length).toBeGreaterThan(0);
+    });
+
+  test("the same job in another file has no environment capability", () => {
+    expect(check(ci, ".github/workflows/other.yml").length).toBeGreaterThan(0);
+  });
+
+  for (const environment of [
+    "container-api-verification",
+    "{ name: container-api-verification }",
+    "\n      name: container-api-verification",
+  ])
+    test(`another job cannot inherit the environment: ${environment}`, () => {
+      expect(
+        check(ci + `\n  unrelated:\n    environment: ${environment}\n    steps: []\n`).length,
+      ).toBeGreaterThan(0);
+    });
+
+  test("renaming the job with an object environment cannot bypass the exception", () => {
+    expect(
+      check(
+        ci
+          .replace("  container-verification:\n", "  other:\n")
+          .replace(
+            "environment: container-api-verification",
+            "environment: { name: container-api-verification }",
+          ),
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+});

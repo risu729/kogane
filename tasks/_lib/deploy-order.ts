@@ -313,9 +313,116 @@ export function credentialWiringViolations(
 /** Modes the pinned deploy Action may run in. There is no preview lane. */
 const ALLOWED_MODES = new Set(["dry-run", "production"]);
 
+/** Only the reviewed, manual synthetic job may use its separate environment.
+ * This is an exact capability exception, not another deployment lane.
+ */
+function syntheticEnvironmentAllowed(file: string, text: string): boolean {
+  if (file !== ".github/workflows/ci.yml") return false;
+  let workflow: any;
+  try {
+    workflow = Bun.YAML.parse(text);
+  } catch {
+    return false;
+  }
+  const job = workflow?.jobs?.["container-verification"];
+  const input = workflow?.on?.workflow_dispatch?.inputs?.["container-verification"];
+  if (
+    !job ||
+    input?.type !== "boolean" ||
+    input.default !== false ||
+    input.required !== false ||
+    typeof input.description !== "string" ||
+    Object.keys(input).sort().join(",") !== "default,description,required,type" ||
+    Object.keys(workflow.env ?? {}).some((name) => !["CI", "MISE_JOBS"].includes(name)) ||
+    [...text.matchAll(/secrets\.([A-Za-z0-9_]+)/gu)].some(
+      (match) => match[1] !== "CONTAINER_VERIFICATION_API_TOKEN",
+    ) ||
+    Object.entries(workflow.jobs).some(
+      ([name, value]: [string, any]) =>
+        name !== "container-verification" &&
+        (value?.environment === "container-api-verification" ||
+          value?.environment?.name === "container-api-verification"),
+    )
+  )
+    return false;
+  const env = {
+    CONTAINER_VERIFICATION_API_TOKEN: "${{ secrets.CONTAINER_VERIFICATION_API_TOKEN }}",
+    CONTAINER_VERIFICATION_ACCOUNT_ID: "${{ vars.CONTAINER_VERIFICATION_ACCOUNT_ID }}",
+    CONTAINER_VERIFICATION_SUBDOMAIN: "${{ vars.CONTAINER_VERIFICATION_SUBDOMAIN }}",
+  };
+  const expected = {
+    name: "Synthetic Container verification",
+    if: "${{ github.event_name == 'workflow_dispatch' && inputs.container-verification }}",
+    "runs-on": "ubuntu-24.04",
+    "timeout-minutes": 45,
+    environment: "container-api-verification",
+    concurrency: { group: "container-api-verification", "cancel-in-progress": false },
+    permissions: { contents: "read" },
+    steps: [
+      {
+        name: "Checkout the selected reviewed commit",
+        uses: "actions/checkout",
+        with: { ref: "${{ github.sha }}", "persist-credentials": false },
+      },
+      { name: "Install mise", uses: "jdx/mise-action", with: { version: "2026.10.2" } },
+      {
+        name: "Install pinned verification dependencies",
+        "timeout-minutes": 5,
+        run: "mise exec -- bun install --frozen-lockfile",
+      },
+      {
+        name: "Verify the synthetic runtime and exact SDK rollback",
+        "timeout-minutes": 32,
+        run: "mise exec -- node experiments/container-api-verification/run-hosted.mjs",
+        env,
+      },
+      {
+        name: "Confirm cleanup of owned temporary resources",
+        if: "${{ always() }}",
+        "timeout-minutes": 8,
+        run: "mise exec -- node experiments/container-api-verification/run-hosted.mjs cleanup",
+        env,
+      },
+    ],
+  };
+  if (!Array.isArray(job.steps) || job.steps.length !== 5) return false;
+  const normalized = structuredClone(job);
+  for (const index of [0, 1]) {
+    const uses = normalized.steps[index]?.uses;
+    if (
+      typeof uses !== "string" ||
+      !new RegExp(
+        `^${index === 0 ? "actions/checkout" : "jdx/mise-action"}@[a-f0-9]{40}$`,
+        "u",
+      ).test(uses)
+    )
+      return false;
+    normalized.steps[index].uses = uses.split("@")[0];
+  }
+  const canonical = (value: any): any =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : value !== null && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([key, child]) => [key, canonical(child)]),
+          )
+        : value;
+  const concurrency = {
+    group:
+      "ci-${{ case(github.event_name == 'workflow_dispatch' && inputs.container-verification, github.run_id, github.event_name == 'pull_request', github.event.pull_request.number, github.ref) }}",
+    "cancel-in-progress": true,
+  };
+  return (
+    JSON.stringify(canonical(normalized)) === JSON.stringify(canonical(expected)) &&
+    JSON.stringify(canonical(workflow.concurrency)) === JSON.stringify(canonical(concurrency))
+  );
+}
+
 /**
  * No workflow may build a preview deployment or name an environment other than
- * `production` (unified plan 11 §1, acceptance G5-10), and no workflow or
+ * `production`, except the exact manual synthetic verification job, and no workflow or
  * automation script may name a collector secret (plan 12 §5, G5-17).
  */
 export function automationViolations(
@@ -336,9 +443,28 @@ export function automationViolations(
         errors.push(`${file}: a preview alias deployment is out of scope`);
     }
     if (workflow) {
-      for (const match of text.matchAll(/^[ \t]*environment:[ \t]*(\S+)[ \t]*$/gmu)) {
-        if (match[1] !== "production")
-          errors.push(`${file}: environment ${String(match[1])} is not part of this repository`);
+      let parsed: any;
+      try {
+        parsed = Bun.YAML.parse(text);
+      } catch {
+        errors.push(`${file}: workflow YAML is invalid`);
+      }
+      const synthetic = syntheticEnvironmentAllowed(file, text);
+      if (parsed?.jobs?.["container-verification"] && !synthetic)
+        errors.push(`${file}: synthetic verification job capability guard failed`);
+      for (const [jobName, job] of Object.entries(parsed?.jobs ?? {}) as [string, any][]) {
+        if (job?.environment === undefined) continue;
+        const environment =
+          typeof job.environment === "string" ? job.environment : job.environment?.name;
+        if (
+          environment !== "production" &&
+          !(
+            environment === "container-api-verification" &&
+            jobName === "container-verification" &&
+            synthetic
+          )
+        )
+          errors.push(`${file}: environment ${String(environment)} is not part of this repository`);
       }
       if (/^[ \t]*secrets-json[ \t]*:/mu.test(text))
         errors.push(`${file}: the deploy Action's secrets-json input must not be used`);
