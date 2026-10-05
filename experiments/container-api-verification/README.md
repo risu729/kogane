@@ -66,6 +66,8 @@ The driver performs no deployment:
    teardown Worker with a `deleted_classes` migration, confirms namespace
    absence, deletes the fixed Worker and unique image tag, and checks absence.
    The workflow runs a separate cleanup step even after verification failure.
+   Registry cleanup deletes only the owned image tag and verifies tag absence;
+   it does not run account-wide garbage collection or prove blob removal.
    Retire the temporary token and GitHub environment after resource readback.
 
 `run-hosted.mjs` stops on any unsuccessful stage and attempts cleanup on failure.

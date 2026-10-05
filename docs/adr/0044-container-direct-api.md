@@ -94,7 +94,9 @@ GitHub environment/token, never production credentials.
 
 The test runner owns only its fixed temporary Worker, application, namespace
 and uniquely tagged image. It rejects pre-existing application/namespace state
-and verifies cleanup. Forced runner termination can prevent cleanup; a failed
+and verifies cleanup. Registry cleanup deletes only the owned image tag, without
+account-wide garbage collection or a claim of blob removal. Forced runner
+termination can prevent cleanup; a failed
 or interrupted job requires separate resource-absence confirmation. The
 experiment's expiry and stop condition are recorded in its EXPERIMENT.md.
 

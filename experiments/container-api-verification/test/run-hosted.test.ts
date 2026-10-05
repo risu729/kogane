@@ -18,6 +18,7 @@ import {
   execute,
   child,
   registryStatus,
+  deleteRegistryTag,
   phaseCounts,
   waitMissing,
 } from "../run-hosted.mjs";
@@ -31,7 +32,14 @@ const image = `registry.cloudflare.com/${account}/${APP}@sha256:${"d".repeat(64)
 const token = "synthetic-test-token";
 const source = JSON.parse(readFileSync(new URL("../wrangler.sdk.jsonc", import.meta.url), "utf8"));
 const input = (temp = "/tmp/synthetic") => ({ account, sha, token, temp, subdomain: "synthetic" });
-const state = () => ({ account, sha, worker: WORKER, appName: APP, claimed: true });
+const state = () => ({
+  account,
+  sha,
+  worker: WORKER,
+  appName: APP,
+  claimed: true,
+  imagePreflightAbsent: true,
+});
 const protectedFile = (path: string, value: unknown) =>
   writeFileSync(path, JSON.stringify(value), { mode: 0o600 });
 const app = () => ({
@@ -380,6 +388,10 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
     await execute(input(temp), {
       api,
       registry: async () => (pushed && !imageRemoved ? image : undefined),
+      deleteImage: async (owned: string) => {
+        expect(owned).toBe(image);
+        imageRemoved = true;
+      },
       report: (text: string) => reports.push(text),
       hold: async () => ({ stop: async () => {} }),
       run: async (command: string, args: string[], options: Record<string, any>) => {
@@ -390,7 +402,7 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
           expect(options.stdin).toMatch(/^[A-Za-z0-9_-]{43}\n$/u);
         }
         if (args.includes("deploy")) deployed = true;
-        if (args.includes("delete")) imageRemoved = true;
+        if (args.includes("delete")) throw new Error("child deletion is forbidden");
         if (command === "node") {
           const phase = options.env.HARNESS_PHASE;
           if (phase === "baseline_sdk")
@@ -411,6 +423,7 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
       },
     });
     expect(calls.filter(([command]) => command === "docker")).toHaveLength(1);
+    expect(calls.some(([, args]) => args.includes("delete"))).toBe(false);
     expect(calls.filter(([, args]) => args.includes("push"))[0]?.[1]).toContain(`${APP}:${sha}`);
     expect(calls.filter(([, args]) => args.includes("rollback"))[0]?.[1]).toContain(workerVersion);
     expect(
@@ -568,11 +581,18 @@ test("cleanup deletes the exact app, explicit synthetic class, Worker, then imag
             : [],
         };
       },
+      deleteImage: async (owned: string) => {
+        expect(owned).toBe(image);
+        expect(workerExists).toBe(false);
+        expect(namespaceExists).toBe(false);
+        steps.push("image_delete");
+        imageExists = false;
+      },
       registry: async () => {
         if (!imageExists) steps.push("image_404");
         return imageExists ? image : undefined;
       },
-      run: async (_command: string, args: string[], options: Record<string, any>) => {
+      run: async (_command: string, args: string[]) => {
         if (args.includes("deploy")) {
           expect(appExists).toBe(false);
           expect(workerExists).toBe(true);
@@ -593,20 +613,7 @@ test("cleanup deletes the exact app, explicit synthetic class, Worker, then imag
           steps.push("namespace_teardown");
           namespaceExists = false;
         } else {
-          expect(workerExists).toBe(false);
-          expect(namespaceExists).toBe(false);
-          expect(args).toEqual([
-            "exec",
-            "wrangler",
-            "containers",
-            "images",
-            "delete",
-            `${APP}:${sha}`,
-            "-y",
-          ]);
-          expect(options.env.CLOUDFLARE_API_TOKEN).toBe(token);
-          steps.push("image_delete");
-          imageExists = false;
+          throw new Error("only fixed namespace teardown child is permitted");
         }
         return "";
       },
@@ -734,4 +741,187 @@ test("holder tolerates a clean post-open disconnect only; recovery verification 
   const holder = await recoveryHolder({}, fake.options);
   await holder.stop();
   expect(fake.killed()).toBe(false);
+});
+
+test("tag-only deletion uses one fixed URL, digest proof, five-minute pull+push credentials, and GET404", async () => {
+  const calls: Array<[string, string]> = [],
+    credentials: unknown[] = [];
+  let time = 0,
+    cancelled = 0;
+  await deleteRegistryTag(input(), image, {
+    api: async (path: string, body: unknown) => {
+      credentials.push([path, body]);
+      return { result: { password: token } };
+    },
+    now: () => time,
+    sleep: async (ms: number) => {
+      time += ms;
+    },
+    fetchImpl: async (url: string, options: RequestInit) => {
+      expect(options.redirect).toBe("manual");
+      expect((options.headers as Record<string, string>).authorization).toStartWith("Basic ");
+      calls.push([url, options.method!]);
+      const status = calls.length === 2 ? 202 : calls.length === 4 ? 404 : 200;
+      return new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled++;
+          },
+        }),
+        {
+          status,
+          headers: { "docker-content-digest": image.split("@")[1]! },
+        },
+      );
+    },
+  });
+  expect(credentials).toEqual([
+    [
+      "containers/registries/registry.cloudflare.com/credentials",
+      { method: "POST", body: { expiration_minutes: 5, permissions: ["pull", "push"] } },
+    ],
+  ]);
+  const url = `https://registry.cloudflare.com/v2/${account}/${APP}/manifests/${sha}`;
+  expect(calls).toEqual([
+    [url, "GET"],
+    [url, "DELETE"],
+    [url, "GET"],
+    [url, "GET"],
+  ]);
+  expect(cancelled).toBe(4);
+  expect(calls.every(([target, method]) => !target.includes("/gc/") && method !== "PUT")).toBe(
+    true,
+  );
+});
+
+test("tag deletion refuses redirects, missing/changed digests and malformed credentials before DELETE", async () => {
+  for (const credentials of [
+    null,
+    {},
+    { password: "" },
+    { password: 1 },
+    { password: "bad\ncredential" },
+  ]) {
+    let requests = 0;
+    await expect(
+      deleteRegistryTag(input(), image, {
+        api: async () => ({ result: credentials }),
+        fetchImpl: async () => {
+          requests++;
+          throw new Error("must not reach registry");
+        },
+      }),
+    ).rejects.toThrow("verification_runner_registry_credentials");
+    expect(requests).toBe(0);
+  }
+  for (const response of [
+    new Response("", { status: 302, headers: { location: "https://untrusted.invalid/" } }),
+    new Response("", { status: 200 }),
+    new Response("", {
+      status: 200,
+      headers: { "docker-content-digest": `sha256:${"e".repeat(64)}` },
+    }),
+  ]) {
+    const methods: string[] = [];
+    await expect(
+      deleteRegistryTag(input(), image, {
+        api: async () => ({ result: { password: token } }),
+        fetchImpl: async (_url: string, options: RequestInit) => {
+          methods.push(options.method!);
+          return response;
+        },
+      }),
+    ).rejects.toThrow(/verification_runner_registry_(http|digest|identity)/u);
+    expect(methods).toEqual(["GET"]);
+  }
+});
+
+test("redirects or changed tags during deletion/readback stay failures with no unrelated endpoint", async () => {
+  for (const badStage of ["delete_redirect", "readback_redirect", "readback_identity"]) {
+    let requests = 0;
+    const methods: string[] = [];
+    await expect(
+      deleteRegistryTag(input(), image, {
+        api: async () => ({ result: { password: token } }),
+        fetchImpl: async (_url: string, options: RequestInit) => {
+          methods.push(options.method!);
+          requests++;
+          if (
+            (requests === 2 && badStage === "delete_redirect") ||
+            (requests === 3 && badStage === "readback_redirect")
+          )
+            return new Response("", { status: 302 });
+          return new Response(requests === 2 ? null : "", {
+            status: requests === 2 ? 204 : 200,
+            headers: {
+              "docker-content-digest": `sha256:${(requests === 3 ? "e" : "d").repeat(64)}`,
+            },
+          });
+        },
+      }),
+    ).rejects.toThrow(/verification_runner_registry_(http|identity)/u);
+    expect(methods).toEqual(
+      badStage === "delete_redirect" ? ["GET", "DELETE"] : ["GET", "DELETE", "GET"],
+    );
+  }
+});
+
+test("partial push deletion requires prior exact-tag absence claim and persists a validated digest before DELETE", async () => {
+  for (const proof of ["valid", "missing_preflight", "invalid_digest", "changed_digest"]) {
+    const temp = mkdtempSync(resolve(tmpdir(), "verification-test-"));
+    let removed = false,
+      deletes = 0,
+      calls = 0;
+    try {
+      const value: Record<string, unknown> = { ...state(), imageAttempted: true };
+      if (proof === "missing_preflight") delete value.imagePreflightAbsent;
+      if (proof === "changed_digest") value.image = image;
+      protectedFile(resolve(temp, "container-api-verification-owned.json"), value);
+      const task = cleanup(input(temp), {
+        api: async (path: string) => {
+          calls++;
+          if (path.endsWith("/settings")) return undefined;
+          return { result: [] };
+        },
+        registry: async () =>
+          removed
+            ? undefined
+            : proof === "invalid_digest"
+              ? "unvalidated"
+              : proof === "changed_digest"
+                ? image.replace("d".repeat(64), "e".repeat(64))
+                : image,
+        deleteImage: async (owned: string) => {
+          deletes++;
+          const stored = readProtected(resolve(temp, "container-api-verification-owned.json"));
+          expect(stored.imagePreflightAbsent).toBe(true);
+          expect(stored.imageAttempted).toBe(true);
+          expect(stored.image).toBe(image);
+          expect(owned).toBe(image);
+          removed = true;
+        },
+        report: () => {},
+      });
+      if (proof === "valid") {
+        await task;
+        expect(deletes).toBe(1);
+        expect(readProtected(resolve(temp, "container-api-verification-owned.json")).cleaned).toBe(
+          true,
+        );
+      } else {
+        await expect(task).rejects.toThrow(
+          proof === "missing_preflight"
+            ? "verification_runner_state"
+            : "verification_runner_cleanup_image_identity",
+        );
+        expect(deletes).toBe(0);
+        if (proof === "missing_preflight") expect(calls).toBe(0);
+        expect(
+          readProtected(resolve(temp, "container-api-verification-owned.json")).cleaned,
+        ).toBeUndefined();
+      }
+    } finally {
+      rmSync(temp, { recursive: true });
+    }
+  }
 });

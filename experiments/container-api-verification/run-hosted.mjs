@@ -145,6 +145,7 @@ export function validateState(state, input) {
     "workerVersion",
     "claimed",
     "imageAttempted",
+    "imagePreflightAbsent",
     "completed",
     "cleaned",
   ];
@@ -156,6 +157,7 @@ export function validateState(state, input) {
     state.worker !== WORKER ||
     state.appName !== APP ||
     state.claimed !== true ||
+    state.imagePreflightAbsent !== true ||
     (state.appId !== undefined && !UUID.test(state.appId)) ||
     (state.namespace !== undefined && !HEX.test(state.namespace)) ||
     (state.workerVersion !== undefined && !UUID.test(state.workerVersion)) ||
@@ -399,38 +401,93 @@ export async function activeVersion(api) {
   return { id, version: (await api(`workers/scripts/${WORKER}/versions/${id}`)).result };
 }
 
-export async function registryStatus(input, api, fetchImpl = fetch) {
+function manifestUrl(input) {
+  if (!HEX.test(input.account ?? "") || !SHA.test(input.sha ?? "")) fail("registry_inputs");
+  return `https://registry.cloudflare.com/v2/${input.account}/${APP}/manifests/${input.sha}`;
+}
+function validImage(input, image) {
+  return (
+    typeof image === "string" &&
+    new RegExp(
+      `^registry\\.cloudflare\\.com/${input.account}/${APP}@sha256:[a-f0-9]{64}$`,
+      "u",
+    ).test(image)
+  );
+}
+async function registryAuth(api, permissions) {
   const credentials = (
     await api("containers/registries/registry.cloudflare.com/credentials", {
       method: "POST",
-      body: { expiration_minutes: 5, permissions: ["pull"] },
+      body: { expiration_minutes: 5, permissions },
     })
   ).result;
-  if (typeof credentials?.password !== "string" || !credentials.password)
+  if (
+    typeof credentials?.password !== "string" ||
+    credentials.password.length === 0 ||
+    credentials.password.length > 16384 ||
+    /[\u0000-\u0020\u007f]/u.test(credentials.password)
+  )
     fail("registry_credentials");
-  let response;
+  return `Basic ${Buffer.from(`v1:${credentials.password}`).toString("base64")}`;
+}
+async function registryRequest(url, authorization, method, fetchImpl, timeout = 30000) {
   try {
-    response = await fetchImpl(
-      `https://registry.cloudflare.com/v2/${input.account}/${APP}/manifests/${input.sha}`,
-      {
-        method: "GET",
-        redirect: "manual",
-        signal: AbortSignal.timeout(30000),
-        headers: {
-          authorization: `Basic ${Buffer.from(`v1:${credentials.password}`).toString("base64")}`,
-          accept:
-            "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
-        },
+    const response = await fetchImpl(url, {
+      method,
+      redirect: "manual",
+      signal: AbortSignal.timeout(Math.min(30000, Math.max(1, timeout))),
+      headers: {
+        authorization,
+        accept:
+          "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
       },
-    );
+    });
+    await response.body?.cancel().catch(() => {});
+    return response;
   } catch {
     fail("registry_transport");
   }
-  if (response.status !== 200 && response.status !== 404) fail("registry_http");
-  if (response.status === 404) return undefined;
+}
+function digestImage(input, response) {
   const digest = response.headers.get("docker-content-digest");
   if (!/^sha256:[a-f0-9]{64}$/u.test(digest ?? "")) fail("registry_digest");
   return `registry.cloudflare.com/${input.account}/${APP}@${digest}`;
+}
+export async function registryStatus(input, api, fetchImpl = fetch) {
+  const url = manifestUrl(input);
+  const authorization = await registryAuth(api, ["pull"]);
+  const response = await registryRequest(url, authorization, "GET", fetchImpl);
+  if (response.status !== 200 && response.status !== 404) fail("registry_http");
+  return response.status === 404 ? undefined : digestImage(input, response);
+}
+export async function deleteRegistryTag(
+  input,
+  expectedImage,
+  { api = apiClient(input), fetchImpl = fetch, now = Date.now, sleep = pause } = {},
+) {
+  const url = manifestUrl(input);
+  if (!validImage(input, expectedImage)) fail("registry_identity");
+  // Exactly this account/repository/tag is addressed. No catalog, other tags,
+  // digest-wide deletion, or account-wide /v2/gc/layers operation is performed.
+  const authorization = await registryAuth(api, ["pull", "push"]);
+  const current = await registryRequest(url, authorization, "GET", fetchImpl);
+  if (current.status === 404) return;
+  if (current.status !== 200) fail("registry_http");
+  if (digestImage(input, current) !== expectedImage) fail("registry_identity");
+  const deleted = await registryRequest(url, authorization, "DELETE", fetchImpl);
+  if (![200, 202, 204].includes(deleted.status)) fail("registry_http");
+  const deadline = now() + 90000;
+  while (true) {
+    const remaining = deadline - now();
+    if (remaining <= 0) fail("cleanup_image");
+    const readback = await registryRequest(url, authorization, "GET", fetchImpl, remaining);
+    if (readback.status === 404) return;
+    if (readback.status !== 200) fail("registry_http");
+    if (digestImage(input, readback) !== expectedImage) fail("registry_identity");
+    const rest = deadline - now();
+    if (rest <= 0) fail("cleanup_image");
+    await sleep(Math.min(2000, rest));
+  }
 }
 
 // Application deletion is asynchronous. Success requires the subsequent GET404.
@@ -503,6 +560,7 @@ export async function cleanup(
     api = apiClient(input),
     run = child,
     registry = () => registryStatus(input, api),
+    deleteImage = (image) => deleteRegistryTag(input, image, { api }),
     report = console.log,
   } = {},
 ) {
@@ -608,12 +666,21 @@ export async function cleanup(
   // force=false refuses deletion when another Worker references this synthetic Worker.
   if (settings) await api(`workers/scripts/${WORKER}?force=false`, { method: "DELETE" });
   await waitMissing(api, `workers/scripts/${WORKER}/settings`, { duration: 90000 });
-  if (state.imageAttempted && (await registry())) {
-    await run(
-      "bun",
-      ["exec", "wrangler", "containers", "images", "delete", `${APP}:${input.sha}`, "-y"],
-      { env: commandEnv(input), timeout: 120000 },
-    );
+  const remainingImage = await registry();
+  if (state.imageAttempted && remainingImage) {
+    if (!validImage(input, remainingImage) || (state.image && state.image !== remainingImage))
+      fail("cleanup_image_identity");
+    if (!state.image) {
+      // A failed push can have published the tag before returning a digest.
+      // Admission required GET404 for this exact immutable SHA tag; the
+      // protected claim predates push and marks this run's attempted mutation.
+      // Capture and persist the validated digest before any DELETE, rather than
+      // treating an expected name alone as ownership evidence.
+      if (!state.imagePreflightAbsent || !state.claimed) fail("cleanup_image_identity");
+      state.image = remainingImage;
+      writeProtected(path, state);
+    }
+    await deleteImage(state.image);
   }
   if (await registry()) fail("cleanup_image");
   state.cleaned = true;
@@ -641,6 +708,7 @@ export async function execute(
     api = apiClient(input),
     run = child,
     registry = () => registryStatus(input, api),
+    deleteImage = (image) => deleteRegistryTag(input, image, { api }),
     report = console.log,
     hold = recoveryHolder,
   } = {},
@@ -655,6 +723,7 @@ export async function execute(
     worker: WORKER,
     appName: APP,
     claimed: true,
+    imagePreflightAbsent: true,
   };
   writeProtected(statePath, state, true);
   const env = commandEnv(input);
@@ -791,7 +860,7 @@ export async function execute(
     try {
       if (holder) await holder.stop();
     } finally {
-      await cleanup(input, { api, run, registry, report });
+      await cleanup(input, { api, run, registry, deleteImage, report });
     }
   }
 }

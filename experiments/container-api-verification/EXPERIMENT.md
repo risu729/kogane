@@ -24,7 +24,9 @@ this experiment. The manual verification job requires explicit selection.
 ## Stop condition
 
 After the reviewed hosted test, remove only its temporary application, Worker,
-namespace and image, verify their absence and retire the temporary credential.
+namespace and image tag, verify their absence and retire the temporary credential.
+Image cleanup does not run account-wide registry garbage collection; underlying
+blobs may remain until normal registry collection.
 On failure retain closed diagnostics, stop the verification and confirm cleanup;
 never declare a failed or skipped stage successful. A forcibly terminated runner
 can prevent its cleanup step; resource absence must be read back separately.
