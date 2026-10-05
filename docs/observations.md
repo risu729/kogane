@@ -58,9 +58,44 @@ failed to load would look the same as the empty month, which the parser
 cannot tell apart (a later capture with rows supersedes it); the read model's
 per-month rule does not look at row counts, so a newer empty reading also hides
 an older run's rows for the same month, with no reason shown (pinned in
-`packages/read-model/test/global-pass-snapshots.test.ts`); no shared run has
-stored an empty month yet. Tests:
+`packages/read-model/test/global-pass-snapshots.test.ts`). Tests:
 `packages/parsers/test/global-pass-empty-month.test.ts`.
+
+**Production result.** #474 merged on 2026-10-04 and was deployed the same
+day (Deploy run 269, after the deploy-pipeline fixes #511 and #512); 1.2.0 is
+registered in `parser_releases` at runtime. The repair lane queued a 1.2.0
+job for each of the 72 eligible `globalpass-activity` artifacts (70
+importer-era, 2 from fetch_run 989), and all 72 were terminal by 2026-10-05
+05:00Z. Read-only aggregate queries:
+
+- **48 importer-era pages with a table**: `ok` with warnings, 372
+  transaction observations, the same pages and the same row count as 1.1.0.
+  Each 1.1.0 `ok` run is superseded by its 1.2.0 run.
+- **20 importer-era pages**: `ok` with no warning and no observation. They
+  are the 20 zero-table pages of the
+  [2026-09-08 investigation](#remaining-globalpass-shape-investigation-2026-09-08),
+  so 20 of the 22 importer-era refusals were the observed empty month.
+- **2 importer-era pages**: still `parser_rejected`, as under 1.0.0 and
+  1.1.0. Which check refused them is not stored; the counts-only replay
+  (`replay-diagnostics.ts globalpass-activity 2`,
+  [operations](operations.md#replaying-a-parser-rejection)), which selects
+  pages whose latest parse was refused, names it. By elimination they are the
+  two captures the 2026-09-08 investigation found failing 1.0.0's
+  unclassified-table guard; production does not show which 1.2.0 check
+  refused them.
+- **fetch_run 989** (English display, one page per selected month, both
+  refused by 1.1.0): both pages are `ok` with no warning and no observation,
+  so both were empty months. This is the first empty month a shared run has
+  stored and the first production markup the 1.2.0 rule has met, and the
+  cause of the 1.1.0 refusal [below](#global-pass-the-first-shared-run-pages-were-refused-no-parser-release)
+  is known without the replay.
+
+In all, `global-pass-activity@1.2.0` has 70 `ok` runs (48 with rows, 22 empty
+months) and 2 `parser_rejected`. The 22 empty months (20 importer-era, 2 from
+run 989) are now current empty snapshots in the read model; none of those
+months had an `ok` capture with rows (the 2026-10-04 count above), so no
+stored row is hidden. Shared runs still have no transaction observation: the
+only admitted run captured two empty months.
 
 ## GLOBAL PASS: the first shared-run pages were refused (no parser release)
 
@@ -76,7 +111,9 @@ queries only:
   re-read the 48 importer-era pages 1.0.0 had parsed, and 1.1.0 parses them
   `ok`; the 22 that 1.0.0 refused, 1.1.0 refuses too. So what 1.1.0 refuses
   is the collector's capture (`page.content()` through
-  `sanitizeGlobalPassActivityHtml`), not a regression of 1.1.0.
+  `sanitizeGlobalPassActivityHtml`), not a regression of 1.1.0. (1.2.0 then
+  read 20 of the 22 as empty months;
+  [above](#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).)
 - **Which check refused them is not stored.** `parse_runs.error` holds only
   the closed code `parser_rejected`.
 - **The sanitizer keeps what the parser reads, on synthetic evidence.** The
@@ -116,6 +153,12 @@ the read model shows only the importer-era months. Tests:
 `services/processor/test/global-pass-rejection.test.ts`,
 `services/processor/test/parser-rejection.test.ts` (the selection),
 `packages/parsers/test/global-pass-sanitized-contract.test.ts`.
+
+Outcome (2026-10-05): `global-pass-activity@1.2.0` read both pages `ok` with
+no warning and no observation, so both were empty months (the first case
+above), and the replay was not needed for them. The run's two months are now
+current empty snapshots; shared runs still have no transaction observation
+([above](#global-pass-empty-months-are-read-as-no-rows-activity-parser-120)).
 
 ## GLOBAL PASS walked months and page-qualified external ids (activity parser 1.1.0)
 
@@ -2832,3 +2875,5 @@ explicit empty state (no Found line, no pager, no table), and
 ([above](#global-pass-empty-months-are-read-as-no-rows-activity-parser-120)).
 The zero-table captures above that show no pager and no Found line parse `ok`
 with no row under 1.2.0; the unclassified-table captures stay refused.
+In production (2026-10-05) 1.2.0 read 20 of the 22 `ok` with no row and still
+refuses 2 ([above](#global-pass-empty-months-are-read-as-no-rows-activity-parser-120)).

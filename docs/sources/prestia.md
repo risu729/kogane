@@ -1150,11 +1150,17 @@ refused it. A zero-table page with any part of the pager, or a later page,
 stays refused
 ([ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-empty-months-are-read-as-no-rows),
 [observations](../observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120)).
-The empty month was observed in English only, and no shared run has stored
-one yet.
+The empty month was observed in English only.
 
-Limit: which check refused the two stored pages is not known. The owner's
-counts-only replay names it
+Production result (2026-10-05, read-only counts): after #474 was deployed,
+1.2.0 read both pages of fetch_run 989 `ok` with no observation, so the two
+stored shared-run pages were empty months and the cause of their 1.1.0
+refusal is known. Of the 70 importer-era pages, 48 parse `ok` with the same
+rows as 1.1.0, 20 (the zero-table pages) parse `ok` with no row, and 2 stay
+refused. Shared runs have no transaction observation yet.
+
+Limit: which check refused the 2 remaining importer-era pages is not stored.
+The owner's counts-only replay names it
 ([operations](../operations.md#replaying-a-parser-rejection)):
 
 ```sh
