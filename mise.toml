@@ -25,7 +25,7 @@ tombi = "1.7.3"
 yamlfmt = "0.21.0"
 uv = "0.12.23"
 yamllint = "1.38.0"
-typos = "1.50.3"
+typos = "1.51.0"
 ruff = "0.16.10"
 
 [settings]
