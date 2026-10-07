@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "hono": "4.13.12"
+    "hono": "4.13.13"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
