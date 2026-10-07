@@ -362,7 +362,7 @@ jobs:
         run: node "${CONTAINER_GUARD}" bind
       - name: Upload the release manifest
         if: steps.decide.outputs.proceed == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-manifest-${{ inputs.sha }}
           path: |
@@ -1050,7 +1050,7 @@ jobs:
             --out "${RUNNER_TEMP}/release-progress.json"
       - name: Upload the release progress
         if: ${{ always() && steps.decide.outputs.proceed == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-progress-${{ inputs.sha }}
           path: ${{ runner.temp }}/release-progress.json
