@@ -167,7 +167,7 @@ jobs:
         # its mise configuration and the scripts below are reviewed code.
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.3
+          version: 2026.10.4
           # No tool cache anywhere in this job: its cache scope is shared with
           # pull request CI, which runs pull request code, so a restored archive
           # is not a trusted source of the interpreter that decides whether this
@@ -226,7 +226,7 @@ jobs:
         if: steps.decide.outputs.proceed == 'true'
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.3
+          version: 2026.10.4
           cache: false
       - name: Install the locked dependencies
         if: steps.decide.outputs.proceed == 'true'
