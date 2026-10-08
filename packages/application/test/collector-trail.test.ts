@@ -6,6 +6,7 @@ import type { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { explain } from "../../read-model/test/card-usage-plan.ts";
 import {
+  claimCollectorStart,
   collectorExecution,
   collectorRunTrails,
   type CollectorRunTrail,
@@ -96,6 +97,92 @@ describe("0068 keeps one start per operation and moves forward only", () => {
     ).toThrow();
     local.close();
   });
+});
+
+describe("0068 never starts or reopens an execution that ended", () => {
+  // Each terminal state, reached through the legal transitions only.
+  const paths: readonly [string, string, readonly string[]][] = [
+    ["expired", "collect", ["state='expired',reason_code='operation_expired',finished_at=?2"]],
+    ["unsupported", "collect", ["state='unsupported',reason_code='collection_unsupported'"]],
+    [
+      "failed",
+      "collect",
+      [
+        "state='started',starts=1,started_at=?2",
+        "state='failed',reason_code='collection_failed',finished_at=?2",
+      ],
+    ],
+    [
+      "uncertain",
+      "collect",
+      [
+        "state='started',starts=1,started_at=?2",
+        "state='uncertain',reason_code='dispatch_uncertain',finished_at=?2",
+      ],
+    ],
+    [
+      "refreshed",
+      "refresh-session",
+      ["state='started',starts=1,started_at=?2", "state='refreshed',finished_at=?2"],
+    ],
+    [
+      "published",
+      "collect",
+      [
+        "state='started',starts=1,started_at=?2",
+        "state='collected',collected_at=?2,run_ids_json='[\"r1\"]'",
+        "state='published',published_at=?2,finished_at=?2",
+      ],
+    ],
+  ];
+
+  for (const [state, action, steps] of paths)
+    test(`${state} is never claimed, restarted or put back in the queue`, async () => {
+      const local = migratedDatabase();
+      const operationId = `op_${"e".repeat(63)}${paths.findIndex(([name]) => name === state)}`;
+      seedRequest(local, operationId, action === "collect" ? "collection" : "session-refresh");
+      local.run(
+        `INSERT INTO ops_collector_dispatches(operation_id,connection_id,action,terminal_source,state,
+          accepted_at,expires_at,updated_at) VALUES(?1,'sony-bank',?2,'sony-bank','waiting',?3,?3,?3)`,
+        [operationId, action, NOW],
+      );
+      for (const step of steps)
+        local.run(
+          `UPDATE ops_collector_dispatches SET ${step},updated_at=?2 WHERE operation_id=?1`,
+          [operationId, NOW],
+        );
+      expect(
+        local
+          .query("SELECT state FROM ops_collector_dispatches WHERE operation_id=?")
+          .get(operationId),
+      ).toEqual({ state });
+      // The service's guarded start finds nothing to claim.
+      expect(
+        await claimCollectorStart({
+          store: sqliteCommandStore(local),
+          operationId,
+          action: action as "collect" | "refresh-session",
+          acceptedAt: NOW,
+          expiresAt: NOW,
+          now: "2026-09-11T01:00:00Z",
+          binding: { connectionId: "sony-bank", terminalSource: "sony-bank" },
+        }),
+      ).toBe(false);
+      // And no direct write can restart or reopen it.
+      for (const sql of [
+        "UPDATE ops_collector_dispatches SET state='waiting',reason_code=NULL WHERE operation_id=?",
+        "UPDATE ops_collector_dispatches SET state='started',starts=1,started_at='2026-09-11T02:00:00Z' WHERE operation_id=?",
+        "UPDATE ops_collector_dispatches SET starts=2 WHERE operation_id=?",
+        "UPDATE ops_collector_dispatches SET updated_at='2026-09-11T03:00:00Z' WHERE operation_id=?",
+      ])
+        expect(() => local.run(sql, [operationId])).toThrow();
+      expect(
+        local
+          .query("SELECT state,starts FROM ops_collector_dispatches WHERE operation_id=?")
+          .get(operationId),
+      ).toEqual({ state, starts: state === "expired" || state === "unsupported" ? 0 : 1 });
+      local.close();
+    });
 });
 
 describe("the trail", () => {
