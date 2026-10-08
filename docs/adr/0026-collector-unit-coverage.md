@@ -1208,13 +1208,22 @@ and settlement do not read them.
   with rows clears it; a month only ever empty, a failed newer run, a newer
   run with an unparsed page and an older capture that was never whole are not
   reported; several older captures with rows are counted once each and the
-  newest is named; the notice text contains the currentness CTEs verbatim; on
+  newest is named; rows then two empty captures name the capture with rows; a
+  walked month is empty only when none of its current pages has a row; rows
+  are those of the published parse (an older capture re-parsed to no row stops
+  counting, a current empty page re-parsed with a row clears the month);
+  sources are kept apart and ordered by source, then month newest first; the
+  reader returns 100 months newest first with `truncated` set when a 101st
+  exists and unset at exactly 100; the notice text contains the currentness
+  CTEs verbatim; on
   a scaled store with the complete CORE schema, no table statistics and a
   quarter of the captures empty, the notice equals an independently written
   model and the current set equals the snapshot model before and after; the
   plan scans the artifacts once (the snapshot CTEs' pass) and no observation,
   parse or run table whole, and reaches each run's pages through
   `idx_fetch_artifacts_run_role`.
+- `packages/read-model/test/read-model.test.ts`: the read compiles against the
+  migrated CORE schema and is empty on an empty store.
 - `services/app/test/api.test.ts`: `/api/meta` carries an empty, valid notice
   on a store without GLOBAL PASS months.
 - `apps/web/test/global-pass-empty-months.test.ts`: the response validator

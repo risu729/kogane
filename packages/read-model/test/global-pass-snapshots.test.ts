@@ -27,7 +27,8 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { CardStore } from "./card-usage-fixture";
 import { explain, type PlanStep } from "./card-usage-plan";
 import { fullCoreSchema } from "./card-usage-scale-fixture";
-import { activeStateProjection } from "../src/index";
+import { activeStateProjection, createObservationReader } from "../src/index";
+import { GLOBAL_PASS_NOTICE_LIMIT } from "../src/scope";
 import {
   GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES,
   GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL,
@@ -64,16 +65,17 @@ class GlobalPassStore {
     this.next += 1;
     return this.next;
   }
-  run(outcome: "success" | "failure" = "success"): number {
+  run(outcome: "success" | "failure" = "success", source = "global-pass"): number {
     const id = this.id();
     const db = this.store.db;
+    db.run("INSERT OR IGNORE INTO sources VALUES(?,'synthetic')", [source]);
     db.run(
       "INSERT INTO acquisition_sessions(id,external_session_id,producer_id,external_id_namespace) VALUES(?,?,'collector-r2-importer','synthetic-global-pass')",
       [id, `synthetic-session-${id}`],
     );
     db.run(
-      "INSERT INTO fetch_runs(id,source_id,acquisition_session_id,producer_id,first_recorded_at_ms) VALUES(?,'global-pass',?,'collector-r2-importer',0)",
-      [id, id],
+      "INSERT INTO fetch_runs(id,source_id,acquisition_session_id,producer_id,first_recorded_at_ms) VALUES(?,?,?,'collector-r2-importer',0)",
+      [id, source, id],
     );
     db.run("INSERT INTO fetch_run_reports VALUES(?,'terminal',?,0,0)", [id, outcome]);
     db.run("INSERT INTO fetch_run_seals(fetch_run_id) VALUES(?)", [id]);
@@ -88,9 +90,10 @@ class GlobalPassStore {
     const artifact = this.id();
     db.run(
       `INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,declared_media_type,fetched_at_ms,recorded_at_ms,sha256,artifact_role)
-       VALUES(?,?,'global-pass','globalpass-activity',?,'text/html',?,?,?,'sanitized_provider_capture')`,
+       VALUES(?,?,(SELECT source_id FROM fetch_runs WHERE id=?),'globalpass-activity',?,'text/html',?,?,?,'sanitized_provider_capture')`,
       [
         artifact,
+        run,
         run,
         key,
         Date.parse(fetchedAt),
@@ -121,6 +124,40 @@ class GlobalPassStore {
     );
     return artifact;
   }
+  /**
+   * A newer `ok` parse of `artifact` with `rows` placeholder rows, published
+   * in place of the current one (a re-parse; the old parse and its rows stay).
+   */
+  reparse(artifact: number, rows: number): void {
+    const db = this.store.db;
+    const previous = (
+      db
+        .query("SELECT parse_run_id FROM published_parse_runs WHERE fetch_artifact_id=?")
+        .get(artifact) as { parse_run_id: number }
+    ).parse_run_id;
+    const parse = this.id();
+    const version = `1.2.0-reparse-${parse}`;
+    db.run(
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'global-pass-activity',?,'2026-10-01','pending','[]')",
+      [parse, artifact, version],
+    );
+    for (let row = 0; row < rows; row += 1)
+      db.run(
+        `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,amount_text,amount_scale,currency,description,as_of,raw_locator,extra_json)
+         VALUES(?,'global-pass:card',?,'1.00',2,'USD','SYNTHETIC','2099-01-02',?,'{}')`,
+        [parse, `global-pass:synthetic-${artifact}:${row}`, `html:activity-record=${row + 1}`],
+      );
+    db.run("UPDATE parse_runs SET status='ok' WHERE id=?", [parse]);
+    db.run(
+      "INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at) VALUES(?,'global-pass-activity',?,?,'normal','pipeline','parse_ok','2026-10-01')",
+      [artifact, previous, parse],
+    );
+    db.run(
+      "UPDATE published_parse_runs SET parse_run_id=?,parser_version=?,published_at='2026-10-01' WHERE parse_run_id=?",
+      [parse, version, previous],
+    );
+    db.run("UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE id=?", [parse, previous]);
+  }
   current(ctes: string): number[] {
     return this.store.db
       .query(
@@ -141,6 +178,23 @@ interface NoticeRow {
   current_fetch_run_id: number;
   superseded_fetch_run_id: number;
   superseded_runs: number;
+}
+
+/** An expected notice row; the month and source default to the hand-built cases'. */
+function notice(
+  current: number,
+  superseded: number,
+  runs: number,
+  month = "2099-01",
+  source = "global-pass",
+): NoticeRow {
+  return {
+    source_id: source,
+    activity_month: month,
+    current_fetch_run_id: current,
+    superseded_fetch_run_id: superseded,
+    superseded_runs: runs,
+  };
 }
 
 /** A deterministic generator, so a failing store can be rebuilt. */
@@ -334,6 +388,121 @@ describe("GLOBAL PASS activity snapshots", () => {
         superseded_runs: 2,
       },
     ]);
+  });
+
+  test("notice: rows, then two empty captures: the capture with rows is named and counted once", () => {
+    const s = new GlobalPassStore();
+    const rows = s.run();
+    s.page(rows, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 2);
+    const emptyFirst = s.run();
+    s.page(emptyFirst, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 0);
+    const emptyLast = s.run();
+    const current = s.page(emptyLast, "activity-2099-01.html", "2099-02-03T00:00:00Z", true, 0);
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([current]);
+    expect(s.notices()).toEqual([notice(emptyLast, rows, 1)]);
+  });
+
+  test("notice: a walked month is empty only when none of its current pages has a row", () => {
+    const s = new GlobalPassStore();
+    const older = s.run();
+    s.page(older, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 2);
+    s.page(older, "activity-2099-01-p2.html", "2099-02-01T00:00:00Z", true, 1);
+    // Page 1 reads no row but page 2 does: the current snapshot shows a row.
+    const partly = s.run();
+    const first = s.page(partly, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 0);
+    const second = s.page(partly, "activity-2099-01-p2.html", "2099-02-02T00:00:00Z", true, 1);
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([first, second]);
+    expect(s.notices()).toEqual([]);
+    // Every page of the newest run reads no row: reported, and the run whose
+    // page 2 alone had a row counts as a capture with rows.
+    const none = s.run();
+    s.page(none, "activity-2099-01.html", "2099-02-03T00:00:00Z", true, 0);
+    s.page(none, "activity-2099-01-p2.html", "2099-02-03T00:00:00Z", true, 0);
+    expect(s.notices()).toEqual([notice(none, partly, 2)]);
+  });
+
+  test("notice: rows are read through the published parse, never a superseded one", () => {
+    const s = new GlobalPassStore();
+    const older = s.run();
+    const olderPage = s.page(older, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 2);
+    const newer = s.run();
+    const newerPage = s.page(newer, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 0);
+    expect(s.notices()).toEqual([notice(newer, older, 1)]);
+    // The older capture re-parsed to no row: no snapshot shows a row, nothing
+    // is hidden, although the superseded parse still holds its rows.
+    s.reparse(olderPage, 0);
+    expect(s.notices()).toEqual([]);
+    s.reparse(olderPage, 3);
+    expect(s.notices()).toEqual([notice(newer, older, 1)]);
+    // The current empty page re-parsed with a row: the month is not empty.
+    s.reparse(newerPage, 1);
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([newerPage]);
+    expect(s.notices()).toEqual([]);
+  });
+
+  test("notice: sources are kept apart and listed by source, newest month first", () => {
+    const s = new GlobalPassStore();
+    const other = "global-pass-synthetic-b";
+    const older = s.run();
+    s.page(older, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 1);
+    s.page(older, "activity-2098-12.html", "2099-02-01T00:00:00Z", true, 1);
+    const otherOlder = s.run("success", other);
+    s.page(otherOlder, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 1);
+    const newer = s.run();
+    s.page(newer, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 0);
+    s.page(newer, "activity-2098-12.html", "2099-02-02T00:00:00Z", true, 0);
+    // The other source's month still has rows: an empty capture of the same
+    // month under another source is not its snapshot.
+    expect(s.notices()).toEqual([
+      notice(newer, older, 1, "2099-01"),
+      notice(newer, older, 1, "2098-12"),
+    ]);
+    const otherNewer = s.run("success", other);
+    s.page(otherNewer, "activity-2099-01.html", "2099-02-03T00:00:00Z", true, 0);
+    expect(s.notices()).toEqual([
+      notice(newer, older, 1, "2099-01"),
+      notice(newer, older, 1, "2098-12"),
+      notice(otherNewer, otherOlder, 1, "2099-01", other),
+    ]);
+  });
+
+  test("notice: the reader returns at most 100 months, newest first, and flags the rest", async () => {
+    const s = new GlobalPassStore();
+    const months = Array.from(
+      { length: GLOBAL_PASS_NOTICE_LIMIT + 1 },
+      (_, index) => `${2090 + Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`,
+    );
+    const older = s.run();
+    const newer = s.run();
+    const emptied = new Map<string, number>();
+    for (const month of months) {
+      s.page(older, `activity-${month}.html`, "2099-02-01T00:00:00Z", true, 1);
+      emptied.set(month, s.page(newer, `activity-${month}.html`, "2099-02-02T00:00:00Z", true, 0));
+    }
+    const db = s.store.db;
+    const reader = createObservationReader({
+      all: async <T>(text: string, args: readonly unknown[]) =>
+        db.query(text).all(...(args as never[])) as T[],
+      first: async <T>(text: string, args: readonly unknown[]) =>
+        (db.query(text).get(...(args as never[])) as T | null) ?? null,
+    });
+    const over = await reader.globalPassEmptyMonths();
+    expect(over.truncated).toBe(true);
+    expect(over.months.map((entry) => entry.month)).toEqual(
+      [...months].reverse().slice(0, GLOBAL_PASS_NOTICE_LIMIT),
+    );
+    expect(over.months[0]).toEqual({
+      source: "global-pass",
+      month: months.at(-1)!,
+      currentFetchRunId: newer,
+      supersededFetchRunId: older,
+      supersededRuns: 1,
+    });
+    // One month fewer, exactly at the bound: nothing is cut.
+    s.reparse(emptied.get(months[0]!)!, 1);
+    const at = await reader.globalPassEmptyMonths();
+    expect(at.truncated).toBe(false);
+    expect(at.months.map((entry) => entry.month)).toEqual(months.slice(1).reverse());
   });
 
   test("notice: composes the currentness CTEs verbatim", () => {
@@ -619,44 +788,32 @@ function subtree(steps: readonly PlanStep[], root: PlanStep): PlanStep[] {
   return steps.filter((step) => inside.has(step.id));
 }
 
-/** The base relations the plan scans whole under `root`, as `name<parent step>`. */
-function baseTableScans(steps: readonly PlanStep[], root: PlanStep): string[] {
-  const byId = new Map(steps.map((step) => [step.id, step]));
-  const bounded = new Set([
-    "eligible_global_pass_snapshots",
-    "ranked_global_pass_snapshots",
-    "snapshot",
-    "unit_policy",
-  ]);
-  return subtree(steps, root)
-    .filter((step) => step.detail.startsWith("SCAN "))
-    .map((step) => ({ step, name: step.detail.slice(5).split(" ")[0]! }))
-    .filter(({ name }) => !bounded.has(name) && !/^\(subquery-\d+\)$/u.test(name))
-    .map(({ step, name }) => `${name}<${byId.get(step.parent)?.detail}>`);
-}
+/** The snapshot CTEs every GLOBAL PASS read composes. */
+const SNAPSHOT_RELATIONS = ["eligible_global_pass_snapshots", "ranked_global_pass_snapshots"];
+
+/** The empty-month notice's own CTEs and the aliases it reads them under. */
+const NOTICE_RELATIONS = [
+  "emptied_global_pass_months",
+  "superseded_global_pass_rows",
+  "latest",
+  "emptied",
+  "older",
+];
 
 /**
- * The base relations the notice plan scans whole, as `name<parent step>`: the
- * notice's own CTEs and aliases are bounded by the eligible snapshots, never
- * by the store, and `unit_policy` is the handful of `dataset_snapshot_policies`
- * rows the active-state predicate reads (as in `card-usage-plan.ts`).
+ * The base relations `steps` scan whole, as `name<parent step>`. `bounded`
+ * names the read's own CTEs and aliases, each bounded by the eligible
+ * snapshots rather than by the store; `unit_policy` is the handful of
+ * `dataset_snapshot_policies` rows the active-state predicate reads (as in
+ * `card-usage-plan.ts`).
  */
-function noticeBaseTableScans(steps: readonly PlanStep[]): string[] {
+function baseTableScans(steps: readonly PlanStep[], bounded: readonly string[]): string[] {
   const byId = new Map(steps.map((step) => [step.id, step]));
-  const bounded = new Set([
-    "eligible_global_pass_snapshots",
-    "ranked_global_pass_snapshots",
-    "emptied_global_pass_months",
-    "superseded_global_pass_rows",
-    "latest",
-    "emptied",
-    "older",
-    "unit_policy",
-  ]);
+  const allowed = new Set([...SNAPSHOT_RELATIONS, ...bounded, "unit_policy"]);
   return steps
     .filter((step) => step.detail.startsWith("SCAN "))
     .map((step) => ({ step, name: step.detail.slice(5).split(" ")[0]! }))
-    .filter(({ name }) => !bounded.has(name) && !/^\(subquery-\d+\)$/u.test(name))
+    .filter(({ name }) => !allowed.has(name) && !/^\(subquery-\d+\)$/u.test(name))
     .map(({ step, name }) => `${name}<${byId.get(step.parent)?.detail}>`);
 }
 
@@ -756,7 +913,7 @@ describe("GLOBAL PASS activity snapshots on the complete CORE schema without sta
       const steps = explain(db, GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL, []);
       // One whole pass over the artifacts, the one the snapshot CTEs make;
       // never a scan of the observations, the parses or the runs.
-      expect(noticeBaseTableScans(steps)).toEqual([
+      expect(baseTableScans(steps, NOTICE_RELATIONS)).toEqual([
         "a<MATERIALIZE eligible_global_pass_snapshots>",
       ]);
       // Each row probe reaches a run's pages through the run index.
@@ -778,7 +935,7 @@ describe("GLOBAL PASS activity snapshots on the complete CORE schema without sta
       expect(root.detail.startsWith("CORRELATED ")).toBe(false);
       // One whole pass over the artifacts, for the eligible snapshots; the
       // expected-page count and the current pages are reached through the run.
-      expect(baseTableScans(steps, root)).toEqual([
+      expect(baseTableScans(subtree(steps, root), ["snapshot"])).toEqual([
         "a<MATERIALIZE eligible_global_pass_snapshots>",
       ]);
       const byRun = subtree(steps, root).filter((step) =>
