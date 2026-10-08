@@ -1206,7 +1206,9 @@ verifies it against the stored SHA-256 and size, and prints whether one was
 found, its internal artifact id, whether it was intact, its record count, how
 many records of the refused page have a desktop row equal cell for cell to
 one of its desktop rows, and whether every record without a pair is among
-them. Which artifacts the replay selects is unchanged.
+them; a count or answer it cannot establish (a page that is not UTF-8, a
+record without a desktop row) prints `null`, never `0` or `false`. Which
+artifacts the replay selects is unchanged.
 
 Texts are only ever compared for exact equality after the parser's own
 normalisation (text nodes joined by a space, whitespace collapsed, trimmed),

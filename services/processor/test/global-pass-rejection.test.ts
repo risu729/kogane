@@ -1050,6 +1050,64 @@ describe("global-pass-activity: detail tables, unclassified tables and records c
       expect(words.filter((word) => !closed.has(word))).toEqual([]);
     }
   });
+
+  test("an unreadable page or an uncomparable record is unknown, never zero or false", () => {
+    const notUtf8 = new Uint8Array([0x3c, 0xff, 0xfe, 0x3e]);
+    expect(
+      globalPassLatestOkComparison(encode(ONE_SHORT), {
+        artifact: 7,
+        bytes: notUtf8,
+        intact: true,
+      }),
+    ).toEqual({
+      found: true,
+      artifact: 7,
+      intact: true,
+      records: null,
+      recordsAlsoPresent: null,
+      unmatchedRecordPresent: null,
+    });
+    expect(
+      globalPassLatestOkComparison(notUtf8, { artifact: 7, bytes: encode(WHOLE), intact: true }),
+    ).toEqual({
+      found: true,
+      artifact: 7,
+      intact: true,
+      records: RECORDS,
+      recordsAlsoPresent: null,
+      unmatchedRecordPresent: null,
+    });
+    // The unmatched last record without its desktop row cannot be compared.
+    const lastDesktop = `<tr>${td(desktopCells(LAST))}</tr>\n`;
+    expect(
+      globalPassLatestOkComparison(encode(mutate(lastDesktop, "", ONE_SHORT)), {
+        artifact: 7,
+        bytes: encode(WHOLE),
+        intact: true,
+      }),
+    ).toMatchObject({
+      records: RECORDS,
+      recordsAlsoPresent: RECORDS - 1,
+      unmatchedRecordPresent: null,
+    });
+    // With another unmatched record the capture lacks, the answer is false;
+    // when the capture has that one, it stays unknown.
+    const twoShort = encode(mutate(lastDesktop, "", syntheticMonth(RECORDS, RECORDS - 2)));
+    expect(
+      globalPassLatestOkComparison(twoShort, {
+        artifact: 8,
+        bytes: encode(syntheticMonth(RECORDS - 2, RECORDS - 2)),
+        intact: true,
+      }),
+    ).toMatchObject({
+      records: RECORDS - 2,
+      recordsAlsoPresent: RECORDS - 2,
+      unmatchedRecordPresent: false,
+    });
+    expect(
+      globalPassLatestOkComparison(twoShort, { artifact: 9, bytes: encode(WHOLE), intact: true }),
+    ).toMatchObject({ recordsAlsoPresent: RECORDS - 1, unmatchedRecordPresent: null });
+  });
 });
 
 /** Every object key in a value, at any depth. */

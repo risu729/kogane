@@ -1839,11 +1839,18 @@ export interface GlobalPassLatestOkCapture {
   artifact: number | null;
   /** Its bytes match the stored SHA-256 and size; null when none was found. */
   intact: boolean | null;
-  /** Its desktop (nine-cell) rows; null when none was found or it is not intact. */
+  /** Its desktop (nine-cell) rows; null when none was found, it is not intact or it is not UTF-8. */
   records: number | null;
-  /** Records of the refused page whose desktop row equals, cell for cell, one of its desktop rows. */
+  /**
+   * Records of the refused page whose desktop row equals, cell for cell, one
+   * of its desktop rows; null with `records` or when the refused page is not UTF-8.
+   */
   recordsAlsoPresent: number | null;
-  /** Every record no compact table carries is among those; null without such a record or capture. */
+  /**
+   * Every record no compact table carries is among those; null without such
+   * a record or `recordsAlsoPresent`, or when such a record has no desktop row
+   * to compare and no other one is absent (unknown, never `false`).
+   */
   unmatchedRecordPresent: boolean | null;
 }
 
@@ -1871,21 +1878,39 @@ export function globalPassLatestOkComparison(
   // A record without a desktop row (more responsive rows than desktop ones) has none to compare.
   const withDesktop = (records: readonly GpRecord[]) =>
     records.filter((record) => record.desktop.length === 9);
-  const acceptedRows = withDesktop(page(ok.bytes)?.records ?? []);
+  const accepted = page(ok.bytes);
+  // A page that cannot be read has no rows to count: unknown, never zero (INV05).
+  if (accepted === null) return { found: true, artifact: ok.artifact, intact: true, ...none };
+  const acceptedRows = withDesktop(accepted.records);
   const present = new Set(acceptedRows.map(desktopKey));
   const mine = page(refused);
-  const unmatched = mine?.activity ? alignment(mine).unmatchedRecords : [];
+  if (mine === null)
+    return {
+      found: true,
+      artifact: ok.artifact,
+      intact: true,
+      records: acceptedRows.length,
+      recordsAlsoPresent: null,
+      unmatchedRecordPresent: null,
+    };
+  const unmatched = alignment(mine).unmatchedRecords.map((record) => mine.records[record]!);
+  const comparable = withDesktop(unmatched);
+  const absent = comparable.some((record) => !present.has(desktopKey(record)));
   return {
     found: true,
     artifact: ok.artifact,
     intact: true,
     records: acceptedRows.length,
-    recordsAlsoPresent: withDesktop(mine?.records ?? []).filter((record) =>
+    recordsAlsoPresent: withDesktop(mine.records).filter((record) =>
       present.has(desktopKey(record)),
     ).length,
     unmatchedRecordPresent:
       unmatched.length === 0
         ? null
-        : unmatched.every((record) => present.has(desktopKey(mine!.records[record]!))),
+        : absent
+          ? false
+          : comparable.length === unmatched.length
+            ? true
+            : null,
   };
 }
