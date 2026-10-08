@@ -197,7 +197,7 @@ function run(input: {
   baselineCut?: number;
 }): ReconstructedState {
   const asked = request(input.request);
-  return ok(
+  const state = ok(
     reconstructState({
       request: asked,
       policy: RECONSTRUCTION_FOLD_V1,
@@ -207,6 +207,10 @@ function run(input: {
       baseline: input.baselineCut === undefined ? null : select(input.set, input.baselineCut),
     }),
   ).state;
+  // Every cell without a figure names at least one gap.
+  for (const row of state.cells)
+    if (row.partition === "not-computable") expect(row.gaps.length).toBeGreaterThan(0);
+  return state;
 }
 
 function cell(state: ReconstructedState, accountId = A, unitRef: string | null = "JPY") {
@@ -536,7 +540,7 @@ describe("leg effects", () => {
       set: eventSet([rev({ legs: [leg({ basis: "unknown", quantity: q("JPY", "50") })] })]),
     });
     expect(cell(state).unknown.count).toBe(1);
-    expect(reason(cell(state).reconstructed)).toBe("unknown_effect");
+    expect(reason(cell(state).reconstructed)).toBe("leg_effect_unknown");
   });
 
   test("a movement no account resolves blocks every requested cell of its unit", () => {
@@ -629,7 +633,7 @@ describe("states and adapter flags", () => {
         rev({ kind: "charge", state: "issued", legs: [leg({ quantity: q("JPY", "10") })] }),
       ]),
     });
-    expect(reason(cell(state).reconstructed)).toBe("unknown_effect");
+    expect(reason(cell(state).reconstructed)).toBe("leg_effect_unknown");
   });
 
   test("an adapter flag is never applied through: the cell needs review", () => {
@@ -1401,5 +1405,23 @@ describe("placement before holds", () => {
       set: eventSet([debit("event:test:1", "1", "2025-01-01", { commit: null })]),
     });
     expect(cell(unlogged).gaps).toContain("knowledge_unlogged");
+  });
+});
+
+describe("every unknown effect names a gap", () => {
+  test("an unmapped state and an unknown basis are leg_effect_unknown", () => {
+    const unmapped = cell(
+      run({
+        set: eventSet([
+          rev({ kind: "charge", state: "issued", legs: [leg({ quantity: q("JPY", "10") })] }),
+        ]),
+      }),
+    );
+    expect(unmapped.gaps).toEqual(["leg_effect_unknown"]);
+    expect(reason(unmapped.reconstructed)).toBe("leg_effect_unknown");
+    const unknownBasis = cell(
+      run({ set: eventSet([rev({ legs: [leg({ basis: "unknown", quantity: q("JPY", "1") })] })]) }),
+    );
+    expect(unknownBasis.gaps).toEqual(["leg_effect_unknown"]);
   });
 });

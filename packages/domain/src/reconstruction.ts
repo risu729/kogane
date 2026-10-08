@@ -449,6 +449,7 @@ export const RECONSTRUCTION_GAPS = [
   "event_time_unknown",
   "own_transfer_held",
   "leg_subject_unrecognized",
+  "leg_effect_unknown",
   "family_not_evented",
   "history_coverage_unknown",
   "history_gap",
@@ -1427,7 +1428,7 @@ function classifyLeg(
   const flag = FLAG_ORDER.find((code) => row.flags.includes(code));
   if (flag !== undefined) return classified(flag, flag);
   // On an unknown basis even the time role to place it by is unknown.
-  if (leg.basis === "unknown") return classified("unknown_effect");
+  if (leg.basis === "unknown") return classified("unknown_effect", "leg_effect_unknown");
   const placement = place(row);
   const rule = policy.legEffects[leg.effect];
   if (rule === "link-never-added") return classified("correspondence_link", null, placement);
@@ -1438,7 +1439,7 @@ function classifyLeg(
   const effect = policy.stateEffects[row.kind][row.state];
   if (effect === "no-effect") return classified("state_no_effect", null, placement);
   if (placement === "outside") return classified("outside_range", null, placement);
-  if (effect === undefined) return classified("unknown_effect", null, placement);
+  if (effect === undefined) return classified("unknown_effect", "leg_effect_unknown", placement);
   if (!accountKnown) return classified("unknown_effect", "leg_subject_unrecognized", placement);
   const ownAccounts = new Set(
     row.legs.flatMap((other) =>
@@ -1767,9 +1768,9 @@ export function reconstructState(input: {
             ? "revision_chain_inconsistent"
             : selected.status === "knowledge_unlogged"
               ? "knowledge_unlogged"
-              : statusDisposition === null
-                ? flag
-                : null,
+              : statusDisposition !== null
+                ? null
+                : (flag ?? (effect === "no-effect" ? null : "leg_effect_unknown")),
       });
       continue;
     }
@@ -1873,13 +1874,14 @@ export function reconstructState(input: {
       if ((IGNORED_DISPOSITIONS as readonly string[]).includes(item.classified.disposition))
         ignored[item.classified.disposition as IgnoredDisposition] += 1;
 
-    // Step 5: the figure, or its absence with the first blocking reason.
+    // Step 5: the figure, or its absence with the first blocking reason. A
+    // blocked leg always carries its gap; this keeps the rule if one does not.
+    if (unknownRefs.length > 0 && ![...gaps].some((gap) => ABSENT_GAPS.includes(gap)))
+      gaps.add("leg_effect_unknown");
     const sortedGaps = RECONSTRUCTION_GAPS.filter((gap) => gaps.has(gap));
     const blocking = sortedGaps.find((gap) => ABSENT_GAPS.includes(gap));
     let reconstructed: Quantity;
     if (blocking !== undefined) reconstructed = absentQuantity(unit, "missing", blocking);
-    else if (unknownRefs.length > 0)
-      reconstructed = absentQuantity(unit, "missing", "unknown_effect");
     else {
       const summed = sumQuantities(unit, [startRow!.oriented, appliedTotal]);
       reconstructed = summed.ok
