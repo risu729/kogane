@@ -113,7 +113,7 @@ What existed before this change:
   policy's zone (`selectMarketData` checks it in the zone of both the price
   and the FX selection policy, so the two share a zone). A date-only price of the policy
   zone is eligible when it is not after the as-of date; one of another zone or
-  none is only known to within a day and refuses the selection when it might
+  none is only known to within two days (zones run from UTC−12 to UTC+14) and refuses the selection when it might
   be the newest.
 - **Knowledge.** `current` reads the parses `published_parse_runs` names now.
   `known-at` K reads prices recorded at or before K, of the parse run adopted

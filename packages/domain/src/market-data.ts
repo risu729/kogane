@@ -529,6 +529,13 @@ interface Placed {
   instant: string | null;
 }
 
+/**
+ * How far a date of another zone, or of none, can lie from its own value on
+ * the policy zone's calendar: zones run from UTC-12 to UTC+14, so a civil day
+ * somewhere covers parts of up to three days anywhere else, two either side.
+ */
+const FOREIGN_DATE_DAYS = 2;
+
 function shiftDate(text: string, days: number): string {
   return formatLocalDate(addDays(civil(text), days));
 }
@@ -542,7 +549,7 @@ function latestPossibleDay(candidate: PriceCandidate, policy: PriceSelectionPoli
   const time = candidate.price.effectiveTime;
   if (time.kind === "instant") return civilDateOfInstant(time.value, policy.zone);
   if (time.kind !== "local-date") return null;
-  return inZone(time.zone, policy.zone) ? time.value : shiftDate(time.value, 1);
+  return inZone(time.zone, policy.zone) ? time.value : shiftDate(time.value, FOREIGN_DATE_DAYS);
 }
 
 /** Why a candidate is not considered at all, or null when it is eligible. */
@@ -570,11 +577,13 @@ function exclusionOf(
   if (time.kind === "local-date") {
     if (policy.dateOnly === "exclude") return "date_only_excluded";
     // A date of the policy's zone is wholly before the bound when it is not
-    // after the as-of date. A date of another zone, or of none, lies on one of
-    // three days of this zone (D − 1 … D + 1); only one certainly after the
+    // after the as-of date. A date of another zone, or of none, lies within
+    // two days of its value here (D − 2 … D + 2); only one certainly after the
     // as-of date is excluded here, the rest are placed (or refused) in step 4.
-    const latest = inZone(time.zone, policy.zone) ? time.value : shiftDate(time.value, -1);
-    return latest <= bound.asOfDate ? null : "effective_at_or_after_bound";
+    const earliest = inZone(time.zone, policy.zone)
+      ? time.value
+      : shiftDate(time.value, -FOREIGN_DATE_DAYS);
+    return earliest <= bound.asOfDate ? null : "effective_at_or_after_bound";
   }
   const order = instantOrder(time.value, bound.effectiveBefore);
   if (order === null) return "invalid_effective_time";
@@ -762,9 +771,9 @@ function selectFromGroup(
   calendar: MarketCalendar | null,
 ): GroupOutcome {
   // Step 4: place every candidate on a civil day of the policy zone. A date
-  // with no zone, or another zone's, is only known to lie within a day of its
-  // own value; it is set aside, and refuses the selection if it might reach
-  // the top day.
+  // with no zone, or another zone's, is only known to lie within two days of
+  // its own value; it is set aside, and refuses the selection if it might
+  // reach the top day.
   const placed: Placed[] = [];
   const unplaced: PriceCandidate[] = [];
   for (const candidate of eligible) {
@@ -790,7 +799,7 @@ function selectFromGroup(
     (candidate) =>
       topDay === null ||
       candidate.price.effectiveTime.kind !== "local-date" ||
-      shiftDate(candidate.price.effectiveTime.value, 1) >= topDay,
+      shiftDate(candidate.price.effectiveTime.value, FOREIGN_DATE_DAYS) >= topDay,
   );
   if (topDay === null || reaching.length > 0)
     return {

@@ -279,23 +279,40 @@ describe("date-only prices", () => {
     const civil = policy({ dateOnly: "civil-date-in-zone" });
     const fresh = candidate({ id: "fresh", amount: "146" });
     for (const zone of [null, "UTC"]) {
-      // 9/9 elsewhere may be 9/10 here: it might be as new as the instant.
-      const near = candidate({ id: `near-${zone}`, amount: "146", time: date("2026-09-09", zone) });
+      // 9/8 elsewhere may be 9/10 here: it might be as new as the instant.
+      const near = candidate({ id: `near-${zone}`, amount: "146", time: date("2026-09-08", zone) });
       expect(refused(selectPrice(USD, [fresh, near], BOUND, civil, null))).toMatchObject({
         reason: "time_incomparable",
         candidateIds: [near.price.id],
       });
-      // 9/8 elsewhere is at the latest 9/9 here: older than the instant.
-      const old = candidate({ id: `old-${zone}`, amount: "140", time: date("2026-09-08", zone) });
+      // 9/7 elsewhere is at the latest 9/9 here: older than the instant.
+      const old = candidate({ id: `old-${zone}`, amount: "140", time: date("2026-09-07", zone) });
       expect(selected(selectPrice(USD, [fresh, old], BOUND, civil, null)).candidate).toBe(fresh);
       // Alone, it cannot be placed at all.
       expect(refused(selectPrice(USD, [old], BOUND, civil, null)).reason).toBe("time_incomparable");
-      // 9/12 elsewhere is at the earliest 9/11 here: after the as-of date.
-      const after = candidate({ amount: "146", time: date("2026-09-12", zone) });
+      // 9/13 elsewhere is at the earliest 9/11 here: after the as-of date.
+      const after = candidate({ amount: "146", time: date("2026-09-13", zone) });
       expect(
         refused(selectPrice(USD, [after], BOUND, civil, null)).excluded.effective_at_or_after_bound,
       ).toBe(1);
     }
+  });
+
+  test("a date of another zone may lie two days from its value (UTC-11 against UTC+14)", () => {
+    const kiritimati = policy({ zone: "Pacific/Kiritimati", dateOnly: "civil-date-in-zone" });
+    // The end of 9/11 in Kiritimati (UTC+14) is 9/11 10:00Z.
+    const bound = { ...BOUND, effectiveBefore: "2026-09-11T10:00:00.000Z", asOfDate: "2026-09-11" };
+    const fresh = candidate({ id: "fresh", amount: "146", at: "2026-09-11T00:00:00Z" });
+    // 9/9 in Pago Pago (UTC-11) runs from 9/10 01:00 to 9/11 00:59 in Kiritimati.
+    const pago = candidate({
+      id: "pago",
+      amount: "140",
+      time: date("2026-09-09", "Pacific/Pago_Pago"),
+    });
+    expect(refused(selectPrice(USD, [fresh, pago], bound, kiritimati, null))).toMatchObject({
+      reason: "time_incomparable",
+      candidateIds: ["pago"],
+    });
   });
 
   test("zone names are compared by the runtime's canonical spelling", () => {
