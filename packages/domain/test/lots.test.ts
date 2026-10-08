@@ -320,7 +320,7 @@ describe("acquisition fees", () => {
     expect(computed(computeLots(inputs, policy())).partition).toBe("partial-verified-scope");
   });
 
-  test("review finding 4: an unknown excluded fee keeps the disposal limited, never complete", () => {
+  test("an unknown excluded fee keeps the disposal limited, never complete", () => {
     const fees = [absentQuantity("JPY", "missing", "not_stated")];
     const inputs = [...withFee(fees), sell("s", "2030-01-07", "10", "1200")];
     const result = computeLots(inputs, policy({ acquisitionFee: "exclude" }));
@@ -648,7 +648,7 @@ describe("refs", () => {
     expect(computed(computeLots([a, otherInstrument], policy())).books).toHaveLength(2);
   });
 
-  test("review finding 2: one ref in two books of the same instrument is duplicate_ref", () => {
+  test("one ref in two books of the same instrument is duplicate_ref", () => {
     const a = buy("a", "2030-01-06", "10", "1000");
     for (const other of [
       { ...a, wrapperKey: "wrapper:test:other" },
@@ -661,7 +661,7 @@ describe("refs", () => {
       });
   });
 
-  test("review finding 2: the two sides of one transfer still refuse only their books", () => {
+  test("the two sides of one transfer still refuse only their books", () => {
     const out = input("t", { kind: "transfer" });
     const into = { ...out, holderRef: "account:test:b" };
     const result = computed(computeLots([out, into], policy()));
@@ -671,7 +671,7 @@ describe("refs", () => {
     ]);
   });
 
-  test("review finding 2: one observation under two parse runs is refused", () => {
+  test("one observation under two parse runs is same_observation_parse_runs", () => {
     const observed = (parseRunId: number, date: string): LotInput => ({
       ...buy("o", date, "10", "1000"),
       ref: {
@@ -962,7 +962,7 @@ describe("validators reject unknown keys and broken shapes", () => {
   });
 });
 
-describe("review finding 1: grouping is closed over every member, instants laid out by epoch", () => {
+describe("time groups are closed over every member", () => {
   const ma = policy({ method: "moving-average" });
   const instant = (value: string, zone = "Asia/Tokyo"): TemporalValue => ({
     kind: "instant",
@@ -1026,7 +1026,7 @@ describe("review finding 1: grouping is closed over every member, instants laid 
   });
 });
 
-describe("review finding 3: a moving-average group's outcome does not depend on ref names", () => {
+describe("a moving-average group's outcome does not depend on ref names", () => {
   const ma = policy({ method: "moving-average" });
 
   test("same-date acquisitions in two cost units stop the book whatever their names", () => {
@@ -1109,7 +1109,7 @@ describe("review finding 3: a moving-average group's outcome does not depend on 
   });
 });
 
-describe("review finding 5: a rounded share never exceeds what is left nor flips its sign", () => {
+describe("a rounded share never exceeds what is left nor flips its sign", () => {
   test("0.9 over 3 units rounded to whole yen is inexact_allocation, not a negative cost", () => {
     const book = onlyBook(
       computeLots(
@@ -1146,7 +1146,7 @@ describe("review finding 5: a rounded share never exceeds what is left nor flips
   });
 });
 
-describe("review finding 6: a split scales what is left, not what was consumed", () => {
+describe("a split scales what is left, not what was consumed", () => {
   const split = (id: string, date: string, stated: string) =>
     input(id, {
       kind: "split",
@@ -1197,7 +1197,7 @@ describe("review finding 6: a split scales what is left, not what was consumed",
   });
 });
 
-describe("review finding 7: the manifest fixes the inputs, not only their refs", () => {
+describe("the manifest fixes the inputs, not only their refs", () => {
   test("the same ref with a different quantity is a different manifest digest", async () => {
     const ten = computed(computeLots([buy("a", "2030-01-06", "10", "1000")], policy()));
     const twenty = computed(computeLots([buy("a", "2030-01-06", "20", "1000")], policy()));
@@ -1225,7 +1225,7 @@ describe("review finding 7: the manifest fixes the inputs, not only their refs",
   });
 });
 
-describe("review finding 8: the zone rule is whole-book; overlapping periods tie", () => {
+describe("the zone rule is whole-book; overlapping periods tie", () => {
   const zoned = (value: string, zone: string): TemporalValue => ({
     kind: "local-date",
     value,
@@ -1300,7 +1300,7 @@ describe("review finding 8: the zone rule is whole-book; overlapping periods tie
   });
 });
 
-describe("review nits: refusals instead of silent reads or throws", () => {
+describe("refusals instead of silent reads or throws", () => {
   test("lot selections under FIFO or moving average are refused, not ignored", () => {
     const withSelection = sell("s", "2030-01-08", "5", "600", {
       lotSelections: [{ lotId: ref("a"), quantity: q(ALPHA, "5") }],
@@ -1416,5 +1416,98 @@ describe("instants beside dates are laid out by their own wall time", () => {
     );
     expect(book.indeterminateFrom).toBeNull();
     expect(book.disposals[0]!.outcome).toBe("allocated");
+  });
+});
+
+describe("the comparison skip is sound at its window boundary", () => {
+  // A dated input elsewhere in the book puts instants on their calendar-day line.
+  const anchor = () =>
+    buy("anchor", "2030-01-01", "1", "100", {
+      time: { trade: undated("2030-01-01"), settlement: undated("2030-01-01") },
+    });
+  function undated(value: string): TemporalValue {
+    return { kind: "local-date", value, zone: null, basis: "provider" };
+  }
+  const instant = (value: string, zone: string): TemporalValue => ({
+    kind: "instant",
+    value,
+    zone,
+    basis: "provider",
+  });
+  const at = (time: TemporalValue) => ({ time: { trade: time, settlement: time } });
+
+  test("a +14:00 instant and a -12:00 instant about two days apart are ordered by epoch", () => {
+    const run = (acquired: TemporalValue, disposed: TemporalValue) =>
+      onlyBook(
+        computeLots(
+          [
+            anchor(),
+            buy("a", "2030-01-06", "10", "1000", at(acquired)),
+            sell("s", "2030-01-08", "5", "600", at(disposed)),
+          ],
+          policy(),
+        ),
+      );
+    // Calendar days three apart, so the comparison is skipped: wall times
+    // 49.5 hours apart, epochs 23.5 hours apart in the same direction.
+    const skipped = run(
+      instant("2030-01-06T23:00:00-12:00", "Etc/GMT+12"),
+      instant("2030-01-09T00:30:00+14:00", "Pacific/Kiritimati"),
+    );
+    expect(skipped.indeterminateFrom).toBeNull();
+    expect(skipped.disposals[0]!.allocations.map((a) => a.lotId)).toEqual([
+      ref("anchor"),
+      ref("a"),
+    ]);
+    // Calendar days two apart (wall times 24 hours apart), but the sale's
+    // epoch is about two hours before the purchase's. A two-day skip would
+    // have taken them as ordered and allocated the sale; they are compared,
+    // found not ordered as laid out, and tie.
+    const inverted = run(
+      instant("2030-01-06T23:59:00-12:00", "Etc/GMT+12"),
+      instant("2030-01-08T00:00:00+14:00", "Pacific/Kiritimati"),
+    );
+    expect(inverted.disposals[0]!.outcome).toBe("indeterminate");
+    expect(inverted.indeterminateFrom!.refs).toEqual([ref("a"), ref("s")]);
+  });
+
+  test("a date and an instant 47 to 49 hours past its end are ordered", () => {
+    for (const disposed of [
+      instant("2030-01-08T23:00:00-12:00", "Etc/GMT+12"),
+      instant("2030-01-09T00:00:00Z", "UTC"),
+      instant("2030-01-09T01:00:00+14:00", "Pacific/Kiritimati"),
+    ]) {
+      const book = onlyBook(
+        computeLots(
+          [
+            buy("a", "2030-01-06", "10", "1000", at(undated("2030-01-06"))),
+            sell("s", "2030-01-09", "5", "600", at(disposed)),
+          ],
+          policy(),
+        ),
+      );
+      expect(book.indeterminateFrom).toBeNull();
+      expect(book.disposals[0]!.outcome).toBe("allocated");
+    }
+  });
+
+  test("an instant 47 to 49 hours before a date's start is ordered before it", () => {
+    for (const acquired of [
+      instant("2030-01-04T01:00:00+14:00", "Pacific/Kiritimati"),
+      instant("2030-01-04T00:00:00Z", "UTC"),
+      instant("2030-01-03T23:00:00-12:00", "Etc/GMT+12"),
+    ]) {
+      const book = onlyBook(
+        computeLots(
+          [
+            buy("a", "2030-01-04", "10", "1000", at(acquired)),
+            sell("s", "2030-01-06", "5", "600", at(undated("2030-01-06"))),
+          ],
+          policy(),
+        ),
+      );
+      expect(book.indeterminateFrom).toBeNull();
+      expect(book.disposals[0]!.outcome).toBe("allocated");
+    }
   });
 });
