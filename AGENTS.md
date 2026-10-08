@@ -80,3 +80,27 @@ shapes ([ci](docs/ci.md); examples in
 [README](README.md), [roadmap](docs/roadmap.md), [ADRs](docs/adr/),
 [plans](docs/plans/), [observations](docs/observations.md),
 [economic events](docs/economic-events.md).
+
+## Cursor Cloud specific instructions
+
+Login shells have the pinned mise tools on `PATH` (`mise`, `bun`, `node`,
+`hk`, and the other CLIs in the root `mise.toml`). Dependency install is
+`mise trust -a -y`, `mise install`, then `mise run install`. Playwright
+Chromium is already in the user cache. `//apps/web:browser` downloads a
+browser only when `CI=true` and `CHROMIUM_PATH` is unset.
+
+The local UI check is the synthetic preview:
+
+```sh
+mise run //experiments/observation-pipeline-local:preview
+```
+
+It listens on `127.0.0.1:8787`. `/api/meta` reports `classification:
+synthetic`, and the client shows 表示対象の記録がありません on the financial
+routes. That empty state is the current client. The API still serves the
+ingested fixtures. 収集スケジュール stays available on `/schedules`.
+
+Container image identity checks (`cf-container-release.mjs validate` and the
+container collectors' `cf-build` tasks) require a Docker daemon. This
+environment leaves those checks to hosted CI
+([ADR 0043](docs/adr/0043-cf-container-deployment.md)).
