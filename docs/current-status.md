@@ -13,14 +13,15 @@ are separate claims. Historical acceptance records are linked from the
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Collection           | Twelve enabled daily collector schedules, shared raw evidence and source-specific manual paths; separate PRESTIA bank Worker implemented                        | A collector's presence does not prove every account/data type is captured or published                                     |
 | Evidence and parsing | Immutable raw evidence, sealed inventories, versioned parsers, adoption and replay                                                                              | Older permanently blocked terminals remain blocked; partial or unsupported shapes remain explicit                          |
+| Collection quality   | Read-only per job, source and source/unit/dataset/period stage states in closed reason codes ([ADR 0045](adr/0045-collection-quality-read.md))                  | No page yet; not verified on production; some per-query rules, empty captures and retention caps are not distinguished     |
 | Scheduling           | Fourteen active alarm jobs: twelve daily collectors, SBI VC keepalive and Processor tick; two unsupported source jobs and the pending PRESTIA bank job disabled | Maintenance research is manually refreshed; a saved setting with pending reservation is not an armed alarm                 |
 | UI                   | Evidence/history, transactions, balances, positions, reported state, card review and schedule settings                                                          | A view or empty list is not proof of complete financial coverage                                                           |
 | Identity             | Source-local identities, mappings and append-only decisions                                                                                                     | Cross-source account/instrument equivalence and unresolved identities still need review                                    |
 | Card flows           | Vpass/MyJCB single-payment purchase/refund recognition, pending-to-posted review, statement/debit review with SMBC and SBI Shinsei adapters                     | Full source coverage, installments/revolving/bonus rows, partial payments and refund allocation are incomplete             |
-| State                | Provider-reported balances, holdings, valuations and card payables on a date                                                                                    | Full event-reconstructed balances/positions and all liabilities are incomplete                                             |
-| Rewards              | Bucket/quantity/observed-expiry display, claim/read projections and pure simulation components                                                                  | Useful forecasts need actual activity, verified rules, membership and applicable offers; no external exchange is performed |
+| State                | Provider-reported balances, holdings, valuations and card payables on a date; a pure reconstruction fold with no read path yet                                  | Full event-reconstructed balances/positions and all liabilities are incomplete                                             |
+| Rewards              | Bucket/quantity display; displayed and computed expiry apart with basis or closed reason; claim/read projections; pure simulation components                    | Useful forecasts need actual activity, verified rules, membership and applicable offers; no external exchange is performed |
 | Valuation/reports    | Provider price claims, pure valuation components and fixed report artifacts                                                                                     | No general external price/FX acquisition or complete portfolio valuation product                                           |
-| Cost basis/P&L/tax   | Typed input/policy gates and decomposition components                                                                                                           | `costBasis()` always returns `needs-policy`; lots, disposal allocation and complete P&L/tax outputs are absent             |
+| Cost basis/P&L/tax   | Typed input/policy gates, decomposition components and a pure lot engine over provisional inputs                                                                | `costBasis()` always returns `needs-policy`; no adapter feeds lots; transfers, persistence, P&L and tax are absent         |
 | AI/MCP               | Shared query/explanation/proposal service and `/mcp` transport exist                                                                                            | Agent grants are empty; maintenance has no MCP tool; client access is not established by having an adapter                 |
 
 ## Source and execution blockers
@@ -55,8 +56,19 @@ are separate claims. Historical acceptance records are linked from the
   (`parser_rejected`, as under 1.0.0 and 1.1.0). Which check refused those 2
   is not stored; the owner's counts-only replay
   (`replay-diagnostics.ts globalpass-activity 2`, see
-  [operations](operations.md#replaying-a-parser-rejection)) names it. The
-  empty month was observed in English only. See
+  [operations](operations.md#replaying-a-parser-rejection)) names it. For one
+  of them it reported `unclassified_table`: 10 records but 9 detail pairs
+  and a two-header table whose meaning is unobserved; the replay now also
+  prints which record each pair carries and how that table compares, as
+  closed values, and no parser change has followed
+  ([observations](observations.md#global-pass-a-refused-page-has-ten-records-and-nine-detail-pairs-replay-diagnostics-no-parser-release)).
+  The empty month was observed in English only. A newer empty capture of a
+  month supersedes an older capture with rows under the per-month rule; since
+  2026-10-08 `/api/meta` names such months (`globalPassEmptyMonths`) and the
+  web app shows a notice to check the provider, without changing what is
+  current (implemented; its deployment is not asserted here). A read-only
+  count on 2026-10-08 found no such month in production (7 months with an
+  empty current snapshot, none with older rows). See
   [observations](observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).
 - Money Forward identity revisions and the SBI Shinsei bank adapter are
   implemented; fresh production adoption/mapping counts are not asserted here.
@@ -73,7 +85,7 @@ are separate claims. Historical acceptance records are linked from the
 The committed [App config](../services/app/wrangler.jsonc) and
 [Processor config](../services/processor/wrangler.jsonc) enable their existing
 boolean feature flags, including scheduling, operations, purchase recognition,
-rewards, reports and READ projections. CORE migrations reach 0066; READ reaches 0002. These are repository facts, not live database/deployment readback.
+rewards, reports and READ projections. CORE migrations reach 0066; READ reaches 0003. These are repository facts, not live database/deployment readback.
 
 App names a human operator in `OPERATOR_SUBJECTS`. `AGENT_GRANTS` and
 `AGENT_API_GRANTS` remain empty. The MCP handler requires an agent-API grant

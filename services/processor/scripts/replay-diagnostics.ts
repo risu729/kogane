@@ -8,7 +8,9 @@
 // a substring of one. `globalpass-activity` selects the stored GLOBAL PASS
 // activity pages whose latest `global-pass-activity` parse (of `version`, when
 // given) was rejected, newest fetch run first (`globalPassReplaySelectionSql`),
-// and prints each refused page's counts-only shape. Every wrangler call is a
+// and prints each refused page's counts-only shape, with the newest capture of
+// the same key that has a published parse compared row for row
+// (`globalPassLatestOkSql`, one more SELECT and R2 read per refused page). Every wrangler call is a
 // D1 SELECT or an R2 object read
 // through `wrangler.diagnostic.jsonc`; nothing is written anywhere. Each
 // rejection prints its closed category (scripts/parser-rejection.ts) and the
@@ -22,6 +24,8 @@ import {
   GLOBAL_PASS_ACTIVITY_PARSER,
   GLOBAL_PASS_SELECTION,
   globalPassActivityShape,
+  globalPassLatestOkComparison,
+  globalPassLatestOkSql,
   globalPassReplaySelectionSql,
   replaySelectionSql,
   replayStatementMetadata,
@@ -41,6 +45,30 @@ async function command(args: string[]): Promise<Uint8Array> {
   if ((await child.exited) !== 0) throw new Error("read-only command failed");
   return output;
 }
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  return Array.from(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))),
+    (b) => b.toString(16).padStart(2, "0"),
+  ).join("");
+}
+async function select(sql: string): Promise<any[]> {
+  return JSON.parse(
+    new TextDecoder().decode(
+      await command([
+        "d1",
+        "execute",
+        "kogane-raw-evidence",
+        "--remote",
+        "--command",
+        sql,
+        "--json",
+      ]),
+    ),
+  )[0].results;
+}
+async function rawObject(blobKey: string): Promise<Uint8Array> {
+  return command(["r2", "object", "get", `kogane-raw-evidence/${blobKey}`, "--remote", "--pipe"]);
+}
 const parserArgument = process.argv[2] || undefined;
 const versionAt = (parserArgument ?? "").indexOf("@");
 const selectionName = versionAt < 0 ? parserArgument : parserArgument!.slice(0, versionAt);
@@ -56,33 +84,18 @@ const sql =
             ? { parser: parserArgument }
             : { substring: parserArgument },
       );
-const result = JSON.parse(
-  new TextDecoder().decode(
-    await command(["d1", "execute", "kogane-raw-evidence", "--remote", "--command", sql, "--json"]),
-  ),
-);
+const rows = await select(sql);
 const summary: Record<string, number> = {};
-const selected: number = result[0].results.length;
+const selected: number = rows.length;
 let parsedCount = 0;
 let replayed = 0;
 const maxReplays = Math.max(1, Math.min(50, Number(process.argv[3]) || 1));
-for (const row of result[0].results) {
+for (const row of rows) {
   if (process.argv[4] && row.id !== Number(process.argv[4])) continue;
   if (replayed++ >= maxReplays) break;
   const parser = PARSERS.find((p) => p.name === row.parser_name)!;
-  const bytes = await command([
-    "r2",
-    "object",
-    "get",
-    `kogane-raw-evidence/${row.blob_key}`,
-    "--remote",
-    "--pipe",
-  ]);
-  const digest = Array.from(
-    new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))),
-    (b) => b.toString(16).padStart(2, "0"),
-  ).join("");
-  if (digest !== row.sha256 || bytes.length !== row.byte_size)
+  const bytes = await rawObject(row.blob_key);
+  if ((await sha256Hex(bytes)) !== row.sha256 || bytes.length !== row.byte_size)
     throw new Error("raw_integrity_failure");
   const meta: ArtifactMeta = {
     id: row.id,
@@ -109,32 +122,12 @@ for (const row of result[0].results) {
   };
   if (row.parser_name === "sony-bank-wallet-history") {
     const manifestSql = `SELECT o.blob_key,o.sha256,o.byte_size FROM fetch_artifacts a JOIN raw_objects o ON o.sha256=a.sha256 WHERE a.fetch_run_id=${Number(row.fetch_run_id)} AND a.artifact_role='collector_manifest'`;
-    const manifestRow = JSON.parse(
-      new TextDecoder().decode(
-        await command([
-          "d1",
-          "execute",
-          "kogane-raw-evidence",
-          "--remote",
-          "--command",
-          manifestSql,
-          "--json",
-        ]),
-      ),
-    )[0].results[0];
-    const manifestBytes = await command([
-      "r2",
-      "object",
-      "get",
-      `kogane-raw-evidence/${manifestRow.blob_key}`,
-      "--remote",
-      "--pipe",
-    ]);
-    const manifestHash = Array.from(
-      new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(manifestBytes))),
-      (b) => b.toString(16).padStart(2, "0"),
-    ).join("");
-    if (manifestHash !== manifestRow.sha256 || manifestBytes.length !== manifestRow.byte_size)
+    const manifestRow = (await select(manifestSql))[0];
+    const manifestBytes = await rawObject(manifestRow.blob_key);
+    if (
+      (await sha256Hex(manifestBytes)) !== manifestRow.sha256 ||
+      manifestBytes.length !== manifestRow.byte_size
+    )
       throw new Error("manifest_integrity_failure");
     const matches = JSON.parse(new TextDecoder().decode(manifestBytes)).artifacts.filter(
       (a: { dataset: string; sha256: string }) =>
@@ -260,13 +253,32 @@ for (const row of result[0].results) {
       console.log(JSON.stringify({ artifact: row.id, shape: topActivityShape(bytes) }));
     if (row.parser_name === "myjcb-skip-payment-schedule")
       console.log(JSON.stringify({ artifact: row.id, shape: skipScheduleShape(bytes) }));
-    if (row.parser_name === GLOBAL_PASS_ACTIVITY_PARSER)
+    if (row.parser_name === GLOBAL_PASS_ACTIVITY_PARSER) {
+      // The newest capture of the same key with a published parse, read and
+      // verified like the refused one; only counts and booleans print.
+      const okSql = globalPassLatestOkSql({ id: row.id, artifactKey: row.artifact_key });
+      const okRow = okSql === null ? undefined : (await select(okSql))[0];
+      let latestOkCapture = null;
+      if (okSql !== null) {
+        if (okRow === undefined) latestOkCapture = globalPassLatestOkComparison(bytes, null);
+        else {
+          const okBytes = await rawObject(okRow.blob_key);
+          latestOkCapture = globalPassLatestOkComparison(bytes, {
+            artifact: okRow.id,
+            bytes: okBytes,
+            intact:
+              (await sha256Hex(okBytes)) === okRow.sha256 && okBytes.length === okRow.byte_size,
+          });
+        }
+      }
       console.log(
         JSON.stringify({
           artifact: row.id,
           shape: globalPassActivityShape(bytes, row.artifact_key),
+          latestOkCapture,
         }),
       );
+    }
     const category = classifyParserRejection(parser.name, error);
     const key = JSON.stringify([parser.name, category]);
     summary[key] = (summary[key] ?? 0) + 1;

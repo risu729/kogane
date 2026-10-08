@@ -26,6 +26,7 @@ import {
 } from "./concepts";
 import {
   type CollectionScope,
+  GLOBAL_PASS_NOTICE_LIMIT,
   type MeasureView,
   PAGE_LIMIT,
   type PageLimit,
@@ -372,6 +373,62 @@ export const GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES = `eligible_global_pass_snapshot
           AND ${GLOBAL_PASS_MONTH("member_fa")} = snapshot.activity_month
          WHERE snapshot.snapshot_rank = 1
        )`;
+
+/**
+ * A visible transaction row of `snapshot`'s run and month, read through the
+ * same active chain the Transactions page reads, so "had rows" means rows the
+ * page showed while that snapshot was current.
+ */
+const GLOBAL_PASS_MONTH_ROWS = (snapshot: string): string => `SELECT 1
+           FROM ${activeStateProjection.observationChain("transaction_observations", "t")}
+           WHERE ${ACTIVE}
+             AND p.parser_name = 'global-pass-activity'
+             AND fa.dataset = 'globalpass-activity'
+             AND fa.fetch_run_id = ${snapshot}.fetch_run_id
+             AND fa.source_id = ${snapshot}.source_id
+             AND ${GLOBAL_PASS_MONTH("fa")} = ${snapshot}.activity_month`;
+
+/**
+ * GLOBAL PASS months whose current snapshot is empty while an older snapshot
+ * of the same month had rows (ADR 0026's amendment of 2026-10-08). The
+ * currentness rule is `GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES`, composed verbatim
+ * and unchanged: this read names the months where that rule hid rows, it never
+ * moves a page back into the current set and never counts a row. Per month: the
+ * current run, the newest older eligible run that had rows, and how many older
+ * eligible runs had rows. Every current snapshot is probed once for a row (an
+ * EXISTS that stops at the first), and only a month whose current snapshot has
+ * none probes its older snapshots; each probe reaches the run's pages through
+ * the artifact index. The result is bounded to `GLOBAL_PASS_NOTICE_LIMIT`
+ * months plus one row for truncation.
+ */
+export const GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL = `WITH ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}, emptied_global_pass_months AS (
+         SELECT latest.source_id, latest.activity_month, latest.fetch_run_id
+         FROM ranked_global_pass_snapshots latest
+         WHERE latest.snapshot_rank = 1
+           AND NOT EXISTS (${GLOBAL_PASS_MONTH_ROWS("latest")})
+       ), superseded_global_pass_rows AS (
+         SELECT emptied.source_id, emptied.activity_month,
+                emptied.fetch_run_id AS current_fetch_run_id,
+                older.fetch_run_id AS superseded_fetch_run_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY emptied.source_id, emptied.activity_month
+                  ORDER BY older.snapshot_rank
+                ) AS newest_superseded,
+                COUNT(*) OVER (
+                  PARTITION BY emptied.source_id, emptied.activity_month
+                ) AS superseded_runs
+         FROM emptied_global_pass_months emptied
+         JOIN ranked_global_pass_snapshots older
+           ON older.source_id = emptied.source_id
+          AND older.activity_month = emptied.activity_month
+          AND older.snapshot_rank > 1
+         WHERE EXISTS (${GLOBAL_PASS_MONTH_ROWS("older")})
+       )
+       SELECT source_id, activity_month, current_fetch_run_id, superseded_fetch_run_id, superseded_runs
+       FROM superseded_global_pass_rows
+       WHERE newest_superseded = 1
+       ORDER BY source_id, activity_month DESC
+       LIMIT ${GLOBAL_PASS_NOTICE_LIMIT + 1}`;
 
 /**
  * The artifact `fa` belongs to `snapshot`, a `current_vpass_snapshots` row:
@@ -771,3 +828,6 @@ export const RAW_DOWNLOAD_SQL = `SELECT o.sha256, o.blob_key, o.byte_size,
         a.artifact_key, a.mime AS declared_media_type
       FROM raw_objects o JOIN ${visibleEvidence.fetchArtifacts} a ON a.sha256 = o.sha256
       WHERE o.sha256 = ? ORDER BY a.id ASC LIMIT 1`;
+
+/** The period expressions the collection quality read groups by (collection-quality.ts). */
+export { GLOBAL_PASS_MONTH, VPASS_STATEMENT_MONTH };

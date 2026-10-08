@@ -8,6 +8,7 @@ import type {
   RewardPage,
   RewardReadExpiryPage,
 } from "./reward-contract.ts";
+import { validRewardExpiryBasis } from "./reward-contract.ts";
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
@@ -16,6 +17,7 @@ import { validIdentityResponse } from "./identity-contract.ts";
 import { validCardOwnershipReview } from "./card-ownership-contract.ts";
 import { validCardPurchasePage } from "./card-purchase-contract.ts";
 import { validReportedState } from "./reported-state-contract.ts";
+import { validCollectionQualityResponse } from "./collection-quality-contract.ts";
 import { validCardSettlementReviewPage } from "./card-settlement-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
@@ -39,6 +41,8 @@ import type {
 import type {
   ApiMetadata,
   ArtifactDetail,
+  GlobalPassEmptyMonth,
+  GlobalPassEmptyMonths,
   BalanceAdoption,
   BalanceEvidenceMember,
   BalanceHistoryItem,
@@ -191,6 +195,13 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   reportedStateOnDate: optional(boolean),
   opsApi: boolean,
 });
+const globalPassEmptyMonth = object<GlobalPassEmptyMonth>({
+  source: text,
+  month: (value): value is string => typeof value === "string" && /^\d{4}-\d{2}$/u.test(value),
+  currentFetchRunId: identifier,
+  supersededFetchRunId: identifier,
+  supersededRuns: (value): value is number => identifier(value) && value > 0,
+});
 const metadata = object<ApiMetadata>({
   parsingHealth: optional(
     object<NonNullable<ApiMetadata["parsingHealth"]>>({
@@ -198,6 +209,9 @@ const metadata = object<ApiMetadata>({
       running: identifier,
       failed: identifier,
     }),
+  ),
+  globalPassEmptyMonths: optional(
+    object<GlobalPassEmptyMonths>({ months: array(globalPassEmptyMonth), truncated: boolean }),
   ),
   apiVersion: literal(1),
   source: object<ApiMetadata["source"]>({
@@ -652,6 +666,9 @@ const rewardReadExpiry = object<RewardReadExpiryRow>({
   reasonCodes: array(text),
   uncertaintyCodes: array(text),
   basisRefs: array(text),
+  // ADR 0049: a basis must pass the domain's exact-key check; null is "not
+  // recorded"; an absent key is a response from an App before the field.
+  expiryBasis: optional(nullable(validRewardExpiryBasis)),
 });
 const rewardReadPage = object<RewardReadExpiryPage>({
   rows: array(rewardReadExpiry),
@@ -735,6 +752,8 @@ export function validApiResponse(path: string, value: unknown): boolean {
     return validCardSettlementReviewPage(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
   if (path === "/api/v2/reported-state") return validReportedState(value);
+  if (path.startsWith("/api/collection-quality"))
+    return validCollectionQualityResponse(path, value);
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/v2/query") return validSharedQueryResponse(value);
   if (path === "/api/filter-options") {

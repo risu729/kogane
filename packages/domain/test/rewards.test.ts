@@ -516,6 +516,17 @@ describe("SC12 / AT44 / AT45 / AT46 — expiry rules", () => {
       estimateExpiry(usedBasis, points, withUsed, [], day("2026-09-09")).expiringBuckets[0]!
         .policyEstimated,
     ).toEqual(derived("2027-02-15"));
+
+    // A missing usage date is not replaced by the posting date: the activity's
+    // date under this policy is unknown, so no deadline is computed (ADR 0049).
+    const withoutUsed: ActivityHistory = {
+      ...history,
+      activities: [{ ...withUsed.activities[0]!, usedDate: null }],
+    };
+    const computed = estimateExpiry(usedBasis, points, withoutUsed, [], day("2026-09-09"))
+      .expiringBuckets[0]!.expiryBasis.computed;
+    expect(computed.status).toBe("unavailable");
+    expect(computed.reasonCode).toBe("activity_date_unknown");
   });
 
   test("a deadline already in the past is reported, not hidden", () => {

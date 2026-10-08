@@ -69,6 +69,82 @@ the store. Readers can ask for `latest` (current mapping revisions) or
 `as-recorded` (the revisions the run pinned) and every organized response
 names the interpretation it was computed under.
 
+## Cross-identifier instrument candidates
+
+One instrument can be stored under several identifiers: a listing identifier
+at one source and a provider code at another, or a listing and a code inside
+SBI when a trade names a venue the SBI rule does not map. Every such
+identifier keeps its own rule mapping until a person re-maps it.
+`queryInstrumentResolution` (`packages/application/src/query/instrument-resolution.ts`,
+[ADR 0055](adr/0055-instrument-candidates.md)) reads the security, crypto and
+product identifiers that current published observations use and answers,
+under policy `instrument-candidates-v1`:
+
+- **candidates**: pairs that share an equal ISIN, an equal RIC, or an equal
+  country and security code as the identity rule recorded them, and state no
+  conflicting fact. Each names its evidence, the facts that agree, the facts
+  one side or both sides do not state (market, currency, share class, product
+  class, ISIN; no rule records the last three, so every pair names them) and
+  `crossSource`, which is false only when both identifiers are used by
+  exactly one source, the same one;
+- **separated** pairs: they share such a value but state a different
+  instrument kind, ISIN, RIC, country, MIC, currency, share class or product
+  class. Each side counts with every identifier that maps to its instrument
+  now (`via` names the others whose facts conflict), so a code a person
+  mapped onto one listing is separated from a listing on another market.
+  They are never candidates;
+- **hints**: equal current mapping labels (after width, case and whitespace
+  normalisation) with no shared value, unless the two are already on one
+  instrument or a label is only the identifier's own code (a rule's fallback
+  when the provider gives no name). A name is never evidence; a hint has no
+  status and nothing to adopt;
+- each identifier's state: `unresolved-candidates`, `resolved-by-decision`,
+  `kept-separate`, `no-candidate` (it stays what its own mapping says, which
+  is not a global identification) or `shared-without-decision` (shares an
+  instrument without a manual mapping; no rule produces it).
+
+Market is compared through MIC or RIC only; the provider's market wording is
+shown, never compared. An identifier's currencies are those the observations
+using it as a security are denominated in: the trade unit, or the unit when
+there is no trade unit or the trade unit is a crypto asset code (SBI VC
+Trade). A trade or unit code outside the explicit currency catalogue, or a
+use with no unit at all, makes the currency unconfirmed rather than falling
+back to the settlement unit or being left out, and
+valuations count, so SBI's yen valuations of a foreign holding beside its
+trading-currency ones make its currencies several and the comparison
+`currency-unconfirmed`.
+
+Nothing here adopts. A candidate is `adopted` only when its two identifiers
+map to one instrument, which only a manual `identity.assign` does today, and
+`rejected` only when the newest `listed_as` relation from one identifier's
+current instrument to the other identifier is rejected. A proposed candidate
+names those two commands (assign the subject identifier to the anchor's
+instrument; reject `listed_as` from the anchor's instrument to the subject) for
+a person to plan with a reason through the [change lifecycle](change-lifecycle.md),
+where agents can plan but never approve or commit. A manually mapped
+identifier, or one sharing its instrument, is always the anchor over one that
+is not; when both identifiers are settled that way the candidate names no
+adopt command and a `hold` code (`subject-decided-elsewhere`,
+`subject-shares-instrument`) says why. It still names the keep-apart
+rejection, which moves no mapping, so a person can close it as `rejected`. `queryInstrumentHistory`
+lists an identifier's mapping revisions, mapping decisions and `listed_as`
+relations, oldest first; a correction is always a later entry.
+
+Limits today: no HTTP route, page or MCP tool serves these reads. Only SBI
+Securities and SBI VC Trade store security, crypto or product identifiers, so
+cross-broker candidates need a second source whose identity rule records a
+code and country, an ISIN or a RIC. No rule records ISIN, share class or
+product class. Valuation and the report job still key holdings by the
+provider-local `instrument:<source>:<market>:<code>`, so no candidate moves a
+price, quantity or cost. The facts read walks every current identity
+observation once, like the instrument catalogue; its D1 cost is not measured
+and must be measured before a route serves it. An equal country and code is
+proposed with no period comparison, so a code reassigned after a delisting
+still pairs, and nothing names that as a gap. The status read ignores a
+`listed_as` relation's `valid_from` and `valid_to`, so a rejection limited to
+a period reads as permanent. A rejection from `instrument:<id>` keeps the
+identifier apart from every identifier currently mapped to that instrument.
+
 ## Acceptance gates
 
 - All merged source patterns exercised with synthetic tests; all seven SBI

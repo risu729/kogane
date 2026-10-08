@@ -69,19 +69,21 @@ Every method of `ObservationReader` and what it does. "Filter" is the typed
 scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
 `measureView`); each query declares which keys it accepts and refuses others.
 
-| Method               | Reads                                                                             | Current means                                                       | Filter vs grouping                                                                                                                                                                             | Order                                               | Limit                              |
-| -------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------- |
-| `overview`           | every `visibleEvidence` relation, counted under the contract table names          | recorded (parse runs list includes failed and superseded)           | none                                                                                                                                                                                           | fetch runs / parse runs by id desc                  | 501 each                           |
-| `parsingHealth`      | `observation_parse_jobs`, `parse_runs`; probes `observation_fetch_artifacts`      | job repaired by a newer published parse                             | none                                                                                                                                                                                           | —                                                   | —                                  |
-| `listTransactions`   | `transaction_observations` via `activeStateProjection`                            | published + successful run + per-source current page/container      | **Group first, then filter.** Duplicates within (source, account, parser family, external id) are ranked over the whole active set and rank 1 kept; the filter applies to that derived result. | `COALESCE(as_of,'') DESC, id DESC`                  | 501                                |
-| `listLatestBalances` | `balance_observations` via `activeStateProjection` + `completeSnapshotCandidates` | as above, plus current complete snapshot, MyJCB and V Point windows | **Group first, then filter.** Latest witness per (source, parser family, unit, account, metric, instrument) is ranked over the whole active set; the filter applies after.                     | `source_id, source_account, metric, instrument, id` | 501, or 5001 for the candidate set |
-| `listBalanceHistory` | `balance_observations` via `visibleEvidence.parseRuns`                            | recorded: failed, superseded and partial-run rows included, marked  | No grouping; filter, order, page.                                                                                                                                                              | `COALESCE(as_of, observed_at,'') DESC, id DESC`     | 501                                |
-| `listPositions`      | `position_observations` via `activeStateProjection` + snapshot membership         | published + successful run + current complete snapshot              | No grouping; filter, order, page, then valuations are matched for the first 500 positions of the page.                                                                                         | `source_id, source_account, security_code, id`      | 501 positions; pairs bounded       |
-| `listArtifacts`      | `observation_fetch_artifacts`; counts via `visibleEvidence.parseRuns`             | recorded (counts include failed and superseded parses)              | Cursor and source inside the query.                                                                                                                                                            | `a.id DESC`                                         | 501                                |
-| `filterOptions`      | per kind; balances read recorded results so superseded rows stay filterable       | transactions/positions: active; balances: recorded, by measure view | Distinct values; no paging.                                                                                                                                                                    | by source, account                                  | 5,000 bound                        |
-| `getArtifact`        | `observation_fetch_artifacts` + reachable raw object + `observation_fetch_runs`   | recorded: every non-pending parse run of the artifact               | —                                                                                                                                                                                              | parse runs by id                                    | 5,000 bound per list               |
-| `getObservation`     | the observation table via `visibleEvidence.observations`                          | recorded: failed and superseded results are shown with provenance   | —                                                                                                                                                                                              | —                                                   | —                                  |
-| `getRawDownload`     | `raw_objects` joined to `observation_fetch_artifacts`                             | reachable through a visible artifact                                | —                                                                                                                                                                                              | lowest artifact id                                  | 1                                  |
+| Method                  | Reads                                                                              | Current means                                                                 | Filter vs grouping                                                                                                                                                                             | Order                                               | Limit                               |
+| ----------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------- |
+| `overview`              | every `visibleEvidence` relation, counted under the contract table names           | recorded (parse runs list includes failed and superseded)                     | none                                                                                                                                                                                           | fetch runs / parse runs by id desc                  | 501 each                            |
+| `parsingHealth`         | `observation_parse_jobs`, `parse_runs`; probes `observation_fetch_artifacts`       | job repaired by a newer published parse                                       | none                                                                                                                                                                                           | —                                                   | —                                   |
+| `globalPassEmptyMonths` | the GLOBAL PASS snapshot CTEs, probing `transaction_observations` by run and month | the month's current snapshot is empty and an older eligible snapshot had rows | none; a notice, not a visibility rule                                                                                                                                                          | source, month desc                                  | 100 months, plus one for truncation |
+| `listTransactions`      | `transaction_observations` via `activeStateProjection`                             | published + successful run + per-source current page/container                | **Group first, then filter.** Duplicates within (source, account, parser family, external id) are ranked over the whole active set and rank 1 kept; the filter applies to that derived result. | `COALESCE(as_of,'') DESC, id DESC`                  | 501                                 |
+| `listLatestBalances`    | `balance_observations` via `activeStateProjection` + `completeSnapshotCandidates`  | as above, plus current complete snapshot, MyJCB and V Point windows           | **Group first, then filter.** Latest witness per (source, parser family, unit, account, metric, instrument) is ranked over the whole active set; the filter applies after.                     | `source_id, source_account, metric, instrument, id` | 501, or 5001 for the candidate set  |
+| `listBalanceHistory`    | `balance_observations` via `visibleEvidence.parseRuns`                             | recorded: failed, superseded and partial-run rows included, marked            | No grouping; filter, order, page.                                                                                                                                                              | `COALESCE(as_of, observed_at,'') DESC, id DESC`     | 501                                 |
+| `listPositions`         | `position_observations` via `activeStateProjection` + snapshot membership          | published + successful run + current complete snapshot                        | No grouping; filter, order, page, then valuations are matched for the first 500 positions of the page.                                                                                         | `source_id, source_account, security_code, id`      | 501 positions; pairs bounded        |
+| `listArtifacts`         | `observation_fetch_artifacts`; counts via `visibleEvidence.parseRuns`              | recorded (counts include failed and superseded parses)                        | Cursor and source inside the query.                                                                                                                                                            | `a.id DESC`                                         | 501                                 |
+| `filterOptions`         | per kind; balances read recorded results so superseded rows stay filterable        | transactions/positions: active; balances: recorded, by measure view           | Distinct values; no paging.                                                                                                                                                                    | by source, account                                  | 5,000 bound                         |
+| `getArtifact`           | `observation_fetch_artifacts` + reachable raw object + `observation_fetch_runs`    | recorded: every non-pending parse run of the artifact                         | —                                                                                                                                                                                              | parse runs by id                                    | 5,000 bound per list                |
+| `getObservation`        | the observation table via `visibleEvidence.observations`                           | recorded: failed and superseded results are shown with provenance             | —                                                                                                                                                                                              | —                                                   | —                                   |
+| `getRawDownload`        | `raw_objects` joined to `observation_fetch_artifacts`                              | reachable through a visible artifact                                          | —                                                                                                                                                                                              | lowest artifact id                                  | 1                                   |
+| collection quality      | `src/collection-quality.ts`; see [Collection quality](#collection-quality)         | per cell, by the composed snapshot rules                                      | Cells per (dataset, parser, unit, period) of one source, ranked whole, then paged.                                                                                                             | dataset, unit, period desc, parser                  | 501 cells; 200 jobs and sources     |
 
 ### Limits
 
@@ -140,8 +142,27 @@ per month
 The rule does not look at row counts: since `global-pass-activity@1.2.0` an
 empty month is an `ok` parse with no row, so a newer run's empty page is its
 month's current snapshot and an older run's rows for that month stop being
-current, with no reason shown. That limit is pinned by a test of the same file
+current. That limit is pinned by a test of the same file
 ([ADR 0026's empty-month amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-empty-months-are-read-as-no-rows)).
+What changed on 2026-10-08 is that the case is no longer silent:
+`GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL` (`globalPassEmptyMonths`, served on
+`/api/meta` as `globalPassEmptyMonths` and shown as a notice by the web app)
+composes the same CTEs verbatim and names every month whose current snapshot
+carries no row while an older eligible snapshot of the same month had rows: the
+current run, the newest older run with rows and how many older runs had rows.
+It reads nothing into the lists and moves nothing: the newer empty page stays
+current, the older rows stay out, and a person checks the provider. A month
+that was only ever empty, a newer run that is not current (failed, or a page
+unparsed) and an older capture that was never a whole snapshot are not
+reported; rows are those of the published parse, so an older capture re-parsed
+to no row does not count. Every current snapshot is probed once for a row (an
+`EXISTS` that stops at the first) and only a month whose current snapshot has
+none probes its older snapshots, each by run and month through
+`idx_fetch_artifacts_run_role`; the plan makes the snapshot CTEs' one pass over
+the artifacts and no other whole scan
+(`test/global-pass-snapshots.test.ts`: hand-built cases, an independent model
+on a scaled store with empty captures, and the plan check;
+[ADR 0026's notice amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-empty-months-that-supersede-rows-are-reported)).
 
 `currentCardUsageSql({ afterId, limit })` (`src/card-usage.ts`) composes the
 same CTEs for purchase recognition: every current Vpass and MyJCB usage row with
@@ -295,3 +316,63 @@ exact-arithmetic subtotal over the filter scope. `legacyLatestPage` serves the
 v1 `/api/balances` window from the same rows in the same order, which is what
 the compatibility adapter uses. See
 [Balance read model](balance-read-model.md) for the contract.
+
+## Collection quality
+
+`src/collection-quality.ts` ([ADR 0045](adr/0045-collection-quality-read.md))
+holds the SQL behind `GET /api/collection-quality` and
+`GET /api/collection-quality/<sourceId>`; `packages/application/src/query/collection-quality.ts`
+maps its rows to the contract and the closed reason codes. It is not an
+`ObservationReader` method: like the dated reads it is composed by an
+application query over an executor.
+
+| Text                       | Reads                                                                                                                                                        | Bound                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `SCHEDULE_QUALITY_SQL`     | every `collection_schedules` row, its newest receipt by `nominal_at` (the unique index) and its held lease                                                   | 201 rows; more is refused                                |
+| `TERMINAL_QUALITY_SQL`     | the `collection_runs` rows of exactly the (collector, run id) pairs a receipt names, with the newest `registered` stage and the visible fetch run            | the pairs given                                          |
+| `UNREGISTERED_QUALITY_SQL` | never-registered terminals of the given collectors, once per run by its newest row, grouped by code                                                          | every row of those sources, by index; grows with history |
+| `SOURCE_QUALITY_SQL`       | every visible source and its newest visible fetch run, read by id                                                                                            | 201 rows; more is refused                                |
+| `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership | 501 cells from an offset                                 |
+
+A cell is (dataset, parser, fetch unit, period, MyJCB statement state,
+currentness rule). Its newest capture is its newest fetch run by capture time;
+its current capture is the newest fetch run with a member of the current set,
+decided by `current_global_pass_snapshots`, `current_vpass_snapshots`
+(`VPASS_SNAPSHOT_MEMBER`), `current_myjcb_snapshots` (`MYJCB_LEDGER_MEMBER`),
+or `activeStateProjection` with `completeSnapshotCandidates.currentMember`. The
+CTE texts are composed unchanged; `GLOBAL_PASS_MONTH` and
+`VPASS_STATEMENT_MONTH` are exported from `src/sql.ts` so the cell's period is
+the expression the snapshot partitions on. The parsers whose current set a
+read narrows further (`UNCOMPOSED_QUERY_RULE_PARSERS`) carry
+`query_rule_not_composed`. A capture no job or parse names is its own cell,
+shown only while it is newer than every parsed capture of its slot. The read
+counts no observation, so an empty current capture is `current` like any
+other; the GLOBAL PASS months where such a capture supersedes an older one
+with rows are named by `globalPassEmptyMonths` (the Queries table), not by
+this read. A
+`container-snapshot` cell is current in the sense of the Balances and
+Positions reads: the Transactions read applies no snapshot selection, so the
+transactions a snapshot parser also emits
+(`sbi-shinsei-top-balances-and-activity`) stay listed from a capture this read
+calls not current.
+
+### Cost
+
+D1 has no table statistics. `test/collection-quality.test.ts` checks every plan
+on a complete-CORE store with none: the summary reads are keyed by job, run
+and source. `UNREGISTERED_QUALITY_SQL` reads every `collection_runs` row of
+each visible collector source on each call through `collection_runs_run
+(source)`, so it grows with the terminal history (measured once in review on a
+loaded machine with every row never registered, the worst case: about 20 ms at
+4,000 rows, 200 ms at 16,000; not asserted). The cell read reaches the source's artifacts by
+`idx_fetch_artifacts_source_dataset_time (source_id=?)`, its runs by
+`idx_fetch_runs_source` and their units by `idx_fetch_units_run`, and every
+job, parse, publication, claim and unit report by key; no observation table is
+read. Its only whole-store passes are inside the composed snapshot CTEs, the
+passes the Transactions, Balances and Positions reads already make, and each is
+evaluated once (an `IN` list materialized once, or an automatic index built
+once), never per row. A per-source CTE is reached only from a cell of its
+dataset: measured once on `bun:sqlite`, a Sony Bank page took the same time
+with 0 or 2,000 GLOBAL PASS pages in the store (not asserted). On the test's
+scaled store (90 daily captures of four sources) one source's cells take
+roughly 10 to 50 ms on `bun:sqlite`; not measured on workerd or D1.

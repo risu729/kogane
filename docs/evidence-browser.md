@@ -126,6 +126,13 @@ the local synthetic snapshot adapter, and the production Worker are told apart b
 they implement, not by what they are called. The full table is in
 [frontend.md](frontend.md#api-metadata-and-capabilities).
 
+Beside the capabilities the production Worker reports two advisory fields,
+neither a capability nor a freshness claim: `parsingHealth` (registered parse
+jobs pending, running or failed) and `globalPassEmptyMonths` (GLOBAL PASS
+months whose current empty capture supersedes an older capture with rows;
+identifiers only, see [read model](read-model.md#card-snapshot-currentness-and-current-card-usage)).
+The web app shows each as a notice; the local store omits both.
+
 The schema for this object and for the query parameters each capability
 unlocks lives once, in `shared/api-schema.ts`. The local server's parameter
 rejection, the production Worker's, the response validator, and the client's
@@ -807,3 +814,40 @@ needs both the reader flag and a sealed snapshot. `/api/balances` is
 unchanged and, with the flag on, is served through a compatibility adapter
 over the same projection. See [Balance read model](balance-read-model.md) for
 the contract, the cursor rules, the budgets and the rollback.
+
+## Collection quality (`/api/collection-quality`)
+
+`GET /api/collection-quality` and `GET /api/collection-quality/<sourceId>`
+state, in closed codes, what each collection stage last did
+([ADR 0045](adr/0045-collection-quality-read.md),
+[read model](read-model.md#collection-quality)). They are read-only, GET-only,
+behind the same Access gate and reader authority as the other evidence routes,
+write nothing, and answer 404 where the store has no CORE 0065 scheduling
+tables. Every answer is checked by `validApiResponse` against
+`packages/observation-shared/src/collection-quality-contract.ts`.
+
+- **Summary** (`/api/collection-quality`, no parameters): every configured job
+  (`collection_schedules`) under the CORE sources its collectors register
+  under, and every visible source. Per job: enabled, supported, a held
+  execution lease, and the newest receipt with each run it names as CORE has
+  it (`registered` with its fetch run, `pending`, `blocked` with its code, or
+  `unrecorded`), the run's own outcome and coverage. Per source: its
+  collectors, its newest visible fetch run, its never-registered terminals by
+  code, and its reasons (`schedule_disabled`, `occurrence_failed`,
+  `user_action_required`, `lease_held`, `dataset_withheld`, ...). Jobs whose
+  source registers under no CORE source (the Processor tick) are listed apart.
+  More than 200 jobs or sources is `413 result_limit_exceeded`, never cut.
+- **Cells** (`/api/collection-quality/<sourceId>?offset=N`): per dataset,
+  parser, fetch unit and period, the newest capture (run success, unit outcome,
+  artifacts, raw objects stored, parse states, failure codes, incomplete
+  coverage claims) and the current capture (its fetch run and capture time),
+  the state `current`, `older-current` or `no-current`, and the reasons
+  (`parse_pending`, `parser_rejected`, `not_parse_eligible`,
+  `coverage_incomplete`, `newer_capture_not_current`, `period_unplaced`,
+  `query_rule_not_composed`, `not_in_latest_run`, ...). 500 cells a page with
+  `coverage.nextOffset`; an unknown or invisible source is 404.
+
+A missing stage is a reason, never a zero or an empty success: a source with
+no capture has no cells and `latestFetchRun: null` with `no_registered_run`. A
+capture time is shown as stored; nothing computes an age. There is no page for
+these routes yet.
