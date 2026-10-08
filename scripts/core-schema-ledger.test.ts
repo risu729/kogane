@@ -182,6 +182,8 @@ describe("G0-09 READ schema ledger", () => {
       "0001_read_baseline.sql",
       // U16: the reward second stage of 04 §2, in the same database.
       "0002_reward_read.sql",
+      // ADR 0049: the displayed and computed expiry basis of each estimate.
+      "0003_reward_expiry_basis.sql",
     ]);
     const core = new Set(ledger.tables.map((table) => table.name));
     expect(

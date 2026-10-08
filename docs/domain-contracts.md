@@ -48,6 +48,17 @@ conflict`; `Quantity { unitRef, value }`.
   and DST-free. No time-zone database is embedded; `zone` names the deadline
   or display zone, the instant string carries the offset in effect.
 
+## `civil-date.ts` — civil dates in named zones
+
+- `civilDateOfInstant(text, zone)` and `canonicalZone(zone)` are the domain's
+  only uses of zone data: the civil date of an instant in a named zone, and
+  the runtime's spelling of a zone name, from the runtime's own
+  `Intl.DateTimeFormat("en-CA", { timeZone })` (one formatter cached per
+  zone). A non-instant, a malformed zone name or a zone the runtime does not
+  know is `null`, never UTC, and no date becomes an instant. The module is
+  separate from `time.ts`, which is in the parser digest closure
+  (`packages/parsers/src/parsers/digests.ts`) and stays free of zone data.
+
 ## `metrics.ts` — what a number measures
 
 - `MetricDefinition`: `metricId`, `providerMetric`, `measurementKind` (stock,
@@ -70,6 +81,42 @@ conflict`; `Quantity { unitRef, value }`.
 - `PriceObservation` states `quoteAmount` per `baseQuantity`; `valueAtPrice`
   checks the unit and price basis (12,500 fund units at 8,000 JPY per 10,000
   units is 10,000 JPY, not 12,500 × 8,000).
+
+## `market-data.ts` — as-of price and FX selection
+
+[ADR 0056](adr/0056-as-of-price-fx-selection.md). Every function takes the
+policy it applies; none has a default.
+
+- `PriceSelectionPolicy` (admitted rules, price kinds, temporal bases, zone,
+  freshness in calendar or business days, date-only rule, multi-source rule,
+  candidate scope), `FxConversionPolicy` (pivot, quotable currencies, one
+  selection policy with one kind, inverse rounding or none), `MarketCalendar`
+  (supplied with evidence; none shipped) and `SelectionBound` (exclusive
+  `effectiveBefore`, `asOfDate`, `current` or `known-at` knowledge). The
+  validators reject unknown keys, empty or duplicated lists, bad day counts,
+  zones the runtime does not know or spells differently, a bound that is not
+  exactly the end of its date in the policy zone, and a known-at instant finer
+  than a millisecond (`validKnownAtInstant`). A policy's digest is its
+  `canonicalDigest`.
+- `selectPrice(key, candidates, bound, policy, calendar)` runs six checks in
+  order and returns one selected price (with its age and corroborating ids)
+  or one closed refusal (`PRICE_SELECTION_REFUSALS`), with every removed
+  candidate counted by `CANDIDATE_EXCLUSIONS`. Instants are compared through
+  `parseInstant`, prices per unit of base with exact decimals.
+  `selectFxRate(currency, …)` answers a currency outside the FX policy
+  `unsupported_pair` and otherwise selects under the policy's selection policy.
+- `fxPath`, `convertToBase` and `valueInBase` go through one pivot: into it
+  exactly, out of it as one ratio rounded once with `RoundingInputs`, a missing
+  or refused rate a refusal (`CONVERSION_REFUSALS`), never 1:1. An FX
+  selection of another key or another selection policy throws.
+- `freshnessWindowStart` and `selectionReadWindow` size the candidate read;
+  `selectionManifest` builds the sorted input set whose digest is a context id.
+  `isCurrencyCode` is the shared three-letter check.
+- `PROPOSED_FX_SELECTION_POLICY_V1`, `PROPOSED_FX_CONVERSION_POLICY_V1` and
+  `PROPOSED_EQUITY_SELECTION_POLICY_V1` hold recommended values only; their
+  ids start with `PROPOSAL_POLICY_PREFIX`, which `selectMarketData` refuses,
+  and a test fails if a production source, script or task outside the module
+  names one.
 
 ## `scope.ts` — what set a number covers, and adoption
 
@@ -209,6 +256,49 @@ described in [identity](identity.md#cross-identifier-instrument-candidates).
 - `identifierResolutions` gives each identifier one of
   `IDENTIFIER_RESOLUTION_STATES`; an instrument shared without a manual
   mapping is `shared-without-decision`, never resolved.
+
+## `lots.ts` — lots and disposal allocation over a provisional input
+
+- `computeLots(inputs, policy)` is pure and deterministic: the same inputs in
+  any order give the same result. Inputs (`LotInput`) carry the provisional
+  tag `provisional-lot-input-v0`, a pinned `LotInputRef` (event at a
+  revision, or observation in a parse run, with `lotInputRefText`), a kind
+  (`acquisition | disposal | split | snapshot | transfer`), the book key
+  (holder, instrument, opaque wrapper key), trade and settlement times,
+  quantity, consideration, fees, an optional input FX rate, a split ratio and
+  lot selections. `validLotInput`, `validLotInputRef` and `validLotPolicy`
+  reject unknown keys.
+- `LotPolicy` pins purpose, method (`fifo | moving-average |
+specific-identification`), scope, time basis, ordering rule, fee and FX
+  treatment, `fxPolicyRef`, `costUnitRef` and an optional `leg`/`carry`
+  `RoundingPolicy`.
+- Whole-run refusals, in order: `policy_missing`; `invalid_input` for a
+  malformed policy; `policy_unsupported` for a rounding policy other than
+  `leg`/`carry` (checked before the tax gate); `tax_rules_unverified` for a
+  `tax` purpose, through the unchanged `costBasis()` gate; `invalid_input`
+  for inputs that are not a list, break the contract or carry lot selections
+  outside specific identification; `duplicate_ref` for one ref twice in a
+  book or in two books of one instrument; `same_event_revisions`;
+  `same_observation_parse_runs` (one observation and JSON path under two
+  parse runs; a re-parse under a different or null JSON path is not caught).
+  Per-book refusals: `transfer_contract_pending`, `unsupported_instrument`.
+- Inside a book the first ambiguous or inconsistent input, or group of
+  inputs the time does not order, is `indeterminateFrom` and later disposals
+  are `upstream_indeterminate`. A `limited` disposal carries only
+  `LOT_LIMITED_REASON_CODES`: `unknown_cost`, `unknown_acquisition_fee`,
+  `unknown_proceeds`, `unknown_disposal_fee`, `fx_rate_missing`,
+  `unit_mismatch`. Amounts that are not known are typed reasons, never zero,
+  and costs in different units are never summed.
+- Output: disposals with allocations (a pool allocation names how many of
+  the pool's members had joined; `pools` lists each pool's members once),
+  allocated cost, proceeds and disposal fees, outcome
+  `allocated | limited | indeterminate`; remaining lots with a `lineage`; a
+  manifest of policy, refs and the validated inputs for `canonicalDigest`, so
+  equal digests mean equal results while `LOT_ENGINE_VERSION`, bumped on
+  every allocation-rule change, is equal. The manifest holds amounts: it is a
+  calculation input that a future writer stores only as a report body, never
+  in a log or tick record. No gain, no tax conclusion. No adapter produces
+  these inputs yet ([ADR 0051](adr/0051-provisional-lot-engine.md)).
 
 ## `result.ts` — the shape UI and agents share
 

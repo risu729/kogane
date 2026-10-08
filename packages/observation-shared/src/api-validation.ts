@@ -8,6 +8,7 @@ import type {
   RewardPage,
   RewardReadExpiryPage,
 } from "./reward-contract.ts";
+import { validRewardExpiryBasis } from "./reward-contract.ts";
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
@@ -665,6 +666,9 @@ const rewardReadExpiry = object<RewardReadExpiryRow>({
   reasonCodes: array(text),
   uncertaintyCodes: array(text),
   basisRefs: array(text),
+  // ADR 0049: a basis must pass the domain's exact-key check; null is "not
+  // recorded"; an absent key is a response from an App before the field.
+  expiryBasis: optional(nullable(validRewardExpiryBasis)),
 });
 const rewardReadPage = object<RewardReadExpiryPage>({
   rows: array(rewardReadExpiry),

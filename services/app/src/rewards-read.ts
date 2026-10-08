@@ -36,6 +36,10 @@ import {
   type RewardSnapshotRow,
 } from "../../../packages/storage-d1/src/read/index.ts";
 import { createCoreProjectionSource, d1Executor } from "../../../packages/read-model/src/index";
+import {
+  validRewardExpiryBasis,
+  type RewardExpiryBasis,
+} from "../../../packages/observation-shared/src/reward-contract.ts";
 import { HttpError, json } from "./http";
 
 /** Rows per page; the same shape of limit the v2 balance routes accept. */
@@ -162,6 +166,22 @@ function temporal(value: string | null): unknown {
   }
 }
 
+/**
+ * The stored displayed/computed basis of one row, or null when the build that
+ * wrote it recorded none (before `reward-projection-v2`) or the stored value
+ * no longer validates. Null is "not recorded"; it is never read as "no
+ * computed expiry" and nothing is reconstructed from the other columns.
+ */
+function expiryBasis(value: string | null): RewardExpiryBasis | null {
+  if (value === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return validRewardExpiryBasis(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function estimateDto(row: RewardEstimateRow) {
   return {
     holdingRef: row.holding_ref,
@@ -190,6 +210,9 @@ function estimateDto(row: RewardEstimateRow) {
     reasonCodes: refs(row.reason_codes_json),
     uncertaintyCodes: refs(row.uncertainty_codes_json),
     basisRefs: refs(row.basis_refs_json),
+    // The provider's display and the computed expiry apart, each with its
+    // basis (ADR 0049). `expiresOn`/`basis` above are only the list's order.
+    expiryBasis: expiryBasis(row.expiry_basis_json),
   };
 }
 
