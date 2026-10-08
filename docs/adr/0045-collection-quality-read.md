@@ -91,15 +91,29 @@ not composed: their cells carry `query_rule_not_composed`, and a test pins the
 list to the reads that apply them.
 
 **Every gap is a reason, never a zero.** The reason lists are closed
-(`SOURCE_REASONS`, `CELL_REASONS`); each is read from one stored state. A
-stored code that is not a safe code reads `unclassified`. Freshness is the
-capture time of the current capture as stored; the read computes no age and
-judges nothing stale.
+(`SOURCE_REASONS`, `CELL_REASONS`); each is read from one stored state. The
+stored stage codes (receipt failure, terminal block, unit failure, parse
+failure and coverage cause codes) are passed on as stored when they have the
+safe-code shape, with no list of their own applied here; any other stored
+text reads `unclassified`. Freshness is the capture time of the current
+capture as stored; the read computes no age and judges nothing stale.
 
-**Unit keys are shown.** They are provider-local opaque identifiers (class c of
-[ADR 0029](0029-data-classification-and-unkeyed-identity.md)), already the
-basis of the `source_account` the evidence lists show, and the per-unit view is
-the point of the read. Logs carry only the route class and status, as before.
+**Unit keys are shown.** The cells route is a new API aggregation entry that
+returns each cell's raw fetch unit key. Unit keys are provider-local opaque
+identifiers (class c of
+[ADR 0029](0029-data-classification-and-unkeyed-identity.md)): for example
+Vpass card tokens and Money Forward account digests (the `-v2-` values
+unkeyed digests, the retired importer's `-v1-` values keyed HMACs), MyJCB
+connection ids, and Mizuho's branch and account number with a page range. The
+route returns them for units whose captures were never parsed or were not
+parse-eligible too, so it is not merely a re-return of the `source_account`
+values the evidence lists already show. It inherits the authenticated reader
+boundary of the evidence routes: every signed-in Access subject holds the
+reader grant (`readerGrant`), not only `OPERATOR_SUBJECTS`. It adds no MCP
+tool or grant, no external recipient and no stored record or log sink; logs
+carry only the route class and status, as before. The owner's separate
+security review of this exposure read neither real data nor the current Access
+policy. The per-unit view is the point of the read.
 
 **One alias table.** Two jobs' sources differ from the source their
 collector writes in its terminal: `vpoint` writes `v-point`, and `vpoint-pay`
@@ -114,9 +128,18 @@ No migration, writer, table or flag is added.
 - Open limits, stated in the read rather than hidden:
   - the per-query rules above are not evaluated, and MoneyForward months and
     SMBC Direct ranges show as one `latest` cell per dataset and unit;
+  - a `container-snapshot` cell is current in the sense of the Balances and
+    Positions reads; the Transactions read applies no snapshot selection, so
+    the transactions a snapshot parser also emits
+    (`sbi-shinsei-top-balances-and-activity`) stay listed from a capture this
+    read calls not current;
   - an empty current capture (the GLOBAL PASS empty month,
     [ADR 0026's amendment](0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-empty-months-are-read-as-no-rows))
-    is `current` like any other; the read counts no observation;
+    is `current` like any other; the read counts no observation. The months
+    where such a capture supersedes an older one with rows are named by
+    `/api/meta`'s `globalPassEmptyMonths`
+    ([ADR 0026's amendment of 2026-10-08](0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-empty-months-that-supersede-rows-are-reported)),
+    not by this read;
   - a provider's retention cap (Mobile Suica's 100 rows) has no stored code of
     its own; it shows as the parser's refusal;
   - unresolved account identity beyond the withheld Vpass collector dataset
@@ -126,7 +149,12 @@ No migration, writer, table or flag is added.
     the raw download route, not here;
   - only the newest receipt of each job is linked to its runs;
   - there is no page yet; the API is the first part of #542.
-- Cost: the summary reads are keyed by job, run id and source. The cell read
+- Cost: the summary reads are keyed by job, run id and source.
+  `UNREGISTERED_QUALITY_SQL` reads every `collection_runs` row of each visible
+  collector source on each call, through the `(source, run_id)` index, so it
+  grows with the terminal history (measured once in review on a loaded
+  machine with every row never registered, the worst case: about 20 ms at
+  4,000 rows and 200 ms at 16,000; not asserted). The cell read
   reaches the source's artifacts through `idx_fetch_artifacts_source_dataset_time`
   and everything else by key; its only whole-store passes are the composed
   snapshot CTEs', which the Transactions, Balances and Positions reads already
@@ -134,9 +162,12 @@ No migration, writer, table or flag is added.
   once on `bun:sqlite`, a Sony Bank page took the same time with 0 or 2,000
   GLOBAL PASS pages in the store (not asserted by a test).
 - `zod/mini` joins the web bundle through the shared validator: the production
-  client's main chunk grew from 624.53 kB (180.38 kB gzip) to 649.28 kB
-  (189.11 kB gzip), this contract included (Vite production build, measured
-  locally).
+  client's main chunk grows by about 24.7 kB (8.7 kB gzip), this contract
+  included (Vite production build, measured locally: 624.53 kB, 180.38 kB
+  gzip, to 649.28 kB, 189.11 kB gzip, on `3a1a2a9`; 626.31 kB, 180.94 kB
+  gzip, to 651.00 kB, 189.67 kB gzip, on `870bd25`). No `Function`
+  constructor or `eval` is in the built chunk, so the `script-src 'self'`
+  policy holds.
 
 ## Verification
 

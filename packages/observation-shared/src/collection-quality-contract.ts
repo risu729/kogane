@@ -2,9 +2,12 @@
 // `GET /api/collection-quality/<sourceId>` (docs/evidence-browser.md, ADR 0045).
 //
 // What each collection stage of a source, and of each source × unit × dataset
-// × period, last did, in closed codes only. Nothing here is an amount, a
-// merchant or provider text: every field is an identifier, a capture or
-// receipt time, a count of stored records or a code from a closed list. A
+// × period, last did, in codes. Nothing here is an amount or a merchant: every
+// field is an identifier (fetch unit keys included, ADR 0045), a period, a
+// capture or receipt time, a count of stored records, a code from a closed
+// list, or a stored stage code of the safe-code shape (`unclassified` for any
+// other stored text). The one stored label passed on as stored is a MyJCB
+// period label the month rule does not read (`statement-slot` below). A
 // state that is missing, unconfirmed or partial is a reason code, never a
 // zero and never "complete" (INV05); a cell with no current capture is
 // `no-current` with its reasons, not an empty success.
@@ -59,8 +62,11 @@ export const CURRENT_RULES = [
 /**
  * How a cell's period is named: `latest` (one period, the newest capture),
  * `activity-month` (GLOBAL PASS `YYYY-MM`), `statement-month` (Vpass
- * `YYYYMM`), `statement-slot` (MyJCB payment month with its statement state;
- * a label no rule places has no value).
+ * `YYYYMM`), `statement-slot` (MyJCB payment month `YYYY-MM` with its
+ * statement state, as `myjcbStatementSlot` reads it: a relative label no rule
+ * places has no value, and any other label the month reading does not place
+ * is its own slot and is shown as stored, as card usage's `statement_period`
+ * shows it).
  */
 export const PERIOD_KINDS = [
   "latest",
@@ -271,7 +277,7 @@ const newest = z
     /** Artifacts whose raw object is reachable (`evidenceExists`). */
     rawStored: count,
     parses,
-    /** Closed failure codes of the failed parses. */
+    /** Failure codes of the failed parses, as stored when safe codes, else `unclassified`. */
     failureCodes: distinct(code),
     /** Published parses whose coverage claim is not complete. */
     incompleteCoverage: count,
