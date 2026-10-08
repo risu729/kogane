@@ -1051,6 +1051,33 @@ describe("global-pass-activity: detail tables, unclassified tables and records c
     }
   });
 
+  test("detail tables under several parents, or none, have no container", () => {
+    const first = compactTable(syntheticRecord(0), 0);
+    const split = shapeOf(mutate(first, `<div>${first}</div>`, WHOLE));
+    expect(split.detailContainer).toBeNull();
+    expect(split.recordDetailAlignment).toMatchObject({
+      unmatchedRecords: [],
+      monotonic: true,
+      indexAligned: true,
+    });
+    const bare = shapeOf(syntheticMonth(RECORDS, 0));
+    expect(bare.detailTables).toEqual({
+      compactHeadersUniform: null,
+      expandedHeadersUniform: null,
+      compactClassTokensUniform: null,
+      expandedClassTokensUniform: null,
+    });
+    expect(bare.detailContainer).toBeNull();
+    // No compact table carries a record, so every record is unmatched and no
+    // carried record gives a majority pattern.
+    expect(bare.recordDetailAlignment!.unmatchedRecords).toEqual([0, 1, 2, 3]);
+    expect(
+      bare.unmatchedRecords!.flatMap((record) =>
+        [...record.desktop, ...record.responsive].map((cell) => cell.patternEqualsMajority),
+      ),
+    ).toEqual(Array(RECORDS * 13).fill(null));
+  });
+
   test("an unreadable page or an uncomparable record is unknown, never zero or false", () => {
     const notUtf8 = new Uint8Array([0x3c, 0xff, 0xfe, 0x3e]);
     expect(
@@ -1107,6 +1134,112 @@ describe("global-pass-activity: detail tables, unclassified tables and records c
     expect(
       globalPassLatestOkComparison(twoShort, { artifact: 9, bytes: encode(WHOLE), intact: true }),
     ).toMatchObject({ recordsAlsoPresent: RECORDS - 1, unmatchedRecordPresent: null });
+  });
+
+  test("distinctive texts, attribute values, ids and numbers anywhere in the page never print", () => {
+    // Every class, id, attribute value, header, cell and loose text below is a
+    // ZQXLEAK sentinel; the ids end in five-digit numbers, the cells hold a
+    // five-digit amount and a date, and none of them may reach the line.
+    const leaky = mutate(
+      '<div class="synthetic-details">\n',
+      '<div class="synthetic-details">\n<p class="zqxleakpara">ZQXLEAKPARA</p>\n',
+      ONE_SHORT,
+    )
+      .replace(
+        /<table class="synthetic-compact" id="compactTable3">[\s\S]*?<\/table>/u,
+        '<zqx-leak-tag data-zqx="ZQXLEAKDATA" title="ZQXLEAKTITLE">ZQXLEAKTEXT 86,420</zqx-leak-tag>' +
+          '<table class="synthetic-compact zqxleakother" id="zqxLeakId94799" name="zqxleakname"' +
+          ' title="ZQXLEAKTITLE" style="color: zqxleakstyle" data-zqxleakattr="ZQXLEAKDATA2"' +
+          ' aria-label="ZQXLEAKARIA" onclick="zqxleakon()" zqxleakcustom="ZQXLEAKCUSTOM"' +
+          ' summary="ZQXLEAKSUMMARY"><thead><tr><th colspan="2">ZQXLEAKHEADER 2087/11/29</th>' +
+          "<th>Transaction Detail</th></tr></thead><tbody><tr>" +
+          td([LAST.amount, "USD 86,420.13", "2087/11/29", "お取引ZQXLEAK", "ZQXLEAKCELL"]) +
+          "</tr></tbody></table>",
+      )
+      .replaceAll('id="compactTable', 'id="zqxLeakId9470')
+      .replaceAll('id="expandedWrap', 'id="zqxLeakWrap9471')
+      .replaceAll('class="synthetic-', 'class="zqxleakclass-');
+    expect(leaky).toContain("zqxLeakId94799");
+    expect(refusal(leaky)).toEqual({ reason: "unclassified_table" });
+    const shape = shapeOf(leaky);
+    const latestOkCapture = globalPassLatestOkComparison(encode(leaky), {
+      artifact: 1,
+      bytes: encode(WHOLE),
+      intact: true,
+    });
+    // The comparisons still see the structure behind the sentinels.
+    expect(shape.detailContainer!.children.map((child) => child.tag)).toEqual([
+      "p",
+      ...Array.from({ length: RECORDS - 1 }, () => ["table", "div"]).flat(),
+      "other",
+      "table",
+    ]);
+    expect(shape.detailContainer!.pairsInOrder).toBe(RECORDS - 1);
+    const [other] = shape.otherTables!;
+    expect(other).toMatchObject({
+      th: 2,
+      td: 5,
+      colspanMax: 2,
+      attributeNames: [
+        "aria-*",
+        "class",
+        "data-*",
+        "id",
+        "name",
+        "on*",
+        "other",
+        "style",
+        "summary",
+        "title",
+      ],
+      // 94799 after 94700-94702 (compact ids) and 94710-94712 (wrapper ids).
+      idNumericSuffixRank: 6,
+      idNumericSuffixDistinct: 7,
+      idNumericSuffixPeers: 6,
+      headerMatches: [
+        { activity: null, compact: null, expanded: null, surveyed: false },
+        { activity: 1, compact: 1, expanded: null, surveyed: true },
+      ],
+    });
+    expect(other!.cells.map((cell) => cell.equalsRecordCell.length)).toEqual([2, 0, 0, 0, 0]);
+    expect(other!.cells.map((cell) => [cell.amountLike, cell.dateLike, cell.hasJapanese])).toEqual([
+      [true, false, false],
+      [true, false, false],
+      [false, true, false],
+      [false, false, true],
+      [false, false, false],
+    ]);
+    expect(latestOkCapture).toMatchObject({ unmatchedRecordPresent: true });
+    const printed = JSON.stringify({ shape, latestOkCapture });
+    for (const text of [
+      "zqx",
+      "leak",
+      "86,420",
+      "86420",
+      "420.13",
+      "2087",
+      "11/29",
+      "947",
+      "お取引",
+      "color",
+      "Transaction",
+      "USD",
+      "JPY",
+      "2099",
+      ...Object.values(LAST).filter((value) => value !== ""),
+    ])
+      expect(printed.toLowerCase(), text).not.toContain(text.toLowerCase());
+    // Every number printed is a small count or index, never a decimal.
+    expect((printed.match(/\d+/gu) ?? []).filter((digits) => digits.length > 2)).toEqual([]);
+    expect(printed).not.toMatch(/\d[./]\d/u);
+    // Every word is a field name or a closed tag, attribute-name class or row kind.
+    const closed = new Set([
+      ...fieldNames({ shape, latestOkCapture }),
+      ...["table", "div", "p", "other", "class", "id", "name", "style", "summary", "title"],
+      ...["aria", "data", "on", "desktop", "responsive", "true", "false", "null"],
+    ]);
+    const words = printed.match(/[A-Za-z_][A-Za-z0-9_]*/gu) ?? [];
+    expect(words.filter((word) => !closed.has(word))).toEqual([]);
   });
 });
 
