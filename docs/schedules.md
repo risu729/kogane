@@ -39,7 +39,13 @@ If a process dies during collection, the source remains locked against another
 manual or scheduled attempt. Inspect its execution state and saved history first.
 Only after confirming the previous execution stopped, use **停止した実行を解除**.
 The release compares the exact lease reference, clears no newer lease, and starts
-no collection. Normal executions release their own leases on completion.
+no collection. Repeating the confirmed request succeeds while that source's lease
+is already empty; if another execution acquired a different reference, the retry
+conflicts and leaves it intact. A source with no lease row still conflicts.
+The button blocks repeated confirmation and submission for the same source until
+the release and its state readback finish. The page refreshes after success or
+failure, and keeps the result visible after the released lease disappears. Normal
+executions release their own leases on completion.
 
 Deployment applies CORE 0065 and uploads named collector entrypoints before the
 Processor and App. It removes the fourteen configured Cron jobs and reconciles
