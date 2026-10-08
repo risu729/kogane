@@ -453,3 +453,66 @@ test("acceptance hands the maintenance writer exactly the #560 write, and its re
     reservation: "pending",
   });
 }, 60000);
+
+test("an acceptance whose decision row fails leaves the revision once and the proposal not current", async () => {
+  const { env } = world();
+  const now = Date.parse("2026-10-08T00:00:00.000Z");
+  // The Processor env whose acceptance row cannot be written; every other
+  // statement, the writer's included, runs on the real database.
+  const failingDecision = {
+    ...env,
+    DB: new Proxy(env.DB, {
+      get(target, key) {
+        if (key !== "prepare") {
+          const value = Reflect.get(target, key, target) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return (sql: string) =>
+          /INSERT INTO maintenance_survey_decisions[\s\S]*'accepted'/u.test(sql)
+            ? {
+                bind: () => ({
+                  run: () => Promise.reject(new Error("synthetic_d1_failure")),
+                }),
+              }
+            : target.prepare(sql);
+      },
+    }),
+  } as Env;
+  const revisions = async (ruleId: string) =>
+    (await env.DB.prepare("SELECT count(*) AS n FROM provider_maintenance_rules WHERE id=?")
+      .bind(ruleId)
+      .first<number>("n")) ?? 0;
+  for (const line of ["毎週火曜日 2:00～3:00", "毎週土曜日 23:00～翌7:30"]) {
+    await survey(env, line, now);
+    const proposal = (await newestProposal(env))!;
+    const ruleId = proposal.rule_id ?? proposedRuleId("mizuho-bank", proposal.id);
+    const before = await revisions(ruleId);
+    const failed = await decide(failingDecision, proposal.id, "accept");
+    expect([failed.status, ((await failed.json()) as { error: string }).error]).toEqual([
+      503,
+      "decision_record_failed",
+    ]);
+    // The writer's revision stands, once, and no decision was recorded.
+    expect(await revisions(ruleId)).toBe(before + 1);
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM maintenance_survey_decisions WHERE proposal_id=?",
+      )
+        .bind(proposal.id)
+        .first<number>("n"),
+    ).toBe(0);
+    // The proposal reads as not current, new or changed alike.
+    const view = await maintenanceSurveyView(env, now, CONFIG);
+    expect(view.proposals.find((p) => p.id === proposal.id)?.current).toBe(false);
+    // A retry cannot apply it a second time: the writer's version check refuses it.
+    const retried = await decide(env, proposal.id, "accept");
+    expect([retried.status, ((await retried.json()) as { error: string }).error]).toEqual([
+      409,
+      "revision_conflict",
+    ]);
+    expect(await revisions(ruleId)).toBe(before + 1);
+    // It can still be rejected, which records the judgement only.
+    expect((await decide(env, proposal.id, "reject")).status).toBe(200);
+    expect(await revisions(ruleId)).toBe(before + 1);
+  }
+}, 60000);

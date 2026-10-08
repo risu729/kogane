@@ -58,7 +58,7 @@ export const ACCEPTED_REASON = "maintenance-survey-proposal-accepted";
 export function proposalRef(id: number): string {
   return `maintenance-survey:proposal:${id}`;
 }
-/** The id a `new` proposal's rule is created under. */
+/** The id a `new` proposal's rule is created under (the survey view repeats it in SQL). */
 export function proposedRuleId(source: string, id: number): string {
   return `${source}-survey-${id}`;
 }
@@ -198,7 +198,8 @@ export async function maintenanceSurveyView(
     db
       .prepare(
         `SELECT p.*,f.url,f.fetched_at,f.sha256,
-          (SELECT MAX(r.revision) FROM provider_maintenance_rules r WHERE r.id=p.rule_id) AS current_revision
+          (SELECT MAX(r.revision) FROM provider_maintenance_rules r
+            WHERE r.id=COALESCE(p.rule_id,p.source||'-survey-'||p.id)) AS current_revision
          FROM maintenance_survey_proposals p JOIN maintenance_survey_fetches f ON f.id=p.fetch_id
          WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions d WHERE d.proposal_id=p.id)
          ORDER BY p.id LIMIT ?`,
@@ -256,7 +257,9 @@ export async function maintenanceSurveyView(
       kind: p.kind,
       ruleId: p.rule_id,
       baseRevision: p.base_revision,
-      // A new rule's id is free until its acceptance creates it.
+      // A new proposal is current while its rule (`proposedRuleId`, the
+      // COALESCE above) does not exist; once the writer created it, even if
+      // the acceptance row then failed, it is not.
       current: (p.current_revision ?? 0) === p.base_revision,
       timezone: p.timezone,
       pattern: JSON.parse(p.pattern_json) as MaintenancePattern,
