@@ -265,6 +265,19 @@ describe("selectMarketData", () => {
         POLICIES,
       ),
     ).toBe("invalid_request");
+    // A bound that is not the end of the as-of date in the policies' zone.
+    expect(
+      await refused(
+        { ...REQUEST, bound: { ...BOUND, effectiveBefore: "2026-09-11T00:00:00Z" } },
+        POLICIES,
+      ),
+    ).toBe("invalid_request");
+    expect(
+      await refused(REQUEST, {
+        ...POLICIES,
+        fx: { ...FX, selection: { ...FX.selection, zone: "UTC" } },
+      }),
+    ).toBe("invalid_request");
     // A proposal is not a decision: no query runs under one.
     for (const proposed of [
       { ...POLICIES, price: PROPOSED_EQUITY_SELECTION_POLICY_V1 },

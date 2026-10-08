@@ -125,7 +125,9 @@ export async function selectMarketData(
   // Currencies no admitted rule quotes are answered without a read.
   const quoted = request.fxCurrencies.filter((code) => policies.fx.currencies.includes(code));
   if (
-    !validSelectionBound(request.bound) ||
+    // The bound must be the end of the as-of date in every policy's zone.
+    !validSelectionBound(request.bound, policies.price.zone) ||
+    !validSelectionBound(request.bound, policies.fx.selection.zone) ||
     !request.prices.every(
       (entry) =>
         isText(entry.key.baseInstrumentRef, 256) &&

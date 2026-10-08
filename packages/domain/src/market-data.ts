@@ -407,12 +407,34 @@ export function validKnownAtInstant(value: unknown): value is string {
   return fraction === null || fraction[1]!.length <= 3;
 }
 
-export function validSelectionBound(value: unknown): value is SelectionBound {
+/**
+ * Whether `instant` is exactly the end of civil date `date` in `zone`: the
+ * first instant of the next day there, the one moment the date changes.
+ */
+function endOfDate(instant: string, date: string, zone: string): boolean {
+  const parsed = parseInstant(instant);
+  if (parsed === null || parsed.nanoseconds !== 0) return false;
+  const before = new Date((parsed.epochSeconds - 1) * 1000);
+  if (Number.isNaN(before.getTime())) return false;
+  return (
+    civilDateOfInstant(instant, zone) === shiftDate(date, 1) &&
+    civilDateOfInstant(before.toISOString(), zone) === date
+  );
+}
+
+/**
+ * A bound whose `effectiveBefore` is exactly the end of `asOfDate` in `zone`
+ * (for Asia/Tokyo, `(D + 1) 00:00 +09:00`), with a known-at instant the read
+ * can compare exactly. A bound that is not aligned to its date would make
+ * every price dated after the date incomparable rather than refused cleanly.
+ */
+export function validSelectionBound(value: unknown, zone: string): value is SelectionBound {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ["effectiveBefore", "asOfDate", "knowledge"]) ||
     !validInstantText(value.effectiveBefore) ||
     !validLocalDateText(value.asOfDate) ||
+    !endOfDate(value.effectiveBefore, value.asOfDate, zone) ||
     !isRecord(value.knowledge)
   )
     return false;

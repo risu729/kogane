@@ -108,7 +108,10 @@ What existed before this change:
   parser, never as text.
 - **The bound.** `effectiveBefore` is exclusive, as the dated state's
   `fetched_at < (D + 1) 00:00` Asia/Tokyo is ([ADR 0019](0019-dated-reported-state.md));
-  `asOfDate` is the civil date ages count to. A date-only price of the policy
+  `asOfDate` is the civil date ages count to, and `validSelectionBound`
+  requires `effectiveBefore` to be exactly the end of that date in the
+  policy's zone (`selectMarketData` checks it in the zone of both the price
+  and the FX selection policy, so the two share a zone). A date-only price of the policy
   zone is eligible when it is not after the as-of date; one of another zone or
   none is only known to within a day and refuses the selection when it might
   be the newest.

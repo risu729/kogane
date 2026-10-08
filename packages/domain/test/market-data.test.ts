@@ -202,8 +202,8 @@ describe("filter and counts", () => {
     ).toBe(1);
     // Current knowledge does not look at the recorded time.
     expect(selected(selectPrice(USD, [unreadable], BOUND, POLICY, null))).toBeTruthy();
-    expect(validSelectionBound(at("2026-09-10T02:00:00.123Z"))).toBe(true);
-    expect(validSelectionBound(at("2026-09-10T02:00:00.1234Z"))).toBe(false);
+    expect(validSelectionBound(at("2026-09-10T02:00:00.123Z"), "Asia/Tokyo")).toBe(true);
+    expect(validSelectionBound(at("2026-09-10T02:00:00.1234Z"), "Asia/Tokyo")).toBe(false);
   });
 
   test("a zero or negative stored price is never a candidate", () => {
@@ -815,9 +815,31 @@ describe("policies, digests and the manifest", () => {
       }),
     ).toBe(false);
     expect(validFxConversionPolicy(fxPolicy({ mode: "half-even", scaleByUnit: {} }))).toBe(false);
-    expect(validSelectionBound(BOUND)).toBe(true);
-    expect(validSelectionBound({ ...BOUND, effectiveBefore: "2026-09-10" })).toBe(false);
-    expect(validSelectionBound({ ...BOUND, knowledge: { mode: "known-at" } })).toBe(false);
+    expect(validSelectionBound(BOUND, "Asia/Tokyo")).toBe(true);
+    expect(validSelectionBound({ ...BOUND, effectiveBefore: "2026-09-10" }, "Asia/Tokyo")).toBe(
+      false,
+    );
+    expect(validSelectionBound({ ...BOUND, knowledge: { mode: "known-at" } }, "Asia/Tokyo")).toBe(
+      false,
+    );
+    // The bound must be the end of the as-of date in the policy's zone, exactly.
+    for (const effectiveBefore of [
+      "2026-09-10T15:00:00.001Z",
+      "2026-09-10T14:59:59Z",
+      "2026-09-11T00:00:00Z",
+    ])
+      expect(validSelectionBound({ ...BOUND, effectiveBefore }, "Asia/Tokyo")).toBe(false);
+    // The same instant in another offset is the same bound.
+    expect(
+      validSelectionBound({ ...BOUND, effectiveBefore: "2026-09-11T00:00:00+09:00" }, "Asia/Tokyo"),
+    ).toBe(true);
+    expect(
+      validSelectionBound({ ...BOUND, effectiveBefore: "2026-09-11T00:00:00+09:00" }, "UTC"),
+    ).toBe(false);
+    expect(validSelectionBound({ ...BOUND, effectiveBefore: "2026-09-11T00:00:00Z" }, "UTC")).toBe(
+      true,
+    );
+    expect(validSelectionBound(BOUND, "Mars/Olympus_Mons")).toBe(false);
   });
 
   test("the proposals are valid policies, frozen, and named as proposals", () => {
