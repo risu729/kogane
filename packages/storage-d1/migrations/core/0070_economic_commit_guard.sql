@@ -115,8 +115,11 @@ CREATE TRIGGER economic_event_times_no_delete BEFORE DELETE ON economic_event_ti
 CREATE TRIGGER economic_event_times_no_replace BEFORE INSERT ON economic_event_times
 WHEN EXISTS(SELECT 1 FROM economic_event_times WHERE event_id=NEW.event_id AND revision=NEW.revision AND role=NEW.role)
 BEGIN SELECT RAISE(ABORT,'economic event time replacement is forbidden'); END;
+-- A time belongs to a live revision, as a claim does: a superseded revision,
+-- sealed or not, takes no new child.
 CREATE TRIGGER economic_event_times_guard BEFORE INSERT ON economic_event_times
-WHEN NOT EXISTS(SELECT 1 FROM economic_event_revisions r WHERE r.event_id=NEW.event_id AND r.revision=NEW.revision)
+WHEN NOT EXISTS(SELECT 1 FROM economic_event_revisions r WHERE r.event_id=NEW.event_id AND r.revision=NEW.revision
+ AND r.superseded_by IS NULL)
 BEGIN SELECT RAISE(ABORT,'economic_event_time_invalid'); END;
 
 -- What one leg is: a real movement, a breakdown of another leg (a stated fee
@@ -139,11 +142,14 @@ CREATE TRIGGER economic_leg_effects_no_delete BEFORE DELETE ON economic_leg_effe
 CREATE TRIGGER economic_leg_effects_no_replace BEFORE INSERT ON economic_leg_effects
 WHEN EXISTS(SELECT 1 FROM economic_leg_effects WHERE event_id=NEW.event_id AND revision=NEW.revision AND leg_index=NEW.leg_index)
 BEGIN SELECT RAISE(ABORT,'economic leg effect replacement is forbidden'); END;
--- The leg exists; a breakdown or correspondence names another leg of the same
--- revision that is not itself a breakdown or correspondence, and a breakdown
--- is in that leg's unit (amounts in different units are never parts, INV03).
+-- The leg exists on a live revision; a breakdown or correspondence names
+-- another leg of the same revision that is not itself a breakdown or
+-- correspondence, and a breakdown is in that leg's unit (amounts in different
+-- units are never parts, INV03).
 CREATE TRIGGER economic_leg_effects_guard BEFORE INSERT ON economic_leg_effects
-WHEN NOT EXISTS(SELECT 1 FROM economic_legs l WHERE l.event_id=NEW.event_id AND l.revision=NEW.revision AND l.leg_index=NEW.leg_index)
+WHEN NOT EXISTS(SELECT 1 FROM economic_legs l
+  JOIN economic_event_revisions r ON r.event_id=l.event_id AND r.revision=l.revision AND r.superseded_by IS NULL
+  WHERE l.event_id=NEW.event_id AND l.revision=NEW.revision AND l.leg_index=NEW.leg_index)
  OR (NEW.of_leg_index IS NOT NULL AND NOT EXISTS(SELECT 1 FROM economic_legs o
   WHERE o.event_id=NEW.event_id AND o.revision=NEW.revision AND o.leg_index=NEW.of_leg_index))
  OR (NEW.of_leg_index IS NOT NULL AND EXISTS(SELECT 1 FROM economic_leg_effects o

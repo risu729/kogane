@@ -1163,6 +1163,37 @@ describe("W3: a sealed revision takes no more children", () => {
   });
 });
 
+describe("times and effects", () => {
+  test("P6: a time or effect row needs a live revision", async () => {
+    const db = database();
+    proposeSettlement(db, "proposal-1", 101);
+    await run(db, acceptSettlementWrites(db, "proposal-1", 101));
+    // Withdraw it: revision 1 is superseded (and was never sealed).
+    await run(
+      db,
+      adoptWrites(db, {
+        eventId: "settlement-event-proposal-1",
+        revision: 2,
+        withdraw: true,
+        released: [{ book: "cash-movement", key: keyOf(db, 101) }],
+      }),
+    );
+    const before = snapshot(db);
+    expect(() =>
+      db.run(
+        "INSERT INTO economic_event_times(event_id,revision,role,temporal_json) VALUES('settlement-event-proposal-1',1,'settlement','{}')",
+      ),
+    ).toThrow("economic_event_time_invalid");
+    expect(() =>
+      db.run(
+        "INSERT INTO economic_leg_effects(event_id,revision,leg_index,effect,of_leg_index) VALUES('settlement-event-proposal-1',1,0,'movement',NULL)",
+      ),
+    ).toThrow("economic_leg_effect_invalid");
+    expect(snapshot(db)).toEqual(before);
+    db.close();
+  });
+});
+
 describe("one live holder across writers", () => {
   test("a settlement accepted on a debit, then an economic claim on it, is refused", async () => {
     const db = database();
