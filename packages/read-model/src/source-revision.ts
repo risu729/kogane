@@ -75,6 +75,16 @@ export const VISIBILITY_REVISION_LEDGER = [
   "fetch_run_annotations",
 ] as const;
 
+// Neither list names the economic event tables (0032), the card purchase
+// sidecars (0047) or the consumption guard's tables (0070: economic_claims,
+// economic_revision_seals, economic_commit_log, economic_event_times,
+// economic_leg_effects, economic_identity_epochs). The balance projection does
+// not read them, and every batch that writes an event revision, a claim, a
+// seal or a commit row also inserts the decision_revisions row it hangs from,
+// which is in the ledger and already moves the revision. They are not
+// operational state either, so they do not belong in the exclusion list below,
+// whose entries are checkpoint, job and projection-output tables.
+
 /**
  * Deliberately outside the ledger (05 §2). Bumping the revision when the
  * projection records its own progress would make every build stale the moment

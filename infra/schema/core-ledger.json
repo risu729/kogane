@@ -1071,6 +1071,17 @@
         }
       ],
       "sha256": "67621a515660753b1846bee314eee76d69b0aec67f375f4c9a724a316bafd3c8"
+    },
+    {
+      "file": "0070_economic_commit_guard.sql",
+      "statementCount": 52,
+      "insertStatements": [
+        {
+          "table": "economic_identity_epochs",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "dd8a95413b4b677b62a88c1e2f7693a7620028574b2ef9c39d79acaf938ccc7a"
     }
   ],
   "tables": [
@@ -3327,6 +3338,8 @@
         }
       ],
       "triggers": [
+        "card_purchase_recognition_keys_economic_claim_held",
+        "card_purchase_recognition_keys_economic_sealed",
         "card_purchase_recognition_keys_guard",
         "card_purchase_recognition_keys_no_delete",
         "card_purchase_recognition_keys_no_replace",
@@ -3460,6 +3473,7 @@
         }
       ],
       "triggers": [
+        "card_purchase_recognitions_economic_sealed",
         "card_purchase_recognitions_facts",
         "card_purchase_recognitions_guard",
         "card_purchase_recognitions_no_delete",
@@ -3985,11 +3999,23 @@
           "onUpdate": "NO ACTION"
         }
       ],
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "card_settlement_decisions_event",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "event_id",
+            "revision"
+          ]
+        }
+      ],
       "triggers": [
         "card_settlement_decisions_bump_revision_delete",
         "card_settlement_decisions_bump_revision_insert",
         "card_settlement_decisions_bump_revision_update",
+        "card_settlement_decisions_economic_claim_held",
+        "card_settlement_decisions_economic_sealed",
         "card_settlement_decisions_guard",
         "card_settlement_decisions_no_delete",
         "card_settlement_decisions_no_update"
@@ -5659,6 +5685,268 @@
       "sqlSha256": "7903382c97aac659"
     },
     {
+      "name": "economic_claims",
+      "classification": "core-keep",
+      "planRow": "economic events",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "book",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "consumption_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 4
+        },
+        {
+          "name": "alias_class",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "identity_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "event_id",
+        "revision",
+        "book",
+        "consumption_key"
+      ],
+      "foreignKeys": [
+        {
+          "column": "event_id",
+          "references": "economic_event_revisions(event_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "identity_epoch",
+          "references": "economic_identity_epochs(identity_epoch)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "observation_id",
+          "references": "transaction_observations(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "parse_run_id",
+          "references": "parse_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "revision",
+          "references": "economic_event_revisions(revision)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "economic_claims_alias",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "book",
+            "alias_class"
+          ]
+        },
+        {
+          "name": "economic_claims_key",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "book",
+            "consumption_key"
+          ]
+        },
+        {
+          "name": "economic_claims_observation",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "observation_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "economic_claims_alias_one_live_holder",
+        "economic_claims_book_supported",
+        "economic_claims_guard",
+        "economic_claims_no_delete",
+        "economic_claims_no_replace",
+        "economic_claims_no_update",
+        "economic_claims_one_live_holder",
+        "economic_claims_sealed"
+      ],
+      "noUpdateTriggers": [
+        "economic_claims_no_update"
+      ],
+      "noDeleteTriggers": [
+        "economic_claims_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "69e2321a7e3c355b"
+    },
+    {
+      "name": "economic_commit_log",
+      "classification": "core-keep",
+      "planRow": "economic events",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "commit_seq",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "decision_revision_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "operation_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "principal",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "payload_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "members_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "claims_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "released_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "known_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "core_epoch",
+        "commit_seq"
+      ],
+      "foreignKeys": [
+        {
+          "column": "decision_revision_id",
+          "references": "decision_revisions(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "economic_commit_log_guard",
+        "economic_commit_log_no_delete",
+        "economic_commit_log_no_replace",
+        "economic_commit_log_no_update"
+      ],
+      "noUpdateTriggers": [
+        "economic_commit_log_no_update"
+      ],
+      "noDeleteTriggers": [
+        "economic_commit_log_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "e8294e7f25ec6f86"
+    },
+    {
       "name": "economic_event_revisions",
       "classification": "core-keep",
       "planRow": "economic events",
@@ -5800,6 +6088,218 @@
       "sqlSha256": "a32e05a2f2f8bb81"
     },
     {
+      "name": "economic_event_times",
+      "classification": "core-keep",
+      "planRow": "economic events",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "temporal_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "event_id",
+        "revision",
+        "role"
+      ],
+      "foreignKeys": [
+        {
+          "column": "event_id",
+          "references": "economic_event_revisions(event_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "revision",
+          "references": "economic_event_revisions(revision)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "economic_event_times_guard",
+        "economic_event_times_no_delete",
+        "economic_event_times_no_replace",
+        "economic_event_times_no_update",
+        "economic_event_times_sealed"
+      ],
+      "noUpdateTriggers": [
+        "economic_event_times_no_update"
+      ],
+      "noDeleteTriggers": [
+        "economic_event_times_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "8ece25708b20cb2e"
+    },
+    {
+      "name": "economic_identity_epochs",
+      "classification": "core-keep",
+      "planRow": "economic events",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "ordinal",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "identity_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reason_code",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "declared_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "ordinal"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [
+        "economic_identity_epochs_next",
+        "economic_identity_epochs_no_delete",
+        "economic_identity_epochs_no_update"
+      ],
+      "noUpdateTriggers": [
+        "economic_identity_epochs_no_update"
+      ],
+      "noDeleteTriggers": [
+        "economic_identity_epochs_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "a0a21750ce3448fa"
+    },
+    {
+      "name": "economic_leg_effects",
+      "classification": "core-keep",
+      "planRow": "economic events",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "leg_index",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "effect",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "of_leg_index",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "event_id",
+        "revision",
+        "leg_index"
+      ],
+      "foreignKeys": [
+        {
+          "column": "event_id",
+          "references": "economic_legs(event_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "leg_index",
+          "references": "economic_legs(leg_index)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "revision",
+          "references": "economic_legs(revision)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "economic_leg_effects_guard",
+        "economic_leg_effects_no_delete",
+        "economic_leg_effects_no_replace",
+        "economic_leg_effects_no_update",
+        "economic_leg_effects_sealed"
+      ],
+      "noUpdateTriggers": [
+        "economic_leg_effects_no_update"
+      ],
+      "noDeleteTriggers": [
+        "economic_leg_effects_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "0f3d62ab6ee839ca"
+    },
+    {
       "name": "economic_legs",
       "classification": "core-keep",
       "planRow": "economic events",
@@ -5927,7 +6427,8 @@
         "card_purchase_recognition_legs_sealed",
         "economic_legs_no_delete",
         "economic_legs_no_replace",
-        "economic_legs_no_update"
+        "economic_legs_no_update",
+        "economic_legs_sealed"
       ],
       "noUpdateTriggers": [
         "economic_legs_no_update"
@@ -5937,6 +6438,155 @@
       ],
       "appendOnly": true,
       "sqlSha256": "aa6fa922982f6ddc"
+    },
+    {
+      "name": "economic_revision_seals",
+      "classification": "core-keep",
+      "planRow": "economic events",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "writer_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "leg_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "claim_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "time_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "effect_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "content_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "identity_pins_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "identity_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "commit_seq",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "event_id",
+        "revision"
+      ],
+      "foreignKeys": [
+        {
+          "column": "event_id",
+          "references": "economic_event_revisions(event_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "identity_epoch",
+          "references": "economic_identity_epochs(identity_epoch)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "revision",
+          "references": "economic_event_revisions(revision)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "economic_revision_seals_commit",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "core_epoch",
+            "commit_seq"
+          ]
+        }
+      ],
+      "triggers": [
+        "economic_revision_seals_guard",
+        "economic_revision_seals_no_delete",
+        "economic_revision_seals_no_replace",
+        "economic_revision_seals_no_update"
+      ],
+      "noUpdateTriggers": [
+        "economic_revision_seals_no_update"
+      ],
+      "noDeleteTriggers": [
+        "economic_revision_seals_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "9b810f0f50b7b9be"
     },
     {
       "name": "entity_relations",
@@ -14441,6 +15091,16 @@
       "sqlSha256": "5cd2680fcf78f6ee"
     },
     {
+      "name": "consumption_claim_conflicts",
+      "columns": [
+        "dimension",
+        "book",
+        "claim_ref",
+        "holder_count"
+      ],
+      "sqlSha256": "9b1aea297afdbd34"
+    },
+    {
       "name": "current_account_connection_reviews",
       "columns": [
         "id",
@@ -14630,6 +15290,25 @@
       "sqlSha256": "27eca06f4a4bb7bf"
     },
     {
+      "name": "economic_event_live_conflicts",
+      "columns": [
+        "event_id",
+        "live_revisions"
+      ],
+      "sqlSha256": "7949fe4020c5f7bd"
+    },
+    {
+      "name": "economic_revision_claims",
+      "columns": [
+        "event_id",
+        "revision",
+        "book",
+        "consumption_key",
+        "alias_class"
+      ],
+      "sqlSha256": "fe3f2b43203b977c"
+    },
+    {
       "name": "effective_identity_instruments",
       "columns": [
         "identity_observation_id",
@@ -14708,6 +15387,17 @@
         "created_at"
       ],
       "sqlSha256": "0c71d3137419b70c"
+    },
+    {
+      "name": "live_consumption_claims",
+      "columns": [
+        "book",
+        "consumption_key",
+        "alias_class",
+        "event_id",
+        "revision"
+      ],
+      "sqlSha256": "9d277162960b72fa"
     },
     {
       "name": "observation_decimal_candidates_v1",
@@ -14890,6 +15580,18 @@
         "card_token"
       ],
       "sqlSha256": "7d814d910f132061"
+    },
+    {
+      "name": "unlogged_economic_revisions",
+      "columns": [
+        "event_id",
+        "revision",
+        "kind",
+        "live",
+        "created_at",
+        "after_log_start"
+      ],
+      "sqlSha256": "448507ad260b3ad1"
     }
   ],
   "triggers": [
@@ -15475,6 +16177,20 @@
       "sqlSha256": "e8ade07fa781173f"
     },
     {
+      "name": "card_purchase_recognition_keys_economic_claim_held",
+      "table": "card_purchase_recognition_keys",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "98e3a8f8210a5824"
+    },
+    {
+      "name": "card_purchase_recognition_keys_economic_sealed",
+      "table": "card_purchase_recognition_keys",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "7b0225ca4a7bf28f"
+    },
+    {
       "name": "card_purchase_recognition_keys_guard",
       "table": "card_purchase_recognition_keys",
       "timing": "BEFORE",
@@ -15515,6 +16231,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "37f4fa4f042a8ae4"
+    },
+    {
+      "name": "card_purchase_recognitions_economic_sealed",
+      "table": "card_purchase_recognitions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "db89446b9df2192d"
     },
     {
       "name": "card_purchase_recognitions_facts",
@@ -15634,6 +16357,20 @@
       "timing": "AFTER",
       "event": "UPDATE",
       "sqlSha256": "41d950aa3d235a98"
+    },
+    {
+      "name": "card_settlement_decisions_economic_claim_held",
+      "table": "card_settlement_decisions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "6ec2c45817d5e09e"
+    },
+    {
+      "name": "card_settlement_decisions_economic_sealed",
+      "table": "card_settlement_decisions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "9668ac694c5885e5"
     },
     {
       "name": "card_settlement_decisions_guard",
@@ -15888,6 +16625,90 @@
       "sqlSha256": "8640702bb695b0db"
     },
     {
+      "name": "economic_claims_alias_one_live_holder",
+      "table": "economic_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "f72c245304c1c3c8"
+    },
+    {
+      "name": "economic_claims_book_supported",
+      "table": "economic_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "858b6709305c1d96"
+    },
+    {
+      "name": "economic_claims_guard",
+      "table": "economic_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "b90a490f18809840"
+    },
+    {
+      "name": "economic_claims_no_delete",
+      "table": "economic_claims",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "b0d054a39e46eca1"
+    },
+    {
+      "name": "economic_claims_no_replace",
+      "table": "economic_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "31ee118901e35ce6"
+    },
+    {
+      "name": "economic_claims_no_update",
+      "table": "economic_claims",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "8e642c39ca2a48fb"
+    },
+    {
+      "name": "economic_claims_one_live_holder",
+      "table": "economic_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "435af35899762881"
+    },
+    {
+      "name": "economic_claims_sealed",
+      "table": "economic_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "c300f73a9400788d"
+    },
+    {
+      "name": "economic_commit_log_guard",
+      "table": "economic_commit_log",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "87fc637b0d73cd0e"
+    },
+    {
+      "name": "economic_commit_log_no_delete",
+      "table": "economic_commit_log",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "cfbceb12a01807d7"
+    },
+    {
+      "name": "economic_commit_log_no_replace",
+      "table": "economic_commit_log",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "4a92072675a73a68"
+    },
+    {
+      "name": "economic_commit_log_no_update",
+      "table": "economic_commit_log",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "5485480d78b1674e"
+    },
+    {
       "name": "economic_event_revisions_no_delete",
       "table": "economic_event_revisions",
       "timing": "BEFORE",
@@ -15916,6 +16737,97 @@
       "sqlSha256": "f66b64d97904877a"
     },
     {
+      "name": "economic_event_times_guard",
+      "table": "economic_event_times",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "1c82042892d9304b"
+    },
+    {
+      "name": "economic_event_times_no_delete",
+      "table": "economic_event_times",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "1a6f49c3568d3aea"
+    },
+    {
+      "name": "economic_event_times_no_replace",
+      "table": "economic_event_times",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "415f9f0f9e455d50"
+    },
+    {
+      "name": "economic_event_times_no_update",
+      "table": "economic_event_times",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "4fe7873a387cfd63"
+    },
+    {
+      "name": "economic_event_times_sealed",
+      "table": "economic_event_times",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "5c3a03fbd78361fb"
+    },
+    {
+      "name": "economic_identity_epochs_next",
+      "table": "economic_identity_epochs",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "a72c4d15c4bbdda7"
+    },
+    {
+      "name": "economic_identity_epochs_no_delete",
+      "table": "economic_identity_epochs",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "e2b67209b1e57dcd"
+    },
+    {
+      "name": "economic_identity_epochs_no_update",
+      "table": "economic_identity_epochs",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "a420c70e5980a8d1"
+    },
+    {
+      "name": "economic_leg_effects_guard",
+      "table": "economic_leg_effects",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "48dfabc006c18783"
+    },
+    {
+      "name": "economic_leg_effects_no_delete",
+      "table": "economic_leg_effects",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "a1f40500dae3b055"
+    },
+    {
+      "name": "economic_leg_effects_no_replace",
+      "table": "economic_leg_effects",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "3d8d791433b3c1b0"
+    },
+    {
+      "name": "economic_leg_effects_no_update",
+      "table": "economic_leg_effects",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "17da4de3e388cb1a"
+    },
+    {
+      "name": "economic_leg_effects_sealed",
+      "table": "economic_leg_effects",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "0b0880588238f89d"
+    },
+    {
       "name": "economic_legs_no_delete",
       "table": "economic_legs",
       "timing": "BEFORE",
@@ -15935,6 +16847,41 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "9fccbdafafc34f39"
+    },
+    {
+      "name": "economic_legs_sealed",
+      "table": "economic_legs",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "34973fa976ac5662"
+    },
+    {
+      "name": "economic_revision_seals_guard",
+      "table": "economic_revision_seals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "75d8e8060fee3bc8"
+    },
+    {
+      "name": "economic_revision_seals_no_delete",
+      "table": "economic_revision_seals",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "7a7112dc6d9d4c5c"
+    },
+    {
+      "name": "economic_revision_seals_no_replace",
+      "table": "economic_revision_seals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "29bf60c0732b34c9"
+    },
+    {
+      "name": "economic_revision_seals_no_update",
+      "table": "economic_revision_seals",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "8eca2ce49cd92261"
     },
     {
       "name": "entity_relations_bump_revision_delete",
@@ -18156,6 +19103,11 @@
       "sqlSha256": "33e67cb228866cec"
     },
     {
+      "name": "card_settlement_decisions_event",
+      "table": "card_settlement_decisions",
+      "sqlSha256": "5aa94c965e972614"
+    },
+    {
       "name": "change_plans_status",
       "table": "change_plans",
       "sqlSha256": "6d550e9d16f24464"
@@ -18211,6 +19163,21 @@
       "sqlSha256": "57331f3a07034e69"
     },
     {
+      "name": "economic_claims_alias",
+      "table": "economic_claims",
+      "sqlSha256": "013daaaaeafebf98"
+    },
+    {
+      "name": "economic_claims_key",
+      "table": "economic_claims",
+      "sqlSha256": "027f9d3284e0b765"
+    },
+    {
+      "name": "economic_claims_observation",
+      "table": "economic_claims",
+      "sqlSha256": "4fd2846c5fa4ce0d"
+    },
+    {
       "name": "economic_event_revisions_current",
       "table": "economic_event_revisions",
       "sqlSha256": "383448eef4fd6ffc"
@@ -18234,6 +19201,11 @@
       "name": "economic_legs_subject",
       "table": "economic_legs",
       "sqlSha256": "5deb672c3a77d02a"
+    },
+    {
+      "name": "economic_revision_seals_commit",
+      "table": "economic_revision_seals",
+      "sqlSha256": "393cfffab38347fd"
     },
     {
       "name": "entity_relations_from",
@@ -18687,10 +19659,10 @@
     }
   ],
   "summary": {
-    "tableCount": 123,
-    "viewCount": 39,
-    "triggerCount": 455,
-    "explicitIndexCount": 121,
+    "tableCount": 129,
+    "viewCount": 44,
+    "triggerCount": 490,
+    "explicitIndexCount": 126,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -18727,8 +19699,14 @@
         "decision_operations",
         "decision_outbox",
         "decision_revisions",
+        "economic_claims",
+        "economic_commit_log",
         "economic_event_revisions",
+        "economic_event_times",
+        "economic_identity_epochs",
+        "economic_leg_effects",
         "economic_legs",
+        "economic_revision_seals",
         "entity_relations",
         "evidence_use_restrictions",
         "expiry_rules",
@@ -18921,8 +19899,9 @@
       "0063_identity_value_rewrite_apply.sql",
       "0064_purchase_retirement_and_reconciliation_cost.sql",
       "0065_alarm_schedules.sql",
-      "0066_prestia_bank_snapshot_schedule.sql"
+      "0066_prestia_bank_snapshot_schedule.sql",
+      "0070_economic_commit_guard.sql"
     ],
-    "schemaSha256": "cdb732d32955a6b1b891cdaff5566cd12252c21dac9fa65acabf5a551ad5029c"
+    "schemaSha256": "a7307ca2fc51bbe78607cd485f5289c3c4c5307d77bf726425f99ef7696a9a9e"
   }
 }
