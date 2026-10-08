@@ -1400,6 +1400,19 @@ describe("identity epochs", () => {
     db.close();
   });
 
+  test("P3: INSERT OR REPLACE cannot replace a declared epoch", () => {
+    const db = database();
+    const before = db.query("SELECT * FROM economic_identity_epochs").all();
+    expect(() =>
+      db.run(
+        "INSERT OR REPLACE INTO economic_identity_epochs VALUES(2,'identity-epoch-1','synthetic-replace',?)",
+        [LATER],
+      ),
+    ).toThrow("identity epochs are append-only");
+    expect(db.query("SELECT * FROM economic_identity_epochs").all()).toEqual(before);
+    db.close();
+  });
+
   test("P11: the guard does not route old-epoch holders to review; that is the planner's job", async () => {
     // ADR 0054: a rule writer under retire-before-recognise keeps auto-revising
     // after a declared rewrite, and a reviewed correction is itself the

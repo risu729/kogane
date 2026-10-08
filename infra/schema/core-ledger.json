@@ -1081,7 +1081,7 @@
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "b67d046190d2ca3361d11b9329bf9c20bf2b52b2846fc6bc5ea1c087d784400a"
+      "sha256": "390e9522de9a3b53a73564e0a50ab615d6b9c81958478aa3ef7997b4f8ca7da5"
     }
   ],
   "tables": [
@@ -16784,7 +16784,7 @@
       "table": "economic_identity_epochs",
       "timing": "BEFORE",
       "event": "INSERT",
-      "sqlSha256": "a72c4d15c4bbdda7"
+      "sqlSha256": "2b8f5e6bbb87fcf2"
     },
     {
       "name": "economic_identity_epochs_no_delete",
@@ -19915,6 +19915,6 @@
       "0066_prestia_bank_snapshot_schedule.sql",
       "0070_economic_commit_guard.sql"
     ],
-    "schemaSha256": "4c88bb0317989dd36bd1ef96a09db5dacb7db357c5fa97bea1f581f204ea520e"
+    "schemaSha256": "8d0cce7f8f652f364ad2c9c1a3cb2e438ef8fdfd6d2c1d83bbd61fce2ca964cb"
   }
 }

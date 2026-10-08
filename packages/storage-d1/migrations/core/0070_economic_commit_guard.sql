@@ -59,8 +59,12 @@ CREATE TABLE economic_identity_epochs (
 ) STRICT;
 CREATE TRIGGER economic_identity_epochs_no_update BEFORE UPDATE ON economic_identity_epochs BEGIN SELECT RAISE(ABORT,'identity epochs are append-only'); END;
 CREATE TRIGGER economic_identity_epochs_no_delete BEFORE DELETE ON economic_identity_epochs BEGIN SELECT RAISE(ABORT,'identity epochs are append-only'); END;
+-- The next ordinal only, and never a name already declared: an INSERT OR
+-- REPLACE on the unique name would otherwise delete the declared row without
+-- firing the delete trigger.
 CREATE TRIGGER economic_identity_epochs_next BEFORE INSERT ON economic_identity_epochs
 WHEN NEW.ordinal<>coalesce((SELECT max(ordinal) FROM economic_identity_epochs),0)+1
+ OR EXISTS(SELECT 1 FROM economic_identity_epochs WHERE identity_epoch=NEW.identity_epoch)
 BEGIN SELECT RAISE(ABORT,'identity epochs are append-only'); END;
 INSERT INTO economic_identity_epochs(ordinal,identity_epoch,reason_code,declared_at)
  VALUES(1,'identity-epoch-1','contract-start','2026-10-08T00:00:00.000Z');
