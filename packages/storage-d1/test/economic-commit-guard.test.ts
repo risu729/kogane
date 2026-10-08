@@ -1011,6 +1011,28 @@ describe("the entry", () => {
   });
 });
 
+describe("G1b decision: a rule entry means the entry exists", () => {
+  test("P9: replaying a pre-guard lane draft with the G1b tail logs that revision now", async () => {
+    // decisionEntry is "this decision exists", not "this batch wrote it". A
+    // draft recognised before G1b, replayed with the seal and commit row
+    // appended, writes no decision but does write the seal and commit row.
+    // ADR 0054 records the decision: from G1b on the lane's decision digest
+    // includes the writer release, so a guard-era batch has its own entry;
+    // where an old draft id is replayed anyway, its revision is logged with
+    // an honest later known_at, never backdated.
+    const db = database();
+    const draft = await draftOf(factOf(1));
+    await run(db, purchaseWrites(draft));
+    const changes = await run(db, purchaseWithCommitWrites(draft));
+    expect(changes.slice(0, -2).every((n) => n === 0)).toBe(true);
+    expect(changes.slice(-2)).toEqual([1, 1]);
+    expect(db.query("SELECT commit_seq,kind,known_at FROM economic_commit_log").all()).toEqual([
+      { commit_seq: 1, kind: "card-purchase.recognize", known_at: NOW },
+    ]);
+    db.close();
+  });
+});
+
 describe("W3: a sealed revision takes no more children", () => {
   test("no leg, claim, time or effect is added after the seal", async () => {
     const db = database();

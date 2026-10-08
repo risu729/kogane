@@ -79,11 +79,14 @@ export const VISIBILITY_REVISION_LEDGER = [
 // sidecars (0047) or the consumption guard's tables (0070: economic_claims,
 // economic_revision_seals, economic_commit_log, economic_event_times,
 // economic_leg_effects, economic_identity_epochs). The balance projection does
-// not read them, and every batch that writes an event revision, a claim, a
-// seal or a commit row also inserts the decision_revisions row it hangs from,
-// which is in the ledger and already moves the revision. They are not
-// operational state either, so they do not belong in the exclusion list below,
-// whose entries are checkpoint, job and projection-output tables.
+// not read them. Every event revision, claim, seal and commit row hangs from a
+// decision_revisions row, which is in the ledger, so adopting anything moves
+// the revision. A batch can write a seal and commit row without a new
+// decision (a replay of a pre-guard rule decision, ADR 0054); that records
+// when an adoption became known, not what was adopted, and moves nothing a
+// projection reads. They are not operational state either, so they do not
+// belong in the exclusion list below, whose entries are checkpoint, job and
+// projection-output tables.
 
 /**
  * Deliberately outside the ledger (05 §2). Bumping the revision when the

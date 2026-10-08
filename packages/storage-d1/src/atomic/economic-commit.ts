@@ -19,7 +19,8 @@
 //   * Every statement here is `WHERE <entry> AND NOT EXISTS(own row)`, so a
 //     stale batch whose entry matched nothing writes 0 rows everywhere, and a
 //     replay of a batch that already committed finds its own rows and writes
-//     nothing.
+//     nothing. A replay of a batch that committed *without* these statements
+//     (a pre-guard rule decision) does write them: see `decisionEntry`.
 //   * The commit row is last. Its BEFORE INSERT trigger is where the batch's
 //     invariants are enforced (a supersede that matched 0 rows, a claim set
 //     that differs from the declared one, a key someone else holds); a
@@ -53,7 +54,16 @@ import type { SqlWrite } from "../core/operations.ts";
 /** A condition, true exactly when this batch's entry row exists. */
 export type EconomicEntry = SqlWrite;
 
-/** The entry of a rule writer: its decision row (statement 1 inserted it). */
+/**
+ * The entry of a rule writer: its decision row. This means "the decision
+ * exists", not "this batch wrote it": a replay whose statement 1 wrote 0 rows
+ * still finds the decision, and so writes any statement here it has not
+ * written yet. A rule writer must therefore give a guard-era batch a decision
+ * id no earlier batch used. From G1b on, the card purchase lane's decision
+ * digest includes the writer release (ADR 0054); a replay of a pre-guard
+ * draft id would otherwise seal and log that legacy revision now, with an
+ * honest later known_at, which is allowed and never backdated.
+ */
 export function decisionEntry(decisionRevisionId: string): EconomicEntry {
   return {
     sql: "EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)",

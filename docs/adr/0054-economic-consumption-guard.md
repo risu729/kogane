@@ -97,6 +97,13 @@ alias rule version)`, computed from a registry-declared, versioned
   precondition (the reviewed receipt reservation, or a rule writer's decision
   insert). Every later statement is `WHERE EXISTS(entry) AND NOT EXISTS(own
 row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
+  A rule writer's entry condition is "this decision exists", not "this batch
+  wrote it" (`decisionEntry`), so a replay finds it and writes whatever it
+  has not written yet. **Decision for G1b:** from G1b on, the card purchase
+  lane's decision digest includes the writer release, so every guard-era
+  batch writes its own entry; where a pre-guard draft id is replayed anyway
+  with the seal and commit appended, that legacy revision is sealed and
+  logged then, with an honest later `known_at`, never backdated (test P9).
   The **last** statement inserts the `economic_commit_log` row. Its trigger is
   where the batch's invariants are enforced, after every mutation, in a fixed
   order with one code each: shape; dense sequence and non-decreasing
@@ -232,7 +239,9 @@ recording the alias class on every new settlement accept.
   synthetic tests, this ADR. No writer joins.
 - **G1b:** both card writers join. `packages/storage-d1/src/atomic/card-purchase-recognition.ts`
   appends a seal and commit row after its keys (the keys are its claims; no
-  duplicate storage; the lane is a rule writer under retire-before-recognise).
+  duplicate storage; the lane is a rule writer under retire-before-recognise),
+  and its decision digest gains the writer release so a guard-era batch never
+  reuses a pre-guard decision id.
   `services/processor/src/card-settlement-commands.ts` writes an
   `economic_claims` row (cash-movement, `bank_key`, alias class), a seal and a
   commit row; its accepted decision row precedes the seal; its withdrawal is
