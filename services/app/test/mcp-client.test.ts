@@ -669,6 +669,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
 describe("a token minted for MCP reaches no other route, and /mcp takes no other token (matrix 2, 3)", () => {
   const environment = {
     ...OPS_ENABLED,
+    SCHEDULES_ENABLED: "true",
     OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
     ...grants({ [OWNER]: grant(READS), [AGENT]: grant(READS) }),
   };
@@ -679,10 +680,14 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
       ["POST", "/api/command/v1/approve", {}],
       ["POST", "/api/command/v1/commit", {}],
       ["GET", "/api/v2/reconciliation/card-settlements", undefined],
+      ["GET", "/api/v2/reconciliation/card-settlements/ownership", undefined],
       ["GET", "/api/v2/card-purchases", undefined],
+      ["GET", "/api/v2/reported-state", undefined],
       ["POST", "/api/ops/v1/collections", COLLECTION],
       ["GET", "/api/ops/v1/operations/op_synthetic", undefined],
       ["GET", "/api/ops/v1/health", undefined],
+      ["GET", "/api/ops/v1/schedules", undefined],
+      ["POST", "/api/ops/v1/schedules/bootstrap", undefined],
       ["GET", "/api/overview", undefined],
       ["GET", "/api/meta", undefined],
       ["GET", "/api/identity/accounts?offset=0", undefined],
@@ -1054,6 +1059,90 @@ describe("the UI, HTTP and MCP return one result (AT72)", () => {
       expect(viaMcp.isError, tool).toBe(true);
       expect(viaMcp.structuredContent, tool).toEqual(await http.json());
     }
+  });
+});
+
+describe("an internal failure leaves only a closed code (G3-08)", () => {
+  /** A store that fails with a message that must never reach a client. */
+  const DETAIL = "synthetic-internal-detail";
+  const failing = (): D1Database =>
+    new Proxy(env.DB, {
+      get(target, key) {
+        if (key === "prepare")
+          return () => {
+            throw new Error(`D1_ERROR: ${DETAIL}`);
+          };
+        const value: unknown = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+  it("answers a tool's or the tool list's exception as the Worker does on every route", async () => {
+    const environment = {
+      ...grants({ [AGENT]: grant(READS), [OTHER]: grant(READS) }),
+      EVENTS_V2_ENABLED: "true",
+      DB: failing(),
+    };
+    const log = vi.spyOn(console, "log");
+    const answers: [string, Response][] = [
+      [
+        "2025-11-25 tools/call",
+        await rpc("tools/call", { name: "kogane.context.open", arguments: {} }, { environment }),
+      ],
+      [
+        "2026-07-28 tools/call",
+        await modern("tools/call", { name: "kogane.context.open", arguments: {} }, { environment }),
+      ],
+      // The tool list asks the store whether purchases are served.
+      ["2025-11-25 tools/list", await rpc("tools/list", {}, { environment })],
+      ["2026-07-28 tools/list", await modern("tools/list", {}, { environment })],
+      [
+        "HTTP agent route",
+        await send(
+          "/api/agent/v1/context.open",
+          {},
+          {
+            environment,
+            identity: { via: "app", subject: OTHER },
+          },
+        ),
+      ],
+    ];
+    for (const [label, response] of answers) {
+      expect(response.status, label).toBe(500);
+      const text = await response.text();
+      expect(text, label).not.toContain(DETAIL);
+      expect(JSON.parse(text), label).toEqual({
+        error: "internal_error",
+        requestId: expect.any(String),
+      });
+    }
+    const lines = log.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, any>);
+    expect(lines.map((line) => [line["route"], line["status"], line["errorCode"]])).toEqual([
+      ["mcp", 500, "internal_error"],
+      ["mcp", 500, "internal_error"],
+      ["mcp", 500, "internal_error"],
+      ["mcp", 500, "internal_error"],
+      ["agent_context_open", 500, "internal_error"],
+    ]);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(DETAIL);
+  });
+
+  it("writes nothing to the log but the request line, in either era", async () => {
+    const environment = grants({ [AGENT]: grant(["summary.read"]) });
+    const log = vi.spyOn(console, "log");
+    const warn = vi.spyOn(console, "warn");
+    const error = vi.spyOn(console, "error");
+    await callTool("kogane.capabilities", {}, { environment });
+    await result(
+      await modern("tools/call", { name: "kogane.capabilities", arguments: {} }, { environment }),
+    );
+    await result(await modern("tools/list", {}, { environment }));
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+    expect(
+      log.mock.calls.map(([line]) => (JSON.parse(String(line)) as { event: string }).event),
+    ).toEqual(["evidence_request", "evidence_request", "evidence_request"]);
   });
 });
 

@@ -139,6 +139,9 @@ below is read by a migration.
 Two variables in `services/app/wrangler.jsonc` look like flags and are not:
 `EVIDENCE_SOURCE_ID`, `ACCESS_ISSUER` and `ACCESS_AUDIENCE` are deployment
 identity, not switches, and changing them changes who can read at all.
+`ACCESS_MCP_AUDIENCE`, absent from both configuration files, is the same kind
+of value for `/mcp` alone: the AUD tag of a dedicated MCP Access application.
+Absent, `/mcp` accepts nobody ([ADR 0047](adr/0047-mcp-client-connection.md)).
 
 ## 3. Prerequisite resources, and who creates them
 

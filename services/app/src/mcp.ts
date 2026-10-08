@@ -254,9 +254,19 @@ function serverFor(run: Dispatch, tools: PublishedTools): Server {
  * A request of an initialize-based revision is answered by the SDK's
  * stateless Streamable HTTP transport with a JSON response (no session, no
  * SSE); a request of the stateless 2026-07-28 revision by `createMcpHandler`
- * in JSON mode. Both use the same server definition, so the two eras publish
- * and dispatch identically. The body bound is the agent API's
- * (`MAX_REQUEST_BYTES`).
+ * in its default response mode, which answers one JSON object because no
+ * handler here sends anything before its result (the explicit `json` mode
+ * would only add a free-text `console.warn` to every request's log). Both use
+ * the same server definition, so the two eras publish and dispatch
+ * identically. The body bound is the agent API's (`MAX_REQUEST_BYTES`).
+ *
+ * An exception from the dispatcher or the tool list is not the SDK's to
+ * answer: it would put the exception's message into a JSON-RPC error with
+ * HTTP 200, and the request log would carry no error code. It is held and
+ * rethrown once the SDK has answered, so the Worker answers it as it answers
+ * one on every other route — `500 internal_error`, or an `HttpError`'s own
+ * status and closed code — and logs that code; nothing else of the failure
+ * crosses the boundary (G3-08).
  *
  * `tools` is what this deployment publishes — the five read/propose tools,
  * plus the purchase explanation while card purchase recognition is served and
@@ -271,7 +281,26 @@ export async function handleMcp(
   run: Dispatch,
   tools: PublishedTools = MCP_TOOLS,
 ): Promise<Response> {
-  const factory = (): Server => serverFor(run, tools);
+  let failure: { error: unknown } | undefined;
+  const contained = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      failure ??= { error };
+      throw new ProtocolError(ProtocolErrorCode.InternalError, "internal_error");
+    }
+  };
+  const factory = (): Server =>
+    serverFor(
+      (name, body) => contained(() => run(name, body)),
+      typeof tools === "function" ? () => contained(tools) : tools,
+    );
+  const response = await serve(request, factory);
+  if (failure !== undefined) throw failure.error;
+  return response;
+}
+
+async function serve(request: Request, factory: () => Server): Promise<Response> {
   if (await isLegacyRequest(request, undefined, { maxRequestBodySize: MAX_REQUEST_BYTES })) {
     const server = factory();
     const transport = new WebStandardStreamableHTTPServerTransport({
@@ -288,7 +317,6 @@ export async function handleMcp(
   }
   const modern = createMcpHandler(factory, {
     legacy: "reject",
-    responseMode: "json",
     maxRequestBodySize: MAX_REQUEST_BYTES,
   });
   try {

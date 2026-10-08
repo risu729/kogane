@@ -49,8 +49,8 @@ answers byte for byte (AT72).
 ## Grants
 
 A grant is looked up **after** the Cloudflare Access check, by the principal
-that check proved (`agentPrincipal`, `src/auth.ts`): a browser session's
-subject, exactly as `authenticate` returns it, or — on `/mcp`, for an
+that check proved (`browserCaller` or `mcpCaller`, `src/auth.ts`): a browser
+session's subject, exactly as `authenticate` returns it, or — on `/mcp`, for an
 identity that came through the MCP Access application — the agent-only
 `mcp-client:<sub>` ([ADR 0047](adr/0047-mcp-client-connection.md)). Nothing
 here parses the token a second time and nothing reads an actor from a request
@@ -495,7 +495,7 @@ attenuates it.
    application's policy at login and again at every refresh.
 3. With that token, Access forwards the request with a signed
    `Cf-Access-Jwt-Assertion` whose `aud` is `<mcp-aud>`.
-4. `agentPrincipal` (`src/auth.ts`) verifies issuer, signature, `type`, `aud`
+4. `mcpCaller` (`src/auth.ts`) verifies issuer, signature, `type`, `aud`
    and `sub`, and names the caller **`mcp-client:<sub>`**.
 5. The grant is `AGENT_API_GRANTS["mcp-client:<sub>"]`, and the tool runs.
 
@@ -548,6 +548,7 @@ over MCP.
 | no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                     | Access's own `401` (Managed OAuth) — not this Worker                                   |
 | assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                | `401 authentication_required`                                                          |
 | Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                | `503 identity_keys_unavailable` / `503 auth_not_configured`                            |
+| an unexpected failure inside a tool or the tool list (the store, a bug)                                                                                           | Worker                                | `500 internal_error`; the exception text never reaches the client or the log           |
 | `Origin` of another site                                                                                                                                          | Worker                                | `403 origin_not_allowed`                                                               |
 | principal not in `AGENT_API_GRANTS` (empty or unreadable table included)                                                                                          | Worker                                | `403 agent_api_not_configured`                                                         |
 | `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                | `405 method_not_allowed` / `400 invalid_query`                                         |
@@ -787,8 +788,9 @@ of every tool naming no denied source or account, the context's source
 selection being exactly the granted source, and a denied source's new
 publication leaving a scoped context identical; a server-derived proposal
 actor that a body or header cannot change, and adopted answers identical
-before and after a proposal; unpublished tools; the connection in both
-eras; the SDK's transport refusals; tool definitions against SEP-986 and
+before and after a proposal; unpublished tools; an internal failure inside
+a tool or the tool list answered `500 internal_error` in both eras with no
+exception text in the answer or the log; the connection in both eras; the SDK's transport refusals; tool definitions against SEP-986 and
 Claude Code's load-time checks; each single capability; and the UI's
 `GET /api/v2/query`, `POST /api/agent/v1/financial.query` and MCP in both
 eras returning deep-equal objects with the same gap reasons.

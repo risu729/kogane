@@ -43,7 +43,7 @@ policies on every refresh, and forwards a signed `Cf-Access-Jwt-Assertion` to
 the origin so that "the request looks like a browser-authenticated one". The
 MCP server must validate that assertion.
 
-Three facts from this repository and the owner decide how the Worker may
+Four facts from this repository and the owner decide how the Worker may
 read that assertion:
 
 1. **An MCP caller could be re-classified as the operator.** `/mcp` →
@@ -175,10 +175,17 @@ call is graded on its own, with a closed reason.
 5. The transport is `@modelcontextprotocol/server` 2.3.1: a request of an
    initialize-based revision goes to the SDK's stateless
    `WebStandardStreamableHTTPServerTransport` in JSON mode, a 2026-07-28
-   request to `createMcpHandler` in JSON mode, both from one server definition
-   that answers `tools/list` and `tools/call` through the existing dispatcher.
-   The Worker keeps its own `Origin` rule (`403 origin_not_allowed` on every
-   agent path) and the agent API's 64 KiB body bound; GET and DELETE are `405`.
+   request to `createMcpHandler` in its default response mode (one JSON
+   object, since no handler sends anything before its result; the explicit
+   `json` mode would log a free-text warning on every request), both from one
+   server definition that answers `tools/list` and `tools/call` through the
+   existing dispatcher. The Worker keeps its own `Origin` rule
+   (`403 origin_not_allowed` on every agent path) and the agent API's 64 KiB
+   body bound; GET and DELETE are `405`. An exception a tool or the tool list
+   throws is not answered by the SDK, which would echo its message with
+   HTTP 200: it is rethrown to the Worker, which answers `500 internal_error`
+   (or an `HttpError`'s own code) and logs that code, as on every other
+   route.
 
 The first grant is `summary.read` on one listed source for
 `mcp-client:<owner sub>`; `records.read`, then `interpretation.propose`, one
@@ -262,6 +269,10 @@ metadata — so the boundary has its own tests:
     actor is `mcp-client:<sub>`, and every adopted answer is identical before
     and after a proposal;
   - _unpublished tools_ (matrix 8): `-32602` and nothing written;
+  - _internal failures_ (G3-08): a store failure inside a tool or the tool
+    list is `500 internal_error` in both eras, as on the HTTP route, with the
+    exception text in neither the answer nor the log, and an exchange logs
+    only the request line;
   - the connection in both eras, `Origin`, the SDK's refusals, tool
     definitions against the SEP-986 names and Claude Code's load-time checks,
     `tools/list` and `tools/call` under each single capability, and the UI's
