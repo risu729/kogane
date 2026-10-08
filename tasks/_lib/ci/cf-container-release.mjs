@@ -256,6 +256,31 @@ export function verifyApplicationRollout(snapshot, versions) {
     fail("rollout_unverified");
 }
 
+/** Keep the existing 180-second rollout window; an attempt cap must not shorten it. */
+export async function waitForApplicationRollout(
+  readState,
+  { now = Date.now, wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms)) } = {},
+) {
+  const deadline = now() + 180000;
+  while (now() < deadline) {
+    const { snapshot, versions } = await readState(deadline);
+    if (now() >= deadline) fail("rollout_pending");
+    try {
+      verifyApplicationRollout(snapshot, versions);
+      return snapshot;
+    } catch (error) {
+      if (
+        !["cf_container_rollout_pending", "cf_container_rollout_unverified"].includes(error.message)
+      )
+        throw error;
+    }
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
+    await wait(Math.min(5000, remaining));
+  }
+  fail("rollout_pending");
+}
+
 export function registryImage(target, image, registryNamespace) {
   if (!/^[a-z0-9_-]{1,64}$/u.test(registryNamespace ?? "")) fail("registry_namespace_invalid");
   const prefix = `registry.cloudflare.com/${registryNamespace}/${target.appName}@`;
@@ -473,6 +498,8 @@ function apiOperation(path, body) {
 export function cloudflareApi({
   accountId,
   token,
+  deadline,
+  now = Date.now,
   fetchImpl = fetch,
   reportDiagnostic = (diagnostic) => console.error(JSON.stringify(diagnostic)),
   reportResponse = () => {},
@@ -490,6 +517,8 @@ export function cloudflareApi({
       });
       fail(code);
     };
+    const remaining = deadline === undefined ? 30000 : Math.min(30000, Math.ceil(deadline - now()));
+    if (remaining <= 0) fail("rollout_pending");
     let response;
     try {
       response = await fetchImpl(
@@ -497,12 +526,13 @@ export function cloudflareApi({
         {
           method,
           redirect: "manual",
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(remaining),
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         },
       );
     } catch {
+      if (deadline !== undefined && now() >= deadline) fail("rollout_pending");
       reject("api_unavailable");
     }
     // Production credentials POST returns 201; every GET still requires 200.
@@ -515,8 +545,10 @@ export function cloudflareApi({
     try {
       envelope = await response.json();
     } catch {
+      if (deadline !== undefined && now() >= deadline) fail("rollout_pending");
       reject("api_response", response.status);
     }
+    if (deadline !== undefined && now() >= deadline) fail("rollout_pending");
     if (envelope?.success !== true || envelope.result === undefined)
       reject("api_response", response.status);
     if (operation === "registry_pull_credentials") {
@@ -802,30 +834,21 @@ async function main() {
     const before = JSON.parse(readFileSync(baseline, "utf8"));
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const api = cloudflareApi({ accountId, token: process.env.CLOUDFLARE_API_TOKEN });
-    let snapshot;
-    const deadline = Date.now() + 180000;
-    for (let attempt = 0; attempt < 25; attempt++) {
-      if (Date.now() >= deadline) fail("rollout_pending");
-      snapshot = await readApplication(target, api, accountId);
+    const snapshot = await waitForApplicationRollout(async (deadline) => {
+      // All four control-plane reads share the remaining polling window.
+      const rolloutApi = cloudflareApi({
+        accountId,
+        token: process.env.CLOUDFLARE_API_TOKEN,
+        deadline,
+      });
+      const current = await readApplication(target, rolloutApi, accountId);
       verifyApplicationIdentity(
         before.snapshots.find((entry) => entry.name === argument),
-        snapshot,
+        current,
       );
-      const versions = await api(`containers/applications/${target.appId}/versions`);
-      try {
-        verifyApplicationRollout(snapshot, versions);
-        break;
-      } catch (error) {
-        if (
-          !["cf_container_rollout_pending", "cf_container_rollout_unverified"].includes(
-            error.message,
-          ) ||
-          attempt === 24
-        )
-          throw error;
-      }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 5000));
-    }
+      const versions = await rolloutApi(`containers/applications/${target.appId}/versions`);
+      return { snapshot: current, versions };
+    });
     const credentials = await api("containers/registries/registry.cloudflare.com/credentials", {
       expiration_minutes: 5,
       permissions: ["pull"],
