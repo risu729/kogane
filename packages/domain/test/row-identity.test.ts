@@ -56,20 +56,28 @@ describe("provider identity functions", () => {
     expect(domain.PROVIDER_IDENTITY_FUNCTIONS).toBe(PROVIDER_IDENTITY_FUNCTIONS);
   });
 
-  test("SMBC is declared for its one account only", () => {
+  test("a declared scope admits its source accounts only; both functions declare every account", () => {
+    for (const declared of PROVIDER_IDENTITY_FUNCTIONS) expect(declared.sourceAccounts).toBe("any");
     expect(
-      providerIdentityFunction("smbc-bank", "smbc-direct-transactions", "smbc-bank:ordinary-yen"),
+      providerIdentityFunction("smbc-bank", "smbc-direct-transactions", "smbc-bank:any-account"),
     ).not.toBeNull();
     expect(
-      providerIdentityFunction("smbc-bank", "smbc-direct-transactions", "smbc-bank:other"),
+      providerIdentityFunction("smbc-bank", "synthetic-parser", "smbc-bank:ordinary-yen"),
     ).toBeNull();
+    const scoped = [
+      { ...PROVIDER_IDENTITY_FUNCTIONS[0]!, sourceAccounts: ["smbc-bank:ordinary-yen"] },
+    ];
     expect(
       providerIdentityFunction(
-        "sbi-shinsei-bank",
-        "sbi-shinsei-top-balances-and-activity",
-        "sbi-shinsei:any-account",
+        "smbc-bank",
+        "smbc-direct-transactions",
+        "smbc-bank:ordinary-yen",
+        scoped,
       ),
-    ).not.toBeNull();
+    ).toBe(scoped[0]!);
+    expect(
+      providerIdentityFunction("smbc-bank", "smbc-direct-transactions", "smbc-bank:other", scoped),
+    ).toBeNull();
   });
 });
 
@@ -142,11 +150,17 @@ describe("humanAdoptedRowIdentity", () => {
     });
   });
 
-  test("outside a declared scope there is no function: identity_resolver_missing", () => {
-    expect(humanAdoptedRowIdentity(smbc({ sourceAccount: "smbc-bank:other" }))).toEqual({
-      admitted: false,
-      refusal: "identity_resolver_missing",
-    });
+  test("one provider id under two resolved accounts is two classes", () => {
+    const a = humanAdoptedRowIdentity(smbc());
+    const b = humanAdoptedRowIdentity(
+      smbc({ sourceAccount: "smbc-bank:other", accountId: "acct-other" }),
+    );
+    if (!a.admitted || !b.admitted) throw new Error("expected admissions");
+    expect(aliasClassText(a.aliasClass)).not.toBe(aliasClassText(b.aliasClass));
+    // Two source accounts resolved to one account: one class.
+    const c = humanAdoptedRowIdentity(smbc({ sourceAccount: "smbc-bank:other" }));
+    if (!c.admitted) throw new Error("expected an admission");
+    expect(aliasClassText(c.aliasClass)).toBe(aliasClassText(a.aliasClass));
   });
 
   test("fingerprints, digests and absent ids are refused", () => {

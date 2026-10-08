@@ -636,21 +636,25 @@ export interface ProviderIdentityFunction {
  * (identity_resolver_missing), and a declared one is still refused while the
  * parser does not record its rows' identity origin (identity_origin_unrecorded).
  *
+ * Both are declared unique within one account only: the class carries the
+ * resolved account id, so the same provider id under two accounts is two
+ * classes, and two source accounts resolved to one account share one class
+ * (an alias conflict, never a second holder). Uniqueness across ranges and
+ * accounts is not verified (ADR 0054, Not verified).
+ *
  * - SMBC (`smbc-direct-transactions`): the row's provider id `id`, which the
  *   collector reads from the provider's `meisaiId` and the parser records as
- *   `identityOrigin: provider-id` and as the external id. Declared for the one
- *   account the parser emits (`smbc-bank:ordinary-yen`): uniqueness across
- *   accounts and ranges is not verified (ADR 0054, Not verified).
+ *   `identityOrigin: provider-id` and as the external id.
  * - SBI Shinsei (`sbi-shinsei-top-balances-and-activity`): `txnReferenceNo`,
  *   which the parser requires to be unique within one activity page (ADR
- *   0018). Every source account of the source. The parser records no origin,
- *   so this function admits nothing until a parser release records it.
+ *   0018). The parser records no origin, so this function admits nothing
+ *   until a parser release records it.
  */
 export const PROVIDER_IDENTITY_FUNCTIONS: readonly ProviderIdentityFunction[] = [
   {
     sourceId: "smbc-bank",
     parserName: "smbc-direct-transactions",
-    sourceAccounts: ["smbc-bank:ordinary-yen"],
+    sourceAccounts: "any",
     componentFields: ["id"],
     ruleVersion: "smbc-meisai-id-v1",
   },
@@ -668,9 +672,10 @@ export function providerIdentityFunction(
   sourceId: string,
   parserName: string,
   sourceAccount: string,
+  declarations: readonly ProviderIdentityFunction[] = PROVIDER_IDENTITY_FUNCTIONS,
 ): ProviderIdentityFunction | null {
   return (
-    PROVIDER_IDENTITY_FUNCTIONS.find(
+    declarations.find(
       (declared) =>
         declared.sourceId === sourceId &&
         declared.parserName === parserName &&
