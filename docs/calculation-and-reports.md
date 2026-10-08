@@ -162,7 +162,11 @@ same instrument is never used. Exclusion counts cover only the rows the read
 returns, the row that explains `stale` is the newest before the window
 whatever its rule, kind or basis, and in `known-at` mode a row whose
 `recorded_at` does not parse is not read. Nothing fetches a price or rate from
-an external source. SBI Shinsei's board is a customer rate tiered by `customerCategory` (5 tiers for most
+an external source. The candidate read reaches each key by
+index but reads that key's whole history (the window bounds what it returns,
+not what it reads): 13 currencies four times a day took about 90 ms over
+1,000 boards and 360–500 ms over 4,380 boards (three years), against
+70–300 ms for `selectPrices` (ADR 0056; `price-candidates-scale.test.ts`). SBI Shinsei's board is a customer rate tiered by `customerCategory` (5 tiers for most
 currencies on the stored boards, [ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)),
 not a market reference. The rule reads the tier the same run's balance
 summary names as the owner's stage (ADR 0031); the two were observed on

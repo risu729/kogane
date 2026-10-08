@@ -170,9 +170,20 @@ What existed before this change:
   provider's terms were assumed.
 - **No route and no UI.** `selectMarketData` has no caller in a service yet;
   valuation cells, the API and the page are a later change.
-- **Cost.** One read per call, the keyed rows materialized once and shared by
-  the three arms of the union; per key it reads only that key's rows by
-  index. Plans were checked without table statistics.
+- **Cost grows with each key's whole history.** One read per call, the keyed
+  rows materialized once and shared by the three arms of the union. Each key
+  is reached by index, but every row of that key's history is read: the
+  window bounds what the read returns, not what it reads, and the 2,000-row
+  bound applies to the rows returned. Measured on `bun:sqlite` without table
+  statistics, 13 currencies on a board published four times a day: the
+  independent review found 1,000 boards (13,000 rows) at 84 ms current and
+  97 ms known-at against 63 ms for `selectPrices`, and 4,380 boards (three
+  years, 56,940 rows) at 422 and 504 ms against 292 ms;
+  `price-candidates-scale.test.ts` at full scale measured 89 / 91 / 72 ms and
+  359–389 / 391–448 / 295–303 ms. That test holds the plan to index searches
+  on such a store. Bounding the read by time (an index on the effective
+  instant, or a stored julianday column) would need a migration and is left
+  until the history makes it matter.
 - **Limits.** Exclusion counts cover the rows the read returns (rows far after
   the bound are not read). The row that explains `stale` is the newest before
   the window whatever its rule, kind or basis, so a key whose newest old row
