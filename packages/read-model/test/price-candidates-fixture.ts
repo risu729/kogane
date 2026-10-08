@@ -31,7 +31,7 @@ export function executor(db: Database): SqlExecutor {
   };
 }
 
-export const PARSER = "sbi-shinsei-exchange-rate";
+const PARSER = "sbi-shinsei-exchange-rate";
 export const USD: PriceKey = {
   baseInstrumentRef: "USD",
   quoteUnitRef: "JPY",
