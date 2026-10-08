@@ -31,9 +31,40 @@ export interface FilterOptions {
 /** Connection names the UI has labels for. Any other name is shown generically. */
 export type SourceKind = "local-store" | "central-store";
 
+/**
+ * A GLOBAL PASS month whose current activity snapshot is an `ok` parse with no
+ * row while an older snapshot of the same month had rows. The read model's
+ * currentness is unchanged: the newer empty capture stays current and the
+ * older rows stay out of the lists; this names the month so a person can check
+ * the provider's display. Identifiers only: no amount, no row.
+ */
+export interface GlobalPassEmptyMonth {
+  source: string;
+  /** `YYYY-MM`, the month the activity key names. */
+  month: string;
+  /** The fetch run whose empty page is the month's current snapshot. */
+  currentFetchRunId: number;
+  /** The newest older eligible fetch run of the month that had rows. */
+  supersededFetchRunId: number;
+  /** How many older eligible fetch runs of the month had rows; at least 1. */
+  supersededRuns: number;
+}
+
+export interface GlobalPassEmptyMonths {
+  /** Newest month first per source; at most 100. */
+  months: GlobalPassEmptyMonth[];
+  /** More such months exist than the list holds. */
+  truncated: boolean;
+}
+
 export interface ApiMetadata {
   /** Registered parsing jobs only; not collector freshness or full source coverage. */
   parsingHealth?: { pending: number; running: number; failed: number };
+  /**
+   * GLOBAL PASS months whose current empty capture supersedes older rows; a
+   * notice to check the provider, not a freshness or completeness claim.
+   */
+  globalPassEmptyMonths?: GlobalPassEmptyMonths;
   apiVersion: 1;
   source: {
     /**
