@@ -633,6 +633,11 @@ export interface ReconstructionManifest {
   identityRelease: string;
   evidenceAliasRelease: string;
   coverageRelease: string;
+  /** The coverage rows the fold read, in canonical order: the context id covers them. */
+  coverage: {
+    family: ProvisionalFamilyCoverage[];
+    history: ProvisionalHistoryCoverage[];
+  };
   fxReferenceRef: string | null;
   policyRefs: string[];
 }
@@ -2140,6 +2145,7 @@ export function reconstructState(input: {
     identityRelease: selection.pins.identityRelease,
     evidenceAliasRelease: selection.pins.evidenceAliasRelease,
     coverageRelease: selection.pins.coverageRelease,
+    coverage: canonicalCoverage(selection),
     fxReferenceRef: selection.pins.fxReferenceRef,
     policyRefs: selection.pins.policyRefs,
   };
@@ -2157,6 +2163,28 @@ export function reconstructState(input: {
       manifest,
     },
   };
+}
+
+function canonicalCoverage(selection: KnowledgeSelection): ReconstructionManifest["coverage"] {
+  const family = selection.familyCoverage
+    .map((row) => ({ ...row, families: [...row.families].sort(cmp) }))
+    .sort(
+      (a, b) =>
+        cmp(a.accountId, b.accountId) ||
+        cmp(a.status, b.status) ||
+        cmp(a.families.join("\u0000"), b.families.join("\u0000")),
+    );
+  const history = selection.historyCoverage
+    .map((row) => ({ ...row }))
+    .sort(
+      (a, b) =>
+        cmp(a.accountId, b.accountId) ||
+        cmp(a.from, b.from) ||
+        cmp(a.to, b.to) ||
+        cmp(a.status, b.status) ||
+        cmp(a.reasonCode ?? "", b.reasonCode ?? ""),
+    );
+  return { family, history };
 }
 
 /**

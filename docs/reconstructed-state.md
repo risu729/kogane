@@ -140,7 +140,8 @@ supplies that baseline), pending movements and boundary candidates.
 Schema `reconstructed-state-v1`, engine release, input contract, resolution,
 policy ids, zone, basis, range, accounts, `knowledgeAt`, the cut and the
 baseline cut, both reported context ids, event-set version, adapter release,
-writers, identity, evidence-alias and coverage releases, FX reference and
+writers, identity, evidence-alias and coverage releases, the family and history
+coverage rows in canonical order (so the id changes when coverage does), FX reference and
 policy references. `canonicalReconstructionManifest` gives its canonical text
 synchronously; `contextId = canonicalDigest(manifest)` is the caller's step.
 Any input order gives the same output and the same id.

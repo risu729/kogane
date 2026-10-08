@@ -1480,3 +1480,29 @@ describe("adapter flags reach the cells their chain touched", () => {
     expect(disposition(state, "event:test:1@1#0")).toBe("claim_conflict");
   });
 });
+
+describe("the manifest pins coverage", () => {
+  test("different coverage rows give a different context id; their order does not", async () => {
+    const complete = run({ set: eventSet([]) });
+    const none = run({ set: eventSet([], { historyCoverage: [] }) });
+    expect(cell(complete).partition).not.toBe(cell(none).partition);
+    expect(await canonicalDigest(complete.manifest)).not.toBe(await canonicalDigest(none.manifest));
+    const reordered = run({
+      set: eventSet([], {
+        familyCoverage: [
+          { accountId: B, families: ["b", "a"], status: "evented" },
+          { accountId: A, families: ["bank-transactions"], status: "evented" },
+        ],
+      }),
+    });
+    const ordered = run({
+      set: eventSet([], {
+        familyCoverage: [
+          { accountId: A, families: ["bank-transactions"], status: "evented" },
+          { accountId: B, families: ["a", "b"], status: "evented" },
+        ],
+      }),
+    });
+    expect(await canonicalDigest(reordered.manifest)).toBe(await canonicalDigest(ordered.manifest));
+  });
+});
