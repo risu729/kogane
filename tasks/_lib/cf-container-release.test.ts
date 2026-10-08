@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { realpathSync, chmodSync, symlinkSync, openSync, renameSync } from "node:fs";
@@ -22,6 +22,7 @@ import {
   isBasicApplicationConfiguration,
   verifyApplicationIdentity,
   verifyApplicationRollout,
+  waitForApplicationRollout,
   registryImage,
   verifyRegistryImage,
   cloudflareApi,
@@ -787,4 +788,208 @@ test("the basic application preset requires all three exact expanded numeric res
       ),
     ).toThrow("application_identity");
   }
+});
+
+describe("rollout polling uses the existing deadline rather than a shorter attempt cap", () => {
+  const state = (pending: boolean, verified = true) => {
+    const snapshot = applicationSnapshot(target, app(), bindings(), account);
+    return {
+      snapshot: {
+        ...snapshot,
+        activeRolloutId: pending ? "00000000-0000-4000-8000-000000000001" : null,
+      },
+      versions: verified
+        ? [{ version: snapshot.version, configuration: { image: snapshot.image }, percentage: 100 }]
+        : [],
+    };
+  };
+
+  test("a rollout completing after the old 25th poll succeeds within 180 seconds", async () => {
+    let elapsed = 0;
+    let reads = 0;
+    const deadlines: number[] = [];
+    const snapshot = await waitForApplicationRollout(
+      async (deadline: number) => {
+        deadlines.push(deadline);
+        reads++;
+        return state(elapsed < 130000);
+      },
+      {
+        now: () => elapsed,
+        wait: async (ms: number) => {
+          elapsed += ms;
+        },
+      },
+    );
+    expect(elapsed).toBe(130000);
+    expect(reads).toBe(27);
+    expect(new Set(deadlines)).toEqual(new Set([180000]));
+    expect(snapshot.activeRolloutId).toBeNull();
+  });
+
+  for (const mode of ["pending", "unverified"] as const) {
+    test(mode + " stops at the unchanged 180-second deadline", async () => {
+      let elapsed = 0;
+      let reads = 0;
+      await expect(
+        waitForApplicationRollout(
+          async () => {
+            reads++;
+            return state(mode === "pending", mode !== "unverified");
+          },
+          {
+            now: () => elapsed,
+            wait: async (ms: number) => {
+              elapsed += ms;
+            },
+          },
+        ),
+      ).rejects.toThrow("cf_container_rollout_pending");
+      expect(elapsed).toBe(180000);
+      expect(reads).toBe(36);
+    });
+  }
+
+  test("slow reads clip the last wait and cannot confirm success after the deadline", async () => {
+    let elapsed = 0;
+    const waits: number[] = [];
+    await expect(
+      waitForApplicationRollout(
+        async () => {
+          elapsed += 179000;
+          return state(true);
+        },
+        {
+          now: () => elapsed,
+          wait: async (ms: number) => {
+            waits.push(ms);
+            elapsed += ms;
+          },
+        },
+      ),
+    ).rejects.toThrow("cf_container_rollout_pending");
+    expect(elapsed).toBe(180000);
+    expect(waits.at(-1)).toBe(1000);
+    elapsed = 0;
+    await expect(
+      waitForApplicationRollout(
+        async () => {
+          elapsed = 180001;
+          return state(false);
+        },
+        { now: () => elapsed },
+      ),
+    ).rejects.toThrow("cf_container_rollout_pending");
+  });
+
+  test("identity and API failures propagate without polling again", async () => {
+    for (const code of ["cf_container_application_identity", "cf_container_api_http"]) {
+      let reads = 0;
+      let waits = 0;
+      await expect(
+        waitForApplicationRollout(
+          async () => {
+            reads++;
+            throw new Error(code);
+          },
+          {
+            now: () => 0,
+            wait: async () => {
+              waits++;
+            },
+          },
+        ),
+      ).rejects.toThrow(code);
+      expect(reads).toBe(1);
+      expect(waits).toBe(0);
+    }
+  });
+
+  test("control-plane calls cannot begin or confirm results beyond their shared deadline", async () => {
+    let elapsed = 180000;
+    let requests = 0;
+    const api = cloudflareApi({
+      accountId: account,
+      token: "synthetic-token",
+      deadline: 180000,
+      now: () => elapsed,
+      reportDiagnostic: () => {},
+      fetchImpl: async () => {
+        requests++;
+        elapsed = 180001;
+        return new Response(JSON.stringify({ success: true, result: {} }));
+      },
+    });
+    await expect(api(`containers/applications/${target.appId}`)).rejects.toThrow(
+      "cf_container_rollout_pending",
+    );
+    expect(requests).toBe(0);
+    elapsed = 179999;
+    await expect(api(`containers/applications/${target.appId}`)).rejects.toThrow(
+      "cf_container_rollout_pending",
+    );
+    expect(requests).toBe(1);
+  });
+
+  test("the native signal aborts a pending read at its remaining budget; ordinary calls retain 30 seconds", async () => {
+    const timeoutValues: number[] = [];
+    const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeoutSpy = spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+      timeoutValues.push(ms);
+      return nativeTimeout(ms);
+    });
+    try {
+      // Keep the logical deadline stable until the real native timer aborts.
+      // This avoids a loaded test host consuming the budget before fetch starts.
+      let clock = 179900;
+      let signalAborted = false;
+      let reads = 0;
+      const limitedApi = cloudflareApi({
+        accountId: account,
+        token: "synthetic-token",
+        deadline: 180000,
+        now: () => clock,
+        reportDiagnostic: () => {},
+        fetchImpl: async (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            reads++;
+            const signal = init.signal!;
+            // Only a hang safeguard, not the mechanism that completes this read.
+            const watchdog = setTimeout(() => reject(new Error("test_signal_not_aborted")), 2000);
+            signal.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(watchdog);
+                signalAborted = signal.aborted;
+                clock = 180000;
+                reject(signal.reason);
+              },
+              { once: true },
+            );
+          }),
+      });
+      await expect(limitedApi(`containers/applications/${target.appId}`)).rejects.toThrow(
+        "cf_container_rollout_pending",
+      );
+      expect(reads).toBe(1);
+      expect(signalAborted).toBe(true);
+      expect(timeoutValues).toEqual([100]);
+
+      const ordinaryApi = cloudflareApi({
+        accountId: account,
+        token: "synthetic-token",
+        reportDiagnostic: () => {},
+        fetchImpl: async (_url: string, init: RequestInit) => {
+          expect(init.signal?.aborted).toBe(false);
+          return new Response(JSON.stringify({ success: true, result: { synthetic: true } }));
+        },
+      });
+      expect(await ordinaryApi(`containers/applications/${target.appId}`)).toEqual({
+        synthetic: true,
+      });
+      expect(timeoutValues).toEqual([100, 30000]);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
 });
