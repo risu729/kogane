@@ -191,6 +191,26 @@ describe("Mobile Suica history semantics", () => {
     ]);
   });
 
+  test("preserves identical rows beyond the 26-week window as separate occurrences", () => {
+    const input = value();
+    const rows = input.rows as Record<string, unknown>[];
+    const aged = { ...rows[0], date: "2026-01-01" };
+    input.rows = [aged, structuredClone(aged)];
+    input.transactionCount = 2;
+    const parsed = mobileSuicaSfHistory.parse(encoded(input), artifact());
+    const ids = parsed.observations
+      .filter((entry) => entry.kind === "transaction")
+      .map((entry) => entry.externalId);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids[0]?.endsWith(":1")).toBe(true);
+    expect(ids[1]?.endsWith(":0")).toBe(true);
+    expect(parsed.warnings).toEqual([
+      "json:$.rows[0]: date exceeds the documented 26-week history window; preserved",
+      "json:$.rows[1]: date exceeds the documented 26-week history window; preserved",
+    ]);
+  });
+
   test("warns and omits only the unavailable metric allowed by the normalized contract", () => {
     const input = value();
     const rows = input.rows as Record<string, unknown>[];
@@ -241,6 +261,12 @@ describe("Mobile Suica strict completeness and schema boundaries", () => {
     expectRejected(hundred, /complete provider snapshot/u);
     delete hundred.complete;
     expectRejected(hundred, /legacy.*100-row/u);
+    const claimed = value();
+    const claimedRow = (claimed.rows as Record<string, unknown>[])[0]!;
+    claimed.rows = Array.from({ length: 100 }, () => structuredClone(claimedRow));
+    claimed.transactionCount = 100;
+    claimed.complete = true;
+    expectRejected(claimed, /contradicts the 100-row boundary/u);
   });
 
   test("refuses invalid row enum, semantic amount drift, and classification drift", () => {
