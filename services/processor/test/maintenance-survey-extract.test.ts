@@ -163,6 +163,36 @@ describe("fetching a page", () => {
     for (const [transport, code, status] of cases)
       expect(await fetchPage(URL_A, transport)).toMatchObject({ ok: false, code, status });
   });
+
+  test("a body that fails while it is read is a closed code too, never an exception", async () => {
+    // The timeout signal and a dropped connection can end the body after the
+    // headers arrived; the stream then errors instead of finishing.
+    const failingBody =
+      (error: unknown): SurveyTransport =>
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("<p>毎週日曜日 13:00"));
+            },
+            pull(controller) {
+              controller.error(error);
+            },
+          }),
+          { headers: { "content-type": "text/html; charset=utf-8" } },
+        );
+    for (const [error, code] of [
+      [new DOMException("synthetic", "TimeoutError"), "timeout"],
+      [new DOMException("synthetic", "AbortError"), "timeout"],
+      [new TypeError("synthetic connection reset"), "network_error"],
+    ] as const)
+      expect(await fetchPage(URL_A, failingBody(error))).toEqual({
+        ok: false,
+        code,
+        status: 200,
+        mediaType: "text/html",
+      });
+  });
 });
 
 describe("page text", () => {

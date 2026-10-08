@@ -477,3 +477,47 @@ test("evidence rows cannot be rewritten", async () => {
       .run(),
   ).rejects.toThrow("maintenance_survey_reason_invalid");
 }, 60000);
+
+test("a body cut off after its headers is a recorded failure that backs off, not a failed tick", async () => {
+  // The 15-second signal (or a dropped connection) can end the body while it
+  // is read. That is the same closed failure as before the headers: recorded,
+  // backed off, and the tick's other page is still surveyed.
+  const cutOff = () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("<p>毎週土曜日 21:00"));
+        },
+        pull(controller) {
+          controller.error(new DOMException("synthetic", "TimeoutError"));
+        },
+      }),
+      { headers: { "content-type": "text/html; charset=utf-8" } },
+    );
+  const now = T0 + 200 * HOUR;
+  const result = await maintenanceSurveyLane(env, {
+    config: CONFIG,
+    now: () => now,
+    transport: transport({ [MIZUHO]: cutOff, [SONY]: html("unavailable", 503) }),
+  });
+  expect(result).toMatchObject({
+    due: 2,
+    extracted: 0,
+    failed: 2,
+    failures: { timeout: 1, http_error: 1 },
+  });
+  expect(
+    await env.DB.prepare(
+      "SELECT outcome,http_status,media_type,sha256 FROM maintenance_survey_fetches WHERE target_id='mizuho-bank' ORDER BY id DESC LIMIT 1",
+    ).first<Record<string, unknown>>(),
+  ).toEqual({ outcome: "timeout", http_status: 200, media_type: "text/html", sha256: null });
+  expect(
+    await env.DB.prepare(
+      "SELECT consecutive_failures,last_failure_code,next_due_at FROM maintenance_survey_cursors WHERE target_id='mizuho-bank'",
+    ).first<Record<string, unknown>>(),
+  ).toEqual({
+    consecutive_failures: 1,
+    last_failure_code: "timeout",
+    next_due_at: new Date(now + HOUR).toISOString(),
+  });
+}, 60000);

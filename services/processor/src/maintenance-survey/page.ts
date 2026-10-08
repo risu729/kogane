@@ -55,13 +55,7 @@ export async function fetchPage(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    const name = error instanceof Error ? error.name : "";
-    return {
-      ok: false,
-      code: name === "TimeoutError" || name === "AbortError" ? "timeout" : "network_error",
-      status: null,
-      mediaType: null,
-    };
+    return { ok: false, code: transportFailure(error), status: null, mediaType: null };
   }
   const status = response.status;
   const header = response.headers.get("content-type") ?? "";
@@ -80,7 +74,14 @@ export async function fetchPage(
   if (mediaType === null || mediaType === "other") return fail("unsupported_content_type");
   const declared = Number(response.headers.get("content-length") ?? "");
   if (Number.isFinite(declared) && declared > MAX_PAGE_BYTES) return fail("too_large");
-  const bytes = await boundedBytes(response, MAX_PAGE_BYTES);
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await boundedBytes(response, MAX_PAGE_BYTES);
+  } catch (error) {
+    // The timeout, or a dropped connection, can end the body after its
+    // headers arrived: the same closed code as before them, never an exception.
+    return { ok: false, code: transportFailure(error), status, mediaType };
+  }
   if (bytes === null) return { ok: false, code: "too_large", status, mediaType };
   if (bytes.byteLength === 0) return { ok: false, code: "empty_body", status, mediaType };
   const charset =
@@ -89,6 +90,12 @@ export async function fetchPage(
       ?.slice(8)
       .replaceAll('"', "") || null;
   return { ok: true, status, mediaType, charset, bytes };
+}
+
+/** A transport that threw, as a closed code: the timeout signal, or anything else. */
+function transportFailure(error: unknown): "timeout" | "network_error" {
+  const name = error instanceof Error ? error.name : "";
+  return name === "TimeoutError" || name === "AbortError" ? "timeout" : "network_error";
 }
 
 async function boundedBytes(response: Response, limit: number): Promise<Uint8Array | null> {
