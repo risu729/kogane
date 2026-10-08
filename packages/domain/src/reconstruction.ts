@@ -445,6 +445,7 @@ export const RECONSTRUCTION_GAPS = [
   "writer_unsupported",
   "duplicate_claim",
   "leg_value_not_exact",
+  "leg_sign_unknown",
   "event_time_unknown",
   "own_transfer_held",
   "leg_subject_unrecognized",
@@ -1419,7 +1420,10 @@ function classifyLeg(
   if (flag !== undefined) return classified(flag, flag);
   if (leg.basis === "unknown") return classified("unknown_effect");
   const rule = policy.legEffects[leg.effect];
-  if (rule === "attribution-never-added") return classified("breakdown_attribution");
+  if (rule === "attribution-never-added")
+    return negative(leg.quantity)
+      ? classified("unknown_effect", "leg_sign_unknown")
+      : classified("breakdown_attribution");
   if (rule === "link-never-added") return classified("correspondence_link");
   const effect = policy.stateEffects[row.kind][row.state];
   if (effect === "no-effect") return classified("state_no_effect");
@@ -1437,8 +1441,18 @@ function classifyLeg(
   if (placement === "outside") return classified("outside_range", null, placement);
   if (leg.quantity.value.status !== "exact")
     return classified("unknown_effect", "leg_value_not_exact", placement);
+  if (negative(leg.quantity)) return classified("unknown_effect", "leg_sign_unknown", placement);
   if (placement !== "inside") return classified("boundary_same_day", null, placement);
   return classified(effect === "applied" ? "applied" : "pending_shown_apart", null, placement);
+}
+
+/**
+ * The direction of a movement is its role; its value is a magnitude. A
+ * negative value would be negated a second time by a decrease, so its sign is
+ * unknown rather than guessed (0032 stores signed coefficients).
+ */
+function negative(quantity: Quantity): boolean {
+  return quantity.value.status === "exact" && quantity.value.value.coefficient.startsWith("-");
 }
 
 function signed(leg: ProvisionalLeg): Quantity {

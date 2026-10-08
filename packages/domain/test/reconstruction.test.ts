@@ -1304,3 +1304,35 @@ describe("history epochs and exported names", () => {
       expect(exported).not.toContain(name);
   });
 });
+
+describe("signs", () => {
+  test("a negative movement is never negated twice: its sign is unknown", () => {
+    const state = run({ set: eventSet([rev({ legs: [leg({ quantity: q("JPY", "-100") })] })]) });
+    const jpy = cell(state);
+    expect(disposition(state, "event:test:1@1#0")).toBe("unknown_effect");
+    expect(jpy.gaps).toContain("leg_sign_unknown");
+    expect(reason(jpy.reconstructed)).toBe("leg_sign_unknown");
+  });
+
+  test("a negative breakdown is refused the same way; zero is a value", () => {
+    const state = run({
+      set: eventSet([
+        rev({
+          legs: [
+            leg({ quantity: q("JPY", "0") }),
+            leg({
+              legIndex: 1,
+              effect: "breakdown",
+              role: "fee",
+              ofLegIndex: 0,
+              quantity: q("JPY", "-1"),
+            }),
+          ],
+        }),
+      ]),
+    });
+    expect(disposition(state, "event:test:1@1#0")).toBe("applied");
+    expect(disposition(state, "event:test:1@1#1")).toBe("unknown_effect");
+    expect(cell(state).gaps).toContain("leg_sign_unknown");
+  });
+});

@@ -200,7 +200,11 @@ now)`, a pure diff of two selections of one scope (the baseline is the cut
    instrument holding.
 5. How legacy `fee` and `unresolved` legs map: a breakdown or correspondence
    of which movement, and whether a fee can ever be an additional movement of
-   its subject.
+   its subject. The sign convention: the fold reads a movement's direction
+   from its role and its value as a non-negative magnitude, and refuses a
+   negative movement or breakdown as `leg_sign_unknown` rather than negating
+   it twice; 0032 allows signed coefficients, so the contract must say
+   whether a stored negative value can occur and what it means.
 6. Own transfers: adoption, withdrawal and re-allocation, in-transit across a
    snapshot boundary, and one live holder per `(book, key)` across every
    writer, so a bank debit row is never both a settlement movement and a
