@@ -17,6 +17,64 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## GLOBAL PASS: a refused page has ten records and nine detail pairs (replay diagnostics, no parser release)
+
+2026-10-08. The owner replayed one of the two importer-era pages
+`global-pass-activity@1.2.0` still refuses (artifact 679; its bytes matched
+the stored SHA-256 and size) and reported closed counts only:
+
+- **Category** `unclassified_table`.
+- **Tables.** 20 in all: one with twelve `th` (the activity table), nine with
+  four, nine with ten, and one other.
+- **Activity table.** 20 body rows: a nine-cell row and a four-cell row for
+  each of 10 records; no table inside any row.
+- **Detail tables.** Each four-`th` table has three body rows of 1, 1 and 2
+  cells; each ten-`th` table has ten rows of one cell. They lie outside the
+  activity table, in one parent `div` (ancestors `div`, `form`, `div`, `div`,
+  `body`, `html`) whose element children are a four-`th` table and a `div`
+  wrapping a ten-`th` table, nine times, then a 19th child: the other table,
+  with 2 `th`, 1 `td`, one body row of one cell and no nested table.
+
+So the page has 10 records but 9 detail pairs, plus a two-header table where
+a tenth pair would be. The parser refuses it at the unclassified-table check;
+leaving the two-header table out would not admit it either, because the
+activity table's 20 rows are not twice 9. The
+[2026-09-08 investigation](#remaining-globalpass-shape-investigation-2026-09-08)
+found that table's header list includes `Transaction Detail`. What the table
+means, and whether it belongs to the tenth record, nobody has observed; no
+accept rule is guessed ([ADR 0004](adr/0004-payment-type-shapes-from-evidence.md)).
+
+No parser changed. The replay's GLOBAL PASS `shape` now also prints, as
+indices, booleans, counts and closed classes
+([ADR 0026's amendment of 2026-10-08](adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-replay-compares-records-with-detail-tables),
+[operations](operations.md#replaying-a-parser-rejection)): the detail
+tables' parent as a list of child signatures and how many pairs run in order;
+for every table of another `th` count its structure, attribute-name classes,
+where its id's number ranks among the detail tables', where each of its
+headers stands in the activity, compact and expanded header lists, and per
+cell a pattern class and the activity cells with exactly its text; which
+record each detail table carries and which records none does; for such a
+record, each cell's pattern against the carried records' and the other
+tables' cells with its text; and whether the newest capture of the same key
+with a published parse has the same desktop rows. No text, attribute value or
+number read from the page is printed, apart from the largest `colspan` of
+such a table (a column count). The owner runs
+
+```sh
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts globalpass-activity 2
+```
+
+and shares the `shape` and `latestOkCapture` of each refused page; a parser
+change, if any, follows from what they show. The owner's private read-only
+replay ran the structural comparisons on this stored page. Limits: they match
+texts exactly as the parser normalises them, so a value the provider
+reformats between views is not matched. For this page `latestOkCapture`
+found no other capture with the same key and a published parse (an
+unpublished successful parse was not checked), so its row comparison
+(`recordsAlsoPresent`, `unmatchedRecordPresent`) has not run on real data. Tests:
+`services/processor/test/global-pass-rejection.test.ts`,
+`services/processor/test/parser-rejection.test.ts` (the lookup).
+
 ## GLOBAL PASS empty months are read as no rows (activity parser 1.2.0)
 
 2026-10-04. The owner observed live (round 8, English display) that a month
