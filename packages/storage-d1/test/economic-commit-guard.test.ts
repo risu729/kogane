@@ -635,6 +635,36 @@ describe("migration 0070", () => {
     db.close();
   });
 
+  test("the trigger lookups go through indexes, without table statistics", () => {
+    const db = database();
+    const lookups = [
+      // Step 4: every revision that points at a member, across event ids.
+      `SELECT 1 FROM json_each(?1) m JOIN economic_event_revisions r
+        ON r.superseded_by=json_extract(m.value,'$.eventId')||'@'||json_extract(m.value,'$.revision')`,
+      `SELECT 1 FROM economic_claims x JOIN economic_event_revisions r ON r.event_id=x.event_id AND r.revision=x.revision
+        WHERE x.book=?1 AND x.consumption_key=?2 AND r.superseded_by IS NULL`,
+      `SELECT 1 FROM economic_claims x JOIN economic_event_revisions r ON r.event_id=x.event_id AND r.revision=x.revision
+        WHERE x.book=?1 AND x.alias_class=?2 AND r.superseded_by IS NULL`,
+      `SELECT 1 FROM card_purchase_recognition_keys k JOIN economic_event_revisions r ON r.event_id=k.event_id AND r.revision=k.revision
+        WHERE k.recognition_key=?1 AND r.superseded_by IS NULL`,
+      `SELECT 1 FROM card_settlement_candidates k JOIN card_settlement_decisions d ON d.proposal_id=k.id AND d.status='accepted'
+        JOIN economic_event_revisions r ON r.event_id=d.event_id AND r.revision=d.revision
+        WHERE k.bank_key=?1 AND r.superseded_by IS NULL`,
+      `SELECT count(*) FROM card_settlement_decisions d JOIN card_settlement_candidates k ON k.id=d.proposal_id
+        WHERE d.event_id=?1 AND d.revision=?2 AND d.status='accepted'`,
+    ];
+    for (const sql of lookups) {
+      const plan = (db.query(`EXPLAIN QUERY PLAN ${sql}`).all() as { detail: string }[]).map(
+        (row) => row.detail,
+      );
+      // Only the JSON table-valued function is scanned; every table is searched.
+      expect(
+        plan.filter((detail) => detail.startsWith("SCAN") && !detail.includes("VIRTUAL TABLE")),
+      ).toEqual([]);
+    }
+    db.close();
+  });
+
   test("every closed code the migration raises is the contract's, and back", () => {
     const sql = migrationSql(CORE_MIGRATIONS_URL, MIGRATION);
     const raised = new Set(
@@ -807,6 +837,58 @@ describe("the finalization", () => {
       { commit_seq: 2 },
       { commit_seq: 3 },
     ]);
+    db.close();
+  });
+
+  test("P1: a correction that leaves its superseded prior undeclared is refused", async () => {
+    const db = database();
+    await run(
+      db,
+      adoptWrites(db, {
+        eventId: "transfer-x",
+        revision: 1,
+        claims: [
+          { book: "cash-movement", observationId: 101 },
+          { book: "cash-movement", observationId: 102 },
+        ],
+      }),
+    );
+    const before = snapshot(db);
+    // The pointer on @1 moves, but the commit declares no prior and releases
+    // nothing, so 102 would be released without anyone saying so.
+    const writes = adoptWrites(db, {
+      eventId: "transfer-x",
+      revision: 2,
+      claims: [{ book: "cash-movement", observationId: 101 }],
+      supersedes: [],
+      supersedeTargets: [{ eventId: "transfer-x", revision: 1 }],
+      now: LATER,
+    });
+    await expect(run(db, writes)).rejects.toThrow("economic_commit_supersession_undeclared");
+    expect(snapshot(db)).toEqual(before);
+    db.close();
+  });
+
+  test("P2: a withdrawal that leaves its prior undeclared cannot wash a double holder", async () => {
+    const db = database();
+    proposeSettlement(db, "proposal-1", 101);
+    proposeSettlement(db, "proposal-2", 101);
+    await run(db, acceptSettlementWrites(db, "proposal-1", 101));
+    await run(db, acceptSettlementWrites(db, "proposal-2", 101));
+    const conflicts = db.query("SELECT * FROM consumption_claim_conflicts").all();
+    expect(conflicts).toHaveLength(1);
+    const before = snapshot(db);
+    const withdraw = adoptWrites(db, {
+      eventId: "settlement-event-proposal-1",
+      revision: 2,
+      withdraw: true,
+      supersedes: [],
+      supersedeTargets: [{ eventId: "settlement-event-proposal-1", revision: 1 }],
+      released: [],
+    });
+    await expect(run(db, withdraw)).rejects.toThrow("economic_commit_supersession_undeclared");
+    expect(snapshot(db)).toEqual(before);
+    expect(db.query("SELECT * FROM consumption_claim_conflicts").all()).toEqual(conflicts);
     db.close();
   });
 

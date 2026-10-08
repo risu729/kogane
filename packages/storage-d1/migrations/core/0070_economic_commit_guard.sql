@@ -203,6 +203,11 @@ WHEN EXISTS(SELECT 1 FROM economic_commit_log WHERE (core_epoch=NEW.core_epoch A
  OR decision_revision_id=NEW.decision_revision_id)
 BEGIN SELECT RAISE(ABORT,'economic commit replacement is forbidden'); END;
 
+-- The commit trigger finds every revision a member superseded, across event
+-- ids (a merge supersedes another event's revision), by its pointer.
+CREATE INDEX economic_event_revisions_superseded_by ON economic_event_revisions(superseded_by)
+ WHERE superseded_by IS NOT NULL;
+
 -- The settlement branch below is read by event revision; 0044 indexes the
 -- decisions only by proposal. An index changes no row and no result.
 CREATE INDEX card_settlement_decisions_event ON card_settlement_decisions(event_id,revision);
@@ -403,7 +408,10 @@ BEGIN SELECT RAISE(ABORT,'economic_revision_sealed'); END;
 --   3a. every member was sealed under the current identity epoch, unless the
 --      commit is a reviewed identity resolution
 --      (kind economic-event.resolve-identity; no planner exists yet);
---   4. every revision a member names in supersedes points at that member;
+--   4. every revision a member names in supersedes points at that member,
+--      and every revision that points at a member is named in its
+--      supersedes (an undeclared supersession would release claims, or wash
+--      a conflict, without saying so);
 --   5. no other live revision of a member's event;
 --   6. the members' claims equal claims_json as a set: every entry is held
 --      by a member, and there are as many entries as the members' seals
@@ -467,6 +475,13 @@ BEGIN
   WHERE NOT EXISTS(SELECT 1 FROM economic_event_revisions r
    WHERE r.event_id=json_extract(p.value,'$[0]') AND r.revision=json_extract(p.value,'$[1]')
    AND r.superseded_by=json_extract(m.value,'$.eventId')||'@'||json_extract(m.value,'$.revision')));
+
+ SELECT RAISE(ABORT,'economic_commit_supersession_undeclared')
+ WHERE EXISTS(SELECT 1 FROM json_each(NEW.members_json) m
+  JOIN economic_event_revisions r
+   ON r.superseded_by=json_extract(m.value,'$.eventId')||'@'||json_extract(m.value,'$.revision')
+  WHERE NOT EXISTS(SELECT 1 FROM json_each(m.value,'$.supersedes') p
+   WHERE json_extract(p.value,'$[0]')=r.event_id AND json_extract(p.value,'$[1]')=r.revision));
 
  SELECT RAISE(ABORT,'economic_event_live_conflict')
  WHERE EXISTS(SELECT 1 FROM json_each(NEW.members_json) m

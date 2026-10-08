@@ -103,7 +103,11 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   `known_at`; every member live, newest, sealed for this commit, and the
   commit's seals exactly the members; identity epoch; every superseded prior
   points at its member (a 0-row compare-and-set raises
-  `economic_commit_prior_not_superseded`); no other live revision of a member's
+  `economic_commit_prior_not_superseded`), and every revision that points at
+  a member is declared in its `supersedes`
+  (`economic_commit_supersession_undeclared`: otherwise its claims would be
+  released, or a conflict washed, without anyone saying so; a partial index on
+  `superseded_by` finds them across event ids); no other live revision of a member's
   event; claims equal `claims_json` as a set; no outside live holder of a
   claimed key or alias class; `released_json` exactly the dropped claims and
   none still live elsewhere (`economic_claim_conflict_unresolved`: a
@@ -308,7 +312,11 @@ Synthetic data only. This PR tests:
   inconsistencies); the current purchase and settlement writers unchanged;
   every raised code is the contract's; an adoption's claims, seal and commit
   row, and a replay that writes 0 rows; W2 (a supersede matching 0 rows
-  raises `economic_commit_prior_not_superseded`, every table unchanged); a
+  raises `economic_commit_prior_not_superseded`, every table unchanged); P1
+  and P2 (a correction or withdrawal that moves its prior's pointer without
+  declaring it raises `economic_commit_supersession_undeclared`, so a dropped
+  claim is never released silently and a double holder is never washed);
+  the trigger lookups' query plans search indexes only; a
   stale batch writes 0 rows everywhere; a correction must list what it
   releases; W10 (same count, other key); dense sequence, `known_at`
   carried forward, gap and regression refused; seal counts; W3 (leg, claim,

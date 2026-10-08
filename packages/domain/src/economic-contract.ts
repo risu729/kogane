@@ -548,6 +548,8 @@ export const ECONOMIC_GUARD_CODES = [
   "economic_commit_member_invalid",
   /** A revision a member says it supersedes does not point at that member (a 0-row CAS). */
   "economic_commit_prior_not_superseded",
+  /** A revision points at a member that does not name it in supersedes: an undeclared supersession. */
+  "economic_commit_supersession_undeclared",
   /** Another live revision of a member's event. */
   "economic_event_live_conflict",
   /** claims_json is not the members' claim set. */

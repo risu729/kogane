@@ -1074,14 +1074,14 @@
     },
     {
       "file": "0070_economic_commit_guard.sql",
-      "statementCount": 52,
+      "statementCount": 53,
       "insertStatements": [
         {
           "table": "economic_identity_epochs",
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "dd8a95413b4b677b62a88c1e2f7693a7620028574b2ef9c39d79acaf938ccc7a"
+      "sha256": "28dacf8600b01ffcac1a1d3430b7282cc1b04a993b0f718bc2b945d006ab18b7"
     }
   ],
   "tables": [
@@ -6068,6 +6068,14 @@
           "columns": [
             "kind",
             "state"
+          ]
+        },
+        {
+          "name": "economic_event_revisions_superseded_by",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "superseded_by"
           ]
         }
       ],
@@ -16685,7 +16693,7 @@
       "table": "economic_commit_log",
       "timing": "BEFORE",
       "event": "INSERT",
-      "sqlSha256": "87fc637b0d73cd0e"
+      "sqlSha256": "a285cb024d1a911b"
     },
     {
       "name": "economic_commit_log_no_delete",
@@ -19193,6 +19201,11 @@
       "sqlSha256": "e8df80590e902309"
     },
     {
+      "name": "economic_event_revisions_superseded_by",
+      "table": "economic_event_revisions",
+      "sqlSha256": "300e32010e3e0943"
+    },
+    {
       "name": "economic_legs_basis",
       "table": "economic_legs",
       "sqlSha256": "3c671e26d0b94261"
@@ -19662,7 +19675,7 @@
     "tableCount": 129,
     "viewCount": 44,
     "triggerCount": 490,
-    "explicitIndexCount": 126,
+    "explicitIndexCount": 127,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -19902,6 +19915,6 @@
       "0066_prestia_bank_snapshot_schedule.sql",
       "0070_economic_commit_guard.sql"
     ],
-    "schemaSha256": "a7307ca2fc51bbe78607cd485f5289c3c4c5307d77bf726425f99ef7696a9a9e"
+    "schemaSha256": "056a4199dedff1978f973185608df20adfe3b24a7143a45155399c2070aa478e"
   }
 }

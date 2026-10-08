@@ -10,7 +10,7 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `a7307ca2fc51bbe78607cd485f5289c3c4c5307d77bf726425f99ef7696a9a9e`
+Schema digest: `056a4199dedff1978f973185608df20adfe3b24a7143a45155399c2070aa478e`
 
 ## Summary
 
@@ -18,7 +18,7 @@ Schema digest: `a7307ca2fc51bbe78607cd485f5289c3c4c5307d77bf726425f99ef7696a9a9e
 - Tables: 129 (all `STRICT`: yes)
 - Views: 44
 - Triggers: 490
-- Explicit indexes: 126
+- Explicit indexes: 127
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
 | classification | count | tables |
@@ -81,7 +81,7 @@ active_releases, allocations, approvals, calculation_runs, card_purchase_retirem
 | `decision_revisions` | core-keep | decisions and relations | yes | no | yes | decision_revisions_no_update | decision_revisions_no_delete | 13 | 2 | 2 | 7 |
 | `economic_claims` | core-keep | economic events | yes | no | yes | economic_claims_no_update | economic_claims_no_delete | 8 | 5 | 3 | 8 |
 | `economic_commit_log` | core-keep | economic events | yes | no | yes | economic_commit_log_no_update | economic_commit_log_no_delete | 11 | 1 | 0 | 4 |
-| `economic_event_revisions` | core-keep | economic events | yes | no | no | — | economic_event_revisions_no_delete | 11 | 1 | 3 | 7 |
+| `economic_event_revisions` | core-keep | economic events | yes | no | no | — | economic_event_revisions_no_delete | 11 | 1 | 4 | 7 |
 | `economic_event_times` | core-keep | economic events | yes | no | yes | economic_event_times_no_update | economic_event_times_no_delete | 4 | 2 | 0 | 5 |
 | `economic_identity_epochs` | core-keep | economic events | yes | no | yes | economic_identity_epochs_no_update | economic_identity_epochs_no_delete | 4 | 0 | 0 | 3 |
 | `economic_leg_effects` | core-keep | economic events | yes | no | yes | economic_leg_effects_no_update | economic_leg_effects_no_delete | 5 | 3 | 0 | 5 |
@@ -266,6 +266,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0064_purchase_retirement_and_reconciliation_cost.sql` | 43 | card_purchase_retirement_check |
 | `0065_alarm_schedules.sql` | 59 | collection_schedule_revisions, collection_schedules, provider_maintenance_references, provider_maintenance_rules |
 | `0066_prestia_bank_snapshot_schedule.sql` | 3 | collection_schedule_revisions, collection_schedules, dataset_snapshot_policies |
-| `0070_economic_commit_guard.sql` | 52 | economic_identity_epochs |
+| `0070_economic_commit_guard.sql` | 53 | economic_identity_epochs |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql

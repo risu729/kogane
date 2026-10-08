@@ -189,7 +189,8 @@ row, purchase sidecar or key, or accepted settlement decision for a sealed
 revision (`economic_revision_sealed`); and at the commit row, after every
 mutation of the batch: the sequence, every member live and sealed for this
 commit under the current identity epoch, every superseded prior pointing at
-its member (a supersede that matched 0 rows raises), no second live revision,
+its member (a supersede that matched 0 rows raises) and every revision that
+points at a member declared by it, no second live revision,
 claims equal to the declared set, released claims exactly the dropped ones and
 none still held elsewhere, and the decisions under one operation and
 principal. Any of these raises, and D1 rolls the whole batch back. The closed
