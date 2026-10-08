@@ -159,6 +159,49 @@ installment slice is never compared with a purchase. The job also admits a
 confirmed row only under a payment month read or resolved the same way, so a
 row recognition stores as `NULL` never pairs rows there either.
 
+### Common consumption guard (migration 0070)
+
+[ADR 0054](adr/0054-economic-consumption-guard.md). **Schema only: no writer
+writes claims, seals or commit rows yet.** The card purchase lane and the card
+settlement commands write exactly what they wrote before; they join in G1b.
+0070 is additive (nothing rewritten, no backfill), and every new trigger on an
+existing table fires only once a seal or an `economic_claims` row exists.
+
+| Object                          | Role                                                                                                                                                                                                                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `economic_claims`               | One (book, key) a revision consumes: `book` (`card-usage`, `cash-movement`, `security-quantity`, the last refused until its writer exists), the 5-tuple `consumption_key` re-derived from the pinned `observation_id`/`parse_run_id`, the nullable `alias_class`, `identity_epoch`. |
+| `economic_revision_seals`       | A revision's children are complete: leg, claim, time and effect counts (checked against the stored rows), writer release, content digest, identity pins, identity epoch, and the `(core_epoch, commit_seq)` that finalizes it.                                                      |
+| `economic_commit_log`           | The finalization row, last in an economic batch: dense `commit_seq` per `core_epoch`, `known_at` never decreasing, the decision, operation, principal, payload digest, kind, `members_json`, `claims_json`, `released_json`.                                                        |
+| `economic_event_times`          | Role-typed times of a revision (`trade`, `settlement`, `posting`, `usage`, `value`); no fallback between roles.                                                                                                                                                                     |
+| `economic_leg_effects`          | Whether a leg is a `movement`, a `breakdown` of another leg (same unit) or a `correspondence`. A leg without a row keeps the legacy reading.                                                                                                                                        |
+| `economic_identity_epochs`      | Append-only declared identity epochs, seeded with `identity-epoch-1`; a declared identity rewrite appends the next.                                                                                                                                                                 |
+| `economic_revision_claims`      | View: every claim of every revision, from `economic_claims`, the card purchase keys (as `card-usage`) and accepted settlements' `bank_key` (as `cash-movement`). Legacy holders have no alias class.                                                                                |
+| `live_consumption_claims`       | View: those whose revision is live (`superseded_by IS NULL`).                                                                                                                                                                                                                       |
+| `consumption_claim_conflicts`   | View: a (book, key) or (book, alias class) with more than one live holder.                                                                                                                                                                                                          |
+| `economic_event_live_conflicts` | View: an event with more than one live revision.                                                                                                                                                                                                                                    |
+| `unlogged_economic_revisions`   | View: revisions no commit row finalizes (everything before the log started); `after_log_start` compares writer clocks and is diagnostic only.                                                                                                                                       |
+
+What the triggers enforce, once a writer uses them: one live holder per
+(book, key) across `economic_claims`, the card purchase keys and accepted
+settlements, in either order (`economic_claim_held`); one live holder per
+(book, alias class) among claims that record one (`alias_conflict`); no child
+row, purchase sidecar or key, or accepted settlement decision for a sealed
+revision (`economic_revision_sealed`); and at the commit row, after every
+mutation of the batch: the sequence, every member live and sealed for this
+commit under the current identity epoch, every superseded prior pointing at
+its member (a supersede that matched 0 rows raises), no second live revision,
+claims equal to the declared set, released claims exactly the dropped ones and
+none still held elsewhere, and the decisions under one operation and
+principal. Any of these raises, and D1 rolls the whole batch back. The closed
+codes are `ECONOMIC_GUARD_CODES` in `packages/domain/src/economic-contract.ts`.
+
+Limits, as of this migration: legacy settlements carry no alias class, so the
+same bank debit collected under two producers or namespaces is two keys to
+0070 and to today's readiness (0052 partitions by producer, 0044 compares the
+whole key) until the settlement writer records one (G1b). Whether production
+holds such a debit is not verified. Trigger behaviour and cost on remote D1
+are not verified.
+
 ### Where the decisions live
 
 Judgements are recorded in `decision_revisions` (migration 0029). Its
@@ -355,11 +398,12 @@ Auto-acceptance needs an identifier the provider issued **for the pair**,
 surfaced by a parser as `extra_json.$._kogane.providerLinkId`. Surveying the
 deployed parsers and `docs/sources/*.md`:
 
-| Source                                                                                                                                        | What it exposes                                                               | Effect                                                         |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| SBI Shinsei (`txnReferenceNo`), SMBC Direct, SBI VC Trade (`cashflowId`, `executionId`), PayPay (`transactionNumber`), V Point Pay (event id) | A provider row id                                                             | Identifies one row (stage A). Does not link pending to posted. |
-| MyJCB                                                                                                                                         | A third-party column survey mentions an approval number on the debit sections | Not read by the deployed ledger parser.                        |
-| Vpass, Sony Bank, MoneyForward, Mobile Suica, Global Pass, SBI Securities histories                                                           | External ids derived from a collector fingerprint                             | Not a provider identifier at all.                              |
+| Source                                                                                                                | What it exposes                                                                                                                       | Effect                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SBI Shinsei (`txnReferenceNo`), SMBC Direct, SBI VC Trade (`cashflowId`, `executionId`), PayPay (`transactionNumber`) | A provider row id                                                                                                                     | Identifies one row (stage A). Does not link pending to posted.                                                                                                                                                                         |
+| V Point Pay (event id)                                                                                                | A SHA-256 digest of the stored notification (`identityOrigin` `normalized-event-id`), not a provider id; a forwarded copy has another | In no reconciliation slice. The stage-A origin rule (`originOf`: any recorded origin without `fingerprint`/`occurrence`) would read it as a provider id; a human-adopted writer refuses it (`identity_digest_not_provider`, ADR 0054). |
+| MyJCB                                                                                                                 | A third-party column survey mentions an approval number on the debit sections                                                         | Not read by the deployed ledger parser.                                                                                                                                                                                                |
+| Vpass, Sony Bank, MoneyForward, Mobile Suica, Global Pass, SBI Securities histories                                   | External ids derived from a collector fingerprint                                                                                     | Not a provider identifier at all.                                                                                                                                                                                                      |
 
 So **no source currently supplies a pending-to-posted link id**, and every
 proposal this job writes stays `proposed`. The automatic path exists, is
