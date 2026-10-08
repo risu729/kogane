@@ -115,7 +115,7 @@ What existed before this change:
 - **Knowledge.** `current` reads the parses `published_parse_runs` names now.
   `known-at` K reads prices recorded at or before K, of the parse run adopted
   by the newest `publication_events` row of the claim's artifact and parser at
-  or before K. The two modes are two SQL texts. The manifest records the mode
+  or before K. The two modes are two SQL texts. SQLite compares times in milliseconds, so K may carry at most three fractional digits (`validKnownAtInstant`; a finer K is refused), and the domain re-checks every candidate's `recorded_at` against K exactly (`recorded_after_known_at`, which also counts a recorded time that does not parse). A publication event's time is compared at the millisecond only; every writer stores milliseconds. The manifest records the mode
   and the newest `recorded_at` actually used, not K, so a later K that changes
   nothing keeps the context.
 - **The candidate read.** Per wanted key, every row effective inside a coarse

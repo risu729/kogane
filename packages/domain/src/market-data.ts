@@ -10,8 +10,8 @@
 // fallback (INV05):
 //
 //   1. filter, counting every candidate it removes by a closed exclusion code
-//      (rule, kind, effective-time shape, basis, date-only policy, not
-//      strictly before the bound);
+//      (recorded after a known-at instant, rule, kind, effective-time shape,
+//      basis, date-only policy, not strictly before the bound);
 //   2. nothing left                                   → `missing`;
 //   3. more than one admitted rule with a candidate that could still be fresh
 //      (on or after the freshness window's first day), and the policy
@@ -91,6 +91,7 @@ export type PriceSelectionRefusal = (typeof PRICE_SELECTION_REFUSALS)[number];
 
 /** Why a candidate was not considered. Counted per selection, never dropped silently. */
 export const CANDIDATE_EXCLUSIONS = [
+  "recorded_after_known_at",
   "rule_not_admitted",
   "kind_not_admitted",
   "basis_not_admitted",
@@ -387,6 +388,18 @@ export interface SelectionBound {
   knowledge: KnowledgeMode;
 }
 
+/**
+ * A known-at instant the candidate read can compare exactly: an RFC 3339
+ * instant with at most three fractional digits. SQLite's `julianday` works in
+ * milliseconds, so a finer K would be rounded there; the domain then
+ * re-checks every candidate's `recordedAt` against K exactly.
+ */
+export function validKnownAtInstant(value: unknown): value is string {
+  if (!validInstantText(value)) return false;
+  const fraction = /\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/u.exec(value);
+  return fraction === null || fraction[1]!.length <= 3;
+}
+
 export function validSelectionBound(value: unknown): value is SelectionBound {
   if (
     !isRecord(value) ||
@@ -401,7 +414,7 @@ export function validSelectionBound(value: unknown): value is SelectionBound {
     ? hasExactKeys(knowledge, ["mode"])
     : knowledge.mode === "known-at" &&
         hasExactKeys(knowledge, ["mode", "knownAt"]) &&
-        validInstantText(knowledge.knownAt);
+        validKnownAtInstant(knowledge.knownAt);
 }
 
 /** One selection: a base priced in a quote unit, of one kind. */
@@ -505,6 +518,12 @@ function exclusionOf(
   policy: PriceSelectionPolicy,
 ): CandidateExclusion | null {
   const { price } = candidate;
+  // What was known at K: the read compares in milliseconds, this exactly. A
+  // recorded time that does not parse is not shown to be at or before K.
+  if (bound.knowledge.mode === "known-at") {
+    const order = instantOrder(candidate.recordedAt, bound.knowledge.knownAt);
+    if (order === null || order > 0) return "recorded_after_known_at";
+  }
   if (!(policy.admittedRules as readonly string[]).includes(candidate.claim.ruleId))
     return "rule_not_admitted";
   if (!policy.priceKinds.includes(price.priceKind)) return "kind_not_admitted";

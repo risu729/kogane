@@ -156,6 +156,21 @@ describe("knowledge: current and known-at", () => {
     ).toBeNull();
   });
 
+  test("known-at is exact: a price recorded a fraction of a millisecond after K is not known", async () => {
+    const store = new PriceStore()
+      .parse(1, 1)
+      .publish(1, 1, "2026-09-10T01:00:00.000Z")
+      .price({ id: "after-k", run: 1, amount: "146", recordedAt: "2026-09-10T02:00:00.0004Z" });
+    // SQLite's julianday rounds both to the same millisecond; the domain does not.
+    const result = await select(store, { knowledge: knownAt("2026-09-10T02:00:00.000Z") });
+    expect(result).toMatchObject({ status: "refused", reason: "missing" });
+    expect(result.excluded.recorded_after_known_at).toBe(1);
+    // K itself is refused when it is finer than the millisecond SQL compares at.
+    await expect(
+      select(store, { knowledge: knownAt("2026-09-10T02:00:00.0001Z") }),
+    ).rejects.toThrow("knowledge_invalid");
+  });
+
   test("same effective and recorded time: equal amounts tie-break by id, different ones disagree", async () => {
     const store = new PriceStore().parse(1, 1).publish(1, 1, "2026-09-10T01:00:00.000Z");
     store.parse(2, 2).publish(2, 2, "2026-09-10T01:00:00.000Z");

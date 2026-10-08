@@ -169,6 +169,7 @@ describe("filter and counts", () => {
     expect(result.reason).toBe("missing");
     expect(result.candidateIds).toEqual([]);
     expect(result.excluded).toEqual({
+      recorded_after_known_at: 0,
       rule_not_admitted: 1,
       kind_not_admitted: 0,
       basis_not_admitted: 1,
@@ -176,6 +177,30 @@ describe("filter and counts", () => {
       effective_at_or_after_bound: 1,
       invalid_effective_time: 3,
     });
+  });
+
+  test("known-at re-checks every candidate's recorded time exactly", () => {
+    const at = (knownAt: string): SelectionBound => ({
+      ...BOUND,
+      knowledge: { mode: "known-at", knownAt },
+    });
+    const recorded = candidate({ id: "r", amount: "146", recordedAt: "2026-09-10T02:00:00.000Z" });
+    expect(
+      selected(selectPrice(USD, [recorded], at("2026-09-10T02:00:00Z"), POLICY, null)),
+    ).toBeTruthy();
+    const late = refused(
+      selectPrice(USD, [recorded], at("2026-09-10T01:59:59.999Z"), POLICY, null),
+    );
+    expect([late.reason, late.excluded.recorded_after_known_at]).toEqual(["missing", 1]);
+    const unreadable = candidate({ amount: "146", recordedAt: "2026-09-10 02:00:00" });
+    expect(
+      refused(selectPrice(USD, [unreadable], at("2026-09-11T00:00:00Z"), POLICY, null)).excluded
+        .recorded_after_known_at,
+    ).toBe(1);
+    // Current knowledge does not look at the recorded time.
+    expect(selected(selectPrice(USD, [unreadable], BOUND, POLICY, null))).toBeTruthy();
+    expect(validSelectionBound(at("2026-09-10T02:00:00.123Z"))).toBe(true);
+    expect(validSelectionBound(at("2026-09-10T02:00:00.1234Z"))).toBe(false);
   });
 
   test("a kind the policy does not admit is counted for every candidate", () => {

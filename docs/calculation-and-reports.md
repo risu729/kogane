@@ -120,14 +120,14 @@ ages are counted to, and a knowledge mode: `current` reads the parses
 `published_parse_runs` names now; `known-at` K reads prices recorded at or
 before K, of the parse run the newest `publication_events` row of the claim's
 artifact and parser at or before K adopted, so a later re-parse or a rollback
-is seen as it stood at K. One read (`selectPriceCandidates`, two SQL texts
+is seen as it stood at K. K may carry at most three fractional digits, the precision SQLite compares at, and the domain re-checks each price's `recorded_at` against K exactly. One read (`selectPriceCandidates`, two SQL texts
 `PRICE_CANDIDATES_SQL` and `PRICE_CANDIDATES_KNOWN_AT_SQL`) returns per key
 every row in a coarse window around the freshness span, the rows of the newest
 instant before it and every row SQL cannot place, and refuses more than 500
 keys or 2,000 rows rather than cutting. A key may be narrowed to one parse run
 (`same-snapshot`). The domain's `selectPrice`
 (`packages/domain/src/market-data.ts`) then filters, counting each removed row
-by a closed code (`rule_not_admitted`, `kind_not_admitted`,
+by a closed code (`recorded_after_known_at`, `rule_not_admitted`, `kind_not_admitted`,
 `basis_not_admitted`, `date_only_excluded`, `effective_at_or_after_bound`,
 `invalid_effective_time`), and selects one price or refuses with `missing`,
 `sources_overlap`, `time_incomparable`, `calendar_missing`, `stale` (ids and

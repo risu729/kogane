@@ -18,7 +18,12 @@
 // Nothing here fetches a price, converts one, or treats a missing price as
 // zero: an instrument with no selectable price is simply absent from the
 // result, and the caller states that as a reason (INV05).
-import type { KnowledgeMode, PriceCandidate, PriceKey } from "../../domain/src/market-data.ts";
+import {
+  validKnownAtInstant,
+  type KnowledgeMode,
+  type PriceCandidate,
+  type PriceKey,
+} from "../../domain/src/market-data.ts";
 import type { PriceKind, PriceObservation } from "../../domain/src/metrics.ts";
 import { PRICE_KINDS } from "../../domain/src/metrics.ts";
 import type { PriceClaimKind } from "../../domain/src/price-sources.ts";
@@ -198,9 +203,13 @@ export async function selectPrices(
 //   known-at  the price was recorded at or before K, and the claim's parse run
 //             is the one the newest `publication_events` row of its artifact
 //             and parser at or before K adopted, so a re-parse published after
-//             K, or a rollback, is seen as it stood at K. A row whose
-//             `recorded_at` or event time does not parse is not shown to be
-//             known at K and is not read.
+//             K, or a rollback, is seen as it stood at K. SQLite compares in
+//             milliseconds, so K may carry at most three fractional digits
+//             (`validKnownAtInstant`), and the domain re-checks each row's
+//             `recorded_at` against K exactly. An event time is compared at
+//             the millisecond only (writers store milliseconds). A row whose
+//             `recorded_at` or event time SQLite cannot read as a time is not
+//             shown to be known at K and is not read.
 //
 // `snapshotParseRunId` narrows a key to prices promoted from one parse run
 // (`same-snapshot`); the publication condition still applies.
@@ -381,7 +390,7 @@ export function priceCandidateArgs(query: PriceCandidateQuery): { sql: string; a
   const limit = PRICE_CANDIDATE_ROW_BOUND + 1;
   if (query.knowledge.mode === "current")
     return { sql: PRICE_CANDIDATES_SQL, args: [JSON.stringify(wanted), limit] };
-  if (query.knowledge.mode !== "known-at" || !validInstantText(query.knowledge.knownAt))
+  if (query.knowledge.mode !== "known-at" || !validKnownAtInstant(query.knowledge.knownAt))
     throw new PriceCandidateError("knowledge_invalid");
   return {
     sql: PRICE_CANDIDATES_KNOWN_AT_SQL,
