@@ -57,9 +57,12 @@ hidden. Limits: the empty month was seen in English only; a page whose list
 failed to load would look the same as the empty month, which the parser
 cannot tell apart (a later capture with rows supersedes it); the read model's
 per-month rule does not look at row counts, so a newer empty reading also hides
-an older run's rows for the same month, with no reason shown (pinned in
-`packages/read-model/test/global-pass-snapshots.test.ts`). Tests:
-`packages/parsers/test/global-pass-empty-month.test.ts`.
+an older run's rows for the same month (pinned in
+`packages/read-model/test/global-pass-snapshots.test.ts`); since 2026-10-08
+`/api/meta` names such months (`globalPassEmptyMonths`) and the web app shows
+them as a notice, without changing what is current
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-empty-months-that-supersede-rows-are-reported)).
+Tests: `packages/parsers/test/global-pass-empty-month.test.ts`.
 
 **Production result.** #474 merged on 2026-10-04 and was deployed the same
 day (Deploy run 269, after the deploy-pipeline fixes #511 and #512); 1.2.0 is
