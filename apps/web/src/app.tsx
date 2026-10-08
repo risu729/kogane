@@ -19,6 +19,7 @@ import { ObservationDetailPage } from "./pages/ObservationDetail.tsx";
 import { NotFoundPage } from "./pages/NotFound.tsx";
 import { EvidenceContent } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
+import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
@@ -216,6 +217,9 @@ export function App(): ReactNode {
       mainRef={main}
     >
       {!synthetic ? <ParsingHealthNotice health={metadata.data?.parsingHealth} /> : null}
+      {!synthetic ? (
+        <GlobalPassEmptyMonthsNotice notice={metadata.data?.globalPassEmptyMonths} />
+      ) : null}
       {path === "/schedules" ? (
         <SchedulesPage />
       ) : (

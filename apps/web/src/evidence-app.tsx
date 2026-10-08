@@ -13,6 +13,7 @@ import { AppShell, NAV_ICONS, type NavItem } from "./app-shell.tsx";
 import { EmptyState } from "./ui.tsx";
 import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract.ts";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
+import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 
 function routeFor(path: string) {
   if (path === "/schedules") return { kind: "schedules" as const, title: "収集スケジュール" };
@@ -91,9 +92,11 @@ export function EvidenceContent({
 
 export function EvidenceApp({
   parsingHealth,
+  globalPassEmptyMonths,
   observationsAvailable = false,
 }: {
   parsingHealth?: ApiMetadata["parsingHealth"];
+  globalPassEmptyMonths?: ApiMetadata["globalPassEmptyMonths"];
   observationsAvailable?: boolean;
 } = {}): ReactNode {
   const path = usePath();
@@ -169,6 +172,7 @@ export function EvidenceApp({
       mainRef={main}
     >
       <ParsingHealthNotice health={parsingHealth} />
+      <GlobalPassEmptyMonthsNotice notice={globalPassEmptyMonths} />
       <EvidenceContent observationsAvailable={observationsAvailable} />
     </AppShell>
   );
