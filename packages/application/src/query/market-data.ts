@@ -10,6 +10,7 @@
 import { canonicalDigest, canonicalJson } from "../../../domain/src/context.ts";
 import { isOneOf, isText } from "../../../domain/src/guards.ts";
 import {
+  isCurrencyCode,
   PROPOSAL_POLICY_PREFIX,
   selectFxRate,
   selectionManifest,
@@ -77,8 +78,6 @@ export interface MarketDataSelection {
   contextId: string;
 }
 
-const CURRENCY = /^[A-Z]{3}$/u;
-
 function calendarFor(
   policy: PriceSelectionPolicy,
   calendars: readonly MarketCalendar[],
@@ -137,7 +136,7 @@ export async function selectMarketData(
           ? Number.isSafeInteger(entry.snapshotParseRunId)
           : entry.snapshotParseRunId === null),
     ) ||
-    !request.fxCurrencies.every((code) => CURRENCY.test(code) && code !== policies.fx.pivot) ||
+    !request.fxCurrencies.every((code) => isCurrencyCode(code) && code !== policies.fx.pivot) ||
     new Set(request.fxCurrencies).size !== request.fxCurrencies.length ||
     request.prices.length + quoted.length > PRICE_SELECTION_BOUND
   )

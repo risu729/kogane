@@ -200,6 +200,27 @@ export function parseInstant(text: string): ParsedInstant | null {
   };
 }
 
+/** One formatter per zone name, or null for a zone the runtime does not know. */
+const CIVIL_DATE_FORMATS = new Map<string, Intl.DateTimeFormat | null>();
+
+function civilDateFormat(zone: string): Intl.DateTimeFormat | null {
+  if (CIVIL_DATE_FORMATS.has(zone)) return CIVIL_DATE_FORMATS.get(zone)!;
+  let format: Intl.DateTimeFormat | null;
+  try {
+    format = new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  } catch {
+    format = null;
+  }
+  // Bounded by the zone names a process meets; an unknown one is cached as null.
+  if (CIVIL_DATE_FORMATS.size < 1024) CIVIL_DATE_FORMATS.set(zone, format);
+  return format;
+}
+
 /**
  * The civil date (`YYYY-MM-DD`) of an RFC 3339 instant in a named IANA zone,
  * from the runtime's zone data (`Intl.DateTimeFormat("en-CA", { timeZone })`,
@@ -212,17 +233,9 @@ export function parseInstant(text: string): ParsedInstant | null {
 export function civilDateOfInstant(text: string, zone: string): string | null {
   const parsed = parseInstant(text);
   if (parsed === null || !validZone(zone)) return null;
-  let parts: Intl.DateTimeFormatPart[];
-  try {
-    parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: zone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(parsed.epochSeconds * 1000);
-  } catch {
-    return null;
-  }
+  const format = civilDateFormat(zone);
+  if (format === null) return null;
+  const parts = format.formatToParts(parsed.epochSeconds * 1000);
   const part = (type: string): string => parts.find((p) => p.type === type)?.value ?? "";
   const text10 = `${part("year").padStart(4, "0")}-${part("month")}-${part("day")}`;
   const date = parseLocalDate(text10);

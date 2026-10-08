@@ -183,6 +183,11 @@ export interface FxConversionPolicy {
 }
 
 const CURRENCY = /^[A-Z]{3}$/u;
+
+/** An ISO 4217-shaped code: three capital letters. */
+export function isCurrencyCode(value: unknown): value is string {
+  return typeof value === "string" && CURRENCY.test(value);
+}
 const FRESHNESS_UNITS = ["calendar-days", "business-days"] as const;
 const DATE_ONLY_MODES = ["exclude", "civil-date-in-zone"] as const;
 const MULTI_SOURCE_MODES = ["refuse-on-overlap", "priority-order"] as const;
@@ -303,13 +308,6 @@ export function validMarketCalendar(value: unknown): value is MarketCalendar {
   const dates = value.closedDates as string[];
   // Sorted and unique, so the calendar's digest does not depend on input order.
   return dates.every((date, index) => index === 0 || dates[index - 1]! < date);
-}
-
-/** `sha256(canonicalJson(policy))`: what the manifest records beside the policy id. */
-export async function policyDigest(
-  policy: PriceSelectionPolicy | FxConversionPolicy | MarketCalendar,
-): Promise<string> {
-  return canonicalDigest(policy);
 }
 
 function deepFrozen<T>(value: T): T {
@@ -586,7 +584,7 @@ function positivePrice(price: PriceObservation): boolean {
 }
 
 /** `a.quote × b.baseQty = b.quote × a.baseQty`: the same price per unit of base, exactly. */
-export function samePricePerUnit(a: PriceObservation, b: PriceObservation): boolean {
+function samePricePerUnit(a: PriceObservation, b: PriceObservation): boolean {
   return decimalEquals(
     multiplyDecimals(a.quoteAmount, b.baseQuantity),
     multiplyDecimals(b.quoteAmount, a.baseQuantity),
@@ -625,11 +623,53 @@ function usableCalendar(
   return calendar;
 }
 
+const CLOSED_DATES = new WeakMap<MarketCalendar, Set<string>>();
+
+function closedDates(calendar: MarketCalendar): Set<string> {
+  let dates = CLOSED_DATES.get(calendar);
+  if (dates === undefined) {
+    dates = new Set(calendar.closedDates);
+    CLOSED_DATES.set(calendar, dates);
+  }
+  return dates;
+}
+
 function isOpen(calendar: MarketCalendar, date: CivilDate): boolean {
   return (
     !calendar.closedWeekdays.includes(isoWeekday(date)) &&
-    !calendar.closedDates.includes(formatLocalDate(date))
+    !closedDates(calendar).has(formatLocalDate(date))
   );
+}
+
+/** The first index of sorted `dates` whose value is greater than `after`. */
+function firstAfter(dates: readonly string[], after: string): number {
+  let low = 0;
+  let high = dates.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (dates[middle]! <= after) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+/**
+ * Open days in `(from, to]`, counted without walking the span: whole weeks
+ * lose every closed weekday, the remaining days are checked one by one, and
+ * the closed dates inside the span (found by binary search in the sorted
+ * list) that fall on an open weekday are taken off.
+ */
+function openDays(calendar: MarketCalendar, from: string, to: string): number {
+  const start = civil(from);
+  const span = daysBetween(start, civil(to));
+  const weeks = Math.floor(span / 7);
+  let open = weeks * (7 - calendar.closedWeekdays.length);
+  for (let step = weeks * 7 + 1; step <= span; step += 1)
+    if (!calendar.closedWeekdays.includes(isoWeekday(addDays(start, step)))) open += 1;
+  const dates = calendar.closedDates;
+  for (let index = firstAfter(dates, from); index < dates.length && dates[index]! <= to; index += 1)
+    if (!calendar.closedWeekdays.includes(isoWeekday(civil(dates[index]!)))) open -= 1;
+  return open;
 }
 
 type Age = { ok: true; days: number } | { ok: false; reason: "calendar_missing" };
@@ -646,10 +686,7 @@ function ageOf(
   const usable = usableCalendar(policy, calendar);
   if (usable === null || from < usable.coverage.from || to > usable.coverage.to)
     return { ok: false, reason: "calendar_missing" };
-  let open = 0;
-  for (let step = 1; step <= span; step += 1)
-    if (isOpen(usable, addDays(civil(from), step))) open += 1;
-  return { ok: true, days: open };
+  return { ok: true, days: span <= 0 ? 0 : openDays(usable, from, to) };
 }
 
 /**
@@ -1160,14 +1197,14 @@ export async function selectionManifest(input: {
   const policies = await Promise.all(
     input.policies.map(async (policy) => ({
       policyId: policy.policyId,
-      digest: await policyDigest(policy),
+      digest: await canonicalDigest(policy),
     })),
   );
   const calendars = await Promise.all(
     input.calendars.map(async (calendar) => ({
       calendarRef: calendar.calendarRef,
       version: calendar.version,
-      digest: await policyDigest(calendar),
+      digest: await canonicalDigest(calendar),
     })),
   );
   const unique = <T>(items: T[], text: (item: T) => string): T[] =>

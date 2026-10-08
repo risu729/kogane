@@ -13,7 +13,6 @@ import {
   PROPOSED_FX_CONVERSION_POLICY_V1,
   PROPOSED_FX_SELECTION_POLICY_V1,
   PROPOSAL_POLICY_PREFIX,
-  policyDigest,
   selectionManifest,
   selectFxRate,
   selectionReadWindow,
@@ -508,6 +507,42 @@ describe("business-day freshness and calendars", () => {
     expect(freshnessWindowStart(business, monday, null)).toBe("2026-09-13");
   });
 
+  test("a century of business days over a large calendar is counted quickly and exactly", () => {
+    const from = "1927-01-01";
+    const closedDates: string[] = [];
+    // Every 1st and 15th of each month for a century: 2,400 dates, plus
+    // filler holidays on the 2nd through the 9th, 20,000 in all.
+    for (let year = 1927; year <= 2026 && closedDates.length < 20_000; year += 1)
+      for (let month = 1; month <= 12; month += 1)
+        for (const day of [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18])
+          closedDates.push(
+            `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+          );
+    const century: MarketCalendar = {
+      ...CALENDAR,
+      coverage: { from, to: "2026-12-31" },
+      closedDates: closedDates.slice(0, 20_000).sort(),
+    };
+    const long = policy({
+      freshness: { unit: "business-days", maxAgeDays: 36_600, calendarRef: CALENDAR.calendarRef },
+    });
+    const old = candidate({ amount: "146", at: "1927-01-03T10:00:00+09:00" });
+    const start = performance.now();
+    const result = selectPrice(USD, [old], monday, long, century);
+    const elapsed = performance.now() - start;
+    // Open days in (1927-01-03, 2026-09-14]: every weekday that is not a closed date.
+    let open = 0;
+    const closed = new Set(century.closedDates);
+    for (let day = 1; ; day += 1) {
+      const date = new Date(Date.UTC(1927, 0, 3 + day));
+      const text = date.toISOString().slice(0, 10);
+      if (text > "2026-09-14") break;
+      if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6 && !closed.has(text)) open += 1;
+    }
+    expect(selected(result).ageDays).toBe(open);
+    expect(elapsed).toBeLessThan(250);
+  });
+
   test("calendars are validated, sorted and evidenced", () => {
     expect(validMarketCalendar(CALENDAR)).toBe(true);
     expect(validMarketCalendar({ ...CALENDAR, closedDates: ["2026-09-22", "2026-09-21"] })).toBe(
@@ -902,12 +937,12 @@ describe("policies, digests and the manifest", () => {
   });
 
   test("a digest is stable and changes with any policy value", async () => {
-    const digest = await policyDigest(POLICY);
-    expect(await policyDigest({ ...POLICY })).toBe(digest);
+    const digest = await canonicalDigest(POLICY);
+    expect(await canonicalDigest({ ...POLICY })).toBe(digest);
     expect(
-      await policyDigest(policy({ freshness: { unit: "calendar-days", maxAgeDays: 5 } })),
+      await canonicalDigest(policy({ freshness: { unit: "calendar-days", maxAgeDays: 5 } })),
     ).not.toBe(digest);
-    expect(await policyDigest(policy({ acceptedBases: ["provider"] }))).not.toBe(digest);
+    expect(await canonicalDigest(policy({ acceptedBases: ["provider"] }))).not.toBe(digest);
   });
 
   test("the manifest is order-independent and moves with a new price, not with the knowledge instant", async () => {
