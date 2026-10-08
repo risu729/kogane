@@ -14,6 +14,7 @@ export * from "./result.ts";
 export * from "./paging.ts";
 export * from "./calculation.ts";
 export * from "./reports.ts";
+export * from "./economic-contract.ts";
 export {
   hasExactKeys,
   isRecord,
