@@ -8,6 +8,7 @@ import type {
   BalanceHistoryRow,
   BalanceRow,
   FilterOptions,
+  GlobalPassEmptyMonths,
   ObservationDetail,
   ObservationKind,
   Overview,
@@ -101,6 +102,12 @@ export interface ObservationReader {
   unitUpdates(): Promise<UnitUpdateSummary[]>;
   /** Registered parsing backlog for `/api/meta`; also probes that visible evidence is readable. */
   parsingHealth(): Promise<ParsingHealth>;
+  /**
+   * GLOBAL PASS months whose current snapshot is empty while an older snapshot
+   * of the same month had rows, for `/api/meta`. Reports only; the currentness
+   * rule that `listTransactions` applies is not changed by this read.
+   */
+  globalPassEmptyMonths(): Promise<GlobalPassEmptyMonths>;
   listTransactions(query: TransactionQuery): Promise<TransactionRow[]>;
   listLatestBalances(query: LatestBalanceQuery): Promise<BalanceRow[]>;
   listBalanceHistory(query: BalanceHistoryQuery): Promise<BalanceHistoryRow[]>;
