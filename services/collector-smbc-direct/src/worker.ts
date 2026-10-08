@@ -41,6 +41,12 @@ export default {
         // operations API is told plainly when the person has to act (12 §3).
         return json({ ...progress, waitingForHuman: progressWaitingForHuman(progress) });
       }
+      if (request.method === "POST" && url.pathname === "/api/publish") {
+        assertSameOriginAction(request);
+        const body = await readJsonObject(request);
+        if (Object.keys(body).length !== 0) throw new Error("publish_options_not_supported");
+        return json(await stub.publishStoredRun());
+      }
       if (request.method === "POST" && url.pathname === "/api/start") {
         assertSameOriginAction(request);
         await readJsonObject(request);

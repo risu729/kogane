@@ -24,6 +24,7 @@ export function renderUi(options: { nonce: string }): string {
   <div class="actions">
     <button class="button" id="generate" type="button">QRを生成</button>
     <button class="button secondary" id="finish" type="button" disabled>承認済み・backfill開始</button>
+    <button class="button secondary" id="publish" type="button" hidden>保存済み明細の取り込みを再試行</button>
   </div>
   <section id="qr">
     <img id="qr-image" alt="SMBCアプリ承認用QRコード">
@@ -37,6 +38,7 @@ const byId=(id)=>document.getElementById(id);
 const status=byId("status");
 const generate=byId("generate");
 const finish=byId("finish");
+const publish=byId("publish");
 let timer=null;
 const request=async(path,body)=>{
   const response=await fetch(path,{method:body?"POST":"GET",headers:body?{"content-type":"application/json","x-kogane-action":"1"}:{},body:body?JSON.stringify(body):undefined});
@@ -45,11 +47,15 @@ const request=async(path,body)=>{
   return value;
 };
 const showProgress=(progress)=>{
-  const labels={idle:"未開始",waiting_for_approval:"アプリ承認待ち",running:"取得中",success:"完了",partial:"一部取得",failed:"失敗"};
+  const labels={idle:"未開始",waiting_for_approval:"アプリ承認待ち",running:"取得中",success:"取得完了",partial:"一部取得",failed:"失敗"};
   const lines=["状態: "+(labels[progress.phase]||progress.phase)];
   if(progress.runId)lines.push("Run ID: "+progress.runId);
   if(progress.totalChunks)lines.push("期間: "+progress.completedChunks+" / "+progress.totalChunks);
   if(progress.phase!=="idle"&&progress.phase!=="waiting_for_approval")lines.push("明細: "+progress.transactionCount+"件", "保存物: "+progress.artifactCount+"件");
+  const ended=["success","partial","failed"].includes(progress.phase);
+  publish.hidden=!ended||progress.publicationStatus==="persisted";
+  if(ended)lines.push("共有保存: "+(progress.publicationStatus==="persisted"?"完了（Koganeへの反映状況は別途確認）":progress.publicationStatus==="failed"?"失敗":"未確認"));
+  if(progress.publicationErrorCode)lines.push("共有保存エラー: "+progress.publicationErrorCode);
   if(progress.lastErrorCode)lines.push("エラー: "+progress.lastErrorCode);
   if(progress.manifestKey)lines.push("Manifest: "+progress.manifestKey);
   status.textContent=lines.join("\\n");
@@ -67,7 +73,7 @@ generate.addEventListener("click",async()=>{
     byId("app-link").href=result.appUrl;
     byId("expires").textContent="有効期限: "+new Date(result.expiresAt).toLocaleString("ja-JP");
     byId("qr").style.display="block";finish.disabled=false;
-    status.textContent="SMBCアプリでQRを承認してください。承認後、backfill開始を押します。";
+    status.textContent="SMBCアプリでQRを承認してください。承認後、backfill開始を押します。有効期限内の再生成は同じQRを返します。";
   }catch(error){showError(error)}finally{generate.disabled=false}
 });
 finish.addEventListener("click",async()=>{
@@ -77,6 +83,10 @@ finish.addEventListener("click",async()=>{
     showProgress(result.progress);
     if(result.phase==="waiting_for_approval")finish.disabled=false;
   }catch(error){showError(error);finish.disabled=false}
+});
+publish.addEventListener("click",async()=>{
+  publish.disabled=true;status.textContent="保存済み明細の取り込みを再試行しています…";
+  try{showProgress(await request("/api/publish",{}))}catch(error){showError(error)}finally{publish.disabled=false}
 });
 refresh().catch(showError);
 </script>

@@ -1132,9 +1132,16 @@ already there), keep only the manifest entries in Durable Object state as
 today, and delete `readStagedArtifacts` and the staging round trip. No terminal
 format change is needed for that step.
 
-- **One terminal per backfill run.** The run is finished exactly once — when the
-  last chunk lands, when it ends partial, or when it fails — and that is the only
-  place the terminal is written, whatever the outcome.
+- **Immutable terminals per published segment** ([ADR 0044](adr/0044-smbc-resume-publication.md)).
+  The initial stopped session keeps the backfill ID. Resumed sessions publish
+  additional partial evidence or a full success snapshot in digest-addressed
+  continuation terminals. Partial SMBC account units are not parseable, so
+  final success includes their earlier chunks; only artifacts from clean
+  successful complete terminals are excluded. Previously catalogued normalized
+  bytes must remain unchanged. Each continuation attaches its segment manifest plus the
+  exact cumulative staging manifest as a non-unit collector artifact.
+  A changed failure with no new provider bytes publishes only manifests and
+  reports failed; an exact snapshot retry is a no-op.
 - The run's bytes are re-read from the staging prefix at that point (the
   bounded exception above) and **verified against the manifest** (size and
   digest) before anything is planned; a byte that changed or vanished stops the
@@ -1156,7 +1163,10 @@ format change is needed for that step.
 - `acquisitionSessionRef`: **yes.** The Durable Object keeps `sessionRef` (the
   live generation, rotated on every approved sign-in) and `runSessionRef` (the
   generation that opened the current run, kept across a resume). The terminal
-  carries `runSessionRef`; the credential, the encrypted session envelope, the
+  carries `runSessionRef` for the initial publication and the current
+  `sessionRef` for partial continuation segments. The full successful snapshot
+  retains `runSessionRef` and its prior-terminal lineage because it spans
+  approved sessions. The credential, the encrypted session envelope, the
   challenge state and the page cookies stay in Durable Object state (12 §4).
 - Human-required: this source has **no unattended re-authentication at all**,
   and none was added. Any run that does not reach `success` needs a person to
@@ -1165,7 +1175,8 @@ format change is needed for that step.
   `human_required_approval` (G3-10, G3-11). `/api/status` reports
   `waitingForHuman` while the person still has to act.
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
-  `worker-test/shared-data-bucket.test.ts`, which stages a run into a real
+  `worker-test/shared-data-bucket.test.ts` and `worker-test/continuation.test.ts`,
+  which stage initial and resumed runs into a real
   Miniflare R2 `DATA` bucket, re-reads it and writes the objects and the
   terminal into the same bucket.
 - A bare `bun test` also discovers `worker-test/shared-data-bucket.test.ts`,
