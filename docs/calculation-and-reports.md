@@ -114,7 +114,43 @@ text; ties go to the later `recorded_at`, then the higher id. A re-parse moves
 selection to its own prices once it is published, and the old rows stay for
 the contexts that used them. A price with a date-only effective time is never
 selected against an instant cutoff, and an instrument without a selectable
-price is absent from the result, never zero.
+price is absent from the result, never zero. `selectPrices` has no production
+caller; its text is frozen by a digest test.
+
+**As-of selection under a policy**
+([ADR 0056](adr/0056-as-of-price-fx-selection.md)). `selectMarketData`
+(`packages/application/src/query/market-data.ts`) takes a bound, the price and
+FX policies and any calendars, with no defaults, and refuses a proposed
+policy (`proposal:` id), two policies sharing an id with different content, a
+malformed key or more than 500 keys. The bound is `effectiveBefore`, an
+exclusive instant that must be exactly the end of the as-of date in the
+policies' zone (for a date D in Asia/Tokyo, `(D + 1) 00:00 +09:00`, as the
+dated state's capture bound), the as-of date that ages are counted to, and a
+knowledge mode: `current` reads the parses `published_parse_runs` names now;
+`known-at` K reads prices recorded at or before K, of the parse run the newest
+`publication_events` row of the claim's artifact and parser at or before K
+adopted, so a later re-parse or a rollback is seen as it stood at K. K may
+carry at most three fractional digits, the precision SQLite compares at, and
+the domain re-checks each price's `recorded_at` against K exactly. One read
+(`selectPriceCandidates`, two SQL texts `PRICE_CANDIDATES_SQL` and
+`PRICE_CANDIDATES_KNOWN_AT_SQL`) returns per key every row in a coarse window
+around the freshness span, the rows of the newest instant before it and every
+row SQL cannot place, and refuses more than 500 keys or 2,000 rows rather than
+cutting. A key may be narrowed to one parse run (`same-snapshot`). The
+domain's `selectPrice` (`packages/domain/src/market-data.ts`) then filters,
+counting each removed row by a closed code (`recorded_after_known_at`,
+`rule_not_admitted`, `kind_not_admitted`, `price_not_positive`,
+`invalid_effective_time`, `basis_not_admitted`, `date_only_excluded`,
+`effective_at_or_after_bound`), and selects one price or refuses with
+`missing`, `sources_overlap` (two admitted rules with prices that could still
+be fresh), `time_incomparable`, `calendar_missing`, `stale` (ids and age
+reported, the price never used) or `disagree` (two prices at the top instant
+that differ per unit of base). Agreeing prices at one instant corroborate the
+later recorded one. A currency the FX policy cannot quote is
+`unsupported_pair` without a read. The result carries a manifest (policies and
+calendars by digest, the bound, the knowledge mode, the newest `recorded_at`
+used, the selected ids and each refusal) whose digest is the context id; it
+identifies the outcome, not the request.
 
 **What the report job reads.** The report job (§4) values a holding only with
 a price claimed from the holding's own snapshot: a price whose claim names an
@@ -129,9 +165,25 @@ price row with no claim values nothing. Foreign holdings are quoted in their
 own currency, so a JPY report still leaves them `missing-price`: nothing is
 converted 1:1.
 
-**Limits.** Valuation on a date through `selectPrices`, with a freshness rule
-and FX under `fx-sbi-shinsei-mid-v1`, is the next step (the plan's P2-3). SBI Shinsei's
-board is a customer rate tiered by `customerCategory` (5 tiers for most
+**Limits.** No selection policy is adopted: the freshness windows, accepted
+bases, overlap rule and FX pivot in `PROPOSED_*` constants are
+recommendations, and ADR 0056 lists the fourteen questions the owner has not
+decided. Nothing in a service calls `selectMarketData`, so no valuation on a
+date, valuation cell, route or page uses it yet. No market calendar is
+shipped, so a business-day rule refuses with `calendar_missing`. A price is
+keyed by the provider-scoped base reference, so another source's price for the
+same instrument is never used. Exclusion counts cover only the rows the read
+returns. The row that explains `stale` is the newest before the window
+whatever its rule, kind, basis or effective-time shape (a date-only row, or
+one the domain cannot read), so such a key reads `missing` rather than
+`stale`. In `known-at` mode a row whose `recorded_at` SQLite cannot read as a
+time is not read. Nothing fetches a price or rate from an external source.
+The candidate read reaches each key by index but reads that key's whole
+history (the window bounds what it returns, not what it reads): 13 currencies
+four times a day took about 90 ms over 1,000 boards and 360–500 ms over 4,380
+boards (three years), against 70–300 ms for `selectPrices` (ADR 0056;
+`price-candidates-scale.test.ts`).
+SBI Shinsei's board is a customer rate tiered by `customerCategory` (5 tiers for most
 currencies on the stored boards, [ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)),
 not a market reference. The rule reads the tier the same run's balance
 summary names as the owner's stage (ADR 0031); the two were observed on
@@ -164,6 +216,32 @@ third shape: `calculation_results` has a CHECK that an `exact` row has a
 coefficient and no reason, and an `unvalued` row has a reason and no
 coefficient. A missing FX price never becomes a 1:1 conversion and never
 becomes zero (AT24, INV05).
+
+**FX path** (`fxPath`, `convertToBase`, `valueInBase` in
+`packages/domain/src/market-data.ts`). Every rate is selected against one
+pivot, the quote of the FX rule (JPY). The same unit needs no rate. A currency
+into the pivot is one exact hop through `valueAtPrice`, so 12 shares at
+130.70 USD at a 146.25 mid is exactly 229,378.5 JPY, both legs reported with
+price ids, effective times and ages. Out of the pivot, or between two other
+currencies, is one exact ratio rounded once under the conversion policy's
+inverse rounding at the target unit's scale, with the operands and the exact
+value kept as `RoundingInputs`; a policy without one refuses with
+`rounding_policy_missing`, before any rate is read. A pair outside the
+policy's currencies (CHF, an instrument code) is `unsupported_pair`, and a
+missing, stale or disagreeing rate is that refusal for the FX leg. A holding
+of another instrument than the price's is `instrument_mismatch`, a quantity
+that is not exact is `quantity_not_exact`, and a selection holding a zero or
+negative price (the table's CHECK allows one; selection never picks it)
+converts nothing (`price_not_positive`). An FX selection of another key, or
+made under another selection policy than the conversion policy's, throws
+(`fx_selection_policy_mismatch`).
+
+**Refusal mapping.** ADR 0056 maps these codes onto the seven reasons above
+for the change that writes valuation cells: `stale` → `stale-price`,
+`instrument_mismatch` → `unresolved-identity`, `quantity_not_exact` →
+`missing-quantity`, every other selection or conversion refusal →
+`missing-price` with the closed code beside it. No code writes that mapping
+yet, and the `calculation_results` CHECK is not widened.
 
 Results are partitioned into `complete`, `partial-verified-scope` and
 `not-computable`. A partial result is never labelled as a whole-portfolio
@@ -366,6 +444,27 @@ would discard later collection and later decisions (docs/operations.md).
   each method with exact conservation, inexact allocation refused or
   carried, fee and FX modes, splits, snapshots, ordering ties, the gates and
   determinism under input permutation.
+- `packages/domain/test/market-data.test.ts` — each exclusion code, the six
+  checks in order, date-only and zone rules, freshness at and past the limit,
+  business days over a synthetic calendar (a century counted exactly and
+  quickly), disagreement and corroboration, overlap among possibly fresh
+  candidates and priority, FX paths, exact two-hop values, inverse rounding
+  once with its inputs, policy mismatches, non-positive prices, validators,
+  digests, the manifest, and a guard that no production source, script or task
+  names a proposal; `civil-date.test.ts` — `civilDateOfInstant`, `canonicalZone`.
+- `packages/read-model/test/price-candidates.test.ts` — both candidate texts
+  on migrated CORE: re-parse and rollback in current and known-at modes, ties
+  and sub-millisecond times at the knowledge instant, same-snapshot scope,
+  overlap independent of the read margin, stale told from missing, unreadable
+  effective times counted, bounds refused, plans without statistics, a
+  differential against `selectPrices` on random tie-free stores (unbounded and
+  0–4 day freshness), a known-at differential against an oracle over random
+  publication histories, and the frozen digest of the shipped selection text;
+  `price-candidates-scale.test.ts` — the plans and answers on a scaled store.
+- `packages/application/test/market-data-query.test.ts` — `selectMarketData`
+  end to end; the same inputs give the same context id, a new price a new one;
+  unquotable currencies, malformed requests, misaligned bounds, ambiguous ids
+  and proposals.
 - `packages/domain/test/reports.test.ts` — body validation and digest
   stability, storage key, event shapes, replayability and capabilities (AT66).
 - `services/processor/test/reports.test.ts` — migration 0034 on
