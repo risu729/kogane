@@ -25,6 +25,7 @@ describe("the READ baseline", () => {
     expect(migrationFiles(READ_MIGRATIONS_URL)).toEqual([
       "0001_read_baseline.sql",
       "0002_reward_read.sql",
+      "0003_reward_expiry_basis.sql",
     ]);
     expect(READ_MIGRATIONS_PATH).toBe("packages/storage-d1/migrations/read");
   });
