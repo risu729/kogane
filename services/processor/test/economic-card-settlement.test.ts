@@ -426,6 +426,55 @@ async function batch(writes: readonly SqlWrite[]): Promise<void> {
   await db.batch(writes.map((write) => db.prepare(write.sql).bind(...write.binds)));
 }
 
+/**
+ * An acceptance as a build before G1b wrote it: decisions, the event revision,
+ * the allocation and the accepted decision, and no claim, seal or commit row.
+ * Such a build accepts a second settlement on a debit another one holds,
+ * because nothing it reads refuses it once the reservation passed.
+ */
+async function legacyAccept(proposalId: string, eventId: string, tag: string): Promise<void> {
+  const candidate = await db
+    .prepare("SELECT bank_observation_id AS bank FROM card_settlement_candidates WHERE id=?")
+    .bind(proposalId)
+    .first<{ bank: number }>();
+  const decision = (id: string, subject: string) =>
+    db
+      .prepare(
+        `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,created_at)
+ VALUES(?,'relation',?,1,'accept','manual','synthetic-human',NULL,'synthetic pre-guard acceptance','[]',NULL,?)`,
+      )
+      .bind(id, subject, now);
+  await db.batch([
+    decision(`dr-legacy-${tag}`, `card-settlement:${proposalId}`),
+    decision(`dr-legacy-event-${tag}`, `event:${eventId}`),
+    decision(`dr-legacy-allocation-${tag}`, `allocation:allocation-legacy-${tag}`),
+    db
+      .prepare(
+        `INSERT INTO economic_event_revisions(event_id,revision,kind,state,unknown_reason,effective_time_json,basis,evidence_support_json,decision_revision_id,created_at)
+ VALUES(?,1,'card_settlement','debited',NULL,'{}','cash-movement','["synthetic-evidence"]',?,?)`,
+      )
+      .bind(eventId, `dr-legacy-event-${tag}`, now),
+    db
+      .prepare(
+        `INSERT INTO allocations(id,source_component_ref,target_effect_ref,role,unit_ref,coefficient,scale,decision_revision_id,created_at)
+ VALUES(?,?,?,'settlement','JPY','3000',0,?,?)`,
+      )
+      .bind(
+        `allocation-legacy-${tag}`,
+        `transaction:${candidate!.bank}`,
+        `event:${eventId}`,
+        `dr-legacy-allocation-${tag}`,
+        now,
+      ),
+    db
+      .prepare(
+        `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+ VALUES(?,1,'accepted',?,?,NULL,?,?)`,
+      )
+      .bind(proposalId, `dr-legacy-${tag}`, eventId, `allocation-legacy-${tag}`, now),
+  ]);
+}
+
 /** The planners, with the acceptance's reservation precondition dropped (an older build's guard). */
 function withoutPrecondition(): MutationPlanners {
   return {
@@ -785,6 +834,53 @@ describe("refusals keep the store whole", () => {
     });
     expect(await snapshot()).toEqual(before);
   }, 60000);
+
+  test("a withdrawal that would wash a pre-existing double holder is refused, at plan time and at commit", async () => {
+    // Two statements of one owner and one SMBC-shaped debit: two candidates
+    // on one bank_key, accepted the way a build before G1b accepted them.
+    await statement(3000, "myjcb", "myjcb:g1b-3000:root", "2027-08");
+    await statement(3002, "myjcb", "myjcb:g1b-3002:root", "2027-08");
+    await debit(3001, "smbc-bank:g1b-3000", "g1b-debit-3000", "2027-08");
+    await ownership(3000, "liable_party");
+    await ownership(3002, "liable_party");
+    await ownership(3001, "beneficial_owner");
+    await cardSettlementSweep(db);
+    const a = await candidateOf(3000, 3001);
+    const b = await candidateOf(3002, 3001);
+    const bankKey = (await bankRow(3001)).key;
+    await legacyAccept(a, "legacy-double-a", "double-a");
+    // Planned and approved while A is the only holder.
+    const withdraw = await preparedCommand("card-settlement.withdraw", {
+      proposalId: a,
+      reason: "corrected",
+    });
+    // Then a pre-G1b build accepts B on the same debit: a double holder.
+    await legacyAccept(b, "legacy-double-b", "double-b");
+    expect(
+      await db
+        .prepare(
+          "SELECT dimension,book,holder_count FROM consumption_claim_conflicts WHERE claim_ref=?",
+        )
+        .bind(bankKey)
+        .all(),
+    ).toMatchObject({ results: [{ dimension: "key", book: "cash-movement", holder_count: 2 }] });
+    const before = await snapshot();
+    // A new plan is refused with the guard's code and writes nothing.
+    await expect(
+      preparedCommand("card-settlement.withdraw", { proposalId: a, reason: "again" }),
+    ).rejects.toThrow(
+      `"error":"needs_scope_resolution","refs":["card-settlement:${a}","economic_claim_conflict_unresolved"]`,
+    );
+    expect(await snapshot()).toEqual(before);
+    // The plan made before the second holder: the commit row refuses the
+    // release, D1 rolls the batch back whole, and the commit names the code.
+    expect(await withdraw()).toEqual({
+      ok: false,
+      error: "commit_failed",
+      refs: [withdraw.plan.planId, "economic_claim_conflict_unresolved"],
+    });
+    expect(await snapshot()).toEqual(before);
+  }, 90000);
 
   test("W3: a sealed settlement revision takes no leg, claim or accepted decision", async () => {
     const proposalId = await ownedPair(2500, "2027-02");
