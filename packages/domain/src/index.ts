@@ -16,6 +16,7 @@ export * from "./paging.ts";
 export * from "./calculation.ts";
 export * from "./reports.ts";
 export * from "./event-families.ts";
+export * from "./reconstruction.ts";
 export {
   hasExactKeys,
   isRecord,
