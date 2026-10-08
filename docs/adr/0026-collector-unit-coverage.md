@@ -1402,15 +1402,21 @@ The parser, its version and its code digest are unchanged.
   cell 2 and responsive cell 0, its id ranked after the detail tables', and
   `pairsInOrder` 3; a two-header table whose header is a compact header
   gets its index in the activity and compact lists; swapped pairs, tied
-  records and a nested table are visible; the synthetic page's texts,
-  class values, ids and numbers never appear in the printed line, and every
-  word of it is a field name, a closed name or a literal; the pattern classes
+  records and a nested table are visible; detail tables under several
+  parents, or none, give no container; the synthetic page's texts, class
+  values, ids and numbers never appear in the printed line, and every word of
+  it is a field name, a closed name or a literal; a page with sentinel
+  texts in every class, id, attribute value, header, cell and loose text,
+  five-digit id numbers, an amount and a date prints none of them, no number
+  of more than two digits and no unknown tag or attribute name; the pattern classes
   use the parser's date and amount literals, read from the parser source;
   on pages the parser accepts, the records, header lists and value cells
   the diagnostics read equal the parser's `extra.sourceViews`,
   `compactFields` and `expandedFields`; the comparison with a published
   capture counts present records and says whether the unmatched one is
-  among them, and the lookup accepts only a key of the parser's form.
+  among them, an unreadable page or an unmatched record without a desktop
+  row gives `null` rather than `0` or `false`, and the lookup accepts only a
+  key of the parser's form.
 - `services/processor/test/parser-rejection.test.ts`: the lookup on the
   migrated CORE schema finds the newest other artifact of the same key whose
   parse is published, never the refused one, another month or an artifact
