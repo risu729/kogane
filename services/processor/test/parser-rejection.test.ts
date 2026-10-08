@@ -20,6 +20,7 @@ import {
 import {
   classifyParserRejection,
   classifySbiShinseiMessage,
+  globalPassLatestOkSql,
   globalPassReplaySelectionSql,
   replaySelectionSql,
   replayStatementMetadata,
@@ -853,8 +854,9 @@ describe("replay selection against the migrated CORE schema", () => {
     db = binding as D1Database;
     await db.exec(LAYER_A_SQL);
     for (const name of layerBMigrations()) await applyMigration(db, name);
-    // id, source, dataset, sha: a sealed successful run with one artifact each.
-    const artifacts: [number, string, string, string][] = [
+    // id, source, dataset, sha (and a key other than `k<id>`): a sealed
+    // successful run with one artifact each.
+    const artifacts: [number, string, string, string, string?][] = [
       [1, "sbi-shinsei-bank", TOP, "a".repeat(64)],
       [2, "sbi-shinsei-bank", "yen-deposit-account", "b".repeat(64)],
       [3, "sbi-shinsei-bank", TOP, "a".repeat(64)], // the same bytes as 1
@@ -868,8 +870,14 @@ describe("replay selection against the migrated CORE schema", () => {
       [10, "global-pass", "globalpass-activity", "3".repeat(64)],
       [11, "global-pass", "globalpass-activity", "1".repeat(64)], // the same bytes as 8
       [12, "global-pass", "globalpass-activity", "4".repeat(64)],
+      // Captures of one month for globalPassLatestOkSql: 13 and 15 published,
+      // 14 another month published, 16 parsed `ok` but never published.
+      [13, "global-pass", "globalpass-activity", "5".repeat(64), "activity-2099-02.html"],
+      [14, "global-pass", "globalpass-activity", "6".repeat(64), "activity-2099-01.html"],
+      [15, "global-pass", "globalpass-activity", "7".repeat(64), "activity-2099-02.html"],
+      [16, "global-pass", "globalpass-activity", "8".repeat(64), "activity-2099-02.html"],
     ];
-    for (const [id, source, dataset, sha] of artifacts)
+    for (const [id, source, dataset, sha, key] of artifacts)
       await db.batch([
         db.prepare("INSERT OR IGNORE INTO sources VALUES(?,?)").bind(source, source),
         db
@@ -886,7 +894,7 @@ describe("replay selection against the migrated CORE schema", () => {
           .prepare(
             "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,declared_media_type,fetched_at_ms,recorded_at_ms,sha256,artifact_role) VALUES(?,?,?,?,?,NULL,'application/json',1,1,?,'sanitized_provider_capture')",
           )
-          .bind(id, id, source, dataset, `k${id}`, sha),
+          .bind(id, id, source, dataset, key ?? `k${id}`, sha),
         db.prepare("INSERT INTO fetch_run_seals(fetch_run_id,sealed_at_ms) VALUES(?,1)").bind(id),
       ]);
     const run = (
@@ -950,6 +958,12 @@ describe("replay selection against the migrated CORE schema", () => {
     await run(10, gp, "1.1.0", "error");
     await run(11, gp, "1.1.0", "error");
     await run(12, gp, "1.1.0", "error", "raw_object_missing");
+    for (const id of [13, 14, 15]) {
+      if (id === 15) await run(id, gp, "1.1.0", "error");
+      const published = await run(id, gp, "1.2.0", "ok");
+      await publishParse(db, Number(published.meta.last_row_id));
+    }
+    await run(16, gp, "1.2.0", "ok");
     // Starting Miniflare and applying every CORE migration in order is a
     // one-time cost that grows with each migration and crossed the 5 s default
     // hook budget; the budget matches every other schema hook in this suite.
@@ -1035,6 +1049,24 @@ describe("replay selection against the migrated CORE schema", () => {
     expect(await all({ version: "9.9.9" })).toEqual([]);
     // The generic selection still leaves GLOBAL PASS out (REPLAY_SOURCES).
     expect((await select({})).some((row) => row["source_id"] === "global-pass")).toBe(false);
+  });
+  test("the capture compared with a refused page is the newest other one of its key with a published parse", async () => {
+    const lookup = async (id: number, artifactKey: string) =>
+      (await db.prepare(globalPassLatestOkSql({ id, artifactKey })!).all<Record<string, unknown>>())
+        .results;
+    // 16 is the newest of the month but its `ok` parse is unpublished; 14 is another month.
+    expect(await lookup(679, "activity-2099-02.html")).toEqual([
+      { id: 15, sha256: "7".repeat(64), blob_key: "7".repeat(64), byte_size: 10 },
+    ]);
+    // The refused artifact itself is never its own comparison.
+    expect((await lookup(15, "activity-2099-02.html")).map((row) => row["id"])).toEqual([13]);
+    expect(await lookup(679, "activity-2098-12.html")).toEqual([]);
+    // The new captures leave the failure selections as they were.
+    expect(
+      (await db.prepare(globalPassReplaySelectionSql()).all<Record<string, unknown>>()).results.map(
+        (row) => row["id"],
+      ),
+    ).toEqual([11, 10]);
   });
   test("the filter refuses anything but parser-name characters", () => {
     expect(() => replaySelectionSql({ parser: "x' OR '1'='1" })).toThrow(/parser name/u);

@@ -65,6 +65,130 @@ it, and no rule proposes one:
 
 This is a limit, not a design: upcoming obligations have no read path yet.
 
+## Non-card families: unsupported today
+
+No code writes an economic event for any transaction family other than card
+purchases and card settlement. The only event writers are the
+[purchase recognition lane](#card-purchase-recognition) (Vpass, MyJCB) and the
+card settlement review acceptance ([card settlements](card-settlements.md),
+bank debits from the SMBC and SBI Shinsei adapters). Bank movements,
+stored-value movements, FX, remittances, securities and crypto trades, reward exchanges and stored-value
+funding are observed and shown, but no event, leg, allocation or settlement is
+written from them.
+
+`packages/domain/src/event-families.ts`
+([ADR 0053](adr/0053-transaction-family-registry.md)) states this as closed
+codes. `TRANSACTION_FAMILY_REGISTRY` has one entry per parser whose rows are
+transactions or positions (23 today): the families its rows belong to, the
+observation kinds, what the row's external id is and under which `_kogane` key
+the parser records its origin (and how stage A reads it: `provider`,
+`fingerprint` or `unknown`),
+the status vocabulary, the provider-stated link fields (`execution_sub_number`,
+`value_date`, `settlement_amount`, `commission_stated`,
+`exchange_rate_stated`, or `none`), and per family whether a writer exists, with
+closed reasons when none does. `transactionFamilyEntry(sourceId, parserName)`,
+`transactionFamilyEntries(family)` and `familyUnsupportedReasons(family)` are
+the lookups. The registry is a statement about the code, not adoption: nothing
+reads it to write an event, and `supported` means a writer exists for those
+rows, not that an event was written. `packages/parsers/test/event-families.test.ts`
+proves every entry against the parser registry and the synthetic fixtures;
+`packages/domain/test/event-families.test.ts` checks the codes and that each
+family maps onto the display kinds `classifyActivity` knows.
+
+In the table, "Writer" is the family-level status (`FAMILY_SUPPORT`); "(writer)"
+marks the parsers whose rows a writer reads. For a supported family the reasons
+column lists why the sources its writer does not read have no event.
+
+| Family                       | Writer      | Parsers whose rows belong to it                                                                                                                                                                                  | Why no event is written (`familyUnsupportedReasons`)                                                                                                                               |
+| ---------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bank-movement`              | unsupported | `mizuho-ordinary-history`, `moneyforward-monthly-transactions`, `sbi-shinsei-top-balances-and-activity`, `smbc-direct-transactions`, `sony-bank-history-csv`, `sony-bank-history-json`, `st-george-transactions` | `no_event_writer`, `identity_fingerprint_only`, `identity_origin_unrecorded`, `counterpart_not_stated`, `semantics_unobserved`, `writer_guard_pending`                             |
+| `stored-value-movement`      | unsupported | `mobile-suica-sf-history`, `paypay-csv`, `v-point-pay-notification-event`                                                                                                                                        | `no_event_writer`, `identity_fingerprint_only`, `identity_evidence_digest`, `identity_origin_unrecorded`, `semantics_unobserved`, `writer_guard_pending`                           |
+| `fx-exchange`                | unsupported | `global-pass-activity`, `paypay-csv`, `sbi-shinsei-top-balances-and-activity`, `sony-bank-history-csv`, `sony-bank-history-json`, `sony-bank-wallet-history`, `vpass-statement-page`                             | `no_event_writer`, `identity_fingerprint_only`, `identity_origin_unrecorded`, `counterpart_not_stated`, `semantics_unobserved`, `writer_guard_pending`                             |
+| `overseas-remittance`        | unsupported | none                                                                                                                                                                                                             | `no_event_writer`, `semantics_unobserved`, `writer_guard_pending`                                                                                                                  |
+| `securities-order`           | unsupported | none                                                                                                                                                                                                             | `no_event_writer`, `not_collected`                                                                                                                                                 |
+| `securities-execution`       | unsupported | `sbi-domestic-cash-positions`, `sbi-domestic-trade-records`, `sbi-foreign-cash-positions`, `sbi-foreign-trade-records`                                                                                           | `no_event_writer`, `identity_fingerprint_only`, `identity_origin_unrecorded`, `direction_code_unmapped`, `snapshot_only`, `writer_guard_pending`                                   |
+| `securities-settlement-cash` | unsupported | `sbi-yen-detail-history`                                                                                                                                                                                         | `no_event_writer`, `identity_origin_unrecorded`, `counterpart_not_stated`, `writer_guard_pending`                                                                                  |
+| `crypto-execution`           | unsupported | `sbi-vc-executions`, `sbi-vc-position-summary`                                                                                                                                                                   | `no_event_writer`, `identity_origin_unrecorded`, `cash_amount_not_stated`, `snapshot_only`, `writer_guard_pending`                                                                 |
+| `crypto-fiat-remittance`     | unsupported | `sbi-vc-cashflows`                                                                                                                                                                                               | `no_event_writer`, `identity_origin_unrecorded`, `counterpart_not_stated`, `writer_guard_pending`                                                                                  |
+| `reward-exchange`            | unsupported | `v-point-history-page`                                                                                                                                                                                           | `no_event_writer`, `identity_absent`, `not_collected`, `semantics_unobserved`                                                                                                      |
+| `prepaid-funding`            | unsupported | `mobile-suica-sf-history`, `paypay-csv`, `v-point-pay-notification-event`                                                                                                                                        | `no_event_writer`, `identity_fingerprint_only`, `identity_evidence_digest`, `identity_origin_unrecorded`, `counterpart_not_stated`, `semantics_unobserved`, `writer_guard_pending` |
+| `prepaid-notification`       | unsupported | `v-point-pay-notification-event`                                                                                                                                                                                 | `no_event_writer`, `identity_evidence_digest`, `semantics_unobserved`                                                                                                              |
+| `card-purchase`              | supported   | `global-pass-activity`, `myjcb-credit-ledger` (writer), `sony-bank-wallet-history`, `vpass-statement-page` (writer)                                                                                              | `no_event_writer`, `identity_fingerprint_only`, `counterpart_not_stated`, `semantics_unobserved`                                                                                   |
+| `card-settlement`            | supported   | `sbi-shinsei-top-balances-and-activity` (writer), `smbc-direct-transactions` (writer)                                                                                                                            | —                                                                                                                                                                                  |
+
+The reasons, all closed:
+
+- `no_event_writer` — no code writes events of this family from these rows.
+- `identity_fingerprint_only` — the row id is a fingerprint of the row's content
+  and position; a re-observed row whose page moved can carry another id.
+- `identity_evidence_digest` — the row id is the SHA-256 of the stored
+  notification message (V Point Pay), not an id the provider issued: a direct
+  delivery's id is the outer message hash and a forwarded copy's is not, so two
+  deliveries of one notice can carry two ids. The parser records it as
+  `normalized-event-id`, which stage A currently reads as provider-issued; that
+  is a limit until a parser release records the origin as a digest. It has no
+  effect today: V Point Pay is in no reconciliation slice (only Vpass and MyJCB
+  are).
+- `identity_origin_unrecorded` — the parser records no `_kogane.identityOrigin`
+  (none at all, or an origin under another key), so stage A reads the origin as
+  unknown whatever the id is
+  ([which sources supply a provider link id](#which-sources-supply-a-provider-link-id)).
+- `identity_absent` — the row has no external id (V Point history).
+- `direction_code_unmapped` — the trade direction is a provider code or raw text
+  nobody has mapped (SBI Securities `tradeRecordTypeCode`, domestic `tradeType`);
+  it is never guessed ([ADR 0004](adr/0004-payment-type-shapes-from-evidence.md)).
+- `cash_amount_not_stated` — an SBI VC execution states quantity and price but no
+  cash amount; quantity × price is never used in its place.
+- `counterpart_not_stated` — no provider id links the row to the other side: the
+  other own account, the other currency, the funding card, the bank side of an
+  SBI VC Trade fiat remittance, or (MoneyForward) the directly collected row it mirrors.
+- `not_collected` — no collector captures securities orders, or the request and
+  destination credit of a point exchange.
+- `semantics_unobserved` — what the rows mean for the family has not been observed
+  or confirmed: which SBI Shinsei, Sony Bank, GLOBAL PASS, Vpass or PayPay rows are exchanges, which
+  PayPay rows move the PayPay balance, which MoneyForward rows are deposit
+  movements, whether a GLOBAL PASS pending row keeps its
+  id when confirmed, what a V Point Pay notification settles, what V Point's point
+  division and type codes mean, and which rows anywhere are overseas remittances.
+- `snapshot_only` — position rows are holdings at a point in time, never a
+  movement; they belong to the execution families only as evidence to check
+  against.
+- `writer_guard_pending` — a writer needs the writer/guard contract shared with
+  the reconstruction (#550) and cost-basis (#556) work, which is under design
+  review; a separate ADR will decide it.
+
+Limits, as the code stands:
+
+- MoneyForward rows are filed under `bank-movement`, but a linked MoneyForward
+  account can be a bank or a card and the parser records no account type, so
+  which of its rows are deposit movements is unknown (`semantics_unobserved`);
+  they also mirror rows other sources collect directly (#545).
+- `bank-movement` is deposit accounts only and is the family own-transfer
+  pairing would read; stored-value balances (Mobile Suica SF, PayPay, the V
+  Point Pay prepaid balance) are `stored-value-movement`, where a fare or a
+  payment is spending from the balance and a charge is funding it (and also
+  `prepaid-funding`). A parser's families are the families of its rows as a
+  set; which row is which (a Suica charge versus a fare, a PayPay balance
+  payment versus a card payment) is not classified per row.
+- Broker and exchange cash transfers (the SBI Securities yen detail rows the
+  parser types `transfer` from their detail text, SBI VC Trade fiat
+  remittances) are in their own families, not `bank-movement`; whether
+  own-transfer pairing reads them is for the writer/guard contract.
+- Card statement totals are balance rows (`credit_statement_payment_amount`),
+  so they are outside the registry: `myjcb-credit-statement-total` has no entry,
+  and the `vpass-statement-page` entry describes its usage rows only. The
+  card-settlement entries are the bank-debit side.
+- The 0032 schema can already hold transfers (`transfer` with states requested →
+  credited/returned), fees, settlement-date and trade-date legs, missing or
+  unresolved legs with reasons, and fill/transfer allocations, but the event-kind
+  list has no trade, exchange, income or redemption kind, the one-live-holder
+  sidecar of 0047 is card-only, and the `allocations` live unique index is per
+  (source, target, role), so one bank row can be allocated to two targets: card
+  settlement readiness (`allocation_available`, 0044) refuses a debit that any
+  current allocation already cites, but nothing refuses the reverse order, and
+  only the domain `checkSourceAllocations` checks a source across targets. These
+  are why the families above wait on `writer_guard_pending`.
+
 ## Tables (migration `0032_economic_events.sql`)
 
 Additive only. Every table has the `*_no_delete` / `*_no_replace` triggers of
@@ -210,9 +334,12 @@ returned side by side with `cross_unit_requires_fx_model`; signed amounts in
   provider issued** (`identifierOrigin: "provider"` on both sides, which the
   job reads from the parser's `_kogane.identityOrigin`); such a pair is
   auto-acceptable. A collector fingerprint, or an origin nobody recorded,
-  pairs nothing: SBI Shinsei's `txnReferenceNo` and PayPay's
-  `transactionNumber` are provider row ids, but their parsers record no
-  origin and neither source is in a slice, so they pair nothing yet either. Vpass and MyJCB derive every external id from the row's
+  pairs nothing: SBI Shinsei's `txnReferenceNo`, the SBI Securities yen
+  detail history's `did`, SBI VC Trade's `cashflowID` and execution id
+  tuple, and PayPay's `transactionNumber` are provider row ids, but their
+  parsers record no origin and none of these sources is in a slice, so they
+  pair nothing yet either ([which sources supply a provider link
+  id](#which-sources-supply-a-provider-link-id)). Vpass and MyJCB derive every external id from the row's
   content and occurrence, so each daily capture of a displayed row carries the
   same fingerprint: stage A over them was one more `provider_same` candidate
   per pair of captures, never auto-acceptable, and nothing for a reviewer to
@@ -352,14 +479,21 @@ source in the slice.
 ### Which sources supply a provider link id
 
 Auto-acceptance needs an identifier the provider issued **for the pair**,
-surfaced by a parser as `extra_json.$._kogane.providerLinkId`. Surveying the
-deployed parsers and `docs/sources/*.md`:
+surfaced by a parser as `extra_json.$._kogane.providerLinkId`. What each
+deployed parser records as a row's identity, read off the parser source and
+pinned per parser by the [transaction-family registry](#non-card-families-unsupported-today)
+(`packages/parsers/test/event-families.test.ts` checks it on the synthetic
+fixtures):
 
-| Source                                                                                                                                        | What it exposes                                                               | Effect                                                         |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| SBI Shinsei (`txnReferenceNo`), SMBC Direct, SBI VC Trade (`cashflowId`, `executionId`), PayPay (`transactionNumber`), V Point Pay (event id) | A provider row id                                                             | Identifies one row (stage A). Does not link pending to posted. |
-| MyJCB                                                                                                                                         | A third-party column survey mentions an approval number on the debit sections | Not read by the deployed ledger parser.                        |
-| Vpass, Sony Bank, MoneyForward, Mobile Suica, Global Pass, SBI Securities histories                                                           | External ids derived from a collector fingerprint                             | Not a provider identifier at all.                              |
+| Source                                                                                                                                                                                                             | What it exposes                                                                                                                                                     | Effect                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SMBC Direct (`id`)                                                                                                                                                                                                 | A provider row id, recorded as `_kogane.identityOrigin: "provider-id"`                                                                                              | Identifies one row (stage A). Does not link pending to posted.                                                                                                                                                                                 |
+| SBI Shinsei (`txnReferenceNo`), SBI Securities yen detail history (the provider `did`), SBI VC Trade cash flows (`cashflowID`) and executions (`CExecutionId` + `CExecutionIdSubNo`), PayPay (`transactionNumber`) | A provider row id; the parser records no `_kogane.identityOrigin`                                                                                                   | Stage A reads the origin as unknown and pairs nothing. Does not link pending to posted.                                                                                                                                                        |
+| V Point Pay                                                                                                                                                                                                        | The SHA-256 of the stored notification message, recorded as `_kogane.identityOrigin: "normalized-event-id"`                                                         | One notification, not an id the provider issued; stage A currently reads that text as provider-issued, a limit until a parser release records its origin (no effect today: V Point Pay is in no reconciliation slice). No pending/posted link. |
+| MyJCB                                                                                                                                                                                                              | A third-party column survey mentions an approval number on the debit sections                                                                                       | Not read by the deployed ledger parser.                                                                                                                                                                                                        |
+| Vpass, MyJCB, Sony Bank (deposit JSON and CSV histories, WALLET), Mizuho, MoneyForward, Mobile Suica, GLOBAL PASS, St.George, SBI Securities foreign trade records                                                 | External ids derived from a fingerprint of the row's fields plus an occurrence, recorded in `_kogane.identityOrigin`                                                | Not a provider identifier at all.                                                                                                                                                                                                              |
+| SBI Securities domestic trade records                                                                                                                                                                              | The collector's fingerprint of the table cells plus an occurrence, recorded under `_kogane.externalIdOrigin: "collector-fingerprint"`, not `_kogane.identityOrigin` | Not a provider identifier; stage A, which reads only `identityOrigin`, sees no origin.                                                                                                                                                         |
+| V Point history                                                                                                                                                                                                    | No external id (`_kogane.providerStableId: "unavailable"`)                                                                                                          | Nothing to pair.                                                                                                                                                                                                                               |
 
 So **no source currently supplies a pending-to-posted link id**, and every
 proposal this job writes stays `proposed`. The automatic path exists, is

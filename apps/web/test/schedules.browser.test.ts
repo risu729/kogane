@@ -15,6 +15,10 @@ describe.if(runnable)("operator schedule administration", () => {
     server: ReturnType<typeof Bun.serve>,
     origin: string,
     snapshot: ScheduleSnapshot;
+  let snapshotReads = 0,
+    snapshotStatus = 200,
+    leaseResponse: (() => Promise<Response>) | null = null,
+    readAfterWrite: (() => Promise<void>) | null = null;
   let writes: {
     path: string;
     body: Record<string, unknown>;
@@ -23,6 +27,10 @@ describe.if(runnable)("operator schedule administration", () => {
   }[] = [];
   beforeEach(() => {
     writes = [];
+    snapshotReads = 0;
+    snapshotStatus = 200;
+    leaseResponse = null;
+    readAfterWrite = null;
     snapshot = {
       schedules: jobs.map((job) => ({
         ...job,
@@ -68,7 +76,13 @@ describe.if(runnable)("operator schedule administration", () => {
             source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
-        if (url.pathname === "/api/ops/v1/schedules") return Response.json(snapshot);
+        if (url.pathname === "/api/ops/v1/schedules") {
+          snapshotReads++;
+          if (writes.length && readAfterWrite) await readAfterWrite();
+          if (snapshotStatus !== 200)
+            return Response.json({ error: "unavailable" }, { status: snapshotStatus });
+          return Response.json(snapshot);
+        }
         if (url.pathname.startsWith("/api/ops/v1/schedules/") && request.method === "POST") {
           const body = (await request.json()) as Record<string, unknown>;
           writes.push({
@@ -77,6 +91,8 @@ describe.if(runnable)("operator schedule administration", () => {
             origin: request.headers.get("origin"),
             marker: request.headers.get("x-kogane-settings"),
           });
+          if (url.pathname.startsWith("/api/ops/v1/schedules/leases/") && leaseResponse)
+            return leaseResponse();
           const id = url.pathname.split("/").at(-1);
           const row = snapshot.schedules.find((s) => s.id === id);
           if (row) {
@@ -97,6 +113,243 @@ describe.if(runnable)("operator schedule administration", () => {
     await browser?.close();
     server?.stop(true);
   });
+  function stoppedLease(leaseRef = "12345678-1234-4234-8234-123456789abc") {
+    snapshot.leases = [{ source: "vpass", leaseRef, startedAt: "2026-10-01T00:00:00.000Z" }];
+  }
+  test("release takes a synchronous guard before confirmation and stays disabled through readback", async () => {
+    stoppedLease();
+    let finishWrite!: () => void, finishRead!: () => void, readEntered!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
+    const reading = new Promise<void>((resolve) => {
+      finishRead = resolve;
+    });
+    const readStarted = new Promise<void>((resolve) => {
+      readEntered = resolve;
+    });
+    leaseResponse = async () => {
+      await writing;
+      snapshot.leases = [];
+      return Response.json({ released: true });
+    };
+    readAfterWrite = () => {
+      readEntered();
+      return reading;
+    };
+    const page = await browser.newPage();
+    // Re-enter the button before confirmation returns: a state-only pending
+    // flag cannot protect this gap. This is a synthetic dialog, not a login.
+    await page.addInitScript(() => {
+      let confirmations = 0;
+      window.confirm = () => {
+        confirmations++;
+        if (confirmations === 1)
+          [...document.querySelectorAll<HTMLButtonElement>("button")]
+            .find((button) => button.textContent === "停止した実行を解除")
+            ?.click();
+        document.documentElement.dataset.leaseConfirmations = String(confirmations);
+        return true;
+      };
+    });
+    try {
+      await page.goto(`${origin}/schedules`);
+      await page.getByRole("button", { name: "停止した実行を解除", exact: true }).click();
+      const pending = page.getByRole("button", { name: "解除中…", exact: true });
+      await pending.waitFor();
+      expect(await pending.isDisabled()).toBe(true);
+      expect(await page.locator("html").getAttribute("data-lease-confirmations")).toBe("1");
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toMatchObject({
+        path: "/api/ops/v1/schedules/leases/vpass",
+        origin,
+        marker: "1",
+        body: {
+          leaseRef: "12345678-1234-4234-8234-123456789abc",
+          confirmedStopped: true,
+        },
+      });
+      const readsBefore = snapshotReads;
+      finishWrite();
+      // Wait on the server's read boundary; the read response is still held.
+      await readStarted;
+      expect(snapshotReads).toBeGreaterThan(readsBefore);
+      expect(await pending.isDisabled()).toBe(true);
+      finishRead();
+      await page
+        .getByText("対象の停止した実行は解除済みです。現在の実行状態を確認してください。", {
+          exact: true,
+        })
+        .waitFor();
+      expect(await page.getByRole("button", { name: "停止した実行を解除" }).count()).toBe(0);
+      expect(writes).toHaveLength(1);
+    } finally {
+      finishWrite();
+      finishRead();
+      await page.close();
+    }
+  }, 30000);
+
+  test("cancelled confirmation sends no write and allows a later confirmed release", async () => {
+    stoppedLease();
+    leaseResponse = async () => {
+      snapshot.leases = [];
+      return Response.json({ released: true });
+    };
+    const page = await browser.newPage();
+    await page.goto(`${origin}/schedules`);
+    const button = page.getByRole("button", { name: "停止した実行を解除", exact: true });
+    page.once("dialog", (dialog) => dialog.dismiss());
+    await button.click();
+    expect(writes).toHaveLength(0);
+    expect(await button.isEnabled()).toBe(true);
+    page.once("dialog", (dialog) => dialog.accept());
+    await button.click();
+    await page
+      .getByText("対象の停止した実行は解除済みです。現在の実行状態を確認してください。", {
+        exact: true,
+      })
+      .waitFor();
+    expect(writes).toHaveLength(1);
+    await page.close();
+  }, 30000);
+
+  test("a conflicting release refreshes the new lease and retries only its new reference", async () => {
+    stoppedLease();
+    const newRef = "87654321-4321-4321-8321-cba987654321";
+    leaseResponse = async () => {
+      stoppedLease(newRef);
+      return Response.json({ error: "lease_conflict" }, { status: 409 });
+    };
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.goto(`${origin}/schedules`);
+    const button = page.getByRole("button", { name: "停止した実行を解除", exact: true });
+    await button.click();
+    await page
+      .getByText("他の変更が先に保存されました。表示を更新して再度変更してください。", {
+        exact: true,
+      })
+      .waitFor();
+    expect(snapshotReads).toBeGreaterThan(1);
+    expect(await button.isEnabled()).toBe(true);
+    leaseResponse = async () => {
+      snapshot.leases = [];
+      return Response.json({ released: true });
+    };
+    await button.click();
+    await page
+      .getByText("対象の停止した実行は解除済みです。現在の実行状態を確認してください。", {
+        exact: true,
+      })
+      .waitFor();
+    expect(writes).toHaveLength(2);
+    expect(writes[1]!.body.leaseRef).toBe(newRef);
+    await page.close();
+  }, 30000);
+
+  test("a failed response still reads back a completed release and retains its result", async () => {
+    stoppedLease();
+    leaseResponse = async () => {
+      snapshot.leases = [];
+      return Response.json({ error: "unavailable" }, { status: 503 });
+    };
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.goto(`${origin}/schedules`);
+    await page.getByRole("button", { name: "停止した実行を解除", exact: true }).click();
+    await page
+      .getByText("設定を確認できません。表示を更新して保存状態を確認してください。", {
+        exact: true,
+      })
+      .waitFor();
+    expect(snapshotReads).toBeGreaterThan(1);
+    expect(await page.getByRole("button", { name: "停止した実行を解除" }).count()).toBe(0);
+    expect(writes).toHaveLength(1);
+    await page.close();
+  }, 30000);
+  test("failed readback releases the UI guard and permits a safe retry", async () => {
+    stoppedLease();
+    leaseResponse = async () => {
+      snapshotStatus = 503;
+      return Response.json({ released: true });
+    };
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.goto(`${origin}/schedules`);
+    const button = page.getByRole("button", { name: "停止した実行を解除", exact: true });
+    await button.click();
+    await page
+      .getByText("解除結果を確認できません。表示を更新して現在の実行状態を確認してください。", {
+        exact: true,
+      })
+      .waitFor();
+    expect(await button.isEnabled()).toBe(true);
+    expect(snapshotReads).toBeGreaterThan(1);
+    leaseResponse = async () => {
+      snapshotStatus = 200;
+      snapshot.leases = [];
+      return Response.json({ released: true });
+    };
+    await button.click();
+    await page
+      .getByText("対象の停止した実行は解除済みです。現在の実行状態を確認してください。", {
+        exact: true,
+      })
+      .waitFor();
+    expect(writes).toHaveLength(2);
+    expect(writes[1]!.body.leaseRef).toBe(writes[0]!.body.leaseRef);
+    await page.close();
+  }, 30000);
+
+  test("a pending release only blocks its own source", async () => {
+    stoppedLease();
+    snapshot.leases.push({
+      source: "myjcb",
+      leaseRef: "87654321-4321-4321-8321-cba987654321",
+      startedAt: "2026-10-01T00:00:00.000Z",
+    });
+    let finish!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    leaseResponse = async () => {
+      await writing;
+      snapshot.leases = [];
+      return Response.json({ released: true });
+    };
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => dialog.accept());
+    try {
+      await page.goto(`${origin}/schedules`);
+      await page.getByRole("button", { name: "停止した実行を解除", exact: true }).first().click();
+      await page.getByRole("button", { name: "解除中…", exact: true }).waitFor();
+      const second = page.getByRole("button", { name: "停止した実行を解除", exact: true });
+      expect(await second.isEnabled()).toBe(true);
+      await second.click();
+      await page.waitForFunction(
+        () =>
+          [...document.querySelectorAll("button")].filter(
+            (button) => button.textContent === "解除中…",
+          ).length === 2,
+      );
+      expect(writes.map((write) => write.path)).toEqual([
+        "/api/ops/v1/schedules/leases/vpass",
+        "/api/ops/v1/schedules/leases/myjcb",
+      ]);
+      finish();
+      await page
+        .getByText("対象の停止した実行は解除済みです。現在の実行状態を確認してください。", {
+          exact: true,
+        })
+        .waitFor();
+      expect(writes).toHaveLength(2);
+    } finally {
+      finish();
+      await page.close();
+    }
+  }, 30000);
+
   for (const width of [1280, 390])
     test(`daily time edits persist and exact evidence links remain visible at ${width}px`, async () => {
       const page = await browser.newPage({ viewport: { width, height: 960 } });

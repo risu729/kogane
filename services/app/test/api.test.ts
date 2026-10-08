@@ -238,6 +238,8 @@ describe("production observation API", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body).toMatchObject({ parsingHealth: { pending: 1, running: 1, failed: 1 } });
+    // No GLOBAL PASS month in this store: the notice is present and empty.
+    expect(body).toMatchObject({ globalPassEmptyMonths: { months: [], truncated: false } });
     expect(validApiResponse("/api/meta", body)).toBe(true);
     expect(body).toMatchObject({
       source: { kind: "central-store", classification: "financial" },
