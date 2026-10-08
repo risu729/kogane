@@ -132,7 +132,13 @@ code and country, an ISIN or a RIC. No rule records ISIN, share class or
 product class. Valuation and the report job still key holdings by the
 provider-local `instrument:<source>:<market>:<code>`, so no candidate moves a
 price, quantity or cost. The facts read walks every current identity
-observation once, like the instrument catalogue, and is not measured on D1.
+observation once, like the instrument catalogue; its D1 cost is not measured
+and must be measured before a route serves it. An equal country and code is
+proposed with no period comparison, so a code reassigned after a delisting
+still pairs, and nothing names that as a gap. The status read ignores a
+`listed_as` relation's `valid_from` and `valid_to`, so a rejection limited to
+a period reads as permanent. A rejection from `instrument:<id>` keeps the
+identifier apart from every identifier currently mapped to that instrument.
 
 ## Acceptance gates
 

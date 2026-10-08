@@ -180,8 +180,29 @@ tests reuse `packages/storage-d1/test/sqlite.ts`,
 - Cross-broker candidates appear only when a second source's identity rule
   records a code and country, an ISIN or a RIC for securities. None does today.
 - The facts read walks every current identity observation once, as the
-  identity catalogue's instrument list does. There is no index on
-  `identity_instrument_uses(identifier_id)`. Not measured on D1.
+  identity catalogue's instrument list does, and reaches each use's trade
+  unit and unit by primary key. No index on
+  `identity_instrument_uses(identifier_id)` is needed for that plan, and none
+  is added. Its D1 cost is not measured and must be measured before a route
+  serves the read.
+
+Limits of this decision, stated so nobody reads more into an answer than it
+says:
+
+- **Country and code have no period.** Two identifiers with an equal
+  (country, security code) are proposed whenever they were seen, even if the
+  code was reassigned to another security after a delisting in between. No
+  period is compared and no gap code names it; the only safeguard is that a
+  candidate is a proposal a person decides.
+- **A `listed_as` validity window is ignored.** The status read takes the
+  newest `listed_as` relation per (instrument, identifier) whatever its
+  `valid_from` and `valid_to`, so a rejection limited to a period reads as a
+  permanent rejection. The keep-apart command this read names writes no
+  window.
+- **A rejection names an instrument, not an identifier.** A rejected
+  `listed_as` from `instrument:<id>` to an identifier keeps that identifier
+  apart from every identifier currently mapped to that instrument, not only
+  from the anchor it was decided against.
 
 ## Explicitly not decided
 
