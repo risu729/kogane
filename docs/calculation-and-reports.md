@@ -210,7 +210,9 @@ currencies, is one exact ratio rounded once under the conversion policy's
 inverse rounding at the target unit's scale, with the operands and the exact
 value kept as `RoundingInputs`; a policy without one refuses with
 `rounding_policy_missing`, before any rate is read. A pair outside the
-policy's currencies (CHF, an instrument code) is `unsupported_pair`, and a
+policy's currencies (CHF, an instrument code) is `unsupported_pair` (and
+`selectMarketData` answers such a currency's rate `unsupported_pair` without a
+read), and a
 missing, stale or disagreeing rate is that refusal for the FX leg. A holding
 of another instrument than the price's is `instrument_mismatch`, and a
 quantity that is not exact is `quantity_not_exact`. A zero or negative

@@ -169,6 +169,23 @@ describe("selectMarketData", () => {
     expect((await knownAt("2026-09-10T03:45:00Z")).contextId).toBe(k1.contextId);
   });
 
+  test("a currency the FX policy cannot quote is unsupported_pair, not missing", async () => {
+    const result = await selectMarketData(
+      executor(world().db),
+      { ...REQUEST, fxCurrencies: ["USD", "CHF"] },
+      POLICIES,
+    );
+    expect(
+      result.fx.map((p) => [p.key.baseInstrumentRef, p.status === "refused" && p.reason]),
+    ).toEqual([
+      ["USD", false],
+      ["CHF", "unsupported_pair"],
+    ]);
+    expect(result.manifest.refused).toEqual([
+      { key: { ...USD, baseInstrumentRef: "CHF" }, reason: "unsupported_pair", candidateIds: [] },
+    ]);
+  });
+
   test("an inapplicable request or policy is refused, never repaired", async () => {
     const sql = executor(world().db);
     const refused = async (request: MarketDataRequest, policies: MarketDataPolicies) => {
@@ -217,6 +234,37 @@ describe("selectMarketData", () => {
     expect(await refused(REQUEST, { ...POLICIES, fx: { ...FX, policyId: EQUITY.policyId } })).toBe(
       "invalid_policy",
     );
+    // Malformed keys are the request's fault, whatever layer would notice.
+    expect(
+      await refused(
+        {
+          ...REQUEST,
+          prices: [{ key: { ...ALPHA, baseInstrumentRef: "" }, snapshotParseRunId: 1 }],
+        },
+        POLICIES,
+      ),
+    ).toBe("invalid_request");
+    expect(
+      await refused(
+        {
+          ...REQUEST,
+          prices: [{ key: { ...ALPHA, priceKind: "guess" as never }, snapshotParseRunId: 1 }],
+        },
+        POLICIES,
+      ),
+    ).toBe("invalid_request");
+    expect(
+      await refused(
+        {
+          ...REQUEST,
+          prices: Array.from({ length: 499 }, (_, index) => ({
+            key: { ...ALPHA, baseInstrumentRef: `instrument:test:${index}` },
+            snapshotParseRunId: 1,
+          })),
+        },
+        POLICIES,
+      ),
+    ).toBe("invalid_request");
     // A proposal is not a decision: no query runs under one.
     for (const proposed of [
       { ...POLICIES, price: PROPOSED_EQUITY_SELECTION_POLICY_V1 },

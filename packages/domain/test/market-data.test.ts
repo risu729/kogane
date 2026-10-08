@@ -15,6 +15,7 @@ import {
   PROPOSAL_POLICY_PREFIX,
   policyDigest,
   selectionManifest,
+  selectFxRate,
   selectionReadWindow,
   selectPrice,
   validFxConversionPolicy,
@@ -545,6 +546,24 @@ describe("FX path and conversion", () => {
     ]);
     expect(fxPath("USD", "AUD", "JPY")).toHaveLength(2);
     expect(fxPath("instrument:test:alpha", "JPY", "JPY")).toBeNull();
+  });
+
+  test("a currency no admitted rule quotes is unsupported_pair before any candidate is read", () => {
+    const chf = selectFxRate("CHF", [], BOUND, fxPolicy(), null);
+    expect(refused(chf)).toMatchObject({
+      key: { ...USD, baseInstrumentRef: "CHF" },
+      reason: "unsupported_pair",
+      candidateIds: [],
+      policyId: POLICY.policyId,
+    });
+    const usd = selectFxRate(
+      "USD",
+      [candidate({ id: "u", amount: "146" })],
+      BOUND,
+      fxPolicy(),
+      null,
+    );
+    expect(selected(usd).candidate.price.id).toBe("u");
   });
 
   test("a missing rate is a refusal, never 1:1 and never zero", () => {

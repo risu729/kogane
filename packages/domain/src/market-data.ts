@@ -82,6 +82,7 @@ export const MARKET_DATA_SELECTION_SCHEMA = "market-data-selection-v1";
 
 /** Why a key has no selected price. Closed; each is a reason, never a zero. */
 export const PRICE_SELECTION_REFUSALS = [
+  "unsupported_pair",
   "missing",
   "stale",
   "disagree",
@@ -108,7 +109,6 @@ export type ExclusionCounts = Record<CandidateExclusion, number>;
 /** Why a value could not be stated in the base unit. A price or FX leg's own refusal is passed through. */
 export const CONVERSION_REFUSALS = [
   ...PRICE_SELECTION_REFUSALS,
-  "unsupported_pair",
   "rounding_policy_missing",
   "price_not_positive",
   "instrument_mismatch",
@@ -866,6 +866,33 @@ export function selectPrice(
 // ---------------------------------------------------------------------------
 // FX path and conversion
 // ---------------------------------------------------------------------------
+
+/**
+ * The rate of `currency` against the policy's pivot: `unsupported_pair`
+ * without looking at candidates when no admitted rule can quote the currency
+ * (it is not in `policy.currencies`), otherwise `selectPrice` under the
+ * policy's selection policy.
+ */
+export function selectFxRate(
+  currency: string,
+  candidates: readonly PriceCandidate[],
+  bound: SelectionBound,
+  policy: FxConversionPolicy,
+  calendar: MarketCalendar | null,
+): PriceSelection {
+  const key = fxKey(currency, policy);
+  if (!policy.currencies.includes(currency))
+    return {
+      status: "refused",
+      key,
+      reason: "unsupported_pair",
+      candidateIds: [],
+      ageDays: null,
+      excluded: zeroCounts(),
+      policyId: policy.selection.policyId,
+    };
+  return selectPrice(key, candidates, bound, policy.selection, calendar);
+}
 
 /** One hop: `direct` multiplies by `base`/`quote`; `inverse` divides by it. */
 export interface FxStep {

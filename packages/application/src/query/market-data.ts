@@ -8,8 +8,10 @@
 // records each by digest, so the same inputs give the same context id and a
 // new price or a changed policy gives a new one (INV04, INV09).
 import { canonicalDigest, canonicalJson } from "../../../domain/src/context.ts";
+import { isOneOf, isText } from "../../../domain/src/guards.ts";
 import {
   PROPOSAL_POLICY_PREFIX,
+  selectFxRate,
   selectionManifest,
   selectionReadWindow,
   selectPrice,
@@ -26,7 +28,9 @@ import {
   type SelectionBound,
   type SelectionManifest,
 } from "../../../domain/src/market-data.ts";
+import { PRICE_KINDS } from "../../../domain/src/metrics.ts";
 import {
+  PRICE_SELECTION_BOUND,
   selectPriceCandidates,
   type PriceCandidateWant,
 } from "../../../read-model/src/price-selection.ts";
@@ -49,7 +53,10 @@ export interface MarketDataRequest {
    * names the parse run of the holding's own snapshot; otherwise none does.
    */
   prices: readonly { key: PriceKey; snapshotParseRunId: number | null }[];
-  /** Currencies whose rate against the FX policy's pivot is selected. */
+  /**
+   * Currencies whose rate against the FX policy's pivot is selected; one no
+   * admitted rule quotes is answered `unsupported_pair` without a read.
+   */
   fxCurrencies: readonly string[];
 }
 
@@ -115,17 +122,22 @@ export async function selectMarketData(
   )
     throw new MarketDataRequestError("invalid_policy");
   const sameSnapshot = policies.price.candidateScope === "same-snapshot";
+  // Currencies no admitted rule quotes are answered without a read.
+  const quoted = request.fxCurrencies.filter((code) => policies.fx.currencies.includes(code));
   if (
     !validSelectionBound(request.bound) ||
     !request.prices.every(
       (entry) =>
-        entry.key.quoteUnitRef !== "" &&
+        isText(entry.key.baseInstrumentRef, 256) &&
+        isText(entry.key.quoteUnitRef, 128) &&
+        isOneOf(PRICE_KINDS)(entry.key.priceKind) &&
         (sameSnapshot
           ? Number.isSafeInteger(entry.snapshotParseRunId)
           : entry.snapshotParseRunId === null),
     ) ||
     !request.fxCurrencies.every((code) => CURRENCY.test(code) && code !== policies.fx.pivot) ||
-    new Set(request.fxCurrencies).size !== request.fxCurrencies.length
+    new Set(request.fxCurrencies).size !== request.fxCurrencies.length ||
+    request.prices.length + quoted.length > PRICE_SELECTION_BOUND
   )
     throw new MarketDataRequestError("invalid_request");
 
@@ -134,7 +146,7 @@ export async function selectMarketData(
   const fxCalendar = calendarFor(policies.fx.selection, policies.calendars);
   const priceWindow = selectionReadWindow(policies.price, bound, priceCalendar);
   const fxWindow = selectionReadWindow(policies.fx.selection, bound, fxCalendar);
-  const fxKeys = request.fxCurrencies.map((code) => fxKey(code, policies.fx));
+  const fxKeys = quoted.map((code) => fxKey(code, policies.fx));
   const wants: PriceCandidateWant[] = [
     ...request.prices.map((entry) => ({
       key: entry.key,
@@ -149,15 +161,16 @@ export async function selectMarketData(
   const prices = request.prices.map((entry, index) =>
     selectPrice(entry.key, candidatesOf(index), bound, policies.price, priceCalendar),
   );
-  const fx = fxKeys.map((key, index) =>
-    selectPrice(
-      key,
-      candidatesOf(request.prices.length + index),
+  const fx = request.fxCurrencies.map((code) => {
+    const index = quoted.indexOf(code);
+    return selectFxRate(
+      code,
+      index < 0 ? [] : candidatesOf(request.prices.length + index),
       bound,
-      policies.fx.selection,
+      policies.fx,
       fxCalendar,
-    ),
-  );
+    );
+  });
   const calendars = [priceCalendar, fxCalendar].filter(
     (calendar): calendar is MarketCalendar => calendar !== null,
   );
