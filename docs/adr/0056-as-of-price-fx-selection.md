@@ -152,9 +152,11 @@ What existed before this change:
   of `calculation_results` is mapped onto, not widened.
 - **Proposed values are not decisions.** `PROPOSED_FX_SELECTION_POLICY_V1`,
   `PROPOSED_FX_CONVERSION_POLICY_V1` and `PROPOSED_EQUITY_SELECTION_POLICY_V1`
-  hold the recommendations below as named constants; nothing in production
-  code uses them, and a test fails if production source outside the domain
-  module names one.
+  hold the recommendations below as named constants whose ids start with
+  `proposal:`; nothing in production code uses them, a test fails if a
+  production source, script or task outside the domain module names one or
+  its id, and `selectMarketData` refuses any policy whose id starts with
+  `proposal:` (`invalid_policy`).
 
 ## Consequences
 

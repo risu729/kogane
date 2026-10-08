@@ -5,6 +5,9 @@
 // Every instrument, amount and time is invented.
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
+  PROPOSED_EQUITY_SELECTION_POLICY_V1,
+  PROPOSED_FX_CONVERSION_POLICY_V1,
+  PROPOSED_FX_SELECTION_POLICY_V1,
   valueInBase,
   type FxConversionPolicy,
   type PriceKey,
@@ -214,6 +217,13 @@ describe("selectMarketData", () => {
     expect(await refused(REQUEST, { ...POLICIES, fx: { ...FX, policyId: EQUITY.policyId } })).toBe(
       "invalid_policy",
     );
+    // A proposal is not a decision: no query runs under one.
+    for (const proposed of [
+      { ...POLICIES, price: PROPOSED_EQUITY_SELECTION_POLICY_V1 },
+      { ...POLICIES, fx: PROPOSED_FX_CONVERSION_POLICY_V1 },
+      { ...POLICIES, fx: { ...FX, selection: PROPOSED_FX_SELECTION_POLICY_V1 } },
+    ])
+      expect(await refused(REQUEST, proposed)).toBe("invalid_policy");
     expect(await refused(REQUEST, POLICIES)).toBe("accepted");
   });
 });

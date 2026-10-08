@@ -325,6 +325,9 @@ function deepFrozen<T>(value: T): T {
 // production code imports these; tests and a later, owner-approved change may.
 // ---------------------------------------------------------------------------
 
+/** Every proposed policy's id starts with this; `selectMarketData` refuses such a policy. */
+export const PROPOSAL_POLICY_PREFIX = "proposal:";
+
 /**
  * PROPOSAL (ADR 0056, questions 1, 4, 5, 7, 9): SBI Shinsei's mid rate, at
  * most 4 calendar days old, provider or collector basis, date-only excluded,

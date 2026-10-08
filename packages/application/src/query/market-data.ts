@@ -2,12 +2,14 @@
 // docs/calculation-and-reports.md §1–§2). One bounded candidate read
 // (`selectPriceCandidates`), then the domain's `selectPrice` per key, then the
 // selection manifest and its digest. It never writes, never fetches a price,
-// never converts anything and has no default policy: a caller passes the
+// never converts anything and has no default policy (and refuses a proposed
+// one, whose id starts with `proposal:`): a caller passes the
 // price policy, the FX conversion policy and any calendars, and the manifest
 // records each by digest, so the same inputs give the same context id and a
 // new price or a changed policy gives a new one (INV04, INV09).
 import { canonicalDigest, canonicalJson } from "../../../domain/src/context.ts";
 import {
+  PROPOSAL_POLICY_PREFIX,
   selectionManifest,
   selectionReadWindow,
   selectPrice,
@@ -103,6 +105,10 @@ export async function selectMarketData(
     !validFxConversionPolicy(policies.fx) ||
     policies.fx.selection.candidateScope !== "latest-in-window" ||
     !idsAreUnambiguous([policies.price, policies.fx.selection, policies.fx]) ||
+    // A proposal is a recommendation, not a decision (ADR 0056).
+    [policies.price, policies.fx.selection, policies.fx].some((policy) =>
+      policy.policyId.startsWith(PROPOSAL_POLICY_PREFIX),
+    ) ||
     !policies.calendars.every(validMarketCalendar) ||
     new Set(policies.calendars.map((calendar) => calendar.calendarRef)).size !==
       policies.calendars.length

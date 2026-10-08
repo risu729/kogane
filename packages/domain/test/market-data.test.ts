@@ -12,6 +12,7 @@ import {
   PROPOSED_EQUITY_SELECTION_POLICY_V1,
   PROPOSED_FX_CONVERSION_POLICY_V1,
   PROPOSED_FX_SELECTION_POLICY_V1,
+  PROPOSAL_POLICY_PREFIX,
   policyDigest,
   selectionManifest,
   selectionReadWindow,
@@ -804,13 +805,24 @@ describe("policies, digests and the manifest", () => {
     for (const proposal of [PROPOSED_FX_SELECTION_POLICY_V1, PROPOSED_EQUITY_SELECTION_POLICY_V1])
       expect(validPriceSelectionPolicy(proposal)).toBe(true);
     expect(validFxConversionPolicy(PROPOSED_FX_CONVERSION_POLICY_V1)).toBe(true);
-    expect(PROPOSED_FX_CONVERSION_POLICY_V1.policyId.startsWith("proposal:")).toBe(true);
+    for (const proposal of [
+      PROPOSED_FX_SELECTION_POLICY_V1,
+      PROPOSED_FX_CONVERSION_POLICY_V1,
+      PROPOSED_EQUITY_SELECTION_POLICY_V1,
+    ])
+      expect(proposal.policyId.startsWith(PROPOSAL_POLICY_PREFIX)).toBe(true);
     expect(Object.isFrozen(PROPOSED_FX_SELECTION_POLICY_V1.freshness)).toBe(true);
     expect(PROPOSED_FX_CONVERSION_POLICY_V1.currencies).not.toContain("CHF");
   });
 
-  test("no production source outside the domain module names a proposal", () => {
+  test("no production source, script or task outside the domain module names a proposal", () => {
     const root = join(import.meta.dir, "../../..");
+    const names = [
+      "PROPOSED_",
+      PROPOSED_FX_SELECTION_POLICY_V1.policyId,
+      PROPOSED_FX_CONVERSION_POLICY_V1.policyId,
+      PROPOSED_EQUITY_SELECTION_POLICY_V1.policyId,
+    ];
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir)) {
@@ -818,22 +830,33 @@ describe("policies, digests and the manifest", () => {
         const path = join(dir, entry);
         if (statSync(path).isDirectory()) walk(path);
         else if (
-          /\.(ts|tsx)$/u.test(entry) &&
-          !path.endsWith("packages/domain/src/market-data.ts") &&
-          readFileSync(path, "utf8").includes("PROPOSED_")
-        )
-          offenders.push(path.slice(root.length + 1));
-      }
-    };
-    for (const top of ["packages", "services", "apps"])
-      for (const workspace of readdirSync(join(root, top))) {
-        const src = join(root, top, workspace, "src");
-        try {
-          if (statSync(src).isDirectory()) walk(src);
-        } catch {
-          // A workspace without src has no production code to check.
+          /\.(ts|tsx|js|mjs|cjs)$/u.test(entry) &&
+          !path.endsWith("packages/domain/src/market-data.ts")
+        ) {
+          const text = readFileSync(path, "utf8");
+          if (names.some((name) => text.includes(name)))
+            offenders.push(path.slice(root.length + 1));
         }
       }
+    };
+    const scanned: string[] = [];
+    const visit = (path: string): void => {
+      try {
+        if (!statSync(path).isDirectory()) return;
+      } catch {
+        return;
+      }
+      scanned.push(path.slice(root.length + 1));
+      walk(path);
+    };
+    visit(join(root, "scripts"));
+    visit(join(root, "tasks"));
+    for (const top of ["packages", "services", "apps"])
+      for (const workspace of readdirSync(join(root, top)))
+        for (const part of ["src", "scripts"]) visit(join(root, top, workspace, part));
+    expect(scanned).toEqual(
+      expect.arrayContaining(["scripts", "tasks", "services/processor/scripts"]),
+    );
     expect(offenders).toEqual([]);
   });
 
