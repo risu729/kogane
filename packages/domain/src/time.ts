@@ -1,7 +1,11 @@
 // Role-typed time. A date is never promoted to an instant, an instant carries
 // its own offset, and period arithmetic works on civil days so it is free of
 // DST and leap-second surprises. Zones are named for deadline resolution and
-// display; this module does not embed a time-zone database.
+// display; this module does not embed a time-zone database. The one place it
+// reads zone data is `civilDateOfInstant`, which asks the runtime's own
+// (`Intl.DateTimeFormat`) for the civil date of an instant in a named zone and
+// returns null for a zone the runtime does not know; nothing here turns a
+// date into an instant.
 import { hasExactKeys, isOneOf, isRecord, isText } from "./guards.ts";
 
 export const TEMPORAL_BASES = ["provider", "collector", "derived"] as const;
@@ -194,6 +198,38 @@ export function parseInstant(text: string): ParsedInstant | null {
     nanoseconds: Number((match[7] ?? "").padEnd(9, "0")),
     localDate: formatLocalDate(date),
   };
+}
+
+/**
+ * The civil date (`YYYY-MM-DD`) of an RFC 3339 instant in a named IANA zone,
+ * from the runtime's zone data (`Intl.DateTimeFormat("en-CA", { timeZone })`,
+ * the pattern packages/collection/src/schedule-model.ts uses). Null when the
+ * text is not an instant, the zone is not a zone name, or the runtime does not
+ * know the zone: an unknown zone is never read as UTC. A result more than one
+ * day from the instant's UTC date (a runtime that renders an era year) is
+ * refused as well.
+ */
+export function civilDateOfInstant(text: string, zone: string): string | null {
+  const parsed = parseInstant(text);
+  if (parsed === null || !validZone(zone)) return null;
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(parsed.epochSeconds * 1000);
+  } catch {
+    return null;
+  }
+  const part = (type: string): string => parts.find((p) => p.type === type)?.value ?? "";
+  const text10 = `${part("year").padStart(4, "0")}-${part("month")}-${part("day")}`;
+  const date = parseLocalDate(text10);
+  if (date === null) return null;
+  const utcDay = Math.floor(parsed.epochSeconds / 86400);
+  if (Math.abs(daysFromCivil(date) - utcDay) > 1) return null;
+  return formatLocalDate(date);
 }
 
 export function validInstantText(value: unknown): value is string {
