@@ -230,7 +230,8 @@ describe("Mobile Suica history semantics", () => {
     const parsed = mobileSuicaSfHistory.parse(encoded(input), artifact());
     const idsOn = (date: string) =>
       parsed.observations
-        .filter((entry) => entry.kind === "transaction" && entry.asOf === date)
+        .filter((entry) => entry.kind === "transaction")
+        .filter((entry) => entry.asOf === date)
         .map((entry) => entry.externalId);
     for (const date of [inside, outside]) {
       const ids = idsOn(date);
