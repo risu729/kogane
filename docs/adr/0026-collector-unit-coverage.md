@@ -1099,7 +1099,7 @@ transaction observation yet.
 
 ## Amendment 2026-10-08: GLOBAL PASS empty months that supersede rows are reported
 
-- Status: proposed
+- Status: proposed (#563; accepted when it merges)
 - Date: 2026-10-08
 - Carried by: `packages/read-model/src/sql.ts`
   (`GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL`), `packages/read-model/src/observation-reader.ts`
