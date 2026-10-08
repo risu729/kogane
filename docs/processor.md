@@ -515,8 +515,20 @@ observation_sweep → collection_scan → identity_sweep → balance_projection
   → reconciliation_sweep → card_debit_account_sweep → card_settlement_sweep
   → purchase_recognition
   → reward_claims_sweep → reward_read_projection → price_promotion
-  → report_job → operation_dispatch → decision_outbox
+  → report_job → maintenance_survey → operation_dispatch → decision_outbox
 ```
+
+`maintenance_survey` runs only while `MAINTENANCE_SURVEY_ENABLED` is `"1"` or
+`"true"` (not declared in `wrangler.jsonc`, so off). It re-reads the official
+maintenance pages `config/maintenance-survey.json` allows, at most two a tick
+on each page's cadence, keeps each fetch's provenance and body, and appends
+proposals for windows that differ from the current rules. It never writes a
+rule, a schedule or an alarm; an operator's acceptance does, through the
+maintenance writer ([schedules](schedules.md#official-site-re-survey),
+[ADR 0050](adr/0050-maintenance-survey-proposals.md)). Every page ships
+disabled, so even with the flag on it fetches nothing until the owner
+confirms pages. It keeps fetch records and cursors of its own, and records
+its ticks too: a tick with no page due leaves no fetch record.
 
 `price_promotion` has no flag. It promotes provider prices already stored as
 observations to `price_observations` by the closed rule list of
@@ -606,6 +618,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `purchase_recognition`     | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped`                                    |
 | `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
+| `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
 | `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                                                            |
 | `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 
@@ -694,7 +707,9 @@ or old-bucket binding in the Processor.
 | `OPS_COLLECTOR_DISPATCH_CONNECTIONS` | `""`      | the connections (alarm job ids, JSON array) whose collector that lane may call; empty or malformed = none |
 
 Only `"1"` and `"true"` enable. An absent, empty or misspelled value leaves
-the Processor doing what it does today. A flag that is off is not a completed
+the Processor doing what it does today. `MAINTENANCE_SURVEY_ENABLED` gates
+the `maintenance_survey` lane the same way; it is not declared, so it is off
+(ADR 0050). A flag that is off is not a completed
 scan: nothing is recorded and the scan cursor does not move.
 
 Supporting vars: `COLLECTION_DATA_BUCKET` (`kogane-raw-evidence`),

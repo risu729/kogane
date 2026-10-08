@@ -82,6 +82,25 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "provider execution exclusion",
   },
+  // The official-site maintenance re-survey (0069, ADR 0050): what was
+  // fetched, what it would change and the operator's decision are append-only
+  // evidence; the per-page cursor is the lane's bookkeeping.
+  maintenance_survey_fetches: {
+    classification: "core-keep",
+    planRow: "append-only maintenance survey fetch provenance",
+  },
+  maintenance_survey_proposals: {
+    classification: "core-keep",
+    planRow: "append-only maintenance survey proposals",
+  },
+  maintenance_survey_decisions: {
+    classification: "core-keep",
+    planRow: "append-only operator decisions on maintenance survey proposals",
+  },
+  maintenance_survey_cursors: {
+    classification: "operational-mutable",
+    planRow: "maintenance survey lane position and freshness",
+  },
   // acquisition_sessions, fetch_runs/units/reports/ranges/page groups → CORE
   acquisition_sessions: { classification: "core-keep", planRow: "acquisition and fetch history" },
   artifact_ranges: { classification: "core-keep", planRow: "acquisition and fetch history" },

@@ -7,6 +7,12 @@ import type {
   ScheduleView,
   ScheduleOccurrence,
 } from "../../../../packages/collection/src/schedule-model";
+import type {
+  MaintenanceSurveyProposalView,
+  MaintenanceSurveyView,
+  ProposalReason,
+  SurveyFailureCode,
+} from "../../../../packages/collection/src/maintenance-survey-model";
 import { ApiError } from "../api";
 import { Link } from "../router";
 import "../styles/schedules.css";
@@ -259,12 +265,165 @@ function ScheduleCard({
     </article>
   );
 }
-function description(rule: MaintenanceRule): string {
+function description(rule: Pick<MaintenanceRule, "pattern">): string {
   const p = rule.pattern;
   if (p.kind === "once") return `${fmt(p.from)} ～ ${fmt(p.to)}`;
   if (p.kind === "weekly")
     return `毎週 ${p.weekdays.map((d) => DAYS[d]).join("・")} ${p.start} ～ ${p.end}${p.end < p.start ? "（翌日）" : ""}`;
   return `毎月 第${p.nth}${DAYS[p.weekday]}曜${p.offsetDays ? `の${p.offsetDays}日後` : ""} ${p.start} ～ ${p.end}${p.end < p.start ? "（翌日）" : ""}`;
+}
+const FRESHNESS = {
+  disabled: "自動取得なし（確認待ち）",
+  never: "まだ取得できていません",
+  fresh: "最新",
+  stale: "古い情報（再調査が成功していません）",
+};
+const FAILURE: Record<SurveyFailureCode, string> = {
+  network_error: "接続できませんでした",
+  timeout: "応答がありませんでした",
+  http_error: "ページを取得できませんでした",
+  redirected: "別のページへ移動していました",
+  too_large: "ページが大きすぎます",
+  unsupported_content_type: "読めない形式のページです",
+  empty_body: "ページが空でした",
+  store_failed: "取得内容を保存できませんでした",
+  decode_failed: "文字を読めませんでした",
+  no_window_recognized: "停止時間を読み取れませんでした",
+  too_many_windows: "停止時間が多すぎて読み取りを止めました",
+};
+const KIND = {
+  new: "新しい停止時間",
+  changed: "停止時間の変更",
+  absent: "ページに見当たらない停止時間（無効にする提案）",
+};
+const REASON: Record<ProposalReason, string> = {
+  year_inferred: "年の記載がありません",
+  weekday_mismatch: "日付と曜日が合いません",
+  end_next_day_inferred: "終了が翌日かどうか明記されていません",
+  timezone_mismatch: "別の時間帯で書かれています",
+  exception_stated: "例外の記載があります",
+  may_change: "変更・延長の可能性が書かれています",
+  cancellation_stated: "中止・延期の記載があります",
+  partial_service: "一部サービスのみの停止です",
+  long_window: "3日を超える停止です",
+  contradictory_windows: "同じページに異なる時間があります",
+  ambiguous_rule_match: "どの設定の変更か特定できません",
+  rule_disabled_by_operator: "無効にした設定と同じです",
+  rule_absent_from_page: "ページに記載が見つかりません",
+};
+function SurveyProposal({
+  value,
+  refresh,
+}: {
+  value: MaintenanceSurveyProposalView;
+  refresh: () => Promise<unknown>;
+}): ReactNode {
+  const [busy, setBusy] = useState(false),
+    [message, setMessage] = useState("");
+  async function decide(decision: "accept" | "reject") {
+    if (
+      decision === "accept" &&
+      !window.confirm(`${name(value.source)}のメンテナンス時間をこの提案のとおりに変更しますか？`)
+    )
+      return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await request(`/proposals/${value.id}`, { decision });
+      await refresh();
+    } catch (error) {
+      setMessage(failure(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <li>
+      <div>
+        <strong>{name(value.source)}</strong> · {KIND[value.kind]} · {description(value)}
+        <br />
+        <small>
+          {value.status === "review_pending"
+            ? `確認が必要: ${value.reasons.map((r) => REASON[r]).join("、")}`
+            : "公式ページの記載と現在の設定が異なります"}{" "}
+          · 取得 {fmt(value.fetchedAt)} ·{" "}
+          <a href={value.referenceUrl} target="_blank" rel="noreferrer">
+            公式案内
+          </a>
+          {value.current ? "" : " · この提案の後に設定が変更されたため、採用できません"}
+        </small>
+        <p role="alert">{message}</p>
+      </div>
+      <div className="schedule-actions">
+        <button
+          className="button"
+          disabled={busy || !value.current}
+          onClick={() => void decide("accept")}
+        >
+          採用
+        </button>
+        <button className="button" disabled={busy} onClick={() => void decide("reject")}>
+          却下
+        </button>
+      </div>
+    </li>
+  );
+}
+function SurveySection({
+  survey,
+  refresh,
+}: {
+  survey: MaintenanceSurveyView | undefined;
+  refresh: () => Promise<unknown>;
+}): ReactNode {
+  return (
+    <section className="schedule-section" aria-labelledby="maintenance-survey">
+      <h2 id="maintenance-survey">公式サイトの再調査</h2>
+      <p>
+        確認済みの公式ページだけを定期的に取得し、停止時間が変わっていれば提案します。採用するまでメンテナンス時間は変わりません。取得の失敗や空のページは「停止時間なし」とはみなしません。
+      </p>
+      {!survey ? (
+        <p className="muted">再調査の状態を読み込めません。</p>
+      ) : (
+        <>
+          {survey.enabled ? null : <p className="muted">自動再調査は停止しています。</p>}
+          <ul className="maintenance-list">
+            {survey.targets.map((t) => (
+              <li key={t.id}>
+                <div>
+                  <strong>{name(t.source)}</strong> · {FRESHNESS[t.freshness]}
+                  <br />
+                  <small>
+                    最終成功 {fmt(t.lastSuccessAt)}
+                    {t.lastFailureCode
+                      ? ` · 最終失敗 ${fmt(t.lastFailureAt)}（${FAILURE[t.lastFailureCode]}）`
+                      : ""}
+                    {t.lastChangedAt ? ` · ページ更新を検知 ${fmt(t.lastChangedAt)}` : ""}
+                    {t.nextDueAt ? ` · 次回 ${fmt(t.nextDueAt)}` : ""} ·{" "}
+                    <a href={t.url} target="_blank" rel="noreferrer">
+                      公式案内
+                    </a>
+                  </small>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {survey.proposals.length > 0 ? (
+            <>
+              <h3>確認待ちの提案</h3>
+              <ul className="maintenance-list">
+                {survey.proposals.map((p) => (
+                  <SurveyProposal key={p.id} value={p} refresh={refresh} />
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="muted">確認待ちの提案はありません。</p>
+          )}
+        </>
+      )}
+    </section>
+  );
 }
 function MaintenanceEditor({
   rule,
@@ -574,6 +733,12 @@ export function SchedulesPage(): ReactNode {
       <p className="query-notice">
         メンテナンスに重なった収集は、終了後に1回実行します。時刻の変更は次回から反映されます。
       </p>
+      {query.data?.survey && query.data.survey.attention > 0 ? (
+        <p className="query-notice" role="status">
+          公式サイトの案内に変更の可能性があります。{query.data.survey.attention}
+          件の提案を確認してください。
+        </p>
+      ) : null}
       {query.isPending ? (
         <p role="status">設定を読み込んでいます…</p>
       ) : query.isError ? (
@@ -594,7 +759,7 @@ export function SchedulesPage(): ReactNode {
               </button>
             </header>
             <p>
-              公式サイトの案内は自動では更新されません。新しい案内を確認したら、出典・確認日時と合わせて変更してください。
+              公式サイトの再調査は提案だけを行い、ここに表示される設定を自動では変更しません。新しい案内を確認したら、出典・確認日時と合わせて変更してください。
             </p>
             {editor !== undefined ? (
               <MaintenanceEditor
@@ -635,6 +800,7 @@ export function SchedulesPage(): ReactNode {
               ))}
             </ul>
           </section>
+          <SurveySection survey={query.data.survey} refresh={refresh} />
           <section className="schedule-section">
             <h2>実行結果</h2>
             <label>

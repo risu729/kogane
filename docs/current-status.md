@@ -14,7 +14,7 @@ are separate claims. Historical acceptance records are linked from the
 | Collection           | Twelve enabled daily collector schedules, shared raw evidence and source-specific manual paths; separate PRESTIA bank Worker implemented; operations-API collection requests run through the same named collector RPC and are traced to publication or a closed reason | A collector's presence does not prove every account/data type is captured or published; no operations-API connection is enabled and production dispatch is unverified |
 | Evidence and parsing | Immutable raw evidence, sealed inventories, versioned parsers, adoption and replay                                                                                                                                                                                     | Older permanently blocked terminals remain blocked; partial or unsupported shapes remain explicit                                                                     |
 | Collection quality   | Read-only per job, source and source/unit/dataset/period stage states in closed reason codes ([ADR 0045](adr/0045-collection-quality-read.md))                                                                                                                         | No page yet; not verified on production; some per-query rules, empty captures and retention caps are not distinguished                                                |
-| Scheduling           | Fourteen active alarm jobs: twelve daily collectors, SBI VC keepalive and Processor tick; two unsupported source jobs and the pending PRESTIA bank job disabled                                                                                                        | Maintenance research is manually refreshed; a saved setting with pending reservation is not an armed alarm                                                            |
+| Scheduling           | Fourteen active alarm jobs: twelve daily collectors, SBI VC keepalive and Processor tick; two unsupported source jobs and the pending PRESTIA bank job disabled                                                                                                        | Re-survey only proposes and fetches no page yet; a saved setting with pending reservation is not an armed alarm                                                       |
 | UI                   | Evidence/history, transactions, balances, positions, reported state, card review and schedule settings                                                                                                                                                                 | A view or empty list is not proof of complete financial coverage                                                                                                      |
 | Identity             | Source-local identities, mappings and append-only decisions                                                                                                                                                                                                            | Cross-source account/instrument equivalence and unresolved identities still need review                                                                               |
 | Card flows           | Vpass/MyJCB single-payment purchase/refund recognition, pending-to-posted review, statement/debit review with SMBC and SBI Shinsei adapters                                                                                                                            | Full source coverage, installments/revolving/bonus rows, partial payments and refund allocation are incomplete                                                        |
@@ -93,7 +93,7 @@ are separate claims. Historical acceptance records are linked from the
 The committed [App config](../services/app/wrangler.jsonc) and
 [Processor config](../services/processor/wrangler.jsonc) enable their existing
 boolean feature flags, including scheduling, operations, purchase recognition,
-rewards, reports and READ projections. CORE migrations reach 0070 (there is no 0067 or 0069 yet); READ
+rewards, reports and READ projections. CORE migrations reach 0070 (there is no 0067 yet); READ
 reaches 0003. The Processor's
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` is empty, so the operation dispatch lane
 calls no collector. These are repository facts, not live database/deployment readback.
@@ -116,5 +116,9 @@ The next product milestone is card usage → statement → bank debit with an
 explainable trail and no double expense. Finish representative coverage and
 identity gaps, then extend dated holdings/liabilities, valuation, lots/P&L and
 tax. Rewards can progress in parallel. See the [roadmap](roadmap.md) for delivery
-order and acceptance criteria. Maintenance MCP access and automatic research
-refresh are separate unfinished capabilities.
+order and acceptance criteria. Maintenance MCP access is a separate unfinished
+capability. The official-site maintenance re-survey is implemented as a
+proposal-only Processor lane ([ADR 0050](adr/0050-maintenance-survey-proposals.md),
+[schedules](schedules.md#official-site-re-survey)), but no page is allowed
+and its flag is unset: it has never fetched a provider page, and its reading
+grammar is verified on synthetic text only.
