@@ -47,12 +47,17 @@ conflict`; `Quantity { unitRef, value }`.
   with `clamp` or `preserve-end-of-month`, `periodBounds`) are leap-year aware
   and DST-free. No time-zone database is embedded; `zone` names the deadline
   or display zone, the instant string carries the offset in effect.
-- `civilDateOfInstant(text, zone)` and `canonicalZone(zone)` are the only uses
-  of zone data: the civil date of an instant in a named zone, and the
-  runtime's spelling of a zone name, from the runtime's own
+
+## `civil-date.ts` — civil dates in named zones
+
+- `civilDateOfInstant(text, zone)` and `canonicalZone(zone)` are the domain's
+  only uses of zone data: the civil date of an instant in a named zone, and
+  the runtime's spelling of a zone name, from the runtime's own
   `Intl.DateTimeFormat("en-CA", { timeZone })` (one formatter cached per
   zone). A non-instant, a malformed zone name or a zone the runtime does not
-  know is `null`, never UTC.
+  know is `null`, never UTC, and no date becomes an instant. The module is
+  separate from `time.ts`, which is in the parser digest closure
+  (`packages/parsers/src/parsers/digests.ts`) and stays free of zone data.
 
 ## `metrics.ts` — what a number measures
 

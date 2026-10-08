@@ -16,7 +16,7 @@ import {
   type PriceSelectionPolicy,
   type SelectionBound,
 } from "../../domain/src/market-data.ts";
-import { civilDateOfInstant } from "../../domain/src/time.ts";
+import { civilDateOfInstant } from "../../domain/src/civil-date.ts";
 import {
   PRICE_CANDIDATE_ROW_BOUND,
   PRICE_CANDIDATES_KNOWN_AT_SQL,

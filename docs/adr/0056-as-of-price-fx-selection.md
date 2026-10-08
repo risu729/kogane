@@ -4,7 +4,7 @@
 - Date: 2026-10-08
 - Issue: #552 (this record covers its selection part; acquisition stays open)
 - Carried by: `packages/domain/src/market-data.ts`,
-  `packages/domain/src/time.ts` (`civilDateOfInstant`),
+  `packages/domain/src/civil-date.ts` (`civilDateOfInstant`, `canonicalZone`),
   `packages/read-model/src/price-selection.ts` (`PRICE_CANDIDATES_SQL`,
   `PRICE_CANDIDATES_KNOWN_AT_SQL`, `selectPriceCandidates`),
   `packages/application/src/query/market-data.ts` (`selectMarketData`),
@@ -188,7 +188,10 @@ What existed before this change:
   mapped onto. No table, ledger classification or migration pin changes.
 - **No library and no external source.** Civil dates come from the runtime's
   own `Intl.DateTimeFormat` (the pattern the collection schedule model already
-  uses); arithmetic is the domain's exact decimals. Nothing is fetched, and no
+  uses), in its own module `civil-date.ts`: `time.ts` is in the parser
+  digest closure (`packages/parsers/src/parsers/digests.ts`) and is
+  unchanged, so no parser's code digest moves. Arithmetic is the domain's
+  exact decimals. Nothing is fetched, and no
   provider's terms were assumed.
 - **No route and no UI.** `selectMarketData` has no caller in a service yet;
   valuation cells, the API and the page are a later change.
@@ -221,7 +224,7 @@ What existed before this change:
 
 With synthetic data only:
 
-- `packages/domain/test/time.test.ts`: `civilDateOfInstant` equals the dated
+- `packages/domain/test/civil-date.test.ts`: `civilDateOfInstant` equals the dated
   state's capture date in Asia/Tokyo across midnight, applies offsets and DST,
   and is null for an unknown zone, a non-instant and an era-rendered year;
   `canonicalZone`.

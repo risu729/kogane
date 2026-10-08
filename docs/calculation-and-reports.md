@@ -383,7 +383,7 @@ would discard later collection and later decisions (docs/operations.md).
   candidates and priority, FX paths, exact two-hop values, inverse rounding
   once with its inputs, policy mismatches, non-positive prices, validators,
   digests, the manifest, and a guard that no production source, script or task
-  names a proposal; `time.test.ts` — `civilDateOfInstant`, `canonicalZone`.
+  names a proposal; `civil-date.test.ts` — `civilDateOfInstant`, `canonicalZone`.
 - `packages/read-model/test/price-candidates.test.ts` — both candidate texts
   on migrated CORE: re-parse and rollback in current and known-at modes, ties
   and sub-millisecond times at the knowledge instant, same-snapshot scope,

@@ -5,6 +5,7 @@
 // no clock, no runtime dependencies.
 export * from "./values.ts";
 export * from "./time.ts";
+export * from "./civil-date.ts";
 export * from "./metrics.ts";
 export * from "./scope.ts";
 export * from "./coverage.ts";

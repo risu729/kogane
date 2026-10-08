@@ -39,6 +39,7 @@
 // whose names say they are proposals. Nothing in production code uses them;
 // ADR 0056 lists the questions the owner has not decided.
 import type { RoundingInputs } from "./calculation.ts";
+import { canonicalZone, civilDateOfInstant } from "./civil-date.ts";
 import { canonicalDigest } from "./context.ts";
 import { hasExactKeys, isOneOf, isRecord, isRefList, isSafeInt, isText } from "./guards.ts";
 import { PRICE_KINDS, valueAtPrice, type PriceKind, type PriceObservation } from "./metrics.ts";
@@ -50,8 +51,6 @@ import {
 } from "./price-sources.ts";
 import {
   addDays,
-  canonicalZone,
-  civilDateOfInstant,
   compareTemporal,
   daysBetween,
   daysFromCivil,
