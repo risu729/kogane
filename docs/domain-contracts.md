@@ -180,6 +180,79 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
   ([economic events](economic-events.md#non-card-families-unsupported-today),
   [ADR 0053](adr/0053-transaction-family-registry.md)).
 
+## `instrument-candidates.ts` — which identifiers may be one instrument
+
+[ADR 0055](adr/0055-instrument-candidates.md); the read that feeds it is
+described in [identity](identity.md#cross-identifier-instrument-candidates).
+
+- `InstrumentIdentifierFacts` is what the identity rules stored about one
+  identifier (ISIN, RIC, MIC, country, security code, share and product class,
+  stated currencies, sources) plus its current mapping. The label is display
+  only.
+- `compareIdentifierFacts` returns closed codes, never a score: `evidence`
+  (`isin-equal`, `ric-equal`, `security-code-equal`), `conflicts` (kind, ISIN,
+  RIC, country, market, currency, share class, product class), `agreements`
+  and `gaps` (a fact one side or both sides do not state, so ISIN, share
+  class and product class are gaps on every pair while no rule records them).
+- `instrumentCandidates` pairs only identifiers that share an evidence value.
+  A pair on two instruments counts every identifier that maps to either
+  instrument now (`via` names the others whose facts conflict). A pair with a
+  conflict is `separated`; one without is a candidate whose
+  `status` is `adopted` only when both map to one instrument and `rejected`
+  only when a stored `listed_as` rejection names it, else `proposed`. Equal
+  normalised names without evidence are `hints` with no status. A manually
+  mapped or instrument-sharing identifier is always the anchor over one that
+  is not; a proposed candidate whose subject is also settled carries a
+  `CANDIDATE_HOLDS` code and names nothing to adopt (it can still be kept
+  apart by a rejection). The answer is
+  order-independent and refuses more than 5,000 pairs or 1,000 hints.
+- `identifierResolutions` gives each identifier one of
+  `IDENTIFIER_RESOLUTION_STATES`; an instrument shared without a manual
+  mapping is `shared-without-decision`, never resolved.
+
+## `lots.ts` — lots and disposal allocation over a provisional input
+
+- `computeLots(inputs, policy)` is pure and deterministic: the same inputs in
+  any order give the same result. Inputs (`LotInput`) carry the provisional
+  tag `provisional-lot-input-v0`, a pinned `LotInputRef` (event at a
+  revision, or observation in a parse run, with `lotInputRefText`), a kind
+  (`acquisition | disposal | split | snapshot | transfer`), the book key
+  (holder, instrument, opaque wrapper key), trade and settlement times,
+  quantity, consideration, fees, an optional input FX rate, a split ratio and
+  lot selections. `validLotInput`, `validLotInputRef` and `validLotPolicy`
+  reject unknown keys.
+- `LotPolicy` pins purpose, method (`fifo | moving-average |
+specific-identification`), scope, time basis, ordering rule, fee and FX
+  treatment, `fxPolicyRef`, `costUnitRef` and an optional `leg`/`carry`
+  `RoundingPolicy`.
+- Whole-run refusals, in order: `policy_missing`; `invalid_input` for a
+  malformed policy; `policy_unsupported` for a rounding policy other than
+  `leg`/`carry` (checked before the tax gate); `tax_rules_unverified` for a
+  `tax` purpose, through the unchanged `costBasis()` gate; `invalid_input`
+  for inputs that are not a list, break the contract or carry lot selections
+  outside specific identification; `duplicate_ref` for one ref twice in a
+  book or in two books of one instrument; `same_event_revisions`;
+  `same_observation_parse_runs` (one observation and JSON path under two
+  parse runs; a re-parse under a different or null JSON path is not caught).
+  Per-book refusals: `transfer_contract_pending`, `unsupported_instrument`.
+- Inside a book the first ambiguous or inconsistent input, or group of
+  inputs the time does not order, is `indeterminateFrom` and later disposals
+  are `upstream_indeterminate`. A `limited` disposal carries only
+  `LOT_LIMITED_REASON_CODES`: `unknown_cost`, `unknown_acquisition_fee`,
+  `unknown_proceeds`, `unknown_disposal_fee`, `fx_rate_missing`,
+  `unit_mismatch`. Amounts that are not known are typed reasons, never zero,
+  and costs in different units are never summed.
+- Output: disposals with allocations (a pool allocation names how many of
+  the pool's members had joined; `pools` lists each pool's members once),
+  allocated cost, proceeds and disposal fees, outcome
+  `allocated | limited | indeterminate`; remaining lots with a `lineage`; a
+  manifest of policy, refs and the validated inputs for `canonicalDigest`, so
+  equal digests mean equal results while `LOT_ENGINE_VERSION`, bumped on
+  every allocation-rule change, is equal. The manifest holds amounts: it is a
+  calculation input that a future writer stores only as a report body, never
+  in a log or tick record. No gain, no tax conclusion. No adapter produces
+  these inputs yet ([ADR 0051](adr/0051-provisional-lot-engine.md)).
+
 ## `result.ts` — the shape UI and agents share
 
 - `QuerySpec` with the intents of addendum 09 §1 (holdings, reported-state,

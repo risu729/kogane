@@ -20,7 +20,13 @@ portfolio, cost-basis or tax product. In
 `costBasis()` returns `needs-policy` on every path, including when a caller
 supplies a verified-policy marker. It does not allocate lots or calculate cost.
 Likewise, `pnlDecomposition()` does not reconstruct a transaction history or
-supply missing acquisition costs.
+supply missing acquisition costs. A separate pure lot engine,
+`computeLots()` in [`lots.ts`](../packages/domain/src/lots.ts), allocates
+disposals to lots for investment analysis over a provisional input contract
+([lots](#lots-over-a-provisional-input-contract),
+[ADR 0051](adr/0051-provisional-lot-engine.md)). Nothing produces its inputs
+yet: there is no adapter from events or observations, no transfer handling,
+no persistence, no realized or unrealized P&L and no tax output.
 
 The [roadmap](roadmap.md) separates the remaining work: price/FX acquisition and
 as-of valuation can start from reported holdings; lots and disposal allocation
@@ -196,6 +202,64 @@ no verified JP or AU rule package, so every request returns `needs-policy` with
 provider's reported cost is stored beside our own numbers as
 `provider.<metric>` rows and is never promoted to the single truth (UC30/AT30).
 
+### Lots over a provisional input contract
+
+`computeLots(inputs, policy)` in
+[`packages/domain/src/lots.ts`](../packages/domain/src/lots.ts) is a pure,
+synchronous allocation engine ([ADR 0051](adr/0051-provisional-lot-engine.md)).
+What it does today:
+
+- Inputs carry `contract: "provisional-lot-input-v0"` and a pinned ref
+  (`event:<id>@<revision>`, `<factKind>:<observation id>@parse_run:<n>`). Kinds
+  are `acquisition`, `disposal`, `split`, `snapshot` and `transfer`; a book is
+  holder × instrument × a caller-supplied, opaque wrapper key.
+- The policy pins the method (FIFO, moving average, specific
+  identification), the time basis (trade or settlement date), the only
+  ordering rule (`temporal-then-indeterminate`), fee treatment on acquisition
+  (`capitalize | exclude`) and disposal (`reduce-proceeds | separate`), FX
+  (`lot-currency`, or `convert-at-input-rate` into `costUnitRef` with the
+  input's own rate and its ref) with an FX policy ref, and rounding. None of
+  them has a default; no policy is `policy_missing`, a rounding policy other
+  than `leg` with `carry` is `policy_unsupported` (checked before the tax
+  gate), and a `tax` purpose is refused `tax_rules_unverified` through
+  `costBasis()`.
+- Partial allocation takes `cost × q / Q` exactly; without rounding an
+  inexact share is `inexact_allocation`, with a `leg`/`carry` rounding policy
+  each share keeps its rounding inputs and the last consumption takes the
+  exact remainder; a rounded share that would exceed what is left is
+  `inexact_allocation`. Moving average keeps exact totals, never a unit
+  price.
+- Inputs the economic time does not order are `order_tie` (same-time
+  acquisitions, and same-time unrounded disposals, commute under moving
+  average); an unknown time is `unknown_time`. Ids and recorded-at times
+  never order anything. Beside dates, an instant is placed by its own
+  calendar day, as `compareTemporal` places it against a date.
+- A snapshot with no history seeds a lot of unknown cost (`snapshot_only`);
+  a later snapshot is a check (`snapshot_mismatch`). A provider-stated
+  acquisition cost never becomes a lot cost. A disposal beyond the holding is
+  `negative_holding`, never a short; a stale specific-identification
+  selection is `lot_selection_mismatch`, never reassigned.
+- Transfers refuse their book (`transfer_contract_pending`); classes other
+  than listed equity, fund units and crypto assets refuse theirs
+  (`unsupported_instrument`).
+- Results carry allocations, allocated cost, proceeds and disposal fees side
+  by side with closed reason codes, moving-average pools listed once, remaining
+  lots with a reserved `lineage`, and a manifest holding the policy and the
+  validated inputs, which the caller digests with `canonicalDigest`. A
+  `limited` disposal's reasons are only `unknown_cost`,
+  `unknown_acquisition_fee`, `unknown_proceeds`, `unknown_disposal_fee`,
+  `fx_rate_missing` and `unit_mismatch`. The manifest holds amounts, so a
+  future writer stores it only as a report body, never in a log or tick
+  record. `LOT_ENGINE_VERSION` is bumped on every allocation-rule change.
+  There is no gain and no tax conclusion.
+
+Limits: no adapter maps events or observations to these inputs, so the
+engine runs only in tests; the input contract is provisional; own-account
+transfers, other corporate actions and short or margin positions are not
+handled; a re-parse that pins the same row under a different JSON path is
+not detected as a duplicate; results are not stored (`calculation_results` cannot hold the lot
+reason codes); P&L and tax outputs are absent.
+
 ## 4. Reports are not projections
 
 | Kind                   | May be discarded and rebuilt?     | Where it lives                                |
@@ -298,6 +362,10 @@ would discard later collection and later decisions (docs/operations.md).
   unvalued reason and their order, unsupported instruments, result partitions,
   net worth versus known-assets subtotal, rounding points and residual rules,
   both P&L policies (SYN23), the cost-basis gate (AT59), SYN11-SYN15.
+- `packages/domain/test/lots.test.ts` — the lot engine on synthetic inputs:
+  each method with exact conservation, inexact allocation refused or
+  carried, fee and FX modes, splits, snapshots, ordering ties, the gates and
+  determinism under input permutation.
 - `packages/domain/test/reports.test.ts` — body validation and digest
   stability, storage key, event shapes, replayability and capabilities (AT66).
 - `services/processor/test/reports.test.ts` — migration 0034 on
