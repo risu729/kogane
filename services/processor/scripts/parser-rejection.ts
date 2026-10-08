@@ -547,7 +547,10 @@ function elementSignature(element: ShapeNode): string {
   return [tag, ...classes].join(".");
 }
 
-function shapeChildren(node: ShapeNode): ShapeNode[] {
+/** Element children, for a skip-payment and a GLOBAL PASS tree alike. */
+function shapeChildren<T extends { readonly tagName?: string; readonly childNodes?: readonly T[] }>(
+  node: T,
+): T[] {
   return (node.childNodes ?? []).filter((child) => child.tagName !== undefined);
 }
 
@@ -890,11 +893,25 @@ export function classifyGlobalPassMessage(message: string): RejectionCategory {
 // text, option value, date or amount is printed; header labels are compared
 // with fixed lists and only how many match is printed.
 //
+// Since ADR 0026's amendment of 2026-10-08 it also compares the page with
+// itself, for a page the parser refuses as `unclassified_table`: the detail
+// tables' common parent as a list of closed child signatures, every table of
+// another `th` count, which activity record each detail table carries, and
+// the records no detail table carries. Those comparisons print indices,
+// booleans, counts, closed tag and attribute-name classes and the pattern
+// class of a cell (`GlobalPassCellPattern`); two texts are only ever tested for
+// exact equality, and only the positions of equal cells are printed.
+//
 // The parser's DOM helpers are private to `global-pass-activity.ts`, and
 // exporting them would change its code digest and so need a parser release
 // (migration 0028 refuses a new digest under the same version). The few lines
 // below read the tree the way those helpers do (`owned`, `closest`,
-// `directCells`, `text`) and validate nothing.
+// `directCells`, `text`, `bodyRows`) and validate nothing. The tree is
+// parse5's, as the registered parser's. Two guards keep the copy honest
+// (test/global-pass-rejection.test.ts): the date and amount patterns must
+// appear verbatim in the parser's source, and on pages the parser accepts the
+// records, header lists and value cells read here must equal those the parser
+// emits (`extra.sourceViews`, `compactFields`, `expandedFields`).
 
 /** The twelve English labels of the live survey of 2026-10-04 (docs/sources/prestia.md). */
 const GLOBAL_PASS_SURVEYED_ENGLISH = [
@@ -929,7 +946,12 @@ const GLOBAL_PASS_SURVEYED_JAPANESE = [
 /** The pager text `global-pass-activity` reads (`requirePagerPage`). */
 const GLOBAL_PASS_PAGER = /^\[\s*(\d{1,4})\s*\/\s*(\d{1,4})\s*(?:pages?|ページ)\s*\]$/iu;
 const EIGHT_DIGITS = /^\d{8}$/u;
-const DATE_CELL = /^\d{4}[/-]\d{2}[/-]\d{2}$/u;
+/** A page-1 or walked-page key of `globalpass-activity` (`parseArtifactKey`); group 1 is a later page. */
+const GLOBAL_PASS_ARTIFACT_KEY = /^activity-\d{4}-\d{2}(?:-p([2-9]))?\.html$/u;
+/** The date form the parser looks for in a desktop row (`global-pass-activity.ts`, `dates`). */
+export const GLOBAL_PASS_DATE_CELL = /^\d{4}[/-]\d{2}[/-]\d{2}$/u;
+/** The displayed amount the parser reads (`parseDisplayedAmount`), on trimmed text. */
+export const GLOBAL_PASS_AMOUNT_CELL = /^([A-Z]{3})\s+([+\-△▲]?\d{1,3}(?:,\d{3})*(?:\.\d+)?)$/u;
 
 type GpNode = GlobalPassDomNode;
 
@@ -1037,6 +1059,160 @@ export interface GlobalPassActivityShape {
     /** Every readable block names the page the artifact key names; null for a key of another form. */
     agreesWithKey: boolean | null;
   };
+  /**
+   * Whether the 4-`th` (compact) and the 10-`th` (expanded) tables agree among
+   * themselves on their header lists and on their class token sets; null when
+   * there is no such table.
+   */
+  detailTables?: {
+    compactHeadersUniform: boolean | null;
+    expandedHeadersUniform: boolean | null;
+    compactClassTokensUniform: boolean | null;
+    expandedClassTokensUniform: boolean | null;
+  };
+  /** The one parent element of every 4-`th` table; null when they have none or several. */
+  detailContainer?: GlobalPassDetailContainer | null;
+  /** Every table whose owned `th` count is not 12, 4 or 10, in document order. */
+  otherTables?: GlobalPassOtherTable[];
+  /** Which activity record each detail table carries (present when a 12-`th` table is). */
+  recordDetailAlignment?: GlobalPassAlignment;
+  /** The records no compact table carries, cell by cell (present when a 12-`th` table is). */
+  unmatchedRecords?: GlobalPassUnmatchedRecord[];
+}
+
+/**
+ * The pattern class of one cell's text, as the parser normalises it: never
+ * the text. `dateLike` and `amountLike` are the parser's own patterns
+ * (`GLOBAL_PASS_DATE_CELL`, `GLOBAL_PASS_AMOUNT_CELL`); `asciiOnly` is
+ * printable ASCII only (true for an empty cell); `hasJapanese` is a Hiragana,
+ * Katakana or Han character, CJK punctuation or a full-width form; the length
+ * is in code points.
+ */
+export interface GlobalPassCellPattern {
+  empty: boolean;
+  digitsOnly: boolean;
+  dateLike: boolean;
+  amountLike: boolean;
+  asciiOnly: boolean;
+  hasJapanese: boolean;
+  lengthBucket: "0" | "1-4" | "5-16" | "17-64" | "65+";
+}
+
+/** A cell of an activity record: record index, row (`desktop` 9 cells, `responsive` 4 or 5) and cell index. */
+export interface GlobalPassRecordCell {
+  record: number;
+  row: "desktop" | "responsive";
+  cell: number;
+}
+
+export interface GlobalPassDetailContainer {
+  /** Element children of the parent. */
+  childCount: number;
+  /** One closed signature per element child, in order. */
+  children: {
+    /** The tag from a closed list, else `other`. */
+    tag: string;
+    /** The owned `th` count of the child when it is a table, or of the one table it wraps; else null. */
+    th: number | null;
+    /** The child is not a table and holds exactly one table outside any other table. */
+    wrapped: boolean;
+    /** `th` is one the parser classifies (12, 4 or 10). */
+    known: boolean;
+    /** Tables anywhere in the child, itself included. */
+    tables: number;
+  }[];
+  /**
+   * Of the children that are or wrap one table, how many leading pairs are
+   * a 4-`th` table followed by a 10-`th` table.
+   */
+  pairsInOrder: number;
+}
+
+export interface GlobalPassOtherTable {
+  th: number;
+  td: number;
+  /** Owned rows outside `thead`, as the parser counts body rows. */
+  bodyRows: number;
+  /** Direct cells of each body row, in order. */
+  cellsPerRow: number[];
+  /** The largest `colspan` of an owned cell; null when no cell has a numeric one. */
+  colspanMax: number | null;
+  theadPresent: boolean;
+  /** Tables inside this one. */
+  nestedTables: number;
+  /** Index among its parent's element children. */
+  positionInParent: number | null;
+  parentIsDetailContainer: boolean;
+  /** Distinct class tokens. */
+  classTokenCount: number;
+  /** Its class tokens equal, as a set, those every compact table shares; null when compact tables are absent or differ. */
+  classTokensEqualCompact: boolean | null;
+  classTokensEqualExpanded: boolean | null;
+  /** Its attribute names, sorted and deduplicated, each a closed name or `data-*`, `aria-*`, `on*`, `other`. */
+  attributeNames: string[];
+  /**
+   * The rank (0-based, ascending, among the distinct numbers) of the digits
+   * ending its id or name among those of itself and the detail tables; null
+   * when it or every detail table has none. The numbers are never printed.
+   */
+  idNumericSuffixRank: number | null;
+  /** How many distinct numbers that rank is among; null with the rank. */
+  idNumericSuffixDistinct: number | null;
+  /** How many detail tables carry such a number. */
+  idNumericSuffixPeers: number;
+  /** Per owned `th`: the index of an equal header in each other table kind's header list, and whether it is a surveyed label. */
+  headerMatches: {
+    activity: number | null;
+    compact: number | null;
+    expanded: number | null;
+    surveyed: boolean;
+  }[];
+  /** Per owned `td`: its pattern and the activity record cells with exactly its (non-empty) text. */
+  cells: (GlobalPassCellPattern & { equalsRecordCell: GlobalPassRecordCell[] })[];
+}
+
+/** One detail table compared with every activity record. */
+export interface GlobalPassDetailMatch {
+  /** Index among the tables of its kind, as the parser pairs them with records. */
+  table: number;
+  /** Its non-empty value cells (the parser's body-row cells). */
+  valueCells: number;
+  /** Records whose desktop or responsive row has a non-empty cell equal to one of its value cells. */
+  records: number[];
+  /** The most of its value cells one record has. */
+  matchedCells: number;
+  /** The one record with that most; null on a tie or no match. */
+  best: number | null;
+}
+
+export interface GlobalPassAlignment {
+  compact: GlobalPassDetailMatch[];
+  expanded: GlobalPassDetailMatch[];
+  /** Records that are no compact table's `best`. */
+  unmatchedRecords: number[];
+  /** Every compact table has a `best`, strictly increasing with the table index. */
+  monotonic: boolean;
+  /** Compact and expanded table i name the same `best`, for every i both kinds have. */
+  pairsAgree: boolean;
+  /** Every compact table i has `best` i: the parser's pairing by index. */
+  indexAligned: boolean;
+}
+
+export interface GlobalPassUnmatchedCell extends GlobalPassCellPattern {
+  /**
+   * The pattern equals the one more than half of the carried records (those
+   * some compact table carries) have at this cell; null when no pattern has
+   * such a majority or no carried record has this cell.
+   */
+  patternEqualsMajority: boolean | null;
+  /** Cells of `otherTables` with exactly its (non-empty) text. */
+  equalsOtherTableCell: { table: number; cell: number }[];
+}
+
+export interface GlobalPassUnmatchedRecord {
+  record: number;
+  desktop: GlobalPassUnmatchedCell[];
+  responsive: GlobalPassUnmatchedCell[];
 }
 
 /**
@@ -1099,7 +1275,7 @@ export function globalPassActivityShape(
   const activity = tables.find((table) => thCount(table) === 12);
   if (activity) {
     const rows = gpOwned(activity, "tr", "table");
-    const body = rows.filter((row) => gpClosest(row, "thead") === null);
+    const body = gpBodyRows(activity);
     const headerCells = gpOwned(activity, "th", "table");
     const headers = headerCells.map(gpText);
     const byCells = { cells9: 0, cells4: 0, cells5: 0, other: 0 };
@@ -1108,7 +1284,7 @@ export function globalPassActivityShape(
       const cells = gpDirectCells(row);
       if (cells.length === 9) {
         byCells.cells9++;
-        const dates = cells.map(gpText).filter((value) => DATE_CELL.test(value)).length;
+        const dates = cells.map(gpText).filter((value) => GLOBAL_PASS_DATE_CELL.test(value)).length;
         if (dates === 1) byDates.one++;
         else if (dates === 0) byDates.none++;
         else byDates.several++;
@@ -1141,7 +1317,7 @@ export function globalPassActivityShape(
   const pagers = gpElements(document, "div").filter((div) =>
     (gpAttribute(div, "class") ?? "").split(/\s+/u).includes("nablarch_currentPageNumber"),
   );
-  const key = /^activity-\d{4}-\d{2}(?:-p([2-9]))?\.html$/u.exec(artifactKey ?? "");
+  const key = GLOBAL_PASS_ARTIFACT_KEY.exec(artifactKey ?? "");
   const keyPage = key ? (key[1] === undefined ? 1 : Number(key[1])) : null;
   const readable = pagers
     .map((pager) => GLOBAL_PASS_PAGER.exec(gpText(pager)))
@@ -1154,7 +1330,441 @@ export function globalPassActivityShape(
     agreesWithKey:
       keyPage === null ? null : readable.every((match) => Number(match[1]) === keyPage),
   };
-  return shape;
+  return { ...shape, ...globalPassComparisons(readGpPage(document)) };
+}
+
+// ── GLOBAL PASS: detail tables, unclassified tables and records compared ────
+//
+// The parser pairs compact table i and expanded table i with activity record
+// i by index, and refuses a page with any table it does not classify. These
+// comparisons say, for such a page, which record each detail table carries,
+// which record none does, and how an unclassified table relates to both. They
+// read the tree as the parser does and print what the shape above may print.
+
+/** Tags printed as themselves; any other tag is `other`. */
+const GP_TAGS = new Set([
+  "a",
+  "br",
+  "button",
+  "caption",
+  "dd",
+  "div",
+  "dl",
+  "dt",
+  "fieldset",
+  "form",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "img",
+  "input",
+  "label",
+  "li",
+  "noscript",
+  "ol",
+  "p",
+  "script",
+  "section",
+  "select",
+  "span",
+  "style",
+  "table",
+  "tbody",
+  "td",
+  "template",
+  "tfoot",
+  "th",
+  "thead",
+  "tr",
+  "ul",
+]);
+/** Attribute names printed as themselves; any other is `data-*`, `aria-*`, `on*` or `other`. */
+const GP_ATTRIBUTE_NAMES = new Set([
+  "align",
+  "bgcolor",
+  "border",
+  "cellpadding",
+  "cellspacing",
+  "class",
+  "dir",
+  "frame",
+  "height",
+  "hidden",
+  "id",
+  "lang",
+  "name",
+  "role",
+  "rules",
+  "style",
+  "summary",
+  "tabindex",
+  "title",
+  "valign",
+  "width",
+]);
+/** Digits ending an id or name; the number is compared, never printed. */
+const GP_ID_SUFFIX = /(\d{1,15})$/u;
+/** Hiragana, Katakana, Han, CJK punctuation (U+3000–U+303F) or a full-width or half-width form (U+FF01–U+FF9F). */
+const GP_JAPANESE =
+  /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\u3000-\u303f\uff01-\uff9f]/u;
+
+export interface GpRecord {
+  desktop: string[];
+  responsive: string[];
+}
+interface GpPage {
+  thOf: (table: GpNode) => number;
+  activity: GpNode | undefined;
+  compact: GpNode[];
+  expanded: GpNode[];
+  others: GpNode[];
+  /** Record i is desktop row i and responsive row i, as the parser pairs them; a missing row is []. */
+  records: GpRecord[];
+}
+
+function gpBodyRows(table: GpNode): GpNode[] {
+  return gpOwned(table, "tr", "table").filter((row) => gpClosest(row, "thead") === null);
+}
+/** The tables in `root` (itself, when a table) that lie inside no other table of `root`. */
+function gpTopTables(root: GpNode): GpNode[] {
+  if (root.tagName === "table") return [root];
+  const found: GpNode[] = [];
+  const visit = (node: GpNode): void => {
+    for (const child of node.childNodes ?? []) {
+      if (child.tagName === "table") found.push(child);
+      else visit(child);
+    }
+  };
+  visit(root);
+  return found;
+}
+/** Distinct class tokens, sorted, so two sets compare as lists. */
+function gpClassTokens(node: GpNode): string[] {
+  const tokens = (gpAttribute(node, "class") ?? "").split(/\s+/u).filter((token) => token !== "");
+  return [...new Set(tokens)].sort();
+}
+/** Whether every list is equal to the first; null for none. */
+function uniform<T>(items: readonly T[], equal: (left: T, right: T) => boolean): boolean | null {
+  return items.length === 0 ? null : items.every((item) => equal(item, items[0]!));
+}
+function sameList(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+/** A table's owned `th` texts, as the parser's `uniqueHeaders` reads them. */
+function gpHeaders(table: GpNode | undefined): string[] {
+  return table ? gpOwned(table, "th", "table").map(gpText) : [];
+}
+/** A detail table's value cells, as the parser's `flattenedValues` reads them. */
+function gpValueCells(table: GpNode): string[] {
+  return gpBodyRows(table).flatMap(gpDirectCells).map(gpText);
+}
+function indexOrNull(list: readonly string[], value: string): number | null {
+  const index = list.indexOf(value);
+  return index < 0 ? null : index;
+}
+
+function readGpPage(document: GpNode): GpPage {
+  const tables = gpElements(document, "table");
+  const counts = new Map(tables.map((table) => [table, gpOwned(table, "th", "table").length]));
+  const thOf = (table: GpNode) => counts.get(table) ?? gpOwned(table, "th", "table").length;
+  const activity = tables.find((table) => thOf(table) === 12);
+  const records: GpRecord[] = [];
+  if (activity) {
+    const body = gpBodyRows(activity);
+    const texts = (row: GpNode) => gpDirectCells(row).map(gpText);
+    const desktop = body.filter((row) => gpDirectCells(row).length === 9).map(texts);
+    const responsive = body.filter((row) => [4, 5].includes(gpDirectCells(row).length)).map(texts);
+    for (let index = 0; index < Math.max(desktop.length, responsive.length); index++)
+      records.push({ desktop: desktop[index] ?? [], responsive: responsive[index] ?? [] });
+  }
+  return {
+    thOf,
+    activity,
+    compact: tables.filter((table) => thOf(table) === 4),
+    expanded: tables.filter((table) => thOf(table) === 10),
+    others: tables.filter((table) => ![12, 4, 10].includes(thOf(table))),
+    records,
+  };
+}
+
+/**
+ * The texts the comparisons above read: activity records, and each detail
+ * table's headers and value cells. Never printed; exported only for the
+ * differential test that proves this reading equals what the parser emits
+ * on pages it accepts.
+ */
+export function globalPassPageText(bytes: Uint8Array): {
+  records: GpRecord[];
+  compact: { headers: string[]; values: string[] }[];
+  expanded: { headers: string[]; values: string[] }[];
+} {
+  const page = readGpPage(
+    parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown as GpNode,
+  );
+  const detail = (table: GpNode) => ({ headers: gpHeaders(table), values: gpValueCells(table) });
+  return {
+    records: page.records,
+    compact: page.compact.map(detail),
+    expanded: page.expanded.map(detail),
+  };
+}
+
+/** The pattern class of a cell's text (`GlobalPassCellPattern`). */
+export function globalPassCellPattern(text: string): GlobalPassCellPattern {
+  const length = [...text].length;
+  return {
+    empty: text === "",
+    digitsOnly: /^\d+$/u.test(text),
+    dateLike: GLOBAL_PASS_DATE_CELL.test(text),
+    amountLike: GLOBAL_PASS_AMOUNT_CELL.test(text.trim()),
+    asciiOnly: /^[\x20-\x7e]*$/u.test(text),
+    hasJapanese: GP_JAPANESE.test(text),
+    lengthBucket:
+      length === 0
+        ? "0"
+        : length <= 4
+          ? "1-4"
+          : length <= 16
+            ? "5-16"
+            : length <= 64
+              ? "17-64"
+              : "65+",
+  };
+}
+
+/** Every record cell with exactly `text`; nothing for an empty text. */
+function recordCellsEqual(records: readonly GpRecord[], text: string): GlobalPassRecordCell[] {
+  if (text === "") return [];
+  const found: GlobalPassRecordCell[] = [];
+  records.forEach((record, index) => {
+    for (const row of ["desktop", "responsive"] as const)
+      record[row].forEach((cell, position) => {
+        if (cell === text) found.push({ record: index, row, cell: position });
+      });
+  });
+  return found;
+}
+
+/**
+ * The number ending a table's id or name: the first of its own `id`, its own
+ * `name`, and, when its parent element wraps only it, the parent's `id` and
+ * `name` that ends in digits.
+ */
+function idNumber(table: GpNode): number | null {
+  const parent = table.parentNode ?? null;
+  const values = [gpAttribute(table, "id"), gpAttribute(table, "name")];
+  if (parent && parent.tagName !== undefined && gpTopTables(parent).length === 1)
+    values.push(gpAttribute(parent, "id"), gpAttribute(parent, "name"));
+  for (const value of values) {
+    const match = GP_ID_SUFFIX.exec(value ?? "");
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
+function detailMatches(tables: readonly GpNode[], records: readonly GpRecord[]) {
+  const recordCells = records.map(
+    (record) => new Set([...record.desktop, ...record.responsive].filter((cell) => cell !== "")),
+  );
+  return tables.map((table, index): GlobalPassDetailMatch => {
+    const values = gpValueCells(table).filter((value) => value !== "");
+    const scores = recordCells.map((cells) => values.filter((value) => cells.has(value)).length);
+    const most = scores.reduce((top, score) => Math.max(top, score), 0);
+    const leaders = scores.flatMap((score, record) => (most > 0 && score === most ? [record] : []));
+    return {
+      table: index,
+      valueCells: values.length,
+      records: scores.flatMap((score, record) => (score > 0 ? [record] : [])),
+      matchedCells: most,
+      best: leaders.length === 1 ? leaders[0]! : null,
+    };
+  });
+}
+
+/** Which record each detail table carries; see `GlobalPassAlignment`. */
+function alignment(page: GpPage): GlobalPassAlignment {
+  const compact = detailMatches(page.compact, page.records);
+  const expanded = detailMatches(page.expanded, page.records);
+  const carried = new Set(compact.flatMap((match) => (match.best === null ? [] : [match.best])));
+  return {
+    compact,
+    expanded,
+    unmatchedRecords: page.records.flatMap((_, record) => (carried.has(record) ? [] : [record])),
+    monotonic: compact.every(
+      (match, index) =>
+        match.best !== null && (index === 0 || match.best > (compact[index - 1]!.best ?? Infinity)),
+    ),
+    pairsAgree: compact.every(
+      (match, index) =>
+        index >= expanded.length || (match.best !== null && match.best === expanded[index]!.best),
+    ),
+    indexAligned: compact.every((match, index) => match.best === index),
+  };
+}
+
+function detailContainer(page: GpPage): GlobalPassDetailContainer | null {
+  const parents = new Set(page.compact.map((table) => table.parentNode ?? null));
+  const parent = parents.size === 1 ? [...parents][0] : null;
+  if (!parent) return null;
+  const children = shapeChildren(parent).map((child) => {
+    const top = gpTopTables(child);
+    const th = top.length === 1 ? page.thOf(top[0]!) : null;
+    return {
+      tag: GP_TAGS.has(child.tagName ?? "") ? child.tagName! : "other",
+      th,
+      wrapped: child.tagName !== "table" && top.length === 1,
+      known: th !== null && [12, 4, 10].includes(th),
+      tables: gpElements(child, "table").length,
+    };
+  });
+  const sequence = children.flatMap((child) => (child.th === null ? [] : [child.th]));
+  let pairs = 0;
+  while (sequence[pairs * 2] === 4 && sequence[pairs * 2 + 1] === 10) pairs++;
+  return { childCount: children.length, children, pairsInOrder: pairs };
+}
+
+function attributeNameClass(name: string): string {
+  const lower = name.toLowerCase();
+  if (GP_ATTRIBUTE_NAMES.has(lower)) return lower;
+  if (lower.startsWith("data-")) return "data-*";
+  if (lower.startsWith("aria-")) return "aria-*";
+  if (lower.startsWith("on")) return "on*";
+  return "other";
+}
+
+function otherTables(
+  page: GpPage,
+  container: GpNode | null,
+  headerLists: { activity: string[]; compact: string[]; expanded: string[] },
+): GlobalPassOtherTable[] {
+  const compactTokens = page.compact.map(gpClassTokens);
+  const expandedTokens = page.expanded.map(gpClassTokens);
+  const sharedCompact = uniform(compactTokens, sameList) ? compactTokens[0]! : null;
+  const sharedExpanded = uniform(expandedTokens, sameList) ? expandedTokens[0]! : null;
+  const peers = [...page.compact, ...page.expanded].map(idNumber).filter((value) => value !== null);
+  const surveyed = new Set<string>([
+    ...GLOBAL_PASS_SURVEYED_ENGLISH,
+    ...GLOBAL_PASS_SURVEYED_JAPANESE,
+  ]);
+  return page.others.map((table): GlobalPassOtherTable => {
+    const parent = table.parentNode ?? null;
+    const position = parent ? shapeChildren(parent).indexOf(table) : -1;
+    const tokens = gpClassTokens(table);
+    const own = idNumber(table);
+    const numbers = own === null || peers.length === 0 ? [] : [...new Set([...peers, own])];
+    numbers.sort((left, right) => left - right);
+    const spans = [...gpOwned(table, "th", "table"), ...gpOwned(table, "td", "table")]
+      .map((cell) => gpAttribute(cell, "colspan") ?? "")
+      .filter((value) => /^\d{1,4}$/u.test(value))
+      .map(Number);
+    return {
+      th: page.thOf(table),
+      td: gpOwned(table, "td", "table").length,
+      bodyRows: gpBodyRows(table).length,
+      cellsPerRow: gpBodyRows(table).map((row) => gpDirectCells(row).length),
+      colspanMax: spans.length === 0 ? null : Math.max(...spans),
+      theadPresent: gpOwned(table, "thead", "table").length > 0,
+      nestedTables: gpElements(table, "table").length - 1,
+      positionInParent: position < 0 ? null : position,
+      parentIsDetailContainer: container !== null && parent === container,
+      classTokenCount: tokens.length,
+      classTokensEqualCompact: sharedCompact === null ? null : sameList(tokens, sharedCompact),
+      classTokensEqualExpanded: sharedExpanded === null ? null : sameList(tokens, sharedExpanded),
+      attributeNames: [
+        ...new Set((table.attrs ?? []).map((item) => attributeNameClass(item.name))),
+      ].sort(),
+      idNumericSuffixRank: numbers.length === 0 ? null : numbers.indexOf(own!),
+      idNumericSuffixDistinct: numbers.length === 0 ? null : numbers.length,
+      idNumericSuffixPeers: peers.length,
+      headerMatches: gpOwned(table, "th", "table")
+        .map(gpText)
+        .map((header) => ({
+          activity: indexOrNull(headerLists.activity, header),
+          compact: indexOrNull(headerLists.compact, header),
+          expanded: indexOrNull(headerLists.expanded, header),
+          surveyed: surveyed.has(header),
+        })),
+      cells: gpOwned(table, "td", "table")
+        .map(gpText)
+        .map((text) => ({
+          ...globalPassCellPattern(text),
+          equalsRecordCell: recordCellsEqual(page.records, text),
+        })),
+    };
+  });
+}
+
+/** The records no compact table carries, with each cell's pattern set against the carried records'. */
+function unmatchedRecords(page: GpPage, aligned: GlobalPassAlignment): GlobalPassUnmatchedRecord[] {
+  const carried = [
+    ...new Set(aligned.compact.flatMap((match) => (match.best === null ? [] : [match.best]))),
+  ];
+  const otherCells = page.others.map((table) => gpOwned(table, "td", "table").map(gpText));
+  const key = (text: string) => JSON.stringify(globalPassCellPattern(text));
+  const majority = (row: "desktop" | "responsive", position: number): string | null => {
+    const keys = carried
+      .map((record) => page.records[record]![row][position])
+      .filter((text) => text !== undefined)
+      .map(key);
+    const tally = new Map<string, number>();
+    for (const item of keys) tally.set(item, (tally.get(item) ?? 0) + 1);
+    for (const [item, count] of tally) if (count * 2 > keys.length) return item;
+    return null;
+  };
+  const describe = (row: "desktop" | "responsive", text: string, position: number) => {
+    const common = majority(row, position);
+    return {
+      ...globalPassCellPattern(text),
+      patternEqualsMajority: common === null ? null : key(text) === common,
+      equalsOtherTableCell:
+        text === ""
+          ? []
+          : otherCells.flatMap((cells, table) =>
+              cells.flatMap((cell, index) => (cell === text ? [{ table, cell: index }] : [])),
+            ),
+    };
+  };
+  return aligned.unmatchedRecords.map((record) => ({
+    record,
+    desktop: page.records[record]!.desktop.map((text, index) => describe("desktop", text, index)),
+    responsive: page.records[record]!.responsive.map((text, index) =>
+      describe("responsive", text, index),
+    ),
+  }));
+}
+
+function globalPassComparisons(
+  page: GpPage,
+): Pick<
+  GlobalPassActivityShape,
+  "detailTables" | "detailContainer" | "otherTables" | "recordDetailAlignment" | "unmatchedRecords"
+> {
+  const container = detailContainer(page);
+  const parent = container === null ? null : (page.compact[0]!.parentNode ?? null);
+  const comparisons: ReturnType<typeof globalPassComparisons> = {
+    detailTables: {
+      compactHeadersUniform: uniform(page.compact.map(gpHeaders), sameList),
+      expandedHeadersUniform: uniform(page.expanded.map(gpHeaders), sameList),
+      compactClassTokensUniform: uniform(page.compact.map(gpClassTokens), sameList),
+      expandedClassTokensUniform: uniform(page.expanded.map(gpClassTokens), sameList),
+    },
+    detailContainer: container,
+    otherTables: otherTables(page, parent, {
+      activity: gpHeaders(page.activity),
+      compact: gpHeaders(page.compact[0]),
+      expanded: gpHeaders(page.expanded[0]),
+    }),
+  };
+  if (page.activity) {
+    const aligned = alignment(page);
+    comparisons.recordDetailAlignment = aligned;
+    comparisons.unmatchedRecords = unmatchedRecords(page, aligned);
+  }
+  return comparisons;
 }
 
 // ── GLOBAL PASS replay selection ─────────────────────────────────────────────
@@ -1193,4 +1803,114 @@ export function globalPassReplaySelectionSql(filter: { version?: string } = {}):
  WHERE l.parse_rank=1 AND l.status='error' AND l.error='parser_rejected'
  AND a.source_id='global-pass' AND a.dataset='globalpass-activity'
 ) SELECT * FROM failed WHERE rank=1 ORDER BY fetch_run_id DESC,id DESC LIMIT 50`;
+}
+
+// ── GLOBAL PASS: the same page in the newest published capture ──────────────
+
+/**
+ * The read-only lookup `replay-diagnostics.ts` runs for each replayed
+ * GLOBAL PASS rejection: the newest other `globalpass-activity` artifact with
+ * the same artifact key (the same month and page) that has a published
+ * `global-pass-activity` parse (`published_parse_runs`, the adoption pointer
+ * the replay's selection also reads), with what the replay needs to read and
+ * verify its raw object. Null for an artifact id or key of another form,
+ * which is never put into SQL.
+ */
+export function globalPassLatestOkSql(artifact: {
+  id: number;
+  artifactKey: string | null | undefined;
+}): string | null {
+  const key = artifact.artifactKey ?? "";
+  if (!Number.isSafeInteger(artifact.id) || artifact.id < 1 || !GLOBAL_PASS_ARTIFACT_KEY.test(key))
+    return null;
+  return `SELECT a.id,a.sha256,o.blob_key,o.byte_size
+ FROM published_parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+ JOIN raw_objects o ON o.sha256=a.sha256
+ WHERE p.parser_name='${GLOBAL_PASS_ACTIVITY_PARSER}'
+ AND a.source_id='global-pass' AND a.dataset='globalpass-activity'
+ AND a.artifact_key='${key}' AND a.id<>${artifact.id}
+ ORDER BY a.fetch_run_id DESC,a.id DESC LIMIT 1`;
+}
+
+export interface GlobalPassLatestOkCapture {
+  /** A capture of the same key with a published parse exists. */
+  found: boolean;
+  /** Its internal artifact id; null when none was found. */
+  artifact: number | null;
+  /** Its bytes match the stored SHA-256 and size; null when none was found. */
+  intact: boolean | null;
+  /** Its desktop (nine-cell) rows; null when none was found, it is not intact or it is not UTF-8. */
+  records: number | null;
+  /**
+   * Records of the refused page whose desktop row equals, cell for cell, one
+   * of its desktop rows; null with `records` or when the refused page is not UTF-8.
+   */
+  recordsAlsoPresent: number | null;
+  /**
+   * Every record no compact table carries is among those; null without such
+   * a record or `recordsAlsoPresent`, or when such a record has no desktop row
+   * to compare and no other one is absent (unknown, never `false`).
+   */
+  unmatchedRecordPresent: boolean | null;
+}
+
+/**
+ * The refused page's records compared with the newest capture of the same key
+ * that has a published parse, by exact desktop-row equality. Counts and
+ * booleans only.
+ */
+export function globalPassLatestOkComparison(
+  refused: Uint8Array,
+  ok: { artifact: number; bytes: Uint8Array; intact: boolean } | null,
+): GlobalPassLatestOkCapture {
+  const none = { records: null, recordsAlsoPresent: null, unmatchedRecordPresent: null };
+  if (ok === null) return { found: false, artifact: null, intact: null, ...none };
+  if (!ok.intact) return { found: true, artifact: ok.artifact, intact: false, ...none };
+  const page = (bytes: Uint8Array): GpPage | null => {
+    try {
+      const html = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      return readGpPage(parse(html) as unknown as GpNode);
+    } catch {
+      return null;
+    }
+  };
+  const desktopKey = (record: GpRecord) => JSON.stringify(record.desktop);
+  // A record without a desktop row (more responsive rows than desktop ones) has none to compare.
+  const withDesktop = (records: readonly GpRecord[]) =>
+    records.filter((record) => record.desktop.length === 9);
+  const accepted = page(ok.bytes);
+  // A page that cannot be read has no rows to count: unknown, never zero (INV05).
+  if (accepted === null) return { found: true, artifact: ok.artifact, intact: true, ...none };
+  const acceptedRows = withDesktop(accepted.records);
+  const present = new Set(acceptedRows.map(desktopKey));
+  const mine = page(refused);
+  if (mine === null)
+    return {
+      found: true,
+      artifact: ok.artifact,
+      intact: true,
+      records: acceptedRows.length,
+      recordsAlsoPresent: null,
+      unmatchedRecordPresent: null,
+    };
+  const unmatched = alignment(mine).unmatchedRecords.map((record) => mine.records[record]!);
+  const comparable = withDesktop(unmatched);
+  const absent = comparable.some((record) => !present.has(desktopKey(record)));
+  return {
+    found: true,
+    artifact: ok.artifact,
+    intact: true,
+    records: acceptedRows.length,
+    recordsAlsoPresent: withDesktop(mine.records).filter((record) =>
+      present.has(desktopKey(record)),
+    ).length,
+    unmatchedRecordPresent:
+      unmatched.length === 0
+        ? null
+        : absent
+          ? false
+          : comparable.length === unmatched.length
+            ? true
+            : null,
+  };
 }
