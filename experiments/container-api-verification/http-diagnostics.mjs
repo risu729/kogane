@@ -41,7 +41,14 @@ const categories = [
   "other_server",
   "invalid_status",
 ];
-const codes = ["verification_http_route"];
+const codes = [
+  "verification_http_route",
+  "verification_state_inputs",
+  "verification_state_timeout",
+  "verification_state_transport",
+  "verification_state_response",
+  "verification_state_schema",
+];
 const routeLabels = Object.values(routes).flatMap(([route]) =>
   route === "once" ? onceStages.map((stage) => `once_${stage}`) : [route],
 );

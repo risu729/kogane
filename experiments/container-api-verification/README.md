@@ -54,6 +54,10 @@ pointing to it. State files use mode 0600 and reject symlinks and multiple links
 validated synthetic app ID, namespace ID and immutable image reference to
 container-api-verification-baseline.json (mode 0600); later stages compare this
 same baseline. It contains no credentials and is not printed or uploaded.
+Before each phase, the runner verifies that the authenticated public state URL
+serves the expected revision. This shares the existing 180-second deployment
+readiness budget with control-plane rollout checks. It sends no application
+POST or Container request and does not change phase/startup timeouts.
 The driver performs no deployment:
 
 1. Deploy SDK with HARNESS_REVISION=baseline_sdk, then verify baseline_sdk.

@@ -16,6 +16,7 @@ import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { identity } from "./driver.mjs";
 import { canonicalDriverHttpCode } from "./http-diagnostics.mjs";
+import { waitHttpReady } from "./http-readiness.mjs";
 import { canonicalHex, canonicalUuid, canonicalImageRef } from "./identifiers.mjs";
 
 export const WORKER = "kogane-container-api-verification";
@@ -837,15 +838,49 @@ export async function waitMissing(
   }
 }
 
-export async function waitReady(api, image, { now = Date.now, sleep = pause } = {}) {
-  const deadline = now() + 180000;
+export async function waitReady(
+  api,
+  image,
+  { now = Date.now, sleep = pause, deadline = now() + 180000 } = {},
+) {
+  if (!Number.isFinite(deadline) || deadline - now() > 180000) fail("rollout_timeout");
+  // Bound every nested API request and body read by the one deployment budget.
+  // A stalled API implementation must not run beyond its per-request allowance.
+  const boundedApi = async (path, options = {}) => {
+    const remaining = deadline - now();
+    if (remaining <= 0) fail("rollout_timeout");
+    const duration = Math.min(30000, remaining);
+    let timer;
+    try {
+      const data = await Promise.race([
+        Promise.resolve().then(() => api(path, { ...options, timeout: duration })),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  remaining <= 30000
+                    ? "verification_runner_rollout_timeout"
+                    : "verification_runner_api_transport",
+                ),
+              ),
+            duration,
+          );
+        }),
+      ]);
+      if (now() >= deadline) fail("rollout_timeout");
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   while (true) {
     if (now() >= deadline) fail("rollout_timeout");
-    const app = await application(api, true);
-    const active = await activeVersion(api);
+    const app = await application(boundedApi, true);
+    const active = await activeVersion(boundedApi);
     const current = identity(app, active.version);
     if (current.image !== image) fail("deployment_identity");
-    const versions = (await api(`containers/applications/${app.id}/versions`)).result;
+    const versions = (await boundedApi(`containers/applications/${app.id}/versions`)).result;
     if (
       !Array.isArray(versions) ||
       !Number.isSafeInteger(app.version) ||
@@ -864,8 +899,10 @@ export async function waitReady(api, image, { now = Date.now, sleep = pause } = 
           entry.configuration?.image === image,
       ).length === 1 &&
       versions.every((entry) => entry.version === app.version || entry.percentage === 0)
-    )
+    ) {
+      if (now() >= deadline) fail("rollout_timeout");
       return current;
+    }
     const remaining = deadline - now();
     if (remaining <= 0) fail("rollout_timeout");
     await sleep(Math.min(2000, remaining));
@@ -1102,6 +1139,7 @@ export async function execute(
     deleteImage = (image) => deleteRegistryTag(input, image, { api }),
     report = console.log,
     hold = recoveryHolder,
+    httpReady = waitHttpReady,
   } = {},
 ) {
   privateDirectory(input.temp);
@@ -1199,7 +1237,8 @@ export async function execute(
         timeout: 300000,
       });
       stage = `${phase}_rollout`;
-      const current = await waitReady(api, image);
+      const rolloutDeadline = Math.min(Date.now() + 180000, deadline);
+      const current = await waitReady(api, image, { deadline: rolloutDeadline });
       if (
         current.image !== image ||
         (state.appId && current.appId !== state.appId) ||
@@ -1210,6 +1249,9 @@ export async function execute(
       state.namespace = canonicalHex(current.namespace, 32);
       driverEnv.HARNESS_APPLICATION_ID = current.appId;
       writeProtected(statePath, state);
+      stage = `${phase}_http_ready`;
+      await httpReady({ phase, subdomain: input.subdomain, key, deadline: rolloutDeadline });
+      if (Date.now() >= rolloutDeadline) fail("rollout_timeout");
     }
     async function verify(phase) {
       stage = `${phase}_verify`;
@@ -1257,6 +1299,19 @@ export async function execute(
       ),
       { env, timeout: 180000 },
     );
+    stage = "rollback_sdk_rollout";
+    const rollbackDeadline = Math.min(Date.now() + 180000, deadline);
+    const rollbackCurrent = await waitReady(api, image, { deadline: rollbackDeadline });
+    if (rollbackCurrent.appId !== state.appId || rollbackCurrent.namespace !== state.namespace)
+      fail("deployment_identity");
+    stage = "rollback_sdk_http_ready";
+    await httpReady({
+      phase: "rollback_sdk",
+      subdomain: input.subdomain,
+      key,
+      deadline: rollbackDeadline,
+    });
+    if (Date.now() >= rollbackDeadline) fail("rollout_timeout");
     await verify("rollback_sdk");
     state.completed = true;
     writeProtected(statePath, state);

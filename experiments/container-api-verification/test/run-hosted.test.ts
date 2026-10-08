@@ -39,6 +39,7 @@ import {
   deleteRegistryTag,
   phaseCounts,
   waitMissing,
+  waitReady,
   observeBaselineInstances,
 } from "../run-hosted.mjs";
 
@@ -368,7 +369,8 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
     pushed = false,
     imageRemoved = false;
   const calls: Array<[string, string[], Record<string, any>]> = [],
-    reports: string[] = [];
+    reports: string[] = [],
+    readyPhases: string[] = [];
   const api = async (path: string, options: { method?: string; missing?: boolean } = {}) => {
     if (options.method === "DELETE") {
       removed = true;
@@ -414,6 +416,13 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
   };
   try {
     await execute(input(temp), {
+      httpReady: async (options: any) => {
+        expect(options.subdomain).toBe("synthetic");
+        expect(options.key).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+        expect(options.deadline).toBeGreaterThan(Date.now());
+        expect(options.deadline).toBeLessThanOrEqual(Date.now() + 180000);
+        readyPhases.push(options.phase);
+      },
       api,
       registry: async () => (pushed && !imageRemoved ? image : undefined),
       deleteImage: async (owned: string) => {
@@ -421,7 +430,10 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
         imageRemoved = true;
       },
       report: (text: string) => reports.push(text),
-      hold: async () => ({ stop: async () => {} }),
+      hold: async () => {
+        expect(readyPhases.at(-1)).toBe("native_unmonitored");
+        return { stop: async () => {} };
+      },
       run: async (command: string, args: string[], options: Record<string, any>) => {
         calls.push([command, args, options]);
         if (args.includes("push")) pushed = true;
@@ -433,6 +445,7 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
         if (args.includes("delete")) throw new Error("child deletion is forbidden");
         if (command === "node" && args[0].endsWith("/driver.mjs")) {
           const phase = options.env.HARNESS_PHASE;
+          expect(readyPhases.at(-1)).toBe(phase);
           if (phase === "baseline_sdk")
             protectedFile(resolve(temp, "container-api-verification-baseline.json"), {
               appId,
@@ -450,6 +463,13 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
         return "";
       },
     });
+    expect(readyPhases).toEqual([
+      "baseline_sdk",
+      "native",
+      "native_unmonitored",
+      "native_recovered",
+      "rollback_sdk",
+    ]);
     expect(calls.filter(([command]) => command === "docker")).toHaveLength(1);
     expect(calls.some(([, args]) => args.includes("delete"))).toBe(false);
     const cliCalls = calls.filter(([, args]) => args[0] === wranglerArgs()[0]);
@@ -977,6 +997,7 @@ test("private state storage rejects public or symlink parents and multiply linke
     let requests = 0;
     await expect(
       execute(input(temp), {
+        httpReady: async () => {},
         api: async () => {
           requests++;
           throw new Error("forbidden");
@@ -1332,6 +1353,7 @@ test("execution and cleanup errors are both reported without erasing the initial
     "image_build",
     "baseline_sdk_secret",
     "baseline_sdk_deploy",
+    "baseline_sdk_http_ready",
     "baseline_sdk_verify",
   ]) {
     const temp = mkdtempSync(resolve(tmpdir(), "verification-dual-"));
@@ -1340,7 +1362,11 @@ test("execution and cleanup errors are both reported without erasing the initial
       removed = false;
     const reports: string[] = [];
     const original =
-      failing === "baseline_sdk_verify" ? "verification_sentinel" : "verification_runner_child";
+      failing === "baseline_sdk_verify"
+        ? "verification_sentinel"
+        : failing === "baseline_sdk_http_ready"
+          ? "verification_state_timeout"
+          : "verification_runner_child";
     const api = async (path: string, options: any = {}) => {
       if (options.method === "DELETE") {
         removed = true;
@@ -1372,6 +1398,9 @@ test("execution and cleanup errors are both reported without erasing the initial
     try {
       await expect(
         execute(input(temp), {
+          httpReady: async () => {
+            if (failing === "baseline_sdk_http_ready") throw new Error(original);
+          },
           api,
           report: (line: string) => reports.push(line),
           registry: async () => {
@@ -1759,6 +1788,7 @@ test("a fresh runner with the wrong installed CLI fails before network, ownershi
       "run-hosted.mjs",
       "identifiers.mjs",
       "http-diagnostics.mjs",
+      "http-readiness.mjs",
       "package.json",
     ])
       writeFileSync(resolve(temp, name), readFileSync(new URL("../" + name, import.meta.url)), {
@@ -2019,3 +2049,118 @@ test("a stalled snapshot has a fixed ten-second overall bound and remains non-fa
     },
   ]);
 }, 15000);
+
+test("control-plane readiness shares an absolute budget and clamps all four nested API calls", async () => {
+  let time = 1000;
+  const calls: Array<[string, number]> = [];
+  const result = await waitReady(
+    async (path: string, options: any) => {
+      expect(options.timeout).toBe(Math.min(30000, 6000 - time));
+      calls.push([path, options.timeout]);
+      time += 1000;
+      if (path.endsWith("/deployments"))
+        return {
+          result: { deployments: [{ versions: [{ version_id: workerVersion, percentage: 100 }] }] },
+        };
+      if (path.includes("/versions/")) return { result: version() };
+      if (path.endsWith("/versions"))
+        return { result: [{ version: 1, percentage: 100, configuration: { image } }] };
+      return { result: [app()] };
+    },
+    image,
+    { now: () => time, deadline: 6000 },
+  );
+  expect(result).toEqual({ appId, namespace, image });
+  expect(time).toBe(5000);
+  expect(calls).toEqual([
+    [`containers/applications?name=${APP}`, 5000],
+    [`workers/scripts/${WORKER}/deployments`, 4000],
+    [`workers/scripts/${WORKER}/versions/${workerVersion}`, 3000],
+    [`containers/applications/${appId}/versions`, 2000],
+  ]);
+  // Remaining 1 s belongs to public GET readiness; no new 180 s window is created.
+});
+
+test("control-plane readiness rejects expired success, invalid budgets and late nested response bodies", async () => {
+  for (const expiryCall of [1, 2, 3, 4]) {
+    let time = 0,
+      calls = 0;
+    await expect(
+      waitReady(
+        async (path: string, options: any) => {
+          expect(options.timeout).toBe(5000);
+          calls++;
+          if (calls === expiryCall) time = 5000;
+          if (path.endsWith("/deployments"))
+            return {
+              result: {
+                deployments: [{ versions: [{ version_id: workerVersion, percentage: 100 }] }],
+              },
+            };
+          if (path.includes("/versions/")) return { result: version() };
+          if (path.endsWith("/versions"))
+            return { result: [{ version: 1, percentage: 100, configuration: { image } }] };
+          return { result: [app()] };
+        },
+        image,
+        { now: () => time, deadline: 5000 },
+      ),
+    ).rejects.toThrow("verification_runner_rollout_timeout");
+    expect(calls).toBe(expiryCall);
+  }
+  for (const deadline of [0, NaN, Infinity, 180001]) {
+    let calls = 0;
+    await expect(
+      waitReady(
+        async () => {
+          calls++;
+        },
+        image,
+        { now: () => 0, deadline },
+      ),
+    ).rejects.toThrow("verification_runner_rollout_timeout");
+    expect(calls).toBe(0);
+  }
+  const api = apiClient(input(), async (_url: string, options: RequestInit) => {
+    expect(options.redirect).toBe("manual");
+    return {
+      status: 200,
+      ok: true,
+      json: async () => await new Promise(() => {}),
+    } as Response;
+  });
+  await expect(waitReady(api, image, { deadline: Date.now() + 30 })).rejects.toThrow(
+    "verification_runner_rollout_timeout",
+  );
+});
+
+test("pending control-plane rollout sleeps only to the shared deadline and never exceeds it", async () => {
+  let time = 0,
+    polls = 0;
+  const api = async (path: string, options: any) => {
+    expect(options.timeout).toBeLessThanOrEqual(2500 - time);
+    if (path.endsWith("/deployments"))
+      return {
+        result: { deployments: [{ versions: [{ version_id: workerVersion, percentage: 100 }] }] },
+      };
+    if (path.includes("/versions/")) return { result: version() };
+    if (path.endsWith("/versions"))
+      return { result: [{ version: 1, percentage: 50, configuration: { image } }] };
+    polls++;
+    return { result: [app()] };
+  };
+  const sleeps: number[] = [];
+  await expect(
+    waitReady(api, image, {
+      deadline: 2500,
+      now: () => time,
+      sleep: async (ms: number) => {
+        sleeps.push(ms);
+        time += ms;
+      },
+    }),
+  ).rejects.toThrow("verification_runner_rollout_timeout");
+  expect(time).toBe(2500);
+  expect(polls).toBe(2);
+  expect(sleeps).toEqual([2000, 500]);
+});
