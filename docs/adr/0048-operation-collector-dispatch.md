@@ -84,8 +84,7 @@ would mix acceptance (a core-keep fact) with execution (operational state).
 
 1. An execution that already left `waiting` is never started again.
 2. No connection serves the source and action → `unsupported`
-   (`collection_unsupported`, `session_refresh_unsupported`); a connection
-   without a binding → `unsupported` (`collector_binding_missing`).
+   (`collection_unsupported`, `session_refresh_unsupported`).
 3. Not started within 24 hours of acceptance → `expired`
    (`operation_expired`).
 4. The connection is not listed in the new Processor variable
@@ -93,13 +92,16 @@ would mix acceptance (a core-keep fact) with execution (operational state).
    malformed means none, and the committed value is empty) → waits
    (`collector_dispatch_disabled`, re-checked hourly) and so expires unless the
    owner enables the connection.
-5. An open provider maintenance window (the alarm's own
+5. An enabled connection without a binding in this deployment →
+   `unsupported` (`collector_binding_missing`).
+6. An open provider maintenance window (the alarm's own
    `maintenanceForSchedule`/`afterMaintenance`) → waits until it closes
-   (`provider_maintenance`).
-6. The source's execution lease is held → waits five minutes
+   (`provider_maintenance`); windows that never close
+   (`maintenance_unavailable`) → the same wait, re-checked hourly.
+7. The source's execution lease is held → waits five minutes
    (`collection_lease_held`). This is a read; the operation path never claims,
    releases, replaces or expires a lease.
-7. One collector start per Processor invocation → others wait for the next
+8. One collector start per Processor invocation → others wait for the next
    tick (`dispatch_deferred`).
 
 A human-required session refresh (`SESSION_REFRESH_POLICY`) is still stored
@@ -211,7 +213,8 @@ Open limits, written down rather than guessed:
   one call); a raced claim; lease held (waits, lease untouched, starts after
   release); lease taken by the collector (`collection_busy`); unsupported
   session refresh and collection; human-required refresh; supported refresh;
-  expiry of a disabled connection; maintenance deferral; one start per tick;
+  expiry of a disabled connection; maintenance deferral, including windows
+  that never close; one start per tick;
   the 48-hour horizon; no parser selected; stored columns.
 - `packages/collection/test/operation-rpc.test.ts`: the connection table equals
   `config/alarm-jobs.json`; request validation; refusals before any run; the

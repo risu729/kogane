@@ -8,7 +8,7 @@
 // registration is the real one; the parse lane's effect is written with the
 // same statements the pipeline writer uses (publication-gate.md). No amount,
 // account, merchant, credential or provider text appears.
-import { beforeAll, expect, test } from "bun:test";
+import { beforeAll, expect, spyOn, test } from "bun:test";
 import {
   claimCollectorStart,
   d1CommandStore,
@@ -20,6 +20,7 @@ import {
   type Principal,
 } from "../../../packages/application/src/index.ts";
 import type { OperationConnection } from "../../../packages/collection/src/operation-rpc.ts";
+import * as scheduleModel from "../../../packages/collection/src/schedule-model.ts";
 import { fullCoreDatabase, sqliteD1 } from "../../../packages/storage-d1/test/sqlite.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
 import {
@@ -559,6 +560,31 @@ test("an open maintenance window defers the start until it closes", async () => 
   });
   expect(await w.tick(T0 + HOUR)).toMatchObject({ claimed: 0 });
   expect(await w.tick(T0 + 2 * HOUR)).toMatchObject({ started: 1 });
+});
+
+test("maintenance windows that never close make the request wait instead of failing the lane", async () => {
+  // Windows that chain into each other forever make the alarm's
+  // `afterMaintenance` throw `maintenance_unavailable` (after a thousand
+  // windows, which is slow, so the throw is stood in for here). The request
+  // waits, contacting nobody, and the rest of the tick still runs.
+  const w = world();
+  const operationId = await collect(w);
+  const unavailable = spyOn(scheduleModel, "afterMaintenance").mockImplementation(() => {
+    throw new Error("maintenance_unavailable");
+  });
+  try {
+    expect(await w.tick(T0 + MINUTE)).toMatchObject({ awaiting: 1, started: 0 });
+  } finally {
+    unavailable.mockRestore();
+  }
+  expect((await read(w, operationId)).execution).toMatchObject({
+    state: "waiting",
+    reasonCode: "provider_maintenance",
+  });
+  expect(w.calls).toHaveLength(0);
+  // Looked at again an hour later, when the windows are read afresh.
+  expect(await w.tick(T0 + 30 * MINUTE)).toMatchObject({ claimed: 0 });
+  expect(await w.tick(T0 + MINUTE + HOUR)).toMatchObject({ started: 1 });
 });
 
 test("one collector start per tick; the next request waits for the next tick", async () => {

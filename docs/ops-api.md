@@ -366,16 +366,16 @@ state is reached; `expiresAt` is acceptance + 24 h.
 
 **Before a start** (each check contacts nobody):
 
-| Reason code                   | When                                                              | Next look                |
-| ----------------------------- | ----------------------------------------------------------------- | ------------------------ |
-| `collection_unsupported`      | no `collect` connection for the source (SMBC Direct, V Point Pay) | terminal (`unsupported`) |
-| `session_refresh_unsupported` | no `refresh-session` connection for the source                    | terminal (`unsupported`) |
-| `collector_binding_missing`   | the connection has no Service Binding in this deployment          | terminal (`unsupported`) |
-| `operation_expired`           | 24 h after acceptance                                             | terminal (`expired`)     |
-| `collector_dispatch_disabled` | the connection is not in `OPS_COLLECTOR_DISPATCH_CONNECTIONS`     | 1 h                      |
-| `provider_maintenance`        | the source's collection/session maintenance window is open        | when it closes           |
-| `collection_lease_held`       | another execution (the alarm, a manual trigger) holds the lease   | 5 min                    |
-| `dispatch_deferred`           | this Processor invocation already started a collector             | 5 min                    |
+| Reason code                   | When                                                              | Next look                                       |
+| ----------------------------- | ----------------------------------------------------------------- | ----------------------------------------------- |
+| `collection_unsupported`      | no `collect` connection for the source (SMBC Direct, V Point Pay) | terminal (`unsupported`)                        |
+| `session_refresh_unsupported` | no `refresh-session` connection for the source                    | terminal (`unsupported`)                        |
+| `collector_binding_missing`   | the connection has no Service Binding in this deployment          | terminal (`unsupported`)                        |
+| `operation_expired`           | 24 h after acceptance                                             | terminal (`expired`)                            |
+| `collector_dispatch_disabled` | the connection is not in `OPS_COLLECTOR_DISPATCH_CONNECTIONS`     | 1 h                                             |
+| `provider_maintenance`        | the source's collection/session maintenance window is open        | when it closes (1 h if the windows never close) |
+| `collection_lease_held`       | another execution (the alarm, a manual trigger) holds the lease   | 5 min                                           |
+| `dispatch_deferred`           | this Processor invocation already started a collector             | 5 min                                           |
 
 Waits never pass the expiry. **The lease is only read**: the operation path never
 takes, releases, replaces or expires `collection_execution_leases`; the collector
@@ -527,13 +527,13 @@ Synthetic data only.
   `services/app/test/conformance.test.ts` pin the new `opsApi`
   capability off in the shared contract.
 - Collector execution (ADR 0048), synthetic source and collector:
-  `services/processor/test/collector-dispatch.test.ts` (18 checks over the
+  `services/processor/test/collector-dispatch.test.ts` (19 checks over the
   real CORE schema and the real registration: success through `published`
   with distinct timestamps, failure, uncertain, an unfinished start, re-send
   with the same key before and after the run, a raced claim, a held lease and
   a lease taken by the collector, unsupported and human-required and supported
-  refresh, expiry, maintenance, one start per tick, the 48-hour horizon, no
-  parser selected, the stored columns);
+  refresh, expiry, maintenance (including windows that never close), one start
+  per tick, the 48-hour horizon, no parser selected, the stored columns);
   `packages/application/test/collector-trail.test.ts` (the 0068 guards, the
   trail's outcomes and its keyed query plans without table statistics);
   `packages/collection/test/operation-rpc.test.ts` (the connection table

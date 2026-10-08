@@ -427,7 +427,8 @@ const LEASE_HELD = `SELECT 1 AS held FROM collection_execution_leases
  *   3. not started within `COLLECTOR_START_TTL_MS` of acceptance → `expired`;
  *   4. the connection is not in `OPS_COLLECTOR_DISPATCH_CONNECTIONS` → waits;
  *   5. no collector binding → `unsupported` (`collector_binding_missing`);
- *   6. the provider's maintenance window is open → waits until it closes;
+ *   6. the provider's maintenance window is open → waits until it closes (an
+ *      hour when the windows never close);
  *   7. another execution holds the source's lease → waits (read only: this
  *      path never takes, releases or replaces a lease);
  *   8. this tick already started a collector → waits for the next tick.
@@ -517,13 +518,19 @@ async function dispatchCollector(
     });
     return "declined";
   }
-  const maintenanceEnd = afterMaintenance(
-    nowMs,
-    await maintenanceForSchedule(env.DB as unknown as D1Database, {
-      source: connection.source,
-      kind: action === "collect" ? "collection" : "keepalive",
-    }),
-  );
+  const rules = await maintenanceForSchedule(env.DB as unknown as D1Database, {
+    source: connection.source,
+    kind: action === "collect" ? "collection" : "keepalive",
+  });
+  let maintenanceEnd: number;
+  try {
+    maintenanceEnd = afterMaintenance(nowMs, rules);
+  } catch {
+    // Windows that never close (`maintenance_unavailable`): the alarm cannot
+    // run this source either. Wait and look again later, contacting nobody,
+    // instead of failing the lane for every request behind this one.
+    return wait("provider_maintenance", nowMs + COLLECTOR_RETRY_MS);
+  }
   if (maintenanceEnd > nowMs) return wait("provider_maintenance", maintenanceEnd);
   if ((await store.first<{ held: number }>(LEASE_HELD, [connection.source])) !== null)
     return wait("collection_lease_held", nowMs + COLLECTOR_WAIT_MS);
