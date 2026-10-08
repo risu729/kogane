@@ -1,6 +1,6 @@
 # ADR 0045: Collection quality is a per-request read of stored stage states, in closed codes
 
-Status: proposed until this PR merges; accepted upon merge
+Status: accepted
 Date: 2026-10-08
 Issue: [#542](https://github.com/risu729/kogane/issues/542) (first part)
 

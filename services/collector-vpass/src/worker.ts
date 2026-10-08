@@ -1,5 +1,8 @@
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
-import { type ScheduledResult } from "../../../packages/collection/src/schedule-result";
+import {
+  scheduledFailure,
+  type ScheduledResult,
+} from "../../../packages/collection/src/schedule-result";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import {
   AUTH_KEY_SHA256,
@@ -539,7 +542,7 @@ export async function alarmCollection(
   try {
     await collectAllCards(env, scheduledTime, (runId) => runIds.push(runId));
     return { status: "completed", runIds, failureCode: null };
-  } catch {
-    return { status: "failed", runIds, failureCode: "collection_failed" };
+  } catch (error) {
+    return scheduledFailure(error, runIds);
   }
 }

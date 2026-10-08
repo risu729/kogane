@@ -4,6 +4,7 @@ import {
   nextNominal,
   type SchedulePattern,
 } from "../../../packages/collection/src/schedule-model";
+import { collectorBindingName } from "./collector-binding";
 import { jobFor, readSchedule, maintenanceForSchedule, bootstrapSchedules } from "./schedule-store";
 interface DispatchResult {
   status: "completed" | "failed";
@@ -128,8 +129,7 @@ export class ScheduleAlarm extends DurableObject<Env> {
         await bootstrapSchedules(this.env);
         result = { status: "completed", runIds: [], failureCode: null };
       } else {
-        const binding =
-          `SCHEDULE_${pending.job.workspace!.replace("collector-", "").replaceAll("-", "_").toUpperCase()}` as keyof Env;
+        const binding = collectorBindingName(pending.job.workspace!) as keyof Env;
         const target = this.env[binding] as unknown as {
           runScheduled(cron: string, time: number): Promise<DispatchResult>;
         };

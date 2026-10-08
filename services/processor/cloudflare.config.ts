@@ -32,6 +32,7 @@ export default defineConfig({
       RELEASE_CANDIDATES_ENABLED: bindings.text("true"),
       SHARED_R2_INGEST_ENABLED: bindings.text("true"),
       OPS_DISPATCH_ENABLED: bindings.text("true"),
+      OPS_COLLECTOR_DISPATCH_CONNECTIONS: bindings.text(""),
       COLLECTION_DATA_BUCKET: bindings.text("kogane-raw-evidence"),
       COLLECTION_ACCOUNT_ID: bindings.text("59ea63cc00914b30ca410b062ae2bb7f"),
       COLLECTION_INGEST_CLIENT: bindings.text("processor-shared-r2"),

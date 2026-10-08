@@ -1,7 +1,7 @@
 # ADR 0050: Re-survey official maintenance pages as proposals an operator accepts
 
-- Status: proposed (accepted when its PR merges; production use waits for the
-  owner's confirmation of each page, see Consequences)
+- Status: accepted (production use waits for the owner's confirmation of each
+  page, see Consequences)
 - Date: 2026-10-08
 - Issue: #561; builds on [ADR 0039](0039-alarm-schedule-management.md) and
   consumes the maintenance writer of #560 (ADR 0046, open in PR #564)

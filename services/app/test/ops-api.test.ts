@@ -26,7 +26,12 @@ import worker from "../src/worker";
 import { seedRegistry } from "./fixtures";
 import { MCP_TOOLS } from "../src/mcp";
 import { OPS_TOOL_NAMES } from "../src/ops-tools";
-import { d1CommandStore, recordOperationStage } from "../../../packages/application/src/index";
+import {
+  claimCollectorStart,
+  d1CommandStore,
+  recordCollectorOutcome,
+  recordOperationStage,
+} from "../../../packages/application/src/index";
 
 const OPS = "/api/ops/v1";
 const OPERATOR = "ops-operator";
@@ -248,6 +253,62 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
       ["projected", "pending"],
     ]);
     expect(receipt.failureCode).toBeNull();
+    // No executor has looked at it: the execution is `accepted`, with no
+    // connection, no start and no run (ADR 0048).
+    expect(receipt.execution).toEqual({
+      action: "collect",
+      state: "accepted",
+      connectionId: null,
+      reasonCode: null,
+      scope: "collector_default",
+      waits: 0,
+      expiresAt: new Date(Date.parse(receipt.acceptedAt) + 24 * 3_600_000).toISOString(),
+      startedAt: null,
+      collectedAt: null,
+      publishedAt: null,
+      finishedAt: null,
+      runs: [],
+    });
+  });
+
+  it("follows the collector execution from the request id to the runs it reported (ADR 0048)", async () => {
+    const accepted = await ops("/collections", { ...COLLECTION, idempotencyKey: "trail-read" });
+    const operationId = accepted.json.operationId as string;
+    const stored = (await row(operationId)) as Record<string, any>;
+    // What the Processor's dispatch lane records, through the same services.
+    const store = d1CommandStore(env.DB);
+    const context = {
+      store,
+      operationId,
+      action: "collect" as const,
+      acceptedAt: stored.created_at as string,
+      expiresAt: new Date(Date.parse(stored.created_at) + 24 * 3_600_000).toISOString(),
+      now: "2026-09-07T00:05:00.000Z",
+    };
+    const binding = { connectionId: "sony-bank", terminalSource: "sony-bank" };
+    expect(await claimCollectorStart({ ...context, binding })).toBe(true);
+    await recordCollectorOutcome({
+      store,
+      operationId,
+      now: "2026-09-07T00:06:00.000Z",
+      nowMs: Date.parse("2026-09-07T00:06:00.000Z"),
+      outcome: { kind: "collected", runIds: ["synthetic-trail-run"] },
+    });
+    const read = await call(`${OPS}/operations/${operationId}`, { environment: ENABLED });
+    expect(read.status).toBe(200);
+    const receipt = (await read.json()) as Record<string, any>;
+    expect(receipt.status).toBe("running");
+    expect(receipt.targetRef).toBe("collector:sony-bank");
+    expect(receipt.stages[0]).toMatchObject({ stage: "persisted", state: "completed" });
+    expect(receipt.execution).toMatchObject({
+      state: "collected",
+      connectionId: "sony-bank",
+      startedAt: "2026-09-07T00:05:00.000Z",
+      collectedAt: "2026-09-07T00:06:00.000Z",
+      publishedAt: null,
+      // The terminal has not been registered yet: not reached, not success.
+      runs: [{ runId: "synthetic-trail-run", state: "not_registered", evidenceRunId: null }],
+    });
   });
 
   it("returns the same operation for a re-send instead of collecting twice", async () => {
@@ -662,11 +723,13 @@ describe("HTTP and MCP are one API (G3-05)", () => {
         operationId: _id,
         acceptedAt: _a,
         updatedAt: _u,
+        execution: { expiresAt: _e, ...execution },
         ...rest
       } = (await (
         await call(`${OPS}/operations/${operationId}`, { environment: ENABLED })
       ).json()) as Record<string, any>;
-      return JSON.stringify(rest);
+      // The expiry is the acceptance time plus a constant (ADR 0048).
+      return JSON.stringify({ ...rest, execution });
     };
     expect(await receipt(httpOnly.json.operationId)).toBe(
       await receipt(mcpOnly.result.structuredContent.operationId),

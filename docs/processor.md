@@ -661,18 +661,31 @@ notifying the executor is a separate step that may be lost, so the request
 stays `dispatch_pending` until someone takes it (02 §5,
 [ops-api.md](ops-api.md)). `operation_dispatch` is that someone.
 
-| Kind                                       | What the Processor does                                                             | What it completes                             |
-| ------------------------------------------ | ----------------------------------------------------------------------------------- | --------------------------------------------- |
-| `import`                                   | `registerTerminal` in process                                                       | `registered`, and only with the CORE evidence |
-| `replay`                                   | starts the `planned` replay plan the acceptance created                             | nothing                                       |
-| `projection`                               | records the handover; the projection lane rebuilds                                  | nothing                                       |
-| `collection`, unattended `session-refresh` | records `dispatch_pending` with `awaiting_collector_dispatch` and backs off an hour | nothing                                       |
+| Kind                                       | What the Processor does                                                                                               | What it completes                                                                         |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `import`                                   | `registerTerminal` in process                                                                                         | `registered`, and only with the CORE evidence                                             |
+| `replay`                                   | starts the `planned` replay plan the acceptance created                                                               | nothing                                                                                   |
+| `projection`                               | records the handover; the projection lane rebuilds                                                                    | nothing                                                                                   |
+| `collection`, unattended `session-refresh` | calls the connection's collector once over its `SCHEDULE_<WORKSPACE>` binding (`runOperation`), after the gates below | `persisted` from the collector's answer; `registered`, `parsed`, `adopted` from CORE rows |
 
 **Enqueuing is never completing.** A queued replay, a projection that will run
-next tick and a collector call that does not exist yet all leave the operation
-short of `completed` (`contracts/stages.json` `neverCompleteOn`). The Service
-Binding call to a collector is U09's; until it exists the request is visible
-and pending rather than silently completed or dropped.
+next tick and a collector that was called all leave the operation short of
+`completed` (`contracts/stages.json` `neverCompleteOn`).
+
+The collector branch ([ADR 0048](adr/0048-operation-collector-dispatch.md),
+[ops-api.md](ops-api.md#collector-execution-adr-0048)) resolves the one
+connection (alarm job) that serves the request's CORE source and action, and
+before any call declines a request no connection serves (`unsupported`) or one
+older than 24 hours (`expired`), and waits — contacting nobody — while the
+connection is not listed in `OPS_COLLECTOR_DISPATCH_CONNECTIONS`, a maintenance
+window is open, the source's execution lease is held (read only; never taken,
+released or replaced here) or this invocation already started one collector.
+The start is one guarded batch (one per operation); the collector's answer is
+recorded as `collected`/`refreshed`, `failed` or `uncertain` and never retried.
+Each tick then marks starts older than an hour `uncertain` and reads the trail
+of up to five collected executions until they are `published` or
+`unpublished` with a closed reason. The collector call is awaited inside the
+tick, as the alarm awaits its own.
 
 A failed dispatch never deletes the request. An import whose terminal is not
 in the bucket is retried, not failed: the collector may still be running.
@@ -687,10 +700,11 @@ or old-bucket binding in the Processor.
 
 ## 9. Flags
 
-| Flag                       | Default   | What it gates                                         |
-| -------------------------- | --------- | ----------------------------------------------------- |
-| `SHARED_R2_INGEST_ENABLED` | `"false"` | the Queue consumer **and** the `collection_scan` lane |
-| `OPS_DISPATCH_ENABLED`     | `"false"` | the `operation_dispatch` lane                         |
+| Flag                                 | Default   | What it gates                                                                                             |
+| ------------------------------------ | --------- | --------------------------------------------------------------------------------------------------------- |
+| `SHARED_R2_INGEST_ENABLED`           | `"false"` | the Queue consumer **and** the `collection_scan` lane                                                     |
+| `OPS_DISPATCH_ENABLED`               | `"false"` | the `operation_dispatch` lane                                                                             |
+| `OPS_COLLECTOR_DISPATCH_CONNECTIONS` | `""`      | the connections (alarm job ids, JSON array) whose collector that lane may call; empty or malformed = none |
 
 Only `"1"` and `"true"` enable. An absent, empty or misspelled value leaves
 the Processor doing what it does today. `MAINTENANCE_SURVEY_ENABLED` gates
@@ -813,9 +827,10 @@ not turn the answer into a 503, and before migration 0049 the list is empty.
 
 - **U09** (collectors to shared R2): the producer ids in
   `config/ingest-clients.json` must be what each collector writes as
-  `producer`; new collector ids go into `COLLECTOR_SOURCE_IDS` with a route;
-  and the Service Binding the `collection` dispatch branch is waiting for
-  (`awaiting_collector_dispatch`).
+  `producer`; new collector ids go into `COLLECTOR_SOURCE_IDS` with a route,
+  and a new alarm job also needs its `OPERATION_CONNECTIONS` entry
+  (`packages/collection/test/operation-rpc.test.ts` compares the two) and its
+  collector's `runOperation` (`tests/collector-operation-rpc.test.ts`), ADR 0048.
 - **U11** (READ projection): the `projected` stage of `collection_runs` and of
   `ops_request_stages` is unwritten; the projection publisher completes it.
 - **U15** completed the legacy resource and source retirement; historical
