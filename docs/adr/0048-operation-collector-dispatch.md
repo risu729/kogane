@@ -127,8 +127,10 @@ sees it and nothing expires it (本人操作待ち).
   which has no stages). A collector failure → `failed` with its closed code
   and any run it still persisted (`collection_busy` included: the lease was
   taken between the lane's read and the collector's claim; St George's
-  coordinator instead persists a failed run for a refused lease, its existing
-  behaviour, and answers `collection_failed`). An exception, or an answer outside the closed shape →
+  coordinator instead persists a failed run (`container-failed`) for a refused
+  lease, its existing behaviour, answers `collection_failed`, and — as after
+  any failed St George run — refuses later runs until the operator resumes it;
+  see [St George](../sources/st-george.md)). An exception, or an answer outside the closed shape →
   `uncertain` (`dispatch_uncertain`, `collector_result_invalid`). A start with
   no recorded outcome after one hour → `uncertain`. **Nothing after a start is
   retried automatically**; a new idempotency key is how an operator asks again.

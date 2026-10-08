@@ -385,7 +385,9 @@ the collector's claim, the collector refuses before contacting anyone and the
 request ends `failed` with `collection_busy`. St George is the exception: its
 session coordinator already turns a refused lease into a persisted failed run
 (an existing behaviour of that collector), so there the race ends `failed` with
-`collection_failed` and that run listed.
+`collection_failed` and that run listed, and — as after any failed St George
+run — the coordinator refuses later runs, alarm or operation, until the operator
+resumes it ([St George](sources/st-george.md)).
 
 **After a start nothing is retried.** A collector failure, an uncertain call
 and a start that never recorded an outcome are terminal; a provider login is

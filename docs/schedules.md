@@ -57,7 +57,7 @@ the collector acquires and releases it exactly as for an alarm run, and a
 stopped execution's lease is still released only by the operator. A collector that finds its lease held reports `collection_busy` (alarm
 receipts included) rather than `collection_failed`; St George, whose session
 coordinator records a refused lease as a failed run, still reports
-`collection_failed`.
+`collection_failed` and then refuses later runs until the operator resumes it.
 
 Deployment applies CORE 0065 and uploads named collector entrypoints before the
 Processor and App. It removes the fourteen configured Cron jobs and reconciles
