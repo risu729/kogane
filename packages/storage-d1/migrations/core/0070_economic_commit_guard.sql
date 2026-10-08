@@ -145,7 +145,8 @@ BEGIN SELECT RAISE(ABORT,'economic leg effect replacement is forbidden'); END;
 -- The leg exists on a live revision; a breakdown or correspondence names
 -- another leg of the same revision that is not itself a breakdown or
 -- correspondence, and a breakdown is in that leg's unit (amounts in different
--- units are never parts, INV03).
+-- units are never parts, INV03). Order-independent: a movement row is always
+-- admitted, so a target's row may follow the breakdown that names it.
 CREATE TRIGGER economic_leg_effects_guard BEFORE INSERT ON economic_leg_effects
 WHEN NOT EXISTS(SELECT 1 FROM economic_legs l
   JOIN economic_event_revisions r ON r.event_id=l.event_id AND r.revision=l.revision AND r.superseded_by IS NULL
@@ -154,7 +155,8 @@ WHEN NOT EXISTS(SELECT 1 FROM economic_legs l
   WHERE o.event_id=NEW.event_id AND o.revision=NEW.revision AND o.leg_index=NEW.of_leg_index))
  OR (NEW.of_leg_index IS NOT NULL AND EXISTS(SELECT 1 FROM economic_leg_effects o
   WHERE o.event_id=NEW.event_id AND o.revision=NEW.revision AND o.leg_index=NEW.of_leg_index AND o.effect<>'movement'))
- OR EXISTS(SELECT 1 FROM economic_leg_effects o WHERE o.event_id=NEW.event_id AND o.revision=NEW.revision AND o.of_leg_index=NEW.leg_index)
+ OR (NEW.effect<>'movement' AND EXISTS(SELECT 1 FROM economic_leg_effects o
+  WHERE o.event_id=NEW.event_id AND o.revision=NEW.revision AND o.of_leg_index=NEW.leg_index))
  OR (NEW.effect='breakdown' AND NOT EXISTS(SELECT 1 FROM economic_legs l JOIN economic_legs o
   ON o.event_id=l.event_id AND o.revision=l.revision AND o.leg_index=NEW.of_leg_index
   WHERE l.event_id=NEW.event_id AND l.revision=NEW.revision AND l.leg_index=NEW.leg_index AND l.unit_ref=o.unit_ref))

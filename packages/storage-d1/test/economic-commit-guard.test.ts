@@ -1192,6 +1192,26 @@ describe("times and effects", () => {
     expect(snapshot(db)).toEqual(before);
     db.close();
   });
+
+  test("P5: effect rows may arrive in any order", async () => {
+    const db = database();
+    const writes = adoptWrites(db, { eventId: "transfer-x", revision: 1 });
+    await run(db, [
+      ...writes.slice(0, 3),
+      {
+        sql: `INSERT INTO economic_legs(event_id,revision,leg_index,subject_ref,unit_ref,value_status,coefficient,scale,value_reason_code,role,basis)
+              VALUES('transfer-x',1,1,'account:acct-bank','JPY','exact','1',0,NULL,'fee','cash-movement')`,
+        binds: [],
+      },
+    ]);
+    const effect = (leg: number, kind: string, of: number | null): SqlWrite => ({
+      sql: "INSERT INTO economic_leg_effects(event_id,revision,leg_index,effect,of_leg_index) VALUES('transfer-x',1,?,?,?)",
+      binds: [leg, kind, of],
+    });
+    // The breakdown first, then its target's movement row.
+    expect(await run(db, [effect(1, "breakdown", 0), effect(0, "movement", null)])).toEqual([1, 1]);
+    db.close();
+  });
 });
 
 describe("one live holder across writers", () => {
