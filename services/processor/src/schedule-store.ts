@@ -215,7 +215,7 @@ export const MAINTENANCE_WRITE_CODES = {
   maintenance_rule_not_found: 404,
   /** `expectedRevision` is not the rule's current revision. */
   revision_conflict: 409,
-  /** An agent revision would lengthen the joined deferral past the bound. */
+  /** An agent revision would leave a long joined deferral its source did not already have. */
   maintenance_deferral_too_long: 422,
   /** The agent principal's rolling daily write budget is spent. */
   maintenance_write_budget_exceeded: 429,
