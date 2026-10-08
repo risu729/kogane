@@ -102,8 +102,10 @@ and `packages/application/src/query/instrument-resolution.ts`:
    `trade-unit` is a crypto asset code (`provider-asset-code`, the base of an
    SBI VC Trade product). A denominating unit that is a resolved currency
    (`iso4217`, `currency-variant`) is stated; any other (a trade currency
-   outside the explicit catalogue, stored as `unresolved-currency`) makes the
-   identifier's currency unconfirmed, so its pairs report
+   outside the explicit catalogue, stored as `unresolved-currency`), or no
+   unit at all (a position row with no currency, which the SBI rule records
+   only as `missing-monetary-unit`), makes the identifier's currency
+   unconfirmed, so its pairs report
    `currency-unconfirmed`: such a use is neither dropped nor replaced by the
    settlement unit. The identifier's set is the distinct stated values. A use
    in another role states none. Valuation observations count like any other
@@ -272,7 +274,8 @@ nothing more:
     `relation.reject` from that keep-apart command closes both held
     candidates as `rejected` and leaves nothing unresolved;
   - currencies: an unresolved trade currency is unconfirmed rather than the
-    settlement unit; an SBI VC Trade product states its quote unit;
+    settlement unit; a position with no currency makes the identifier
+    unconfirmed; an SBI VC Trade product states its quote unit;
   - an unpublished capture and a superseded parse contribute no identifier;
   - each read asks for one row past its bound, and a stub returning 10,001
     fact rows or 10,001 relations is refused;

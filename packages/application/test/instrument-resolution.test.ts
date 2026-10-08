@@ -158,7 +158,8 @@ interface Position {
   code: string;
   name: string;
   market?: string | null;
-  currency: string;
+  /** Nullable as in position_observations: a provider row may name no currency. */
+  currency: string | null;
   extra?: Record<string, unknown>;
 }
 interface Trade {
@@ -968,6 +969,56 @@ describe("currencies the observations state", () => {
     expect(result.identifiers.find((row) => row.identifierId === ric)).toMatchObject({
       currencies: ["JPY"],
       currencyUnconfirmed: false,
+    });
+    const candidate = candidateOf(result, ric, code);
+    expect(candidate.agreements).not.toContain("currency-agrees");
+    expect(candidate.gaps).toContain("currency-unconfirmed");
+  });
+
+  test("a security use with no unit at all is unconfirmed, never left out", async () => {
+    const w = new World();
+    const foreign = {
+      specificAccountCode: "SYNTHETIC",
+      securities: { securitiesCode: "SYNNC01", ric: "SYNNC01.X", countryCode: "US" },
+    };
+    await w.capture(
+      "sbi-securities",
+      [
+        {
+          account: "sbi-securities:foreign",
+          code: "SYNNC01",
+          name: "Synthetic No Currency",
+          currency: "USD",
+          extra: foreign,
+        },
+        {
+          // The provider row names no currency; the rule records no unit.
+          account: "sbi-securities:foreign",
+          code: "SYNNC01",
+          name: "Synthetic No Currency",
+          currency: null,
+          extra: foreign,
+        },
+      ],
+      [
+        {
+          account: "sbi-securities:foreign",
+          currency: "JPY",
+          extra: {
+            specificAccountCode: "SYNTHETIC",
+            tradeCurrencyCode: "USD",
+            settlementCurrencyCode: "JPY",
+            securities: { securitiesCode: "SYNNC01", countryCode: "US" },
+          },
+        },
+      ],
+    );
+    const ric = w.identifier("ric", "", "SYNNC01.X");
+    const code = w.identifier("sbi-security-code", "US", "SYNNC01");
+    const result = await queryInstrumentResolution(w.sql);
+    expect(result.identifiers.find((row) => row.identifierId === ric)).toMatchObject({
+      currencies: ["USD"],
+      currencyUnconfirmed: true,
     });
     const candidate = candidateOf(result, ric, code);
     expect(candidate.agreements).not.toContain("currency-agrees");

@@ -11,9 +11,10 @@
 //   only when it names no trade unit or the trade unit is a crypto asset
 //   code (`provider-asset-code`, an exchange product's base). A denominating
 //   unit that is a resolved currency (`iso4217`, `currency-variant`) is
-//   stated; any other (an unresolved provider code, say) makes the use's
-//   currency unconfirmed, never dropped and never replaced by the other
-//   unit. A use in another role states none.
+//   stated; any other (an unresolved provider code, say), or none at all (a
+//   provider row with no currency), makes the use's currency unconfirmed,
+//   never dropped and never replaced by the other unit. A use in another
+//   role states none.
 // - `LISTED_AS_SQL`: the newest `listed_as` relation per (instrument,
 //   identifier), ordered as the change lifecycle orders a relation's history.
 // - `INSTRUMENT_HISTORY_SQL`: the mapping revisions, mapping decisions and
@@ -46,7 +47,7 @@ export const INSTRUMENT_FACTS_SQL = `WITH eligible AS MATERIALIZED (
  JOIN source_accounts s ON s.id=o.source_account_id
  WHERE u.identifier_id IN (SELECT identifier_id FROM eligible)
 ), denominated AS (
- SELECT x.identifier_id,x.source_id,
+ SELECT x.identifier_id,x.source_id,x.role,
   CASE WHEN x.role<>'security' THEN NULL
    WHEN t.identifier_id IS NOT NULL AND td.namespace<>'provider-asset-code' THEN t.identifier_id
    ELSE n.identifier_id END AS unit_id
@@ -57,7 +58,8 @@ export const INSTRUMENT_FACTS_SQL = `WITH eligible AS MATERIALIZED (
 ), stated AS (
  SELECT DISTINCT y.identifier_id,y.source_id,
   CASE WHEN c.namespace IN ('iso4217','currency-variant') THEN c.value END AS currency,
-  CASE WHEN c.namespace NOT IN ('iso4217','currency-variant') THEN 1 ELSE 0 END AS unconfirmed
+  CASE WHEN y.role='security' AND (c.id IS NULL OR c.namespace NOT IN ('iso4217','currency-variant'))
+   THEN 1 ELSE 0 END AS unconfirmed
  FROM denominated y LEFT JOIN instrument_identifiers c ON c.id=y.unit_id
 )
 SELECT e.identifier_id AS identifierId,e.instrument_id AS instrumentId,e.method,e.status,
@@ -84,7 +86,7 @@ export interface InstrumentFactsRow {
   sourceId: string;
   /** A resolved currency the use is denominated in, or null. */
   currency: string | null;
-  /** 1 when the use is denominated in a unit that is not a resolved currency. */
+  /** 1 when a use as `security` has no denominating unit, or one that is not a resolved currency. */
   currencyUnconfirmed: 0 | 1;
 }
 

@@ -53,7 +53,7 @@ export interface ResolutionIdentifier {
   mappingRevision: number;
   sources: string[];
   currencies: string[];
-  /** A use is denominated in a unit that is not a resolved currency. */
+  /** A use as a security has no unit, or a unit that is not a resolved currency. */
   currencyUnconfirmed: boolean;
   /** The provider's own market wording, shown to a reviewer and never compared. */
   providerMarket: string | null;

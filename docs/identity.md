@@ -107,8 +107,9 @@ Market is compared through MIC or RIC only; the provider's market wording is
 shown, never compared. An identifier's currencies are those the observations
 using it as a security are denominated in: the trade unit, or the unit when
 there is no trade unit or the trade unit is a crypto asset code (SBI VC
-Trade). A trade or unit code outside the explicit currency catalogue makes the
-currency unconfirmed rather than falling back to the settlement unit, and
+Trade). A trade or unit code outside the explicit currency catalogue, or a
+use with no unit at all, makes the currency unconfirmed rather than falling
+back to the settlement unit or being left out, and
 valuations count, so SBI's yen valuations of a foreign holding beside its
 trading-currency ones make its currencies several and the comparison
 `currency-unconfirmed`.

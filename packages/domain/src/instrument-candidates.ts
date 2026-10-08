@@ -71,7 +71,7 @@ export interface InstrumentIdentifierFacts {
    */
   currencies: readonly string[];
   /**
-   * Some observation using it as a security is denominated in a unit that is
+   * Some observation using it as a security names no unit, or a unit that is
    * not a resolved currency (an unresolved provider code, say). Its currency
    * set is then incomplete, so it is never compared as agreeing or differing.
    */
