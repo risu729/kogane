@@ -215,6 +215,7 @@ export const LOT_REFUSAL_CODES = [
   "invalid_input",
   "duplicate_ref",
   "same_event_revisions",
+  "same_observation_parse_runs",
   "transfer_contract_pending",
   "unsupported_instrument",
 ] as const;
@@ -1286,8 +1287,8 @@ function isSupportedClass(value: InstrumentClass): boolean {
 /**
  * Allocate disposals to lots, book by book, under an explicit policy. Gates
  * run first and refuse the whole run: no policy, a tax purpose, an input
- * that breaks the contract, the same ref twice in one book, or two revisions
- * of one event. A transfer or an unsupported instrument class refuses only its
+ * that breaks the contract, the same ref twice for one instrument, two
+ * revisions of one event, or one observation under two parse runs. A transfer or an unsupported instrument class refuses only its
  * book. Inside a book, the first input that makes the history ambiguous or
  * inconsistent stops it: later disposals are `upstream_indeterminate` and the
  * remaining lots are not reported.
@@ -1353,6 +1354,19 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
       seen.add(ref);
     }
   }
+  // One ref in two books of the same instrument would hold the same units
+  // twice (INV06). Legs of one event on two instruments (a swap) are two
+  // facts; two sides of a transfer are refused per book below.
+  const holders = new Map<string, { books: Set<string>; transfersOnly: boolean }>();
+  for (const [key, book] of books)
+    for (const { input, ref } of book) {
+      const slot = JSON.stringify([input.instrumentRef, ref]);
+      const seen = holders.get(slot) ?? { books: new Set<string>(), transfersOnly: true };
+      seen.books.add(key);
+      seen.transfersOnly &&= input.kind === "transfer";
+      holders.set(slot, seen);
+      if (seen.books.size > 1 && !seen.transfersOnly) duplicates.push(ref);
+    }
   if (duplicates.length > 0) return refused("duplicate_ref", duplicates);
   const revisions = new Map<string, Set<string>>();
   for (const { input, ref } of entries)
@@ -1362,6 +1376,15 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
     .filter((refs) => refs.size > 1)
     .flatMap((r) => [...r]);
   if (conflicting.length > 0) return refused("same_event_revisions", conflicting);
+  const parseRuns = new Map<string, Set<string>>();
+  for (const { input, ref } of entries)
+    if (input.ref.source === "observation") {
+      const { factKind, observationId, jsonPath } = input.ref;
+      const slot = JSON.stringify([factKind, observationId, jsonPath]);
+      parseRuns.set(slot, (parseRuns.get(slot) ?? new Set()).add(ref));
+    }
+  const reparsed = [...parseRuns.values()].filter((refs) => refs.size > 1).flatMap((r) => [...r]);
+  if (reparsed.length > 0) return refused("same_observation_parse_runs", reparsed);
 
   const results: LotBook[] = [];
   const keys = [...books.keys()].sort();

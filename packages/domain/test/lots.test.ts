@@ -615,15 +615,70 @@ describe("refs", () => {
     ).toBe("transaction:7@parse_run:2");
   });
 
-  test("the same ref twice in one book is duplicate_ref; in two books it is two legs", () => {
+  test("the same ref twice in one book is duplicate_ref; on two instruments it is two legs", () => {
     const a = buy("a", "2030-01-06", "10", "1000");
     expect(computeLots([a, a], policy())).toMatchObject({
       status: "refused",
       reasonCode: "duplicate_ref",
       refs: [ref("a")],
     });
-    const other = { ...a, wrapperKey: "wrapper:test:other" };
-    expect(computed(computeLots([a, other], policy())).books).toHaveLength(2);
+    const otherInstrument = {
+      ...a,
+      kind: "disposal" as const,
+      instrumentRef: "instrument:test:beta",
+      quantity: q("instrument:test:beta", "10"),
+    };
+    expect(computed(computeLots([a, otherInstrument], policy())).books).toHaveLength(2);
+  });
+
+  test("review finding 2: one ref in two books of the same instrument is duplicate_ref", () => {
+    const a = buy("a", "2030-01-06", "10", "1000");
+    for (const other of [
+      { ...a, wrapperKey: "wrapper:test:other" },
+      { ...a, holderRef: "account:test:b" },
+    ])
+      expect(computeLots([a, other], policy())).toMatchObject({
+        status: "refused",
+        reasonCode: "duplicate_ref",
+        refs: [ref("a")],
+      });
+  });
+
+  test("review finding 2: the two sides of one transfer still refuse only their books", () => {
+    const out = input("t", { kind: "transfer" });
+    const into = { ...out, holderRef: "account:test:b" };
+    const result = computed(computeLots([out, into], policy()));
+    expect(result.books.map((book) => book.status === "refused" && book.reasonCode)).toEqual([
+      "transfer_contract_pending",
+      "transfer_contract_pending",
+    ]);
+  });
+
+  test("review finding 2: one observation under two parse runs is refused", () => {
+    const observed = (parseRunId: number, date: string): LotInput => ({
+      ...buy("o", date, "10", "1000"),
+      ref: {
+        source: "observation",
+        factKind: "transaction",
+        observationId: 7,
+        parseRunId,
+        jsonPath: "$.rows[0]",
+      },
+    });
+    expect(
+      computeLots([observed(1, "2030-01-06"), observed(2, "2030-01-07")], policy()),
+    ).toMatchObject({
+      status: "refused",
+      reasonCode: "same_observation_parse_runs",
+      refs: ["transaction:7@parse_run:1#$.rows[0]", "transaction:7@parse_run:2#$.rows[0]"],
+    });
+    const otherPath = {
+      ...observed(2, "2030-01-07"),
+      ref: { ...observed(2, "2030-01-07").ref, jsonPath: "$.rows[1]" },
+    };
+    expect(computeLots([observed(1, "2030-01-06"), otherPath as LotInput], policy()).status).toBe(
+      "computed",
+    );
   });
 
   test("two revisions of one event are same_event_revisions", () => {
