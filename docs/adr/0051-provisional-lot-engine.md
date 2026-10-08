@@ -70,51 +70,61 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   (`capitalize | exclude`), disposal fee (`reduce-proceeds | separate`), FX
   (`lot-currency | convert-at-input-rate`) with `fxPolicyRef` and, when
   converting, `costUnitRef`, and rounding (a `RoundingPolicy` at `leg` with
-  `carry`, or null). A null policy is `policy_missing`; a well-formed
-  rounding policy at another point or with another residual is
-  `policy_unsupported` (largest-remainder needs every disposal up front,
-  `leave` breaks conservation, `refuse` is what no rounding already does); a
-  `tax` purpose is refused `tax_rules_unverified` by calling the unchanged
-  `costBasis()` gate.
-- **Gates.** Whole-run refusals: `policy_missing`, `policy_unsupported`,
-  `tax_rules_unverified`, `invalid_input` (including inputs that are not a
-  list, and lot selections under FIFO or moving average, which would
-  otherwise be ignored), `duplicate_ref` (one ref in one book twice, or in two
-  books of the same instrument unless every occurrence is a transfer),
-  `same_event_revisions` (two revisions of one event) and
-  `same_observation_parse_runs` (one observation and JSON path under two
-  parse runs). Per book:
-  `unsupported_instrument` (only listed equity, fund units and crypto assets,
-  long spot) and `transfer_contract_pending` (any transfer input).
+  `carry`, or null).
+- **Gates.** Checked in this order, each refusing the whole run:
+  `policy_missing` (no policy); `invalid_input` for a malformed policy;
+  `policy_unsupported` for a well-formed rounding policy at another point or
+  with another residual (largest-remainder needs every disposal up front,
+  `leave` breaks conservation, `refuse` is what no rounding already does),
+  checked before the tax gate; `tax_rules_unverified` for a `tax` purpose,
+  decided by calling the unchanged `costBasis()` gate; `invalid_input` for
+  inputs that are not a list, break the contract, or carry lot selections
+  under FIFO or moving average (where they would be ignored);
+  `duplicate_ref` (one ref twice in one book, or in two books of the same
+  instrument unless every occurrence is a transfer); `same_event_revisions`
+  (two revisions of one event); `same_observation_parse_runs` (one
+  observation and JSON path under two parse runs; a re-parse that pins the
+  same row under a different or null JSON path, or under a new observation
+  id, is not caught). Per book: `unsupported_instrument` (only listed equity,
+  fund units and crypto assets, long spot) and `transfer_contract_pending`
+  (any transfer input).
 - **Ordering.** Inputs are ordered by `compareTemporal` on the policy's basis.
   No id, ref, revision or recorded-at time ever decides an economic order.
-  Inputs are laid out on one absolute line (instants by epoch, dates and
-  periods by their civil days) and cut into groups so that every input of a
-  later group is strictly after every input of every earlier group; an input
-  joins the current group as soon as one earlier input is not strictly before
-  it. A group of more than one input (same date, an instant inside a dated
-  day, overlapping periods) is `order_tie`, except same-time acquisitions
+  Inputs are laid out on one line and cut into groups so that every input of
+  a later group is strictly after every input of every earlier group; an
+  input joins the current group as soon as one earlier input is not strictly
+  before it. Dates and periods sit at their civil days. Instants sit at their
+  epoch in a book of instants only; in a book that also has dates or periods
+  they sit at the start of their own calendar day (epoch + their own offset,
+  the day `compareTemporal` uses against a date), and the instants of one day
+  follow each other by epoch. Two instants are compared by epoch, two dates or
+  periods by their day bounds, and an instant against a date or period by
+  `compareTemporal`. A group of more than one input (same date, an instant
+  inside a dated day, overlapping periods, two instants whose calendar-day
+  and epoch orders disagree) is `order_tie`, except same-time acquisitions
   under moving average and same-time disposals under moving average without
-  rounding, which commute. Two rules apply to the whole book: an unknown time
-  is `unknown_time`, and dates or periods in two named zones, or an instant in
-  another zone than the book's dates, are `order_tie` for every input,
-  however far apart. The zone rule is whole-book because `compareTemporal`
-  never orders a date against a date or instant in another named zone, and
-  the grouping skips comparisons between inputs more than two days apart only
-  because one zone holds across the book.
+  rounding, which commute. Comparisons are skipped between inputs three or
+  more calendar days apart on the layout: for two instants that means more
+  than 48 hours of wall time, and wall time is at most 18 hours from epoch, so
+  their epochs are in the same order whatever their offsets or zones. Two
+  rules apply to the whole book: an unknown time is `unknown_time`, and dates
+  or periods in two named zones, or an instant in another zone than the
+  book's dates, are `order_tie` for every input, however far apart, because
+  `compareTemporal` never orders a date against a date or instant in another
+  named zone.
 - **Allocation.** Partial consumption takes `cost × q / Q` of the lot's
   remaining cost through `multiplyByRatio`. Without rounding an inexact share
   is `inexact_allocation`; with rounding each share is rounded and keeps its
   `RoundingInputs`, and the consumption that empties a lot takes the exact
   remainder, so allocated + remaining always equals what entered; a rounded
   share that would exceed what is left or flip its sign is
-  `inexact_allocation`. Moving
-  average keeps exact pool totals and never stores a unit price. A split
-  scales the remaining quantity of every lot still held by its exact ratio,
-  keeps cost, acquisition time and the quantity as entered, and is recorded
-  in the lot's lineage; consumed lots are left as they were. A ratio that does
-  not scale a remainder exactly or disagrees with the stated post-split
-  holding is `corporate_action_unsupported`.
+  `inexact_allocation`. Moving average keeps exact pool totals and never
+  stores a unit price. A split scales the remaining quantity of every lot
+  still held by its exact ratio, keeps cost, acquisition time and the
+  quantity as entered, and is recorded in the lot's lineage; consumed lots
+  are left as they were. A ratio that does not scale a remainder exactly or
+  disagrees with the stated post-split holding is
+  `corporate_action_unsupported`.
 - **Snapshots.** A snapshot with no earlier input in its book seeds a lot of
   unknown cost (`snapshot_only`); it never carries a cost, so a provider's
   stated acquisition cost is never seeded into a lot. A later snapshot is a
@@ -122,33 +132,41 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   `history_gap` reason: a gap between a history and a later snapshot surfaces
   as `snapshot_mismatch`, and a holding known only from a snapshot as
   `snapshot_only`.
-- **Stops.** The first input that makes a book ambiguous or inconsistent
-  (`negative_holding`, `order_tie`, `snapshot_mismatch`,
-  `lot_selection_missing`, `unknown_lot`, `lot_selection_mismatch`,
-  `inexact_allocation`, `value_not_exact`, `unit_mismatch` in a pool,
-  `corporate_action_unsupported`) is `indeterminateFrom` (its refs; a group of
-  inputs the time does not order is reported as a whole, decided on the
-  group, never on ref order); later disposals are
+- **Outcomes.** A disposal is `allocated` when every unit came from a lot and
+  cost, acquisition fees, proceeds and disposal fees are all known. It is
+  `limited` when every unit came from a lot but something is unknown or not
+  summable; its reasons are only these closed codes
+  (`LOT_LIMITED_REASON_CODES`): `unknown_cost`, `unknown_acquisition_fee`,
+  `unknown_proceeds`, `unknown_disposal_fee`, `fx_rate_missing` and
+  `unit_mismatch`. It is `indeterminate` when nothing was allocated.
+- **Stops.** The first input, or group of inputs the time does not order,
+  that makes a book ambiguous or inconsistent (`negative_holding`,
+  `order_tie`, `unknown_time`, `snapshot_mismatch`, `lot_selection_missing`,
+  `unknown_lot`, `lot_selection_mismatch`, `inexact_allocation`,
+  `value_not_exact`, `unit_mismatch` in a pool,
+  `corporate_action_unsupported`) is `indeterminateFrom` with all its refs; a
+  group is judged as a whole, never by ref order. Later disposals are
   `upstream_indeterminate` and remaining lots are not reported. A disposal is
   never filled by a synthetic short, and a stale specific-identification
   selection is never reassigned to another lot.
 - **Output.** Per book: disposals with allocations (lot, its acquisition ref
-  or, for a moving-average pool, the number of pool members that had joined,
-  quantity, cost, acquisition fees, FX basis, rounding inputs), the book's
-  moving-average pools listed once each with their members in join order (so
-  output grows with the inputs, not with inputs × disposals), allocated cost
-  or null,
-  proceeds and disposal fees side by side, an outcome
-  (`allocated | limited | indeterminate`) and closed reason codes; remaining
-  lots with a `lineage` (origin ref, origin acquisition time, origin cost unit,
-  `fragmentOf`, splits). A lot's id is its acquisition's (or seeding
-  snapshot's) ref text; a moving-average pool's is `pool:<first ref>`, the
-  first acquisition or snapshot since the holding was last empty. A manifest of the contract, the engine version, the
-  policy, the sorted refs and the validated inputs themselves (copied, sorted
-  by book and ref) is returned for the caller to digest with
-  `canonicalDigest`. The manifest therefore fixes the inputs: equal digests
-  mean equal inputs, policy and engine, and so an equal result. There is no
-  realized gain and no tax conclusion.
+  or, for a moving-average pool, how many of the pool's members had joined,
+  quantity, cost, acquisition fees, FX basis, rounding inputs), allocated
+  cost or null, proceeds and disposal fees side by side, the outcome and its
+  reason codes; the book's moving-average pools, each listed once with its
+  members in join order (so output grows with the inputs, not with inputs ×
+  disposals); remaining lots with a `lineage` (origin ref, origin acquisition
+  time, origin cost unit, `fragmentOf`, splits). A lot's id is its
+  acquisition's (or seeding snapshot's) ref text; a moving-average pool's is
+  `pool:<first ref>`, the first acquisition or snapshot since the holding was
+  last empty. A manifest of the contract, the engine version, the policy, the
+  sorted refs and the validated inputs themselves (copied, sorted by book and
+  ref) is returned for the caller to digest with `canonicalDigest`. The
+  manifest therefore fixes the inputs: equal digests mean equal inputs,
+  policy and engine, and so an equal result. `LOT_ENGINE_VERSION` is bumped
+  on every change to an allocation rule so that this keeps holding across
+  releases; this first merge keeps `lot-engine-v0`. There is no realized gain
+  and no tax conclusion.
 
 ## Consequences
 
@@ -163,6 +181,20 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   caller must choose them, and the manifest pins the choice.
 - `costBasis()` is unchanged and still returns `needs-policy` for every
   request; a tax purpose cannot reach a number through this engine.
+- The manifest holds amounts and quantities: it is a calculation input, not
+  an operational record. A future writer stores it only as a report body
+  (retention class `report`), never in a log line, tick record or lane state,
+  which carry counts and closed codes only.
+- Measured bound (Bun 1.4.2 in a development container, review
+  scripts `perf.ts` and `perf2.ts`, one book, synthetic inputs): 5,000
+  intraday fills (instants one second apart, alternating buy and sell) 382 ms
+  FIFO / 327 ms moving average; 5,000 acquisitions on one date 200 ms FIFO
+  (an order tie) / 226 ms moving average; 5,000 daily inputs 137 ms / 110 ms;
+  20,000 daily inputs 387 ms FIFO, and 362 ms for 20,000 daily inputs mixing
+  buys and sells; 20,000 daily moving-average inputs 393 ms with 21.8 MB of
+  output. Before the review's fixes the same cases took 14.3 s, 5.0 s and
+  10.9 s. No case is above a second, so no input budget is set; a caller
+  feeding much larger books should measure again.
 - `calculation_results` cannot hold the lot reason codes (its reason CHECK is
   the valuation list), so a retained lot result would be a later report
   purpose, not a row there.
@@ -216,5 +248,13 @@ skipping consumed lots; the gates (tax, null policy, `policy_unsupported` for
 rounding as `invalid_input`, selections under FIFO and moving average, a
 non-list input, margin class, transfer); identical results and manifest
 digests under input permutation, and different digests for a different
-input under the same ref; validators rejecting unknown keys. Not
+input under the same ref; validators rejecting unknown keys; an evening
+instant at a negative offset ordered before the next day's dated sale; the
+comparison window boundary (instants at +14:00 and −12:00 three calendar days
+apart, and two calendar days apart with inverted epochs, which tie; dates
+against instants 47 to 49 hours away); moving-average pools listed once with
+the number of members each allocation drew on; `unknown_disposal_fee`; every
+limited outcome using only the six limited codes. Review scripts outside the
+repository (input permutation, conservation over random histories and random
+grouping against pairwise `compareTemporal`) found no unsound outcome. Not
 verified: any real evidence, any adapter, D1, Workers or production data.

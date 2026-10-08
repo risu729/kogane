@@ -220,8 +220,9 @@ What it does today:
   (`lot-currency`, or `convert-at-input-rate` into `costUnitRef` with the
   input's own rate and its ref) with an FX policy ref, and rounding. None of
   them has a default; no policy is `policy_missing`, a rounding policy other
-  than `leg` with `carry` is `policy_unsupported`, and a `tax` purpose is
-  refused `tax_rules_unverified` through `costBasis()`.
+  than `leg` with `carry` is `policy_unsupported` (checked before the tax
+  gate), and a `tax` purpose is refused `tax_rules_unverified` through
+  `costBasis()`.
 - Partial allocation takes `cost × q / Q` exactly; without rounding an
   inexact share is `inexact_allocation`, with a `leg`/`carry` rounding policy
   each share keeps its rounding inputs and the last consumption takes the
@@ -231,7 +232,8 @@ What it does today:
 - Inputs the economic time does not order are `order_tie` (same-time
   acquisitions, and same-time unrounded disposals, commute under moving
   average); an unknown time is `unknown_time`. Ids and recorded-at times
-  never order anything.
+  never order anything. Beside dates, an instant is placed by its own
+  calendar day, as `compareTemporal` places it against a date.
 - A snapshot with no history seeds a lot of unknown cost (`snapshot_only`);
   a later snapshot is a check (`snapshot_mismatch`). A provider-stated
   acquisition cost never becomes a lot cost. A disposal beyond the holding is
@@ -241,15 +243,21 @@ What it does today:
   than listed equity, fund units and crypto assets refuse theirs
   (`unsupported_instrument`).
 - Results carry allocations, allocated cost, proceeds and disposal fees side
-  by side with closed reason codes, remaining lots with a reserved `lineage`,
-  and a manifest holding the policy and the validated inputs, which the
-  caller digests with `canonicalDigest`. There is no gain
-  and no tax conclusion.
+  by side with closed reason codes, moving-average pools listed once, remaining
+  lots with a reserved `lineage`, and a manifest holding the policy and the
+  validated inputs, which the caller digests with `canonicalDigest`. A
+  `limited` disposal's reasons are only `unknown_cost`,
+  `unknown_acquisition_fee`, `unknown_proceeds`, `unknown_disposal_fee`,
+  `fx_rate_missing` and `unit_mismatch`. The manifest holds amounts, so a
+  future writer stores it only as a report body, never in a log or tick
+  record. `LOT_ENGINE_VERSION` is bumped on every allocation-rule change.
+  There is no gain and no tax conclusion.
 
 Limits: no adapter maps events or observations to these inputs, so the
 engine runs only in tests; the input contract is provisional; own-account
 transfers, other corporate actions and short or margin positions are not
-handled; results are not stored (`calculation_results` cannot hold the lot
+handled; a re-parse that pins the same row under a different JSON path is
+not detected as a duplicate; results are not stored (`calculation_results` cannot hold the lot
 reason codes); P&L and tax outputs are absent.
 
 ## 4. Reports are not projections

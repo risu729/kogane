@@ -6,6 +6,7 @@ import { canonicalDigest, canonicalJson } from "../src/context.ts";
 import {
   computeLots,
   LOT_INPUT_CONTRACT,
+  LOT_LIMITED_REASON_CODES,
   lotInputRefText,
   validLotInput,
   validLotInputRef,
@@ -368,8 +369,17 @@ describe("disposal fees", () => {
       .disposals[0]!;
     expect(amountText(disposal.proceeds)).toBe("unknown:fee_unknown");
     expect(disposal.outcome).toBe("limited");
-    expect(disposal.reasonCodes).toEqual(["unknown_proceeds"]);
+    expect(disposal.reasonCodes).toEqual(["unknown_disposal_fee", "unknown_proceeds"]);
     expect(quantityText(disposal.allocatedCost)).toBe("1000");
+  });
+
+  test("an unknown disposal fee kept separate is unknown_disposal_fee; proceeds stay known", () => {
+    const fees = [absentQuantity("JPY", "missing", "not_stated")];
+    const disposal = onlyBook(computeLots(inputs(fees), policy())).disposals[0]!;
+    expect(amountText(disposal.proceeds)).toBe("1500 JPY");
+    expect(amountText(disposal.disposalFees)).toBe("unknown:fee_unknown");
+    expect(disposal.outcome).toBe("limited");
+    expect(disposal.reasonCodes).toEqual(["unknown_disposal_fee"]);
   });
 });
 
@@ -1509,5 +1519,62 @@ describe("the comparison skip is sound at its window boundary", () => {
       expect(book.indeterminateFrom).toBeNull();
       expect(book.disposals[0]!.outcome).toBe("allocated");
     }
+  });
+});
+
+describe("a limited disposal's reasons come from the closed limited list", () => {
+  test("every limited outcome in these scenarios uses LOT_LIMITED_REASON_CODES only", () => {
+    const fees = [absentQuantity("JPY", "missing", "not_stated")];
+    const plain = policy();
+    const reduceExclude = policy({ disposalFee: "reduce-proceeds", acquisitionFee: "exclude" });
+    const convert = policy({ fx: "convert-at-input-rate", costUnitRef: "JPY" });
+    const scenarios: [LotInput[], LotPolicy[]][] = [
+      [
+        [
+          input("a", { kind: "acquisition", consideration: null }),
+          sell("s", "2030-01-07", "5", "1"),
+        ],
+        [plain, reduceExclude, convert],
+      ],
+      [
+        [
+          buy("a", "2030-01-06", "10", "1000", { fees }),
+          sell("s", "2030-01-07", "5", "1", { fees }),
+        ],
+        [plain, reduceExclude, convert],
+      ],
+      [
+        [
+          input("a", { kind: "acquisition", consideration: usd("1") }),
+          buy("b", "2030-01-07", "10", "1"),
+          sell("s", "2030-01-08", "15", "1"),
+        ],
+        [plain, reduceExclude, convert],
+      ],
+      [
+        [
+          input("a", { kind: "acquisition", consideration: usd("1") }),
+          input("s", {
+            kind: "disposal",
+            date: "2030-01-07",
+            quantity: "5",
+            consideration: usd("1"),
+          }),
+        ],
+        [convert],
+      ],
+    ];
+    const limited = new Set<string>(LOT_LIMITED_REASON_CODES);
+    const seen = new Set<string>();
+    for (const [scenario, policies] of scenarios)
+      for (const p of policies) {
+        const disposal = onlyBook(computeLots(scenario, p)).disposals[0]!;
+        expect(disposal.outcome).toBe("limited");
+        for (const reason of disposal.reasonCodes) {
+          expect(limited.has(reason)).toBe(true);
+          seen.add(reason);
+        }
+      }
+    expect([...seen].sort()).toEqual([...LOT_LIMITED_REASON_CODES].sort());
   });
 });

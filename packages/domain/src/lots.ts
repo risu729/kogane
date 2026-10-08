@@ -61,7 +61,12 @@ import {
 
 /** The provisional input contract. A later, decided contract gets a new tag. */
 export const LOT_INPUT_CONTRACT = "provisional-lot-input-v0";
-/** Version of the allocation rules in this module; part of every manifest. */
+/**
+ * Version of the allocation rules in this module; part of every manifest.
+ * Bumped on every change to an allocation rule (ordering, grouping, shares,
+ * rounding, refusals, output meaning), so equal manifests keep meaning equal
+ * results across releases.
+ */
 export const LOT_ENGINE_VERSION = "lot-engine-v0";
 
 export const LOT_INPUT_KINDS = [
@@ -230,7 +235,10 @@ export type LotBookRefusalCode = Extract<
   "transfer_contract_pending" | "unsupported_instrument"
 >;
 
-/** Why a disposal is limited or indeterminate, or why a book stopped being determinate. */
+/**
+ * Why a disposal is limited or indeterminate, or why a book stopped being
+ * determinate. A `limited` disposal carries only `LOT_LIMITED_REASON_CODES`.
+ */
 export const LOT_REASON_CODES = [
   "order_tie",
   "unknown_time",
@@ -238,6 +246,7 @@ export const LOT_REASON_CODES = [
   "unknown_cost",
   "unknown_acquisition_fee",
   "unknown_proceeds",
+  "unknown_disposal_fee",
   "snapshot_mismatch",
   "unknown_lot",
   "lot_selection_missing",
@@ -250,6 +259,16 @@ export const LOT_REASON_CODES = [
   "upstream_indeterminate",
 ] as const;
 export type LotReasonCode = (typeof LOT_REASON_CODES)[number];
+
+/** Every unit came from a lot, but one of these is unknown or not summable. */
+export const LOT_LIMITED_REASON_CODES = [
+  "unknown_cost",
+  "unknown_acquisition_fee",
+  "unknown_proceeds",
+  "unknown_disposal_fee",
+  "fx_rate_missing",
+  "unit_mismatch",
+] as const satisfies readonly LotReasonCode[];
 
 /** Why an amount (a cost, a fee total, proceeds) is not known. */
 export const LOT_AMOUNT_UNKNOWN_REASONS = [
@@ -351,8 +370,9 @@ export type LotDisposalOutcome = (typeof LOT_DISPOSAL_OUTCOMES)[number];
 
 /**
  * `allocated`: every unit came from a lot and cost, acquisition fees,
- * proceeds and disposal fees are all known. `limited`: every unit came from a lot, but something is unknown or
- * not summable (the reasons say what). `indeterminate`: no allocation at all.
+ * proceeds and disposal fees are all known. `limited`: every unit came from
+ * a lot, but something is unknown or not summable; its reasons are drawn
+ * from `LOT_LIMITED_REASON_CODES`. `indeterminate`: no allocation at all.
  * There is no gain field: cost and proceeds are reported side by side.
  */
 export interface LotDisposal {
@@ -1133,7 +1153,7 @@ function applyDisposal(
   else if (total !== null && total.reasonCode === "unit_mismatch") reasons.add("unit_mismatch");
   const side = disposalSide(entry.input, policy);
   for (const reason of amountReasons(side.proceeds, "unknown_proceeds")) reasons.add(reason);
-  for (const reason of amountReasons(side.fees, "unknown_proceeds")) reasons.add(reason);
+  for (const reason of amountReasons(side.fees, "unknown_disposal_fee")) reasons.add(reason);
   state.disposals.push(
     disposalRecord(
       entry,
@@ -1665,6 +1685,9 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
     .filter((refs) => refs.size > 1)
     .flatMap((r) => [...r]);
   if (conflicting.length > 0) return refused("same_event_revisions", conflicting);
+  // One observation row pinned under two parse runs. A re-parse that pins the
+  // same row under a different or null JSON path, or a new observation id,
+  // looks like a different fact here and is not caught.
   const parseRuns = new Map<string, Set<string>>();
   for (const { input, ref } of entries)
     if (input.ref.source === "observation") {
