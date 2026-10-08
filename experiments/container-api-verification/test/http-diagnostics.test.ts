@@ -5,12 +5,12 @@ import {
   syntheticHttpFailure,
 } from "../http-diagnostics.mjs";
 import { worker } from "../src/common";
-import { verifyPhase } from "../driver.mjs";
+import { verifyPhase, verifyConcurrency } from "../driver.mjs";
 
 const routes = [
   ["/initialize", "initialize", "POST"],
   ["/state", "state", "GET"],
-  ["/once", "once", "POST"],
+  ["/once", "once_concurrency", "POST", "concurrency"],
   ["/stats", "stats", "GET"],
   ["/delay", "delay", "GET"],
   ["/stream", "stream", "GET"],
@@ -40,10 +40,10 @@ const statuses: [number, string][] = [
 ];
 
 test("each fixed route maps exact outer and upstream HTTP categories without reading a body", () => {
-  for (const [path, route, method] of routes) {
+  for (const [path, route, method, substage] of routes) {
     for (const [status, category] of statuses) {
       const outer = new Response("private-provider-body", { status });
-      expect(syntheticHttpFailure(path, method, outer)).toBe(
+      expect(syntheticHttpFailure(path, method, outer, substage)).toBe(
         `verification_http_${route}_outer_${category}`,
       );
       expect(outer.bodyUsed).toBe(false);
@@ -54,7 +54,7 @@ test("each fixed route maps exact outer and upstream HTTP categories without rea
           "x-verification-upstream-status": String(status),
         },
       });
-      expect(syntheticHttpFailure(path, method, upstream)).toBe(
+      expect(syntheticHttpFailure(path, method, upstream, substage)).toBe(
         `verification_http_${route}_upstream_${category}`,
       );
       expect(upstream.bodyUsed).toBe(false);
@@ -292,4 +292,75 @@ test("phase verification uses route diagnostics before any success report or rec
   ).rejects.toThrow("verification_http_initialize_upstream_server_error");
   expect(paths).toEqual(["/state", "/initialize"]);
   expect(reports).toEqual([]);
+});
+
+test("once HTTP diagnostics require one of five exact substages before any request", async () => {
+  let calls = 0;
+  const response = new Response("private-provider-body", { status: 503 });
+  const request = createSyntheticRequest({
+    origin: "https://synthetic.invalid",
+    key: "private-key",
+    fetchImpl: async () => {
+      calls++;
+      return response;
+    },
+  });
+  const stages = [
+    "concurrency",
+    "idle_restart",
+    "destroy_restart",
+    "signal_restart",
+    "exit_restart",
+  ];
+  for (const stage of stages) {
+    const code = `verification_http_once_${stage}_outer_unavailable`;
+    await expect(request("/once", "POST", stage)).rejects.toThrow(code);
+    expect(canonicalDriverHttpCode(code)).toBe(code);
+    expect(
+      syntheticHttpFailure(
+        "/once",
+        "POST",
+        new Response(null, {
+          status: 502,
+          headers: {
+            "x-verification-failure": "upstream_http",
+            "x-verification-upstream-status": "503",
+          },
+        }),
+        stage,
+      ),
+    ).toBe(`verification_http_once_${stage}_upstream_unavailable`);
+  }
+  expect(calls).toBe(5);
+  for (const stage of [undefined, "unknown", "concurrency private-text", "concurrency\n", {}, null])
+    await expect(request("/once", "POST", stage)).rejects.toThrow("verification_http_route");
+  await expect(request("/delay", "GET", "concurrency")).rejects.toThrow("verification_http_route");
+  expect(calls).toBe(5);
+  expect(response.bodyUsed).toBe(false);
+  expect(
+    canonicalDriverHttpCode("verification_http_once_concurrency_upstream_unavailable private-text"),
+  ).toBeUndefined();
+});
+
+test("both cold concurrent POSTs carry the exact concurrency substage without extra POSTs", async () => {
+  const calls: [string, string, string | undefined][] = [];
+  let states = 0;
+  const processIdentity = "dddddddd-dddd-4ddd-addd-dddddddddddd";
+  await verifyConcurrency({
+    phase: "native",
+    json: async (path: string, method = "GET", substage?: string) => {
+      calls.push([path, method, substage]);
+      if (path === "/state")
+        return states++ === 0 ? { running: 0, starts: 0 } : { running: 1, starts: 1 };
+      if (path === "/once") return { accepted: 1, processIdentity };
+      return { posts: 2, processIdentity };
+    },
+  });
+  expect(calls.filter(([, method]) => method === "POST")).toEqual([
+    ["/once", "POST", "concurrency"],
+    ["/once", "POST", "concurrency"],
+  ]);
+  expect(
+    calls.filter(([path]) => path !== "/once").every(([, , substage]) => substage === undefined),
+  ).toBe(true);
 });

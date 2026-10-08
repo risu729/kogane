@@ -146,7 +146,10 @@ export async function verifyConcurrency({ phase, json }) {
     closed("phase");
   const before = await json("/state");
   if (before?.running !== 0) closed("concurrency_state");
-  const replies = await Promise.all([json("/once", "POST"), json("/once", "POST")]);
+  const replies = await Promise.all([
+    json("/once", "POST", "concurrency"),
+    json("/once", "POST", "concurrency"),
+  ]);
   const after = await json("/state"),
     stats = await json("/stats");
   if (replies.some((reply) => reply?.accepted !== 1) || stats?.posts !== 2)
@@ -249,9 +252,9 @@ export async function verifyPhase({
     sdkAlarmChecks: 0,
   };
   const request = createSyntheticRequest({ origin, key, fetchImpl });
-  async function json(path, method = "GET") {
+  async function json(path, method = "GET", substage) {
     try {
-      return await (await request(path, method)).json();
+      return await (await request(path, method, substage)).json();
     } catch (error) {
       if (error?.message?.startsWith("verification_")) throw error;
       closed("response");
@@ -411,10 +414,10 @@ export async function verifyPhase({
   await waitState((value) => value.running === 0);
   counts.idleChecks++;
   counts.idleObservedMs = Date.now() - idleStarted;
-  await json("/once", "POST");
+  await json("/once", "POST", "idle_restart");
   await json("/destroy", "POST");
   if ((await json("/state")).running !== 0) closed("destroy");
-  await json("/once", "POST");
+  await json("/once", "POST", "destroy_restart");
   if ((await json("/stats")).posts !== 1) closed("restart");
   counts.destroyRestartChecks++;
   await json("/signal", "POST");
@@ -422,14 +425,14 @@ export async function verifyPhase({
   counts.signalChecks++;
   if (["native", "native_recovered"].includes(phase) && (await json("/state")).signaled < 1)
     closed("signal_diagnostic");
-  await json("/once", "POST");
+  await json("/once", "POST", "signal_restart");
   await json("/exit", "POST");
   await waitState((value) => value.running === 0);
   counts.nonzeroExitChecks++;
   if (["native", "native_recovered"].includes(phase) && (await json("/state")).exitSeven < 1)
     closed("exit_diagnostic");
   if (phase === "baseline_sdk" || phase === "rollback_sdk") {
-    await json("/once", "POST");
+    await json("/once", "POST", "exit_restart");
     if ((await json("/state")).sdkAlarmPresent !== 1) closed("sdk_alarm");
     counts.sdkAlarmChecks++;
   }

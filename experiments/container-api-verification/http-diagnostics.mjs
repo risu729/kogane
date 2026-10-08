@@ -13,6 +13,13 @@ const routes = Object.freeze({
   "/signal": ["signal", "POST"],
   "/exit": ["exit", "POST"],
 });
+const onceStages = Object.freeze([
+  "concurrency",
+  "idle_restart",
+  "destroy_restart",
+  "signal_restart",
+  "exit_restart",
+]);
 const statuses = new Map([
   [400, "bad_request"],
   [401, "unauthorized"],
@@ -35,7 +42,10 @@ const categories = [
   "invalid_status",
 ];
 const codes = ["verification_http_route"];
-for (const [route] of Object.values(routes)) {
+const routeLabels = Object.values(routes).flatMap(([route]) =>
+  route === "once" ? onceStages.map((stage) => `once_${stage}`) : [route],
+);
+for (const route of routeLabels) {
   for (const origin of ["outer", "upstream"])
     for (const category of categories)
       codes.push(`verification_http_${route}_${origin}_${category}`);
@@ -49,9 +59,14 @@ const canonicalCodes = Object.freeze(codes);
 export function canonicalDriverHttpCode(value) {
   return canonicalCodes.find((entry) => entry === value);
 }
-export function syntheticRoute(path, method) {
+export function syntheticRoute(path, method, substage) {
   if (typeof path !== "string" || !Object.hasOwn(routes, path) || routes[path][1] !== method)
     throw new Error("verification_http_route");
+  if (path === "/once") {
+    if (!onceStages.includes(substage)) throw new Error("verification_http_route");
+    return `once_${substage}`;
+  }
+  if (substage !== undefined) throw new Error("verification_http_route");
   return routes[path][0];
 }
 function statusCategory(status) {
@@ -63,8 +78,8 @@ function statusCategory(status) {
   if (status >= 200) return "unexpected_success";
   return "invalid_status";
 }
-export function syntheticHttpFailure(path, method, response) {
-  const route = syntheticRoute(path, method);
+export function syntheticHttpFailure(path, method, response, substage) {
+  const route = syntheticRoute(path, method, substage);
   const failure = response.headers.get("x-verification-failure");
   const upstream = response.headers.get("x-verification-upstream-status");
   let suffix;
@@ -83,8 +98,8 @@ export function syntheticHttpFailure(path, method, response) {
 }
 /** The same bounded, single request used by phase verification, with no error-body reads. */
 export function createSyntheticRequest({ origin, key, fetchImpl = fetch }) {
-  return async function request(path, method = "GET") {
-    syntheticRoute(path, method);
+  return async function request(path, method = "GET", substage) {
+    syntheticRoute(path, method, substage);
     let response;
     try {
       response = await fetchImpl(`${origin}${path}`, {
@@ -96,7 +111,8 @@ export function createSyntheticRequest({ origin, key, fetchImpl = fetch }) {
     } catch {
       throw new Error("verification_transport");
     }
-    if (response.status !== 200) throw new Error(syntheticHttpFailure(path, method, response));
+    if (response.status !== 200)
+      throw new Error(syntheticHttpFailure(path, method, response, substage));
     return response;
   };
 }

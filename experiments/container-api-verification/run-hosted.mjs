@@ -97,6 +97,8 @@ const RUNNER_CODES = new Set(
     "failed",
     "image_missing",
     "inputs",
+    "instances",
+    "instances_timeout",
     "namespaces",
     "preexisting",
     "private_directory",
@@ -133,6 +135,7 @@ for (const endpoint of [
   "namespace_objects",
   "applications",
   "application_versions",
+  "application_instances",
   "worker_version",
 ])
   for (const category of HTTP_CATEGORIES)
@@ -574,6 +577,9 @@ export function canonicalApiPath(path, method = "GET") {
   const namespace = /^workers\/durable_objects\/namespaces\/([a-f0-9]{32})\/objects$/u.exec(path);
   if (namespace && method === "GET")
     return `workers/durable_objects/namespaces/${canonicalHex(namespace[1], 32)}/objects`;
+  const instances = /^containers\/applications\/([a-f0-9-]+)\/instances-v2$/u.exec(path);
+  if (instances && method === "GET")
+    return `containers/applications/${canonicalUuid(instances[1])}/instances-v2`;
   const app = /^containers\/applications\/([a-f0-9-]+)(\/versions)?$/u.exec(path);
   if (app && (method === "GET" || (method === "DELETE" && app[2] === undefined)))
     return `containers/applications/${canonicalUuid(app[1])}${app[2] ? "/versions" : ""}`;
@@ -602,6 +608,11 @@ export function apiHttpCode(selector, status) {
   )
     endpoint = "namespace_objects";
   else if (selector === `containers/applications?name=${APP}`) endpoint = "applications";
+  else if (
+    typeof selector === "string" &&
+    /^containers\/applications\/[a-f0-9-]+\/instances-v2$/u.test(selector)
+  )
+    endpoint = "application_instances";
   else if (
     typeof selector === "string" &&
     /^containers\/applications\/[a-f0-9-]+\/versions$/u.test(selector)
@@ -858,6 +869,67 @@ export async function waitReady(api, image, { now = Date.now, sleep = pause } = 
     const remaining = deadline - now();
     if (remaining <= 0) fail("rollout_timeout");
     await sleep(Math.min(2000, remaining));
+  }
+}
+
+const INSTANCE_STATES = [
+  "provisioning",
+  "running",
+  "failed",
+  "stopping",
+  "stopped",
+  "unhealthy",
+  "inactive",
+  "unknown",
+];
+
+// A failure-only snapshot, never readiness evidence or a condition for cleanup.
+// Exactly one own-app GET; no pagination, retries, provider fields, or persisted IDs.
+export async function observeBaselineInstances(input, state, { api, report = console.log }) {
+  let timer;
+  let observation;
+  try {
+    const owned = validateState(state, input);
+    if (!owned.appId) fail("instances");
+    const path = `containers/applications/${canonicalUuid(owned.appId)}/instances-v2`;
+    const data = await Promise.race([
+      Promise.resolve().then(() => api(path, { timeout: 10000 })),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("verification_runner_instances_timeout")), 10000);
+      }),
+    ]);
+    if (!Array.isArray(data?.result) || data.result.length > 100 || data.info?.next_page_token)
+      fail("instances");
+    const counts = Object.fromEntries(INSTANCE_STATES.map((name) => [name, 0]));
+    for (const entry of data.result) {
+      const stateName = INSTANCE_STATES.find((name) => name === entry?.status?.state);
+      if (
+        entry?.application_id !== owned.appId ||
+        typeof entry?.id !== "string" ||
+        !/^[a-f0-9]{64}$/u.test(entry.id) ||
+        stateName === undefined
+      )
+        fail("instances");
+      counts[stateName]++;
+    }
+    observation = {
+      code: "verification_instance_observation",
+      instances: data.result.length,
+      ...counts,
+    };
+  } catch (error) {
+    observation = {
+      code: "verification_instance_observation_failed",
+      error: diagnosticCode(error),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+  // A logging failure must not mask execution failure or block cleanup.
+  try {
+    report(JSON.stringify(observation));
+  } catch {
+    /* Best-effort diagnostics only. */
   }
 }
 
@@ -1193,6 +1265,8 @@ export async function execute(
     const code = diagnosticCode(error);
     failure = new Error(code);
     report(JSON.stringify({ code: "verification_execution_failed", stage, error: code }));
+    if (stage === "baseline_sdk_verify")
+      await observeBaselineInstances(input, state, { api, report });
   } finally {
     // Reap the holder and clean up independently; neither erases the first failure.
     if (holder) {

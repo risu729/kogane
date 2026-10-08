@@ -39,6 +39,7 @@ import {
   deleteRegistryTag,
   phaseCounts,
   waitMissing,
+  observeBaselineInstances,
 } from "../run-hosted.mjs";
 
 const account = "a".repeat(32),
@@ -1402,6 +1403,14 @@ test("execution and cleanup errors are both reported without erasing the initial
       const diagnostics = reports.map((line) => JSON.parse(line));
       expect(diagnostics).toEqual([
         { code: "verification_execution_failed", stage: failing, error: original },
+        ...(failing === "baseline_sdk_verify"
+          ? [
+              {
+                code: "verification_instance_observation_failed",
+                error: "verification_runner_failed",
+              },
+            ]
+          : []),
         {
           code: "verification_cleanup_failed",
           stage: "cleanup",
@@ -1696,7 +1705,7 @@ test("canonical HEAD existence ignores stale GET content while preserving exact-
 
 test("runner forwards only finite synthetic route/status driver codes and discards forged or provider-bearing text", () => {
   for (const code of [
-    "verification_http_once_upstream_not_found",
+    "verification_http_once_concurrency_upstream_not_found",
     "verification_http_initialize_worker_exception",
     "verification_http_stream_error_metadata_invalid",
     "verification_http_state_outer_forbidden",
@@ -1708,6 +1717,7 @@ test("runner forwards only finite synthetic route/status driver codes and discar
     expect(diagnosticCode(new Error(code + "\n" + token))).toBe("verification_runner_failed");
   }
   for (const code of [
+    "verification_http_once_upstream_not_found",
     "verification_http_secret_outer_forbidden",
     "verification_http_once_upstream_" + token,
     "verification_http_once_upstream_404",
@@ -1814,3 +1824,198 @@ test("a fresh runner with the wrong installed CLI fails before network, ownershi
     rmSync(temp, { recursive: true });
   }
 });
+
+test("failure snapshot reads only the owned app and projects fixed state counts without provider fields", async () => {
+  const states = [
+    "provisioning",
+    "running",
+    "failed",
+    "stopping",
+    "stopped",
+    "unhealthy",
+    "inactive",
+    "unknown",
+  ];
+  const owned = { ...state(), appId, namespace, image };
+  const records = states.map((name) => ({
+    id: "e".repeat(64),
+    application_id: appId,
+    status: { state: name, updated_at: token, exit_code: 987654 },
+    image,
+    name: token,
+    location: { name: token, region: token },
+  }));
+  for (const result of [[], records]) {
+    const reports: string[] = [];
+    let calls = 0;
+    await observeBaselineInstances(input(), owned, {
+      api: async (path: string, options: any) => {
+        calls++;
+        expect(path).toBe(`containers/applications/${appId}/instances-v2`);
+        expect(options).toEqual({ timeout: 10000 });
+        return { result, info: { per_page: 100 } };
+      },
+      report: (line: string) => reports.push(line),
+    });
+    expect(calls).toBe(1);
+    expect(reports.map((line) => JSON.parse(line))).toEqual([
+      {
+        code: "verification_instance_observation",
+        instances: result.length,
+        ...Object.fromEntries(states.map((name) => [name, result.length ? 1 : 0])),
+      },
+    ]);
+    for (const privateValue of [token, appId, namespace, account, image, "987654", "e".repeat(64)])
+      expect(reports.join("")).not.toContain(privateValue);
+  }
+  // Production selectors and any write to instances remain unapproved.
+  expect(canonicalApiPath(`containers/applications/${appId}/instances-v2`)).toBe(
+    `containers/applications/${appId}/instances-v2`,
+  );
+  for (const method of ["POST", "DELETE", "PUT"])
+    expect(() => canonicalApiPath(`containers/applications/${appId}/instances-v2`, method)).toThrow(
+      "verification_runner_api_selector",
+    );
+  for (const path of [
+    `containers/applications/${appId}/instances-v2?state=active`,
+    `containers/applications/${appId}/instances`,
+    "containers/applications/../instances-v2",
+    `containers/applications/${appId}/instances-v2/other`,
+  ])
+    expect(() => canonicalApiPath(path)).toThrow("verification_runner_api_selector");
+});
+
+test("partial, malformed and foreign-app snapshots fail closed without leaking provider data", async () => {
+  const entry = { id: "e".repeat(64), application_id: appId, status: { state: "running" } };
+  for (const response of [
+    undefined,
+    { result: null },
+    { result: {} },
+    { result: [entry], info: { next_page_token: token } },
+    { result: Array.from({ length: 101 }, () => entry) },
+    { result: [null] },
+    { result: [{ ...entry, application_id: workerVersion }] },
+    { result: [{ ...entry, id: token }] },
+    { result: [{ ...entry, status: { state: token } }] },
+    { result: [{ ...entry, status: null }] },
+  ]) {
+    const reports: string[] = [];
+    await observeBaselineInstances(
+      input(),
+      { ...state(), appId },
+      {
+        api: async () => response,
+        report: (line: string) => reports.push(line),
+      },
+    );
+    expect(reports.map((line) => JSON.parse(line))).toEqual([
+      {
+        code: "verification_instance_observation_failed",
+        error: "verification_runner_instances",
+      },
+    ]);
+    expect(reports.join("")).not.toContain(token);
+  }
+  for (const owned of [
+    { ...state(), account: "f".repeat(32), appId },
+    state(),
+    { ...state(), appId: token },
+  ]) {
+    let calls = 0;
+    await observeBaselineInstances(input(), owned, {
+      api: async () => {
+        calls++;
+        throw new Error(token);
+      },
+      report: () => {},
+    });
+    expect(calls).toBe(0);
+  }
+});
+
+test("snapshot API failures stay finite, scoped, redirect-safe and never reject diagnostic callers", async () => {
+  for (const [status, category] of [
+    [401, "unauthorized"],
+    [403, "forbidden"],
+    [404, "not_found"],
+    [429, "rate_limit"],
+    [503, "server"],
+    [302, "redirect"],
+    [418, "default"],
+  ] as const) {
+    const reports: string[] = [];
+    let bodyReads = 0;
+    const api = apiClient(input(), async (url: string, options: RequestInit) => {
+      expect(url).toBe(
+        `https://api.cloudflare.com/client/v4/accounts/${account}/containers/applications/${appId}/instances-v2`,
+      );
+      expect(options.method).toBe("GET");
+      expect(options.redirect).toBe("manual");
+      expect(options.body).toBeUndefined();
+      expect(options.signal?.aborted).toBe(false);
+      return {
+        status,
+        ok: false,
+        json: async () => {
+          bodyReads++;
+          throw new Error(token);
+        },
+      } as Response;
+    });
+    await observeBaselineInstances(
+      input(),
+      { ...state(), appId },
+      {
+        api,
+        report: (line: string) => reports.push(line),
+      },
+    );
+    const error = `verification_runner_api_http_application_instances_${category}`;
+    expect(reports.map((line) => JSON.parse(line))).toEqual([
+      {
+        code: "verification_instance_observation_failed",
+        error,
+      },
+    ]);
+    expect(diagnosticCode(new Error(error))).toBe(error);
+    expect(bodyReads).toBe(0);
+    expect(reports.join("")).not.toContain(token);
+    expect(reports.join("")).not.toContain(appId);
+  }
+  await observeBaselineInstances(
+    input(),
+    { ...state(), appId },
+    {
+      api: async () => {
+        throw new Error(token);
+      },
+      report: () => {
+        throw new Error(token);
+      },
+    },
+  );
+});
+
+test("a stalled snapshot has a fixed ten-second overall bound and remains non-fatal", async () => {
+  const reports: string[] = [];
+  let calls = 0;
+  await observeBaselineInstances(
+    input(),
+    { ...state(), appId },
+    {
+      api: async (_path: string, options: any) => {
+        calls++;
+        expect(options.timeout).toBe(10000);
+        return await new Promise(() => {});
+      },
+      report: (line: string) => reports.push(line),
+    },
+  );
+  expect(calls).toBe(1);
+  expect(reports.map((line) => JSON.parse(line))).toEqual([
+    {
+      code: "verification_instance_observation_failed",
+      error: "verification_runner_instances_timeout",
+    },
+  ]);
+}, 15000);
