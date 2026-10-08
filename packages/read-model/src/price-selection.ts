@@ -188,11 +188,11 @@ export async function selectPrices(
 // basis must give way to the next, prices tied at one instant must be
 // compared, and a key with no fresh price must say how old its newest one is.
 // So this read returns, per wanted key, every row whose effective time falls
-// in a coarse window (compared through `julianday`, a day of margin on each
-// side), every row of the newest instant before the window (so `stale` can be
-// told from `missing`), and every row whose effective time SQL cannot place
-// (a date-only row is placed by its date; an unreadable one is returned as
-// `unordered`, never dropped). The domain (`selectPrice` in
+// in a coarse window (compared through `julianday`, two days of margin on
+// each side, `selectionReadWindow`), every row of the newest instant before
+// the window (so `stale` can be told from `missing`), and every row whose
+// effective time SQL cannot place (a date-only row is placed by its date; an
+// unreadable one is returned as `unordered`, never dropped). The domain (`selectPrice` in
 // packages/domain/src/market-data.ts) decides every row exactly. A read that
 // would return more than `PRICE_CANDIDATE_ROW_BOUND` rows is refused, never
 // cut.

@@ -507,6 +507,20 @@ describe("business-day freshness and calendars", () => {
     expect(freshnessWindowStart(business, tuesday, CALENDAR)).toBe("2026-09-18");
   });
 
+  test("a calendar whose closed dates are not sorted is not used", () => {
+    // Counting binary-searches the closed dates, so an unsorted list could
+    // miss one; it is calendar_missing rather than a wrong age.
+    const unsorted = { ...CALENDAR, closedDates: ["2026-09-21", "2026-09-14"] };
+    expect(validMarketCalendar(unsorted)).toBe(false);
+    expect(refused(selectPrice(USD, [friday], monday, business, unsorted)).reason).toBe(
+      "calendar_missing",
+    );
+    const repeated = { ...CALENDAR, closedDates: ["2026-09-21", "2026-09-21"] };
+    expect(refused(selectPrice(USD, [friday], monday, business, repeated)).reason).toBe(
+      "calendar_missing",
+    );
+  });
+
   test("no calendar, another calendar or partial coverage: calendar_missing", () => {
     expect(refused(selectPrice(USD, [friday], monday, business, null)).reason).toBe(
       "calendar_missing",
@@ -525,10 +539,10 @@ describe("business-day freshness and calendars", () => {
     );
   });
 
-  test("the read window covers every possibly fresh day with a day of margin", () => {
+  test("the read window covers every possibly fresh day with two days of margin", () => {
     expect(selectionReadWindow(POLICY, BOUND, null)).toEqual({
-      from: "2026-09-05T00:00:00Z",
-      to: "2026-09-11T15:00:01.000Z",
+      from: "2026-09-04T00:00:00Z",
+      to: "2026-09-12T15:00:01.000Z",
     });
     expect(freshnessWindowStart(business, monday, CALENDAR)).toBe("2026-09-11");
     expect(freshnessWindowStart(business, monday, null)).toBe("2026-09-13");

@@ -7,6 +7,13 @@
 // KOGANE_PRICE_CANDIDATES_SCALE=full to build `FULL_BOARDS` (three years, or
 // KOGANE_PRICE_CANDIDATES_BOARDS boards) and print the timings ADR 0056 and
 // docs/calculation-and-reports.md quote. Every value is synthetic.
+//
+// D1 has no table statistics, and neither does this store, so the planner
+// chooses the same plan at 200 boards as on an empty store: the CI run guards
+// the plan's structure only (no SCAN of a stored table, one
+// price_observations_instrument SEARCH, one MATERIALIZE keyed) and the
+// answers. The cost's growth with history is only observed when
+// KOGANE_PRICE_CANDIDATES_SCALE=full builds the large store.
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
   selectionReadWindow,
@@ -145,6 +152,7 @@ describe(`price candidates on ${BOARDS} boards of ${KEYS.length} currencies`, ()
           line.startsWith("SEARCH po USING INDEX price_observations_instrument"),
         ),
       ).toHaveLength(1);
+      expect(lines.filter((line) => line.startsWith("MATERIALIZE keyed"))).toHaveLength(1);
       expect(read.sql).toBe(
         knowledge.mode === "current" ? PRICE_CANDIDATES_SQL : PRICE_CANDIDATES_KNOWN_AT_SQL,
       );
@@ -163,7 +171,7 @@ describe(`price candidates on ${BOARDS} boards of ${KEYS.length} currencies`, ()
     );
     for (const knowledge of MODES) {
       const read = await selectPriceCandidates(sql, { wants: wants(knowledge), knowledge });
-      // The window starts 2026-09-03 00:00Z: 21 boards up to 09-08 00:00Z, and
+      // The window starts 2026-09-02 00:00Z: 25 boards up to 09-08 00:00Z, and
       // the newest board before it. Older history is read but not returned.
       for (const rows of read)
         expect(
@@ -171,7 +179,7 @@ describe(`price candidates on ${BOARDS} boards of ${KEYS.length} currencies`, ()
             counts[row.reach] = (counts[row.reach] ?? 0) + 1;
             return counts;
           }, {}),
-        ).toEqual({ window: 21, "before-window": 1 });
+        ).toEqual({ window: 25, "before-window": 1 });
       KEYS.forEach((key, index) => {
         const selection = selectPrice(
           key,

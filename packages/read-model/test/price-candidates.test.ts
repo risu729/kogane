@@ -376,6 +376,91 @@ describe("overlap does not depend on the read margin", () => {
   });
 });
 
+describe("a foreign or zoneless date-only row that could be fresh is always read", () => {
+  const civil: PriceSelectionPolicy = { ...POLICY, dateOnly: "civil-date-in-zone" };
+  const WIDE = { from: "2000-01-01T00:00:00Z", to: "2100-01-01T00:00:00Z" };
+  /** The selection through the read's window, and the domain's over every row of the key. */
+  async function both(store: PriceStore, at: SelectionBound, policy: PriceSelectionPolicy) {
+    const sql = executor(store.db);
+    const [read] = await selectPriceCandidates(sql, {
+      wants: [
+        { key: USD, snapshotParseRunId: null, window: selectionReadWindow(policy, at, null) },
+      ],
+      knowledge: at.knowledge,
+    });
+    const [all] = await selectPriceCandidates(sql, {
+      wants: [{ key: USD, snapshotParseRunId: null, window: WIDE }],
+      knowledge: at.knowledge,
+    });
+    const decide = (rows: typeof read) =>
+      selectPrice(
+        USD,
+        rows!.map((row) => row.candidate),
+        at,
+        policy,
+        null,
+      );
+    return { viaRead: decide(read), overAll: decide(all) };
+  }
+  const outcome = (selection: PriceSelection) =>
+    selection.status === "selected"
+      ? ["selected", selection.candidate.price.id]
+      : [selection.reason, selection.candidateIds];
+
+  test("at the lower edge: a UTC date two days before the window's first day", async () => {
+    // D = 9/10, four days: the window's first day is 9/6. The UTC date 9/4 may
+    // be 9/6 in Tokyo, as new as the newest instant.
+    const store = new PriceStore()
+      .parse(1, 1)
+      .publish(1, 1, "2026-09-01T00:00:00.000Z")
+      .price({ id: "a-start", run: 1, amount: "146", at: "2026-09-06T12:00:00+09:00" })
+      .price({ id: "a-before", run: 1, amount: "145", at: "2026-09-05T01:00:00+09:00" })
+      .price({
+        id: "foreign-date",
+        run: 1,
+        amount: "144",
+        effective: JSON.stringify({
+          kind: "local-date",
+          value: "2026-09-04",
+          zone: "UTC",
+          basis: "provider",
+        }),
+      });
+    const { viaRead, overAll } = await both(store, bound(), civil);
+    expect(outcome(overAll)).toEqual(["time_incomparable", ["foreign-date"]]);
+    expect(outcome(viaRead)).toEqual(outcome(overAll));
+  });
+
+  test("at the upper edge: a UTC date two days after the as-of date of a UTC+14 policy", async () => {
+    // The end of 9/11 in Kiritimati (UTC+14) is 9/11 10:00Z; the UTC date 9/13
+    // may be 9/11 there, as new as the instant.
+    const kiritimati: PriceSelectionPolicy = { ...civil, zone: "Pacific/Kiritimati" };
+    const at: SelectionBound = {
+      effectiveBefore: "2026-09-11T10:00:00.000Z",
+      asOfDate: "2026-09-11",
+      knowledge: CURRENT,
+    };
+    const store = new PriceStore()
+      .parse(1, 1)
+      .publish(1, 1, "2026-09-01T00:00:00.000Z")
+      .price({ id: "fresh", run: 1, amount: "146", at: "2026-09-11T00:00:00Z" })
+      .price({
+        id: "foreign-date",
+        run: 1,
+        amount: "144",
+        effective: JSON.stringify({
+          kind: "local-date",
+          value: "2026-09-13",
+          zone: "UTC",
+          basis: "provider",
+        }),
+      });
+    const { viaRead, overAll } = await both(store, at, kiritimati);
+    expect(outcome(overAll)).toEqual(["time_incomparable", ["foreign-date"]]);
+    expect(outcome(viaRead)).toEqual(outcome(overAll));
+  });
+});
+
 describe("plans without table statistics", () => {
   const plan = (db: Database, text: string, args: unknown[]): string[] =>
     (db.query(`EXPLAIN QUERY PLAN ${text}`).all(...(args as never[])) as { detail: string }[]).map(

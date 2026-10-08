@@ -132,8 +132,10 @@ What existed before this change:
   milliseconds. The manifest records the mode and the newest `recorded_at`
   actually used, not K, so a later K that changes nothing keeps the context.
 - **The candidate read.** Per wanted key, every row effective inside a coarse
-  window (the earliest possibly fresh civil date minus one day, to the bound
-  plus one day, compared through `julianday`), every row of the newest instant
+  window (the earliest possibly fresh civil date minus two days, to the bound
+  plus two days, compared through `julianday`: a date of another zone, or of
+  none, may lie two days from its value, so such a row that could be fresh is
+  always read), every row of the newest instant
   before the window, and every row SQL cannot place, each with its claim, rule,
   recorded time and parse run. A key may be narrowed to one parse run
   (`same-snapshot`). More than 500 keys or 2,000 rows is refused, never cut.
@@ -149,8 +151,9 @@ What existed before this change:
   `valueInBase` reports both legs with price ids, effective times and ages.
   An FX selection of another key, or made under another selection policy than
   the conversion policy's (`fx_selection_policy_mismatch`), is a caller error
-  and throws; `selectMarketData` refuses policies that share an id with
-  different content.
+  and throws. That check compares policy ids only; two policies that share an
+  id with different content are refused where they enter, at
+  `selectMarketData` (`invalid_policy`), not in `convertToBase`.
 - **Identity.** A price is keyed by the provider-scoped base reference the
   promotion rule wrote (`instrument:<source>:<market>:<code>`, an ISO code for
   FX); another source's price for the same instrument is not used.

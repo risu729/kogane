@@ -636,6 +636,10 @@ function usableCalendar(
   if (policy.freshness.unit !== "business-days" || calendar === null) return null;
   if (calendar.calendarRef !== policy.freshness.calendarRef || calendar.zone !== policy.zone)
     return null;
+  // Ages binary-search the closed dates: an unsorted or repeated list could
+  // miss one, so such a calendar is not used (calendar_missing).
+  const dates = calendar.closedDates;
+  if (!dates.every((date, index) => index === 0 || dates[index - 1]! < date)) return null;
   return calendar;
 }
 
@@ -735,19 +739,24 @@ export function freshnessWindowStart(
 }
 
 /**
- * The coarse window a candidate read covers, as instants: from one day before
- * the earliest fresh civil date to one day after the bound. A day of margin
- * on each side covers any zone offset; the domain decides each row exactly.
+ * The coarse window a candidate read covers, as instants: from
+ * `FOREIGN_DATE_DAYS` before the earliest fresh civil date (at 00:00Z) to
+ * `FOREIGN_DATE_DAYS` after the bound. SQL places a date-only row at 00:00Z
+ * of its value, and a date of another zone, or of none, may lie two days
+ * either side of that value on the policy zone's calendar, so a row whose
+ * latest possible day could be fresh, or whose earliest possible day is not
+ * after the as-of date, is always read; instants need less. The domain
+ * decides each row exactly.
  */
 export function selectionReadWindow(
   policy: PriceSelectionPolicy,
   bound: SelectionBound,
   calendar: MarketCalendar | null,
 ): { from: string; to: string } {
-  const start = addDays(civil(freshnessWindowStart(policy, bound, calendar)), -1);
+  const start = addDays(civil(freshnessWindowStart(policy, bound, calendar)), -FOREIGN_DATE_DAYS);
   const before = parseInstant(bound.effectiveBefore);
   if (before === null) throw new RangeError("invalid bound");
-  const to = (before.epochSeconds + 86_400 + 1) * 1000;
+  const to = (before.epochSeconds + FOREIGN_DATE_DAYS * 86_400 + 1) * 1000;
   return {
     from: `${formatLocalDate(start)}T00:00:00Z`,
     to: new Date(to).toISOString(),
