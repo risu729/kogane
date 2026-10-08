@@ -157,7 +157,7 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   and a reviewed correction or withdrawal is itself the explicit review.
   Routing old-epoch holders to needs-review (`identity_epoch_changed`, holder
   kept) is the planners' job (G3) and the selector's (#550, ADR 0058).
-- **Knowledge selector interface** (#550, ADR 0056): a cut is
+- **Knowledge selector interface** (#550, ADR 0058): a cut is
   `{coreEpoch, commitSeq}` or `{coreEpoch, instant}` resolved to the largest
   sequence whose `known_at` is at or before the instant (equal instants all
   included). The selector resolves every touched event's active revision at
@@ -255,7 +255,7 @@ recording the alias class on every new settlement accept.
 - **G2:** migration 0071, the command-kind vocabulary (`economic-event.adopt`,
   `correct`, `withdraw`, `move`) by the 0051 rebuild pattern; no planner, so
   every new kind is `unsupported_semantics`. Amends this ADR.
-- **G3:** ADR 0055 and migration 0072, own-transfer proposals (proposal-only)
+- **G3:** its own ADR and migration 0072, own-transfer proposals (proposal-only)
   and their planners, behind the production gate below.
 - **Later:** widening the event kind CHECK (0032) for trades and FX, and the
   securities writer that admits `security-quantity`.
@@ -265,15 +265,70 @@ recording the alias class on every new settlement accept.
 Own-transfer adoption cannot be enabled before both card writers write
 claims, seals and commit rows, `unlogged_economic_revisions` has no row after
 the log start, and the D1 compatibility tests are green (on an isolated
-synthetic remote database).
+synthetic remote database). The second condition compares writer clocks:
+`after_log_start` is `created_at` against the first commit's `known_at`, a
+diagnostic, never adoption evidence. A revision an older build writes while
+its clock lags the log can read as before the start; the operator checks the
+view together with the deployed build versions, not the flag alone.
 
 ### Rollback
 
-Turn off the planner registration or flag. The migration stays: an older
-build keeps working (the new triggers only refuse cross-writer double claims
-and additions to sealed revisions, neither of which an older build makes),
-and its revisions show as unlogged, read fail-closed. Schema-floor rules as in
+Turn off the planner registration or flag. The migration stays. An older
+build keeps working with one deliberate exception: once a newer writer has
+recorded an `economic_claims` row, an older card settlement build accepting a
+settlement on the same bank debit is refused with `economic_claim_held` (and
+an older purchase lane recognising a key held there likewise). That refusal is
+correct (it is the double count the guard exists to stop) and surfaces as a
+failed command, not as data. The new triggers refuse nothing else an older
+build does: it never writes a seal, so nothing it writes is sealed. Its
+revisions show as unlogged and are read fail-closed. Schema-floor rules as in
 [economic events](../economic-events.md#deploy-order-and-rollback).
+
+### Migration number gap
+
+0070 follows 0066 on main; 0067, 0068 and 0069 are held by other open pull
+requests. Wrangler applies migrations by name and records each applied one,
+and the repository's tests tolerate the gap (only 0001–0037 must be
+contiguous). If those pull requests merge after 0070 is deployed, production
+applies them after 0070 while a fresh database applies them before it; none
+of them may therefore depend on 0070's objects or be depended on by it, and
+`services/processor/test/lanes.test.ts` lists 0070 last today and must be
+edited when they merge.
+
+### Deviations recorded in this PR
+
+- **Account-prefixed leg subjects are not enforced.** The review wanted the
+  seal to require `account:<id>` leg subjects for new writers; the card
+  settlement writer still writes bare account ids (read through 0044's
+  tolerance), and G1b keeps them until a reader audit. `account:` is the
+  canonical form for every new writer.
+- **Alias classes are checked in shape only.** 0070 checks that an alias class
+  is a four-element array whose first element is the key's own source and
+  whose component list is a non-empty array; it does not check that the
+  account id is the row's currently mapped account, nor that each component
+  is text. The writer's registry function is responsible for both
+  (`validAliasClass` checks the types).
+- **`after_log_start` is diagnostic only** (see the production gate).
+
+### Acceptance tests B1–B13 (owner's list) and who owns them
+
+None is tested here; each needs the selector or an engine adapter.
+
+| Test                                                                    | Owner                                                                  |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| B1 an old revision never returns at any cut after a correction          | #550 selector (ADR 0058)                                               |
+| B2 a later commit does not change an earlier cut's result               | #550 selector (ADR 0058)                                               |
+| B3 no double count raw/event, net/fee, trade/settlement (101 = 100 + 1) | #550 reconstruction and adapter (ADR 0058); the C side #556 (ADR 0059) |
+| B4 an unknown snapshot boundary is indeterminate                        | #550 reconstruction (ADR 0058)                                         |
+| B5 a zero remainder with incomplete coverage is never reconciled        | #550 reconstruction (ADR 0058)                                         |
+| B6 unknown stays unknown                                                | #550 reconstruction (ADR 0058)                                         |
+| B7 a lot that depends on an unknown order is held                       | #556 lots and adapter (ADR 0059)                                       |
+| B8 a partial allocation keeps its basis                                 | #556 lots (ADR 0059)                                                   |
+| B9 split and transfer lineage keep quantity and basis                   | #556 lots (ADR 0059)                                                   |
+| B10 a sale after a withdrawal is never filled with a short              | #556 lots and adapter (ADR 0059)                                       |
+| B11 a stale specific id is never reassigned                             | #556 lots (ADR 0059)                                                   |
+| B12 history filled later gives a new cut and a new result               | #550 selector (ADR 0058) and #556 adapter (ADR 0059)                   |
+| B13 the manifest is deterministic under permutation                     | #550 (ADR 0058) and #556 (ADR 0059)                                    |
 
 ### Not verified (owner items)
 
@@ -309,6 +364,11 @@ item with the code. Its SQL sketches were not adopted as text.
 | Generic ledger / event bus; differential replay; complex cross-currency, many-to-many, short, tax           | Deferred                                                                                                                                                                                                                                                             |
 | big.js / decimal.js / fast-check                                                                            | Rejected for now: exact decimals exist (INV03) and seeded random stores cover property testing                                                                                                                                                                       |
 | Fingerprint-only identities for human-adopted writers                                                       | Rejected (refused: `identity_fingerprint_only`)                                                                                                                                                                                                                      |
+| Do not claim atomicity across databases                                                                     | Adopted: the guard is one CORE batch; CORE and READ are separate bindings and nothing here spans them                                                                                                                                                                |
+| A client-supplied actorKind is no approval proof; no AI approves                                            | Adopted (already true): the principal comes from the Access subject and grants, a commit requires a human, approvals are server-verified; no rule, AI or agent adopts own transfers                                                                                  |
+| The manifest pins identity, aliases, coverage, snapshots, FX, policy and engine                             | Adopted: the interface is fixed here (Decision, manifest pins); #550 and #556 build the manifests                                                                                                                                                                    |
+| The old card writers join the guard before own transfers are adopted in production                          | Adopted: the production gate                                                                                                                                                                                                                                         |
+| D1 compatibility is tested on an isolated synthetic database, never by mutating production                  | Adopted; unverified until the owner creates one (Not verified)                                                                                                                                                                                                       |
 
 Evidence for the alias-class row: ADR 0014 (producer change),
 `descriptors.ts` (client-declared namespace), `docs/observations.md` (Vpass
