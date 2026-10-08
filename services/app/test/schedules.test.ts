@@ -136,6 +136,33 @@ it("writes require the same origin, a custom header and bounded JSON", async () 
     (await call({ suffix: "/leases/sony-bank", method: "POST", body: "{}" })).response.status,
   ).toBe(200);
 });
+it("stopped lease release retains operator, user-session and same-origin boundaries", async () => {
+  const request = {
+    suffix: "/leases/vpass",
+    method: "POST",
+    body: JSON.stringify({
+      leaseRef: "12345678-1234-4234-8234-123456789abc",
+      confirmedStopped: true,
+    }),
+  };
+  for (const [options, status] of [
+    [{ anonymous: true }, 401],
+    [{ subject: AGENT }, 403],
+    [{ serviceToken: TOKEN }, 401],
+    [{ origin: "https://other.test" }, 403],
+    [{ marker: "" }, 403],
+  ] as const) {
+    const denied = await call({ ...request, ...options });
+    expect(denied.response.status).toBe(status);
+    expect(denied.seen).toEqual([]);
+  }
+  const allowed = await call(request);
+  expect(allowed.response.status).toBe(200);
+  expect(allowed.seen).toEqual([
+    { path: "/internal/schedules/leases/vpass", actor: OPERATOR, body: request.body },
+  ]);
+});
+
 it("a deployment token has only bodyless future bootstrap authority", async () => {
   const boot = await call({ suffix: "/bootstrap", method: "POST", serviceToken: TOKEN });
   expect(boot.response.status).toBe(200);

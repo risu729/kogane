@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   MaintenanceRule,
@@ -520,8 +520,48 @@ export function SchedulesPage(): ReactNode {
     client = useQueryClient();
   const [editor, setEditor] = useState<MaintenanceRule | null | undefined>(),
     [filter, setFilter] = useState("collection"),
-    [leaseMessage, setLeaseMessage] = useState("");
+    [leaseMessage, setLeaseMessage] = useState(""),
+    [releasingSources, setReleasingSources] = useState<string[]>([]);
+  const leaseRequests = useRef(new Set<string>());
   const refresh = () => client.invalidateQueries({ queryKey: ["schedules"] });
+  async function releaseLease(lease: ScheduleSnapshot["leases"][number]) {
+    // The ref closes the gap before React disables the button, including
+    // another activation while the confirmation dialog is being opened.
+    if (leaseRequests.current.has(lease.source)) return;
+    leaseRequests.current.add(lease.source);
+    if (
+      !window.confirm(
+        `${name(lease.source)}の前の実行が停止していることを確認しましたか？ 実行中の解除は重複収集につながります。`,
+      )
+    ) {
+      leaseRequests.current.delete(lease.source);
+      return;
+    }
+    setReleasingSources([...leaseRequests.current]);
+    setLeaseMessage("");
+    try {
+      let message = "対象の停止した実行は解除済みです。現在の実行状態を確認してください。";
+      try {
+        await request(`/leases/${lease.source}`, {
+          leaseRef: lease.leaseRef,
+          confirmedStopped: true,
+        });
+      } catch (error) {
+        message = failure(error);
+      }
+      try {
+        // A failed response may still follow a completed write. Read back on
+        // both outcomes before allowing another release from this source.
+        await client.invalidateQueries({ queryKey: ["schedules"] }, { throwOnError: true });
+      } catch {
+        message = "解除結果を確認できません。表示を更新して現在の実行状態を確認してください。";
+      }
+      setLeaseMessage(message);
+    } finally {
+      leaseRequests.current.delete(lease.source);
+      setReleasingSources([...leaseRequests.current]);
+    }
+  }
   return (
     <section>
       <div className="page-head">
@@ -632,33 +672,17 @@ export function SchedulesPage(): ReactNode {
                     <strong>{name(lease.source)}</strong> · 開始 {fmt(lease.startedAt)}
                     <button
                       className="button"
-                      onClick={async () => {
-                        if (
-                          !window.confirm(
-                            `${name(lease.source)}の前の実行が停止していることを確認しましたか？ 実行中の解除は重複収集につながります。`,
-                          )
-                        )
-                          return;
-                        try {
-                          await request(`/leases/${lease.source}`, {
-                            leaseRef: lease.leaseRef,
-                            confirmedStopped: true,
-                          });
-                          await refresh();
-                          setLeaseMessage("解除しました。次の予定から実行できます。");
-                        } catch (error) {
-                          setLeaseMessage(failure(error));
-                        }
-                      }}
+                      disabled={releasingSources.includes(lease.source)}
+                      onClick={() => releaseLease(lease)}
                     >
-                      停止した実行を解除
+                      {releasingSources.includes(lease.source) ? "解除中…" : "停止した実行を解除"}
                     </button>
                   </div>
                 ),
               )}
-              <p role="status">{leaseMessage}</p>
             </section>
           ) : null}
+          {leaseMessage ? <p role="status">{leaseMessage}</p> : null}
         </>
       ) : null}
     </section>
