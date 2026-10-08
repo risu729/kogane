@@ -285,6 +285,14 @@ describe("publication follows the grant", () => {
     expect(report.writes).toMatchObject({ maintenanceRules: false, proposals: false });
     const writer = (await tool(MAINTAINER, "kogane.capabilities", {})).structuredContent;
     expect(writer.writes).toMatchObject({ maintenanceRules: true, adoption: false });
+    // No maintenance write is claimed while the deployment serves no tool for it.
+    const off = await mcp(
+      MAINTAINER,
+      "tools/call",
+      { name: "kogane.capabilities", arguments: {} },
+      { SCHEDULES_ENABLED: "false" },
+    );
+    expect(off.result.structuredContent.writes).toMatchObject({ maintenanceRules: false });
   });
 
   it("revoking the grant table closes the tools with the transport", async () => {
@@ -295,6 +303,64 @@ describe("publication follows the grant", () => {
     });
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
+  });
+});
+
+describe("nothing but an agent-API grant reaches the tools", () => {
+  it("refuses every call while the grant table is empty or absent, and writes nothing", async () => {
+    const before = await revisionCount();
+    for (const grants of ["", undefined, "{}", "not json"]) {
+      for (const [name, args] of [
+        [UPDATE, window("vpass")],
+        [READ, {}],
+      ] as const) {
+        const response = await request("/mcp", {
+          subject: MAINTAINER,
+          body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
+          environment: { AGENT_API_GRANTS: grants },
+        });
+        expect([grants, name, response.status]).toEqual([grants, name, 403]);
+        expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
+      }
+    }
+    expect(relayed).toEqual([]);
+    expect(await revisionCount()).toBe(before);
+  });
+
+  it("refuses the human operator, whom no agent-API grant names, even with operations on", async () => {
+    // The tools are graded by the agent-API grant alone: the change
+    // lifecycle's operator classification (OPERATOR_SUBJECTS) never stands in.
+    const before = await revisionCount();
+    for (const name of [UPDATE, READ]) {
+      const response = await request("/mcp", {
+        subject: OPERATOR,
+        body: {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: name === UPDATE ? window("vpass") : {} },
+        },
+        environment: { OPS_API_ENABLED: "true" },
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
+    }
+    expect(relayed).toEqual([]);
+    expect(await revisionCount()).toBe(before);
+  });
+
+  it("refuses malformed arguments before relaying anything", async () => {
+    const before = await revisionCount();
+    for (const args of [null, "vpass", ["vpass"], 1, { ...window("vpass"), revision: -1 }]) {
+      const refused = await tool(MAINTAINER, UPDATE, args);
+      expect([args, refused.structuredContent]).toEqual([args, { error: "invalid_request" }]);
+    }
+    for (const args of ["vpass", ["vpass"], { source: "Vpass" }])
+      expect((await tool(MAINTAINER, READ, args)).structuredContent).toEqual({
+        error: "invalid_request",
+      });
+    expect(relayed).toEqual([]);
+    expect(await revisionCount()).toBe(before);
   });
 });
 
