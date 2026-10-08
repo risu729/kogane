@@ -1,5 +1,5 @@
 // Cross-identifier instrument resolution (src/query/instrument-resolution.ts,
-// ADR 0048) over CORE migrations 0017+ on the minimal Layer A stub. The
+// ADR 0055) over CORE migrations 0017+ on the minimal Layer A stub. The
 // identifiers are written by the production identity writer (`identifyParse`)
 // from synthetic observations: SBI Securities rows go through the deployed SBI
 // rules, and a second broker, `synthetic-broker-b`, through a test policy

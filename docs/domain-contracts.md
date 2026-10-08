@@ -160,7 +160,7 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
 
 ## `instrument-candidates.ts` — which identifiers may be one instrument
 
-[ADR 0048](adr/0048-instrument-candidates.md); the read that feeds it is
+[ADR 0055](adr/0055-instrument-candidates.md); the read that feeds it is
 described in [identity](identity.md#cross-identifier-instrument-candidates).
 
 - `InstrumentIdentifierFacts` is what the identity rules stored about one

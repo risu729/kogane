@@ -1,5 +1,5 @@
 // Cross-identifier instrument candidates (src/instrument-candidates.ts,
-// ADR 0048). Every identifier, code, name and ISIN here is synthetic; the
+// ADR 0055). Every identifier, code, name and ISIN here is synthetic; the
 // "ISINs" are invented strings of the ISIN shape.
 import { describe, expect, test } from "bun:test";
 import {

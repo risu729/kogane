@@ -1,4 +1,4 @@
-// The reads behind cross-identifier instrument resolution (ADR 0048,
+// The reads behind cross-identifier instrument resolution (ADR 0055,
 // docs/identity.md). Three bounded reads, none of which writes:
 //
 // - `INSTRUMENT_FACTS_SQL`: every identifier whose current mapping targets a
