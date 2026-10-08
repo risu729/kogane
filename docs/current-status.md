@@ -60,8 +60,9 @@ are separate claims. Historical acceptance records are linked from the
   supersedes an older capture with rows under the per-month rule; since
   2026-10-08 `/api/meta` names such months (`globalPassEmptyMonths`) and the
   web app shows a notice to check the provider, without changing what is
-  current. A read-only count on 2026-10-08 found no such month in production
-  (7 months with an empty current snapshot, none with older rows). See
+  current (implemented; its deployment is not asserted here). A read-only
+  count on 2026-10-08 found no such month in production (7 months with an
+  empty current snapshot, none with older rows). See
   [observations](observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).
 - Money Forward identity revisions and the SBI Shinsei bank adapter are
   implemented; fresh production adoption/mapping counts are not asserted here.
