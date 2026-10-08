@@ -2164,3 +2164,33 @@ test("pending control-plane rollout sleeps only to the shared deadline and never
   expect(polls).toBe(2);
   expect(sleeps).toEqual([2000, 500]);
 });
+
+test("captured backpressure failures preserve only the seven owned reasons without provider text", () => {
+  const reasons = ["timing", "process", "stream", "posts", "chunks", "exhausted", "progress"];
+  for (const reason of reasons) {
+    const code = `verification_backpressure_${reason}`;
+    expect(driverFailure(code)).toBe(code);
+    expect(diagnosticCode(new Error(code))).toBe(code);
+    for (const privateValue of [token, account, appId, image]) {
+      for (const forged of [
+        code + "\n" + privateValue,
+        code + " " + privateValue,
+        code + "_" + privateValue,
+      ]) {
+        expect(driverFailure(forged)).toBe("verification_runner_child");
+        expect(diagnosticCode(new Error(forged))).toBe("verification_runner_failed");
+      }
+    }
+  }
+  for (const forged of [
+    "verification_backpressure_idle",
+    "verification_backpressure_progressing",
+    "verification_backpressure_posts_changed",
+    "verification_backpressure_TIMING",
+    "verification_backpressure_stream_" + account,
+    "verification_backpressure_" + token,
+  ]) {
+    expect(driverFailure(forged)).toBe("verification_runner_child");
+    expect(diagnosticCode(new Error(forged))).toBe("verification_runner_failed");
+  }
+});

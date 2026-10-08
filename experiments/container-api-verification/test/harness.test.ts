@@ -372,24 +372,44 @@ test("unpaced synthetic source stalls behind a paused reader and releases on can
   }
   expect((await (await serve(new Request("http://synthetic/stats"))).json()).streams).toBe(0);
 });
-test("backpressure verification requires a real elapsed idle window, stable process and stalled source", async () => {
+test("backpressure diagnostics preserve1s+35s gates and identify each closed predicate", async () => {
   const stable = { processIdentity, posts: 2, streams: 1, backpressureChunks: 32 };
-  for (const scenario of ["valid", "ended", "restarted", "moving", "too_short"]) {
+  const scenarios: [string, string | undefined][] = [
+    ["valid", undefined],
+    ["ended", "stream"],
+    ["restarted", "process"],
+    ["moving", "progress"],
+    ["too_short", "timing"],
+    ["posts", "posts"],
+    ["chunks", "chunks"],
+    ["exhausted", "exhausted"],
+    ["stopped", "process"],
+    ["exhausted_and_ended", "exhausted"],
+    ["multiple_failures", "process"],
+  ];
+  for (const [scenario, code] of scenarios) {
     let calls = 0,
       time = 0,
       canceled = false;
-    const counts = [
+    const waits: number[] = [],
+      paths: string[] = [];
+    const samples = [
       stable,
       stable,
       {
         ...stable,
-        ...(scenario === "ended"
-          ? { streams: 0, backpressureChunks: BACKPRESSURE_MAX_CHUNKS }
-          : {}),
-        ...(scenario === "restarted"
+        ...(scenario === "ended" ? { streams: 0 } : {}),
+        ...(scenario === "restarted" || scenario === "multiple_failures"
           ? { processIdentity: "ffffffff-ffff-4fff-afff-ffffffffffff" }
           : {}),
         ...(scenario === "moving" ? { backpressureChunks: 33 } : {}),
+        ...(scenario === "posts" ? { posts: 3 } : {}),
+        ...(scenario === "chunks" ? { backpressureChunks: "32" } : {}),
+        ...(scenario === "exhausted" ||
+        scenario === "exhausted_and_ended" ||
+        scenario === "multiple_failures"
+          ? { backpressureChunks: BACKPRESSURE_MAX_CHUNKS, streams: 0 }
+          : {}),
       },
     ];
     const result = verifyBackpressure({
@@ -407,17 +427,69 @@ test("backpressure verification requires a real elapsed idle window, stable proc
         );
       },
       json: async (path: string) => {
+        paths.push(path);
+        if (path === "/state") return { running: scenario === "stopped" ? 0 : 1 };
         expect(path).toBe("/stats");
-        return counts[calls++];
+        return samples[calls++];
       },
       wait: async (ms: number) => {
+        waits.push(ms);
         if (scenario !== "too_short") time += ms;
       },
       now: () => time,
     });
-    if (scenario === "valid") await result;
-    else await expect(result).rejects.toThrow("verification_backpressure");
+    if (!code) await result;
+    else await expect(result).rejects.toThrow(`verification_backpressure_${code}`);
     expect(canceled).toBe(true);
+    expect(waits).toEqual([1000, 35_000]);
+    if (scenario === "stopped") expect(paths).toEqual(["/stats", "/stats", "/state"]);
+    else if (scenario === "too_short") expect(paths).toEqual(["/stats", "/stats"]);
+    else expect(paths).toEqual(["/stats", "/stats", "/state", "/stats"]);
+  }
+});
+test("backpressure reader and malformed snapshots fail closed without erasing primary failure during cancel", async () => {
+  const stable = { processIdentity, posts: 2, streams: 1, backpressureChunks: 32 };
+  await expect(
+    verifyBackpressure({ json: async () => null, request: async () => new Response("unused") }),
+  ).rejects.toThrow("verification_backpressure_process");
+  await expect(
+    verifyBackpressure({ json: async () => stable, request: async () => new Response(null) }),
+  ).rejects.toThrow("verification_backpressure_chunks");
+  await expect(
+    verifyBackpressure({
+      json: async () => stable,
+      request: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.close();
+            },
+          }),
+        ),
+    }),
+  ).rejects.toThrow("verification_backpressure_chunks");
+  for (const stopped of [true, false]) {
+    let time = 0;
+    await expect(
+      verifyBackpressure({
+        json: async (path: string) => (path === "/state" ? { running: stopped ? 0 : 1 } : stable),
+        request: async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array([1]));
+              },
+              cancel() {
+                throw new Error("private-cancel-text");
+              },
+            }),
+          ),
+        wait: async (ms: number) => {
+          time += ms;
+        },
+        now: () => time,
+      }),
+    ).rejects.toThrow(`verification_backpressure_${stopped ? "process" : "stream"}`);
   }
 });
 

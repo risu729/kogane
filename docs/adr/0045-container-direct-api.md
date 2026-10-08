@@ -115,10 +115,16 @@ The main-integration head `89d3a3ee614c2ff91e2dee73b2f37d3698ff671e` passed
 That result predates the idle-alarm correction and synthetic harness; it does
 not validate those additions. Local Docker is unavailable. Hosted attempts have deployed the SDK baseline
 and exposed harness defects; none has completed the native or rollback phases.
-The latest completed attempt at commit `6d92b9b` stopped in the SDK baseline
-with a closed HTTP error. Its application, namespace and Worker were removed;
-registry readback disagreed between GET and HEAD. The runner now uses the OCI
-manifest HEAD existence operation for both ownership and absence checks.
+The latest completed attempt at commit `c0678833`
+([run 37819824222](https://github.com/risu729/kogane/actions/runs/37819824222))
+passed SDK concurrent startup, a 35-second delayed response and a 40-second
+stream, then failed the paused-consumer backpressure predicate. All four
+cleanup checks passed; separate API reads confirmed Worker, application and
+namespace absence. The runner uses canonical OCI manifest HEAD for registry
+ownership and absence, and shares the existing rollout deadline with public
+HTTP readiness checks. Normal CI and CodeQL passed on that published head.
+The diagnostic follow-up preserves the existing backpressure gates and observes
+DO-only process state before a stats request can auto-restart a stopped process.
 These attempts do not establish runtime equivalence. Final CI and the following
 runtime gates are still pending:
 

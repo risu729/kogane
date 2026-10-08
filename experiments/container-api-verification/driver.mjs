@@ -175,36 +175,63 @@ export async function verifyConcurrency({ phase, json }) {
 
 export async function verifyBackpressure({ request, json, wait = pause, now = Date.now }) {
   const baseline = await json("/stats");
-  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(baseline.processIdentity ?? ""))
-    closed("backpressure");
+  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(baseline?.processIdentity ?? ""))
+    closed("backpressure_process");
   const reader = (await request("/backpressure")).body?.getReader();
-  if (!reader) closed("backpressure");
+  if (!reader) closed("backpressure_chunks");
+  let failed = false;
   try {
-    const first = await reader.read();
-    if (first.done || first.value.byteLength === 0) closed("backpressure");
-    // Stop consuming. This unpaced source must stall, rather than finish inside
-    // proxy/client buffers; a tiny paced stream would not establish backpressure.
+    let first;
+    try {
+      first = await reader.read();
+    } catch {
+      closed("backpressure_stream");
+    }
+    if (first.done || !first.value?.byteLength) closed("backpressure_chunks");
+    // Preserve the existing 1s+35s measurement. Diagnostics do not assume which
+    // predicate failed or change how much data the bounded source may emit.
     await wait(1000);
     const stalled = await json("/stats");
     const started = now();
     await wait(35_000);
+    if (now() - started < 30_000) closed("backpressure_timing");
+    // /stats proxies into the Container and can auto-start a stopped SDK process.
+    // The DO-only state observation happens first and never sends Container traffic.
+    if ((await json("/state"))?.running !== 1) closed("backpressure_process");
     const after = await json("/stats");
+    // Fixed diagnostic precedence: timing, process, malformed/exhausted source,
+    // stream count, POST count, then continued producer progress.
+    if (now() - started < 30_000) closed("backpressure_timing");
     if (
-      now() - started < 30_000 ||
-      stalled.processIdentity !== baseline.processIdentity ||
-      after.processIdentity !== baseline.processIdentity ||
-      stalled.streams !== 1 ||
-      after.streams !== 1 ||
-      stalled.posts !== baseline.posts ||
-      after.posts !== baseline.posts ||
-      !Number.isSafeInteger(stalled.backpressureChunks) ||
-      stalled.backpressureChunks < 1 ||
-      stalled.backpressureChunks >= BACKPRESSURE_MAX_CHUNKS ||
-      after.backpressureChunks !== stalled.backpressureChunks
+      stalled?.processIdentity !== baseline.processIdentity ||
+      after?.processIdentity !== baseline.processIdentity
     )
-      closed("backpressure");
+      closed("backpressure_process");
+    if (
+      ![stalled.backpressureChunks, after.backpressureChunks].every(
+        (count) => Number.isSafeInteger(count) && count >= 1,
+      )
+    )
+      closed("backpressure_chunks");
+    if (
+      stalled.backpressureChunks >= BACKPRESSURE_MAX_CHUNKS ||
+      after.backpressureChunks >= BACKPRESSURE_MAX_CHUNKS
+    )
+      closed("backpressure_exhausted");
+    if (stalled.streams !== 1 || after.streams !== 1) closed("backpressure_stream");
+    if (stalled.posts !== baseline.posts || after.posts !== baseline.posts)
+      closed("backpressure_posts");
+    if (after.backpressureChunks !== stalled.backpressureChunks) closed("backpressure_progress");
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await reader.cancel();
+    try {
+      await reader.cancel();
+    } catch {
+      // A broken transport during cancellation must not erase the measured failure.
+      if (!failed) closed("backpressure_stream");
+    }
   }
 }
 export async function verifyPhase({
