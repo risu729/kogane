@@ -11,6 +11,7 @@ import { validApiResponse } from "../../observation-shared/src/api-validation.ts
 import { validCollectionQualityCells } from "../../observation-shared/src/collection-quality-contract.ts";
 import type { CellQualityRow } from "../../read-model/src/collection-quality.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
+import { fullCoreSchema } from "../../read-model/test/card-usage-scale-fixture.ts";
 import { QualityStore } from "../../read-model/test/collection-quality-fixture.ts";
 import { COLLECTOR_SOURCE_IDS } from "../src/collection/descriptors.ts";
 import {
@@ -27,6 +28,13 @@ import {
 const JOBS = JSON.parse(
   readFileSync(join(import.meta.dir, "../../../config/alarm-jobs.json"), "utf8"),
 ) as { id: string; source: string | null; kind: string }[];
+
+// The first store pays the one-time CORE schema build (schema-template.ts,
+// every migration in order), which crosses the 5 s default of the first hook
+// or test that builds one on a loaded runner. Pay it here, outside their budgets.
+beforeAll(() => {
+  fullCoreSchema().close();
+}, 60_000);
 
 /**
  * The terminal source a collector declares in its shared-run module, read as

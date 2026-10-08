@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { explain, type PlanStep } from "./card-usage-plan";
+import { fullCoreSchema } from "./card-usage-scale-fixture";
 import { QualityStore } from "./collection-quality-fixture";
 import {
   CELL_QUALITY_SQL,
@@ -22,11 +23,24 @@ import {
   type TerminalQualityRow,
   type UnregisteredQualityRow,
 } from "../src/collection-quality";
-import { latestBalancesSql, transactionsSql } from "../src/sql";
+import {
+  latestBalancesSql,
+  MYJCB_LEDGER_MEMBER,
+  positionsSql,
+  transactionsSql,
+  VPASS_SNAPSHOT_MEMBER,
+} from "../src/sql";
 
 const JOBS = JSON.parse(
   readFileSync(join(import.meta.dir, "../../../config/alarm-jobs.json"), "utf8"),
 ) as { id: string }[];
+
+// The first store pays the one-time CORE schema build (schema-template.ts,
+// every migration in order), which crosses the first test's 5 s default
+// timeout on a loaded runner. Pay it here, outside any test's budget.
+beforeAll(() => {
+  fullCoreSchema().close();
+}, 60_000);
 
 function cells(store: QualityStore, source: string, offset = 0): CellQualityRow[] {
   return store.all<CellQualityRow>(CELL_QUALITY_SQL, [source, offset]);
@@ -532,11 +546,52 @@ describe("collection quality: cells", () => {
   });
 });
 
+/**
+ * The parsers a current read narrows beyond `activeStateProjection` and the
+ * snapshot policies, read from the shipped texts: every
+ * `p.parser_name <> 'x' OR ...` and `p.parser_name NOT IN ('x', ...) OR ...`
+ * guard, the shape every such rule of those reads takes.
+ */
+function narrowedParsers(sql: string): string[] {
+  const found = new Set<string>();
+  for (const match of sql.matchAll(/p\.parser_name <> '([a-z0-9-]+)'\s+OR\b/gu))
+    found.add(match[1]!);
+  for (const match of sql.matchAll(/p\.parser_name NOT IN \(([^)]*)\)\s+OR\b/gu))
+    for (const name of match[1]!.matchAll(/'([a-z0-9-]+)'/gu)) found.add(name[1]!);
+  return [...found].sort();
+}
+
 describe("collection quality: the uncomposed per-query rules are the ones the reads apply", () => {
-  test("each named parser is narrowed by the Transactions or Balances read", () => {
-    const reads = transactionsSql({}, 0).sql + latestBalancesSql({}, 0, 501).sql;
-    for (const parser of UNCOMPOSED_QUERY_RULE_PARSERS) expect(reads).toContain(`'${parser}'`);
-    // and nowhere composed here: no rule of this read names them.
+  /** The rules this read composes, by the parser each guard names and the membership it applies. */
+  const COMPOSED: Record<string, string> = {
+    "global-pass-activity":
+      "fa.id IN (SELECT fetch_artifact_id FROM current_global_pass_snapshots)",
+    "vpass-statement-page": VPASS_SNAPSHOT_MEMBER,
+    "myjcb-credit-ledger": MYJCB_LEDGER_MEMBER,
+  };
+  const reads = [
+    transactionsSql({}, 0).sql,
+    latestBalancesSql({}, 0, 501).sql,
+    positionsSql({}, 0).sql,
+  ].join("\n");
+
+  test("every parser the Transactions, Balances and Positions reads narrow is composed here or named", () => {
+    // Both ways: a rule added to a read, or one dropped from it, fails until
+    // the list (or the composition) follows.
+    expect(narrowedParsers(reads)).toEqual(
+      [...Object.keys(COMPOSED), ...UNCOMPOSED_QUERY_RULE_PARSERS].sort(),
+    );
+    // The guard is read the way the shipped texts write it.
+    expect(
+      narrowedParsers("p.parser_name <> 'a-b'\n OR x AND p.parser_name NOT IN ('c', 'd') OR y"),
+    ).toEqual(["a-b", "c", "d"]);
+  });
+
+  test("the composed rules are the reads' own membership texts; the uncomposed ones appear nowhere here", () => {
+    for (const membership of Object.values(COMPOSED)) {
+      expect(reads).toContain(membership);
+      expect(CELL_QUALITY_SQL).toContain(membership);
+    }
     for (const parser of UNCOMPOSED_QUERY_RULE_PARSERS)
       expect(CELL_QUALITY_SQL).not.toContain(`'${parser}'`);
   });
