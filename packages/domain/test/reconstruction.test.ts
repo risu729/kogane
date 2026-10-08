@@ -1425,3 +1425,58 @@ describe("every unknown effect names a gap", () => {
     expect(unknownBasis.gaps).toEqual(["leg_effect_unknown"]);
   });
 });
+
+describe("adapter flags reach the cells their chain touched", () => {
+  test("a flagged withdrawal without legs blocks the cell of the movement it withdrew", () => {
+    const state = run({
+      set: eventSet([
+        debit("event:test:1", "100", "2026-03-15", { supersededBy: "event:test:1@2" }),
+        rev({
+          revision: 2,
+          state: "unknown",
+          unknownReason: "conflicting_evidence",
+          times: [],
+          commit: 20,
+          flags: ["identity_changed"],
+        }),
+      ]),
+    });
+    const jpy = cell(state);
+    expect(jpy.gaps).toContain("identity_changed");
+    expect(jpy.needsReview).toBe(true);
+    expect(jpy.explanation.status).not.toBe("reconciled");
+  });
+
+  test("a flagged correction marks the old account's cell too, opening it if needed", () => {
+    const state = run({
+      set: eventSet([
+        rev({ legs: [leg({ quantity: q("USD", "5") })], supersededBy: "event:test:1@2" }),
+        rev({
+          revision: 2,
+          commit: 20,
+          legs: [leg({ accountId: B, quantity: q("USD", "5") })],
+          flags: ["alias_conflict"],
+        }),
+      ]),
+      request: { accountIds: [A, B] },
+      start: side(START_DATE, [balance(), balance({ ref: "balance:test:b", accountId: B })]),
+    });
+    expect(cell(state, A, "USD").gaps).toContain("alias_conflict");
+    expect(cell(state, B, "USD").gaps).toContain("alias_conflict");
+    expect(cell(state, A, "JPY").needsReview).toBe(false);
+  });
+
+  test("a flagged leg no account resolves gives every cell of its unit the flag", () => {
+    const state = run({
+      set: eventSet([
+        rev({
+          legs: [leg({ accountId: null, quantity: q("JPY", "1") })],
+          flags: ["claim_conflict"],
+        }),
+      ]),
+    });
+    expect(cell(state).gaps).toContain("claim_conflict");
+    expect(cell(state).needsReview).toBe(true);
+    expect(disposition(state, "event:test:1@1#0")).toBe("claim_conflict");
+  });
+});

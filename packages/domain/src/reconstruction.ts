@@ -1566,12 +1566,68 @@ function historyGaps(
   return next > last ? [] : ["history_coverage_unknown"];
 }
 
+interface FlagReach {
+  /** `account\u0000unit` → flags of an active revision whose chain moved it. */
+  cells: Map<string, Set<ProvisionalRevisionFlag>>;
+  /** unit → flags, for chain legs no account resolves: every requested cell of the unit. */
+  units: Map<string, Set<ProvisionalRevisionFlag>>;
+}
+
+/**
+ * An active revision's adapter flags reach every cell its chain touched: its
+ * own legs and those of every revision it superseded, directly or not. A
+ * flagged withdrawal without legs therefore still blocks the cell of the
+ * movement it withdrew.
+ */
+function flagReach(
+  selection: KnowledgeSelection,
+  legBasis: RecognitionBasis,
+  requested: ReadonlySet<string>,
+): FlagReach {
+  const predecessors = new Map<string, ProvisionalEventRevision[]>();
+  for (const { revision: row } of selection.revisions)
+    if (row.supersededBy !== null) {
+      const list = predecessors.get(row.supersededBy) ?? [];
+      list.push(row);
+      predecessors.set(row.supersededBy, list);
+    }
+  const reach: FlagReach = { cells: new Map(), units: new Map() };
+  const add = <K>(
+    map: Map<K, Set<ProvisionalRevisionFlag>>,
+    key: K,
+    flags: readonly ProvisionalRevisionFlag[],
+  ) => {
+    const set = map.get(key) ?? new Set();
+    for (const flag of flags) set.add(flag);
+    map.set(key, set);
+  };
+  for (const { revision: head, status } of selection.revisions) {
+    if (status !== "active" || head.flags.length === 0) continue;
+    const seen = new Set<string>();
+    const queue = [head];
+    while (queue.length > 0) {
+      const row = queue.pop()!;
+      if (seen.has(refOf(row))) continue;
+      seen.add(refOf(row));
+      for (const leg of row.legs) {
+        if (leg.basis !== legBasis && leg.basis !== "unknown") continue;
+        if (leg.accountId === null) add(reach.units, leg.quantity.unitRef, head.flags);
+        else if (requested.has(leg.accountId))
+          add(reach.cells, `${leg.accountId}\u0000${leg.quantity.unitRef}`, head.flags);
+      }
+      queue.push(...(predecessors.get(refOf(row)) ?? []));
+    }
+  }
+  return reach;
+}
+
 function frames(
   request: ReconstructionRequest,
   policy: FoldPolicy,
   start: StartSnapshot,
   end: EndReported,
   selection: KnowledgeSelection,
+  reach: FlagReach,
 ): CellFrame[] {
   const legBasis = policy.bases[request.basis].legBasis;
   const out: CellFrame[] = [];
@@ -1595,6 +1651,11 @@ function frames(
         for (const leg of selected.revision.legs)
           if (leg.accountId === accountId && (leg.basis === legBasis || leg.basis === "unknown"))
             note(leg.quantity.unitRef, "flow-only");
+    // A cell a flagged chain touched is opened even when nothing in force moves it.
+    for (const key of reach.cells.keys()) {
+      const [owner, unit] = key.split("\u0000") as [string, string];
+      if (owner === accountId) note(unit, "flow-only");
+    }
     for (const [unit, measure] of keyed) {
       const pick = (side: ReconstructionReportedSide) =>
         pickRow(
@@ -1713,7 +1774,8 @@ export function reconstructState(input: {
 
   const legBasis = policy.bases[request.basis].legBasis;
   const requested = new Set(request.accountIds);
-  const cellFrames = frames(request, policy, start, end, selection);
+  const reach = flagReach(selection, legBasis, requested);
+  const cellFrames = frames(request, policy, start, end, selection, reach);
   const cellKey = (accountId: string, unit: string) => `${accountId}\u0000${unit}`;
   const cellKeys = new Set(
     cellFrames.flatMap((frame) =>
@@ -1834,6 +1896,12 @@ export function reconstructState(input: {
     if (start.accountsWithoutContainer.includes(frame.accountId)) gaps.add("no_start_snapshot");
     for (const item of fold.views) if (item.classified.gap !== null) gaps.add(item.classified.gap);
     if (conflicted.size > 0) gaps.add("duplicate_claim");
+    if (frame.unitRef !== null)
+      for (const flag of [
+        ...(reach.cells.get(cellKey(frame.accountId, frame.unitRef)) ?? []),
+        ...(reach.units.get(frame.unitRef) ?? []),
+      ])
+        gaps.add(flag);
     const family = familyRows(frame.accountId);
     if (family.length === 0 || family.some((row) => row.status !== "evented"))
       gaps.add("family_not_evented");

@@ -124,7 +124,10 @@ review shaped the provisional input this PR uses.
    whenever the start, a movement's value, its effect, its time, the chain,
    the knowledge, an adapter flag, a duplicate claim or an own transfer
    blocks it; it is never zero by default. Two active events holding one
-   `(book, key)` are both marked and never resolved. A revision with
+   `(book, key)` are both marked and never resolved. An active revision's
+   adapter flag reaches every requested cell its chain touched (its own legs
+   and those of every revision it superseded), so a flagged withdrawal
+   without legs still blocks the cell of the movement it withdrew. A revision with
    movements on two own accounts is held (`own_transfer_held`). Nothing is
    totalled across accounts; `netWorth` is `"not-computed"`.
 6. **Explanation.** Against the end figure in the same orientation: the
