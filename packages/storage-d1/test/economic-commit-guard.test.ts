@@ -27,7 +27,9 @@ import {
 import { cardPurchaseRecognitionWrites } from "../src/atomic/card-purchase-recognition.ts";
 import {
   decisionEntry,
+  economicClaimWrite,
   economicFinalizationWrites,
+  receiptEntry,
   type CommitInput,
 } from "../src/atomic/economic-commit.ts";
 import type { SqlWrite } from "../src/core/operations.ts";
@@ -865,6 +867,64 @@ describe("the finalization", () => {
     binds[3] = 2;
     writes[writes.length - 2] = { sql: seal.sql, binds };
     await expect(run(db, writes)).rejects.toThrow("economic_seal_invalid");
+    db.close();
+  });
+});
+
+describe("the entry", () => {
+  test("a reviewed entry is the receipt for this payload and plan, nothing else", async () => {
+    const db = database();
+    const planId = "f".repeat(64);
+    db.run(
+      `INSERT INTO change_plans(plan_id,kind,payload_json,base_context_id,expected_revisions_json,simulation_json,created_by,created_at,expires_at,status)
+       VALUES(?,'card-settlement.accept','{}','context','{}','{}','owner',?,?,'committed')`,
+      [planId, NOW, LATER],
+    );
+    db.run(
+      `INSERT INTO operation_receipts(operation_id,principal,operation_kind,payload_digest,plan_id,status,result_json,created_at)
+       VALUES('op-1','owner','card-settlement.accept',?,?,'accepted','{}',?)`,
+      ["e".repeat(64), planId, NOW],
+    );
+    // The revision the claim belongs to (decision, revision, leg only).
+    await run(db, adoptWrites(db, { eventId: "transfer-x", revision: 1 }).slice(0, 3));
+    const [claim] = claimRecords(db, "transfer-x", 1, [
+      { book: "cash-movement", observationId: 101 },
+    ]);
+    const entry = (payloadDigest: string, principal = "owner") =>
+      receiptEntry({ operationId: "op-1", principal, payloadDigest, planId });
+    // Another payload, or another principal, under the same operation id writes nothing.
+    expect(await run(db, [economicClaimWrite(entry("0".repeat(64)), claim!)])).toEqual([0]);
+    expect(await run(db, [economicClaimWrite(entry("e".repeat(64), "other"), claim!)])).toEqual([
+      0,
+    ]);
+    expect(await run(db, [economicClaimWrite(entry("e".repeat(64)), claim!)])).toEqual([1]);
+    // And once written, the same statement finds its own row.
+    expect(await run(db, [economicClaimWrite(entry("e".repeat(64)), claim!)])).toEqual([0]);
+    db.close();
+  });
+
+  test("a finalization whose members and seals disagree is a programming error", () => {
+    const db = database();
+    expect(() =>
+      economicFinalizationWrites({
+        entry: decisionEntry("dr-x"),
+        claims: claimRecords(db, "transfer-y", 1, [{ book: "cash-movement", observationId: 101 }]),
+        times: [],
+        effects: [],
+        seals: [],
+        commit: {
+          decisionRevisionId: "dr-x",
+          operationId: null,
+          principal: PRINCIPAL,
+          payloadDigest: "d".repeat(64),
+          kind: "synthetic.adopt",
+          members: [{ eventId: "transfer-x", revision: 1, supersedes: [] }],
+          claims: [],
+          released: [],
+          now: NOW,
+        },
+      }),
+    ).toThrow("economic finalization does not match its commit");
     db.close();
   });
 });
