@@ -1300,6 +1300,8 @@ export function explainLate(
     baseline.contract !== now.contract ||
     baseline.resolution !== now.resolution ||
     baseline.adapterRelease !== now.adapterRelease ||
+    // Full chains are one set read at two cuts; resolved sets differ per cut.
+    (now.resolution === "full-chains" && baseline.setVersion !== now.setVersion) ||
     baseline.knowledgeCut.coreEpoch !== now.knowledgeCut.coreEpoch ||
     baseline.knowledgeCut.commitSeq > now.knowledgeCut.commitSeq
   )

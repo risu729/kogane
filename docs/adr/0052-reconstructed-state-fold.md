@@ -154,6 +154,13 @@ now)`, a pure diff of two selections of one scope (the baseline is the cut
    synchronously; the caller digests it with `canonicalDigest`. An input over
    5,000 revisions or 20,000 legs is refused (`event_budget_exceeded`), never
    cut.
+8. **What the engine can and cannot verify.** The engine never verifies
+   `setVersion` against the content it is handed: the version is the
+   adapter's word, pinned as given. Re-running the selector on a selection
+   catches edits of derived fields (statuses, supersession, holders) but not
+   an edited input row, which re-selects consistently. A full-chains baseline
+   must carry the same `setVersion` as the selection (one set read at two
+   cuts); sets resolved by the adapter at each cut may carry their own.
 
 ## Consequences
 

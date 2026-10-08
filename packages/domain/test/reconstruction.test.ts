@@ -1541,3 +1541,36 @@ describe("the policy constant", () => {
     expect(!refused.ok && refused.error.code).toBe("invalid_policy");
   });
 });
+
+describe("a baseline is of the same set", () => {
+  test("full chains of another set version are refused as a baseline", () => {
+    const first = eventSet([debit("event:test:1", "1", "2026-03-15")], {
+      setVersion: "set:test:1",
+    });
+    const second = eventSet([debit("event:test:2", "1", "2026-03-15")], {
+      setVersion: "set:test:2",
+    });
+    const late = explainLate(select(first, 50), select(second, CUT));
+    expect(!late.ok && late.error.code).toBe("baseline_mismatch");
+    const refused = reconstructState({
+      request: request(),
+      policy: RECONSTRUCTION_FOLD_V1,
+      start: side(START_DATE, [balance()]),
+      end: side(END_DATE, [endBalance("10000")]),
+      selection: select(second, CUT),
+      baseline: select(first, 50),
+    });
+    expect(!refused.ok && refused.error.code).toBe("baseline_mismatch");
+  });
+
+  test("sets the adapter resolved at each cut may carry their own versions", () => {
+    const at = (version: string, commit: number) =>
+      eventSet([debit("event:test:1", "1", "2026-03-15", { commit })], {
+        resolution: "resolved-at-cut",
+        setVersion: version,
+      });
+    expect(
+      explainLate(select(at("set:test:50", 10), 50), select(at("set:test:100", 10), CUT)).ok,
+    ).toBe(true);
+  });
+});
