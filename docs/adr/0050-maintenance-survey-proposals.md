@@ -78,7 +78,9 @@ variable is not declared, so it is off.
 Processor tick. Each tick claims at most `targetsPerTick` (2) due pages from
 `maintenance_survey_cursors` (a claim moves the due time 30 minutes ahead, so
 an overlapping tick cannot fetch the same page) and for each: one GET with no
-cookie, no redirect following, a 15-second timeout and a 2 MiB cap; the body
+cookie, no redirect following, a 15-second timeout and a 2 MiB cap counted on
+the body stream (a body the timeout or a dropped connection ends while it is
+read is `timeout`/`network_error`, like one that never started); the body
 stored content-addressed in the EVIDENCE bucket under
 `maintenance-survey/objects/<2 hex>/<sha256>` (written once, SHA-256 verified
 by R2); one append-only `maintenance_survey_fetches` row with the fetch time,
@@ -102,7 +104,8 @@ optionally after 翌/翌日 or a weekday; recurring windows are 毎週X曜日
 by a time range. Anything else is not a window. Ambiguity is a closed reason,
 never a silent guess: `year_inferred`, `weekday_mismatch`,
 `end_next_day_inferred`, `timezone_mismatch`, `exception_stated`,
-`may_change`, `cancellation_stated`, `partial_service`, `long_window`,
+`may_change` (including approximate times: 頃, ごろ, 目途, 目安),
+`cancellation_stated`, `partial_service`, `long_window`,
 `contradictory_windows`. A stated weekday that matches exactly one candidate
 year pins it without a reason. Dated windows that ended before the fetch are
 counted as past and not proposed.
@@ -186,33 +189,39 @@ codes are checked closed sets in the schema itself.
   reference; the acceptance row links proposal and revision instead. The
   writer call and the acceptance row are not one transaction: if the row
   cannot be written after the writer saved, the revision stands, the API
-  answers `decision_record_failed`, and the proposal reads as not current.
+  answers `decision_record_failed`, and the proposal reads as not current (a
+  `new` one too: its rule `<source>-survey-<id>` then exists). Accepting it
+  again is the writer's `revision_conflict`, so the revision is never written
+  twice; the proposal can still be rejected.
 - Page bodies of public notices are kept in the raw-evidence bucket under
   their own prefix, outside the collection catalogue, without retention
   pruning. Each distinct body is stored once.
-- CORE 0069 and ADR 0050 follow the numbering agreed for the open PRs: CORE
-  0067 is #560's and 0068 #544's, so 0069 lands after them whatever the
-  merge order; ADR 0045–0049 belong to other open PRs.
+- CORE 0069 follows the numbering agreed for the open PRs: CORE 0067 is
+  #560's and 0068 #544's, so 0069 lands after them whatever the merge order.
 
 ## Verification
 
 Synthetic tests only; no provider page was fetched by a test or while
 writing this. `services/processor/test/maintenance-survey-extract.test.ts`
 covers the allowlist schema and the committed configuration, every transport
-failure code, strict decoding (UTF-8 and Shift_JIS), visible-text extraction,
-the dated and recurring grammar, every reason code, rejected and past
-windows, contradictions, the comparison with rules, and a page whose
-instruction-like text only ever meets the closed grammar.
+failure code (also for a body that fails while it is read), strict decoding
+(UTF-8 and Shift_JIS), visible-text extraction, the dated and recurring
+grammar, every reason code, rejected and past windows, contradictions, the
+comparison with rules, and a page whose instruction-like text only ever meets
+the closed grammar.
 `maintenance-survey-lane.test.ts` runs the lane on the migrated schema in
 Miniflare: provenance and the content-addressed body, proposals without any
 rule or schedule change, freshness and backoff, the same reading proposing
 nothing new, empty and windowless pages as failures, an injected page whose
-text reaches no row, log or tick record, and the flag-off tick.
+text reaches no row, log or tick record, a body cut off after its headers
+recorded as `timeout` and backed off, and the flag-off tick.
 `maintenance-survey-decisions.test.ts` accepts a proposal through the
 operator route and the adapter, then shows with the production
 `ScheduleAlarm` that the due time moves to the window's end while the nominal
 occurrence stays, and that the alarm runs it once after the window; it also
 covers rejection, a moved rule (`revision_conflict`), operator-only access,
-and the exact write handed to a synthetic #560-shaped writer.
+the exact write handed to a synthetic #560-shaped writer, and an acceptance
+whose decision row fails: the revision is written once, the proposal (new or
+changed) reads as not current, and a retry is `revision_conflict`.
 `services/app/test/schedules.test.ts` covers the relay, and
 `apps/web/test/schedules.browser.test.ts` the page section.

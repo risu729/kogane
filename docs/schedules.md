@@ -90,7 +90,8 @@ changed into proposals. It never changes a rule, a schedule or an alarm.
   weekday for the next day) and 毎週X曜日, 毎日 and 毎月第N X曜日(の翌日) followed
   by a time range. Missing years, weekday or zone mismatches, unmarked
   next-day ends, exception, change, cancellation or partial-service wording,
-  windows over three days and contradictory times are review reasons.
+  approximate times (頃, 目途), windows over three days and contradictory
+  times are review reasons.
 - **What is proposed.** A window that equals an enabled rule changes nothing.
   One that overlaps one rule is a revision of it; one that overlaps none is a
   new rule; an enabled rule this page backed but no longer states is proposed
