@@ -22,8 +22,8 @@ import type { ScheduledResult } from "./schedule-result";
 export const COLLECTOR_OPERATION_VERSION = "kogane-collector-operation-v1";
 
 /** The two things an operation may ask a collector to do. */
-export const COLLECTOR_OPERATION_ACTIONS = ["collect", "refresh-session"] as const;
-export type CollectorOperationAction = (typeof COLLECTOR_OPERATION_ACTIONS)[number];
+const COLLECTOR_OPERATION_ACTIONS = ["collect", "refresh-session"] as const;
+type CollectorOperationAction = (typeof COLLECTOR_OPERATION_ACTIONS)[number];
 
 export interface CollectorOperationRequest {
   readonly version: typeof COLLECTOR_OPERATION_VERSION;
@@ -177,7 +177,7 @@ export const OPERATION_CONNECTIONS: readonly OperationConnection[] = [
 ];
 
 /** The connection with this id, or null. */
-export function operationConnection(connectionId: string): OperationConnection | null {
+function operationConnection(connectionId: string): OperationConnection | null {
   return OPERATION_CONNECTIONS.find((entry) => entry.connectionId === connectionId) ?? null;
 }
 

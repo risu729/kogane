@@ -57,19 +57,19 @@ export const DEFAULT_DISPATCH_LIMIT = 5;
 export const COLLECTOR_RETRY_MS = 3_600_000;
 const RETRY_MS = 300_000;
 /** A request waiting for a held lease or this tick's start budget looks again after this. */
-export const COLLECTOR_WAIT_MS = 300_000;
+const COLLECTOR_WAIT_MS = 300_000;
 /**
  * Collector calls started per invocation. A collection can take minutes and
  * the call is awaited inside the tick, exactly as the alarm awaits it, so the
  * lane starts one and leaves the rest waiting (`dispatch_deferred`).
  */
-export const COLLECTOR_STARTS_PER_TICK = 1;
+const COLLECTOR_STARTS_PER_TICK = 1;
 /** A start with no recorded outcome after this long is `uncertain` (the alarm's own bound). */
-export const STARTED_UNCERTAIN_MS = 3_600_000;
+const STARTED_UNCERTAIN_MS = 3_600_000;
 /** How often a collected execution's trail is read again until it settles. */
-export const TRACK_INTERVAL_MS = 300_000;
+const TRACK_INTERVAL_MS = 300_000;
 /** Collected executions whose trail is read per tick. */
-export const TRACK_LIMIT = 5;
+const TRACK_LIMIT = 5;
 
 export interface DispatchEnv extends CollectionEnv {
   OPS_DISPATCH_ENABLED?: string | undefined;
