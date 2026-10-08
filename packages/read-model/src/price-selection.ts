@@ -176,7 +176,7 @@ export async function selectPrices(
 }
 
 // ---------------------------------------------------------------------------
-// Candidates for an as-of selection under a policy (ADR 0050).
+// Candidates for an as-of selection under a policy (ADR 0056).
 //
 // `selectPrices` above picks one row per key in SQL and stays as shipped. A
 // policy needs more than one row: a top that is excluded by rule, kind or

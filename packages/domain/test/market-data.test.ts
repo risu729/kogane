@@ -1,4 +1,4 @@
-// As-of price and FX selection (src/market-data.ts, ADR 0050). Every
+// As-of price and FX selection (src/market-data.ts, ADR 0056). Every
 // instrument, rate, amount and calendar here is invented.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";

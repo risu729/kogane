@@ -1,5 +1,5 @@
 // Candidate reads for as-of selection (src/price-selection.ts,
-// `selectPriceCandidates`, ADR 0050) over the migrated CORE schema, decided by
+// `selectPriceCandidates`, ADR 0056) over the migrated CORE schema, decided by
 // the domain's `selectPrice`. Synthetic prices, claims, parses and
 // publications only; every instrument and amount is invented.
 import type { Database } from "bun:sqlite";

@@ -1,5 +1,5 @@
 // Price and FX selection at an as-of, under an explicit, versioned policy
-// (ADR 0050, docs/calculation-and-reports.md §1–§2). Pure: no I/O, no clock,
+// (ADR 0056, docs/calculation-and-reports.md §1–§2). Pure: no I/O, no clock,
 // and no default policy anywhere — every function takes the policy it applies,
 // and the policy's digest goes into the selection manifest, so the same
 // candidates under the same policy always give the same answer and a changed
@@ -35,7 +35,7 @@
 // The proposed policy values (freshness windows, accepted bases, the refusal of
 // overlapping sources, the JPY pivot without an inverse) are named constants
 // whose names say they are proposals. Nothing in production code uses them;
-// ADR 0050 lists the questions the owner has not decided.
+// ADR 0056 lists the questions the owner has not decided.
 import type { RoundingInputs } from "./calculation.ts";
 import { canonicalDigest } from "./context.ts";
 import { hasExactKeys, isOneOf, isRecord, isRefList, isSafeInt, isText } from "./guards.ts";
@@ -315,12 +315,12 @@ function deepFrozen<T>(value: T): T {
 }
 
 // ---------------------------------------------------------------------------
-// Proposals. Not decisions: ADR 0050 lists the open questions. Nothing in
+// Proposals. Not decisions: ADR 0056 lists the open questions. Nothing in
 // production code imports these; tests and a later, owner-approved change may.
 // ---------------------------------------------------------------------------
 
 /**
- * PROPOSAL (ADR 0050, questions 1, 4, 5, 7, 9): SBI Shinsei's mid rate, at
+ * PROPOSAL (ADR 0056, questions 1, 4, 5, 7, 9): SBI Shinsei's mid rate, at
  * most 4 calendar days old, provider or collector basis, date-only excluded,
  * overlapping sources refused.
  */
@@ -338,7 +338,7 @@ export const PROPOSED_FX_SELECTION_POLICY_V1: PriceSelectionPolicy =
   });
 
 /**
- * PROPOSAL (ADR 0050, questions 1, 8): pivot JPY over the currencies the
+ * PROPOSAL (ADR 0056, questions 1, 8): pivot JPY over the currencies the
  * provider's public pages quote per 1 unit; no inverse, so a non-JPY base is
  * refused with `rounding_policy_missing`.
  */
@@ -351,7 +351,7 @@ export const PROPOSED_FX_CONVERSION_POLICY_V1: FxConversionPolicy = deepFrozen<F
 });
 
 /**
- * PROPOSAL (ADR 0050, questions 2, 3, 4, 5, 7): an SBI Securities position
+ * PROPOSAL (ADR 0056, questions 2, 3, 4, 5, 7): an SBI Securities position
  * price from the holding's own snapshot, at most 3 calendar days old.
  */
 export const PROPOSED_EQUITY_SELECTION_POLICY_V1: PriceSelectionPolicy =

@@ -1,4 +1,4 @@
-// Prices and FX rates at an as-of, under policies the caller names (ADR 0050,
+// Prices and FX rates at an as-of, under policies the caller names (ADR 0056,
 // docs/calculation-and-reports.md §1–§2). One bounded candidate read
 // (`selectPriceCandidates`), then the domain's `selectPrice` per key, then the
 // selection manifest and its digest. It never writes, never fetches a price,
