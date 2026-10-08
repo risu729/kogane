@@ -181,7 +181,8 @@ described in [identity](identity.md#cross-identifier-instrument-candidates).
   normalised names without evidence are `hints` with no status. A manually
   mapped or instrument-sharing identifier is always the anchor over one that
   is not; a proposed candidate whose subject is also settled carries a
-  `CANDIDATE_HOLDS` code and names nothing to adopt. The answer is
+  `CANDIDATE_HOLDS` code and names nothing to adopt (it can still be kept
+  apart by a rejection). The answer is
   order-independent and refuses more than 5,000 pairs or 1,000 hints.
 - `identifierResolutions` gives each identifier one of
   `IDENTIFIER_RESOLUTION_STATES`; an instrument shared without a manual

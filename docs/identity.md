@@ -123,8 +123,9 @@ a person to plan with a reason through the [change lifecycle](change-lifecycle.m
 where agents can plan but never approve or commit. A manually mapped
 identifier, or one sharing its instrument, is always the anchor over one that
 is not; when both identifiers are settled that way the candidate names no
-command and a `hold` code (`subject-decided-elsewhere`,
-`subject-shares-instrument`) says why. `queryInstrumentHistory`
+adopt command and a `hold` code (`subject-decided-elsewhere`,
+`subject-shares-instrument`) says why. It still names the keep-apart
+rejection, which moves no mapping, so a person can close it as `rejected`. `queryInstrumentHistory`
 lists an identifier's mapping revisions, mapping decisions and `listed_as`
 relations, oldest first; a correction is always a later entry.
 

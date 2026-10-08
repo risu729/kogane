@@ -582,9 +582,8 @@ describe("candidates from the identifiers the identity rules stored", () => {
     const result = await queryInstrumentResolution(w.sql);
     for (const candidate of result.candidates) {
       const commands = candidate.commands!;
-      expect(
-        validPayload(commands.adopt.kind, { ...commands.adopt.payload, reason: "same security" }),
-      ).toBe(true);
+      const adopt = commands.adopt!;
+      expect(validPayload(adopt.kind, { ...adopt.payload, reason: "same security" })).toBe(true);
       expect(
         validPayload(commands.keepApart.kind, {
           ...commands.keepApart.payload,
@@ -592,7 +591,7 @@ describe("candidates from the identifiers the identity rules stored", () => {
         }),
       ).toBe(true);
       // The adopted target is the anchor's instrument; the subject is re-mapped.
-      expect(commands.adopt.payload.referenceId).toBe(candidate.subjectIdentifierId);
+      expect(adopt.payload.referenceId).toBe(candidate.subjectIdentifierId);
     }
   });
 });
@@ -611,7 +610,7 @@ describe("only a person's decision adopts or rejects, and the history keeps ever
       w,
       AGENT,
       "identity.assign",
-      { ...candidate.commands!.adopt.payload, reason: "agent proposal" },
+      { ...candidate.commands!.adopt!.payload, reason: "agent proposal" },
       "op-agent-adopt",
     );
     expect(outcome.stage).toBe("approve");
@@ -634,7 +633,7 @@ describe("only a person's decision adopts or rejects, and the history keeps ever
       w,
       OPERATOR,
       "identity.assign",
-      { ...candidate.commands!.adopt.payload, reason: "same security, checked" },
+      { ...candidate.commands!.adopt!.payload, reason: "same security, checked" },
       "op-adopt",
     );
     expect(outcome.result.ok).toBe(true);
@@ -773,7 +772,7 @@ describe("a decision binds every identifier on the decided instrument", () => {
       w,
       OPERATOR,
       "identity.assign",
-      { ...toTokyo.commands!.adopt.payload, reason: "the venue trade is the Tokyo listing" },
+      { ...toTokyo.commands!.adopt!.payload, reason: "the venue trade is the Tokyo listing" },
       "op-s1-adopt",
     );
     expect(outcome.result.ok).toBe(true);
@@ -824,7 +823,7 @@ describe("a decision binds every identifier on the decided instrument", () => {
           w,
           OPERATOR,
           "identity.assign",
-          { ...adopt.commands!.adopt.payload, reason: "same security, checked" },
+          { ...adopt.commands!.adopt!.payload, reason: "same security, checked" },
           "op-s2-adopt",
         )
       ).result.ok,
@@ -847,7 +846,7 @@ describe("a decision binds every identifier on the decided instrument", () => {
       status: "proposed",
       hold: null,
     });
-    expect(tie.commands!.adopt.payload).toEqual({
+    expect(tie.commands!.adopt!.payload).toEqual({
       subject: "instrument",
       referenceId: venue,
       targetId: listingInstrument,
@@ -862,7 +861,8 @@ describe("a decision binds every identifier on the decided instrument", () => {
     });
 
     // Once a person maps the bare code somewhere else (here: onto its own
-    // instrument), no candidate offers to move it again.
+    // instrument), no candidate offers to move it again; keeping it apart is
+    // still offered, so the candidate can be closed.
     const ownInstrument = after.identifiers.find((row) => row.identifierId === venue)!.instrumentId;
     expect(
       (
@@ -881,12 +881,49 @@ describe("a decision binds every identifier on the decided instrument", () => {
       ).result.ok,
     ).toBe(true);
     const held = await queryInstrumentResolution(w.sql);
+    for (const other of [listing, broker]) {
+      const candidate = candidateOf(held, other, venue);
+      expect(candidate).toMatchObject({ status: "proposed", hold: "subject-decided-elsewhere" });
+      expect(candidate.commands!.adopt).toBeNull();
+      expect(
+        validPayload(candidate.commands!.keepApart.kind, {
+          ...candidate.commands!.keepApart.payload,
+          reason: "different security, checked",
+        }),
+      ).toBe(true);
+    }
+    expect(held.summary.unresolved).toBe(3);
+
+    // A person keeps the venue code apart from the listing's instrument. The
+    // rejection names that instrument, so it closes the broker code's held
+    // candidate too, and nothing is left unresolved.
+    const closing = candidateOf(held, listing, venue).commands!.keepApart;
+    expect(closing.payload).toMatchObject({
+      fromRef: `instrument:${listingInstrument}`,
+      toRef: `identifier:${venue}`,
+    });
+    expect(
+      (
+        await decide(
+          w,
+          OPERATOR,
+          "relation.reject",
+          { ...closing.payload, reason: "kept apart, checked" },
+          "op-s2-keep-apart",
+        )
+      ).result.ok,
+    ).toBe(true);
+    const closed = await queryInstrumentResolution(w.sql);
     for (const other of [listing, broker])
-      expect(candidateOf(held, other, venue)).toMatchObject({
-        status: "proposed",
-        hold: "subject-decided-elsewhere",
+      expect(candidateOf(closed, other, venue)).toMatchObject({
+        status: "rejected",
+        hold: null,
         commands: null,
       });
+    expect(stateOf(closed, venue)).toBe("kept-separate");
+    expect(stateOf(closed, listing)).toBe("resolved-by-decision");
+    expect(stateOf(closed, broker)).toBe("resolved-by-decision");
+    expect(closed.summary.unresolved).toBe(0);
   });
 });
 

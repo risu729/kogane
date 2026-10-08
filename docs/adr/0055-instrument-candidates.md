@@ -137,11 +137,14 @@ and `packages/application/src/query/instrument-resolution.ts`:
     not, so an adoption never moves a decided identifier. Between two settled
     or two unsettled identifiers the anchor is ranked by ISIN first, then a
     listing identifier (RIC or MIC), then a provider code; a tie goes to the
-    lower id. When both are settled the candidate stays `proposed` with no
-    commands and a closed `hold` code: `subject-decided-elsewhere` (the
-    subject's mapping is manual) or `subject-shares-instrument` (re-mapping
-    it would split a shared instrument). Re-deciding it is a person's
-    correction of the earlier decision, not an adoption.
+    lower id. When both are settled the candidate stays `proposed` with a
+    closed `hold` code: `subject-decided-elsewhere` (the subject's mapping is
+    manual) or `subject-shares-instrument` (re-mapping it would split a
+    shared instrument). The hold withholds only the adopt command; moving a
+    settled subject is a person's correction of the earlier decision, not an
+    adoption. The keep-apart command is still named, because a rejected
+    `listed_as` moves no mapping: without it a held candidate could never be
+    closed and its identifiers would stay `unresolved-candidates`.
 11. **History** of an identifier: every mapping revision, every decision on
     the mapping and every `listed_as` relation naming it, oldest first.
 12. **Bounds.** 5,000 pairs, 1,000 hints, 10,000 fact rows and 10,000
@@ -246,8 +249,8 @@ nothing more:
     reopens; identifier states, including `shared-without-decision`;
   - instrument groups and orientation: S1 (a code a person mapped onto one
     listing is separated from a listing on another market, `via` the first),
-    S2 (a decided identifier anchors a new one whichever id sorts first), and
-    both `hold` codes;
+    S2 (a decided identifier anchors a new one whichever id sorts first),
+    both `hold` codes, and a held candidate closed by a rejection;
   - input-order independence; money and reward identifiers are not paired;
     more than 5,000 pairs, more than 1,000 hints and a duplicate identifier are
     refused.
@@ -264,8 +267,10 @@ nothing more:
     with a third identifier; a person's `relation.reject` keeps a pair apart; the history lists
     both; a history read of more than 100 identifiers is refused;
   - S1 and S2 through the change lifecycle, with the anchor, the adopt and
-    keep-apart payloads, and `subject-decided-elsewhere` with no commands once
-    a person maps the subject elsewhere;
+    keep-apart payloads, and `subject-decided-elsewhere` with no adopt
+    command once a person maps the subject elsewhere; a person's
+    `relation.reject` from that keep-apart command closes both held
+    candidates as `rejected` and leaves nothing unresolved;
   - currencies: an unresolved trade currency is unconfirmed rather than the
     settlement unit; an SBI VC Trade product states its quote unit;
   - an unpublished capture and a superseded parse contribute no identifier;

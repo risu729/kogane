@@ -133,8 +133,9 @@ export const CANDIDATE_STATUSES = ["proposed", "adopted", "rejected"] as const;
 export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
 
 /**
- * Why a proposed candidate names no command, a closed list. Adopting re-maps
- * the subject, so a subject that is already settled is not offered for it:
+ * Why a proposed candidate names no adoption, a closed list. Adopting re-maps
+ * the subject, so a subject that is already settled is not offered for it
+ * (keeping the pair apart moves nothing and stays available):
  * - `subject-decided-elsewhere`: a person mapped the subject (a manual
  *   mapping) to an instrument the anchor does not map to;
  * - `subject-shares-instrument`: the subject's instrument is shared with
@@ -166,7 +167,7 @@ export interface InstrumentCandidate {
    */
   crossSource: boolean;
   status: CandidateStatus;
-  /** Why a `proposed` candidate names no command; null otherwise. */
+  /** Why a `proposed` candidate names no adoption; null otherwise. */
   hold: CandidateHold | null;
 }
 

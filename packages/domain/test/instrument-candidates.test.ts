@@ -640,6 +640,20 @@ describe("a decision binds every identifier that shares the decided instrument",
       status: "proposed",
       hold: "subject-decided-elsewhere",
     });
+    // A held candidate can still be kept apart: a rejection closes it, and
+    // both identifiers read as kept separate rather than unresolved.
+    expect(
+      identifierResolutions([left, right], set([left, right])).map((row) => row.state),
+    ).toEqual(["unresolved-candidates", "unresolved-candidates"]);
+    const keptApart = set(
+      [left, right],
+      new Map([[listedAsKey(left.instrumentId, right.identifierId), "rejected" as const]]),
+    );
+    expect(keptApart.candidates[0]).toMatchObject({ status: "rejected", hold: null });
+    expect(identifierResolutions([left, right], keptApart).map((row) => row.state)).toEqual([
+      "kept-separate",
+      "kept-separate",
+    ]);
 
     // The subject shares a rule instrument with another identifier: moving
     // it would split that instrument, so no command is named either.

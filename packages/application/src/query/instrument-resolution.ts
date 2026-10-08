@@ -64,15 +64,17 @@ export interface ResolutionIdentifier {
 
 /** The payload of a command a person may plan, without the reason they must write. */
 export interface CandidateCommands {
-  adopt: { kind: "identity.assign"; payload: Omit<IdentityAssignPayload, "reason"> };
+  /**
+   * Null when the candidate has a `hold`: its subject is already settled and
+   * adopting would re-map it.
+   */
+  adopt: { kind: "identity.assign"; payload: Omit<IdentityAssignPayload, "reason"> } | null;
+  /** Always named: a `listed_as` rejection moves no mapping, so a held candidate can be closed. */
   keepApart: { kind: "relation.reject"; payload: Omit<RelationPayload, "reason"> };
 }
 
 export interface ResolutionCandidate extends InstrumentCandidate {
-  /**
-   * Present only while the candidate is `proposed` and has no `hold`: a held
-   * candidate's subject is already settled, and adopting would re-map it.
-   */
+  /** Present only while the candidate is `proposed`. */
   commands: CandidateCommands | null;
 }
 
@@ -138,18 +140,23 @@ function commandsFor(
   candidate: InstrumentCandidate,
   byId: ReadonlyMap<string, InstrumentIdentifierFacts>,
 ): CandidateCommands | null {
-  if (candidate.status !== "proposed" || candidate.hold !== null) return null;
+  if (candidate.status !== "proposed") return null;
   const anchor = byId.get(candidate.anchorIdentifierId)!;
   const subject = byId.get(candidate.subjectIdentifierId)!;
   return {
-    adopt: {
-      kind: "identity.assign",
-      payload: {
-        subject: "instrument",
-        referenceId: subject.identifierId,
-        targetId: anchor.instrumentId,
-      },
-    },
+    // A hold withholds adoption only: re-mapping a settled subject would
+    // undo or split a decision. Keeping the pair apart moves nothing.
+    adopt:
+      candidate.hold !== null
+        ? null
+        : {
+            kind: "identity.assign",
+            payload: {
+              subject: "instrument",
+              referenceId: subject.identifierId,
+              targetId: anchor.instrumentId,
+            },
+          },
     keepApart: {
       kind: "relation.reject",
       payload: {
