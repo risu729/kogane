@@ -1,11 +1,11 @@
 // Role-typed time. A date is never promoted to an instant, an instant carries
 // its own offset, and period arithmetic works on civil days so it is free of
 // DST and leap-second surprises. Zones are named for deadline resolution and
-// display; this module does not embed a time-zone database. The one place it
-// reads zone data is `civilDateOfInstant`, which asks the runtime's own
-// (`Intl.DateTimeFormat`) for the civil date of an instant in a named zone and
-// returns null for a zone the runtime does not know; nothing here turns a
-// date into an instant.
+// display; this module does not embed a time-zone database. The only places
+// it reads zone data are `civilDateOfInstant` and `canonicalZone`, which ask
+// the runtime's own (`Intl.DateTimeFormat`) for the civil date of an instant
+// in a named zone and for the zone's spelling, and return null for a zone the
+// runtime does not know; nothing here turns a date into an instant.
 import { hasExactKeys, isOneOf, isRecord, isText } from "./guards.ts";
 
 export const TEMPORAL_BASES = ["provider", "collector", "derived"] as const;

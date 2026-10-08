@@ -85,42 +85,52 @@ What existed before this change:
   the currencies an admitted rule can quote against it, its selection policy
   (exactly one price kind) and an inverse rounding (mode and scale per unit)
   or none. Validators reject unknown keys, empty or duplicated lists, a
-  negative or non-integer day count and a zone the runtime does not know. No
-  function takes a default policy.
+  negative or non-integer day count, and a zone the runtime does not know or
+  that is not spelled as the runtime spells it (`canonicalZone`), so a
+  policy's digest has one form. No function takes a default policy.
 - **Six checks in order** (`selectPrice`): (1) filter, counting every
-  removed candidate by `rule_not_admitted`, `kind_not_admitted`,
-  `invalid_effective_time`, `basis_not_admitted`, `date_only_excluded` or
+  removed candidate by a closed code: `recorded_after_known_at`,
+  `rule_not_admitted`, `kind_not_admitted`, `price_not_positive` (the table's
+  CHECK allows a zero or negative amount), `invalid_effective_time`,
+  `basis_not_admitted`, `date_only_excluded` or
   `effective_at_or_after_bound`; (2) none left → `missing`; (3) more than one
   admitted rule with a candidate that could still be fresh (its latest
   possible civil day on or after the first day of the freshness window) under
   `refuse-on-overlap` → `sources_overlap`, so a stale row of another rule never
   refuses a fresh one and the answer does not depend on how much history the
   read returned (`priority-order` takes the first rule that yields a
-  selection); (4) rank by
-  instant, a date-only price by its civil date in the policy zone, and a top
-  that cannot be ordered → `time_incomparable`; (5) age from the top's civil
-  date to the as-of date, in calendar days or in open days of a calendar that
-  covers the span (else `calendar_missing`), older than allowed → `stale`
-  with the ids and the age, never the value; (6) candidates at the top
-  instant must state the same price per unit of base exactly, else
-  `disagree`; agreeing ones are corroboration, and the later recorded, then
-  the higher id, is selected. Instants are compared through the instant
-  parser, never as text.
+  selection); (4) rank by instant, a date-only price by its civil date in the
+  policy zone, and a top that cannot be ordered → `time_incomparable`; (5) age
+  from the top's civil date to the as-of date, in calendar days or in open
+  days of a calendar that covers the span (else `calendar_missing`), older
+  than allowed → `stale` with the ids and the age, never the value; (6)
+  candidates at the top instant must state the same price per unit of base
+  exactly, else `disagree`; agreeing ones are corroboration, and the later
+  recorded, then the higher id, is selected. Instants are compared through the
+  instant parser, never as text. `selectFxRate` answers a currency outside the
+  FX policy's currencies `unsupported_pair` without a read.
 - **The bound.** `effectiveBefore` is exclusive, as the dated state's
-  `fetched_at < (D + 1) 00:00` Asia/Tokyo is ([ADR 0019](0019-dated-reported-state.md));
-  `asOfDate` is the civil date ages count to, and `validSelectionBound`
-  requires `effectiveBefore` to be exactly the end of that date in the
-  policy's zone (`selectMarketData` checks it in the zone of both the price
-  and the FX selection policy, so the two share a zone). A date-only price of the policy
-  zone is eligible when it is not after the as-of date; one of another zone or
-  none is only known to within two days (zones run from UTC−12 to UTC+14) and refuses the selection when it might
-  be the newest.
+  `fetched_at < (D + 1) 00:00` Asia/Tokyo is
+  ([ADR 0019](0019-dated-reported-state.md)); `asOfDate` is the civil date
+  ages count to, and `validSelectionBound` requires `effectiveBefore` to be
+  exactly the end of that date in the policy's zone (`selectMarketData`
+  checks it in the zone of both the price and the FX selection policy, so the
+  two share a zone). A date-only price of the policy zone is eligible when it
+  is not after the as-of date; one of another zone or none is only known to
+  within two days (zones run from UTC−12 to UTC+14) and refuses the selection
+  when it might be the newest. A stored zone is the policy's when the runtime
+  spells it the same; an alias the runtime keeps (`Japan`) stays another zone.
 - **Knowledge.** `current` reads the parses `published_parse_runs` names now.
   `known-at` K reads prices recorded at or before K, of the parse run adopted
   by the newest `publication_events` row of the claim's artifact and parser at
-  or before K. The two modes are two SQL texts. SQLite compares times in milliseconds, so K may carry at most three fractional digits (`validKnownAtInstant`; a finer K is refused), and the domain re-checks every candidate's `recorded_at` against K exactly (`recorded_after_known_at`, which also counts a recorded time that does not parse). A publication event's time is compared at the millisecond only; every writer stores milliseconds. The manifest records the mode
-  and the newest `recorded_at` actually used, not K, so a later K that changes
-  nothing keeps the context.
+  or before K. The two modes are two SQL texts. SQLite compares times in
+  milliseconds, so K may carry at most three fractional digits
+  (`validKnownAtInstant`; a finer K is refused), and the domain re-checks
+  every candidate's `recorded_at` against K exactly (`recorded_after_known_at`,
+  which also counts a recorded time that does not parse). A publication
+  event's time is compared at the millisecond only; every writer stores
+  milliseconds. The manifest records the mode and the newest `recorded_at`
+  actually used, not K, so a later K that changes nothing keeps the context.
 - **The candidate read.** Per wanted key, every row effective inside a coarse
   window (the earliest possibly fresh civil date minus one day, to the bound
   plus one day, compared through `julianday`), every row of the newest instant
@@ -134,7 +144,8 @@ What existed before this change:
   the exact value (when finite) kept as `RoundingInputs`; without one the
   conversion is `rounding_policy_missing`. A pair the policy's currencies do
   not cover is `unsupported_pair`. A missing, stale or disagreeing rate is that
-  refusal for the FX leg; nothing is converted 1:1 and nothing becomes zero.
+  refusal for the FX leg, and a selection holding a zero or negative price is
+  `price_not_positive`; nothing is converted 1:1 and nothing becomes zero.
   `valueInBase` reports both legs with price ids, effective times and ages.
   An FX selection of another key, or made under another selection policy than
   the conversion policy's (`fx_selection_policy_mismatch`), is a caller error
@@ -146,7 +157,10 @@ What existed before this change:
 - **Manifest.** `market-data-selection-v1`: policies and calendars by id (and
   version) and digest, the bound, the knowledge mode and boundary, the
   selected ids and each refusal with its key and candidate ids, sorted. Its
-  `canonicalDigest` is the selection's context id.
+  `canonicalDigest` is the selection's context id. The context id identifies
+  the outcome, not the request: neither K nor a requested snapshot run is in
+  it, so two requests that select and refuse the same things under the same
+  policies share it.
 - **Mapping onto unvalued reasons** (for the change that writes valuation
   cells; nothing writes them yet): `stale` → `stale-price`;
   `instrument_mismatch` → `unresolved-identity`; `quantity_not_exact` →
@@ -191,11 +205,12 @@ What existed before this change:
   until the history makes it matter.
 - **Limits.** Exclusion counts cover the rows the read returns (rows far after
   the bound are not read). The row that explains `stale` is the newest before
-  the window whatever its rule, kind or basis, so a key whose newest old row
-  is not admitted reads `missing` rather than `stale`. In `known-at` mode a
-  row whose `recorded_at` or event time does not parse is not shown to be
-  known and is not read. A business-day rule refuses until a calendar is
-  supplied; none is shipped.
+  the window whatever its rule, kind, basis or effective-time shape (it may be
+  a date-only row, or one the domain cannot read), so a key whose newest old
+  row is not admitted reads `missing` rather than `stale`. In `known-at` mode
+  a row whose `recorded_at` or event time SQLite cannot read as a time is not
+  shown to be known and is not read. A business-day rule refuses until a
+  calendar is supplied; none is shipped.
 - `selectPrices` keeps its behaviour, including the skipped invalid row, for
   any caller that relies on it; there is none in production.
 
@@ -205,30 +220,44 @@ With synthetic data only:
 
 - `packages/domain/test/time.test.ts`: `civilDateOfInstant` equals the dated
   state's capture date in Asia/Tokyo across midnight, applies offsets and DST,
-  and is null for an unknown zone, a non-instant and an era-rendered year.
-- `packages/domain/test/market-data.test.ts`: every exclusion code counted;
+  and is null for an unknown zone, a non-instant and an era-rendered year;
+  `canonicalZone`.
+- `packages/domain/test/market-data.test.ts`: every exclusion code counted,
+  including a recorded time after K (exactly) and a zero or negative price;
   date-only exclusion, civil-date eligibility on D and not D + 1, zoneless and
-  other-zone dates, a date and an instant on one day; freshness at and past
-  the limit, a stale rate refusing a conversion, a date after the as-of date;
-  disagreement, corroboration, per-1 against per-10 bases, one instant in two
-  offsets, nanosecond order, overlap and priority; business days Friday to
-  Monday, a closed date, missing, foreign or partial calendars, the read
-  window; FX paths, a missing rate never 1:1, CHF unsupported, JPY to JPY,
-  `rounding_policy_missing`, 12 × 130.70 USD × 146.25 equal to `valueAtPrice`
-  twice, JPY → AUD and USD → AUD rounded once with operands; validators,
-  proposals, digests, the manifest and the guard that production code names
-  no proposal.
+  other-zone dates two days off (UTC−11 against UTC+14), zone spelling, a
+  date and an instant on one day; freshness at and past the limit, a stale
+  rate refusing a conversion, a date after the as-of date; disagreement,
+  corroboration, per-1 against per-10 bases, one instant in two offsets,
+  nanosecond order, overlap among possibly fresh candidates only and
+  priority; business days Friday to Monday, a closed date, missing, foreign
+  or partial calendars, a century over 20,000 closed dates counted exactly and
+  quickly, the read window; FX paths, a missing rate never 1:1, CHF
+  unsupported, JPY to JPY, `rounding_policy_missing`, a rate selected under
+  another policy refused, 12 × 130.70 USD × 146.25 equal to `valueAtPrice`
+  twice, JPY → AUD and USD → AUD rounded once with operands; validators
+  (including the bound at the end of its date), proposals, digests, the
+  manifest and the guard that no production source, script or task names a
+  proposal.
 - `packages/read-model/test/price-candidates.test.ts`: on migrated CORE
   SQLite, re-parse supersession in both modes through `publication_events`,
-  rollback, ties at K, same-snapshot scope, the before-window row turning
-  missing into stale, unreadable effective times counted, bounds refused,
-  plans without statistics for both texts, a differential against
-  `selectPrices` on 30 random tie-free stores, and frozen digests of the
-  shipped `PRICE_SELECTION_SQL`, `selectPrices` and `priceSelectionArgs`.
+  rollback, ties at K and a recorded time a fraction of a millisecond after
+  it, same-snapshot scope, overlap the same inside and outside the margin, the
+  before-window row turning missing into stale, unreadable effective times
+  counted, bounds refused, plans without statistics for both texts, a
+  differential against `selectPrices` on 30 random tie-free stores (unbounded
+  and 0–4 day freshness, through the before-window arm), a known-at
+  differential on 30 random publication histories against an in-JS oracle
+  over the events, and frozen digests of the shipped `PRICE_SELECTION_SQL`,
+  `selectPrices` and `priceSelectionArgs`.
+- `packages/read-model/test/price-candidates-scale.test.ts`: 200 boards of 13
+  currencies in CI (4,380 at full scale): no statistics, index searches only,
+  only the window returned, the same prices as `selectPrices`.
 - `packages/application/test/market-data-query.test.ts`: selections and a
   two-hop value end to end; the same inputs give the same context id, a new
-  price, a policy change or the knowledge mode a new one; inapplicable
-  requests and policies refused.
+  price, a policy change or the knowledge mode a new one; a currency outside
+  the FX policy is `unsupported_pair`; malformed requests, misaligned bounds,
+  ambiguous policy ids and proposals refused.
 - `mise run //packages/domain:ci`, `mise run //packages/read-model:ci`,
   `mise run //packages/application:ci` and `mise run ci:root`. No production
   data, D1 or Workers were involved.
