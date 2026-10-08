@@ -40,9 +40,11 @@ documentation described them inaccurately:
   `_kogane.externalIdOrigin` (`collector-fingerprint`), which stage A does not
   read; the id is the collector's fingerprint of the table cells plus an
   occurrence.
-- The V Point Pay id is the SHA-256 of the stored notification message,
-  recorded as `normalized-event-id`; the documentation listed it as a provider
-  row id.
+- The V Point Pay id is the SHA-256 of the stored notification message (the
+  outer message hash for a direct delivery, not for a forwarded one, so two
+  deliveries of one notice can carry two ids), recorded as
+  `normalized-event-id`, which stage A reads as provider-issued; the
+  documentation listed it as a provider row id.
 - V Point history rows carry no external id at all.
 
 Which provider fields could feed legs (a value date, a settlement amount in
@@ -80,7 +82,8 @@ Add `packages/domain/src/event-families.ts`, exported from the package index:
   `card-purchase`, `card-settlement`. `bank-movement` covers deposit and
   stored-value balances alike.
 - `FAMILY_UNSUPPORTED_REASONS`, closed: `no_event_writer`,
-  `identity_fingerprint_only`, `identity_origin_unrecorded`, `identity_absent`,
+  `identity_fingerprint_only`, `identity_evidence_digest`,
+  `identity_origin_unrecorded`, `identity_absent`,
   `direction_code_unmapped`, `cash_amount_not_stated`, `counterpart_not_stated`,
   `not_collected`, `semantics_unobserved`, `snapshot_only`,
   `writer_guard_pending`.
@@ -92,8 +95,9 @@ Add `packages/domain/src/event-families.ts`, exported from the package index:
   the observation kinds, the external id basis (`provider_id`,
   `provider_id_tuple`, `evidence_digest`, `fingerprint_occurrence`,
   `collector_fingerprint`, `none`), the `_kogane` key the origin is recorded
-  under (`identityOrigin`, `externalIdOrigin` or none) and the class the stage A
-  rule gives its text (`provider`, `fingerprint`), the status vocabulary
+  under (`identityOrigin`, `externalIdOrigin` or none) and how stage A reads it
+  (`provider`, `fingerprint`, or `unknown` when there is no
+  `identityOrigin`), the status vocabulary
   (absent, a closed set, or provider text verbatim), the provider link fields,
   and one or more family memberships. A membership is `supported` only for the
   card-purchase rows of Vpass and MyJCB and the card-settlement debits of SMBC
@@ -131,7 +135,10 @@ roadmap's phases 6–7, and a [domain contracts](../domain-contracts.md) entry.
 - Recording `_kogane.identityOrigin` in the provider-id parsers (SBI Shinsei,
   yen detail, SBI VC cash flows and executions, PayPay) is a parser release with
   regenerated digests and is not done here; nor is the domestic trade parser's
-  `externalIdOrigin` key renamed. Both need the owner's confirmation first.
+  `externalIdOrigin` key renamed, nor is V Point Pay's origin text changed so
+  that stage A stops reading its message digest as provider-issued (a limit the
+  `identity_evidence_digest` reason states). These need the owner's
+  confirmation first.
 - No migration, no Worker change, no production read.
 
 ## Verification
@@ -150,7 +157,7 @@ Locally with synthetic data only:
   outside, and those with
   coverage-contract cases shown to emit no such row); every registry parser run
   on the shared synthetic fixtures records the entry's observation kinds, origin
-  key and stage A class (never the text or an id), external-id presence, status
+  key and stage A reading (never the text or an id), external-id presence, status
   vocabulary and every listed provider link field.
 - `mise run //packages/domain:ci`, `mise run //packages/parsers:ci` (parser
   digests unchanged), `mise run ci:root`, and oxlint, oxfmt and typos on the

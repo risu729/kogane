@@ -13,7 +13,7 @@ import {
   TRANSACTION_FAMILY_REGISTRY,
   transactionFamilyEntry,
   type ProviderLinkCode,
-  type RecordedOriginClass,
+  type StageAOriginReading,
   type TransactionFamilyEntry,
 } from "../../domain/src/event-families.ts";
 import { globalPassActivity } from "../src/parsers/global-pass-activity-parser.ts";
@@ -368,9 +368,15 @@ const LINK_FIELDS: Record<string, Partial<Record<ProviderLinkCode, readonly stri
 };
 
 const RECORDED_KEYS = ["identityOrigin", "externalIdOrigin"] as const;
-/** The stage A rule (services/processor/src/reconciliation-job.ts `originOf`). */
-const originClass = (text: string): RecordedOriginClass =>
-  text.includes("fingerprint") || text.includes("occurrence") ? "fingerprint" : "provider";
+/**
+ * The stage A rule (services/processor/src/reconciliation-job.ts `originOf`):
+ * it reads only `$._kogane.identityOrigin`.
+ */
+const stageAReads = (kogane: Record<string, unknown>): StageAOriginReading => {
+  const text = kogane["identityOrigin"];
+  if (typeof text !== "string") return "unknown";
+  return text.includes("fingerprint") || text.includes("occurrence") ? "fingerprint" : "provider";
+};
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -450,19 +456,18 @@ describe("transaction-family registry against PARSERS", () => {
           kind: true,
         });
         const kogane = record(row.extra["_kogane"]) ?? {};
-        // The identity origin: which key, and its stage A class, never its text.
+        // The identity origin: which key, and how stage A reads it, never its text.
         const recorded = RECORDED_KEYS.filter((name) => Object.hasOwn(kogane, name));
-        if (entry.identity.originKey === null)
-          expect({ label, recorded }).toEqual({ label, recorded: [] });
-        else {
-          expect({ label, recorded }).toEqual({ label, recorded: [entry.identity.originKey] });
-          const text = kogane[entry.identity.originKey];
-          if (typeof text !== "string") throw new Error(`${label}: origin is not text`);
-          expect({ label, origin: originClass(text) }).toEqual({
-            label,
-            origin: entry.identity.originClass!,
-          });
-        }
+        expect({ label, recorded }).toEqual({
+          label,
+          recorded: entry.identity.originKey === null ? [] : [entry.identity.originKey],
+        });
+        if (entry.identity.originKey !== null)
+          expect(typeof kogane[entry.identity.originKey]).toBe("string");
+        expect({ label, reads: stageAReads(kogane) }).toEqual({
+          label,
+          reads: entry.identity.stageAReads,
+        });
         // The external id: present exactly when the entry names a basis.
         const externalId = row.kind === "transaction" ? row.externalId : undefined;
         expect({ label, id: typeof externalId === "string" && externalId.length > 0 }).toEqual({

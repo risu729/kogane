@@ -11,9 +11,9 @@ import {
   FAMILY_UNSUPPORTED_REASONS,
   familyUnsupportedReasons,
   PROVIDER_LINK_CODES,
-  RECORDED_ORIGIN_CLASSES,
   RECORDED_ORIGIN_KEYS,
   REGISTRY_OBSERVATION_KINDS,
+  STAGE_A_ORIGIN_READINGS,
   TRANSACTION_FAMILIES,
   TRANSACTION_FAMILY_REGISTRY,
   TRANSACTION_FAMILY_REGISTRY_VERSION,
@@ -52,6 +52,7 @@ describe("closed codes", () => {
     expect(FAMILY_UNSUPPORTED_REASONS).toEqual([
       "no_event_writer",
       "identity_fingerprint_only",
+      "identity_evidence_digest",
       "identity_origin_unrecorded",
       "identity_absent",
       "direction_code_unmapped",
@@ -79,7 +80,7 @@ describe("closed codes", () => {
       "none",
     ]);
     expect(RECORDED_ORIGIN_KEYS).toEqual(["identityOrigin", "externalIdOrigin"]);
-    expect(RECORDED_ORIGIN_CLASSES).toEqual(["provider", "fingerprint"]);
+    expect(STAGE_A_ORIGIN_READINGS).toEqual(["provider", "fingerprint", "unknown"]);
     expect(REGISTRY_OBSERVATION_KINDS).toEqual(["transaction", "position"]);
     expect(WRITER_STATUSES).toEqual(["supported", "unsupported"]);
   });
@@ -183,7 +184,7 @@ describe("registry entries", () => {
     expect(by((entry) => entry.identity.originKey === "externalIdOrigin")).toEqual([
       "sbi-securities/sbi-domestic-trade-records",
     ]);
-    expect(by((entry) => entry.identity.originClass === "provider")).toEqual([
+    expect(by((entry) => entry.identity.stageAReads === "provider")).toEqual([
       "smbc-bank/smbc-direct-transactions",
       "v-point-pay/v-point-pay-notification-event",
     ]);
@@ -197,10 +198,25 @@ describe("registry entries", () => {
       const fingerprint =
         entry.identity.externalId === "fingerprint_occurrence" ||
         entry.identity.externalId === "collector_fingerprint";
-      expect(entry.identity.originClass === "fingerprint").toBe(fingerprint);
+      const digest = entry.identity.externalId === "evidence_digest";
+      // Stage A reads only identityOrigin; an origin under another key is unknown to it.
+      expect(entry.identity.stageAReads === "fingerprint").toBe(
+        fingerprint && entry.identity.originKey === "identityOrigin",
+      );
+      expect(entry.identity.stageAReads === "unknown").toBe(
+        entry.identity.originKey !== "identityOrigin",
+      );
       const unsupported = entry.families.filter((membership) => membership.writer !== "supported");
       for (const membership of unsupported) {
+        // An identity reason is required exactly when the id is not the provider's.
+        expect(
+          membership.reasons.some(
+            (reason) =>
+              reason === "identity_fingerprint_only" || reason === "identity_evidence_digest",
+          ),
+        ).toBe(fingerprint || digest);
         expect(membership.reasons.includes("identity_fingerprint_only")).toBe(fingerprint);
+        expect(membership.reasons.includes("identity_evidence_digest")).toBe(digest);
         expect(membership.reasons.includes("identity_origin_unrecorded")).toBe(
           entry.identity.externalId !== "none" && entry.identity.originKey !== "identityOrigin",
         );
@@ -224,7 +240,13 @@ describe("registry entries", () => {
       (entry) => (entry.identity.extra = true),
       (entry) => (entry.identity.externalId = "provider"),
       (entry) => (entry.identity.originKey = "identityOrigin"),
-      (entry) => (entry.identity.originClass = "provider"),
+      (entry) => (entry.identity.stageAReads = "provider"),
+      (entry) => (entry.identity.stageAReads = "maybe"),
+      (entry) => delete entry.identity.stageAReads,
+      (entry) => {
+        entry.identity.originKey = "externalIdOrigin";
+        entry.identity.stageAReads = "fingerprint";
+      },
       (entry) => (entry.observationKinds = ["balance"]),
       (entry) => (entry.observationKinds = []),
       (entry) => (entry.observationKinds = ["transaction", "transaction"]),

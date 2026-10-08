@@ -165,10 +165,10 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
   crypto execution and fiat remittance, reward exchange, prepaid funding and
   notification, card purchase, card settlement);
   `FAMILY_UNSUPPORTED_REASONS`, `PROVIDER_LINK_CODES`, `EXTERNAL_ID_BASES` and
-  the recorded origin keys and classes are closed as well.
+  the recorded origin keys and stage A readings are closed as well.
 - `TRANSACTION_FAMILY_REGISTRY` has one entry per parser whose rows are
   transactions or positions: observation kinds, the external id basis and the
-  `_kogane` key and stage A class of its recorded origin, the status
+  `_kogane` key of its recorded origin and how stage A reads it, the status
   vocabulary, the provider-stated link fields, and the family memberships with
   writer status `supported` (card purchases from Vpass/MyJCB, card settlement
   debits from SMBC/SBI Shinsei) or `unsupported` with closed reasons.

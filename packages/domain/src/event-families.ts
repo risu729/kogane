@@ -56,6 +56,9 @@ export type TransactionFamily = (typeof TRANSACTION_FAMILIES)[number];
  * - `no_event_writer`: no code writes events of this family from these rows.
  * - `identity_fingerprint_only`: the row id is a fingerprint of the row's
  *   content and position, not an id the provider issued.
+ * - `identity_evidence_digest`: the row id is a digest of the stored evidence
+ *   message, not an id the provider issued; another delivery of the same
+ *   notice (a forwarded copy) can carry another id.
  * - `identity_origin_unrecorded`: the row id may be the provider's, but the
  *   parser records no `_kogane.identityOrigin`, so stage A reads it as unknown.
  * - `identity_absent`: the row carries no external id at all.
@@ -75,6 +78,7 @@ export type TransactionFamily = (typeof TRANSACTION_FAMILIES)[number];
 export const FAMILY_UNSUPPORTED_REASONS = [
   "no_event_writer",
   "identity_fingerprint_only",
+  "identity_evidence_digest",
   "identity_origin_unrecorded",
   "identity_absent",
   "direction_code_unmapped",
@@ -126,19 +130,23 @@ export const RECORDED_ORIGIN_KEYS = ["identityOrigin", "externalIdOrigin"] as co
 export type RecordedOriginKey = (typeof RECORDED_ORIGIN_KEYS)[number];
 
 /**
- * How the recorded origin text classifies under the stage A rule
- * (services/processor/src/reconciliation-job.ts `originOf`): text naming a
- * fingerprint or an occurrence is `fingerprint`, any other text `provider`.
+ * What stage A (services/processor/src/reconciliation-job.ts `originOf`) reads
+ * as the row's identifier origin. It reads only `$._kogane.identityOrigin`:
+ * text naming a fingerprint or an occurrence is `fingerprint`, any other text
+ * `provider`, and no `identityOrigin` (none recorded, or an origin recorded
+ * under another key) is `unknown`. This is how the text is read, not what the
+ * id is: `externalId` states that, and the two can disagree (V Point Pay).
  */
-export const RECORDED_ORIGIN_CLASSES = ["provider", "fingerprint"] as const;
-export type RecordedOriginClass = (typeof RECORDED_ORIGIN_CLASSES)[number];
+export const STAGE_A_ORIGIN_READINGS = ["provider", "fingerprint", "unknown"] as const;
+export type StageAOriginReading = (typeof STAGE_A_ORIGIN_READINGS)[number];
 
 export interface RecordedIdentity {
+  /** What the external id is, read off the parser. */
   externalId: ExternalIdBasis;
   /** Null when the parser records no origin under either key. */
   originKey: RecordedOriginKey | null;
-  /** Null exactly when `originKey` is null. */
-  originClass: RecordedOriginClass | null;
+  /** `unknown` exactly when `originKey` is not `identityOrigin`. */
+  stageAReads: StageAOriginReading;
 }
 
 export const REGISTRY_OBSERVATION_KINDS = ["transaction", "position"] as const;
@@ -225,8 +233,8 @@ const unsupported = (
 const identity = (
   externalId: ExternalIdBasis,
   originKey: RecordedOriginKey | null = null,
-  originClass: RecordedOriginClass | null = null,
-): RecordedIdentity => ({ externalId, originKey, originClass });
+  stageAReads: StageAOriginReading = "unknown",
+): RecordedIdentity => ({ externalId, originKey, stageAReads });
 const ABSENT: StatusVocabulary = { kind: "absent" };
 const POSTED: StatusVocabulary = { kind: "closed", values: ["posted"] };
 const NO_LINK: readonly ProviderLinkCode[] = ["none"];
@@ -321,7 +329,7 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     sourceId: "sbi-securities",
     parserName: "sbi-domestic-trade-records",
     observationKinds: ["transaction"],
-    identity: identity("collector_fingerprint", "externalIdOrigin", "fingerprint"),
+    identity: identity("collector_fingerprint", "externalIdOrigin"),
     statuses: ABSENT,
     providerLinks: ["value_date"],
     families: [
@@ -499,10 +507,13 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     families: [unsupported("bank-movement", "identity_fingerprint_only", "counterpart_not_stated")],
   },
   {
-    // The id is the SHA-256 of the stored notification message, recorded as
-    // `normalized-event-id` (which the stage A rule reads as provider-issued).
-    // A notification does not establish settlement; charge events fund the
-    // balance from a source the notice does not link.
+    // The id is the SHA-256 of the stored notification message: for a direct
+    // delivery the outer message hash, for a forwarded one not (so two
+    // deliveries of one notice can carry two ids). The parser records it as
+    // `normalized-event-id`, which stage A reads as provider-issued — a limit
+    // until a parser release records its origin. A notification does not
+    // establish settlement; charge events fund the balance from a source the
+    // notice does not link.
     sourceId: "v-point-pay",
     parserName: "v-point-pay-notification-event",
     observationKinds: ["transaction"],
@@ -510,8 +521,13 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     statuses: { kind: "closed", values: ["notified", "declined"] },
     providerLinks: NO_LINK,
     families: [
-      unsupported("prepaid-notification"),
-      unsupported("prepaid-funding", "counterpart_not_stated", "semantics_unobserved"),
+      unsupported("prepaid-notification", "identity_evidence_digest"),
+      unsupported(
+        "prepaid-funding",
+        "identity_evidence_digest",
+        "counterpart_not_stated",
+        "semantics_unobserved",
+      ),
     ],
   },
   {
@@ -577,7 +593,7 @@ const isReason = isOneOf(FAMILY_UNSUPPORTED_REASONS);
 const isLink = isOneOf(PROVIDER_LINK_CODES);
 const isBasis = isOneOf(EXTERNAL_ID_BASES);
 const isOriginKey = isOneOf(RECORDED_ORIGIN_KEYS);
-const isOriginClass = isOneOf(RECORDED_ORIGIN_CLASSES);
+const isReading = isOneOf(STAGE_A_ORIGIN_READINGS);
 const isKind = isOneOf(REGISTRY_OBSERVATION_KINDS);
 
 function distinctNonEmpty<T>(value: unknown, guard: (item: unknown) => item is T): value is T[] {
@@ -590,11 +606,11 @@ function distinctNonEmpty<T>(value: unknown, guard: (item: unknown) => item is T
 }
 
 function validIdentity(value: unknown): value is RecordedIdentity {
-  if (!isRecord(value) || !hasExactKeys(value, ["externalId", "originKey", "originClass"]))
+  if (!isRecord(value) || !hasExactKeys(value, ["externalId", "originKey", "stageAReads"]))
     return false;
-  if (!isBasis(value.externalId)) return false;
-  if (value.originKey === null) return value.originClass === null;
-  return isOriginKey(value.originKey) && isOriginClass(value.originClass);
+  if (!isBasis(value.externalId) || !isReading(value.stageAReads)) return false;
+  if (value.originKey !== null && !isOriginKey(value.originKey)) return false;
+  return (value.originKey === "identityOrigin") === (value.stageAReads !== "unknown");
 }
 
 function validStatuses(value: unknown): value is StatusVocabulary {
