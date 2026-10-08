@@ -521,7 +521,11 @@ ledger does not move.
   claims) and the commit row supersedes the accepted revision and releases its
   claim; the writer still writes `card_settlement_allocation_withdrawals` (its
   own legacy record). A release whose key another live holder also holds is
-  refused (`economic_claim_conflict_unresolved`).
+  refused (`economic_claim_conflict_unresolved`): the withdrawal plan reads the
+  key half of `claim_available` (`CARD_SETTLEMENT_KEY_AVAILABLE_SQL`, by the
+  candidate's id and the key index) and refuses with `needs_scope_resolution`
+  and that code; a plan made before the second holder appeared is refused by
+  the commit row and answered `commit_failed` with the code.
 - **Ordering.** The commit row is the last _economic_ statement. The change
   lifecycle's approval, plan and outbox statements follow it in a reviewed
   batch, and the provider-linked merge's proposal, relation and resolution
@@ -550,6 +554,9 @@ ref; the commit's planner returns nothing for a refused row. Consequence:
 **SBI Shinsei debits can no longer be accepted** (`identity_origin_unrecorded`,
 rule 2): their parser records no origin, and no parser was changed here. Their
 function is declared, so a parser release that records the origin admits them.
+The only other route, treating ADR 0018's reviewed adapter evidence as the
+declared origin, would need an owner-approved amendment of rule 2; it is not
+taken.
 The registry lists SBI Shinsei's card-settlement membership as unsupported.
 
 ### Readiness, heads and refusals
@@ -636,6 +643,14 @@ The registry lists SBI Shinsei's card-settlement membership as unsupported.
   included); W6 PROC (a withdrawal planned before another withdrawal:
   `stale_context`, no commit row); W7 and W8 PROC; W9 PROC (a failure at every
   statement of an acceptance) and SD1 (the split). W10 SD1 (G1a).
+- A withdrawal that would wash a pre-existing double holder (two settlements
+  accepted on one debit the pre-G1b way): refused at plan time and, for a plan
+  made before the second holder, at commit, every table unchanged (PROC; the
+  plan's refusal also in `packages/application/test/card-settlement-plan.test.ts`,
+  its SQL against the CTEs and its plan in the readiness test). An SBI Shinsei
+  acceptance made before G1b still reserves every candidate of its provider id
+  in the view and in `claim_available`, and the G1b withdrawal releases it
+  (`services/processor/test/card-settlement-sbi-shinsei.test.ts`).
 - Deferred, with the reason: W5 for `move` and W6's re-adoption need the own
   transfer writer (G3); W11 needs the knowledge selector (#550, ADR 0058).
 - Purchase lane: sealed and logged batches, replays, released-key refusal,

@@ -37,7 +37,10 @@ from a statement, or calculate net assets.
 Both adapters propose candidates. Since ADR 0054 G1b only SMBC debits can be
 accepted: an SBI Shinsei debit's id has no recorded origin, so its acceptance
 is refused (`identity_origin_unrecorded`, [lifecycle](#candidate-and-decision-lifecycle))
-until a parser release records it.
+until a parser release records it. The only other route, treating
+[ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md)'s reviewed adapter
+evidence as the declared origin, would need an owner-approved amendment of
+ADR 0054's rule 2; it is not taken.
 
 The currency, status, direction and sign are judged on the newest capture of a
 provider id, so a newer capture that fails them withdraws the row instead of
@@ -259,7 +262,11 @@ Since ADR 0054 G1b the acceptance and the withdrawal write the rows of the
   a commit row that supersedes the accepted revision and releases its claim,
   and still writes `card_settlement_allocation_withdrawals` as before. A
   release whose key another live holder also holds is refused
-  (`economic_claim_conflict_unresolved`): a double holder is never washed.
+  (`economic_claim_conflict_unresolved`): a double holder is never washed. The
+  withdrawal plan already refuses it (`needs_scope_resolution` with that code),
+  reading the key half of `claim_available` by the candidate's id; a plan made
+  before the second holder appeared is refused by the commit row
+  (`commit_failed` with that code).
 - The plan pins the event's head, `economic-event:<event id>` (0 before an
   acceptance, the accepted revision before a withdrawal), beside
   `card-settlement:<id>`.

@@ -442,7 +442,9 @@ would see the change; `commit_failed` with any other guard code; and
 `unsupported_semantics` with `identity_fingerprint_only`,
 `identity_origin_unrecorded`, `identity_digest_not_provider`,
 `identity_resolver_missing` or `identity_absent` when a card settlement's bank
-debit cannot be consumed by a human-adopted writer. A batch the guard refuses
+debit cannot be consumed by a human-adopted writer; and `needs_scope_resolution`
+with `economic_claim_conflict_unresolved` when a card settlement withdrawal
+would release a key another live holder also holds. A batch the guard refuses
 is rolled back whole; the commit answers with the code instead of an error.
 
 ## UI
