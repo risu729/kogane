@@ -21,7 +21,7 @@ are separate claims. Historical acceptance records are linked from the
 | Rewards              | Bucket/quantity/observed-expiry display, claim/read projections and pure simulation components                                                                  | Useful forecasts need actual activity, verified rules, membership and applicable offers; no external exchange is performed |
 | Valuation/reports    | Provider price claims, pure valuation components and fixed report artifacts                                                                                     | No general external price/FX acquisition or complete portfolio valuation product                                           |
 | Cost basis/P&L/tax   | Typed input/policy gates and decomposition components                                                                                                           | `costBasis()` always returns `needs-policy`; lots, disposal allocation and complete P&L/tax outputs are absent             |
-| AI/MCP               | Shared query/explanation/proposal service and `/mcp` transport exist                                                                                            | Agent grants are empty; maintenance has no MCP tool; client access is not established by having an adapter                 |
+| AI/MCP               | Shared query/explanation/proposal service, `/mcp` transport and maintenance-window tools exist                                                                  | Agent grants are empty; maintenance tools are unverified in production; client access is not established by an adapter     |
 
 ## Source and execution blockers
 
@@ -90,8 +90,10 @@ flag alone does not make MCP usable. See [agent API](agent-api.md) and
 Schedule and maintenance edits use the operator-only
 [HTTP settings API](schedules.md#settings-api), with version checks, verified
 Access identity, same-origin JSON and the settings header. This API exists for
-the management screen. AI access needs a deliberately designed authentication
-and permission path plus a maintenance MCP adapter; these are not implemented.
+the management screen. Maintenance windows alone can also be changed by an
+agent holding `schedules.maintenance.update` through the
+[maintenance MCP tools](schedules.md#agent-maintenance-tools); no grant names
+such an agent yet.
 
 ## Next work
 
@@ -99,5 +101,5 @@ The next product milestone is card usage → statement → bank debit with an
 explainable trail and no double expense. Finish representative coverage and
 identity gaps, then extend dated holdings/liabilities, valuation, lots/P&L and
 tax. Rewards can progress in parallel. See the [roadmap](roadmap.md) for delivery
-order and acceptance criteria. Maintenance MCP access and automatic research
-refresh are separate unfinished capabilities.
+order and acceptance criteria. Production use of the maintenance MCP tools and
+automatic research refresh are separate unfinished capabilities.

@@ -78,7 +78,45 @@ same-origin JSON, `x-kogane-settings: 1` and strict payload validation
 tools. The separately allowlisted, bodyless deployment `/bootstrap` route
 only reconciles reservations after release identity checks.
 
-Maintenance changes can be made from the management screen using this HTTP API.
-An AI/MCP integration, its credentials/permissions and automatic online research
-refresh remain unimplemented. See [agent access](agent-api.md) and
+Maintenance changes can be made from the management screen using this HTTP API,
+and by an agent through the two MCP tools below. Automatic online research
+refresh remains unimplemented. See [agent access](agent-api.md) and
 [current status](current-status.md).
+
+## Agent maintenance tools
+
+[ADR 0046](adr/0046-agent-maintenance-windows.md). An agent-API grant with
+`schedules.read` and `schedules.maintenance.update`, scoped by
+`scopes.scheduleSources`, reaches two MCP tools and nothing else here: job
+times, enable/disable, lease release and bootstrap stay operator or deployment
+only, and the routes above still refuse every agent.
+
+- `kogane.schedules.maintenance.read` returns, for the granted sources (or the
+  one named), the registered reference, each schedule's original next
+  occurrence, saved maintenance-adjusted due time, actual alarm,
+  `armed`/`pending`/`disabled` state and latest receipt outcome, and each rule
+  with up to 20 revisions (actor kind, reason, whether the caller wrote it).
+  It returns no run or evidence ids, no lease and no principal's identity, and
+  nothing about another source.
+- `kogane.schedules.maintenance.update` appends one revision: omit `ruleId` with
+  `revision: 0` to create a rule under an id the server chooses, or name a rule
+  of that source with its current revision. It needs a one-line `reason`, an
+  https `referenceUrl` on the source's registered maintenance host (stored,
+  never fetched) and `verifiedAt`. It answers the saved revision, whether the
+  reservations were reconciled, and the source's view after the save.
+
+Both go through the Processor's single writer, `writeMaintenanceRevision`
+(`services/processor/src/schedule-store.ts`), which the operator route also
+uses. It answers a closed code: `invalid_request`, `invalid_reference`,
+`reason_required`, `maintenance_rule_not_found` (another source's rule answers
+like a missing one), `revision_conflict`, `maintenance_deferral_too_long`
+(an agent revision may not lengthen a source's longest joined deferral past
+seven days) or `maintenance_write_budget_exceeded` (30 agent revisions per
+principal per rolling day). CORE 0067 records each revision's actor kind,
+reason and optional decision reference; older revisions show them as unknown.
+A source with no registered reference (PRESTIA bank) takes no rule. A
+collection deferred by any window still runs once after it and resumes its
+nominal schedule.
+
+Not verified in production: no grant names a maintenance principal, CORE 0067
+is not applied, and no Claude or Codex client has called these tools.

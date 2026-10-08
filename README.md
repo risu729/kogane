@@ -34,8 +34,8 @@ transaction matching, reconstructed state, portfolio valuation, lots, cost
 basis, P&L and tax outputs are incomplete.
 
 The operator HTTP API can edit schedules and maintenance. Research is not
-automatically refreshed. MCP query/explanation/proposal code exists, but agent
-grants are empty and maintenance has no MCP tool. Generic collection-operation
+automatically refreshed. MCP query/explanation/proposal and maintenance-window
+tools exist, but agent grants are empty. Generic collection-operation
 requests still need executor wiring; alarm execution uses a separate implemented
 private RPC path.
 

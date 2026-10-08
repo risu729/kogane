@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   afterMaintenance,
+  longestDeferral,
   nextNominal,
   validMaintenance,
   type MaintenanceRule,
@@ -122,4 +123,42 @@ test("a persistent active lease blocks provider entry; no time expiry is consult
   });
   expect(calls).toBe(1);
   expect(ref).toBeNull();
+});
+test("the longest joined deferral is measured from each union's own start", () => {
+  const hour = 3_600_000,
+    day = 24 * hour,
+    from = ms("2026-11-01T00:00:00.000Z");
+  const dated = (start: number, end: number) =>
+    rule({ kind: "once", from: new Date(start).toISOString(), to: new Date(end).toISOString() });
+  // Two adjacent dated windows join; a later short one stays its own union.
+  const joined = [
+    dated(from + day, from + 4 * day),
+    dated(from + 4 * day, from + 6 * day),
+    dated(from + 20 * day, from + 20 * day + hour),
+  ];
+  expect(longestDeferral(joined, from, 92 * day, 92 * day)).toBe(5 * day);
+  // A window already running at `from` counts only what remains of it.
+  expect(longestDeferral([dated(from - day, from + hour)], from, 92 * day, 92 * day)).toBe(hour);
+  // A cross-midnight weekly window is measured from its start, not from `from`.
+  const weekly = [rule({ kind: "weekly", weekdays: [6], start: "22:00", end: "08:00" })];
+  expect(longestDeferral(weekly, from, 92 * day, 92 * day)).toBe(10 * hour);
+  // Windows that cover every minute never end: the answer is "more than cap".
+  const endless = [
+    rule({ kind: "weekly", weekdays: [0, 1, 2, 3, 4, 5, 6], start: "00:00", end: "12:00" }),
+    rule({ kind: "weekly", weekdays: [0, 1, 2, 3, 4, 5, 6], start: "12:00", end: "00:00" }),
+  ];
+  expect(longestDeferral(endless, from, 92 * day, 7 * day)).toBeGreaterThan(7 * day);
+  expect(() => afterMaintenance(from, endless)).toThrow("maintenance_unavailable");
+  // Disabled and feature-only rules defer nothing.
+  expect(
+    longestDeferral(
+      [
+        { ...dated(from, from + 30 * day), enabled: false },
+        { ...weekly[0]!, scope: "feature-only" },
+      ],
+      from,
+      92 * day,
+      92 * day,
+    ),
+  ).toBe(0);
 });

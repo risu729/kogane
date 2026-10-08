@@ -39,6 +39,12 @@ import { grantsUsable } from "./grants";
 import { handleMcp, MCP_TOOLS, PURCHASES_MCP_TOOLS } from "./mcp";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
+import {
+  callScheduleTool,
+  isScheduleToolName,
+  scheduleToolsFor,
+  schedulesServed,
+} from "./schedule-tools";
 import { HttpError, json } from "./http";
 
 const AGENT_PREFIX = "/api/agent/v1/";
@@ -172,18 +178,23 @@ export async function agentApi(
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
+    // Maintenance tools (ADR 0046) exist while the settings routes do, are
+    // graded by this API's grant, and are listed only to a grant holding them.
+    const schedules = schedulesServed(env);
     const message = await handleMcp(
       await boundedJson(request),
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (isAgentToolName(name)) return callTool(name, body, context);
         if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, subject);
+        if (schedules && isScheduleToolName(name)) return callScheduleTool(name, body, env, grant);
         return null;
       },
       async () => [
         ...MCP_TOOLS,
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
         ...(listOps ? OPS_MCP_TOOLS : []),
+        ...(schedules ? scheduleToolsFor(grant) : []),
       ],
     );
     if (message === null) return new Response(null, { status: 202 });

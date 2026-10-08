@@ -1071,6 +1071,12 @@
         }
       ],
       "sha256": "67621a515660753b1846bee314eee76d69b0aec67f375f4c9a724a316bafd3c8"
+    },
+    {
+      "file": "0067_maintenance_change_provenance.sql",
+      "statementCount": 4,
+      "insertStatements": [],
+      "sha256": "5b565437761076652bee2420220d3688eb9cba6d2bd11a01088a4dfd44433650"
     }
   ],
   "tables": [
@@ -11930,6 +11936,27 @@
           "notNull": true,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "change_reason",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "decision_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -11938,6 +11965,15 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "name": "maintenance_agent_writes",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "actor",
+            "created_at"
+          ]
+        },
         {
           "name": "maintenance_source",
           "unique": false,
@@ -11960,7 +11996,7 @@
         "maintenance_no_delete"
       ],
       "appendOnly": true,
-      "sqlSha256": "069618216f10aa80"
+      "sqlSha256": "eda817d81f64d544"
     },
     {
       "name": "publication_events",
@@ -18446,6 +18482,11 @@
       "sqlSha256": "621bbd1c45936b0d"
     },
     {
+      "name": "maintenance_agent_writes",
+      "table": "provider_maintenance_rules",
+      "sqlSha256": "628b36ffb11ad868"
+    },
+    {
       "name": "maintenance_source",
       "table": "provider_maintenance_rules",
       "sqlSha256": "d640aeb09437edd1"
@@ -18690,7 +18731,7 @@
     "tableCount": 123,
     "viewCount": 39,
     "triggerCount": 455,
-    "explicitIndexCount": 121,
+    "explicitIndexCount": 122,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -18923,6 +18964,6 @@
       "0065_alarm_schedules.sql",
       "0066_prestia_bank_snapshot_schedule.sql"
     ],
-    "schemaSha256": "cdb732d32955a6b1b891cdaff5566cd12252c21dac9fa65acabf5a551ad5029c"
+    "schemaSha256": "a811f491a562f71cff2bcf5a644e419904fa8e2fc74462dc2951d1d87980754d"
   }
 }

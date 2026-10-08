@@ -36,7 +36,8 @@ export interface AgentCapabilitiesReport {
   capabilities: readonly AgentCapability[];
   /** Only the intents this grant can actually run. */
   intents: IntentDescription[];
-  scopes: { sources: ScopeSet; accounts: ScopeSet };
+  /** `scheduleSources` is `[]` when the grant names none. */
+  scopes: { sources: ScopeSet; accounts: ScopeSet; scheduleSources: ScopeSet };
   limits: {
     defaultQueryLimit: number;
     maxRows: number;
@@ -49,8 +50,16 @@ export interface AgentCapabilitiesReport {
   proposalMethods: readonly string[];
   resultSchemaVersion: "financial-result-v1";
   errorCodes: { code: FinancialErrorCode; remedy: string }[];
-  /** No write beyond a proposal exists in this API; stated, not implied. */
-  writes: { proposals: boolean; adoption: false; externalActions: false };
+  /**
+   * No write beyond a proposal and, with `schedules.maintenance.update`, a
+   * maintenance-rule revision exists in this API; stated, not implied.
+   */
+  writes: {
+    proposals: boolean;
+    maintenanceRules: boolean;
+    adoption: false;
+    externalActions: false;
+  };
   api: ApiCapabilities;
 }
 
@@ -72,7 +81,11 @@ export function capabilitiesFor(
     principal: grant.principal,
     capabilities: [...grant.capabilities],
     intents,
-    scopes: { sources: grant.scopes.sources, accounts: grant.scopes.accounts },
+    scopes: {
+      sources: grant.scopes.sources,
+      accounts: grant.scopes.accounts,
+      scheduleSources: grant.scopes.scheduleSources ?? [],
+    },
     limits: {
       defaultQueryLimit: DEFAULT_QUERY_LIMIT,
       maxRows: grant.budget.maxRows,
@@ -84,7 +97,12 @@ export function capabilitiesFor(
     proposalMethods: proposes ? PROPOSAL_METHODS : [],
     resultSchemaVersion: "financial-result-v1",
     errorCodes: FINANCIAL_ERROR_CODES.map((code) => ({ code, remedy: ERROR_REMEDIES[code] })),
-    writes: { proposals: proposes, adoption: false, externalActions: false },
+    writes: {
+      proposals: proposes,
+      maintenanceRules: grantAllows(grant, "schedules.maintenance.update"),
+      adoption: false,
+      externalActions: false,
+    },
     api,
   };
 }

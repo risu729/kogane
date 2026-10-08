@@ -3,6 +3,7 @@ import {
   AGENT_CAPABILITIES,
   grantAllows,
   grantAllowsRow,
+  grantAllowsScheduleSource,
   grantedSources,
   grantFor,
   parseGrants,
@@ -39,6 +40,8 @@ describe("grants are deny-by-default", () => {
       "records.read",
       "evidence.read",
       "interpretation.propose",
+      "schedules.read",
+      "schedules.maintenance.update",
     ]);
     for (const capability of [
       "interpretation.accept",
@@ -48,6 +51,12 @@ describe("grants are deny-by-default", () => {
       "policy.admin",
       "retention.admin",
       "external-money-action",
+      // Maintenance windows only: no job edit, toggle, lease release or run.
+      "schedules.update",
+      "schedules.enable",
+      "schedules.lease.release",
+      "schedules.collection.run",
+      "schedules.*",
     ])
       expect(validGrant({ ...grant(), capabilities: [capability] })).toBe(false);
   });
@@ -96,6 +105,57 @@ describe("scope arithmetic", () => {
   });
 });
 
+describe("maintenance-settings grants (ADR 0046)", () => {
+  const maintenance = grant({
+    scopes: { sources: [], accounts: [], scheduleSources: ["fixture-a"] },
+    capabilities: ["schedules.read", "schedules.maintenance.update"],
+  });
+
+  test("the schedule scope is separate, optional and bounded like any scope", () => {
+    expect(validGrant(maintenance)).toBe(true);
+    expect(validGrant(grant())).toBe(true);
+    expect(
+      validGrant(grant({ scopes: { sources: "*", accounts: "*", scheduleSources: "*" } })),
+    ).toBe(true);
+    for (const scheduleSources of ["fixture-a", [1], ["dup", "dup"], Array(65).fill("x")])
+      expect(
+        validGrant({ ...grant(), scopes: { sources: "*", accounts: "*", scheduleSources } }),
+      ).toBe(false);
+    expect(
+      validGrant({ ...grant(), scopes: { sources: "*", accounts: "*", schedules: ["x"] } }),
+    ).toBe(false);
+  });
+
+  test("an absent schedule scope reaches no source, and financial scope never stands in", () => {
+    expect(grantAllowsScheduleSource(maintenance, "fixture-a")).toBe(true);
+    expect(grantAllowsScheduleSource(maintenance, "fixture-b")).toBe(false);
+    const financial = grant({ scopes: { sources: "*", accounts: "*" } });
+    expect(grantAllowsScheduleSource(financial, "fixture-a")).toBe(false);
+  });
+
+  test("no financial capability implies a schedule capability, or the reverse", () => {
+    const reader = grant();
+    expect(grantAllows(reader, "schedules.read")).toBe(false);
+    expect(grantAllows(reader, "schedules.maintenance.update")).toBe(false);
+    const readOnly = grant({ capabilities: ["schedules.read"] });
+    expect(grantAllows(readOnly, "schedules.maintenance.update")).toBe(false);
+    for (const capability of ["summary.read", "records.read", "evidence.read"] as const)
+      expect(grantAllows(maintenance, capability)).toBe(false);
+  });
+
+  test("the report states the maintenance write and its scope", () => {
+    const report = capabilitiesFor(maintenance, CENTRAL_STORE_CAPABILITIES, 65_536);
+    expect(report.intents).toEqual([]);
+    expect(report.scopes.scheduleSources).toEqual(["fixture-a"]);
+    expect(report.writes).toEqual({
+      proposals: false,
+      maintenanceRules: true,
+      adoption: false,
+      externalActions: false,
+    });
+  });
+});
+
 describe("capability report", () => {
   test("records.read alone does not carry evidence.read", () => {
     const records = grant({ capabilities: ["summary.read", "records.read"] });
@@ -112,7 +172,13 @@ describe("capability report", () => {
     const report = capabilitiesFor(narrow, CENTRAL_STORE_CAPABILITIES, 65_536);
     expect(report.intents.map((entry) => entry.intent)).toEqual(["holdings", "coverage"]);
     expect(report.scopes.sources).toEqual(["fixture-a"]);
-    expect(report.writes).toEqual({ proposals: false, adoption: false, externalActions: false });
+    expect(report.writes).toEqual({
+      proposals: false,
+      maintenanceRules: false,
+      adoption: false,
+      externalActions: false,
+    });
+    expect(report.scopes.scheduleSources).toEqual([]);
     expect(report.proposalMethods).toEqual([]);
     // Nothing in the report names a source the principal cannot see.
     expect(JSON.stringify(report)).not.toContain("fixture-b");

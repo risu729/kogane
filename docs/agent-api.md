@@ -21,8 +21,9 @@ while its own flag is on, and no capability in the table below reaches it.
 `AGENT_API_GRANTS` and `AGENT_GRANTS` are empty. With an absent or empty
 agent-API grant map, every agent route and the shared `/mcp` transport answers
 403 after authentication. An enabled operations flag does not bypass that
-transport gate. Schedule/maintenance settings currently have an operator HTTP
-API but no MCP tool; see [schedules](schedules.md#settings-api).
+transport gate. Maintenance windows have two MCP tools under their own
+capabilities ([below](#maintenance-windows)); job settings and lease release
+stay operator-only ([schedules](schedules.md#settings-api)).
 
 ## Why the application service exists
 
@@ -48,12 +49,14 @@ A grant is looked up **after** the Cloudflare Access check, by the subject
 nothing reads an actor from a request body or header, which is the same rule
 the change lifecycle follows. A valid token with no grant is still refused.
 
-| Capability               | Allows                                                                       | Notes                                                   |
-| ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                           | The first capability an agent should get                |
-| `records.read`           | `reported-state`, `activity`, and `purchases.explain` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                  | A separate grant; raw bytes are still a different route |
-| `interpretation.propose` | `reconcile.propose`                                                          | Proposals only; never adoption                          |
+| Capability                     | Allows                                                                       | Notes                                                   |
+| ------------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `summary.read`                 | `coverage`, `holdings`, and the shell of `explain`                           | The first capability an agent should get                |
+| `records.read`                 | `reported-state`, `activity`, and `purchases.explain` on a whole-store scope | Never implies `evidence.read`                           |
+| `evidence.read`                | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                  | A separate grant; raw bytes are still a different route |
+| `interpretation.propose`       | `reconcile.propose`                                                          | Proposals only; never adoption                          |
+| `schedules.read`               | `schedules.maintenance.read` for `scopes.scheduleSources`                    | Not a financial read; implied by no other capability    |
+| `schedules.maintenance.update` | `schedules.maintenance.update` for `scopes.scheduleSources`                  | One maintenance revision; never a job edit or lease     |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -154,14 +157,16 @@ Five tools, plus a sixth while the deployment serves card purchase
 recognition, one implementation each (`src/agent-service.ts`), reachable two
 ways.
 
-| Tool                       | HTTP                                   | MCP `tools/call`           | Requires                                                                                                                      |
-| -------------------------- | -------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `kogane.capabilities`      | `POST /api/agent/v1/capabilities`      | `kogane.capabilities`      | any grant                                                                                                                     |
-| `kogane.context.open`      | `POST /api/agent/v1/context.open`      | `kogane.context.open`      | any grant                                                                                                                     |
-| `kogane.financial.query`   | `POST /api/agent/v1/financial.query`   | `kogane.financial.query`   | per intent (table below)                                                                                                      |
-| `kogane.explain`           | `POST /api/agent/v1/explain`           | `kogane.explain`           | `summary.read`                                                                                                                |
-| `kogane.reconcile.propose` | `POST /api/agent/v1/reconcile.propose` | `kogane.reconcile.propose` | `interpretation.propose`                                                                                                      |
-| `kogane.purchases.explain` | `POST /api/agent/v1/purchases.explain` | `kogane.purchases.explain` | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
+| Tool                                  | HTTP                                   | MCP `tools/call`                      | Requires                                                                                                                      |
+| ------------------------------------- | -------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`      | `kogane.capabilities`                 | any grant                                                                                                                     |
+| `kogane.context.open`                 | `POST /api/agent/v1/context.open`      | `kogane.context.open`                 | any grant                                                                                                                     |
+| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`   | `kogane.financial.query`              | per intent (table below)                                                                                                      |
+| `kogane.explain`                      | `POST /api/agent/v1/explain`           | `kogane.explain`                      | `summary.read`                                                                                                                |
+| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose` | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                      |
+| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain` | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
+| `kogane.schedules.maintenance.read`   | none (MCP only)                        | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                             |
+| `kogane.schedules.maintenance.update` | none (MCP only)                        | `kogane.schedules.maintenance.update` | `schedules.maintenance.update`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                               |
 
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
@@ -325,6 +330,30 @@ and `rawLocator` is the parser's position inside an artifact, not a
 `fetch_artifact:` or `raw:` locator; reaching those still takes `explain` and
 `evidence.read`. The operator route itself is unchanged and still refuses an
 agent principal (`403 operator_required`).
+
+### Maintenance windows
+
+[ADR 0046](adr/0046-agent-maintenance-windows.md). With `SCHEDULES_ENABLED`
+on, each of the two maintenance tools is appended to `tools/list` for a grant
+holding its capability, after every other tool; otherwise its name is
+`unknown_tool`. A grant names the sources it reaches in a separate
+`scopes.scheduleSources` (source ids of `config/alarm-jobs.json`; absent means
+none), so financial scope and maintenance scope never stand in for each other:
+
+```jsonc
+{
+  "maintenance-client": {
+    "scopes": { "sources": [], "accounts": [], "scheduleSources": ["sony-bank"] },
+    "capabilities": ["schedules.read", "schedules.maintenance.update"],
+    "budget": { "maxRows": 1, "maxProposalTargets": 1, "maxExplainDepth": 1 },
+  },
+}
+```
+
+The tools relay to the Processor's settings service as the verified principal;
+what they validate, refuse and read back is in
+[schedules](schedules.md#agent-maintenance-tools). `kogane.capabilities`
+reports `scopes.scheduleSources` and `writes.maintenanceRules`.
 
 ## Contexts, cursors and hand-off
 
