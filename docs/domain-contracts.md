@@ -158,6 +158,29 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
   `checkSourceAllocations` (sums never exceed the limit; negative allocations
   rejected).
 
+## `instrument-candidates.ts` — which identifiers may be one instrument
+
+[ADR 0046](adr/0046-instrument-candidates.md); the read that feeds it is
+described in [identity](identity.md#cross-identifier-instrument-candidates).
+
+- `InstrumentIdentifierFacts` is what the identity rules stored about one
+  identifier (ISIN, RIC, MIC, country, security code, share and product class,
+  stated currencies, sources) plus its current mapping. The label is display
+  only.
+- `compareIdentifierFacts` returns closed codes, never a score: `evidence`
+  (`isin-equal`, `ric-equal`, `security-code-equal`), `conflicts` (kind, ISIN,
+  RIC, country, market, currency, share class, product class), `agreements`
+  and `gaps` (a fact one side does not state).
+- `instrumentCandidates` pairs only identifiers that share an evidence value.
+  A pair with a conflict is `separated`; one without is a candidate whose
+  `status` is `adopted` only when both map to one instrument and `rejected`
+  only when a stored `listed_as` rejection names it, else `proposed`. Equal
+  normalised names without evidence are `hints` with no status. The answer is
+  order-independent and refuses more than 5,000 pairs or 1,000 hints.
+- `identifierResolutions` gives each identifier one of
+  `IDENTIFIER_RESOLUTION_STATES`; an instrument shared without a manual
+  mapping is `shared-without-decision`, never resolved.
+
 ## `result.ts` — the shape UI and agents share
 
 - `QuerySpec` with the intents of addendum 09 §1 (holdings, reported-state,
