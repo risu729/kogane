@@ -407,9 +407,10 @@ describe("merge and split commit every member", () => {
     }
     // The second half's own failure: the restored event's seal states a
     // claim count its stored keys do not have.
-    const restoreSeal = writes.findLastIndex((write) =>
-      write.sql.startsWith("INSERT INTO economic_revision_seals"),
+    const seals = writes.flatMap((write, at) =>
+      write.sql.startsWith("INSERT INTO economic_revision_seals") ? [at] : [],
     );
+    const restoreSeal = seals[seals.length - 1]!;
     const wrongCount = writes.map((write, at) =>
       at === restoreSeal
         ? { sql: write.sql, binds: write.binds.map((bind, i) => (i === 4 ? 7 : bind)) }
