@@ -15,11 +15,7 @@ import {
   type IdentityAdmission,
   type IdentityOriginBasis,
 } from "./economic-contract.ts";
-import {
-  providerIdentityFunction,
-  transactionFamilyEntry,
-  type ProviderIdentityFunction,
-} from "./event-families.ts";
+import { providerIdentityFunction, transactionFamilyEntry } from "./event-families.ts";
 import { isRecord } from "./guards.ts";
 
 /** One stored transaction row, as the cited observation and its parse run state it. */
@@ -71,13 +67,33 @@ export function rowOriginBasis(input: HumanAdoptedRowInput): IdentityOriginBasis
   }
 }
 
-/** The declared function's components, read from the row's provider fields, or null. */
-function components(declared: ProviderIdentityFunction, extra: unknown): string[] | null {
-  if (!isRecord(extra)) return null;
-  const values = declared.componentFields.map((field) => extra[field]);
-  return values.every((value): value is string => typeof value === "string" && value !== "")
-    ? values
-    : null;
+/**
+ * The alias class the declared provider identity function computes for a row,
+ * before any admission: null when no function is declared for its parser and
+ * source account, when a component field is missing, empty or not text, or
+ * when the class is not the contract's (`validAliasClass`: bounded texts). The
+ * readiness read computes the same class in SQL
+ * (packages/read-model/src/card-settlement-readiness.ts) to find a holder of
+ * the fact under another key.
+ */
+export function declaredAliasClass(
+  input: Pick<HumanAdoptedRowInput, "sourceId" | "parserName" | "sourceAccount" | "extra"> & {
+    accountId: unknown;
+  },
+): AliasClass | null {
+  const declared = providerIdentityFunction(input.sourceId, input.parserName, input.sourceAccount);
+  if (declared === null || !isRecord(input.extra)) return null;
+  const extra = input.extra;
+  const parts = declared.componentFields.map((field) => extra[field]);
+  if (!parts.every((value): value is string => typeof value === "string" && value !== ""))
+    return null;
+  const aliasClass = {
+    sourceId: input.sourceId,
+    components: parts,
+    accountId: input.accountId,
+    ruleVersion: declared.ruleVersion,
+  };
+  return validAliasClass(aliasClass) ? aliasClass : null;
 }
 
 /**
@@ -97,16 +113,10 @@ export function humanAdoptedRowIdentity(input: HumanAdoptedRowInput): HumanAdopt
     retireBeforeRecognise: false,
   });
   if (!admission.admitted) return admission;
-  // A human writer's admission always requires an alias class, so a function is declared.
-  const parts = declared === null ? null : components(declared, input.extra);
-  if (declared === null || parts === null) return { admitted: false, refusal: "identity_absent" };
-  const aliasClass: AliasClass = {
-    sourceId: input.sourceId,
-    components: parts,
-    accountId: input.accountId,
-    ruleVersion: declared.ruleVersion,
-  };
-  return validAliasClass(aliasClass)
-    ? { admitted: true, aliasClass }
-    : { admitted: false, refusal: "identity_absent" };
+  // A human writer's admission requires a declared function, so null here is
+  // a provider field the row does not carry.
+  const aliasClass = declaredAliasClass(input);
+  return aliasClass === null
+    ? { admitted: false, refusal: "identity_absent" }
+    : { admitted: true, aliasClass };
 }
