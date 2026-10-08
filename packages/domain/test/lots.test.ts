@@ -1094,3 +1094,40 @@ describe("review finding 3: a moving-average group's outcome does not depend on 
     }
   });
 });
+
+describe("review finding 5: a rounded share never exceeds what is left nor flips its sign", () => {
+  test("0.9 over 3 units rounded to whole yen is inexact_allocation, not a negative cost", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-06", "3", "0.9"),
+          sell("s1", "2030-01-07", "2", "1"),
+          sell("s2", "2030-01-08", "1", "1"),
+        ],
+        policy({ rounding: yenLegRounding }),
+      ),
+    );
+    expect(book.indeterminateFrom).toEqual({ refs: [ref("s1")], reasonCode: "inexact_allocation" });
+    expect(book.disposals.map((d) => d.reasonCodes)).toEqual([
+      ["inexact_allocation"],
+      ["upstream_indeterminate"],
+    ]);
+  });
+
+  test("a share rounded down to zero stays allowed: it is within the remaining amount", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-06", "3", "0.9"),
+          sell("s1", "2030-01-07", "1", "1"),
+          sell("s2", "2030-01-08", "2", "1"),
+        ],
+        policy({ rounding: yenLegRounding }),
+      ),
+    );
+    expect(book.disposals.map((d) => amountText(d.allocations[0]!.cost))).toEqual([
+      "0 JPY",
+      "0.9 JPY",
+    ]);
+  });
+});

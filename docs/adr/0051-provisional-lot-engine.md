@@ -91,7 +91,9 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   remaining cost through `multiplyByRatio`. Without rounding an inexact share
   is `inexact_allocation`; with rounding each share is rounded and keeps its
   `RoundingInputs`, and the consumption that empties a lot takes the exact
-  remainder, so allocated + remaining always equals what entered. Moving
+  remainder, so allocated + remaining always equals what entered; a rounded
+  share that would exceed what is left or flip its sign is
+  `inexact_allocation`. Moving
   average keeps exact pool totals and never stores a unit price. A split
   scales quantities by its exact ratio, keeps cost and acquisition time, and
   is recorded in the lot's lineage; a ratio that does not scale exactly or

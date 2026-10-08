@@ -224,7 +224,9 @@ What it does today:
 - Partial allocation takes `cost × q / Q` exactly; without rounding an
   inexact share is `inexact_allocation`, with a `leg`/`carry` rounding policy
   each share keeps its rounding inputs and the last consumption takes the
-  exact remainder. Moving average keeps exact totals, never a unit price.
+  exact remainder; a rounded share that would exceed what is left is
+  `inexact_allocation`. Moving average keeps exact totals, never a unit
+  price.
 - Inputs the economic time does not order are `order_tie` (same-time
   acquisitions, and same-time unrounded disposals, commute under moving
   average); an unknown time is `unknown_time`. Ids and recorded-at times

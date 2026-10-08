@@ -47,6 +47,7 @@ import {
   isZeroDecimal,
   multiplyByRatio,
   multiplyDecimals,
+  negateDecimal,
   subtractDecimals,
   validExactDecimal,
   validExactRatio,
@@ -883,6 +884,17 @@ function shareOf(
     mode: rounding.mode,
   });
   if (!rounded.ok) return { ok: false };
+  // Rounding to a precision coarser than the amount can overshoot what is
+  // left (0.6 of 0.9 rounds to 1) and drive the remainder below zero; that
+  // is not an allocation this policy can make.
+  const sign = compareDecimals(amount.value, ZERO);
+  const shareSign = compareDecimals(rounded.value, ZERO);
+  const magnitude = (value: ExactDecimal) => (sign < 0 ? negateDecimal(value) : value);
+  if (
+    (shareSign !== 0 && shareSign !== sign) ||
+    compareDecimals(magnitude(rounded.value), magnitude(amount.value)) > 0
+  )
+    return { ok: false };
   return {
     ok: true,
     share: knownAmount(amount.unitRef, rounded.value),
