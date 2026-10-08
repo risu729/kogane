@@ -139,7 +139,8 @@ The reasons, all closed:
   destination credit of a point exchange.
 - `semantics_unobserved` — what the rows mean for the family has not been observed
   or confirmed: which SBI Shinsei, Sony Bank, GLOBAL PASS, Vpass or PayPay rows are exchanges, which
-  PayPay rows move the PayPay balance, whether a GLOBAL PASS pending row keeps its
+  PayPay rows move the PayPay balance, which MoneyForward rows are deposit
+  movements, whether a GLOBAL PASS pending row keeps its
   id when confirmed, what a V Point Pay notification settles, what V Point's point
   division and type codes mean, and which rows anywhere are overseas remittances.
 - `snapshot_only` — position rows are holdings at a point in time, never a
@@ -150,6 +151,11 @@ The reasons, all closed:
   review; a separate ADR will decide it.
 
 Limits, as the code stands:
+
+- MoneyForward rows are filed under `bank-movement`, but a linked MoneyForward
+  account can be a bank or a card and the parser records no account type, so
+  which of its rows are deposit movements is unknown (`semantics_unobserved`);
+  they also mirror rows other sources collect directly (#545).
 
 - `bank-movement` covers deposit and stored-value balances alike (Mobile Suica,
   PayPay). A parser's families are the families of its rows as a set; which row

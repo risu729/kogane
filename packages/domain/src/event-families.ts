@@ -286,14 +286,24 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     ],
   },
   {
-    // Aggregator copies of rows other sources collect directly (#545).
+    // Aggregator copies of rows other sources collect directly (#545). A linked
+    // account can be a bank or a card (docs/sources/moneyforward.md), and the
+    // parser records no account type, so which rows are deposit movements is
+    // not known.
     sourceId: "moneyforward-me",
     parserName: "moneyforward-monthly-transactions",
     observationKinds: ["transaction"],
     identity: identity("fingerprint_occurrence", "identityOrigin", "fingerprint"),
     statuses: ABSENT,
     providerLinks: NO_LINK,
-    families: [unsupported("bank-movement", "identity_fingerprint_only", "counterpart_not_stated")],
+    families: [
+      unsupported(
+        "bank-movement",
+        "identity_fingerprint_only",
+        "counterpart_not_stated",
+        "semantics_unobserved",
+      ),
+    ],
   },
   {
     sourceId: "myjcb",
