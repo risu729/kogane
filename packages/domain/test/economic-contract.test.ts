@@ -369,7 +369,59 @@ describe("identity", () => {
     });
   });
 
-  test("every input of the closed shape has exactly one outcome from the closed lists", () => {
+  test("every input of the closed shape has its pinned outcome", () => {
+    // Written out by hand, all 48: origin, resolver declared, writer kind,
+    // retire-before-recognise.
+    const expected: Record<string, string> = {
+      "provider-id resolver rule rbr": "admitted",
+      "provider-id resolver rule no-rbr": "admitted+alias",
+      "provider-id resolver human rbr": "admitted+alias",
+      "provider-id resolver human no-rbr": "admitted+alias",
+      "provider-id no-resolver rule rbr": "admitted",
+      "provider-id no-resolver rule no-rbr": "identity_resolver_missing",
+      "provider-id no-resolver human rbr": "identity_resolver_missing",
+      "provider-id no-resolver human no-rbr": "identity_resolver_missing",
+      "fingerprint-occurrence resolver rule rbr": "admitted",
+      "fingerprint-occurrence resolver rule no-rbr": "identity_fingerprint_only",
+      "fingerprint-occurrence resolver human rbr": "identity_fingerprint_only",
+      "fingerprint-occurrence resolver human no-rbr": "identity_fingerprint_only",
+      "fingerprint-occurrence no-resolver rule rbr": "admitted",
+      "fingerprint-occurrence no-resolver rule no-rbr": "identity_fingerprint_only",
+      "fingerprint-occurrence no-resolver human rbr": "identity_fingerprint_only",
+      "fingerprint-occurrence no-resolver human no-rbr": "identity_fingerprint_only",
+      "collector-fingerprint resolver rule rbr": "admitted",
+      "collector-fingerprint resolver rule no-rbr": "identity_fingerprint_only",
+      "collector-fingerprint resolver human rbr": "identity_fingerprint_only",
+      "collector-fingerprint resolver human no-rbr": "identity_fingerprint_only",
+      "collector-fingerprint no-resolver rule rbr": "admitted",
+      "collector-fingerprint no-resolver rule no-rbr": "identity_fingerprint_only",
+      "collector-fingerprint no-resolver human rbr": "identity_fingerprint_only",
+      "collector-fingerprint no-resolver human no-rbr": "identity_fingerprint_only",
+      "evidence-digest resolver rule rbr": "admitted",
+      "evidence-digest resolver rule no-rbr": "identity_digest_not_provider",
+      "evidence-digest resolver human rbr": "identity_digest_not_provider",
+      "evidence-digest resolver human no-rbr": "identity_digest_not_provider",
+      "evidence-digest no-resolver rule rbr": "admitted",
+      "evidence-digest no-resolver rule no-rbr": "identity_digest_not_provider",
+      "evidence-digest no-resolver human rbr": "identity_digest_not_provider",
+      "evidence-digest no-resolver human no-rbr": "identity_digest_not_provider",
+      "unrecorded resolver rule rbr": "admitted",
+      "unrecorded resolver rule no-rbr": "identity_origin_unrecorded",
+      "unrecorded resolver human rbr": "identity_origin_unrecorded",
+      "unrecorded resolver human no-rbr": "identity_origin_unrecorded",
+      "unrecorded no-resolver rule rbr": "admitted",
+      "unrecorded no-resolver rule no-rbr": "identity_origin_unrecorded",
+      "unrecorded no-resolver human rbr": "identity_origin_unrecorded",
+      "unrecorded no-resolver human no-rbr": "identity_origin_unrecorded",
+      "absent resolver rule rbr": "identity_absent",
+      "absent resolver rule no-rbr": "identity_absent",
+      "absent resolver human rbr": "identity_absent",
+      "absent resolver human no-rbr": "identity_absent",
+      "absent no-resolver rule rbr": "identity_absent",
+      "absent no-resolver rule no-rbr": "identity_absent",
+      "absent no-resolver human rbr": "identity_absent",
+      "absent no-resolver human no-rbr": "identity_absent",
+    };
     let cases = 0;
     for (const originBasis of IDENTITY_ORIGIN_BASES)
       for (const resolverDeclared of [true, false])
@@ -378,14 +430,14 @@ describe("identity", () => {
             const input = { originBasis, resolverDeclared, writerKind, retireBeforeRecognise };
             expect(validIdentityAdmissionInput(input)).toBe(true);
             const outcome = admitIdentity(input);
-            if (outcome.admitted) {
-              // Only a provider id with a resolver, or a proven rule writer.
-              expect(
-                (originBasis === "provider-id" && resolverDeclared) ||
-                  (writerKind === "rule" && retireBeforeRecognise),
-              ).toBe(true);
-              expect(originBasis).not.toBe("absent");
-            } else expect(IDENTITY_REFUSALS).toContain(outcome.refusal);
+            const name = `${originBasis} ${resolverDeclared ? "resolver" : "no-resolver"} ${writerKind} ${retireBeforeRecognise ? "rbr" : "no-rbr"}`;
+            const actual = outcome.admitted
+              ? outcome.aliasClassRequired
+                ? "admitted+alias"
+                : "admitted"
+              : outcome.refusal;
+            expect({ name, outcome: actual }).toEqual({ name, outcome: expected[name] });
+            if (!outcome.admitted) expect(IDENTITY_REFUSALS).toContain(outcome.refusal);
             cases += 1;
           }
     expect(cases).toBe(48);

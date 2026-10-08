@@ -326,7 +326,7 @@ Synthetic data only. This PR tests:
   namespace; `admitIdentity` cases T2a (occurrence fingerprints), T2b (a
   mirror's fingerprint id), T6a (digest ids), T7 (no recorded origin), T8
   (collector fingerprint under `externalIdOrigin`), the rule-writer case, and
-  all 48 inputs of the closed shape.
+  the pinned outcome of each of the 48 inputs of the closed shape.
 - `packages/storage-d1/test/economic-commit-guard.test.ts`, on CORE migrated
   through every migration on main and then 0070: additivity (a store with a
   recognised purchase, two accepted settlements on one debit and an event
@@ -345,8 +345,9 @@ Synthetic data only. This PR tests:
   carried forward, gap and regression refused; seal counts; W3 (leg, claim,
   time, effect, and a card purchase key on a sealed purchase revision written
   by the lane's batch plus a G1b-style seal and commit); leg effects in one
-  unit only; cross-writer one live holder in both orders; the legacy purchase
-  key trigger; T2c; a released key with another live holder; T1 in both
+  unit only; cross-writer one live holder in both orders, for settlements and
+  for card purchase keys; T2c (two captures of one row sharing a 5-tuple); a
+  released key with another live holder; T1 in both
   orders and its pinned legacy limit; T4; alias source; P11 (pins that a correction under the new epoch may supersede an old-epoch
   holder: routing is the planner's), T9 (also refused for a rule writer that names the resolution kind, and no
   receipt of that kind can be stored) and the reserved

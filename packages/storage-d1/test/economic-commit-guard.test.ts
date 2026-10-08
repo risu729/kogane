@@ -109,8 +109,26 @@ function seedBank(db: Database): void {
       session,
     );
   }
+  // A later capture under producer A (run 12): observation 121 is
+  // observation 101's row again, with the same 5-tuple.
+  run(
+    `INSERT INTO fetch_runs(id,acquisition_session_id,producer_id,source_id,first_recorded_by_client_id,source_run_key,first_recorded_at_ms)
+     VALUES(12,10,'bank-producer-a','smbc-bank','card-client','run-12',2000)`,
+  );
+  run(
+    `INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,producer_id,first_ingested_by_client_id,artifact_key,artifact_role,
+      payload_fidelity,container_kind,lineage_disposition,sha256,byte_size,descriptor_version,descriptor_sha256,recorded_at_ms)
+     VALUES(12,12,'smbc-bank','bank-producer-a','card-client','bank/details-12.json','provider_response','exact','single','not_applicable',?,3,'v1',?,2000)`,
+    "a".repeat(64),
+    "12".repeat(32),
+  );
+  run(
+    `INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status)
+     VALUES(12,12,'smbc-direct','1.0.0','2026-10-02T00:00:00Z','ok')`,
+  );
   const rows: [number, number, string][] = [
     [101, 10, "meisai-0001"],
+    [121, 12, "meisai-0001"],
     [102, 10, "meisai-0002"],
     [103, 10, "meisai-0003"],
     [104, 10, "meisai-0004"],
@@ -1271,8 +1289,29 @@ describe("one live holder across writers", () => {
     db.close();
   });
 
+  test("the lane's recognition first, then an economic claim on its key, is refused", async () => {
+    const db = database();
+    await run(db, purchaseWrites(await draftOf(factOf(1))));
+    const before = snapshot(db);
+    await expect(
+      run(
+        db,
+        adoptWrites(db, {
+          eventId: "usage-holder",
+          revision: 1,
+          claims: [{ book: "card-usage", observationId: 1 }],
+        }),
+      ),
+    ).rejects.toThrow("economic_claim_held");
+    expect(snapshot(db)).toEqual(before);
+    db.close();
+  });
+
   test("T2c: the same 5-tuple claimed again (one execution seen twice) is refused", async () => {
     const db = database();
+    // Two captures (two observations, two parse runs) of one row: one key.
+    expect(keyText(db, 121)).toBe(keyText(db, 101));
+    expect(parseRunOf(db, 121)).not.toBe(parseRunOf(db, 101));
     await run(
       db,
       adoptWrites(db, {
@@ -1288,7 +1327,7 @@ describe("one live holder across writers", () => {
         adoptWrites(db, {
           eventId: "transfer-y",
           revision: 1,
-          claims: [{ book: "cash-movement", observationId: 101 }],
+          claims: [{ book: "cash-movement", observationId: 121 }],
         }),
       ),
     ).rejects.toThrow("economic_claim_held");
