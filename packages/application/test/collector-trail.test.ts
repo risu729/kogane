@@ -71,9 +71,10 @@ describe("0068 keeps one start per operation and moves forward only", () => {
       [NOW, OP],
     );
     expect(() =>
-      local.run("UPDATE ops_collector_dispatches SET run_ids_json='[\"r2\"]' WHERE operation_id=?", [
-        OP,
-      ]),
+      local.run(
+        "UPDATE ops_collector_dispatches SET run_ids_json='[\"r2\"]' WHERE operation_id=?",
+        [OP],
+      ),
     ).toThrow(/only moves forward/u);
     local.run(
       "UPDATE ops_collector_dispatches SET state='unpublished',reason_code='parse_failed' WHERE operation_id=?",

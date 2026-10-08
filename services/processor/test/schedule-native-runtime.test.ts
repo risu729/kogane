@@ -124,7 +124,9 @@ test("native processor alarm uses ctx.exports and can reconcile its own object w
 }, 10000);
 test("native processor tick starts an accepted collection once over the named collector RPC", async () => {
   // An accepted request, as the App stores it (CORE 0040), for a declared source.
-  await db.prepare("INSERT OR IGNORE INTO sources(id,provider) VALUES('mizuho-bank','Synthetic')").run();
+  await db
+    .prepare("INSERT OR IGNORE INTO sources(id,provider) VALUES('mizuho-bank','Synthetic')")
+    .run();
   const operationId = `op_${"e".repeat(64)}`;
   const acceptedAt = new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/u, "Z");
   await db
