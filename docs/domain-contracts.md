@@ -158,6 +158,28 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
   `checkSourceAllocations` (sums never exceed the limit; negative allocations
   rejected).
 
+## `event-families.ts` — which transaction families have an event writer
+
+- `TRANSACTION_FAMILIES` is a closed list of 14 economic-event families
+  (deposit-account movement, stored-value movement, FX, remittance, securities order/execution/settlement cash,
+  crypto execution and fiat remittance, reward exchange, prepaid funding and
+  notification, card purchase, card settlement);
+  `FAMILY_UNSUPPORTED_REASONS`, `PROVIDER_LINK_CODES`, `EXTERNAL_ID_BASES` and
+  the recorded origin keys and stage A readings are closed as well.
+- `TRANSACTION_FAMILY_REGISTRY` has one entry per parser whose rows are
+  transactions or positions: observation kinds, the external id basis and the
+  `_kogane` key of its recorded origin and how stage A reads it, the status
+  vocabulary, the provider-stated link fields, and the family memberships with
+  writer status `supported` (card purchases from Vpass/MyJCB, card settlement
+  debits from SMBC/SBI Shinsei) or `unsupported` with closed reasons.
+  `FAMILY_SUPPORT` is the family-level statement.
+- `transactionFamilyEntry`, `transactionFamilyEntries` and
+  `familyUnsupportedReasons` are the pure lookups;
+  `validTransactionFamilyEntry` rejects unknown keys and codes. The registry is
+  a statement about the code, never adoption: nothing reads it to write
+  ([economic events](economic-events.md#non-card-families-unsupported-today),
+  [ADR 0053](adr/0053-transaction-family-registry.md)).
+
 ## `result.ts` — the shape UI and agents share
 
 - `QuerySpec` with the intents of addendum 09 §1 (holdings, reported-state,
@@ -172,6 +194,20 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
 - `FinancialErrorCode`: the codes of addendum 10 §9 plus `context_expired`,
   `unauthorized` and `invalid_query`. Messages carry no provider content,
   tokens or raw exceptions.
+
+## `reconstruction.ts` — reconstructed state from adopted events
+
+- [Reconstructed state](reconstructed-state.md), [ADR 0052](adr/0052-reconstructed-state-fold.md):
+  `selectKnowledge` resolves every event's active revision at a commit-sequence
+  cut over the whole chains before any filter; `reconstructState` folds a
+  start snapshot plus the selected movements per (account, unit) and
+  (account, instrument) in exact decimals and explains the difference against
+  the reported end with closed codes; `explainLate` diffs two selections.
+- The event input (`provisional-adopted-events-v1`) is provisional and is
+  replaced by the hand-off contract. The policy `reconstruction-fold-v1` is a
+  required parameter and any other content under its id is refused. Absent
+  stays absent, nothing is totalled across accounts, and an input over the
+  budget is refused, never cut. No read path uses it yet.
 
 ## Fixtures
 

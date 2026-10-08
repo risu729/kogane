@@ -23,7 +23,7 @@ the relevant rollout records.
 | 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables)                            | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                            |
 | 9 + 13: prices and valuation            | Price contracts, pure valuation functions and fixed report artifacts                                                                                                             | Price/FX acquisition, selection policies and portfolio valuation from actual holdings                                                |
 | 10: rewards                             | Bucket claims, expiry and conversion functions, READ projections                                                                                                                 | Classified activity history, verified applicable rules, membership and usable conversion offers                                      |
-| 11: derived balances and positions      | Difference contracts and reconciliation readers                                                                                                                                  | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                |
+| 11: derived balances and positions      | Difference contracts and reconciliation readers; a pure fold from a start snapshot and adopted events, without a read path ([ADR 0052](adr/0052-reconstructed-state-fold.md))    | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                |
 | 12 + 14: cost basis and P&L             | Input gates and some P&L decomposition functions                                                                                                                                 | Lots, carried cost, disposal allocation, realized and unrealized P&L                                                                 |
 | 15: tax                                 | Refusal when required policy or inputs are missing                                                                                                                               | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                                           |
 | 16: AI / MCP                            | Shared query/explanation/proposal service and transports                                                                                                                         | Complete analysis and correction flows using the same services as the UI                                                             |
@@ -115,6 +115,14 @@ functions alone do not complete this stage.
 | FX and overseas transfers                          | Changes per currency, explicit fees and unexplained differences         |
 | Securities orders, executions, settlement and cash | Quantity changes linked to the relevant cash movement                   |
 | Reward exchanges and stored-value funding          | Request, deduction, arrival, cancellation and return as separate stages |
+
+Limit: only the card purchase and card settlement rows have an event writer
+today. No event is written for bank or stored-value movements, transfers, FX, remittances,
+securities, crypto, reward exchanges or stored-value funding; the
+transaction-family registry states, per parser, which family its rows belong to
+and the closed reasons no event is written
+([economic events](economic-events.md#non-card-families-unsupported-today),
+[ADR 0053](adr/0053-transaction-family-registry.md)).
 
 Connect candidate review, acceptance, rejection and correction to guarded
 commands and the UI. Amount/date proximity stays a proposal; provider evidence
