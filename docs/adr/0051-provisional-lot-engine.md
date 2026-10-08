@@ -103,10 +103,12 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   inside a dated day, overlapping periods, two instants whose calendar-day
   and epoch orders disagree) is `order_tie`, except same-time acquisitions
   under moving average and same-time disposals under moving average without
-  rounding, which commute. Comparisons are skipped between inputs three or
-  more calendar days apart on the layout: for two instants that means more
-  than 48 hours of wall time, and wall time is at most 18 hours from epoch, so
-  their epochs are in the same order whatever their offsets or zones. Two
+  rounding, which commute. A cut after an input is allowed exactly when every
+  later input is strictly after every earlier one; with one zone per book
+  that holds when the latest epoch, instant calendar day and date or period
+  end before the cut are below the earliest epoch, instant calendar day and
+  date or period start after it, so the cut is decided from running extremes
+  in constant time per input and no comparison window is involved. Two
   rules apply to the whole book: an unknown time is `unknown_time`, and dates
   or periods in two named zones, or an instant in another zone than the
   book's dates, are `order_tie` for every input, however far apart, because
@@ -185,16 +187,24 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   an operational record. A future writer stores it only as a report body
   (retention class `report`), never in a log line, tick record or lane state,
   which carry counts and closed codes only.
-- Measured bound (Bun 1.4.2 in a development container, review
-  scripts `perf.ts` and `perf2.ts`, one book, synthetic inputs): 5,000
-  intraday fills (instants one second apart, alternating buy and sell) 382 ms
-  FIFO / 327 ms moving average; 5,000 acquisitions on one date 200 ms FIFO
-  (an order tie) / 226 ms moving average; 5,000 daily inputs 137 ms / 110 ms;
-  20,000 daily inputs 387 ms FIFO, and 362 ms for 20,000 daily inputs mixing
-  buys and sells; 20,000 daily moving-average inputs 393 ms with 21.8 MB of
-  output. Before the review's fixes the same cases took 14.3 s, 5.0 s and
-  10.9 s. No case is above a second, so no input budget is set; a caller
-  feeding much larger books should measure again.
+- Measured cost (Bun 1.4.2 in a development container, one book of
+  synthetic inputs of 1 unit each, results not retained between runs). The
+  densest case is moving-average fills one second apart inside a single day,
+  alternating buy and sell, every input within a day of every other:
+  20,000 fills 546 ms (488 ms with one dated acquisition two days earlier,
+  which switches the layout to calendar days), 50,000 fills 1,022 ms
+  (1,040 ms), 100,000 fills 2,291 ms (3,117 ms). Before the cut rule used
+  running extremes, 20,000 and 50,000 such fills took 5.8 s and 45.5 s.
+  Sparser books are cheaper: 5,000 daily inputs 160 ms FIFO and 149 ms moving
+  average, 5,000 acquisitions on one date 73 ms and 85 ms, 20,000 daily
+  inputs 466 ms FIFO, 20,000 daily moving-average inputs (two buys, one sell)
+  about 0.4 s with 21.8 MB of output. Growth is close to linear in the number
+  of inputs (a sort, then constant work per input and per allocation; output
+  grows with the allocations), a little worse than linear at 100,000 inputs.
+  Per-input work is not constant everywhere: a split visits every lot still
+  held, and specific identification sorts each disposal's selections. No
+  input budget is set; a caller feeding books well beyond 100,000 inputs
+  should measure again.
 - `calculation_results` cannot hold the lot reason codes (its reason CHECK is
   the valuation list), so a retained lot result would be a later report
   purpose, not a row there.
@@ -249,12 +259,13 @@ rounding as `invalid_input`, selections under FIFO and moving average, a
 non-list input, margin class, transfer); identical results and manifest
 digests under input permutation, and different digests for a different
 input under the same ref; validators rejecting unknown keys; an evening
-instant at a negative offset ordered before the next day's dated sale; the
-comparison window boundary (instants at +14:00 and −12:00 three calendar days
-apart, and two calendar days apart with inverted epochs, which tie; dates
-against instants 47 to 49 hours away); moving-average pools listed once with
+instant at a negative offset ordered before the next day's dated sale;
+inputs about two days apart (instants at +14:00 and −12:00 three calendar
+days apart, and two calendar days apart with inverted epochs, which tie;
+dates against instants 47 to 49 hours away); moving-average pools listed once with
 the number of members each allocation drew on; `unknown_disposal_fee`; every
 limited outcome using only the six limited codes. Review scripts outside the
-repository (input permutation, conservation over random histories and random
-grouping against pairwise `compareTemporal`) found no unsound outcome. Not
-verified: any real evidence, any adapter, D1, Workers or production data.
+repository (input permutation, conservation over random histories, random
+grouping against pairwise `compareTemporal`, and 60,000 random books giving
+byte-identical results before and after the cut rule moved to running
+extremes) found no unsound outcome. Not verified: any real evidence, any adapter, D1, Workers or production data.

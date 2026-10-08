@@ -1020,6 +1020,37 @@ describe("time groups are closed over every member", () => {
     expect(book.disposals[0]!.reasonCodes).toEqual(["order_tie"]);
   });
 
+  test("a long period ties every input it spans, however far apart", () => {
+    const month: TemporalValue = {
+      kind: "period",
+      start: "2030-01-01",
+      end: "2030-01-30",
+      endExclusive: false,
+      zone: "Asia/Tokyo",
+      granularity: "day",
+    };
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("p", "2030-01-01", "10", "1000", at(month)),
+          buy("b", "2030-01-05", "10", "1000"),
+          buy("c", "2030-01-12", "10", "1000"),
+          sell("d", "2030-01-25", "5", "600"),
+          sell("e", "2030-02-03", "1", "100"),
+        ],
+        policy(),
+      ),
+    );
+    expect(book.indeterminateFrom).toEqual({
+      refs: [ref("b"), ref("c"), ref("d"), ref("p")],
+      reasonCode: "order_tie",
+    });
+    expect(book.disposals.map((d) => d.reasonCodes)).toEqual([
+      ["order_tie"],
+      ["upstream_indeterminate"],
+    ]);
+  });
+
   test("C: instants with different offsets are laid out by absolute time", () => {
     const book = onlyBook(
       computeLots(
@@ -1429,7 +1460,7 @@ describe("instants beside dates are laid out by their own wall time", () => {
   });
 });
 
-describe("the comparison skip is sound at its window boundary", () => {
+describe("inputs about two days apart are ordered by their own rules", () => {
   // A dated input elsewhere in the book puts instants on their calendar-day line.
   const anchor = () =>
     buy("anchor", "2030-01-01", "1", "100", {
@@ -1458,21 +1489,21 @@ describe("the comparison skip is sound at its window boundary", () => {
           policy(),
         ),
       );
-    // Calendar days three apart, so the comparison is skipped: wall times
-    // 49.5 hours apart, epochs 23.5 hours apart in the same direction.
-    const skipped = run(
+    // Calendar days three apart: wall times 49.5 hours apart, epochs 23.5
+    // hours apart in the same direction, so the pair is ordered.
+    const ordered = run(
       instant("2030-01-06T23:00:00-12:00", "Etc/GMT+12"),
       instant("2030-01-09T00:30:00+14:00", "Pacific/Kiritimati"),
     );
-    expect(skipped.indeterminateFrom).toBeNull();
-    expect(skipped.disposals[0]!.allocations.map((a) => a.lotId)).toEqual([
+    expect(ordered.indeterminateFrom).toBeNull();
+    expect(ordered.disposals[0]!.allocations.map((a) => a.lotId)).toEqual([
       ref("anchor"),
       ref("a"),
     ]);
     // Calendar days two apart (wall times 24 hours apart), but the sale's
-    // epoch is about two hours before the purchase's. A two-day skip would
-    // have taken them as ordered and allocated the sale; they are compared,
-    // found not ordered as laid out, and tie.
+    // epoch is about two hours before the purchase's: laid out by calendar
+    // day they are not ordered as laid out, so they tie rather than the sale
+    // being allocated.
     const inverted = run(
       instant("2030-01-06T23:59:00-12:00", "Etc/GMT+12"),
       instant("2030-01-08T00:00:00+14:00", "Pacific/Kiritimati"),

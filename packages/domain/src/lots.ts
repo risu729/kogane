@@ -29,7 +29,6 @@ import {
 } from "./calculation.ts";
 import { hasExactKeys, isArrayOf, isOneOf, isRecord, isSafeInt, isText } from "./guards.ts";
 import {
-  compareTemporal,
   daysFromCivil,
   parseInstant,
   parseLocalDate,
@@ -1266,9 +1265,8 @@ function applyEntry(state: BookState, entry: Entry, policy: LotPolicy): void {
  * only instants. When the book also has dates or periods, an instant sits at
  * the start of its own calendar day (from epoch + its own offset), because
  * `compareTemporal` places an instant against a date by that day, and the
- * instants of one day follow each other by epoch. Used only to lay inputs out
- * and to skip comparisons that cannot fail; whether two inputs are ordered is
- * decided by `strictlyBefore`.
+ * instants of one day follow each other by epoch. The layout only decides
+ * where groups may be cut; whether a cut is allowed is decided by `timeGroups`.
  */
 interface TimeSpan {
   lo: number;
@@ -1277,20 +1275,15 @@ interface TimeSpan {
   /** An instant's absolute time; 0 for dates and periods. */
   epoch: number;
   nanos: number;
+  /**
+   * Civil days (since 1970-01-01): an instant's own calendar day in `day`; a
+   * date's or period's first day in `day` and its exclusive end in `endDay`.
+   */
+  day: number;
+  endDay: number;
 }
 
 const DAY_SECONDS = 86_400;
-/**
- * Two spans this far apart are ordered, whatever the offsets. Beside dates,
- * an instant's position is its own calendar day, so against a date or period
- * the skip is exact. Two instants are compared by epoch: three days between
- * their calendar days means more than 48 hours between their wall times, and
- * an instant's wall time is at most 18 hours from its epoch, so their epochs
- * are ordered the same way. For instants this does not depend on zones; an
- * instant against a date relies on the book's single zone, which
- * `zonesConflict` guarantees.
- */
-const ORDERED_GAP_SECONDS = 3 * DAY_SECONDS;
 
 const OFFSET = /(Z|([+-])(\d{2}):(\d{2}))$/u;
 
@@ -1308,55 +1301,50 @@ function timeSpan(time: TemporalValue, wallTime: boolean): TimeSpan {
       const parsed = parseInstant(time.value)!;
       // Beside dates, an instant sits at the start of its own calendar day
       // and instants of one day follow each other by epoch.
-      const at = wallTime
-        ? Math.floor((parsed.epochSeconds + offsetSeconds(time.value)) / DAY_SECONDS) * DAY_SECONDS
-        : parsed.epochSeconds;
+      const day = Math.floor((parsed.epochSeconds + offsetSeconds(time.value)) / DAY_SECONDS);
+      const at = wallTime ? day * DAY_SECONDS : parsed.epochSeconds;
       return {
         lo: at,
         loNanos: 0,
         hi: at,
         epoch: parsed.epochSeconds,
         nanos: parsed.nanoseconds,
+        day,
+        endDay: day + 1,
       };
     }
     case "local-date": {
       const day = daysFromCivil(parseLocalDate(time.value)!);
-      return { lo: day * DAY_SECONDS, loNanos: 0, hi: (day + 1) * DAY_SECONDS, epoch: 0, nanos: 0 };
+      return {
+        lo: day * DAY_SECONDS,
+        loNanos: 0,
+        hi: (day + 1) * DAY_SECONDS,
+        epoch: 0,
+        nanos: 0,
+        day,
+        endDay: day + 1,
+      };
     }
     case "period": {
       const bounds = periodBounds(time)!;
+      const day = daysFromCivil(bounds.start);
+      const endDay = daysFromCivil(bounds.endExclusive);
       return {
-        lo: daysFromCivil(bounds.start) * DAY_SECONDS,
+        lo: day * DAY_SECONDS,
         loNanos: 0,
-        hi: daysFromCivil(bounds.endExclusive) * DAY_SECONDS,
+        hi: endDay * DAY_SECONDS,
         epoch: 0,
         nanos: 0,
+        day,
+        endDay,
       };
     }
     case "unknown":
-      return { lo: 0, loNanos: 0, hi: 0, epoch: 0, nanos: 0 };
+      return { lo: 0, loNanos: 0, hi: 0, epoch: 0, nanos: 0, day: 0, endDay: 0 };
   }
 }
 
 type LaidOut = Entry & { span: TimeSpan };
-
-/**
- * `compareTemporal(a, b)` is ordered −1, computed without re-parsing where it
- * is cheap: two instants by their epoch, two dates or periods (one zone per
- * book, see `zonesConflict`) by their civil-day bounds. An instant against a
- * date or period goes through `compareTemporal` itself.
- */
-function strictlyBefore(a: LaidOut, b: LaidOut): boolean {
-  const aInstant = a.time.kind === "instant";
-  const bInstant = b.time.kind === "instant";
-  if (aInstant && bInstant)
-    return (
-      a.span.epoch < b.span.epoch || (a.span.epoch === b.span.epoch && a.span.nanos < b.span.nanos)
-    );
-  if (!aInstant && !bInstant) return a.span.hi <= b.span.lo;
-  const order = compareTemporal(a.time, b.time);
-  return order.kind === "ordered" && order.order < 0;
-}
 
 function compareLaidOut(a: LaidOut, b: LaidOut): number {
   return (
@@ -1369,33 +1357,85 @@ function compareLaidOut(a: LaidOut, b: LaidOut): number {
   );
 }
 
+/** The latest (prefix) or earliest (suffix) times of a run of laid-out inputs. */
+interface TimeBounds {
+  /** Instants: absolute time, as seconds then nanoseconds. */
+  epoch: number;
+  nanos: number;
+  /** Instants: own calendar day. */
+  instantDay: number;
+  /** Dates and periods: first day (suffix) or exclusive end day (prefix). */
+  civilDay: number;
+}
+
 /**
  * Cut the laid-out inputs into groups such that every input of a later group
- * is strictly after every input of every earlier group by `compareTemporal`.
- * An input joins the current group as soon as one earlier input is not
- * strictly before it, so "not ordered" is closed over the whole group rather
- * than checked between neighbours only.
+ * is strictly after every input of every earlier group by `compareTemporal`:
+ * a cut after position k is allowed exactly when every input after it is
+ * strictly after every input up to it. With one zone per book
+ * (`zonesConflict`), "a strictly before b" is, by kind of a and b:
+ *
+ *   instant, instant — a's epoch is earlier;
+ *   instant, date    — a's own calendar day is before b's first day;
+ *   date, instant    — b's own calendar day is on or after a's exclusive end;
+ *   date, date       — a's exclusive end is on or before b's first day.
+ *
+ * So a cut is allowed when the latest epoch, instant day and date end before
+ * it are below the earliest epoch, instant day and date start after it. Both
+ * sides are running extremes, so each input costs a constant amount, however
+ * dense the inputs are. "Not ordered" is closed over the whole group: an input
+ * joins it as soon as one earlier input is not strictly before it.
  */
 function timeGroups(ordered: readonly LaidOut[]): LaidOut[][] {
-  const reach = ordered.map((_, index) => index);
-  let active: number[] = [];
-  ordered.forEach((entry, index) => {
-    active = active.filter((j) => ordered[j]!.span.hi + ORDERED_GAP_SECONDS > entry.span.lo);
-    // The earliest earlier input not strictly before this one spans the
-    // widest range; later ones fall inside it, so the scan stops there.
-    const conflict = active.find((j) => !strictlyBefore(ordered[j]!, entry));
-    if (conflict !== undefined) reach[conflict] = index;
-    active.push(index);
-  });
+  const count = ordered.length;
+  const after: TimeBounds[] = new Array<TimeBounds>(count + 1);
+  let earliest: TimeBounds = {
+    epoch: Infinity,
+    nanos: Infinity,
+    instantDay: Infinity,
+    civilDay: Infinity,
+  };
+  after[count] = earliest;
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const { time, span } = ordered[index]!;
+    earliest = { ...earliest };
+    if (time.kind === "instant") {
+      if (
+        span.epoch < earliest.epoch ||
+        (span.epoch === earliest.epoch && span.nanos < earliest.nanos)
+      ) {
+        earliest.epoch = span.epoch;
+        earliest.nanos = span.nanos;
+      }
+      earliest.instantDay = Math.min(earliest.instantDay, span.day);
+    } else earliest.civilDay = Math.min(earliest.civilDay, span.day);
+    after[index] = earliest;
+  }
+  const latest: TimeBounds = {
+    epoch: -Infinity,
+    nanos: -Infinity,
+    instantDay: -Infinity,
+    civilDay: -Infinity,
+  };
   const groups: LaidOut[][] = [];
   let start = 0;
-  let furthest = 0;
-  ordered.forEach((_, index) => {
-    furthest = Math.max(furthest, reach[index]!);
-    if (index === furthest) {
+  ordered.forEach(({ time, span }, index) => {
+    if (time.kind === "instant") {
+      if (span.epoch > latest.epoch || (span.epoch === latest.epoch && span.nanos > latest.nanos)) {
+        latest.epoch = span.epoch;
+        latest.nanos = span.nanos;
+      }
+      latest.instantDay = Math.max(latest.instantDay, span.day);
+    } else latest.civilDay = Math.max(latest.civilDay, span.endDay);
+    const next = after[index + 1]!;
+    const cut =
+      (latest.epoch < next.epoch || (latest.epoch === next.epoch && latest.nanos < next.nanos)) &&
+      latest.instantDay < next.civilDay &&
+      latest.civilDay <= next.instantDay &&
+      latest.civilDay <= next.civilDay;
+    if (cut) {
       groups.push(ordered.slice(start, index + 1));
       start = index + 1;
-      furthest = index + 1;
     }
   });
   return groups;
