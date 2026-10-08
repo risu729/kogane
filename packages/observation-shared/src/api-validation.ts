@@ -39,6 +39,8 @@ import type {
 import type {
   ApiMetadata,
   ArtifactDetail,
+  GlobalPassEmptyMonth,
+  GlobalPassEmptyMonths,
   BalanceAdoption,
   BalanceEvidenceMember,
   BalanceHistoryItem,
@@ -191,6 +193,13 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   reportedStateOnDate: optional(boolean),
   opsApi: boolean,
 });
+const globalPassEmptyMonth = object<GlobalPassEmptyMonth>({
+  source: text,
+  month: (value): value is string => typeof value === "string" && /^\d{4}-\d{2}$/u.test(value),
+  currentFetchRunId: identifier,
+  supersededFetchRunId: identifier,
+  supersededRuns: (value): value is number => identifier(value) && value > 0,
+});
 const metadata = object<ApiMetadata>({
   parsingHealth: optional(
     object<NonNullable<ApiMetadata["parsingHealth"]>>({
@@ -198,6 +207,9 @@ const metadata = object<ApiMetadata>({
       running: identifier,
       failed: identifier,
     }),
+  ),
+  globalPassEmptyMonths: optional(
+    object<GlobalPassEmptyMonths>({ months: array(globalPassEmptyMonth), truncated: boolean }),
   ),
   apiVersion: literal(1),
   source: object<ApiMetadata["source"]>({

@@ -102,6 +102,8 @@ export const PAGE_LIMIT = 501;
 export const CANDIDATE_LIMIT = 5001;
 /** No list result may exceed this many rows; larger results are refused, never silently cut. */
 export const RESULT_BOUND = 5000;
+/** GLOBAL PASS empty-month notices reported per read, plus one row so truncation is visible. */
+export const GLOBAL_PASS_NOTICE_LIMIT = 100;
 export type PageLimit = typeof PAGE_LIMIT | typeof CANDIDATE_LIMIT;
 
 export interface PageSql {

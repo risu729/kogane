@@ -246,6 +246,54 @@ describe("G1-01/G1-02 persisting a run", () => {
     expect(second.terminalDigest).toBe(first.terminalDigest);
     expect(bucket.putKeys.length).toBe(putCount);
   });
+
+  test("a cross-page total contradiction stays partial after the terminal is sealed", async () => {
+    // `classifyError` folds hyphens, so the sealed code matches the
+    // observation-pipeline partial-run fixture, not the thrown message.
+    const code = "executions_historical_pagination_total_changed";
+    const manifest = manifestOf({
+      status: "partial",
+      artifacts: [
+        storedArtifact("executions-historical-page-0001"),
+        storedArtifact("executions-historical-page-0002"),
+      ],
+      failures: [{ operation: "collect", errorCode: code }],
+    });
+    const bucket = new FakeR2Bucket();
+    const summary = await persistSharedRun(bucket, inputOf(manifest));
+    expect(summary.outcome).toBe("persisted");
+    expect(bucket.putKeys.at(-1)).toBe(terminalKey("sbi-vc-trade", RUN_ID));
+
+    const read = await readTerminal(bucket, "sbi-vc-trade", RUN_ID);
+    if (read.outcome !== "found") throw new Error("unreachable");
+    expect(read.manifest.providerOutcome).toBe("partial");
+    expect(read.manifest.coverageStatus).toBe("partial");
+    expect(read.manifest.safeErrorCode).toBe(code);
+    expect(read.manifest.units).toEqual([
+      {
+        unitKey: "account",
+        unitKind: "collection",
+        artifactCount: 2,
+        coverageStatus: "partial",
+        safeErrorCode: code,
+      },
+    ]);
+    expect(
+      read.manifest.artifacts.map((entry) => [entry.artifactKey, entry.unitKey ?? null]),
+    ).toEqual([
+      ["executions-historical-page-0001.json", "account"],
+      ["executions-historical-page-0002.json", "account"],
+      ["manifest.json", null],
+    ]);
+
+    const stored = await bucket.get(summary.manifestObjectKey);
+    const sealed = JSON.parse(new TextDecoder().decode(await stored!.arrayBuffer())) as {
+      status: string;
+      failures: unknown;
+    };
+    expect(sealed.status).toBe("partial");
+    expect(sealed.failures).toEqual([{ operation: "collect", errorCode: code }]);
+  });
 });
 
 describe("one copy: shared mode names what legacy mode would have staged", () => {

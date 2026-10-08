@@ -17,7 +17,7 @@ are separate claims. Historical acceptance records are linked from the
 | UI                   | Evidence/history, transactions, balances, positions, reported state, card review and schedule settings                                                          | A view or empty list is not proof of complete financial coverage                                                           |
 | Identity             | Source-local identities, mappings and append-only decisions                                                                                                     | Cross-source account/instrument equivalence and unresolved identities still need review                                    |
 | Card flows           | Vpass/MyJCB single-payment purchase/refund recognition, pending-to-posted review, statement/debit review with SMBC and SBI Shinsei adapters                     | Full source coverage, installments/revolving/bonus rows, partial payments and refund allocation are incomplete             |
-| State                | Provider-reported balances, holdings, valuations and card payables on a date                                                                                    | Full event-reconstructed balances/positions and all liabilities are incomplete                                             |
+| State                | Provider-reported balances, holdings, valuations and card payables on a date; a pure reconstruction fold with no read path yet                                  | Full event-reconstructed balances/positions and all liabilities are incomplete                                             |
 | Rewards              | Bucket/quantity/observed-expiry display, claim/read projections and pure simulation components                                                                  | Useful forecasts need actual activity, verified rules, membership and applicable offers; no external exchange is performed |
 | Valuation/reports    | Provider price claims, pure valuation components, fixed report artifacts and as-of price/FX selection under an explicit policy                                  | No adopted selection policy, no general external price/FX acquisition or complete portfolio valuation product              |
 | Cost basis/P&L/tax   | Typed input/policy gates and decomposition components                                                                                                           | `costBasis()` always returns `needs-policy`; lots, disposal allocation and complete P&L/tax outputs are absent             |
@@ -55,8 +55,19 @@ are separate claims. Historical acceptance records are linked from the
   (`parser_rejected`, as under 1.0.0 and 1.1.0). Which check refused those 2
   is not stored; the owner's counts-only replay
   (`replay-diagnostics.ts globalpass-activity 2`, see
-  [operations](operations.md#replaying-a-parser-rejection)) names it. The
-  empty month was observed in English only. See
+  [operations](operations.md#replaying-a-parser-rejection)) names it. For one
+  of them it reported `unclassified_table`: 10 records but 9 detail pairs
+  and a two-header table whose meaning is unobserved; the replay now also
+  prints which record each pair carries and how that table compares, as
+  closed values, and no parser change has followed
+  ([observations](observations.md#global-pass-a-refused-page-has-ten-records-and-nine-detail-pairs-replay-diagnostics-no-parser-release)).
+  The empty month was observed in English only. A newer empty capture of a
+  month supersedes an older capture with rows under the per-month rule; since
+  2026-10-08 `/api/meta` names such months (`globalPassEmptyMonths`) and the
+  web app shows a notice to check the provider, without changing what is
+  current (implemented; its deployment is not asserted here). A read-only
+  count on 2026-10-08 found no such month in production (7 months with an
+  empty current snapshot, none with older rows). See
   [observations](observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).
 - Money Forward identity revisions and the SBI Shinsei bank adapter are
   implemented; fresh production adoption/mapping counts are not asserted here.

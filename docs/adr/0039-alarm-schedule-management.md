@@ -85,3 +85,33 @@ are reported as uncertain; this neither expires leases nor repeats collection.
 The trusted workflow refuses pre-alarm release/rollback targets before checkout
 and before any production mutation. Removing the ScheduleAlarm class requires a
 separate retirement migration; it is not an ordinary old-commit rollback.
+
+## Amendment: repeated stopped-execution release
+
+Status: proposed until this PR merges; accepted upon merge
+Date: 2026-10-09
+
+A confirmed stopped-execution release can be resent after a lost response or a
+second click. Previously its second request conflicted even though the first
+request had already emptied the lease. Return the same successful result when
+the existing source lease is empty, using one conditional UPDATE that accepts
+either the requested reference or NULL. A different current reference, or a
+missing lease row, still conflicts. Input confirmation, reference validation and
+human-operator authorization are unchanged. No expiry or collection is added.
+
+An alternative read-after-failed-update would separate the empty-state check
+from the release statement. The single statement defines the result at the
+write's serialization point and cannot clear a lease acquired under another
+reference. An empty lease has no historical reference, so this is desired-state
+idempotency, not proof that a particular previous request performed the release.
+
+The UI takes a per-source synchronous guard before confirmation, disables the
+button during submission and readback, and reads current state after either a
+successful or failed response. Cancellation sends no write. A successful release
+does not claim the source remains unlocked, since a new execution may acquire it
+before readback. The result remains visible when its old lease disappears.
+
+Verification covers concurrent duplicate releases, a later acquisition racing
+an old retry, the new reference and start time remaining intact, rejected input,
+confirmation cancellation, pending UI, successful and failed response readback,
+and existing Access/operator/same-origin boundaries.
