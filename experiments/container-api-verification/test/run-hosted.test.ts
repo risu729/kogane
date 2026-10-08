@@ -21,6 +21,9 @@ import {
   driverReport,
   apiClient,
   apiHttpCode,
+  diagnosticCode,
+  driverFailure,
+  registryHttpCode,
   wranglerArgs,
   preflight,
   namespaces,
@@ -1278,3 +1281,216 @@ for (const moduleName of ["node:http", "node:https"]) {
     rmSync(temp, { recursive: true });
   }
 }, 60000);
+
+test("controlled driver errors retain a finite complete code; provider text and forged codes remain private", async () => {
+  const driver = resolve(import.meta.dir, "../driver.mjs");
+  await expect(
+    child("node", [driver], { env: { PATH: process.env.PATH }, timeout: 10000 }),
+  ).rejects.toThrow("verification_phase");
+  await expect(
+    child("node", ["-e", 'console.error("verification_phase"); process.exit(1)'], {
+      timeout: 10000,
+    }),
+  ).rejects.toThrow("verification_runner_child");
+  for (const text of [
+    token,
+    "verification_token",
+    "verification_phase\n" + token,
+    token + "\nverification_phase",
+    "verification_phase\nverification_phase",
+    "verification_runner_child",
+    "verification_phase_extra",
+    "x".repeat(4097),
+  ])
+    expect(driverFailure(text)).toBe("verification_runner_child");
+  expect(driverFailure("verification_identity\n")).toBe("verification_identity");
+  for (const text of [
+    token,
+    "verification_token",
+    "verification_runner_api_http_settings_secret",
+    "verification_runner_registry_http_delete_password",
+    "verification_identity " + token,
+  ])
+    expect(diagnosticCode(new Error(text))).toBe("verification_runner_failed");
+  expect(diagnosticCode(new Error("verification_runner_api_http_settings_forbidden"))).toBe(
+    "verification_runner_api_http_settings_forbidden",
+  );
+});
+
+test("execution and cleanup errors are both reported without erasing the initial stage or private data", async () => {
+  for (const failing of [
+    "image_build",
+    "baseline_sdk_secret",
+    "baseline_sdk_deploy",
+    "baseline_sdk_verify",
+  ]) {
+    const temp = mkdtempSync(resolve(tmpdir(), "verification-dual-"));
+    let pushed = false,
+      deployed = false,
+      removed = false;
+    const reports: string[] = [];
+    const original =
+      failing === "baseline_sdk_verify" ? "verification_sentinel" : "verification_runner_child";
+    const api = async (path: string, options: any = {}) => {
+      if (options.method === "DELETE") {
+        removed = true;
+        return { result: {} };
+      }
+      if (path.endsWith("/settings"))
+        return removed && options.missing ? undefined : { result: { bindings: [] } };
+      if (path.startsWith("workers/durable_objects/namespaces/")) return undefined;
+      if (path.startsWith("workers/durable_objects"))
+        return {
+          result:
+            deployed && !removed
+              ? [{ id: namespace, script: WORKER, class: "VerificationContainer" }]
+              : [],
+        };
+      if (path === `containers/applications/${appId}/versions`)
+        return { result: [{ version: 1, percentage: 100, configuration: { image } }] };
+      if (path === `containers/applications/${appId}`)
+        return removed ? undefined : { result: app() };
+      if (path.startsWith("containers/applications?"))
+        return { result: deployed && !removed ? [app()] : [] };
+      if (path.endsWith("/deployments"))
+        return {
+          result: { deployments: [{ versions: [{ version_id: workerVersion, percentage: 100 }] }] },
+        };
+      if (path.includes("/versions/")) return { result: version() };
+      throw new Error(token);
+    };
+    try {
+      await expect(
+        execute(input(temp), {
+          api,
+          report: (line: string) => reports.push(line),
+          registry: async () => {
+            if (removed && !pushed)
+              throw new Error("verification_runner_registry_http_lookup_forbidden");
+            return pushed ? image : undefined;
+          },
+          deleteImage: async () => {
+            throw new Error("verification_runner_registry_http_delete_forbidden");
+          },
+          run: async (command: string, args: string[]) => {
+            const current =
+              command === "docker"
+                ? "image_build"
+                : args.includes("secret")
+                  ? "baseline_sdk_secret"
+                  : args[0].endsWith("/driver.mjs")
+                    ? "baseline_sdk_verify"
+                    : args.includes("deploy") && !args.some((a) => a.includes("teardown"))
+                      ? "baseline_sdk_deploy"
+                      : "";
+            if (current === failing) throw new Error(original);
+            if (args.includes("push")) pushed = true;
+            if (args.includes("deploy")) deployed = true;
+            return "";
+          },
+        }),
+      ).rejects.toThrow(original);
+      const diagnostics = reports.map((line) => JSON.parse(line));
+      expect(diagnostics).toEqual([
+        { code: "verification_execution_failed", stage: failing, error: original },
+        {
+          code: "verification_cleanup_failed",
+          stage: "cleanup",
+          error:
+            failing === "image_build"
+              ? "verification_runner_registry_http_lookup_forbidden"
+              : "verification_runner_registry_http_delete_forbidden",
+        },
+      ]);
+      expect(reports.join("")).not.toContain(token);
+      expect(reports.join("")).not.toContain(account);
+      expect(reports.join("")).not.toContain(appId);
+      expect(reports.join("")).not.toContain(image);
+      expect(
+        readProtected(resolve(temp, "container-api-verification-owned.json")).cleaned,
+      ).not.toBe(true);
+    } finally {
+      rmSync(temp, { recursive: true });
+    }
+  }
+});
+
+test("registry diagnostics distinguish each exact operation and finite HTTP status without inspecting provider text", async () => {
+  const statuses: Array<[number, string]> = [
+    [401, "unauthorized"],
+    [403, "forbidden"],
+    [404, "not_found"],
+    [429, "rate_limit"],
+    [503, "server"],
+    [302, "redirect"],
+    [418, "default"],
+  ];
+  for (const operation of ["lookup", "predelete", "delete", "readback"]) {
+    for (const [status, category] of statuses) {
+      expect(registryHttpCode(operation, status)).toBe(`registry_http_${operation}_${category}`);
+      if (status === 404 && ["lookup", "predelete", "readback"].includes(operation)) continue;
+      let calls = 0,
+        inspected = 0;
+      const fetchImpl = async (_url: string, options: RequestInit) => {
+        expect(options.redirect).toBe("manual");
+        calls++;
+        const failAt =
+          operation === "lookup" || operation === "predelete" ? 1 : operation === "delete" ? 2 : 3;
+        if (calls === failAt)
+          return {
+            status,
+            body: { cancel: async () => {} },
+            get headers() {
+              inspected++;
+              throw new Error(token);
+            },
+            text: async () => {
+              inspected++;
+              throw new Error(token);
+            },
+            json: async () => {
+              inspected++;
+              throw new Error(token);
+            },
+          } as unknown as Response;
+        return new Response(null, {
+          status: calls === 2 ? 202 : 200,
+          headers: { "docker-content-digest": image.split("@")[1]! },
+        });
+      };
+      const api = async () => ({ result: { password: token } });
+      const result =
+        operation === "lookup"
+          ? registryStatus(input(), api, fetchImpl)
+          : deleteRegistryTag(input(), image, { api, fetchImpl });
+      await expect(result).rejects.toThrow(
+        `verification_runner_registry_http_${operation}_${category}`,
+      );
+      expect(inspected).toBe(0);
+    }
+  }
+  expect(registryHttpCode(token, 403)).toBe("registry_http");
+});
+
+test("accepted exact-tag deletion still fails closed at the unchanged ninety-second absence deadline", async () => {
+  let time = 0,
+    requests = 0;
+  await expect(
+    deleteRegistryTag(input(), image, {
+      api: async () => ({ result: { password: token } }),
+      now: () => time,
+      sleep: async (ms: number) => {
+        time += ms;
+      },
+      fetchImpl: async (_url: string, options: RequestInit) => {
+        requests++;
+        return new Response(null, {
+          status: options.method === "DELETE" ? 202 : 200,
+          headers: { "docker-content-digest": image.split("@")[1]! },
+        });
+      },
+    }),
+  ).rejects.toThrow("verification_runner_cleanup_image_readback_timeout");
+  expect(time).toBe(90000);
+  expect(requests).toBe(47);
+});

@@ -28,6 +28,137 @@ const fail = (code) => {
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const root = dirname(fileURLToPath(import.meta.url));
 
+// Only complete project-owned codes may cross a captured-child/log boundary.
+const DRIVER_CODES = new Set(
+  [
+    "allocation",
+    "application",
+    "application_rollout",
+    "backpressure",
+    "baseline",
+    "cancel",
+    "concurrency",
+    "delay",
+    "destroy",
+    "exit_diagnostic",
+    "failed",
+    "hold",
+    "http",
+    "identity",
+    "identity_changed",
+    "identity_http",
+    "identity_response",
+    "identity_transport",
+    "inputs",
+    "phase",
+    "record",
+    "recovery",
+    "recovery_baseline",
+    "response",
+    "restart",
+    "revision",
+    "rollback_version",
+    "sdk_alarm",
+    "sentinel",
+    "signal_diagnostic",
+    "state_timeout",
+    "stream",
+    "stream_failure",
+    "transport",
+  ].map((code) => `verification_${code}`),
+);
+const RUNNER_CODES = new Set(
+  [
+    "allocation",
+    "api_http",
+    "api_response",
+    "api_selector",
+    "api_transport",
+    "application",
+    "baseline",
+    "child",
+    "cleanup_identity",
+    "cleanup_image",
+    "cleanup_image_identity",
+    "cleanup_image_readback_timeout",
+    "cleanup_image_remaining",
+    "cleanup_namespace",
+    "cleanup_timeout",
+    "command",
+    "config",
+    "deadline",
+    "deployment_identity",
+    "driver_output",
+    "failed",
+    "image_missing",
+    "inputs",
+    "namespaces",
+    "preexisting",
+    "private_directory",
+    "recovery",
+    "registry_credentials",
+    "registry_digest",
+    "registry_http",
+    "registry_identity",
+    "registry_inputs",
+    "registry_transport",
+    "rollout",
+    "rollout_timeout",
+    "state",
+    "state_exists",
+    "worker_not_blank",
+  ].map((code) => `verification_runner_${code}`),
+);
+const HTTP_CATEGORIES = [
+  "unauthorized",
+  "forbidden",
+  "not_found",
+  "rate_limit",
+  "server",
+  "redirect",
+  "default",
+];
+for (const endpoint of [
+  "settings",
+  "deployments",
+  "worker_delete",
+  "registry_credentials",
+  "namespaces",
+  "namespace_objects",
+  "applications",
+  "application_versions",
+  "worker_version",
+])
+  for (const category of HTTP_CATEGORIES)
+    RUNNER_CODES.add(`verification_runner_api_http_${endpoint}_${category}`);
+for (const operation of ["lookup", "predelete", "delete", "readback"])
+  for (const category of HTTP_CATEGORIES)
+    RUNNER_CODES.add(`verification_runner_registry_http_${operation}_${category}`);
+export function diagnosticCode(error) {
+  const code = error?.message;
+  for (const known of RUNNER_CODES) if (known === code) return known;
+  for (const known of DRIVER_CODES) if (known === code) return known;
+  return "verification_runner_failed";
+}
+export function driverFailure(text) {
+  const code = text.trim();
+  for (const known of DRIVER_CODES) if (known === code) return known;
+  return "verification_runner_child";
+}
+function httpCategory(status) {
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "forbidden";
+  if (status === 404) return "not_found";
+  if (status === 429) return "rate_limit";
+  if (Number.isInteger(status) && status >= 500 && status <= 599) return "server";
+  if (Number.isInteger(status) && status >= 300 && status <= 399) return "redirect";
+  return "default";
+}
+export function registryHttpCode(operation, status) {
+  if (!["lookup", "predelete", "delete", "readback"].includes(operation)) return "registry_http";
+  return `registry_http_${operation}_${httpCategory(status)}`;
+}
+
 export function wranglerArgs(...args) {
   return [resolve(root, "node_modules/wrangler/bin/wrangler.js"), ...args];
 }
@@ -315,6 +446,9 @@ export function child(
       stdio: ["pipe", "pipe", "pipe"],
       detached: true,
     });
+    const controlledDriver =
+      command === "node" && args.length === 1 && args[0] === resolve(root, "driver.mjs");
+    let driverStderr = "";
     let output = "",
       pending = "",
       bytes = 0,
@@ -366,8 +500,9 @@ export function child(
         }
       } else output += chunk.toString();
     });
-    // Capture/discard stderr. It can contain arbitrary provider text or credentials.
+    // CLI/provider stderr stays discarded. Only a complete finite driver code is admitted.
     process.stderr.on("data", (chunk) => {
+      if (controlledDriver && driverStderr.length <= 4096) driverStderr += chunk.toString();
       bytes += chunk.length;
       if (bytes > 8 * 1024 * 1024) {
         badOutput = true;
@@ -380,7 +515,14 @@ export function child(
       detach();
       clearTimeout(timer);
       clearTimeout(hardTimer);
-      if (code !== 0 || timedOut || badOutput) reject(new Error("verification_runner_child"));
+      if (code !== 0 || timedOut || badOutput)
+        reject(
+          new Error(
+            controlledDriver && !timedOut && !badOutput && driverStderr.length <= 4096
+              ? driverFailure(driverStderr)
+              : "verification_runner_child",
+          ),
+        );
       else done(output);
     });
   });
@@ -449,14 +591,7 @@ export function apiHttpCode(selector, status) {
   )
     endpoint = "worker_version";
   if (endpoint === undefined) return "api_http";
-  let category = "default";
-  if (status === 401) category = "unauthorized";
-  else if (status === 403) category = "forbidden";
-  else if (status === 404) category = "not_found";
-  else if (status === 429) category = "rate_limit";
-  else if (Number.isInteger(status) && status >= 500 && status <= 599) category = "server";
-  else if (Number.isInteger(status) && status >= 300 && status <= 399) category = "redirect";
-  return `api_http_${endpoint}_${category}`;
+  return `api_http_${endpoint}_${httpCategory(status)}`;
 }
 
 export function apiClient(input, fetchImpl = fetch) {
@@ -610,7 +745,8 @@ export async function registryStatus(input, api, fetchImpl = fetch) {
   const url = manifestUrl(input);
   const authorization = await registryAuth(api, ["pull"]);
   const response = await registryRequest(url, authorization, "GET", fetchImpl);
-  if (response.status !== 200 && response.status !== 404) fail("registry_http");
+  if (response.status !== 200 && response.status !== 404)
+    fail(registryHttpCode("lookup", response.status));
   return response.status === 404 ? undefined : digestImage(input, response);
 }
 export async function deleteRegistryTag(
@@ -625,20 +761,20 @@ export async function deleteRegistryTag(
   const authorization = await registryAuth(api, ["pull", "push"]);
   const current = await registryRequest(url, authorization, "GET", fetchImpl);
   if (current.status === 404) return;
-  if (current.status !== 200) fail("registry_http");
+  if (current.status !== 200) fail(registryHttpCode("predelete", current.status));
   if (digestImage(input, current) !== expectedImage) fail("registry_identity");
   const deleted = await registryRequest(url, authorization, "DELETE", fetchImpl);
-  if (![200, 202, 204].includes(deleted.status)) fail("registry_http");
+  if (![200, 202, 204].includes(deleted.status)) fail(registryHttpCode("delete", deleted.status));
   const deadline = now() + 90000;
   while (true) {
     const remaining = deadline - now();
-    if (remaining <= 0) fail("cleanup_image");
+    if (remaining <= 0) fail("cleanup_image_readback_timeout");
     const readback = await registryRequest(url, authorization, "GET", fetchImpl, remaining);
     if (readback.status === 404) return;
-    if (readback.status !== 200) fail("registry_http");
+    if (readback.status !== 200) fail(registryHttpCode("readback", readback.status));
     if (digestImage(input, readback) !== expectedImage) fail("registry_identity");
     const rest = deadline - now();
-    if (rest <= 0) fail("cleanup_image");
+    if (rest <= 0) fail("cleanup_image_readback_timeout");
     await sleep(Math.min(2000, rest));
   }
 }
@@ -835,7 +971,7 @@ export async function cleanup(
     }
     await deleteImage(state.image);
   }
-  if (await registry()) fail("cleanup_image");
+  if (await registry()) fail("cleanup_image_remaining");
   state.cleaned = true;
   writeProtected(path, state);
   report(JSON.stringify({ code: "verification_cleanup_complete", resources: 4 }));
@@ -869,7 +1005,15 @@ export async function execute(
   privateDirectory(input.temp);
   const statePath = resolve(input.temp, "container-api-verification-owned.json");
   if (readProtected(statePath) !== undefined) fail("state_exists");
-  await preflight(input, api, registry);
+  try {
+    await preflight(input, api, registry);
+  } catch (error) {
+    const code = diagnosticCode(error);
+    report(
+      JSON.stringify({ code: "verification_execution_failed", stage: "preflight", error: code }),
+    );
+    throw new Error(code, { cause: error });
+  }
   const state = {
     account: input.account,
     sha: input.sha,
@@ -887,7 +1031,8 @@ export async function execute(
     return run(command, args, { ...options, timeout: Math.min(options.timeout, remaining) });
   };
   const key = randomBytes(32).toString("base64url");
-  let holder;
+  let holder, failure;
+  let stage = "image_build";
   try {
     const tag = `${APP}:${input.sha}`;
     await boundedRun(
@@ -905,6 +1050,7 @@ export async function execute(
       ],
       { env, timeout: 600000 },
     );
+    stage = "image_push";
     state.imageAttempted = true;
     writeProtected(statePath, state);
     await boundedRun(
@@ -912,6 +1058,7 @@ export async function execute(
       wranglerArgs("containers", "push", tag, "--config", resolve(root, "wrangler.sdk.jsonc")),
       { env, timeout: 300000 },
     );
+    stage = "image_readback";
     const image = await registry();
     if (!image) fail("image_missing");
     state.image = canonicalImageRef(image, input.account);
@@ -924,6 +1071,7 @@ export async function execute(
       HARNESS_API_TOKEN: input.token,
     };
     async function deploy(phase) {
+      stage = `${phase}_config`;
       const source = JSON.parse(
         readFileSync(
           resolve(root, phase === "baseline_sdk" ? "wrangler.sdk.jsonc" : "wrangler.native.jsonc"),
@@ -932,16 +1080,20 @@ export async function execute(
       );
       const path = resolve(input.temp, `container-api-verification-${phase}.json`);
       writeProtected(path, config(source, { account: input.account, image, phase }), true);
-      if (phase === "baseline_sdk")
+      if (phase === "baseline_sdk") {
+        stage = "baseline_sdk_secret";
         await boundedRun("node", wranglerArgs("secret", "put", "HARNESS_KEY", "--config", path), {
           env,
           stdin: `${key}\n`,
           timeout: 120000,
         });
+      }
+      stage = `${phase}_deploy`;
       await boundedRun("node", wranglerArgs("deploy", "--config", path), {
         env,
         timeout: 300000,
       });
+      stage = `${phase}_rollout`;
       const current = await waitReady(api, image);
       if (
         current.image !== image ||
@@ -955,6 +1107,7 @@ export async function execute(
       writeProtected(statePath, state);
     }
     async function verify(phase) {
+      stage = `${phase}_verify`;
       const result = await boundedRun("node", [resolve(root, "driver.mjs")], {
         env: { ...driverEnv, HARNESS_PHASE: phase },
         timeout: 360000,
@@ -965,6 +1118,7 @@ export async function execute(
     }
     await deploy("baseline_sdk");
     await verify("baseline_sdk");
+    stage = "baseline_sdk_record";
     const baseline = readProtected(resolve(input.temp, "container-api-verification-baseline.json"));
     if (
       !UUID.test(baseline?.workerVersion ?? "") ||
@@ -979,11 +1133,14 @@ export async function execute(
     await verify("native");
     await deploy("native_unmonitored");
     await verify("native_unmonitored");
+    stage = "recovery_hold";
     holder = await hold({ ...driverEnv, HARNESS_PHASE: "native_unmonitored" });
     await deploy("native_recovered");
     await verify("native_recovered");
+    stage = "recovery_stop";
     await holder.stop();
     holder = undefined;
+    stage = "rollback_sdk_deploy";
     await boundedRun(
       "node",
       wranglerArgs(
@@ -999,13 +1156,38 @@ export async function execute(
     state.completed = true;
     writeProtected(statePath, state);
     report(JSON.stringify({ code: "verification_runner_complete", phases: 5 }));
+  } catch (error) {
+    const code = diagnosticCode(error);
+    failure = new Error(code);
+    report(JSON.stringify({ code: "verification_execution_failed", stage, error: code }));
   } finally {
+    // Reap the holder and clean up independently; neither erases the first failure.
+    if (holder) {
+      try {
+        await holder.stop();
+      } catch (error) {
+        const code = diagnosticCode(error);
+        failure ??= new Error(code);
+        report(
+          JSON.stringify({
+            code: "verification_recovery_cleanup_failed",
+            stage: "recovery_stop",
+            error: code,
+          }),
+        );
+      }
+    }
     try {
-      if (holder) await holder.stop();
-    } finally {
       await cleanup(input, { api, run, registry, deleteImage, report });
+    } catch (error) {
+      const code = diagnosticCode(error);
+      failure ??= new Error(code);
+      report(
+        JSON.stringify({ code: "verification_cleanup_failed", stage: "cleanup", error: code }),
+      );
     }
   }
+  if (failure) throw failure;
 }
 
 export async function recoveryHolder(
@@ -1130,11 +1312,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     else if (process.argv.length === 2) await execute(input);
     else fail("command");
   } catch (error) {
-    console.error(
-      /^verification_(?:runner_)?[a-z_]+$/u.test(error?.message ?? "")
-        ? error.message
-        : "verification_runner_failed",
-    );
+    console.error(diagnosticCode(error));
     process.exitCode = 1;
   }
 }
