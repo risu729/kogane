@@ -3,7 +3,7 @@ import {
   EVIDENCE_API_VERSION,
   type EvidenceMeta,
 } from "../../../packages/observation-shared/src/evidence-contract";
-import { agentPrincipal, authenticate } from "./auth";
+import { authenticate, browserCaller, mcpCaller } from "./auth";
 import { agentApi, classifyAgentPath, isAgentPath, MCP_PATH, sharedQueryApi } from "./agent-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { classifyOpsPath, opsApi } from "./ops-api";
@@ -55,17 +55,20 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (healthResponse) return healthResponse;
   const bootstrapResponse = await scheduleBootstrapApi(request, env, url);
   if (bootstrapResponse) return bootstrapResponse;
-  // The agent API (docs/agent-api.md). Its principal is `agentPrincipal`'s:
-  // on `/mcp`, an identity that came through the MCP Access application is the
-  // agent-only `mcp-client:<sub>` (ADR 0047); otherwise it is the subject
-  // `authenticate` would return. Every path below accepts only this Worker's
-  // own Access application, as before.
+  // The agent API (docs/agent-api.md). `/mcp` accepts only an assertion for
+  // the MCP Access application and makes it the agent-only caller
+  // `mcp-client:<sub>`; `/api/agent/v1/*` takes the browser session's subject
+  // (ADR 0047). Every path below accepts only this Worker's own Access
+  // application and refuses a token minted for the MCP one, as `/mcp` refuses
+  // the browser's.
   const agentResponse = isAgentPath(url.pathname)
     ? await agentApi(
         request,
         env,
         url,
-        await agentPrincipal(request, env, url.pathname === MCP_PATH),
+        url.pathname === MCP_PATH
+          ? await mcpCaller(request, env)
+          : await browserCaller(request, env),
       )
     : null;
   if (agentResponse) return agentResponse;

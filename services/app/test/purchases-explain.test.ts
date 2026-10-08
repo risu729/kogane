@@ -243,7 +243,8 @@ async function call(path: string, options: CallOptions = {}) {
       : await new SignJWT({ type: "app" })
           .setProtectedHeader({ alg: "RS256", kid: "fixture" })
           .setIssuer(issuer)
-          .setAudience("fixture-audience")
+          // `/mcp` accepts only the MCP Access application's audience (ADR 0047).
+          .setAudience(path === "/mcp" ? "fixture-mcp-audience" : "fixture-audience")
           .setSubject(subject)
           .setIssuedAt()
           .setExpirationTime("5m")
@@ -270,10 +271,21 @@ async function call(path: string, options: CallOptions = {}) {
     DB: options.statements === undefined ? store : recording(store, options.statements),
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: "fixture-audience",
+    ACCESS_MCP_AUDIENCE: "fixture-mcp-audience",
     EVENTS_V2_ENABLED: options.enabled === false ? "0" : "true",
     OPERATOR_SUBJECTS: '["synthetic-operator"]',
     AGENT_GRANTS: '["synthetic-agent"]',
-    AGENT_API_GRANTS: JSON.stringify(options.grants ?? { "synthetic-agent": FULL_GRANT }),
+    // Each principal's grant also names its MCP client, `mcp-client:<sub>`.
+    AGENT_API_GRANTS: JSON.stringify(
+      Object.fromEntries(
+        Object.entries(options.grants ?? { "synthetic-agent": FULL_GRANT }).flatMap(
+          ([principal, grant]) => [
+            [principal, grant],
+            [`mcp-client:${principal}`, grant],
+          ],
+        ),
+      ),
+    ),
   } as Env);
 }
 

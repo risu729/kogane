@@ -37,7 +37,23 @@ const NARROW_GRANT = {
   capabilities: ["summary.read"],
   budget: { maxRows: 500, maxProposalTargets: 5, maxExplainDepth: 3 },
 };
-const grants = (table: Record<string, unknown>) => ({ AGENT_API_GRANTS: JSON.stringify(table) });
+/**
+ * A grant table naming each principal twice: as the browser session's subject
+ * (`/api/agent/v1/*`) and as the agent-only `mcp-client:<sub>` an MCP client
+ * of the same person is on `/mcp` (ADR 0047).
+ */
+const grants = (table: Record<string, unknown>) => ({
+  AGENT_API_GRANTS: JSON.stringify(
+    Object.fromEntries(
+      Object.entries(table).flatMap(([principal, grant]) => [
+        [principal, grant],
+        [`mcp-client:${principal}`, grant],
+      ]),
+    ),
+  ),
+});
+/** The MCP Access application's audience; `/mcp` accepts nothing else. */
+const MCP_AUDIENCE = "fixture-mcp-audience";
 
 beforeAll(async () => {
   await seedRegistry();
@@ -84,11 +100,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function token(subject = "agent-principal") {
+async function token(subject = "agent-principal", audience = "fixture-audience") {
   return new SignJWT({ type: "app" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
     .setIssuer(issuer)
-    .setAudience("fixture-audience")
+    .setAudience(audience)
     .setSubject(subject)
     .setIssuedAt()
     .setExpirationTime("5m")
@@ -105,7 +121,10 @@ async function call(
     environment?: Record<string, unknown>;
   } = {},
 ) {
-  const jwt = options.jwt === undefined ? await token(options.subject) : options.jwt;
+  const jwt =
+    options.jwt === undefined
+      ? await token(options.subject, path === "/mcp" ? MCP_AUDIENCE : undefined)
+      : options.jwt;
   const init: RequestInit = {
     method: options.method ?? (options.body === undefined ? "GET" : "POST"),
     headers: {
@@ -119,6 +138,7 @@ async function call(
     ...env,
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: "fixture-audience",
+    ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
     ...options.environment,
   } as Env);
 }

@@ -16,12 +16,13 @@
 // and an agent grant is never widened to serve a page.
 //
 // The principal of the shared query route is the subject `authenticate`
-// returned. The principal of an agent path is `agentPrincipal`'s, from the
-// same verified token: the subject as before, or — on `/mcp`, for an identity
-// that came through the MCP Access application — the agent-only
-// `mcp-client:<sub>` (ADR 0047). Nothing here parses the token again, and
-// nothing reads an actor from a body or a header (review rule 9, addendum 10
-// section 5).
+// returned. An agent path receives an `AgentCaller` decided at the boundary
+// (`src/auth.ts`, ADR 0047): on `/mcp`, only an identity that came through the
+// MCP Access application, as the agent-only `mcp-client:<sub>`; on
+// `/api/agent/v1/*`, the browser session's subject as before. The caller
+// object, never a bare subject, is what reaches every tool and grader. Nothing
+// here parses the token again, and nothing reads an actor from a body or a
+// header (review rule 9, addendum 10 section 5).
 import {
   DEFAULT_QUERY_LIMIT,
   type Grant,
@@ -38,7 +39,7 @@ import {
   queryResponse,
   toolContext,
 } from "./agent-service";
-import { isAgentOnlyPrincipal } from "./auth";
+import type { AgentCaller } from "./auth";
 import { cardPurchasesAvailable } from "./card-purchases-api";
 import { grantsUsable } from "./grants";
 import { assertAgentTransport, handleMcp, MCP_TOOLS, PURCHASES_MCP_TOOLS } from "./mcp";
@@ -137,24 +138,23 @@ export function readerGrant(principal: string): Grant {
 }
 
 /**
- * POST routes. Returns `null` when the path is not an agent path. The
- * principal is the one the Access gate proved (`agentPrincipal`): a user's
- * subject, the same one the change lifecycle uses, or an agent-only
- * `mcp-client:<sub>`; nothing here reads the token a second time.
+ * POST routes. Returns `null` when the path is not an agent path. The caller
+ * is the one the Access gate proved (`mcpCaller` or `browserCaller`); nothing
+ * here reads the token a second time.
  */
 export async function agentApi(
   request: Request,
   env: Env,
   url: URL,
-  /** The principal `agentPrincipal` proved; never a body or header claim. */
-  subject: string,
+  /** The caller the boundary proved; never a body or header claim. */
+  caller: AgentCaller,
 ): Promise<Response | null> {
   const path = url.pathname;
   if (!isAgentPath(path)) return null;
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   if (url.search) throw new HttpError(400, "invalid_query");
   assertAgentTransport(request, url);
-  const grant = agentGrant(env, subject);
+  const grant = agentGrant(env, caller.principal);
   if (grant === null) throw new HttpError(403, "agent_api_not_configured");
   const now = new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
   const context = toolContext(env, grant, now);
@@ -165,16 +165,16 @@ export async function agentApi(
     // and the operations tools are graded by the change lifecycle's principal
     // inside `callOpsTool`, exactly as their HTTP routes are. With
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
-    // surface matches the routes this deployment actually serves. An
-    // agent-only principal is never an operator (ADR 0047): for it they do
-    // not exist, and `principalFor` refuses it again behind them.
-    const ops = opsApiEnabled(env) && !isAgentOnlyPrincipal(subject);
+    // surface matches the routes this deployment actually serves. An MCP
+    // client is never an operator (ADR 0047): they are not published to one,
+    // and `callOpsTool` refuses its caller object before any grader runs.
+    const ops = opsApiEnabled(env);
     // A deployment whose command grant lists cannot be read grades nobody, so
     // it can authorize none of the operations tools; publishing them would
     // describe a capability this deployment does not have. They stay callable,
     // so a client that asks anyway is told `grants_misconfigured` rather than
     // "no such tool".
-    const listOps = ops && grantsUsable(env);
+    const listOps = ops && caller.kind !== "mcp-client" && grantsUsable(env);
     // The purchase explanation exists exactly while the operator route does
     // (`cardPurchaseRecognition`): otherwise it is neither listed nor callable.
     // That needs the store's schema, so it is asked once, and only by a message
@@ -186,7 +186,7 @@ export async function agentApi(
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (isAgentToolName(name)) return callTool(name, body, context);
-        if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, subject);
+        if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, caller);
         return null;
       },
       async () => [

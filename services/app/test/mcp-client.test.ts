@@ -67,6 +67,8 @@ let jwks: { keys: unknown[] };
 let sequence = 0;
 let artifactId = 0;
 const sourceAccounts: string[] = [];
+/** The first artifact of each seeded source, for adding parse runs later. */
+const artifactOf: Record<string, number> = {};
 
 beforeAll(async () => {
   await seedRegistry();
@@ -81,6 +83,7 @@ beforeAll(async () => {
   ] as const) {
     const run = await seedRun({ count: 1, source });
     if (artifactId === 0) artifactId = run.artifacts[0].id;
+    artifactOf[source] = run.artifacts[0].id;
     const parse = await env.DB.prepare(`INSERT INTO parse_runs
       (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
       VALUES (?,'mcp-fixture','1','2026-09-07','ok','[]') RETURNING id`)
@@ -120,22 +123,38 @@ afterEach(() => {
  * `via: "app"` one for the browser application.
  */
 type Identity =
-  | { via: "app" | "mcp" | "both"; subject: string }
+  | {
+      via: "app" | "mcp" | "both" | "other";
+      subject: string;
+      /** Another Access team's issuer. */
+      foreignIssuer?: boolean;
+      expired?: boolean;
+    }
   | { via: "app" | "mcp"; serviceToken: string }
   | { forged: true }
   | null;
+
+const AUDIENCES = {
+  app: APP_AUD,
+  mcp: MCP_AUD,
+  both: [APP_AUD, MCP_AUD],
+  other: "fixture-other-audience",
+} as const;
 
 async function assertion(identity: Exclude<Identity, null>): Promise<string> {
   const claims: Record<string, unknown> = { type: "app" };
   if ("serviceToken" in identity) claims["common_name"] = identity.serviceToken;
   const via = "via" in identity ? identity.via : "mcp";
+  const foreign = "foreignIssuer" in identity && identity.foreignIssuer === true;
+  const expired = "expired" in identity && identity.expired === true;
+  const now = Math.floor(Date.now() / 1000);
   return new SignJWT(claims)
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
-    .setIssuer(issuer)
-    .setAudience(via === "both" ? [APP_AUD, MCP_AUD] : via === "app" ? APP_AUD : MCP_AUD)
+    .setIssuer(foreign ? "https://another-team.cloudflareaccess.com" : issuer)
+    .setAudience([...[AUDIENCES[via]].flat()])
     .setSubject("subject" in identity ? identity.subject : "")
-    .setIssuedAt()
-    .setExpirationTime("5m")
+    .setIssuedAt(expired ? now - 900 : now)
+    .setExpirationTime(expired ? now - 600 : now + 300)
     .sign("forged" in identity ? strangerKeys.privateKey : keys.privateKey);
 }
 
@@ -479,7 +498,7 @@ describe("a client connects through the MCP application, in either protocol era"
   });
 });
 
-describe("whoever signs in through the MCP application is an agent-only principal", () => {
+describe("the same person: operator in the browser, agent-only through MCP (matrix 1)", () => {
   // The hardest configuration: the same person is the operator, holds a full
   // read-and-propose grant under the bare subject, and the agent-only name is
   // even listed on the command path. Through the MCP application they are
@@ -493,8 +512,9 @@ describe("whoever signs in through the MCP application is an agent-only principa
       [AGENT]: grant(["summary.read"]),
     }),
   };
+  const browser = { via: "app" as const, subject: OWNER };
 
-  it("is graded by its own entry, never by the operator's", async () => {
+  it("is graded by its own entry on /mcp, never by the operator's", async () => {
     const report = await callTool("kogane.capabilities", {}, { environment: HOSTILE });
     expect(report.structuredContent).toMatchObject({
       principal: AGENT,
@@ -516,36 +536,50 @@ describe("whoever signs in through the MCP application is an agent-only principa
     });
     expect(proposed.structuredContent).toMatchObject({ code: "unauthorized" });
     expect(await relationCount()).toBe(before);
-    // Without its own entry it has nothing: the bare subject's grant is not a fallback.
-    const bare = await rpc(
-      "tools/list",
-      {},
-      { environment: { ...HOSTILE, ...grants({ [OWNER]: grant(READS) }) } },
-    );
-    expect(bare.status).toBe(403);
-    expect(await bare.json()).toMatchObject({ error: "agent_api_not_configured" });
   });
 
-  it("is never offered, and can never reach, an operations tool", async () => {
+  it("keeps the operator's rights on the browser's own routes", async () => {
+    // The HTTP agent route reads the bare subject's grant, as before.
+    const http = await send(
+      "/api/agent/v1/capabilities",
+      {},
+      {
+        environment: HOSTILE,
+        identity: browser,
+      },
+    );
+    expect(await http.json()).toMatchObject({
+      principal: OWNER,
+      capabilities: [...READS, "interpretation.propose"],
+    });
+    // The operations route still accepts the operator's request.
+    const before = await opsRowCount();
+    const accepted = await send("/api/ops/v1/collections", COLLECTION, {
+      environment: HOSTILE,
+      identity: browser,
+    });
+    expect(accepted.status).toBe(202);
+    expect(await opsRowCount()).toBe(before + 1);
+    // And the browser routes answer.
+    for (const path of ["/api/v2/query?intent=coverage", "/api/meta"]) {
+      const read = await send(path, undefined, { environment: HOSTILE, identity: browser });
+      expect(read.status, path).toBe(200);
+    }
+  });
+
+  it("never offers an operations tool on /mcp, and refuses one from the caller object", async () => {
     expect(await listTools({ environment: HOSTILE })).toEqual([...AGENT_TOOL_NAMES]);
     const before = await opsRowCount();
     for (const [name, args] of [
       ["kogane.ops.collection.request", COLLECTION],
+      ["kogane.ops.projection.request", { reason: "attempt over mcp" }],
       ["kogane.ops.operation.get", { operationId: "op_synthetic" }],
     ] as const) {
-      const called = (await (
-        await rpc("tools/call", { name, arguments: args }, { environment: HOSTILE })
-      ).json()) as { error: unknown };
-      expect(called.error, name).toEqual({ code: -32602, message: "unknown_tool" });
+      const called = await callTool(name, args, { environment: HOSTILE });
+      expect(called.isError, name).toBe(true);
+      expect(called.structuredContent, name).toEqual({ error: "actor_not_supported" });
     }
     expect(await opsRowCount()).toBe(before);
-    // The same person through the browser application is still the operator
-    // there: the operator's application is unchanged.
-    const operator = await listTools({
-      environment: HOSTILE,
-      identity: { via: "app", subject: OWNER },
-    });
-    expect(operator.filter((name) => name.startsWith("kogane.ops."))).toHaveLength(6);
   });
 
   it("is refused by every grader downstream, whatever the lists say", async () => {
@@ -556,56 +590,43 @@ describe("whoever signs in through the MCP application is an agent-only principa
     ];
     for (const vars of lists) {
       const deployment = { ...env, ...OPS_ENABLED, ...vars } as Env;
+      // `callOpsTool` receives the caller object and refuses it before any grader.
+      const before = await opsRowCount();
+      const outcome = await callOpsTool("kogane.ops.collection.request", COLLECTION, deployment, {
+        kind: "mcp-client",
+        principal: AGENT,
+      });
+      expect(outcome).toEqual({ status: 403, body: { error: "actor_not_supported" } });
+      expect(await opsRowCount()).toBe(before);
+      // Even the agent-only name as a bare string is never graded.
       expect(() => principalFor(vars, AGENT), JSON.stringify(vars)).toThrow(
         new HttpError(403, "actor_not_supported"),
       );
       expect(() => opsContext(deployment, AGENT)).toThrow(
         new HttpError(403, "actor_not_supported"),
       );
-      const before = await opsRowCount();
-      const outcome = await callOpsTool(
-        "kogane.ops.collection.request",
-        COLLECTION,
-        deployment,
-        AGENT,
-      );
-      expect(outcome).toEqual({ status: 403, body: { error: "actor_not_supported" } });
-      expect(await opsRowCount()).toBe(before);
     }
   });
 
-  it("reaches no route but /mcp", async () => {
-    const paths: [string, string][] = [
-      ["GET", "/api/v2/query?intent=coverage"],
-      ["GET", "/api/meta"],
-      ["GET", "/api/overview"],
-      ["GET", "/api/identity/accounts?offset=0"],
-      ["GET", `/api/evidence/v1/runs/r_1/artifacts/a_${String(artifactId)}/raw`],
-      ["POST", "/api/agent/v1/capabilities"],
-      ["POST", "/api/command/v1"],
-      ["POST", "/api/ops/v1/collections"],
-      ["GET", "/api/ops/v1/health"],
-      ["GET", "/"],
-    ];
-    for (const [method, path] of paths) {
-      const response = await send(path, method === "POST" ? {} : undefined, {
-        method,
-        environment: HOSTILE,
-      });
-      expect(response.status, path).toBe(401);
-      expect(await response.json()).toMatchObject({ error: "authentication_required" });
-    }
-  });
-
-  it("records the agent-only principal, never the operator, as a proposal's actor", async () => {
+  it("records the agent-only principal as a proposal's actor, whatever the request claims (matrix 7)", async () => {
     const environment = {
       ...HOSTILE,
       ...grants({ [AGENT]: grant(["summary.read", "interpretation.propose"]) }),
     };
+    // A body that names an actor is refused by the closed schema, and writes nothing.
+    const before = await relationCount();
+    const claimed = await callTool(
+      "kogane.reconcile.propose",
+      { ...proposal(0, "a proposal that claims an actor"), actor: OWNER },
+      { environment },
+    );
+    expect(claimed.structuredContent).toMatchObject({ code: "unsupported_semantics" });
+    expect(await relationCount()).toBe(before);
+    // A header that names one is ignored.
     const outcome = await callTool(
       "kogane.reconcile.propose",
       proposal(0, "a proposal whose actor is pinned"),
-      { environment },
+      { environment, headers: { "x-kogane-verified-actor": OWNER } },
     );
     const receipt = outcome.structuredContent as { relationId: string };
     const stored = await env.DB.prepare(
@@ -622,51 +643,198 @@ describe("whoever signs in through the MCP application is an agent-only principa
     });
   });
 
-  it("fails closed on the audience configuration and on ambiguous or borrowed identities", async () => {
-    const environment = grants({ [AGENT]: grant(READS), [OWNER]: grant(READS) });
-    const token = "0123456789abcdef0123456789abcdef.access";
-    const cases: [Options, number, string][] = [
-      // No MCP application configured: its assertions are accepted nowhere.
-      [
-        { environment: { ...environment, ACCESS_MCP_AUDIENCE: "" } },
-        401,
-        "authentication_required",
-      ],
-      // The MCP application may not share the browser application's audience.
-      [
-        { environment: { ...environment, ACCESS_MCP_AUDIENCE: APP_AUD } },
-        503,
-        "auth_not_configured",
-      ],
-      [
-        { environment: { ...environment, ACCESS_MCP_AUDIENCE: ` ${MCP_AUD}` } },
-        503,
-        "auth_not_configured",
-      ],
-      // One assertion for both applications has no defined role.
-      [{ environment, identity: { via: "both", subject: OWNER } }, 401, "authentication_required"],
-      // A browser subject cannot claim the agent-only namespace.
-      [{ environment, identity: { via: "app", subject: AGENT } }, 403, "actor_not_supported"],
-      // A service token is not the client path, through either application.
-      [
-        { environment, identity: { via: "mcp", serviceToken: token } },
-        401,
-        "authentication_required",
-      ],
-      [
-        { environment, identity: { via: "app", serviceToken: token } },
-        401,
-        "authentication_required",
-      ],
-      // No assertion, and one signed by another key.
-      [{ environment, identity: null }, 401, "authentication_required"],
-      [{ environment, identity: { forged: true } }, 401, "authentication_required"],
+  it("changes no adopted answer through a proposal (matrix 7, AT68)", async () => {
+    const environment = grants({ [AGENT]: grant([...READS, "interpretation.propose"]) });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    const answers = async () => {
+      const collected: unknown[] = [];
+      for (const intent of ["coverage", "reported-state", "activity", "holdings"]) {
+        const outcome = await callTool("kogane.financial.query", { intent }, { environment });
+        collected.push(outcome.structuredContent["result"]["data"]);
+      }
+      return collected;
+    };
+    const before = await answers();
+    const proposed = await callTool(
+      "kogane.reconcile.propose",
+      proposal(0, "a proposal that must not change adopted state"),
+      { environment },
+    );
+    expect(proposed.structuredContent).toMatchObject({ status: "proposed", adopted: false });
+    expect(await answers()).toEqual(before);
+  });
+});
+
+describe("a token minted for MCP reaches no other route, and /mcp takes no other token (matrix 2, 3)", () => {
+  const environment = {
+    ...OPS_ENABLED,
+    OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
+    ...grants({ [OWNER]: grant(READS), [AGENT]: grant(READS) }),
+  };
+
+  it("refuses an MCP-application token on every ordinary route", async () => {
+    const routes: [string, string, unknown][] = [
+      ["POST", "/api/command/v1/plan", {}],
+      ["POST", "/api/command/v1/approve", {}],
+      ["POST", "/api/command/v1/commit", {}],
+      ["GET", "/api/v2/reconciliation/card-settlements", undefined],
+      ["GET", "/api/v2/card-purchases", undefined],
+      ["POST", "/api/ops/v1/collections", COLLECTION],
+      ["GET", "/api/ops/v1/operations/op_synthetic", undefined],
+      ["GET", "/api/ops/v1/health", undefined],
+      ["GET", "/api/overview", undefined],
+      ["GET", "/api/meta", undefined],
+      ["GET", "/api/identity/accounts?offset=0", undefined],
+      ["GET", "/api/v2/query?intent=coverage", undefined],
+      ["GET", `/api/evidence/v1/runs/r_1/artifacts/a_${String(artifactId)}/raw`, undefined],
+      ["POST", "/api/agent/v1/capabilities", {}],
+      ["GET", "/", undefined],
     ];
-    for (const [options, status, code] of cases) {
-      const response = await rpc("tools/list", {}, options);
-      expect(response.status, JSON.stringify(options)).toBe(status);
+    for (const identity of [
+      { via: "mcp" as const, subject: OWNER },
+      { via: "both" as const, subject: OWNER },
+    ]) {
+      for (const [method, path, body] of routes) {
+        const response = await send(path, body, { method, environment, identity });
+        expect(response.status, `${identity.via} ${method} ${path}`).toBe(401);
+        expect(await response.json()).toMatchObject({ error: "authentication_required" });
+      }
+    }
+    // The same routes with the browser's own token answer as before.
+    const operator = await send("/api/v2/query?intent=coverage", undefined, {
+      environment,
+      identity: { via: "app", subject: OWNER },
+    });
+    expect(operator.status).toBe(200);
+  });
+
+  it("accepts only an assertion for the MCP application at /mcp", async () => {
+    const token = "0123456789abcdef0123456789abcdef.access";
+    const refused: [Identity, string][] = [
+      [{ via: "app", subject: OWNER }, "the browser application's audience"],
+      [{ via: "both", subject: OWNER }, "both audiences"],
+      [{ via: "other", subject: OWNER }, "another application's audience"],
+      [{ via: "mcp", subject: OWNER, foreignIssuer: true }, "another issuer"],
+      [{ via: "mcp", subject: OWNER, expired: true }, "an expired assertion"],
+      [{ forged: true }, "a signature by another key"],
+      [{ via: "mcp", serviceToken: token }, "a service token through the MCP application"],
+      [{ via: "app", serviceToken: token }, "a service token through the browser application"],
+      [{ via: "mcp", subject: AGENT }, "a subject in the agent-only namespace"],
+      [null, "no assertion"],
+    ];
+    for (const [identity, label] of refused) {
+      const response = await rpc("tools/list", {}, { environment, identity });
+      expect(response.status, label).toBe(401);
+      expect(await response.json()).toMatchObject({ error: "authentication_required" });
+    }
+    // A forged header on a request without a valid assertion changes nothing.
+    const spoofed = await rpc(
+      "tools/list",
+      {},
+      {
+        environment,
+        identity: null,
+        headers: {
+          "x-kogane-verified-actor": OWNER,
+          "cf-access-authenticated-user-email": "x@example.invalid",
+        },
+      },
+    );
+    expect(spoofed.status).toBe(401);
+    expect((await rpc("tools/list", {}, { environment })).status).toBe(200);
+  });
+
+  it("fails closed on the MCP audience configuration", async () => {
+    const cases: [Record<string, unknown>, number, string][] = [
+      // No MCP application configured: /mcp accepts nothing.
+      [{ ACCESS_MCP_AUDIENCE: "" }, 401, "authentication_required"],
+      [{ ACCESS_MCP_AUDIENCE: undefined }, 401, "authentication_required"],
+      // The MCP application may not share the browser application's audience.
+      [{ ACCESS_MCP_AUDIENCE: APP_AUD }, 503, "auth_not_configured"],
+      [{ ACCESS_MCP_AUDIENCE: ` ${MCP_AUD}` }, 503, "auth_not_configured"],
+      [{ ACCESS_MCP_AUDIENCE: "x".repeat(257) }, 503, "auth_not_configured"],
+    ];
+    for (const [vars, status, code] of cases) {
+      const response = await rpc("tools/list", {}, { environment: { ...environment, ...vars } });
+      expect(response.status, JSON.stringify(vars)).toBe(status);
       expect(await response.json()).toMatchObject({ error: code });
     }
+    // A misconfigured MCP audience never takes the browser application down.
+    const ui = await send("/api/v2/query?intent=coverage", undefined, {
+      environment: { ...environment, ACCESS_MCP_AUDIENCE: APP_AUD },
+      identity: { via: "app", subject: OWNER },
+    });
+    expect(ui.status).toBe(200);
+  });
+
+  it("refuses a browser subject that claims the agent-only namespace on the HTTP agent routes", async () => {
+    const response = await send(
+      "/api/agent/v1/capabilities",
+      {},
+      {
+        environment,
+        identity: { via: "app", subject: AGENT },
+      },
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: "actor_not_supported" });
+  });
+});
+
+describe("the grant fails closed (matrix 4)", () => {
+  it("refuses an absent, malformed or revoked grant", async () => {
+    const tables: [Record<string, string>, string][] = [
+      [{}, "no AGENT_API_GRANTS"],
+      [{ AGENT_API_GRANTS: "" }, "the committed empty table"],
+      [{ AGENT_API_GRANTS: "{" }, "unparsable"],
+      [{ AGENT_API_GRANTS: JSON.stringify([AGENT]) }, "a list, not a table"],
+      [
+        {
+          AGENT_API_GRANTS: JSON.stringify({
+            [AGENT]: { ...grant(READS), capabilities: ["interpretation.accept"] },
+          }),
+        },
+        "a capability outside the vocabulary",
+      ],
+      [{ ...grants({ [OWNER]: grant(READS) }) }, "only the bare subject's entry"],
+      [
+        { ...grants({ [OTHER]: grant(READS), [`mcp-client:${OTHER}`]: grant(READS) }) },
+        "revoked: another person only",
+      ],
+    ];
+    for (const [vars, label] of tables) {
+      for (const message of [
+        { method: "tools/list", params: {} },
+        { method: "tools/call", params: { name: "kogane.capabilities", arguments: {} } },
+      ]) {
+        const response = await rpc(message.method, message.params, {
+          environment: { AGENT_API_GRANTS: undefined, ...vars },
+        });
+        expect(response.status, `${label} ${message.method}`).toBe(403);
+        expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
+      }
+    }
+  });
+});
+
+describe("a tool that is not published cannot be called (matrix 8)", () => {
+  it("answers unknown_tool, or the caller's refusal, and runs nothing", async () => {
+    const environment = grants({ [AGENT]: grant([...READS, "interpretation.propose"]) });
+    const before = { relations: await relationCount(), ops: await opsRowCount() };
+    for (const name of [
+      "kogane.change.commit",
+      "kogane.change.approve",
+      "kogane.purchases.explain",
+      "kogane.ops.collection.request",
+      "tools/call",
+      "",
+    ]) {
+      const response = await rpc("tools/call", { name, arguments: {} }, { environment });
+      const message = (await response.json()) as { error?: { code: number; message: string } };
+      expect(message.error, name).toMatchObject({ code: -32602 });
+    }
+    expect({ relations: await relationCount(), ops: await opsRowCount() }).toEqual(before);
   });
 });
 
@@ -886,5 +1054,114 @@ describe("the UI, HTTP and MCP return one result (AT72)", () => {
       expect(viaMcp.isError, tool).toBe(true);
       expect(viaMcp.structuredContent, tool).toEqual(await http.json());
     }
+  });
+});
+
+describe("scope covers every byte of every answer (matrix 5, 6)", () => {
+  // `other-test` is granted; `sony-bank` and its account `mcp-account-a` are not.
+  const DENIED = ["sony-bank", "mcp-account-a", "sa_mcp_sony-bank"];
+  const narrow = grant([...READS, "interpretation.propose"], {
+    sources: ["other-test"],
+    accounts: "*",
+  });
+
+  it("honours an account scope on reads and proposals", async () => {
+    const environment = grants({
+      [AGENT]: grant([...READS, "interpretation.propose"], {
+        sources: "*",
+        accounts: ["mcp-account-b"],
+      }),
+    });
+    const rows = await callTool("kogane.financial.query", { intent: "activity" }, { environment });
+    expect(rows.isError).toBe(false);
+    expect(JSON.stringify(rows.structuredContent)).not.toContain("mcp-account-a");
+    const filtered = await callTool(
+      "kogane.financial.query",
+      { intent: "activity", filters: { account: "mcp-account-a" } },
+      { environment },
+    );
+    expect(filtered.structuredContent).toMatchObject({
+      code: "evidence_restricted",
+      refs: ["scope:account"],
+    });
+    const before = await relationCount();
+    const proposed = await callTool(
+      "kogane.reconcile.propose",
+      proposal(0, "a proposal across the account scope"),
+      { environment },
+    );
+    expect(proposed.structuredContent).toMatchObject({ code: "incomplete_evidence" });
+    expect(await relationCount()).toBe(before);
+  });
+
+  it("never names a source or an account outside the grant, anywhere in an answer", async () => {
+    const environment = { ...grants({ [AGENT]: narrow }), EVENTS_V2_ENABLED: "true" };
+    const rows = await callTool("kogane.financial.query", { intent: "activity" }, { environment });
+    const inScopeRef = (
+      rows.structuredContent["result"]["data"]["rows"] as { observationRef: string }[]
+    )[0]!.observationRef;
+    const calls: [string, unknown][] = [
+      ["kogane.capabilities", {}],
+      ["kogane.context.open", {}],
+      ["kogane.context.open", { query: { intent: "activity" } }],
+      ["kogane.financial.query", { intent: "coverage" }],
+      ["kogane.financial.query", { intent: "holdings" }],
+      ["kogane.financial.query", { intent: "activity" }],
+      ["kogane.financial.query", { intent: "reported-state" }],
+      ["kogane.explain", { ref: "source:other-test" }],
+      ["kogane.explain", { ref: inScopeRef }],
+      ["kogane.explain", { ref: "observation:transaction:999999" }],
+      ["kogane.purchases.explain", {}],
+    ];
+    for (const [name, args] of calls) {
+      const outcome = await callTool(name, args, { environment });
+      const whole = JSON.stringify(outcome);
+      for (const denied of DENIED)
+        expect(whole, `${name} ${JSON.stringify(args)}`).not.toContain(denied);
+    }
+    const opened = await callTool("kogane.context.open", {}, { environment });
+    expect(opened.structuredContent["context"]["sourceSelectionManifestRef"]).toBe(
+      "sources:other-test",
+    );
+    // tools/list and initialize carry no source at all.
+    const listed = JSON.stringify(await result(await rpc("tools/list", {}, { environment })));
+    for (const denied of DENIED) expect(listed).not.toContain(denied);
+  });
+
+  it("keeps a scoped context unchanged when only a source outside the grant moves", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    const environment = grants({ [AGENT]: narrow, [`mcp-client:${OTHER}`]: grant(READS) });
+    const contextFor = async (identity: Identity) =>
+      (await callTool("kogane.context.open", {}, { environment, identity })).structuredContent[
+        "context"
+      ] as Record<string, string>;
+    const scoped = async () => contextFor({ via: "mcp", subject: OWNER });
+    const whole = async () => contextFor({ via: "mcp", subject: OTHER });
+    const publish = async (source: string, parser: string) => {
+      const parse = await env.DB.prepare(`INSERT INTO parse_runs
+        (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+        VALUES (?,?,'9','2026-09-08','ok','[]') RETURNING id`)
+        .bind(artifactOf[source], parser)
+        .first<{ id: number }>();
+      await publishParse(parse!.id);
+    };
+
+    const scopedBefore = await scoped();
+    const wholeBefore = await whole();
+    // A new publication by a new parser build, in the source outside the grant.
+    await publish("sony-bank", "out-of-scope-parser");
+    const scopedAfter = await scoped();
+    const wholeAfter = await whole();
+    expect(scopedAfter).toEqual(scopedBefore);
+    // The whole-store context does see it: the digests are not simply constant.
+    expect(wholeAfter["publicationRef"]).not.toBe(wholeBefore["publicationRef"]);
+    expect(wholeAfter["parserBuildManifestRef"]).not.toBe(wholeBefore["parserBuildManifestRef"]);
+    // And the scoped context moves with its own source.
+    await publish("other-test", "in-scope-parser");
+    const scopedMoved = await scoped();
+    expect(scopedMoved["publicationRef"]).not.toBe(scopedBefore["publicationRef"]);
+    expect(scopedMoved["parserBuildManifestRef"]).not.toBe(scopedBefore["parserBuildManifestRef"]);
+    expect(scopedMoved["contextId"]).not.toBe(scopedBefore["contextId"]);
   });
 });

@@ -9,9 +9,11 @@
 //     progress of a fresh operation is `pending` everywhere, so absence is
 //     reported as absence rather than as a successful empty result (the shape
 //     G3-01 asks for, applied to an operation);
-//   * HTTP and MCP write one identical operation record for one request
-//     (G3-05), and re-sending it returns the same operation rather than
-//     starting a second collection (G3-06, G3-14);
+//   * HTTP writes one operation record for one request (G3-05), and
+//     re-sending it returns the same operation rather than starting a second
+//     collection (G3-06, G3-14); `/mcp` is agent-only (ADR 0047), so it
+//     publishes none of the operations and refuses every one of them, even for
+//     the operator's own identity, without writing a row;
 //   * an error carries a safe code and safe field paths, never the value that
 //     was rejected (G3-08);
 //   * a source whose policy needs a person answers `waiting_for_human` and
@@ -86,11 +88,14 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-async function token(subject = OPERATOR) {
+/** The MCP Access application's audience (ADR 0047); `/mcp` accepts nothing else. */
+const MCP_AUDIENCE = "fixture-mcp-audience";
+
+async function token(subject = OPERATOR, audience = "fixture-audience") {
   return new SignJWT({ type: "app" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
     .setIssuer(issuer)
-    .setAudience("fixture-audience")
+    .setAudience(audience)
     .setSubject(subject)
     .setIssuedAt()
     .setExpirationTime("5m")
@@ -107,7 +112,7 @@ async function call(
     target?: typeof worker | typeof demo;
   } = {},
 ) {
-  const jwt = await token(options.subject);
+  const jwt = await token(options.subject, path === "/mcp" ? MCP_AUDIENCE : undefined);
   const init: RequestInit = {
     method: options.method ?? (options.body === undefined ? "GET" : "POST"),
     headers: {
@@ -122,6 +127,7 @@ async function call(
     ...env,
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: "fixture-audience",
+    ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
     ...options.environment,
   } as Env);
 }
@@ -599,22 +605,34 @@ describe("stage progress is evidence, not a guess", () => {
   });
 });
 
-describe("HTTP and MCP are one API (G3-05)", () => {
-  it("lists exactly the five tools with the flag off and exactly eleven with it on", async () => {
+describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () => {
+  // Through the MCP Access application every caller is `mcp-client:<sub>`,
+  // the operator included. Give that name a read grant so `/mcp` answers at
+  // all; the operations must still be absent and refused.
+  const THROUGH_MCP = {
+    ...ENABLED,
+    AGENT_API_GRANTS: JSON.stringify({
+      [`mcp-client:${OPERATOR}`]: {
+        scopes: { sources: "*", accounts: "*" },
+        capabilities: ["summary.read"],
+        budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
+      },
+    }),
+  };
+  const opsRows = async () =>
+    env.DB.prepare("SELECT count(*) AS n FROM ops_requests").first<number>("n");
+
+  it("publishes no operations tool to the operator's own MCP client, flag on or off", async () => {
     const five = MCP_TOOLS.map((tool) => tool.name);
     expect(five).toHaveLength(5);
-    const off = await mcp("tools/list", {}, { OPS_API_ENABLED: "" });
-    expect(off.result.tools.map((tool: any) => tool.name)).toEqual(five);
-    const called = await mcp(
-      "tools/call",
-      { name: "kogane.ops.collection.request", arguments: COLLECTION },
-      { OPS_API_ENABLED: "" },
-    );
-    expect(called.error.message).toBe("unknown_tool");
-
-    const on = await mcp("tools/list");
-    const names = on.result.tools.map((tool: any) => tool.name);
-    expect(names).toEqual([...five, ...OPS_TOOL_NAMES]);
+    for (const flag of ["", "true"]) {
+      const listed = await mcp("tools/list", {}, { ...THROUGH_MCP, OPS_API_ENABLED: flag });
+      expect(
+        listed.result.tools.map((tool: any) => tool.name),
+        flag,
+      ).toEqual(five);
+    }
+    // The definitions still exist, generated from the routes' schemas.
     expect(OPS_TOOL_NAMES).toEqual([
       "kogane.ops.collection.request",
       "kogane.ops.import.request",
@@ -623,142 +641,46 @@ describe("HTTP and MCP are one API (G3-05)", () => {
       "kogane.ops.session.refresh",
       "kogane.ops.operation.get",
     ]);
-    for (const tool of on.result.tools) {
-      const schema = JSON.stringify(tool.inputSchema);
-      expect(schema).toContain('"additionalProperties":false');
-      expect(schema).not.toMatch(/"(url|uri|sql|table|host|endpoint|orderBy)"\s*:/u);
+  });
+
+  it("refuses every operation over MCP without writing a row, and serves it over HTTP", async () => {
+    const before = await opsRows();
+    const accepted = await ops("/imports", { source: "sony-bank", runId: "run-read-over-http" });
+    const calls: [string, Record<string, unknown>][] = [
+      ["kogane.ops.collection.request", { ...COLLECTION, idempotencyKey: "over-mcp" }],
+      ["kogane.ops.import.request", { source: "sony-bank", runId: "run-over-mcp" }],
+      ["kogane.ops.replay.request", { source: "sony-bank" }],
+      ["kogane.ops.projection.request", { reason: "over mcp" }],
+      ["kogane.ops.session.refresh", { source: "sony-bank" }],
+      ["kogane.ops.operation.get", { operationId: accepted.json.operationId }],
+    ];
+    for (const [name, args] of calls) {
+      const called = await mcp("tools/call", { name, arguments: args }, THROUGH_MCP);
+      expect(called.result.isError, name).toBe(true);
+      expect(called.result.structuredContent, name).toEqual({ error: "actor_not_supported" });
     }
+    // Only the HTTP import above was written.
+    expect(await opsRows()).toBe((before ?? 0) + 1);
+    // The operator keeps the operations over HTTP, with the browser application.
+    const overHttp = await ops("/collections", { ...COLLECTION, idempotencyKey: "over-http" });
+    expect(overHttp.status).toBe(202);
   });
 
-  it("writes one record for one request, whichever transport carries it", async () => {
-    const body = { ...COLLECTION, idempotencyKey: "parity-same-key" };
-    const overHttp = await ops("/collections", body);
-    const overMcp = await mcp("tools/call", {
-      name: "kogane.ops.collection.request",
-      arguments: body,
-    });
-    // The same principal and the same key is the same operation: MCP does not
-    // start a second collection for a request HTTP already accepted.
-    expect(overMcp.result.isError).toBe(false);
-    expect(overMcp.result.structuredContent).toEqual(overHttp.json);
-    expect(
-      await env.DB.prepare("SELECT count(*) AS n FROM ops_requests WHERE idempotency_key=?")
-        .bind("parity-same-key")
-        .first<number>("n"),
-    ).toBe(1);
-
-    // And two requests that differ only by their key produce stored rows that
-    // are byte-identical in every column except the key, the id derived from
-    // it and the clock — and read back as the same receipt but for those.
-    const httpOnly = await ops("/collections", { ...COLLECTION, idempotencyKey: "parity-http" });
-    const mcpOnly = await mcp("tools/call", {
-      name: "kogane.ops.collection.request",
-      arguments: { ...COLLECTION, idempotencyKey: "parity-mcp" },
-    });
-    const KEYED = new Set(["operation_id", "idempotency_key", "created_at", "updated_at"]);
-    const unkeyed = (record: Record<string, any>) =>
-      Object.fromEntries(Object.entries(record).filter(([column]) => !KEYED.has(column)));
-    const httpRow = (await row(httpOnly.json.operationId)) as Record<string, any>;
-    const mcpRow = (await row(mcpOnly.result.structuredContent.operationId)) as Record<string, any>;
-    expect(Object.keys(httpRow).sort()).toEqual(Object.keys(mcpRow).sort());
-    expect(JSON.stringify(unkeyed(httpRow))).toBe(JSON.stringify(unkeyed(mcpRow)));
-    const receipt = async (operationId: string) => {
-      const {
-        operationId: _id,
-        acceptedAt: _a,
-        updatedAt: _u,
-        ...rest
-      } = (await (
-        await call(`${OPS}/operations/${operationId}`, { environment: ENABLED })
-      ).json()) as Record<string, any>;
-      return JSON.stringify(rest);
-    };
-    expect(await receipt(httpOnly.json.operationId)).toBe(
-      await receipt(mcpOnly.result.structuredContent.operationId),
+  it("refuses a token minted for the browser application on /mcp", async () => {
+    const response = await worker.fetch(
+      new Request("https://fixture.test/mcp", {
+        method: "POST",
+        headers: { "cf-access-jwt-assertion": await token(OPERATOR), ...MCP_CLIENT_HEADERS },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      }),
+      {
+        ...env,
+        ...THROUGH_MCP,
+        ACCESS_ISSUER: issuer,
+        ACCESS_AUDIENCE: "fixture-audience",
+        ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
+      } as Env,
     );
-  });
-
-  it("refuses the same requests the routes refuse, with the same codes", async () => {
-    const refused = await mcp("tools/call", {
-      name: "kogane.ops.collection.request",
-      arguments: { ...COLLECTION, source: "not-a-source" },
-    });
-    expect(refused.result.isError).toBe(true);
-    expect(refused.result.structuredContent).toEqual({
-      error: "target_missing",
-      refs: ["source"],
-    });
-    const invalid = await mcp("tools/call", {
-      name: "kogane.ops.session.refresh",
-      arguments: { source: "sony-bank", extra: "no" },
-    });
-    expect(invalid.result.structuredContent).toMatchObject({ error: "invalid_request" });
-    // An agent is refused on this transport too — and so is a subject the
-    // deployment never named, with the code its HTTP route gives.
-    const readable = JSON.stringify({
-      [AGENT]: {
-        scopes: { sources: "*", accounts: "*" },
-        capabilities: ["summary.read"],
-        budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
-      },
-      [STRANGER]: {
-        scopes: { sources: "*", accounts: "*" },
-        capabilities: ["summary.read"],
-        budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
-      },
-    });
-    const agent = await mcp(
-      "tools/call",
-      { name: "kogane.ops.projection.request", arguments: { reason: "agent attempt" } },
-      { AGENT_GRANTS: JSON.stringify([AGENT]), AGENT_API_GRANTS: readable },
-      AGENT,
-    );
-    expect(agent.result.structuredContent).toEqual({ error: "approval_required" });
-    const stranger = await mcp(
-      "tools/call",
-      { name: "kogane.ops.projection.request", arguments: { reason: "stranger attempt" } },
-      { AGENT_API_GRANTS: readable },
-      STRANGER,
-    );
-    expect(stranger.result.structuredContent).toEqual({ error: "subject_not_granted" });
-  });
-
-  // One resolver, so a misconfiguration cannot make MCP and HTTP disagree.
-  // The tools are not even published while the lists are unreadable: a
-  // deployment that grades nobody cannot authorize any of them.
-  it("agrees with the routes while the grant lists cannot be read", async () => {
-    const broken = { AGENT_GRANTS: JSON.stringify({ [AGENT]: 1 }) };
-    const listed = await mcp("tools/list", {}, broken);
-    expect((listed.result.tools as { name: string }[]).map((tool) => tool.name)).toEqual(
-      MCP_TOOLS.map((tool) => tool.name),
-    );
-    const called = await mcp(
-      "tools/call",
-      { name: "kogane.ops.projection.request", arguments: { reason: "misconfigured" } },
-      broken,
-    );
-    expect(called.result.isError).toBe(true);
-    expect(called.result.structuredContent).toEqual({ error: "grants_misconfigured" });
-    const overHttp = await call(`${OPS}/projections`, {
-      body: { reason: "misconfigured" },
-      environment: { ...ENABLED, ...broken },
-    });
-    expect(overHttp.status).toBe(503);
-    expect((await overHttp.json()).error).toBe("grants_misconfigured");
-  });
-
-  it("reads an operation through the tool of the same name", async () => {
-    const accepted = await ops("/imports", {
-      source: "sony-bank",
-      runId: "run-read-through-mcp",
-    });
-    const read = await mcp("tools/call", {
-      name: "kogane.ops.operation.get",
-      arguments: { operationId: accepted.json.operationId },
-    });
-    const overHttp = await call(`${OPS}/operations/${accepted.json.operationId}`, {
-      environment: ENABLED,
-    });
-    expect(read.result.structuredContent).toEqual(await overHttp.json());
+    expect(response.status).toBe(401);
   });
 });

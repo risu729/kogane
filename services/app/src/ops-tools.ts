@@ -13,6 +13,7 @@
 // table name, no ordering, no SQL (G3-13).
 import { z } from "zod";
 import type { ToolResult } from "./agent-service";
+import type { AgentCaller } from "./auth";
 import { HttpError } from "./http";
 import {
   collectionSchema,
@@ -122,11 +123,14 @@ export async function callOpsTool(
   name: OpsToolName,
   body: unknown,
   env: Env,
-  /** The subject `authenticate` proved; never a body or header claim. */
-  subject: string,
+  /** The caller the boundary proved (`src/auth.ts`); never a body or header claim. */
+  caller: AgentCaller,
 ): Promise<ToolResult> {
+  // An MCP client is agent-only (ADR 0047): it is refused here, from the
+  // caller object, before any grader could look at a subject.
+  if (caller.kind === "mcp-client") return { status: 403, body: { error: "actor_not_supported" } };
   try {
-    const context = opsContext(env, subject);
+    const context = opsContext(env, caller.principal);
     const argument: unknown = body ?? {};
     switch (name) {
       case "kogane.ops.collection.request":

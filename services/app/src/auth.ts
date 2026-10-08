@@ -21,27 +21,33 @@ export interface AccessIdentity {
   serviceToken: string | null;
 }
 
+/** The audience variables: the browser application's, and the MCP application's (ADR 0047). */
+type AudienceVars = Pick<Env, "ACCESS_ISSUER" | "ACCESS_AUDIENCE"> & {
+  ACCESS_MCP_AUDIENCE?: string | undefined;
+};
+
 /**
  * Verifies the Cloudflare Access JWT and returns the identity it proved,
  * without deciding what that identity may do. Every failure mode of
  * `authenticate` is this function's: a missing or oversized assertion, an
  * unverifiable token and an unreachable key set answer exactly as before.
  *
- * Only an assertion issued for this Worker's own Access application
- * (`ACCESS_AUDIENCE`) is accepted here. An assertion for the MCP application
- * (`ACCESS_MCP_AUDIENCE`, ADR 0047) is accepted by `agentPrincipal` on `/mcp`
- * and nowhere else.
+ * It accepts only an assertion issued for this Worker's own (browser) Access
+ * application. One that also names the MCP application's audience is
+ * `401 authentication_required`: a token minted for MCP clients reaches no
+ * ordinary route (ADR 0047).
  */
-export async function accessIdentity(
-  request: Request,
-  env: Pick<Env, "ACCESS_ISSUER" | "ACCESS_AUDIENCE">,
-): Promise<AccessIdentity> {
-  const audience = appAudience(env);
-  return (await verifyAssertion(request, env.ACCESS_ISSUER, [audience])).identity;
+export async function accessIdentity(request: Request, env: AudienceVars): Promise<AccessIdentity> {
+  const app = appAudience(env);
+  const mcp = mcpAudience(env, app, false);
+  const verified = await verifyAssertion(request, env.ACCESS_ISSUER, app);
+  if (mcp !== null && verified.audiences.includes(mcp))
+    throw new HttpError(401, "authentication_required");
+  return verified.identity;
 }
 
 /** This Worker's own Access application audience, or 503 when it is not configured. */
-function appAudience(env: Pick<Env, "ACCESS_ISSUER" | "ACCESS_AUDIENCE">): string {
+function appAudience(env: AudienceVars): string {
   const issuer: string = env.ACCESS_ISSUER;
   const audience: string = env.ACCESS_AUDIENCE;
   if (
@@ -55,14 +61,35 @@ function appAudience(env: Pick<Env, "ACCESS_ISSUER" | "ACCESS_AUDIENCE">): strin
 }
 
 /**
- * Verifies the assertion against the issuer and any one of `audiences`, and
- * reports which audiences the verified token names. The token's own `aud`
+ * The MCP Access application's audience, or `null` while none is configured
+ * (the committed state). A value that is present but unusable — not a plain
+ * string of at most 256 characters, or the browser application's own
+ * audience, which would make a browser session indistinguishable from an MCP
+ * client — is `503 auth_not_configured` when `strict`, and is otherwise
+ * ignored by the browser routes, which never accept it anyway.
+ */
+function mcpAudience(env: AudienceVars, app: string, strict: boolean): string | null {
+  const configured: unknown = env.ACCESS_MCP_AUDIENCE;
+  if (configured === undefined || configured === null || configured === "") return null;
+  const usable =
+    typeof configured === "string" &&
+    configured.trim() === configured &&
+    configured.length <= 256 &&
+    configured !== app;
+  if (usable) return configured;
+  if (strict) throw new HttpError(503, "auth_not_configured");
+  return null;
+}
+
+/**
+ * Verifies the assertion against the issuer and exactly one audience, and
+ * reports every audience the verified token names. The token's own `aud`
  * claim is what is reported, never a header or a path.
  */
 async function verifyAssertion(
   request: Request,
   issuer: string,
-  audiences: readonly string[],
+  audience: string,
 ): Promise<{ identity: AccessIdentity; audiences: readonly string[] }> {
   const token = request.headers.get("cf-access-jwt-assertion");
   if (!token || token.length > 16_384) throw new HttpError(401, "authentication_required");
@@ -87,20 +114,19 @@ async function verifyAssertion(
     // which identities are acceptable is decided below and by each caller.
     const { payload } = await jwtVerify(token, keys, {
       issuer,
-      audience: [...audiences],
+      audience,
       algorithms: ["RS256"],
       requiredClaims: ["exp", "iat"],
     });
     if (payload.type !== "app") throw new HttpError(401, "authentication_required");
-    const named = typeof payload.aud === "string" ? [payload.aud] : (payload.aud ?? []);
-    const matched = audiences.filter((audience) => named.includes(audience));
+    const audiences = typeof payload.aud === "string" ? [payload.aud] : (payload.aud ?? []);
     // The subject is returned exactly as the claim carries it, as `authenticate`
     // always did; only the emptiness test trims.
     if (typeof payload.sub === "string" && payload.sub.trim() !== "")
-      return { identity: { subject: payload.sub, serviceToken: null }, audiences: matched };
+      return { identity: { subject: payload.sub, serviceToken: null }, audiences };
     const common = payload["common_name"];
     if (typeof common === "string" && common.trim() !== "" && common.length <= 256)
-      return { identity: { subject: "", serviceToken: common.trim() }, audiences: matched };
+      return { identity: { subject: "", serviceToken: common.trim() }, audiences };
     throw new HttpError(401, "authentication_required");
   } catch (error) {
     if (error instanceof HttpError) throw error;
@@ -122,94 +148,68 @@ async function verifyAssertion(
  * headers never name the actor (review rule 9, addendum 10 section 5). A
  * service token has no subject and is refused here, exactly as before.
  */
-export async function authenticate(
-  request: Request,
-  env: Pick<Env, "ACCESS_ISSUER" | "ACCESS_AUDIENCE">,
-): Promise<string> {
+export async function authenticate(request: Request, env: AudienceVars): Promise<string> {
   const identity = await accessIdentity(request, env);
   if (identity.subject === "") throw new HttpError(401, "authentication_required");
   return identity.subject;
 }
 
-/**
- * The namespace of a principal that reached the MCP endpoint through the MCP
- * Access application (ADR 0047). Access user subjects are UUIDs, so no user
- * session can hold a name in it; a subject that claims it is refused.
- */
-const MCP_CLIENT_PRINCIPAL_PREFIX = "mcp-client:";
+/** The namespace of an agent-only principal: an identity that reached `/mcp` through the MCP application. */
+const MCP_CLIENT_PREFIX = "mcp-client:";
 
 /**
- * Whether a principal is agent-only: it may read and propose under its
- * `AGENT_API_GRANTS` entry and nothing else. It is never graded by
- * `OPERATOR_SUBJECTS` or `AGENT_GRANTS` (`principalFor` refuses it), never
- * offered an operations tool, and never reaches a non-agent route.
+ * The caller of the agent API, decided once at the boundary from the verified
+ * Access assertion and carried, as this object, to every tool, grader and
+ * service behind it (ADR 0047).
+ *
+ * - `mcp-client`: an identity that reached `/mcp` through the MCP Access
+ *   application (Cloudflare Access Managed OAuth). Whoever signed in — the
+ *   operator included — is **agent-only** here: `principal` is
+ *   `mcp-client:<sub>`, its grant is that name's `AGENT_API_GRANTS` entry and
+ *   nothing else, and no grader may turn it back into the subject it came
+ *   from. The bare subject is deliberately not part of this object.
+ * - `browser`: a session of this Worker's own Access application on an
+ *   `/api/agent/v1/*` route; `principal` is its subject, as before.
+ */
+export type AgentCaller =
+  | { readonly kind: "mcp-client"; readonly principal: string }
+  | { readonly kind: "browser"; readonly principal: string };
+
+/**
+ * Whether a principal string names an agent-only caller. The graders that take
+ * a bare string (`principalFor`) refuse such a name, so even a value that
+ * escaped the `AgentCaller` object could not be re-classified.
  */
 export function isAgentOnlyPrincipal(principal: string): boolean {
-  return principal.startsWith(MCP_CLIENT_PRINCIPAL_PREFIX);
-}
-
-/** The variable naming the MCP Access application's audience, typed on the variable. */
-interface McpAudienceVars {
-  ACCESS_MCP_AUDIENCE?: string | undefined;
+  return principal.startsWith(MCP_CLIENT_PREFIX);
 }
 
 /**
- * The MCP Access application's audience, or `null` while none is configured.
- * A value that is present but unusable — too long, or the same as
- * `ACCESS_AUDIENCE`, which would make a browser session indistinguishable
- * from an MCP client — is `503 auth_not_configured` on `/mcp`, never a
- * silent fallback to the browser audience.
+ * The caller of `/mcp`. Only an assertion issued for the MCP Access
+ * application is accepted; one for the browser application, one naming both,
+ * one without a subject (a service token) and every assertion while
+ * `ACCESS_MCP_AUDIENCE` is unset are `401 authentication_required`. A
+ * misconfigured `ACCESS_MCP_AUDIENCE` is `503 auth_not_configured`.
  */
-function mcpAudience(env: McpAudienceVars, app: string): string | null {
-  const configured: unknown = env.ACCESS_MCP_AUDIENCE;
-  if (configured === undefined || configured === null || configured === "") return null;
-  if (
-    typeof configured !== "string" ||
-    configured.trim() !== configured ||
-    configured.length > 256 ||
-    configured === app
-  )
-    throw new HttpError(503, "auth_not_configured");
-  return configured;
-}
-
-/**
- * The principal of a caller of the agent API, derived from the verified
- * Access assertion and nothing else (ADR 0047).
- *
- * - On `/mcp`, an assertion issued for the **MCP Access application** — the
- *   one Cloudflare Access Managed OAuth fronts for claude.ai, ChatGPT and
- *   Codex — is the principal `mcp-client:<sub>`. Whoever signed in, the
- *   operator included, is an agent-only principal there: its grant is the
- *   `AGENT_API_GRANTS` entry for that name, never the entry or the role of the
- *   bare subject.
- * - Anything else is exactly what `authenticate` accepts: an assertion for
- *   this Worker's own application with a user subject, which is its own
- *   principal as before. A subject that claims the agent-only namespace is
- *   `403 actor_not_supported`.
- *
- * A service token is refused here as it is by `authenticate`. With
- * `ACCESS_MCP_AUDIENCE` unset, an MCP-application assertion is not accepted
- * anywhere, which is the deployed default.
- */
-export async function agentPrincipal(
-  request: Request,
-  env: Pick<Env, "ACCESS_ISSUER" | "ACCESS_AUDIENCE"> & McpAudienceVars,
-  mcp: boolean,
-): Promise<string> {
+export async function mcpCaller(request: Request, env: AudienceVars): Promise<AgentCaller> {
   const app = appAudience(env);
-  const agent = mcp ? mcpAudience(env, app) : null;
-  const verified = await verifyAssertion(
-    request,
-    env.ACCESS_ISSUER,
-    agent === null ? [app] : [app, agent],
-  );
-  const subject = verified.identity.subject;
-  if (subject === "") throw new HttpError(401, "authentication_required");
-  if (isAgentOnlyPrincipal(subject)) throw new HttpError(403, "actor_not_supported");
-  if (agent === null || !verified.audiences.includes(agent)) return subject;
-  // One assertion for both applications has no defined role; refuse it
-  // rather than pick one.
+  const mcp = mcpAudience(env, app, true);
+  if (mcp === null) throw new HttpError(401, "authentication_required");
+  const verified = await verifyAssertion(request, env.ACCESS_ISSUER, mcp);
   if (verified.audiences.includes(app)) throw new HttpError(401, "authentication_required");
-  return `${MCP_CLIENT_PRINCIPAL_PREFIX}${subject}`;
+  const subject = verified.identity.subject;
+  if (subject === "" || isAgentOnlyPrincipal(subject))
+    throw new HttpError(401, "authentication_required");
+  return { kind: "mcp-client", principal: `${MCP_CLIENT_PREFIX}${subject}` };
+}
+
+/**
+ * The caller of an `/api/agent/v1/*` route: the browser application's
+ * subject, exactly as `authenticate` returns it. A subject that claims the
+ * agent-only namespace is `403 actor_not_supported`.
+ */
+export async function browserCaller(request: Request, env: AudienceVars): Promise<AgentCaller> {
+  const subject = await authenticate(request, env);
+  if (isAgentOnlyPrincipal(subject)) throw new HttpError(403, "actor_not_supported");
+  return { kind: "browser", principal: subject };
 }
