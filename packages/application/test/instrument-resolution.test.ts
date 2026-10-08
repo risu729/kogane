@@ -21,8 +21,10 @@ import { coreDatabase, sqliteD1 } from "../../storage-d1/test/sqlite.ts";
 import { fromTemplate } from "../../read-model/test/schema-template.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import {
+  INSTRUMENT_FACTS_ROW_BOUND,
   INSTRUMENT_FACTS_SQL,
   INSTRUMENT_HISTORY_SQL,
+  LISTED_AS_ROW_BOUND,
   LISTED_AS_SQL,
 } from "../../read-model/src/instrument-resolution.ts";
 import { approve } from "../src/command/approve.ts";
@@ -163,6 +165,10 @@ interface Trade {
   currency: string;
   extra: Record<string, unknown>;
 }
+interface Capture {
+  run: number;
+  artifact: number;
+}
 
 // CORE 0017+ over the Layer A stub, migrated once per process; every world
 // gets its own copy of the image (packages/read-model/test/schema-template.ts).
@@ -193,34 +199,59 @@ class World {
     return this.sequence;
   }
 
-  /** One sealed, published capture of `source`, identified by the production writer. */
-  async capture(source: string, positions: Position[], trades: Trade[] = []): Promise<void> {
-    const run = this.id();
-    this.db.run(
-      "INSERT INTO acquisition_sessions(id,external_session_id,producer_id,external_id_namespace) VALUES(?,?,?,'synthetic')",
-      [run, `synthetic-session-${run}`, PRODUCER],
-    );
-    this.db.run(
-      "INSERT INTO fetch_runs(id,source_id,acquisition_session_id,producer_id,first_recorded_at_ms) VALUES(?,?,?,?,0)",
-      [run, source, run, PRODUCER],
-    );
-    this.db.run("INSERT INTO fetch_run_reports VALUES(?,'terminal','success',0,0)", [run]);
-    this.db.run("INSERT INTO fetch_run_seals(fetch_run_id) VALUES(?)", [run]);
-    const artifact = this.id();
-    this.db.run(
-      `INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetched_at_ms,recorded_at_ms,sha256,artifact_role)
-       VALUES(?,?,?,'synthetic','synthetic.json',0,0,?,'provider_response')`,
-      [artifact, run, source, artifact.toString(16).padStart(64, "0")],
-    );
+  /**
+   * One sealed capture of `source`, identified by the production writer and
+   * published unless `publish` is false. `reparseOf` parses an earlier
+   * capture's artifact again; publishing it moves that artifact's
+   * publication pointer, so the earlier parse is superseded.
+   */
+  async capture(
+    source: string,
+    positions: Position[],
+    trades: Trade[] = [],
+    options: { publish?: boolean; reparseOf?: Capture } = {},
+  ): Promise<Capture> {
+    let run: number;
+    let artifact: number;
+    if (options.reparseOf) ({ run, artifact } = options.reparseOf);
+    else {
+      run = this.id();
+      this.db.run(
+        "INSERT INTO acquisition_sessions(id,external_session_id,producer_id,external_id_namespace) VALUES(?,?,?,'synthetic')",
+        [run, `synthetic-session-${run}`, PRODUCER],
+      );
+      this.db.run(
+        "INSERT INTO fetch_runs(id,source_id,acquisition_session_id,producer_id,first_recorded_at_ms) VALUES(?,?,?,?,0)",
+        [run, source, run, PRODUCER],
+      );
+      this.db.run("INSERT INTO fetch_run_reports VALUES(?,'terminal','success',0,0)", [run]);
+      this.db.run("INSERT INTO fetch_run_seals(fetch_run_id) VALUES(?)", [run]);
+      artifact = this.id();
+      this.db.run(
+        `INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetched_at_ms,recorded_at_ms,sha256,artifact_role)
+         VALUES(?,?,?,'synthetic','synthetic.json',0,0,?,'provider_response')`,
+        [artifact, run, source, artifact.toString(16).padStart(64, "0")],
+      );
+    }
     const parse = this.id();
+    // A parser runs once per artifact and version, so a re-parse is a new version.
+    const version = options.reparseOf ? `1.1.${parse}` : "1.0.0";
     this.db.run(
-      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'synthetic','1.0.0',?,'ok','[]')",
-      [parse, artifact, T0],
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'synthetic',?,?,'ok','[]')",
+      [parse, artifact, version, T0],
     );
-    this.db.run(
-      "INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind) VALUES(?,'synthetic',?,'1.0.0',?,'normal')",
-      [artifact, parse, T0],
-    );
+    if (options.publish !== false) {
+      if (options.reparseOf)
+        this.db.run(
+          "UPDATE published_parse_runs SET parse_run_id=?,parser_version=? WHERE fetch_artifact_id=?",
+          [parse, version, artifact],
+        );
+      else
+        this.db.run(
+          "INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind) VALUES(?,'synthetic',?,?,?,'normal')",
+          [artifact, parse, version, T0],
+        );
+    }
     for (const [index, position] of positions.entries())
       this.db.run(
         `INSERT INTO position_observations(parse_run_id,source_account,security_code,security_name,market,quantity_text,quantity_scale,currency,raw_locator,extra_json)
@@ -260,6 +291,7 @@ class World {
         .get(parse)
     )
       throw new Error("identity run not sealed");
+    return { run, artifact };
   }
 
   /** Every row of the tables a read must never write. */
@@ -913,6 +945,55 @@ describe("currencies the observations state", () => {
         (row) => row.identifierId === product,
       ),
     ).toMatchObject({ kind: "product", currencies: ["JPY"], currencyUnconfirmed: false });
+  });
+});
+
+describe("only published identity observations are read", () => {
+  test("an unpublished capture and a superseded parse contribute nothing", async () => {
+    const w = new World();
+    const position = (code: string): Position => ({
+      account: "sbi-securities:domestic",
+      code,
+      name: "Synthetic Gate",
+      market: "TKY",
+      currency: "JPY",
+    });
+    const first = await w.capture("sbi-securities", [position("SYN9201")]);
+    await w.capture("sbi-securities", [position("SYN9202")], [], { publish: false });
+    await w.capture("sbi-securities", [position("SYN9203")], [], { reparseOf: first });
+    const stored = ["SYN9201", "SYN9202", "SYN9203"].map((code) =>
+      w.identifier("mic-symbol", "XTKS", code),
+    );
+    const read = (await queryInstrumentResolution(w.sql)).identifiers.map(
+      (row) => row.identifierId,
+    );
+    // All three were identified; only the published parse of the artifact is read.
+    expect(read).toEqual([stored[2]!]);
+  });
+});
+
+describe("bounds refuse, never cut", () => {
+  const stub = (bounded: string, rows: number): SqlExecutor => ({
+    all: async <T>(text: string) =>
+      (text === bounded ? Array.from({ length: rows }, () => ({})) : []) as T[],
+    first: async () => null,
+  });
+
+  test("each read asks for one row past its bound", () => {
+    expect(INSTRUMENT_FACTS_SQL).toEndWith(`LIMIT ${INSTRUMENT_FACTS_ROW_BOUND + 1}`);
+    expect(LISTED_AS_SQL).toEndWith(`LIMIT ${LISTED_AS_ROW_BOUND + 1}`);
+  });
+
+  test("more fact rows than the bound are refused", async () => {
+    await expect(
+      queryInstrumentResolution(stub(INSTRUMENT_FACTS_SQL, INSTRUMENT_FACTS_ROW_BOUND + 1)),
+    ).rejects.toBeInstanceOf(InstrumentResolutionLimitError);
+  });
+
+  test("more listed_as relations than the bound are refused", async () => {
+    await expect(
+      queryInstrumentResolution(stub(LISTED_AS_SQL, LISTED_AS_ROW_BOUND + 1)),
+    ).rejects.toBeInstanceOf(InstrumentResolutionLimitError);
   });
 });
 

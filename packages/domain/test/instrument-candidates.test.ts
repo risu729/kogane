@@ -3,6 +3,7 @@
 // "ISINs" are invented strings of the ISIN shape.
 import { describe, expect, test } from "bun:test";
 import {
+  CANDIDATE_HINT_LIMIT,
   CANDIDATE_PAIR_LIMIT,
   compareIdentifierFacts,
   identifierResolutions,
@@ -652,5 +653,21 @@ describe("a fact neither side states is still named", () => {
       "share-class-unconfirmed",
       "product-class-unconfirmed",
     ]);
+  });
+});
+
+describe("hint bound", () => {
+  test("more name hints than the bound are refused, not cut", () => {
+    const named = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        facts(`h${String(index).padStart(3, "0")}`, { label: "Synthetic same name" }),
+      );
+    // 45 identifiers make 990 hints; 46 make 1,035.
+    expect(instrumentCandidates(named(45))).toMatchObject({ ok: true });
+    expect((46 * 45) / 2).toBeGreaterThan(CANDIDATE_HINT_LIMIT);
+    expect(instrumentCandidates(named(46))).toEqual({
+      ok: false,
+      error: "candidate_limit_exceeded",
+    });
   });
 });

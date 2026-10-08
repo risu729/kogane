@@ -194,20 +194,57 @@ tests reuse `packages/storage-d1/test/sqlite.ts`,
 
 ## Verification
 
-Synthetic data only, no production access:
+Synthetic data only, no production access. What the tests check, and
+nothing more:
 
-- `packages/domain/test/instrument-candidates.test.ts`: evidence, conflicts
-  (market, RIC, currency, share class, product class, country, kind), gaps,
-  names as hints only, renaming not changing a candidate, status only from a
-  stored mapping or rejection, identifier states, input-order independence and
-  bounds.
-- `packages/application/test/instrument-resolution.test.ts`: identifiers
-  written by the production identity writer from synthetic SBI rows through the
-  deployed SBI rules and a synthetic second-broker test policy; the read writes
-  nothing; an agent can plan an adoption but not approve it; a person's
-  `identity.assign` adopts as a new manual revision with the rule revision
-  kept; a person's `relation.reject` keeps a pair apart; the history lists
-  both; query plans scan no observation table and reach mappings, decisions and
-  relations by index.
+- `packages/domain/test/instrument-candidates.test.ts`:
+  - evidence: an equal country-scoped code on one MIC is proposed with its
+    agreements and gaps; a code without a MIC names `market-unconfirmed`;
+    equal ISINs and equal RICs are evidence, an equal RIC states the market;
+  - conflicts separate a pair: two MICs, two RICs, disjoint currencies, two
+    share classes, two product classes, two countries, three instrument kinds;
+    a conflict on two identifiers already on one instrument is reported with
+    `sharedInstrument` and the decision stays;
+  - gaps: an ISIN or share class on one side only, overlapping multi-currency
+    sets, an unconfirmed currency (never agreeing or differing), and ISIN,
+    share class and product class when both sides lack them;
+  - names: equal normalised names without evidence are a hint with no status;
+    same-name products with different ISINs and share classes stay apart;
+    renaming either side changes nothing; normalisation is width, case and
+    whitespace only;
+  - status: an accepted `listed_as` alone does not adopt; a shared instrument
+    is `adopted`; a rejection in either orientation rejects and a released one
+    reopens; identifier states, including `shared-without-decision`;
+  - instrument groups and orientation: S1 (a code a person mapped onto one
+    listing is separated from a listing on another market, `via` the first),
+    S2 (a decided identifier anchors a new one whichever id sorts first), and
+    both `hold` codes;
+  - input-order independence; money and reward identifiers are not paired;
+    more than 5,000 pairs, more than 1,000 hints and a duplicate identifier are
+    refused.
+- `packages/application/test/instrument-resolution.test.ts`, over CORE
+  migrations with identifiers written by the production identity writer from
+  synthetic SBI rows through the deployed SBI rules, synthetic SBI VC Trade
+  rows through the deployed rule, and a synthetic second-broker test policy:
+  - the read writes nothing; proposed, separated (two markets, two
+    currencies) and hinted pairs; the provider's market wording is shown;
+    every named command is a valid change payload once a reason is added;
+  - an agent can plan an adoption but not approve it; a person's
+    `identity.assign` adopts as a new manual revision with the rule revision
+    kept; a person's `relation.reject` keeps a pair apart; the history lists
+    both; a history read of more than 100 identifiers is refused;
+  - S1 and S2 through the change lifecycle, with the anchor, the adopt and
+    keep-apart payloads, and `subject-decided-elsewhere` with no commands once
+    a person maps the subject elsewhere;
+  - currencies: an unresolved trade currency is unconfirmed rather than the
+    settlement unit; an SBI VC Trade product states its quote unit;
+  - an unpublished capture and a superseded parse contribute no identifier;
+  - each read asks for one row past its bound, and a stub returning 10,001
+    fact rows or 10,001 relations is refused;
+  - query plans: no observation table is named, identifier uses (and each
+    use's trade unit and unit) are reached by primary key, and mappings,
+    decisions and relations by index.
 - `mise run //packages/domain:ci`, `mise run //packages/read-model:ci`,
   `mise run //packages/application:ci`, `mise run ci:root`.
+
+D1 cost of the facts read is not measured (see Consequences).
