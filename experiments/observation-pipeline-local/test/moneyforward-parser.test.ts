@@ -7,7 +7,7 @@ import {
   moneyForwardMonthlyTransactions,
 } from "../../../packages/parsers/src/parsers/moneyforward-parser.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
-import { currentTransactions } from "../src/queries.ts";
+import { currentTransactions, observationDetail } from "../src/queries.ts";
 import {
   insertFetchArtifact,
   insertFetchRun,
@@ -429,6 +429,9 @@ describe("moneyforward Layer B parsers", () => {
     addSnapshot(store, "december-complete", "2099-04-03T00:00:00.000Z", december, decemberKey);
     expect(runParsers(store).errors).toBe(1);
     expect(dates(currentTransactions(store))).toEqual(["2099-02-03", "2099-02-03", "2099-12-15"]);
+    const siblingBefore = currentTransactions(store)
+      .filter((row) => row.as_of === "2099-02-03")
+      .map((row) => ({ id: row.id, external_id: row.external_id }));
 
     addSnapshot(
       store,
@@ -440,10 +443,60 @@ describe("moneyforward Layer B parsers", () => {
     expect(runParsers(store).errors).toBe(1);
     expect(dates(currentTransactions(store))).toEqual(["2099-02-03", "2099-02-03"]);
 
-    addSnapshot(store, "december-restored", "2099-04-05T00:00:00.000Z", december, decemberKey);
+    // A different in-month value makes the newest snapshot distinguishable from
+    // the December rows the empty snapshot removed.
+    const restored = new TextEncoder().encode(
+      new TextDecoder()
+        .decode(withEdges("2099-12-28", ["2099-11-30", "2100-01-04"]))
+        .replace("SYNTHETIC", "SYNTHETIC RESTORE")
+        .replace("-123", "-456"),
+    );
+    const restoredParsed = moneyForwardMonthlyTransactions.parse(
+      restored,
+      meta({ artifactKey: decemberKey }),
+    );
+    expect(restoredParsed.observations).toHaveLength(1);
+    const restoredObservation = restoredParsed.observations[0];
+    if (restoredObservation?.kind !== "transaction") throw new Error("Expected one transaction");
+    expect(restoredObservation).toMatchObject({
+      asOf: "2099-12-28",
+      amountMinor: -456,
+      description: "SYNTHETIC RESTORE",
+    });
+    addSnapshot(store, "december-restored", "2099-04-05T00:00:00.000Z", restored, decemberKey);
     expect(runParsers(store).errors).toBe(1);
-    expect(dates(currentTransactions(store))).toEqual(["2099-02-03", "2099-02-03", "2099-12-15"]);
-    expect(currentTransactions(store).every((row) => row.amount_minor === "-123")).toBe(true);
+    const current = currentTransactions(store);
+    expect(dates(current)).toEqual(["2099-02-03", "2099-02-03", "2099-12-28"]);
+    const sibling = current.filter((row) => row.as_of === "2099-02-03");
+    expect(sibling.map((row) => ({ id: row.id, external_id: row.external_id }))).toEqual(
+      siblingBefore,
+    );
+    for (const row of sibling) {
+      expect(row.amount_minor).toBe("-123");
+      expect(row.description).toBe("SYNTHETIC");
+      expect(observationDetail(store, "transaction", row.id)?.provenance).toMatchObject({
+        external_run_id: "february-complete",
+        fetched_at: "2099-04-01T00:00:00.000Z",
+        parse_status: "ok",
+        superseded_by_parse_run_id: null,
+      });
+    }
+    const restoredRows = current.filter((row) => row.as_of === "2099-12-28");
+    expect(restoredRows).toHaveLength(1);
+    expect(restoredRows[0]).toMatchObject({
+      amount_minor: "-456",
+      description: "SYNTHETIC RESTORE",
+      external_id: restoredObservation.externalId,
+    });
+    expect(current.some((row) => row.as_of === "2099-12-15")).toBe(false);
+    expect(observationDetail(store, "transaction", restoredRows[0]!.id)?.provenance).toMatchObject({
+      external_run_id: "december-restored",
+      fetched_at: "2099-04-05T00:00:00.000Z",
+      parse_status: "ok",
+      fetch_status: "success",
+      superseded_by_parse_run_id: null,
+      source_id: "moneyforward-me",
+    });
     store.db.close();
   });
 
