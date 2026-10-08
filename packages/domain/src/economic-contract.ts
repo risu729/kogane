@@ -52,8 +52,12 @@ export type ConsumptionKey = readonly [
 /** The bound CORE 0070 puts on a stored key's text. */
 export const CONSUMPTION_KEY_MAX_TEXT = 2048;
 
+/** A lone UTF-16 surrogate: SQLite's json_array renders it unlike JSON.stringify. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
 export function validConsumptionKey(value: unknown): value is ConsumptionKey {
   if (!Array.isArray(value) || value.length !== 5) return false;
+  if (value.some((part) => typeof part === "string" && LONE_SURROGATE.test(part))) return false;
   const [sourceId, producerId, namespace, sourceAccount, externalId] = value as unknown[];
   return (
     isText(sourceId, 256) &&

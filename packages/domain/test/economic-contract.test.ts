@@ -78,6 +78,21 @@ describe("consumption keys", () => {
       null,
     );
     expect(parseConsumptionKey("not json")).toBe(null);
+    // A lone surrogate renders differently in SQLite's json_array, so the key
+    // could never match the stored one: it is not a key. A pair is fine.
+    const db = new Database(":memory:");
+    const lone = (db.query("SELECT json_array(?) AS k").get("\ud800") as { k: string }).k;
+    expect(lone).not.toBe(JSON.stringify(["\ud800"]));
+    db.close();
+    expect(validConsumptionKey(["bank-x", "producer-1", "ns", "account-1", "row-\ud800"])).toBe(
+      false,
+    );
+    expect(validConsumptionKey(["bank-x", "producer-1", "ns", "account-\udc00", "row-1"])).toBe(
+      false,
+    );
+    expect(
+      validConsumptionKey(["bank-x", "producer-1", "ns", "account-1", "row-\ud83d\ude00"]),
+    ).toBe(true);
   });
 });
 
