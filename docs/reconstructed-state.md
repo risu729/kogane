@@ -47,7 +47,8 @@ computes a reconstructed state.
 
 Every validator rejects unknown keys. An input over 5,000 revisions or 20,000
 legs is refused with `event_budget_exceeded`, a reported side over 5,000 rows
-(balances and positions, counted per side) with `reported_budget_exceeded`;
+(balances and positions, counted per side) with `reported_budget_exceeded`,
+over 1,000 family or history coverage rows with `coverage_budget_exceeded`;
 nothing is cut to fit.
 
 ## Step 1: knowledge selection
@@ -139,14 +140,14 @@ gap makes it `not-computable`. Nothing is totalled across accounts:
 
 ## Step 7: the explanation
 
-| Status                               | When                                                                                                    |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `unavailable`                        | `no_reported_container`: a cell of an account no reported container lists                               |
-| `not_comparable`                     | `reported_end_missing`, `snapshot_basis_unknown`, `reported_end_not_exact`, `reconstruction_incomplete` |
-| `reconciled`                         | Complete cell, no boundary candidate, remainder zero                                                    |
-| `consistent_with_boundary_exclusion` | Complete cell with boundary candidates, remainder zero                                                  |
-| `consistent_with_boundary_inclusion` | Complete cell, remainder equal to the boundary candidates' total                                        |
-| `difference_unexplained`             | Otherwise                                                                                               |
+| Status                               | When                                                                                                                                                                       |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unavailable`                        | `no_reported_container`: a cell of an account no reported container lists                                                                                                  |
+| `not_comparable`                     | `reported_end_missing`, `same_capture_as_start` (the end is the start capture read again), `snapshot_basis_unknown`, `reported_end_not_exact`, `reconstruction_incomplete` |
+| `reconciled`                         | Complete cell, no boundary candidate, remainder zero                                                                                                                       |
+| `consistent_with_boundary_exclusion` | Complete cell with boundary candidates, remainder zero                                                                                                                     |
+| `consistent_with_boundary_inclusion` | Complete cell, remainder equal to the boundary candidates' total                                                                                                           |
+| `difference_unexplained`             | Otherwise                                                                                                                                                                  |
 
 `snapshot_basis_unknown` covers an end that is not one stock figure with a
 known sign, a different metric from the start, an end captured before the

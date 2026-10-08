@@ -396,6 +396,7 @@ export const RECONSTRUCTION_REFUSALS = [
   "baseline_mismatch",
   "event_budget_exceeded",
   "reported_budget_exceeded",
+  "coverage_budget_exceeded",
 ] as const;
 export type ReconstructionRefusal = (typeof RECONSTRUCTION_REFUSALS)[number];
 export interface ReconstructionError {
@@ -502,6 +503,7 @@ export const NOT_COMPARABLE_REASONS = [
   "reported_end_not_exact",
   "reconstruction_incomplete",
   "snapshot_basis_unknown",
+  "same_capture_as_start",
 ] as const;
 export type NotComparableReason = (typeof NOT_COMPARABLE_REASONS)[number];
 export const UNAVAILABLE_REASONS = ["no_reported_container"] as const;
@@ -875,6 +877,11 @@ function checkEventSet(value: unknown): ReconstructionError | null {
   );
   if (legs > RECONSTRUCTION_BUDGET.legs)
     return { code: "event_budget_exceeded", refs: [`legs:${legs}`] };
+  for (const key of ["familyCoverage", "historyCoverage"] as const) {
+    const rows = value[key];
+    if (Array.isArray(rows) && rows.length > RECONSTRUCTION_BUDGET.coverageRows)
+      return { code: "coverage_budget_exceeded", refs: [`${key}:${rows.length}`] };
+  }
   if (
     value.contract !== PROVISIONAL_EVENT_CONTRACT ||
     !isOneOf(PROVISIONAL_RESOLUTIONS)(value.resolution) ||
@@ -1044,12 +1051,17 @@ function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** Two validated instants in absolute order (`compareTemporal`'s instant branch). */
 function compareInstants(a: string, b: string): -1 | 0 | 1 {
-  const x = parseInstant(a)!;
-  const y = parseInstant(b)!;
-  if (x.epochSeconds !== y.epochSeconds) return x.epochSeconds < y.epochSeconds ? -1 : 1;
-  if (x.nanoseconds !== y.nanoseconds) return x.nanoseconds < y.nanoseconds ? -1 : 1;
-  return 0;
+  const value = (text: string): TemporalValue => ({
+    kind: "instant",
+    value: text,
+    zone: RECONSTRUCTION_ZONE,
+    basis: "collector",
+  });
+  const order = compareTemporal(value(a), value(b));
+  if (order.kind !== "ordered") throw new Error("instant_not_validated");
+  return order.order;
 }
 
 /** The same instant written with the Tokyo offset, so its own calendar date is the Tokyo date. */
@@ -1931,11 +1943,10 @@ export function reconstructState(input: {
         records.push({ ...common, disposition: statusDisposition, gap: null });
       else if (leg.basis !== legBasis && leg.basis !== "unknown")
         records.push({ ...common, disposition: "other_basis", gap: null });
-      else if (!requested.has(leg.accountId))
-        records.push({ ...common, disposition: "other_account", gap: null });
       // A requested account's leg on the selected basis, not superseded and
-      // not after the cut, always opens a cell; nothing reaches here.
-      else records.push({ ...common, disposition: "unknown_effect", gap: null });
+      // not after the cut, always opens a cell, so only another account's
+      // leg reaches here (a test checks that every leg has one record).
+      else records.push({ ...common, disposition: "other_account", gap: null });
     }
   }
 
@@ -2050,6 +2061,15 @@ export function reconstructState(input: {
     } else if (frame.end.kind === "missing") {
       status = "not_comparable";
       reasonCode = "reported_end_missing";
+    } else if (
+      startRow !== null &&
+      endRow !== null &&
+      startRow.snapshotRef === endRow.snapshotRef &&
+      compareInstants(startRow.capturedAt, endRow.capturedAt) === 0
+    ) {
+      // No capture after the start: the end would compare a snapshot with itself.
+      status = "not_comparable";
+      reasonCode = "same_capture_as_start";
     } else if (
       frame.end.kind === "unusable" ||
       request.basis !== "cash" ||

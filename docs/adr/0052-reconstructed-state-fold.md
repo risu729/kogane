@@ -146,6 +146,7 @@ now)`, a pure diff of two selections of one scope (the baseline is the cut
    remainder with no gap and no boundary candidate;
    `consistent_with_boundary_exclusion` / `_inclusion` as candidates;
    `difference_unexplained`; `not_comparable` (`reported_end_missing`,
+   `same_capture_as_start`,
    `reported_end_not_exact`, `reconstruction_incomplete`,
    `snapshot_basis_unknown`, the last also for every basis but cash, since no
    container says which basis its figure reflects, ADR 0004);
@@ -164,7 +165,9 @@ now)`, a pure diff of two selections of one scope (the baseline is the cut
    canonical order, FX reference and policy
    references. `canonicalReconstructionManifest` returns its canonical text
    synchronously; the caller digests it with `canonicalDigest`. An input over
-   5,000 revisions or 20,000 legs is refused (`event_budget_exceeded`), never
+   5,000 revisions or 20,000 legs is refused (`event_budget_exceeded`), a
+   reported side over 5,000 rows (`reported_budget_exceeded`) and over 1,000
+   coverage rows of a kind (`coverage_budget_exceeded`) likewise; nothing is
    cut.
 8. **What the engine can and cannot verify.** The engine never verifies
    `setVersion` against the content it is handed: the version is the

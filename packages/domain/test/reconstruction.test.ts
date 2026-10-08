@@ -1659,3 +1659,140 @@ describe("time placement as documented", () => {
     expect(disposition(state, "event:test:1@1#0")).toBe("other_basis");
   });
 });
+
+describe("refusals and comparisons the first round left untested", () => {
+  const base = () => ({
+    request: request(),
+    policy: RECONSTRUCTION_FOLD_V1,
+    start: side(START_DATE, [balance()]),
+    end: side(END_DATE, [endBalance("10000")]),
+    selection: select(eventSet([]), CUT),
+    baseline: null,
+  });
+
+  test("too many legs, reported rows or coverage rows are refused with a budget code", () => {
+    const legs = Array.from({ length: 400 }, (_, index) =>
+      rev({
+        eventId: `event:test:${index}`,
+        legs: Array.from({ length: 51 }, (_, legIndex) =>
+          leg({ legIndex, quantity: q("JPY", "1") }),
+        ),
+      }),
+    );
+    const tooManyLegs = selectKnowledge(eventSet(legs), { coreEpoch: EPOCH, commitSeq: CUT });
+    expect(!tooManyLegs.ok && tooManyLegs.error.code).toBe("event_budget_exceeded");
+    const rows = Array.from({ length: RECONSTRUCTION_BUDGET.reportedRows + 1 }, (_, index) =>
+      balance({ ref: `balance:test:${index}` }),
+    );
+    const tooManyRows = reconstructState({ ...base(), end: side(END_DATE, rows) });
+    expect(!tooManyRows.ok && tooManyRows.error.code).toBe("reported_budget_exceeded");
+    const history = Array.from({ length: RECONSTRUCTION_BUDGET.coverageRows + 1 }, () => ({
+      accountId: A,
+      from: "2026-01-01",
+      to: "2026-04-30",
+      status: "complete" as const,
+      reasonCode: null,
+    }));
+    const tooMuchCoverage = selectKnowledge(eventSet([], { historyCoverage: history }), {
+      coreEpoch: EPOCH,
+      commitSeq: CUT,
+    });
+    expect(!tooMuchCoverage.ok && tooMuchCoverage.error.code).toBe("coverage_budget_exceeded");
+  });
+
+  test("an end of another date or with an unknown key is invalid_end_reported", () => {
+    const wrongDate = reconstructState({ ...base(), end: side("2026-03-30", [endBalance("1")]) });
+    expect(!wrongDate.ok && wrongDate.error.code).toBe("invalid_end_reported");
+    const extra = reconstructState({
+      ...base(),
+      end: { ...side(END_DATE, []), total: 1 } as unknown as EndReported,
+    });
+    expect(!extra.ok && extra.error.code).toBe("invalid_end_reported");
+  });
+
+  test("a supersession pointing to a revision the input lacks is inconsistent", () => {
+    const state = run({
+      set: eventSet([debit("event:test:1", "1", "2026-03-15", { supersededBy: "event:test:1@7" })]),
+    });
+    expect(cell(state).gaps).toContain("revision_chain_inconsistent");
+  });
+
+  test("an end captured before the start, or under another metric, is not comparable", () => {
+    const inverted = cell(
+      run({
+        set: eventSet([]),
+        start: side(START_DATE, [balance({ capturedAt: "2026-03-01T05:00:00.000Z" })]),
+        end: side(END_DATE, [endBalance("10000", { capturedAt: "2026-03-01T04:00:00.000Z" })]),
+      }),
+    );
+    expect(inverted.explanation.reasonCode).toBe("snapshot_basis_unknown");
+    expect(inverted.window.to).toEqual({ kind: "end-of-date", date: END_DATE });
+    const metric = cell(
+      run({
+        set: eventSet([]),
+        end: side(END_DATE, [endBalance("10000", { metricId: "bank.other" })]),
+      }),
+    );
+    expect(metric.explanation.reasonCode).toBe("snapshot_basis_unknown");
+  });
+
+  test("the start capture read again as the end is not a comparison", () => {
+    const same = cell(run({ set: eventSet([]), end: side(END_DATE, [balance()]) }));
+    expect(same.explanation.status).toBe("not_comparable");
+    expect(same.explanation.reasonCode).toBe("same_capture_as_start");
+  });
+
+  test("two positions of one instrument at the start are ambiguous", () => {
+    const position = (ref: string): ReconstructionReportedPosition => ({
+      ref,
+      accountId: A,
+      instrumentId: ALPHA,
+      quantity: q(ALPHA, "1"),
+      snapshotRef: "artifact:test:start",
+      capturedAt: START_CAPTURE,
+    });
+    const state = run({
+      set: eventSet([]),
+      start: side(START_DATE, [], {
+        positions: [position("position:test:1"), position("position:test:2")],
+      }),
+    });
+    expect(reason(cell(state, A, ALPHA).reconstructed)).toBe("start_ambiguous_positions");
+  });
+
+  test("a stale end capture leaves later events outside its window", () => {
+    const state = run({
+      set: eventSet([debit("event:test:1", "100", "2026-03-28")]),
+      end: side(END_DATE, [endBalance("10000", { capturedAt: "2026-03-20T03:00:00.000Z" })]),
+    });
+    expect(disposition(state, "event:test:1@1#0")).toBe("outside_range");
+    expect(cell(state).explanation.status).toBe("reconciled");
+  });
+
+  test("every leg and every legless revision has exactly one record", () => {
+    const state = run({
+      set: eventSet([
+        debit("event:test:1", "1000", "2026-03-15", { supersededBy: "event:test:1@2" }),
+        rev({ revision: 2, state: "unknown", unknownReason: "conflicting_evidence", commit: 20 }),
+        debit("event:test:2", "50", "2026-03-16"),
+        rev({ eventId: "event:test:3", legs: [leg({ accountId: null, quantity: q("JPY", "1") })] }),
+        rev({ eventId: "event:test:4", legs: [leg({ accountId: B, quantity: q("JPY", "1") })] }),
+        rev({ eventId: "event:test:5", legs: [leg({ accountId: A, quantity: q("EUR", "1") })] }),
+      ]),
+    });
+    const refs = state.dispositions.map((row) => row.ref);
+    expect(new Set(refs).size).toBe(refs.length);
+    expect([...refs].sort()).toEqual(
+      [
+        "event:test:1@1#0",
+        "event:test:1@1#1",
+        "event:test:1@2",
+        "event:test:2@1#0",
+        "event:test:2@1#1",
+        "event:test:3@1#0",
+        "event:test:4@1#0",
+        "event:test:5@1#0",
+      ].sort(),
+    );
+  });
+});
