@@ -211,6 +211,41 @@ describe("Mobile Suica history semantics", () => {
     ]);
   });
 
+  test("treats exactly 26 weeks as inside the window and the next day as outside", () => {
+    const input = value();
+    const asOf = input.asOfDateJst;
+    if (typeof asOf !== "string") throw new Error("fixture asOfDateJst must be a date");
+    // Same UTC midnight day length as the parser. 26 weeks is 182 days; the
+    // warning starts on the following day.
+    const utcDaysBefore = (days: number) =>
+      new Date(Date.parse(`${asOf}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
+    const inside = utcDaysBefore(26 * 7);
+    const outside = utcDaysBefore(26 * 7 + 1);
+    const rows = input.rows as Record<string, unknown>[];
+    const at = (date: string) => ({ ...rows[0], date });
+    const insideRow = at(inside);
+    const outsideRow = at(outside);
+    input.rows = [insideRow, structuredClone(insideRow), outsideRow, structuredClone(outsideRow)];
+    input.transactionCount = 4;
+    const parsed = mobileSuicaSfHistory.parse(encoded(input), artifact());
+    const idsOn = (date: string) =>
+      parsed.observations
+        .filter((entry) => entry.kind === "transaction" && entry.asOf === date)
+        .map((entry) => entry.externalId);
+    for (const date of [inside, outside]) {
+      const ids = idsOn(date);
+      expect(parsed.observations.filter((entry) => entry.asOf === date)).toHaveLength(4);
+      expect(ids).toHaveLength(2);
+      expect(new Set(ids).size).toBe(2);
+      expect(ids[0]?.endsWith(":1")).toBe(true);
+      expect(ids[1]?.endsWith(":0")).toBe(true);
+    }
+    expect(parsed.warnings).toEqual([
+      "json:$.rows[2]: date exceeds the documented 26-week history window; preserved",
+      "json:$.rows[3]: date exceeds the documented 26-week history window; preserved",
+    ]);
+  });
+
   test("warns and omits only the unavailable metric allowed by the normalized contract", () => {
     const input = value();
     const rows = input.rows as Record<string, unknown>[];
