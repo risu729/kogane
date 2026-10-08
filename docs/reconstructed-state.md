@@ -16,7 +16,7 @@ computes a reconstructed state.
 
 | Piece     | Where                                                                    |
 | --------- | ------------------------------------------------------------------------ |
-| Selector  | `selectKnowledge(set, { commitSeq })`                                    |
+| Selector  | `selectKnowledge(set, { coreEpoch, commitSeq })`                         |
 | Fold      | `reconstructState({ request, policy, start, end, selection, baseline })` |
 | Late diff | `explainLate(baseline, now)`                                             |
 | Manifest  | `canonicalReconstructionManifest(manifest)`, digested by the caller      |
@@ -28,7 +28,7 @@ computes a reconstructed state.
 - **Events**: `ProvisionalAdoptedEventSet`, contract
   `provisional-adopted-events-v1`. It is provisional: an adapter maps the
   stored rows onto it, and the #549/#550 hand-off contract replaces it. Each
-  revision carries its `commitRef { commitSeq }` (the history cursor of the
+  revision carries its `commitRef { coreEpoch, commitSeq }` (the history cursor of the
   common guard, ADR 0054 in preparation; null when none records it),
   `supersededBy`, typed times (`trade`, `settlement`, `posting`, `usage`,
   `value`), typed legs, `(book, key)` claims (`card-usage`, `cash-movement`,

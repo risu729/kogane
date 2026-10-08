@@ -99,11 +99,14 @@ export type ProvisionalWriter = (typeof PROVISIONAL_WRITERS)[number];
  * guard assigns (ADR 0054, in preparation). It is not a D1 bookmark and not a
  * timestamp; `created_at` is never evidence of when a revision was adopted.
  */
-export interface CommitRef {
+export interface ProvisionalCommitRef {
+  /** The history the sequence belongs to: a restored backup starts another epoch. */
+  coreEpoch: string;
   commitSeq: number;
 }
-/** Everything committed at or before `commitSeq` is known at the cut. */
-export interface KnowledgeCut {
+/** Everything committed in `coreEpoch` at or before `commitSeq` is known at the cut. */
+export interface ProvisionalKnowledgeCut {
+  coreEpoch: string;
   commitSeq: number;
 }
 
@@ -131,8 +134,8 @@ export interface ProvisionalTime {
  * engine; a `correspondence` restates it on another reading (the obligation
  * a cash payment reduces, the settlement of a trade). Neither is ever added.
  */
-export const LEG_EFFECTS = ["movement", "breakdown", "correspondence"] as const;
-export type LegEffect = (typeof LEG_EFFECTS)[number];
+export const PROVISIONAL_LEG_EFFECTS = ["movement", "breakdown", "correspondence"] as const;
+export type ProvisionalLegEffect = (typeof PROVISIONAL_LEG_EFFECTS)[number];
 export interface ProvisionalLeg {
   legIndex: number;
   /**
@@ -143,7 +146,7 @@ export interface ProvisionalLeg {
    */
   accountId: string | null;
   quantity: Quantity;
-  effect: LegEffect;
+  effect: ProvisionalLegEffect;
   /** For a movement, its direction; for the others, the stored role. */
   role: LegRole;
   /** The movement leg of the same revision a breakdown or correspondence refers to. */
@@ -152,21 +155,25 @@ export interface ProvisionalLeg {
 }
 
 /** The exclusivity books of the common contract; one live holder per (book, key). */
-export const CLAIM_BOOKS = ["card-usage", "cash-movement", "security-quantity"] as const;
-export type ClaimBook = (typeof CLAIM_BOOKS)[number];
+export const PROVISIONAL_CLAIM_BOOKS = [
+  "card-usage",
+  "cash-movement",
+  "security-quantity",
+] as const;
+export type ProvisionalClaimBook = (typeof PROVISIONAL_CLAIM_BOOKS)[number];
 export interface ProvisionalClaim {
-  book: ClaimBook;
+  book: ProvisionalClaimBook;
   key: string;
 }
 
 /** Conditions the adapter detects and the fold never applies through. */
-export const REVISION_FLAGS = [
+export const PROVISIONAL_REVISION_FLAGS = [
   "identity_changed",
   "alias_conflict",
   "claim_conflict",
   "writer_unsupported",
 ] as const;
-export type RevisionFlag = (typeof REVISION_FLAGS)[number];
+export type ProvisionalRevisionFlag = (typeof PROVISIONAL_REVISION_FLAGS)[number];
 
 /**
  * One stored event revision as the provisional adapter hands it over. Replaced
@@ -182,7 +189,7 @@ export interface ProvisionalEventRevision {
   unknownReason: UnknownStateReason | null;
   times: ProvisionalTime[];
   /** Null when no history cursor records the revision (`knowledge_unlogged`). */
-  commitRef: CommitRef | null;
+  commitRef: ProvisionalCommitRef | null;
   /** The stored `created_at`, informational only: never used to select or order. */
   recordedAt: string;
   /** `eventId@revision` that replaced it (may name another event), or null. */
@@ -191,7 +198,7 @@ export interface ProvisionalEventRevision {
   /** Source facts cited, for explanation; duplicates are detected on `claims`. */
   evidenceIds: string[];
   claims: ProvisionalClaim[];
-  flags: RevisionFlag[];
+  flags: ProvisionalRevisionFlag[];
 }
 export const FAMILY_COVERAGE_STATUSES = ["evented", "not-evented", "unknown"] as const;
 export type FamilyCoverageStatus = (typeof FAMILY_COVERAGE_STATUSES)[number];
@@ -282,7 +289,7 @@ export interface ReconstructionRequest {
   /** The instant asked about, as the caller states it; informational. */
   knowledgeAt: string;
   /** The cut the adapter resolved `knowledgeAt` to; the selection must be at it. */
-  knowledgeCut: KnowledgeCut;
+  knowledgeCut: ProvisionalKnowledgeCut;
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +311,7 @@ export interface FoldPolicy {
   bases: Record<ReconstructionBasis, { legBasis: RecognitionBasis; timeRole: ProvisionalTimeRole }>;
   /** Kind → state → effect. A state absent here has an unknown effect. */
   stateEffects: Record<EconomicEventKind, Partial<Record<EventState, StateEffect>>>;
-  legEffects: Record<LegEffect, LegEffectRule>;
+  legEffects: Record<ProvisionalLegEffect, LegEffectRule>;
   directions: { increase: "add"; decrease: "subtract" };
 }
 
@@ -460,7 +467,7 @@ export const REVIEW_GAPS: readonly ReconstructionGap[] = [
   "writer_unsupported",
   "duplicate_claim",
 ];
-const FLAG_ORDER: readonly RevisionFlag[] = REVISION_FLAGS;
+const FLAG_ORDER: readonly ProvisionalRevisionFlag[] = PROVISIONAL_REVISION_FLAGS;
 
 export const EXPLANATION_STATUSES = [
   "reconciled",
@@ -493,7 +500,7 @@ export interface SelectedRevision {
 }
 /** A (book, key) more than one active event holds at the cut. */
 export interface DuplicateClaim {
-  book: ClaimBook;
+  book: ProvisionalClaimBook;
   key: string;
   /** `eventId@revision` of every active holder, sorted. */
   holders: string[];
@@ -506,7 +513,7 @@ export interface DuplicateClaim {
 export interface KnowledgeSelection {
   contract: typeof PROVISIONAL_EVENT_CONTRACT;
   resolution: ProvisionalResolution;
-  knowledgeCut: KnowledgeCut;
+  knowledgeCut: ProvisionalKnowledgeCut;
   setVersion: string;
   adapterRelease: string;
   writers: ProvisionalWriter[];
@@ -521,8 +528,8 @@ export interface KnowledgeSelection {
 }
 /** The revisions whose being in force differs between two cuts of one scope. */
 export interface LateExplanation {
-  baselineCut: KnowledgeCut;
-  cut: KnowledgeCut;
+  baselineCut: ProvisionalKnowledgeCut;
+  cut: ProvisionalKnowledgeCut;
   /** Active at the cut, not at the baseline. */
   entered: string[];
   /** Active at the baseline, not at the cut. */
@@ -613,8 +620,8 @@ export interface ReconstructionManifest {
   range: { startDate: string; endDate: string };
   accountIds: string[];
   knowledgeAt: string;
-  knowledgeCut: KnowledgeCut;
-  baselineCut: KnowledgeCut | null;
+  knowledgeCut: ProvisionalKnowledgeCut;
+  baselineCut: ProvisionalKnowledgeCut | null;
   baselineSetVersion: string | null;
   startContextId: string;
   endContextId: string;
@@ -630,7 +637,7 @@ export interface ReconstructionManifest {
 export interface ReconstructedState {
   schemaVersion: typeof RECONSTRUCTED_STATE_SCHEMA;
   basis: ReconstructionBasis;
-  knowledgeCut: KnowledgeCut;
+  knowledgeCut: ProvisionalKnowledgeCut;
   zone: typeof RECONSTRUCTION_ZONE;
   accounts: ReconstructedAccount[];
   cells: ReconstructedCell[];
@@ -655,9 +662,21 @@ export type LateExplanationResult =
 
 const EVENT_REF = /^(.+)@([1-9][0-9]*)$/u;
 
-function validCut(value: unknown): value is KnowledgeCut {
-  return isRecord(value) && hasExactKeys(value, ["commitSeq"]) && isSafeInt(value.commitSeq, 0);
+function validCut(value: unknown): value is ProvisionalKnowledgeCut {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["coreEpoch", "commitSeq"]) &&
+    isText(value.coreEpoch, 64) &&
+    isSafeInt(value.commitSeq, 0)
+  );
 }
+
+const sameCut = (a: ProvisionalKnowledgeCut, b: ProvisionalKnowledgeCut) =>
+  a.coreEpoch === b.coreEpoch && a.commitSeq === b.commitSeq;
+const copyCut = (cut: ProvisionalKnowledgeCut): ProvisionalKnowledgeCut => ({
+  coreEpoch: cut.coreEpoch,
+  commitSeq: cut.commitSeq,
+});
 
 function validTime(value: unknown): value is ProvisionalTime {
   return (
@@ -672,7 +691,7 @@ function validClaim(value: unknown): value is ProvisionalClaim {
   return (
     isRecord(value) &&
     hasExactKeys(value, ["book", "key"]) &&
-    isOneOf(CLAIM_BOOKS)(value.book) &&
+    isOneOf(PROVISIONAL_CLAIM_BOOKS)(value.book) &&
     isText(value.key, 512)
   );
 }
@@ -692,7 +711,7 @@ export function validProvisionalLeg(value: unknown): value is ProvisionalLeg {
     !isSafeInt(value.legIndex, 0) ||
     !isTextOrNull(value.accountId, 256) ||
     !validQuantity(value.quantity) ||
-    !isOneOf(LEG_EFFECTS)(value.effect) ||
+    !isOneOf(PROVISIONAL_LEG_EFFECTS)(value.effect) ||
     !isOneOf(LEG_ROLES)(value.role) ||
     !isOneOf(RECOGNITION_BASES)(value.basis)
   )
@@ -735,8 +754,8 @@ export function validProvisionalEventRevision(value: unknown): value is Provisio
     !isArrayOf(validProvisionalLeg, 64)(value.legs) ||
     !isRefList(value.evidenceIds, 64) ||
     !isArrayOf(validClaim, 64)(value.claims) ||
-    !isRefList(value.flags, REVISION_FLAGS.length) ||
-    !value.flags.every((flag) => isOneOf(REVISION_FLAGS)(flag))
+    !isRefList(value.flags, PROVISIONAL_REVISION_FLAGS.length) ||
+    !value.flags.every((flag) => isOneOf(PROVISIONAL_REVISION_FLAGS)(flag))
   )
     return false;
   const family: readonly string[] = EVENT_STATE_FAMILIES[value.kind];
@@ -1053,7 +1072,7 @@ const refOf = (row: ProvisionalEventRevision) => `${row.eventId}@${row.revision}
 function resolveAtCut(
   revisions: readonly ProvisionalEventRevision[],
   resolution: ProvisionalResolution,
-  cut: KnowledgeCut,
+  cut: ProvisionalKnowledgeCut,
 ): Omit<
   KnowledgeSelection,
   | "contract"
@@ -1067,12 +1086,16 @@ function resolveAtCut(
   | "historyCoverage"
 > {
   const byRef = new Map(revisions.map((row) => [refOf(row), row]));
+  // A commit of another epoch belongs to another history: it cannot be placed
+  // at this cut, exactly like a revision no history records.
+  const logged = (row: ProvisionalEventRevision) =>
+    row.commitRef !== null && row.commitRef.coreEpoch === cut.coreEpoch;
   const committed = (row: ProvisionalEventRevision) =>
-    row.commitRef !== null && row.commitRef.commitSeq <= cut.commitSeq;
+    logged(row) && row.commitRef!.commitSeq <= cut.commitSeq;
   const unlogged = new Set<string>();
   const inconsistent = new Set<string>();
   const successorAtCut = new Map<string, ProvisionalEventRevision>();
-  for (const row of revisions) if (row.commitRef === null) unlogged.add(row.eventId);
+  for (const row of revisions) if (!logged(row)) unlogged.add(row.eventId);
   if (resolution === "full-chains") {
     for (const row of revisions) {
       if (!committed(row) || row.supersededBy === null) continue;
@@ -1083,7 +1106,7 @@ function resolveAtCut(
         continue;
       }
       // Whether a successor without a history position is in force is not known.
-      if (target.commitRef === null) {
+      if (!logged(target)) {
         unlogged.add(row.eventId);
         continue;
       }
@@ -1092,7 +1115,7 @@ function resolveAtCut(
       if (
         target === row ||
         (target.eventId === row.eventId && target.revision <= row.revision) ||
-        target.commitRef.commitSeq < row.commitRef!.commitSeq
+        target.commitRef!.commitSeq < row.commitRef!.commitSeq
       ) {
         inconsistent.add(row.eventId);
         inconsistent.add(target.eventId);
@@ -1130,7 +1153,7 @@ function resolveAtCut(
         status,
         supersededAtCutBy: null,
       });
-      if (row.commitRef === null) return plain("knowledge_unlogged");
+      if (!logged(row)) return plain("knowledge_unlogged");
       if (!committed(row)) return plain("recorded_after_cut");
       if (unlogged.has(row.eventId)) return plain("knowledge_unlogged");
       if (inconsistent.has(row.eventId)) return plain("chain_inconsistent");
@@ -1187,7 +1210,7 @@ function resolveAtCut(
  */
 export function selectKnowledge(
   eventSet: ProvisionalAdoptedEventSet,
-  knowledgeCut: KnowledgeCut,
+  knowledgeCut: ProvisionalKnowledgeCut,
 ): KnowledgeSelectionResult {
   const problem = checkEventSet(eventSet);
   if (problem !== null) return { ok: false, error: problem };
@@ -1198,7 +1221,7 @@ export function selectKnowledge(
     selection: {
       contract: PROVISIONAL_EVENT_CONTRACT,
       resolution: eventSet.resolution,
-      knowledgeCut: { commitSeq: knowledgeCut.commitSeq },
+      knowledgeCut: copyCut(knowledgeCut),
       setVersion: eventSet.setVersion,
       adapterRelease: eventSet.adapterRelease,
       writers: [...eventSet.writers].sort(cmp),
@@ -1249,6 +1272,7 @@ export function explainLate(
     baseline.contract !== now.contract ||
     baseline.resolution !== now.resolution ||
     baseline.adapterRelease !== now.adapterRelease ||
+    baseline.knowledgeCut.coreEpoch !== now.knowledgeCut.coreEpoch ||
     baseline.knowledgeCut.commitSeq > now.knowledgeCut.commitSeq
   )
     return { ok: false, error: { code: "baseline_mismatch", refs: ["baseline"] } };
@@ -1646,7 +1670,7 @@ export function reconstructState(input: {
   if (endProblem !== null) return { ok: false, error: endProblem };
   const selectionProblem = checkSelection(selection);
   if (selectionProblem !== null) return { ok: false, error: selectionProblem };
-  if (selection.knowledgeCut.commitSeq !== request.knowledgeCut.commitSeq)
+  if (!sameCut(selection.knowledgeCut, request.knowledgeCut))
     return { ok: false, error: { code: "selection_mismatch", refs: ["selection.knowledgeCut"] } };
   if (baseline !== null) {
     const late = explainLate(baseline, selection);
@@ -1989,8 +2013,8 @@ export function reconstructState(input: {
     range: { startDate: request.startDate, endDate: request.endDate },
     accountIds,
     knowledgeAt: request.knowledgeAt,
-    knowledgeCut: { commitSeq: request.knowledgeCut.commitSeq },
-    baselineCut: baseline === null ? null : { commitSeq: baseline.knowledgeCut.commitSeq },
+    knowledgeCut: copyCut(request.knowledgeCut),
+    baselineCut: baseline === null ? null : copyCut(baseline.knowledgeCut),
     baselineSetVersion: baseline === null ? null : baseline.setVersion,
     startContextId: start.contextId,
     endContextId: end.contextId,
@@ -2008,7 +2032,7 @@ export function reconstructState(input: {
     state: {
       schemaVersion: RECONSTRUCTED_STATE_SCHEMA,
       basis: request.basis,
-      knowledgeCut: { commitSeq: request.knowledgeCut.commitSeq },
+      knowledgeCut: copyCut(request.knowledgeCut),
       zone: RECONSTRUCTION_ZONE,
       accounts,
       cells,

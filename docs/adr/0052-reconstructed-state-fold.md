@@ -75,10 +75,10 @@ review shaped the provisional input this PR uses.
    `EndReported`, each pinned by its reported-state `contextId`), a
    `ReconstructionRequest` (accounts, start and end date, basis
    `cash | trade-date | settlement-date`, `knowledgeAt` and the
-   `knowledgeCut { commitSeq }` the adapter resolved it to) and the
+   `knowledgeCut { coreEpoch, commitSeq }` the adapter resolved it to) and the
    `FoldPolicy` `reconstruction-fold-v1`, passed explicitly; no parameter has a
    default, and any other content under that id is refused.
-2. **Knowledge.** `commitSeq` is a history cursor the common guard supplies
+2. **Knowledge.** `{ coreEpoch, commitSeq }` is a history cursor the common guard supplies
    (ADR 0054, in preparation). It is not a D1 bookmark, and `created_at` is
    never evidence of adoption: `recordedAt` is carried for information only.
    `selectKnowledge(set, cut)` first selects the revisions committed at or
@@ -90,8 +90,12 @@ review shaped the provisional input this PR uses.
    Holders of a claim at the cut come only from those active revisions. A
    successor committed before its predecessor, a pointer to a revision the
    input lacks, a cycle, or two active revisions of one event make the chain
-   `revision_chain_inconsistent`; a revision without a commit is
-   `knowledge_unlogged`. An input the adapter already resolved
+   `revision_chain_inconsistent`; a revision without a commit, or with a
+   commit of another epoch (a restored backup starts a new history), is
+   `knowledge_unlogged`, and so is every revision of its event. The exported
+   provisional names (`ProvisionalCommitRef`, `ProvisionalKnowledgeCut`,
+   `PROVISIONAL_CLAIM_BOOKS`, `PROVISIONAL_LEG_EFFECTS`, …) are prefixed so
+   that the common contract's own names can be exported beside them. An input the adapter already resolved
    (`resolved-at-cut`) is only checked for one revision per event.
 3. **Leg effects.** A `movement` (`increase` or `decrease`) is what moved and
    is applied once; a `breakdown` (principal 100 and fee 1 of a 101 debit)
@@ -171,7 +175,7 @@ now)`, a pure diff of two selections of one scope (the baseline is the cut
 | Select decisions at the knowledge cut, resolve active revisions, then filter        | Adopted: `selectKnowledge` is a separate pure step whose output is the fold's input                                                                                  |
 | Separate the movement, its fee breakdown, trade/settlement correspondence, boundary | Adopted: leg `effect` `movement`/`breakdown`/`correspondence` with `ofLegIndex`; boundary candidates are their own component, never adopted                          |
 | Past holders from the cut's selected claims, not from a current-live guard          | Adopted: active-at-cut from `commitSeq`; duplicate `(book, key)` holders from active revisions only                                                                  |
-| Never infer adoption from creation time; a history cursor distinct from bookmarks   | Adopted: `commitRef { commitSeq }` from the common guard (ADR 0054, in preparation); `recordedAt` informational; a late part is a diff of two selections             |
+| Never infer adoption from creation time; a history cursor distinct from bookmarks   | Adopted: `commitRef { coreEpoch, commitSeq }` from the common guard (ADR 0054, in preparation); `recordedAt` informational; a late part is a diff of two selections  |
 | Manifest pins identity, evidence alias, coverage, snapshot, FX, policy, engine      | Adopted in the manifest type; FX and policy references are fields the adapter fills (no FX is applied here)                                                          |
 | Exclusivity by book × consumption key for every writer                              | Changed for the fold: claims are `(book, key)` and duplicates are detected on them, not on evidence ids; the common guard itself is deferred to the #549 contract PR |
 | An adapter over the real writers, joining the common guard                          | Deferred to the #549 contract PR and #550's adapter PR                                                                                                               |

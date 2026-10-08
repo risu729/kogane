@@ -38,8 +38,9 @@ const START_DATE = "2026-03-01";
 const END_DATE = "2026-03-31";
 const START_CAPTURE = "2026-03-01T03:00:00.000Z";
 const END_CAPTURE = "2026-03-31T03:00:00.000Z";
-/** The cut every test asks at unless it says otherwise. */
+/** The cut every test asks at unless it says otherwise, in one invented history epoch. */
 const CUT = 100;
+const EPOCH = "epoch:test:1";
 
 const on = (date: string, role: ProvisionalTime["role"] = "posting"): ProvisionalTime => ({
   role,
@@ -69,7 +70,7 @@ function rev(fields: RevisionFields): ProvisionalEventRevision {
     state: "debited",
     unknownReason: null,
     times: [on("2026-03-15")],
-    commitRef: commit === null ? null : { commitSeq: commit },
+    commitRef: commit === null ? null : { coreEpoch: EPOCH, commitSeq: commit },
     recordedAt: "2026-03-16T00:00:00.000Z",
     supersededBy: null,
     legs: [],
@@ -179,13 +180,13 @@ function request(fields: Partial<ReconstructionRequest> = {}): ReconstructionReq
     endDate: END_DATE,
     basis: "cash",
     knowledgeAt: "2026-04-05T00:00:00.000Z",
-    knowledgeCut: { commitSeq: CUT },
+    knowledgeCut: { coreEpoch: EPOCH, commitSeq: CUT },
     ...fields,
   };
 }
 
 const select = (set: ProvisionalAdoptedEventSet, commitSeq: number): KnowledgeSelection =>
-  ok(selectKnowledge(set, { commitSeq })).selection;
+  ok(selectKnowledge(set, { coreEpoch: EPOCH, commitSeq })).selection;
 
 function run(input: {
   set: ProvisionalAdoptedEventSet;
@@ -571,7 +572,7 @@ describe("leg effects", () => {
         ],
       }),
     ]);
-    expect(selectKnowledge(set, { commitSeq: CUT }).ok).toBe(false);
+    expect(selectKnowledge(set, { coreEpoch: EPOCH, commitSeq: CUT }).ok).toBe(false);
   });
 });
 
@@ -658,7 +659,10 @@ describe("knowledge selection", () => {
   ];
 
   test("a correction committed after the cut leaves the earlier revision applied", () => {
-    const state = run({ set: eventSet(corrected), request: { knowledgeCut: { commitSeq: 50 } } });
+    const state = run({
+      set: eventSet(corrected),
+      request: { knowledgeCut: { coreEpoch: EPOCH, commitSeq: 50 } },
+    });
     expect(disposition(state, "event:test:1@1#0")).toBe("applied");
     expect(disposition(state, "event:test:1@2#0")).toBe("recorded_after_knowledge_time");
     expect(text(cell(state).reconstructed)).toBe("9000");
@@ -675,13 +679,13 @@ describe("knowledge selection", () => {
     expect(text(jpy.explanation.lateRecorded!.total)).toBe("-200");
     expect(jpy.explanation.lateRecorded!.refs).toEqual(["event:test:1@1#0", "event:test:1@2#0"]);
     expect(jpy.explanation.status).toBe("reconciled");
-    expect(state.manifest.baselineCut).toEqual({ commitSeq: 50 });
+    expect(state.manifest.baselineCut).toEqual({ coreEpoch: EPOCH, commitSeq: 50 });
     const late = ok(
       explainLate(select(eventSet(corrected), 50), select(eventSet(corrected), CUT)),
     ).late;
     expect(late).toEqual({
-      baselineCut: { commitSeq: 50 },
-      cut: { commitSeq: CUT },
+      baselineCut: { coreEpoch: EPOCH, commitSeq: 50 },
+      cut: { coreEpoch: EPOCH, commitSeq: CUT },
       entered: ["event:test:1@2"],
       left: ["event:test:1@1"],
     });
@@ -759,7 +763,7 @@ describe("knowledge selection", () => {
     expect(text(cell(state, A).reconstructed)).toBe("10000");
     expect(cell(state, A).ignored.superseded_at_knowledge_time).toBe(1);
     expect(text(cell(state, B).reconstructed)).toBe("9000");
-    const before = run({ set, request: { knowledgeCut: { commitSeq: 15 } } });
+    const before = run({ set, request: { knowledgeCut: { coreEpoch: EPOCH, commitSeq: 15 } } });
     expect(text(cell(before).reconstructed)).toBe("9000");
   });
 
@@ -800,7 +804,7 @@ describe("knowledge selection", () => {
       debit("event:test:1", "3000", "2026-03-15", { revision: 2, supersededBy: "event:test:1@3" }),
       rev({ revision: 3, state: "unknown", unknownReason: "conflicting_evidence", commit: 60 }),
     ]);
-    const before = run({ set, request: { knowledgeCut: { commitSeq: 50 } } });
+    const before = run({ set, request: { knowledgeCut: { coreEpoch: EPOCH, commitSeq: 50 } } });
     expect(disposition(before, "event:test:1@2#0")).toBe("applied");
     expect(text(cell(before).reconstructed)).toBe("7000");
     const after = run({ set, baselineCut: 50 });
@@ -832,7 +836,7 @@ describe("knowledge selection", () => {
     ];
     const beforeMerge = run({
       set: eventSet(merged),
-      request: { knowledgeCut: { commitSeq: 15 } },
+      request: { knowledgeCut: { coreEpoch: EPOCH, commitSeq: 15 } },
     });
     expect(cell(beforeMerge).applied.count).toBe(1);
     expect(cell(beforeMerge).pending.count).toBe(1);
@@ -907,9 +911,9 @@ describe("knowledge selection", () => {
       debit("event:test:1", "1000", "2026-03-15", { revision: 2, commit: 150 }),
     ]);
     expect(cell(run({ set })).applied.count).toBe(1);
-    expect(cell(run({ set, request: { knowledgeCut: { commitSeq: 200 } } })).gaps).toContain(
-      "revision_chain_inconsistent",
-    );
+    expect(
+      cell(run({ set, request: { knowledgeCut: { coreEpoch: EPOCH, commitSeq: 200 } } })).gaps,
+    ).toContain("revision_chain_inconsistent");
   });
 
   test("the selector resolves before it filters and reports every revision", () => {
@@ -1175,20 +1179,24 @@ describe("refusals, determinism and the manifest", () => {
     const revisions = Array.from({ length: RECONSTRUCTION_BUDGET.revisions + 1 }, (_, index) =>
       rev({ eventId: `event:test:${index}` }),
     );
-    const refused = selectKnowledge(eventSet(revisions), { commitSeq: CUT });
+    const refused = selectKnowledge(eventSet(revisions), { coreEpoch: EPOCH, commitSeq: CUT });
     expect(!refused.ok && refused.error.code).toBe("event_budget_exceeded");
   });
 
   test("unknown keys, another policy and a tampered selection are refused", () => {
     const withExtra = { ...eventSet([]), extra: 1 } as unknown as ProvisionalAdoptedEventSet;
-    expect(selectKnowledge(withExtra, { commitSeq: CUT }).ok).toBe(false);
+    expect(selectKnowledge(withExtra, { coreEpoch: EPOCH, commitSeq: CUT }).ok).toBe(false);
     const legExtra = eventSet([
       rev({
         legs: [{ ...leg({ quantity: q("JPY", "1") }), note: "x" } as unknown as ProvisionalLeg],
       }),
     ]);
-    expect(selectKnowledge(legExtra, { commitSeq: CUT }).ok).toBe(false);
-    const cutExtra = selectKnowledge(eventSet([]), { commitSeq: CUT, at: 1 } as never);
+    expect(selectKnowledge(legExtra, { coreEpoch: EPOCH, commitSeq: CUT }).ok).toBe(false);
+    const cutExtra = selectKnowledge(eventSet([]), {
+      coreEpoch: EPOCH,
+      commitSeq: CUT,
+      at: 1,
+    } as never);
     expect(!cutExtra.ok && cutExtra.error.code).toBe("invalid_knowledge_cut");
     const selection = select(eventSet([debit("event:test:1", "1", "2026-03-15")]), CUT);
     const base = {
@@ -1209,7 +1217,7 @@ describe("refusals, determinism and the manifest", () => {
     expect(!tamperRefusal.ok && tamperRefusal.error.code).toBe("selection_mismatch");
     const otherCut = reconstructState({
       ...base,
-      request: request({ knowledgeCut: { commitSeq: CUT + 1 } }),
+      request: request({ knowledgeCut: { coreEpoch: EPOCH, commitSeq: CUT + 1 } }),
     });
     expect(!otherCut.ok && otherCut.error.code).toBe("selection_mismatch");
     const requestExtra = reconstructState({
@@ -1259,8 +1267,8 @@ describe("refusals, determinism and the manifest", () => {
       inputContract: "provisional-adopted-events-v1",
       policies: ["reconstruction-fold-v1"],
       accountIds: [A, B],
-      knowledgeCut: { commitSeq: CUT },
-      baselineCut: { commitSeq: 50 },
+      knowledgeCut: { coreEpoch: EPOCH, commitSeq: CUT },
+      baselineCut: { coreEpoch: EPOCH, commitSeq: 50 },
       eventSetVersion: "set:test:1",
       identityRelease: "identity:test:1",
       evidenceAliasRelease: "alias:test:1",
@@ -1270,8 +1278,29 @@ describe("refusals, determinism and the manifest", () => {
     });
     const later = run({
       set: eventSet(revisions),
-      request: { knowledgeCut: { commitSeq: CUT + 1 } },
+      request: { knowledgeCut: { coreEpoch: EPOCH, commitSeq: CUT + 1 } },
     });
     expect(await canonicalDigest(later.manifest)).not.toBe(contextId);
+  });
+});
+
+describe("history epochs and exported names", () => {
+  test("a cut names its epoch; a commit of another epoch cannot be placed", () => {
+    const bare = selectKnowledge(eventSet([]), { commitSeq: CUT } as never);
+    expect(!bare.ok && bare.error.code).toBe("invalid_knowledge_cut");
+    const restored = rev({ legs: [leg({ quantity: q("JPY", "100") })] });
+    restored.commitRef = { coreEpoch: "epoch:test:2", commitSeq: 5 };
+    const state = run({ set: eventSet([restored]) });
+    expect(disposition(state, "event:test:1@1#0")).toBe("knowledge_unlogged");
+    expect(reason(cell(state).reconstructed)).toBe("knowledge_unlogged");
+    const other = selectKnowledge(eventSet([]), { coreEpoch: "epoch:test:2", commitSeq: 200 });
+    const late = explainLate(ok(other).selection, select(eventSet([]), CUT));
+    expect(!late.ok && late.error.code).toBe("baseline_mismatch");
+  });
+
+  test("no runtime name collides with the common contract's", async () => {
+    const exported = Object.keys(await import("../src/reconstruction.ts"));
+    for (const name of ["BOOKS", "LEG_EFFECTS", "EVENT_TIME_ROLES", "CLAIM_BOOKS"])
+      expect(exported).not.toContain(name);
   });
 });
