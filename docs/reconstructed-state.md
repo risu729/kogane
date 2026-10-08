@@ -148,6 +148,8 @@ Any input order gives the same output and the same id.
 
 ## Limits
 
+- Cost: at the budget a fold takes about 0.45–0.8 s on `bun` locally, most of
+  it re-checking each selection; not measured on workerd (ADR 0052).
 - No read path: no adapter, query, route or page. The provisional input is
   not filled from the stored rows by anything yet.
 - The input is provisional and is replaced by the hand-off contract; the

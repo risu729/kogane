@@ -1296,6 +1296,14 @@ export function explainLate(
 ): LateExplanationResult {
   const problem = checkSelection(baseline) ?? checkSelection(now);
   if (problem !== null) return { ok: false, error: problem };
+  return lateUnchecked(baseline, now);
+}
+
+/** `explainLate` for two selections already checked (each is checked once). */
+function lateUnchecked(
+  baseline: KnowledgeSelection,
+  now: KnowledgeSelection,
+): LateExplanationResult {
   if (
     baseline.contract !== now.contract ||
     baseline.resolution !== now.resolution ||
@@ -1649,15 +1657,55 @@ function flagReach(
   return reach;
 }
 
+/** Legs of a selection by cell key, `account\u0000unit`, or `\u0001unit` for no account. */
+type LegIndex = Map<string, LegView[]>;
+
+function indexLegs(selection: KnowledgeSelection): LegIndex {
+  const index: LegIndex = new Map();
+  for (const selected of selection.revisions)
+    for (const leg of selected.revision.legs) {
+      const key =
+        leg.accountId === null
+          ? `\u0001${leg.quantity.unitRef}`
+          : `${leg.accountId}\u0000${leg.quantity.unitRef}`;
+      const list = index.get(key) ?? [];
+      list.push({ selected, leg, ref: `${refOf(selected.revision)}#${leg.legIndex}` });
+      index.set(key, list);
+    }
+  return index;
+}
+
+function byAccount<T extends { accountId: string }>(rows: readonly T[]): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const row of rows) {
+    const list = out.get(row.accountId) ?? [];
+    list.push(row);
+    out.set(row.accountId, list);
+  }
+  return out;
+}
+
 function frames(
   request: ReconstructionRequest,
   policy: FoldPolicy,
   start: StartSnapshot,
   end: EndReported,
-  selection: KnowledgeSelection,
+  legs: LegIndex,
   reach: FlagReach,
 ): CellFrame[] {
   const legBasis = policy.bases[request.basis].legBasis;
+  const sides = [start, end].map((side) => ({
+    balances: byAccount(side.balances),
+    positions: byAccount(side.positions),
+  }));
+  const legUnits = new Map<string, LegView[][]>();
+  for (const [key, views] of legs) {
+    if (key.startsWith("\u0001")) continue;
+    const owner = key.slice(0, key.indexOf("\u0000"));
+    const list = legUnits.get(owner) ?? [];
+    list.push(views);
+    legUnits.set(owner, list);
+  }
   const out: CellFrame[] = [];
   for (const accountId of request.accountIds) {
     const keyed = new Map<string, CellFrame["measure"]>();
@@ -1665,32 +1713,32 @@ function frames(
       const seen = keyed.get(unit);
       if (seen === undefined || seen === "flow-only") keyed.set(unit, measure);
     };
-    for (const side of [start, end]) {
-      for (const row of side.balances)
-        if (row.accountId === accountId) note(row.quantity.unitRef, "balance");
-      for (const row of side.positions)
-        if (row.accountId === accountId && row.instrumentId !== null)
-          note(row.instrumentId, "position");
+    for (const side of sides) {
+      for (const row of side.balances.get(accountId) ?? []) note(row.quantity.unitRef, "balance");
+      for (const row of side.positions.get(accountId) ?? [])
+        if (row.instrumentId !== null) note(row.instrumentId, "position");
     }
     // A leg not superseded and not after the cut opens its cell on the
     // selected basis; a superseded or later leg alone does not.
-    for (const selected of selection.revisions)
-      if (selected.status !== "superseded_at_cut" && selected.status !== "recorded_after_cut")
-        for (const leg of selected.revision.legs)
-          if (leg.accountId === accountId && (leg.basis === legBasis || leg.basis === "unknown"))
-            note(leg.quantity.unitRef, "flow-only");
+    for (const views of legUnits.get(accountId) ?? [])
+      for (const { selected, leg } of views)
+        if (
+          selected.status !== "superseded_at_cut" &&
+          selected.status !== "recorded_after_cut" &&
+          (leg.basis === legBasis || leg.basis === "unknown")
+        )
+          note(leg.quantity.unitRef, "flow-only");
     // A cell a flagged chain touched is opened even when nothing in force moves it.
     for (const key of reach.cells.keys()) {
       const [owner, unit] = key.split("\u0000") as [string, string];
       if (owner === accountId) note(unit, "flow-only");
     }
+    const [startSide, endSide] = sides as [(typeof sides)[number], (typeof sides)[number]];
     for (const [unit, measure] of keyed) {
-      const pick = (side: ReconstructionReportedSide) =>
+      const pick = (side: (typeof sides)[number]) =>
         pickRow(
-          side.balances.filter(
-            (row) => row.accountId === accountId && row.quantity.unitRef === unit,
-          ),
-          side.positions.filter((row) => row.accountId === accountId && row.instrumentId === unit),
+          (side.balances.get(accountId) ?? []).filter((row) => row.quantity.unitRef === unit),
+          (side.positions.get(accountId) ?? []).filter((row) => row.instrumentId === unit),
         );
       out.push({
         accountId,
@@ -1698,13 +1746,13 @@ function frames(
         unitRef: unit,
         unit,
         unidentifiedRef: null,
-        start: pick(start),
-        end: endOutcome(pick(end)),
+        start: pick(startSide),
+        end: endOutcome(pick(endSide)),
       });
     }
-    for (const side of [start, end])
-      for (const row of side.positions)
-        if (row.accountId === accountId && row.instrumentId === null)
+    for (const side of sides)
+      for (const row of side.positions.get(accountId) ?? [])
+        if (row.instrumentId === null)
           out.push({
             accountId,
             measure: "position",
@@ -1734,22 +1782,17 @@ function foldCell(
   frame: CellFrame,
   request: ReconstructionRequest,
   policy: FoldPolicy,
-  selection: KnowledgeSelection,
+  legs: LegIndex,
   window: { from: ReconstructionWindowBound; to: ReconstructionWindowBound },
 ): CellFold {
   const place = placer(policy, request.basis, window.from, window.to);
   const views: CellFold["views"] = [];
   if (frame.unitRef === null) return { views };
-  for (const selected of selection.revisions) {
-    const row = selected.revision;
-    for (const leg of row.legs) {
-      if (leg.quantity.unitRef !== frame.unitRef) continue;
-      if (leg.accountId !== null && leg.accountId !== frame.accountId) continue;
-      const view = { selected, leg, ref: `${refOf(row)}#${leg.legIndex}` };
-      const known = leg.accountId !== null;
+  for (const key of [`${frame.accountId}\u0000${frame.unitRef}`, `\u0001${frame.unitRef}`])
+    for (const view of legs.get(key) ?? []) {
+      const known = view.leg.accountId !== null;
       views.push({ view, classified: classifyLeg(view, policy, request.basis, place, known) });
     }
-  }
   return { views };
 }
 
@@ -1796,14 +1839,19 @@ export function reconstructState(input: {
   if (!sameCut(selection.knowledgeCut, request.knowledgeCut))
     return { ok: false, error: { code: "selection_mismatch", refs: ["selection.knowledgeCut"] } };
   if (baseline !== null) {
-    const late = explainLate(baseline, selection);
+    const baselineProblem = checkSelection(baseline);
+    if (baselineProblem !== null)
+      return { ok: false, error: { code: "baseline_mismatch", refs: baselineProblem.refs } };
+    const late = lateUnchecked(baseline, selection);
     if (!late.ok) return { ok: false, error: { code: "baseline_mismatch", refs: late.error.refs } };
   }
 
   const legBasis = policy.bases[request.basis].legBasis;
   const requested = new Set(request.accountIds);
   const reach = flagReach(selection, legBasis, requested);
-  const cellFrames = frames(request, policy, start, end, selection, reach);
+  const legs = indexLegs(selection);
+  const baselineLegs = baseline === null ? null : indexLegs(baseline);
+  const cellFrames = frames(request, policy, start, end, legs, reach);
   const cellKey = (accountId: string, unit: string) => `${accountId}\u0000${unit}`;
   const cellKeys = new Set(
     cellFrames.flatMap((frame) =>
@@ -1891,8 +1939,9 @@ export function reconstructState(input: {
     }
   }
 
-  const familyRows = (accountId: string) =>
-    selection.familyCoverage.filter((row) => row.accountId === accountId);
+  const familyByAccount = byAccount(selection.familyCoverage);
+  const historyByAccount = byAccount(selection.historyCoverage);
+  const familyRows = (accountId: string) => familyByAccount.get(accountId) ?? [];
   const cells: ReconstructedCell[] = [];
   for (const frame of cellFrames) {
     const startRow = frame.start.kind === "row" ? frame.start.start : null;
@@ -1904,7 +1953,7 @@ export function reconstructState(input: {
     const from = boundOf(startRow?.capturedAt ?? null, request.startDate);
     const to = boundOf(endRow === null || inverted ? null : endRow.capturedAt, request.endDate);
     const window = { from, to };
-    const fold = foldCell(frame, request, policy, selection, window);
+    const fold = foldCell(frame, request, policy, legs, window);
     const unit = frame.unit;
 
     // Step 4: a (book, key) held by two active events, on a leg that reaches a total.
@@ -1939,11 +1988,7 @@ export function reconstructState(input: {
         : formatLocalDate(addDays(parseLocalDate(from.date)!, 1));
     const toDate = to.kind === "capture" ? captureTokyoDate(to.capturedAt)! : to.date;
     if (fromDate <= toDate)
-      for (const gap of historyGaps(
-        selection.historyCoverage.filter((row) => row.accountId === frame.accountId),
-        fromDate,
-        toDate,
-      ))
+      for (const gap of historyGaps(historyByAccount.get(frame.accountId) ?? [], fromDate, toDate))
         gaps.add(gap);
 
     const by = (disposition: LegDisposition) =>
@@ -2041,7 +2086,7 @@ export function reconstructState(input: {
     }
     let lateRecorded: ReconstructionExplanation["lateRecorded"] = null;
     if (baseline !== null && endRow !== null && reasonCode !== "no_reported_container") {
-      const earlier = appliedOf(foldCell(frame, request, policy, baseline, window));
+      const earlier = appliedOf(foldCell(frame, request, policy, baselineLegs!, window));
       const late = subtractQuantities(appliedTotal, total(unit, earlier));
       const now = new Set(appliedViews.map((view) => view.ref));
       const then = new Set(earlier.map((view) => view.ref));

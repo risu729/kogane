@@ -164,6 +164,15 @@ now)`, a pure diff of two selections of one scope (the baseline is the cut
 
 ## Consequences
 
+- Cost, a limit to fix before a Worker calls this: legs are indexed by
+  (account, unit) once and each selection is checked once, but checking a
+  selection re-runs the selector and compares canonical text. At the budget
+  (5,000 revisions, 20,000 legs) on `bun` locally, a selection takes about
+  60–90 ms and the fold about 0.45 s for 100 to 1,000 cells and 0.7 s for
+  20,000 cells, 0.8 s with a baseline (most of it the two selection checks).
+  Branding the selector's output (a module-private `WeakSet`) instead of
+  re-checking it is left to the PR that moves the selector; nothing was
+  measured on workerd.
 - No migration, no read path, no route, no UI: the adapter over the stored
   rows, `GET /api/v2/reconstructed-state` and the panel beside `/state` are
   later PRs. Nothing in production computes a reconstructed state yet.
