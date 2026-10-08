@@ -35,8 +35,12 @@
 --     live holder per (book, key), and per (book, alias class) where one is
 --     recorded, across every writer (INV06).
 --   * identity epoch: the declared identity era. A declared identity rewrite
---     (as 0063 was) appends a new epoch; seals pin the epoch they were made
---     under, and holders of an older epoch need review, never a silent move.
+--     (as 0063 was) appends a new epoch, and seals pin the epoch they were
+--     made under. This schema only refuses a new seal under a stale epoch;
+--     routing a holder sealed under an older epoch to needs-review is the
+--     planner's and the selector's job (ADR 0054), because a rule writer
+--     under retire-before-recognise keeps revising and a reviewed correction
+--     is itself the review.
 --   * a seal: the revision's child rows are complete; nothing is added later.
 --   * a commit row: the finalization of one economic batch, last in it, with a
 --     dense per-core-epoch sequence. "Accepted" means this row exists.

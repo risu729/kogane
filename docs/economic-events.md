@@ -200,8 +200,11 @@ Limits, as of this migration: legacy settlements carry no alias class, so the
 same bank debit collected under two producers or namespaces is two keys to
 0070 and to today's readiness (0052 partitions by producer, 0044 compares the
 whole key) until the settlement writer records one (G1b). Whether production
-holds such a debit is not verified. Trigger behaviour and cost on remote D1
-are not verified.
+holds such a debit is not verified. 0070 refuses a new seal under a stale
+identity epoch, but does not refuse superseding a holder sealed under an older
+epoch: routing such holders to needs-review is the planners' and the
+selector's job (ADR 0054). Trigger behaviour and cost on remote D1 are not
+verified.
 
 ### Where the decisions live
 

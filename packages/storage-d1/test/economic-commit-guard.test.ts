@@ -1378,6 +1378,51 @@ describe("identity epochs", () => {
     db.close();
   });
 
+  test("P11: the guard does not route old-epoch holders to review; that is the planner's job", async () => {
+    // ADR 0054: a rule writer under retire-before-recognise keeps auto-revising
+    // after a declared rewrite, and a reviewed correction is itself the
+    // explicit review, so 0070 cannot tell which supersession of an old-epoch
+    // holder needs review. The planner (G3) and the selector (#550) decide;
+    // the trigger only requires the new seal to be under the current epoch.
+    const db = database();
+    await run(
+      db,
+      adoptWrites(db, {
+        eventId: "transfer-x",
+        revision: 1,
+        claims: [{ book: "cash-movement", observationId: 101 }],
+      }),
+    );
+    db.run(
+      "INSERT INTO economic_identity_epochs(ordinal,identity_epoch,reason_code,declared_at) VALUES(2,'identity-epoch-2','synthetic-rewrite',?)",
+      [LATER],
+    );
+    await run(
+      db,
+      adoptWrites(db, {
+        eventId: "transfer-x",
+        revision: 2,
+        now: LATER,
+        sealEpoch: "identity-epoch-2",
+        claims: [{ book: "cash-movement", observationId: 104, identityEpoch: "identity-epoch-2" }],
+        released: [{ book: "cash-movement", key: keyOf(db, 101) }],
+      }),
+    );
+    expect(
+      db.query("SELECT s.identity_epoch FROM economic_revision_seals s ORDER BY s.revision").all(),
+    ).toEqual([{ identity_epoch: EPOCH_1 }, { identity_epoch: "identity-epoch-2" }]);
+    expect(liveHolders(db)).toEqual([
+      {
+        book: "cash-movement",
+        consumption_key: keyText(db, 104),
+        alias_class: null,
+        event_id: "transfer-x",
+        revision: 2,
+      },
+    ]);
+    db.close();
+  });
+
   test("a claim names a declared epoch, and the seal's epoch is its claims' epoch", async () => {
     const db = database();
     await expect(

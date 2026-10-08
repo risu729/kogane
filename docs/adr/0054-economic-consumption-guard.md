@@ -139,8 +139,15 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   receipt of that kind for the commit's operation and principal. The
   receipt kind CHECK (0051) admits no such kind, so the exemption is closed
   until the vocabulary migration that adds it together with its planner; a
-  rule writer, or any writer that only names the kind, is refused. The
-  holder stays held; nothing is moved automatically.
+  rule writer, or any writer that only names the kind, is refused.
+  That is all 0070 enforces about epochs: a new seal under the current
+  epoch. It does **not** refuse a commit that supersedes a holder sealed
+  under an older epoch, because it cannot tell which such supersession needs
+  review: the card purchase lane under retire-before-recognise keeps
+  auto-revising after a rewrite ([ADR 0002](0002-card-purchase-recognition.md)),
+  and a reviewed correction or withdrawal is itself the explicit review.
+  Routing old-epoch holders to needs-review (`identity_epoch_changed`, holder
+  kept) is the planners' job (G3) and the selector's (#550, ADR 0058).
 - **Knowledge selector interface** (#550, ADR 0056): a cut is
   `{coreEpoch, commitSeq}` or `{coreEpoch, instant}` resolved to the largest
   sequence whose `known_at` is at or before the instant (equal instants all
@@ -189,8 +196,9 @@ For human-adopted writers nothing is adopted automatically, and:
    admitted rule writer states that property.
 
 `admitIdentity` (`economic-contract.ts`) decides 1, 2, 5, 6 and 8 from a
-closed input; CORE 0070 enforces 4 and the epoch half of 7; 3 and the rekey
-half of 7 are decided by planners against stored holders (G3).
+closed input; CORE 0070 enforces 4 and refuses a new seal under a stale
+epoch; 3, the rekey half of 7 and routing old-epoch holders to review are
+decided by planners against stored holders (G3) and by the selector (#550).
 
 **Finding:** today's card settlement readiness is producer-sensitive. 0052
 partitions bank debits by producer and namespace (0052:31-32) and readiness
@@ -328,7 +336,8 @@ Synthetic data only. This PR tests:
   by the lane's batch plus a G1b-style seal and commit); leg effects in one
   unit only; cross-writer one live holder in both orders; the legacy purchase
   key trigger; T2c; a released key with another live holder; T1 in both
-  orders and its pinned legacy limit; T4; alias source; T9 (also refused for a rule writer that names the resolution kind, and no
+  orders and its pinned legacy limit; T4; alias source; P11 (pins that a correction under the new epoch may supersede an old-epoch
+  holder: routing is the planner's), T9 (also refused for a rule writer that names the resolution kind, and no
   receipt of that kind can be stored) and the reserved
   resolution kind; epochs append-only; every 0070 table append-only.
 - `services/processor/test/lanes.test.ts`: the migration pin includes 0070;
