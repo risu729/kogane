@@ -412,6 +412,49 @@ export function canonicalApiPath(path, method = "GET") {
   fail("api_selector");
 }
 
+// Emit only a fixed endpoint/status vocabulary, never URL segments or provider data.
+export function apiHttpCode(selector, status) {
+  let endpoint;
+  if (selector === `workers/scripts/${WORKER}/settings`) endpoint = "settings";
+  else if (selector === `workers/scripts/${WORKER}/deployments`) endpoint = "deployments";
+  else if (selector === `workers/scripts/${WORKER}?force=false`) endpoint = "worker_delete";
+  else if (selector === "containers/registries/registry.cloudflare.com/credentials")
+    endpoint = "registry_credentials";
+  else if (
+    typeof selector === "string" &&
+    /^workers\/durable_objects\/namespaces\?per_page=100&page=\d+$/u.test(selector)
+  )
+    endpoint = "namespaces";
+  else if (
+    typeof selector === "string" &&
+    /^workers\/durable_objects\/namespaces\/[a-f0-9]{32}\/objects$/u.test(selector)
+  )
+    endpoint = "namespace_objects";
+  else if (selector === `containers/applications?name=${APP}`) endpoint = "applications";
+  else if (
+    typeof selector === "string" &&
+    /^containers\/applications\/[a-f0-9-]+\/versions$/u.test(selector)
+  )
+    endpoint = "application_versions";
+  else if (typeof selector === "string" && /^containers\/applications\/[a-f0-9-]+$/u.test(selector))
+    endpoint = "applications";
+  else if (
+    typeof selector === "string" &&
+    selector.startsWith(`workers/scripts/${WORKER}/versions/`) &&
+    UUID.test(selector.slice(`workers/scripts/${WORKER}/versions/`.length))
+  )
+    endpoint = "worker_version";
+  if (endpoint === undefined) return "api_http";
+  let category = "default";
+  if (status === 401) category = "unauthorized";
+  else if (status === 403) category = "forbidden";
+  else if (status === 404) category = "not_found";
+  else if (status === 429) category = "rate_limit";
+  else if (Number.isInteger(status) && status >= 500 && status <= 599) category = "server";
+  else if (Number.isInteger(status) && status >= 300 && status <= 399) category = "redirect";
+  return `api_http_${endpoint}_${category}`;
+}
+
 export function apiClient(input, fetchImpl = fetch) {
   return async (path, { method = "GET", body, missing = false, timeout = 30000 } = {}) => {
     const selector = canonicalApiPath(path, method);
@@ -433,7 +476,7 @@ export function apiClient(input, fetchImpl = fetch) {
       fail("api_transport");
     }
     if (missing && response.status === 404) return undefined;
-    if (!response.ok || response.status >= 300) fail("api_http");
+    if (!response.ok || response.status >= 300) fail(apiHttpCode(selector, response.status));
     // The public scripts DELETE explicitly returns no successful response body.
     if (method === "DELETE" && path === `workers/scripts/${WORKER}?force=false`) {
       const text = await response.text();

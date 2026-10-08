@@ -20,6 +20,7 @@ import {
   readProtected,
   driverReport,
   apiClient,
+  apiHttpCode,
   preflight,
   namespaces,
   activeVersion,
@@ -1101,4 +1102,107 @@ process.stdout.write(privateDirectory(inputs(process.env).temp));`;
   } finally {
     rmSync(parent, { recursive: true });
   }
+});
+
+test("API HTTP diagnostics expose only fixed endpoint and status categories without reading provider data", async () => {
+  const endpoints: Array<[string, string, string]> = [
+    [`workers/scripts/${WORKER}/settings`, "GET", "settings"],
+    ["workers/durable_objects/namespaces?per_page=100&page=1", "GET", "namespaces"],
+    [`containers/applications?name=${APP}`, "GET", "applications"],
+    ["containers/registries/registry.cloudflare.com/credentials", "POST", "registry_credentials"],
+    [`workers/scripts/${WORKER}/deployments`, "GET", "deployments"],
+    [`workers/scripts/${WORKER}/versions/${workerVersion}`, "GET", "worker_version"],
+    [`containers/applications/${appId}/versions`, "GET", "application_versions"],
+    [`workers/durable_objects/namespaces/${namespace}/objects`, "GET", "namespace_objects"],
+    [`containers/applications/${appId}`, "DELETE", "applications"],
+    [`workers/scripts/${WORKER}?force=false`, "DELETE", "worker_delete"],
+  ];
+  const statuses: Array<[number, string]> = [
+    [401, "unauthorized"],
+    [403, "forbidden"],
+    [404, "not_found"],
+    [429, "rate_limit"],
+    [500, "server"],
+    [599, "server"],
+    [302, "redirect"],
+    [400, "default"],
+  ];
+  let providerReads = 0;
+  for (const [path, method, endpoint] of endpoints) {
+    for (const [status, category] of statuses) {
+      let requests = 0;
+      const response = {
+        status,
+        ok: false,
+        get headers() {
+          providerReads++;
+          throw new Error(token);
+        },
+        async text() {
+          providerReads++;
+          throw new Error(token);
+        },
+        async json() {
+          providerReads++;
+          throw new Error(token);
+        },
+      } as unknown as Response;
+      const api = apiClient(input(), async (_url: string, options: RequestInit) => {
+        requests++;
+        expect(options.redirect).toBe("manual");
+        return response;
+      });
+      let message = "";
+      try {
+        await api(path, { method });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toBe(`verification_runner_api_http_${endpoint}_${category}`);
+      expect(message).toMatch(/^verification_(?:runner_)?[a-z_]+$/u);
+      for (const privateValue of [
+        token,
+        account,
+        appId,
+        namespace,
+        workerVersion,
+        WORKER,
+        APP,
+        "https://",
+        path,
+      ])
+        expect(message).not.toContain(privateValue);
+      expect(requests).toBe(1);
+    }
+  }
+  expect(providerReads).toBe(0);
+});
+
+test("unknown endpoint diagnostics stay generic and allowed missing404 remains silent", async () => {
+  for (const selector of [
+    null,
+    {},
+    token,
+    "https://foreign.invalid/" + account,
+    `workers/scripts/${WORKER}/settings?provider=${token}`,
+  ])
+    expect(apiHttpCode(selector, 403)).toBe("api_http");
+  expect(apiHttpCode(`workers/scripts/${WORKER}/settings`, token)).toBe(
+    "api_http_settings_default",
+  );
+  const absent = apiClient(
+    input(),
+    async () =>
+      ({
+        status: 404,
+        ok: false,
+        text: () => {
+          throw new Error(token);
+        },
+        json: () => {
+          throw new Error(token);
+        },
+      }) as unknown as Response,
+  );
+  expect(await absent(`workers/scripts/${WORKER}/settings`, { missing: true })).toBeUndefined();
 });
