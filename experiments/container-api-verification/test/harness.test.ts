@@ -24,6 +24,7 @@ import {
   sameIdentity,
   verifyPhase,
   verifyBackpressure,
+  verifyConcurrency,
   recoveryHold,
   baselineRecord,
   recoveryRecord,
@@ -67,9 +68,14 @@ test("synthetic local TCP server only serves fixed counters; no outbound request
   try {
     const url = `http://127.0.0.1:${server.port}`;
     expect(await (await fetch(url + "/health")).json()).toEqual({ ready: 1 });
-    expect(await (await fetch(url + "/once", { method: "POST" })).json()).toEqual({ accepted: 1 });
-    expect(await (await fetch(url + "/once", { method: "POST" })).json()).toEqual({ accepted: 1 });
+    const first = await (await fetch(url + "/once", { method: "POST" })).json();
+    const second = await (await fetch(url + "/once", { method: "POST" })).json();
+    expect(first.accepted).toBe(1);
+    expect(second.accepted).toBe(1);
+    expect(canonicalUuid(first.processIdentity)).toBe(first.processIdentity);
+    expect(second.processIdentity).toBe(first.processIdentity);
     const stats = await (await fetch(url + "/stats")).json();
+    expect(stats.processIdentity).toBe(first.processIdentity);
     expect(stats.posts).toBe(2);
     expect(stats.streams).toBe(0);
     expect(stats.processIdentity).toMatch(/^[a-f0-9-]{36}$/u);
@@ -569,5 +575,110 @@ test("driver records reject path escape and oversized output before creating a r
     );
   } finally {
     rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("SDK concurrency measures accepted POSTs in one actual process rather than readiness callbacks", async () => {
+  for (const phase of ["baseline_sdk", "rollback_sdk"]) {
+    const calls: { path: string; method: string }[] = [];
+    let states = 0;
+    await verifyConcurrency({
+      phase,
+      json: async (path: string, method = "GET") => {
+        calls.push({ path, method });
+        if (path === "/state")
+          return states++ === 0
+            ? { running: 0, startCallbacks: 0 }
+            : { running: 1, startCallbacks: 2 };
+        if (path === "/once") return { accepted: 1, processIdentity };
+        if (path === "/stats") return { posts: 2, processIdentity };
+        throw new Error("unexpected");
+      },
+    });
+    expect(calls.filter((call) => call.method === "POST")).toEqual([
+      { path: "/once", method: "POST" },
+      { path: "/once", method: "POST" },
+    ]);
+  }
+});
+test("native concurrency retains exactly one startup callback as well as the process/POST proof", async () => {
+  for (const phase of ["native", "native_unmonitored"]) {
+    let states = 0;
+    await verifyConcurrency({
+      phase,
+      json: async (path: string) => {
+        if (path === "/state")
+          return states++ === 0 ? { running: 0, starts: 3 } : { running: 1, starts: 4 };
+        if (path === "/once") return { accepted: 1, processIdentity };
+        return { posts: 2, processIdentity };
+      },
+    });
+  }
+});
+test("concurrency fails closed for extra/missing POSTs, changed process, wrong state or duplicate native startup", async () => {
+  const cases = [
+    { override: { posts: 3 }, code: "concurrency_posts" },
+    { override: { posts: 1 }, code: "concurrency_posts" },
+    { override: { accepted: 0 }, code: "concurrency_posts" },
+    {
+      override: { replyIdentity: "ffffffff-ffff-4fff-afff-ffffffffffff" },
+      code: "concurrency_process",
+    },
+    { override: { statsIdentity: "provider-text" }, code: "concurrency_process" },
+    { override: { replyIdentity: processIdentity.toUpperCase() }, code: "concurrency_process" },
+    { override: { beforeRunning: 1 }, code: "concurrency_state" },
+    { override: { afterRunning: 0 }, code: "concurrency_state" },
+    { override: { afterStarts: 2 }, code: "concurrency_start" },
+    { override: { beforeStarts: "0" }, code: "concurrency_start" },
+  ];
+  for (const { override, code } of cases) {
+    const shape = {
+      posts: 2,
+      accepted: 1,
+      replyIdentity: processIdentity,
+      statsIdentity: processIdentity,
+      beforeRunning: 0,
+      afterRunning: 1,
+      beforeStarts: 0,
+      afterStarts: 1,
+      ...override,
+    };
+    let states = 0,
+      posts = 0;
+    await expect(
+      verifyConcurrency({
+        phase: "native",
+        json: async (path: string, method = "GET") => {
+          if (method === "POST") posts++;
+          if (path === "/state")
+            return states++ === 0
+              ? { running: shape.beforeRunning, starts: shape.beforeStarts }
+              : { running: shape.afterRunning, starts: shape.afterStarts };
+          if (path === "/once")
+            return { accepted: shape.accepted, processIdentity: shape.replyIdentity };
+          return { posts: shape.posts, processIdentity: shape.statsIdentity };
+        },
+      }),
+    ).rejects.toThrow(`verification_${code}`);
+    expect(posts).toBe(shape.beforeRunning === 0 ? 2 : 0);
+  }
+});
+
+test("malformed concurrency state or stats remain classified closed errors", async () => {
+  for (const malformed of ["before", "after", "stats"]) {
+    let states = 0;
+    await expect(
+      verifyConcurrency({
+        phase: "native",
+        json: async (path: string) => {
+          if (path === "/state") {
+            if (states++ === 0) return malformed === "before" ? null : { running: 0, starts: 0 };
+            return malformed === "after" ? null : { running: 1, starts: 1 };
+          }
+          if (path === "/once") return { accepted: 1, processIdentity };
+          return malformed === "stats" ? null : { posts: 2, processIdentity };
+        },
+      }),
+    ).rejects.toThrow(`verification_concurrency_${malformed === "stats" ? "posts" : "state"}`);
   }
 });

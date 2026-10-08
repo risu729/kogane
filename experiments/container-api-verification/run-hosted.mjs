@@ -38,6 +38,10 @@ const DRIVER_CODES = new Set(
     "baseline",
     "cancel",
     "concurrency",
+    "concurrency_posts",
+    "concurrency_process",
+    "concurrency_start",
+    "concurrency_state",
     "delay",
     "destroy",
     "exit_diagnostic",
@@ -752,7 +756,13 @@ export async function registryStatus(input, api, fetchImpl = fetch) {
 export async function deleteRegistryTag(
   input,
   expectedImage,
-  { api = apiClient(input), fetchImpl = fetch, now = Date.now, sleep = pause } = {},
+  {
+    api = apiClient(input),
+    fetchImpl = fetch,
+    now = Date.now,
+    sleep = pause,
+    report = console.log,
+  } = {},
 ) {
   const url = manifestUrl(input);
   if (!validImage(input, expectedImage)) fail("registry_identity");
@@ -764,8 +774,12 @@ export async function deleteRegistryTag(
   if (current.status !== 200) fail(registryHttpCode("predelete", current.status));
   if (digestImage(input, current) !== expectedImage) fail("registry_identity");
   const deleted = await registryRequest(url, authorization, "DELETE", fetchImpl);
-  if (![200, 202, 204].includes(deleted.status)) fail(registryHttpCode("delete", deleted.status));
+  // A concurrent/eventually visible deletion can race the predelete GET.
+  // DELETE404 is not absence proof: require a separate exact-tag GET404 below.
+  if (![200, 202, 204, 404].includes(deleted.status))
+    fail(registryHttpCode("delete", deleted.status));
   const deadline = now() + 90000;
+  let observed = false;
   while (true) {
     const remaining = deadline - now();
     if (remaining <= 0) fail("cleanup_image_readback_timeout");
@@ -773,6 +787,26 @@ export async function deleteRegistryTag(
     if (readback.status === 404) return;
     if (readback.status !== 200) fail(registryHttpCode("readback", readback.status));
     if (digestImage(input, readback) !== expectedImage) fail("registry_identity");
+    if (!observed) {
+      observed = true;
+      const remainingHead = deadline - now();
+      if (remainingHead <= 0) fail("cleanup_image_readback_timeout");
+      let headStatus = "transport";
+      try {
+        const head = await registryRequest(url, authorization, "HEAD", fetchImpl, remainingHead);
+        headStatus = head.status === 200 ? "present" : httpCategory(head.status);
+      } catch {
+        // Observation failure neither proves absence nor changes the GET gate.
+      }
+      report(
+        JSON.stringify({
+          code: "verification_registry_readback_observation",
+          delete: deleted.status === 404 ? "not_found" : "accepted",
+          get: "present",
+          head: headStatus,
+        }),
+      );
+    }
     const rest = deadline - now();
     if (rest <= 0) fail("cleanup_image_readback_timeout");
     await sleep(Math.min(2000, rest));
@@ -849,7 +883,7 @@ export async function cleanup(
     api = apiClient(input),
     run = child,
     registry = () => registryStatus(input, api),
-    deleteImage = (image) => deleteRegistryTag(input, image, { api }),
+    deleteImage = (image) => deleteRegistryTag(input, image, { api, report }),
     report = console.log,
   } = {},
 ) {
@@ -997,7 +1031,7 @@ export async function execute(
     api = apiClient(input),
     run = child,
     registry = () => registryStatus(input, api),
-    deleteImage = (image) => deleteRegistryTag(input, image, { api }),
+    deleteImage = (image) => deleteRegistryTag(input, image, { api, report }),
     report = console.log,
     hold = recoveryHolder,
   } = {},

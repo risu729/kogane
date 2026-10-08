@@ -139,6 +139,36 @@ export function sameIdentity(before, after) {
     before.image === after.image
   );
 }
+/** SDK readiness callbacks are per caller; process identity measures the process serving POSTs. */
+export async function verifyConcurrency({ phase, json }) {
+  if (!["baseline_sdk", "native", "native_unmonitored", "rollback_sdk"].includes(phase))
+    closed("phase");
+  const before = await json("/state");
+  if (before?.running !== 0) closed("concurrency_state");
+  const replies = await Promise.all([json("/once", "POST"), json("/once", "POST")]);
+  const after = await json("/state"),
+    stats = await json("/stats");
+  if (replies.some((reply) => reply?.accepted !== 1) || stats?.posts !== 2)
+    closed("concurrency_posts");
+  let processIdentity;
+  try {
+    processIdentity = canonicalUuid(stats.processIdentity);
+    if (replies.some((reply) => canonicalUuid(reply?.processIdentity) !== processIdentity))
+      closed("concurrency_process");
+  } catch {
+    closed("concurrency_process");
+  }
+  if (after?.running !== 1) closed("concurrency_state");
+  if (
+    (phase === "native" || phase === "native_unmonitored") &&
+    (!Number.isSafeInteger(before.starts) ||
+      before.starts < 0 ||
+      !Number.isSafeInteger(after.starts) ||
+      after.starts - before.starts !== 1)
+  )
+    closed("concurrency_start");
+}
+
 export async function verifyBackpressure({ request, json, wait = pause, now = Date.now }) {
   const baseline = await json("/stats");
   if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(baseline.processIdentity ?? ""))
@@ -350,11 +380,7 @@ export async function verifyPhase({
     return counts; // Parent cancels the hold before any destroy or rollback.
   }
   await json("/destroy", "POST");
-  const before = await json("/state");
-  await Promise.all([json("/once", "POST"), json("/once", "POST")]);
-  const after = await json("/state"),
-    stats = await json("/stats");
-  if (stats.posts !== 2 || after.starts - before.starts !== 1) closed("concurrency");
+  await verifyConcurrency({ phase, json });
   counts.concurrencyChecks++;
   const start = Date.now();
   const delayed = await json("/delay");

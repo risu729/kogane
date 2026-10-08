@@ -13,7 +13,7 @@ export function syntheticServer() {
       return Response.json({ posts, streams, processIdentity, backpressureChunks });
     if (path === "/once" && request.method === "POST") {
       posts++;
-      return Response.json({ accepted: 1 });
+      return Response.json({ accepted: 1, processIdentity });
     }
     if (path === "/delay") {
       await new Promise((done) => setTimeout(done, 35_000));

@@ -5,11 +5,12 @@ export class VerificationContainer extends Container<HarnessEnv> {
   defaultPort = 8080;
   sleepAfter = "30s";
   enableInternet = false;
-  private starts = 0;
+  private startCallbacks = 0;
   private stops = 0;
   private errors = 0;
   onStart() {
-    this.starts++;
+    // SDK 0.3.7 calls this for each readiness caller, even when startup is shared.
+    this.startCallbacks++;
   }
   onStop() {
     this.stops++;
@@ -28,7 +29,7 @@ export class VerificationContainer extends Container<HarnessEnv> {
         ...(await storageState(this.ctx, path === "/initialize")),
         revision: this.env.HARNESS_REVISION,
         running: Number(this.ctx.container?.running),
-        starts: this.starts,
+        startCallbacks: this.startCallbacks,
         stops: this.stops,
         errors: this.errors,
         signaled: 0,

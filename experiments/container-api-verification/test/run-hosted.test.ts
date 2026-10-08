@@ -794,7 +794,7 @@ test("tag-only deletion uses one fixed URL, digest proof, five-minute pull+push 
       expect(options.redirect).toBe("manual");
       expect((options.headers as Record<string, string>).authorization).toStartWith("Basic ");
       calls.push([url, options.method!]);
-      const status = calls.length === 2 ? 202 : calls.length === 4 ? 404 : 200;
+      const status = calls.length === 2 ? 202 : calls.length === 5 ? 404 : 200;
       return new Response(
         new ReadableStream({
           cancel() {
@@ -819,9 +819,10 @@ test("tag-only deletion uses one fixed URL, digest proof, five-minute pull+push 
     [url, "GET"],
     [url, "DELETE"],
     [url, "GET"],
+    [url, "HEAD"],
     [url, "GET"],
   ]);
-  expect(cancelled).toBe(4);
+  expect(cancelled).toBe(5);
   expect(calls.every(([target, method]) => !target.includes("/gc/") && method !== "PUT")).toBe(
     true,
   );
@@ -1304,6 +1305,12 @@ test("controlled driver errors retain a finite complete code; provider text and 
   ])
     expect(driverFailure(text)).toBe("verification_runner_child");
   expect(driverFailure("verification_identity\n")).toBe("verification_identity");
+  for (const name of ["posts", "process", "start", "state"]) {
+    const code = `verification_concurrency_${name}`;
+    expect(driverFailure(code)).toBe(code);
+    expect(diagnosticCode(new Error(code))).toBe(code);
+    expect(driverFailure(code + "\n" + token)).toBe("verification_runner_child");
+  }
   for (const text of [
     token,
     "verification_token",
@@ -1428,7 +1435,7 @@ test("registry diagnostics distinguish each exact operation and finite HTTP stat
   for (const operation of ["lookup", "predelete", "delete", "readback"]) {
     for (const [status, category] of statuses) {
       expect(registryHttpCode(operation, status)).toBe(`registry_http_${operation}_${category}`);
-      if (status === 404 && ["lookup", "predelete", "readback"].includes(operation)) continue;
+      if (status === 404) continue; // DELETE404 requires the independent absence gate tested below.
       let calls = 0,
         inspected = 0;
       const fetchImpl = async (_url: string, options: RequestInit) => {
@@ -1492,5 +1499,159 @@ test("accepted exact-tag deletion still fails closed at the unchanged ninety-sec
     }),
   ).rejects.toThrow("verification_runner_cleanup_image_readback_timeout");
   expect(time).toBe(90000);
-  expect(requests).toBe(47);
+  expect(requests).toBe(48);
+});
+
+test("DELETE404 races still require independent GET404 and preserve identity, privacy and the ninety-second deadline", async () => {
+  for (const result of [
+    "absent",
+    "stale_then_absent",
+    "stale",
+    "forbidden",
+    "changed",
+    "redirect",
+  ]) {
+    let time = 0,
+      requests = 0,
+      inspected = 0;
+    const methods: string[] = [];
+    const check = deleteRegistryTag(input(), image, {
+      api: async () => ({ result: { password: token } }),
+      now: () => time,
+      sleep: async (ms: number) => {
+        time += ms;
+      },
+      fetchImpl: async (url: string, options: RequestInit) => {
+        expect(url).toBe(`https://registry.cloudflare.com/v2/${account}/${APP}/manifests/${sha}`);
+        expect(options.redirect).toBe("manual");
+        requests++;
+        methods.push(options.method!);
+        if (requests === 2)
+          return {
+            status: 404,
+            body: { cancel: async () => {} },
+            get headers() {
+              inspected++;
+              throw new Error(token);
+            },
+            text: async () => {
+              inspected++;
+              throw new Error(token);
+            },
+            json: async () => {
+              inspected++;
+              throw new Error(token);
+            },
+          } as unknown as Response;
+        const status =
+          requests === 1
+            ? 200
+            : result === "absent" || (result === "stale_then_absent" && requests >= 4)
+              ? 404
+              : result === "forbidden"
+                ? 403
+                : result === "redirect"
+                  ? 302
+                  : 200;
+        return new Response(null, {
+          status,
+          headers: {
+            "docker-content-digest": `sha256:${(requests >= 3 && result === "changed" ? "e" : "d").repeat(64)}`,
+          },
+        });
+      },
+    });
+    if (["absent", "stale_then_absent"].includes(result)) {
+      await check;
+      expect(requests).toBe(result === "absent" ? 3 : 5);
+      expect(time).toBe(result === "absent" ? 0 : 2000);
+    } else {
+      const code =
+        result === "stale"
+          ? "verification_runner_cleanup_image_readback_timeout"
+          : result === "changed"
+            ? "verification_runner_registry_identity"
+            : `verification_runner_registry_http_readback_${result}`;
+      await expect(check).rejects.toThrow(code);
+      expect(time).toBe(result === "stale" ? 90000 : 0);
+      expect(requests).toBe(result === "stale" ? 48 : 3);
+    }
+    expect(methods.slice(0, 3)).toEqual(["GET", "DELETE", "GET"]);
+    expect(methods.filter((method) => method === "DELETE")).toHaveLength(1);
+    expect(inspected).toBe(0);
+  }
+});
+
+test("one bounded HEAD observation distinguishes stale GET without replacing GET404 or exposing metadata", async () => {
+  for (const head of [200, 404, 403, 302, "transport"]) {
+    let time = 0,
+      get = 0,
+      headCalls = 0,
+      inspected = 0;
+    const reports: string[] = [];
+    await expect(
+      deleteRegistryTag(input(), image, {
+        api: async () => ({ result: { password: token } }),
+        now: () => time,
+        sleep: async (ms: number) => {
+          time += ms;
+        },
+        report: (line: string) => reports.push(line),
+        fetchImpl: async (url: string, options: RequestInit) => {
+          expect(url).toBe(`https://registry.cloudflare.com/v2/${account}/${APP}/manifests/${sha}`);
+          expect(options.redirect).toBe("manual");
+          if (options.method === "HEAD") {
+            headCalls++;
+            // Consume part of the SAME deadline, never a new ninety-second budget.
+            time += 1000;
+            if (head === "transport") throw new Error(token);
+            return {
+              status: head,
+              body: { cancel: async () => {} },
+              get headers() {
+                inspected++;
+                throw new Error(token);
+              },
+              text: async () => {
+                inspected++;
+                throw new Error(token);
+              },
+              json: async () => {
+                inspected++;
+                throw new Error(token);
+              },
+            } as unknown as Response;
+          }
+          if (options.method === "GET") get++;
+          return new Response(null, {
+            status: options.method === "DELETE" ? 202 : 200,
+            headers: { "docker-content-digest": image.split("@")[1]! },
+          });
+        },
+      }),
+    ).rejects.toThrow("verification_runner_cleanup_image_readback_timeout");
+    expect(time).toBe(90000);
+    expect(headCalls).toBe(1);
+    expect(get).toBeGreaterThan(1);
+    expect(inspected).toBe(0);
+    expect(reports.map((line) => JSON.parse(line))).toEqual([
+      {
+        code: "verification_registry_readback_observation",
+        delete: "accepted",
+        get: "present",
+        head:
+          head === 200
+            ? "present"
+            : head === 404
+              ? "not_found"
+              : head === 403
+                ? "forbidden"
+                : head === 302
+                  ? "redirect"
+                  : "transport",
+      },
+    ]);
+    for (const secret of [token, account, sha, image])
+      expect(reports.join("")).not.toContain(secret);
+  }
 });

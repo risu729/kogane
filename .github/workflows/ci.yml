@@ -137,8 +137,7 @@ jobs:
           chmod 700 "${private_temp}"
           printf 'CONTAINER_VERIFICATION_TEMP=%s\n' "${private_temp}" >> "${GITHUB_ENV}"
           export CONTAINER_VERIFICATION_TEMP="${private_temp}"
-          # Temporary read-only probe; exits before any synthetic creation.
-          mise exec -- node experiments/container-api-verification/inspect-owned-registry.mjs
+          mise exec -- node experiments/container-api-verification/run-hosted.mjs
         env:
           # These names have no production-secret fallback. Environment approval
           # and exact temporary Worker/token scope are prerequisites.
