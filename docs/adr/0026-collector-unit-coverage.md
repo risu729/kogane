@@ -1213,7 +1213,9 @@ artifacts the replay selects is unchanged.
 Texts are only ever compared for exact equality after the parser's own
 normalisation (text nodes joined by a space, whitespace collapsed, trimmed),
 and only the positions of equal cells are printed. No cell or header text,
-attribute value, id, number, date or amount read from the page is printed.
+id, number, date or amount read from the page is printed, and no attribute
+value except the largest numeric `colspan` of a table in `otherTables`
+(`colspanMax`, a column count).
 The parser, its version and its code digest are unchanged.
 
 ### Consequences

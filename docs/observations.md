@@ -56,8 +56,9 @@ cell a pattern class and the activity cells with exactly its text; which
 record each detail table carries and which records none does; for such a
 record, each cell's pattern against the carried records' and the other
 tables' cells with its text; and whether the newest capture of the same key
-with a published parse has the same desktop rows. No text, attribute value or number read
-from the page is printed. The owner runs
+with a published parse has the same desktop rows. No text, attribute value or
+number read from the page is printed, apart from the largest `colspan` of
+such a table (a column count). The owner runs
 
 ```sh
 mise exec -- bun services/processor/scripts/replay-diagnostics.ts globalpass-activity 2
