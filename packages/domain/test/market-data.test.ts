@@ -1,7 +1,7 @@
 // As-of price and FX selection (src/market-data.ts, ADR 0056). Every
 // instrument, rate, amount and calendar here is invented.
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CANDIDATE_EXCLUSIONS,
@@ -941,13 +941,17 @@ describe("policies, digests and the manifest", () => {
       PROPOSED_EQUITY_SELECTION_POLICY_V1.policyId,
     ];
     const offenders: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir)) {
-        if (entry === "node_modules" || entry.startsWith(".")) continue;
-        const path = join(dir, entry);
-        if (statSync(path).isDirectory()) walk(path);
+    // Directory entries carry their own type, so no path is checked first and
+    // read afterwards; a file that vanishes between the listing and the read
+    // throws, which fails the test rather than skipping the file.
+    const walkEntries = (dir: string, entries: Dirent[]): void => {
+      for (const entry of entries) {
+        if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
         else if (
-          /\.(ts|tsx|js|mjs|cjs)$/u.test(entry) &&
+          entry.isFile() &&
+          /\.(ts|tsx|js|mjs|cjs)$/u.test(entry.name) &&
           !path.endsWith("packages/domain/src/market-data.ts")
         ) {
           const text = readFileSync(path, "utf8");
@@ -956,15 +960,19 @@ describe("policies, digests and the manifest", () => {
         }
       }
     };
+    const walk = (dir: string): void => walkEntries(dir, readdirSync(dir, { withFileTypes: true }));
     const scanned: string[] = [];
     const visit = (path: string): void => {
+      // A missing or non-directory path is simply not scanned; the listing is
+      // the only check, so there is nothing to race against.
+      let entries: Dirent[];
       try {
-        if (!statSync(path).isDirectory()) return;
+        entries = readdirSync(path, { withFileTypes: true });
       } catch {
         return;
       }
       scanned.push(path.slice(root.length + 1));
-      walk(path);
+      walkEntries(path, entries);
     };
     visit(join(root, "scripts"));
     visit(join(root, "tasks"));
