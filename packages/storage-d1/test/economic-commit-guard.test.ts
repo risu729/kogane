@@ -1116,16 +1116,22 @@ describe("the finalization", () => {
       expect(() => adoptWrites(db, { eventId: "transfer-y", revision: 1, now })).toThrow(
         "economic commit is not the contract",
       );
-    // ... and the table refuses a hand-written one.
-    const writes = adoptWrites(db, { eventId: "transfer-y", revision: 1, now: LATER });
-    writes[writes.length - 1] = {
-      sql: `INSERT INTO economic_commit_log(core_epoch,commit_seq,decision_revision_id,operation_id,principal,payload_digest,kind,members_json,claims_json,released_json,known_at)
- VALUES('core-epoch-1',2,'dr-transfer-y-1',NULL,?,?,'synthetic.adopt','[{"eventId":"transfer-y","revision":1,"supersedes":[]}]','[]','[]','2026-10-08T11:00:00Z')`,
-      binds: [PRINCIPAL, "d".repeat(64)],
-    };
+    // ... and the table refuses a hand-written one, including hour 24, which
+    // strftime would keep but validKnownAt (and Date) refuse.
+    expect(() =>
+      adoptWrites(db, { eventId: "transfer-y", revision: 1, now: "2026-10-08T24:00:00.000Z" }),
+    ).toThrow("economic commit is not the contract");
     const before = snapshot(db);
-    await expect(run(db, writes)).rejects.toThrow("CHECK constraint failed");
-    expect(snapshot(db)).toEqual(before);
+    for (const knownAt of ["2026-10-08T11:00:00Z", "2026-10-08T24:00:00.000Z"]) {
+      const writes = adoptWrites(db, { eventId: "transfer-y", revision: 1, now: LATER });
+      writes[writes.length - 1] = {
+        sql: `INSERT INTO economic_commit_log(core_epoch,commit_seq,decision_revision_id,operation_id,principal,payload_digest,kind,members_json,claims_json,released_json,known_at)
+ VALUES('core-epoch-1',2,'dr-transfer-y-1',NULL,?,?,'synthetic.adopt','[{"eventId":"transfer-y","revision":1,"supersedes":[]}]','[]','[]',?)`,
+        binds: [PRINCIPAL, "d".repeat(64), knownAt],
+      };
+      await expect(run(db, writes)).rejects.toThrow("CHECK constraint failed");
+      expect(snapshot(db)).toEqual(before);
+    }
     db.close();
   });
 

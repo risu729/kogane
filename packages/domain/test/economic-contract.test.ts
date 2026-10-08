@@ -206,6 +206,7 @@ describe("heads, commits and cuts", () => {
       "2026-10-08T09:00:00.000+09:00",
       "2026-02-30T00:00:00.000Z",
       "2026-10-08 00:00:00.000Z",
+      "2026-10-08T24:00:00.000Z",
     ])
       expect(validCommitLogRecord({ ...record, knownAt })).toBe(false);
     expect(validCommitLogRecord({ ...record, knownAt: "2026-12-31T23:59:59.999Z" })).toBe(true);
