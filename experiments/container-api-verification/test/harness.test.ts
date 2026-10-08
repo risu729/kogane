@@ -6,7 +6,7 @@ import {
   readFileSync,
   symlinkSync,
   chmodSync,
-  statSync,
+  fstatSync,
   linkSync,
   openSync,
   closeSync,
@@ -467,46 +467,107 @@ test("persisted identities are exact canonical records with no arbitrary network
     expect(() => canonicalHex(value, 32)).toThrow("verification_identity");
 });
 
-test("driver records use private owned directories, exclusive600 files and bounded single-link reads", () => {
+test("driver records create private exclusive600 files and preserve content on duplicate writes", () => {
   const temp = mkdtempSync(resolve(tmpdir(), "synthetic-records-"));
   const name = "container-api-verification-baseline.json";
-  const path = resolve(temp, name);
   const baseline = baselineRecord({ ...identity(app, version), workerVersion }, app.account_id);
   try {
     writeRecord(temp, name, baseline);
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    // Inspect the opened file, never check a pathname before opening it.
+    const fd = openSync(resolve(temp, name), constants.O_RDONLY | constants.O_NOFOLLOW, 0o600);
+    try {
+      const metadata = fstatSync(fd);
+      expect(metadata.isFile()).toBe(true);
+      expect(metadata.mode & 0o777).toBe(0o600);
+      expect(metadata.nlink).toBe(1);
+      expect(metadata.uid).toBe(process.getuid());
+    } finally {
+      closeSync(fd);
+    }
     expect(readRecord(temp, name)).toEqual(baseline);
     expect(() => writeRecord(temp, name, baseline)).toThrow();
     expect(readRecord(temp, name)).toEqual(baseline);
-    chmodSync(path, 0o644);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("driver records reject public-mode file fixtures", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "synthetic-public-record-"));
+  const name = "container-api-verification-baseline.json";
+  try {
+    writeFileSync(resolve(temp, name), "{}", { mode: 0o644, flag: "wx" });
     expect(() => readRecord(temp, name)).toThrow("verification_record");
-    chmodSync(path, 0o600);
-    const oversizedFd = openSync(path, constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
-    try {
-      writeFileSync(oversizedFd, "x".repeat(1025));
-    } finally {
-      closeSync(oversizedFd);
-    }
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("driver records reject an independently created oversized file fixture", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "synthetic-oversized-record-"));
+  const name = "container-api-verification-baseline.json";
+  try {
+    writeFileSync(resolve(temp, name), "x".repeat(1025), { mode: 0o600, flag: "wx" });
     expect(() => readRecord(temp, name)).toThrow("verification_record");
-    rmSync(path);
-    const target = resolve(temp, "target");
-    writeFileSync(target, JSON.stringify(baseline), { mode: 0o600 });
-    symlinkSync(target, path);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("driver records reject symlink fixtures without modifying their targets", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "synthetic-symlink-record-"));
+  const name = "container-api-verification-baseline.json";
+  const baseline = baselineRecord({ ...identity(app, version), workerVersion }, app.account_id);
+  const target = resolve(temp, "target");
+  try {
+    writeFileSync(target, JSON.stringify(baseline), { mode: 0o600, flag: "wx" });
+    symlinkSync(target, resolve(temp, name));
     expect(() => readRecord(temp, name)).toThrow();
     expect(() => writeRecord(temp, name, baseline)).toThrow();
-    rmSync(path);
-    linkSync(target, path);
+    expect(readFileSync(target, "utf8")).toBe(JSON.stringify(baseline));
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("driver records reject independent hardlink fixtures", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "synthetic-hardlink-record-"));
+  const name = "container-api-verification-baseline.json";
+  const baseline = baselineRecord({ ...identity(app, version), workerVersion }, app.account_id);
+  const target = resolve(temp, "target");
+  try {
+    writeFileSync(target, JSON.stringify(baseline), { mode: 0o600, flag: "wx" });
+    linkSync(target, resolve(temp, name));
     expect(() => readRecord(temp, name)).toThrow("verification_record");
-    rmSync(path);
+    expect(() => writeRecord(temp, name, baseline)).toThrow();
+    expect(readFileSync(target, "utf8")).toBe(JSON.stringify(baseline));
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("driver records reject public directories before creating a record", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "synthetic-public-directory-"));
+  const name = "container-api-verification-baseline.json";
+  const baseline = baselineRecord({ ...identity(app, version), workerVersion }, app.account_id);
+  try {
     chmodSync(temp, 0o755);
     expect(() => writeRecord(temp, name, baseline)).toThrow("verification_record");
-    chmodSync(temp, 0o700);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("driver records reject path escape and oversized output before creating a record", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "synthetic-invalid-record-"));
+  const name = "container-api-verification-baseline.json";
+  const baseline = baselineRecord({ ...identity(app, version), workerVersion }, app.account_id);
+  try {
     expect(() => writeRecord(temp, "../outside.json", baseline)).toThrow("verification_record");
     expect(() => writeRecord(temp, name, { payload: "x".repeat(1025) })).toThrow(
       "verification_record",
     );
   } finally {
-    chmodSync(temp, 0o700);
     rmSync(temp, { recursive: true, force: true });
   }
 });
