@@ -298,6 +298,16 @@ describe("date-only prices", () => {
     }
   });
 
+  test("zone names are compared by the runtime's canonical spelling", () => {
+    // A policy must spell its zone canonically, so its digest has one form.
+    expect(validPriceSelectionPolicy(policy({ zone: "asia/tokyo" }))).toBe(false);
+    expect(validPriceSelectionPolicy(policy({ zone: "Asia/Tokyo" }))).toBe(true);
+    // A stored date's zone in another case is the policy's zone.
+    const civil = policy({ dateOnly: "civil-date-in-zone" });
+    const dated = candidate({ id: "dated", amount: "146", time: date("2026-09-10", "asia/tokyo") });
+    expect(selected(selectPrice(USD, [dated], BOUND, civil, null)).candidate).toBe(dated);
+  });
+
   test("a date and an instant on the same top day: refused when they differ, one value when they agree", () => {
     const civil = policy({ dateOnly: "civil-date-in-zone" });
     const dated = candidate({ id: "dated", amount: "146", time: date("2026-09-10") });

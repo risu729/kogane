@@ -222,6 +222,17 @@ function civilDateFormat(zone: string): Intl.DateTimeFormat | null {
 }
 
 /**
+ * The runtime's own spelling of a zone name (`resolvedOptions().timeZone`:
+ * `asia/tokyo` is `Asia/Tokyo`), or null for a zone it does not know. Whether
+ * an alias (`Japan`) maps to its target depends on the runtime; this does not
+ * guess.
+ */
+export function canonicalZone(zone: string): string | null {
+  if (!validZone(zone)) return null;
+  return civilDateFormat(zone)?.resolvedOptions().timeZone ?? null;
+}
+
+/**
  * The civil date (`YYYY-MM-DD`) of an RFC 3339 instant in a named IANA zone,
  * from the runtime's zone data (`Intl.DateTimeFormat("en-CA", { timeZone })`,
  * the pattern packages/collection/src/schedule-model.ts uses). Null when the

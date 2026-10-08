@@ -3,6 +3,7 @@ import { captureDate } from "../src/reported-state.ts";
 import {
   addDays,
   addMonths,
+  canonicalZone,
   civilDateOfInstant,
   compareTemporal,
   daysBetween,
@@ -271,5 +272,12 @@ describe("civil date of an instant in a named zone", () => {
     expect(civilDateOfInstant("2026-09-07T00:00:00", "Asia/Tokyo")).toBeNull();
     // Year 0 is rendered as an era year by the runtime; refused rather than misread.
     expect(civilDateOfInstant("0000-01-01T12:00:00Z", "UTC")).toBeNull();
+  });
+
+  test("the runtime's spelling of a zone, or null", () => {
+    expect(canonicalZone("asia/tokyo")).toBe("Asia/Tokyo");
+    expect(canonicalZone("Asia/Tokyo")).toBe("Asia/Tokyo");
+    expect(canonicalZone("Mars/Olympus_Mons")).toBeNull();
+    expect(canonicalZone("+09:00")).toBeNull();
   });
 });

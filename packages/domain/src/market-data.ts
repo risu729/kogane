@@ -50,6 +50,7 @@ import {
 } from "./price-sources.ts";
 import {
   addDays,
+  canonicalZone,
   civilDateOfInstant,
   compareTemporal,
   daysBetween,
@@ -208,7 +209,13 @@ function uniqueListOf<const T extends readonly string[]>(
 
 /** A zone name the runtime knows; an unknown zone would make every civil date null. */
 function knownZone(value: unknown): value is string {
-  return validZone(value) && civilDateOfInstant("2000-01-01T00:00:00Z", value) !== null;
+  // Spelled as the runtime spells it, so a policy's digest has one form.
+  return validZone(value) && canonicalZone(value) === value;
+}
+
+/** A stored zone (any case the runtime accepts) that is the policy's zone. */
+function inZone(zone: string | null, policyZone: string): boolean {
+  return zone !== null && (zone === policyZone || canonicalZone(zone) === policyZone);
 }
 
 export function validFreshness(value: unknown): value is Freshness {
@@ -535,7 +542,7 @@ function latestPossibleDay(candidate: PriceCandidate, policy: PriceSelectionPoli
   const time = candidate.price.effectiveTime;
   if (time.kind === "instant") return civilDateOfInstant(time.value, policy.zone);
   if (time.kind !== "local-date") return null;
-  return time.zone === policy.zone ? time.value : shiftDate(time.value, 1);
+  return inZone(time.zone, policy.zone) ? time.value : shiftDate(time.value, 1);
 }
 
 /** Why a candidate is not considered at all, or null when it is eligible. */
@@ -566,7 +573,7 @@ function exclusionOf(
     // after the as-of date. A date of another zone, or of none, lies on one of
     // three days of this zone (D − 1 … D + 1); only one certainly after the
     // as-of date is excluded here, the rest are placed (or refused) in step 4.
-    const latest = time.zone === policy.zone ? time.value : shiftDate(time.value, -1);
+    const latest = inZone(time.zone, policy.zone) ? time.value : shiftDate(time.value, -1);
     return latest <= bound.asOfDate ? null : "effective_at_or_after_bound";
   }
   const order = instantOrder(time.value, bound.effectiveBefore);
@@ -766,7 +773,8 @@ function selectFromGroup(
       { kind: "instant" | "local-date" }
     >;
     if (time.kind === "local-date") {
-      if (time.zone === policy.zone) placed.push({ candidate, day: time.value, instant: null });
+      if (inZone(time.zone, policy.zone))
+        placed.push({ candidate, day: time.value, instant: null });
       else unplaced.push(candidate);
       continue;
     }
