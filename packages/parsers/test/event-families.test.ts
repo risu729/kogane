@@ -551,8 +551,8 @@ const NOT_LINK_FIELDS: Record<string, readonly string[]> = {
   "v-point-pay/v-point-pay-notification-event": ["_kogane.settlementDisposition"],
   // Web rows: a payment-pattern flag. Customized rows: a conversion date, a
   // per-row payment date and total that are empty on every fixture row, and
-  // `tesuWariKin`, equal to the usage amount on every fixture row (see the
-  // registry entry).
+  // `tesuWariKin`, equal to the magnitude of the usage amount on every fixture
+  // row, the refund row included (see the registry entry).
   "vpass/vpass-statement-page": [
     "shiharaiPatternFlag",
     "kanzanDate",

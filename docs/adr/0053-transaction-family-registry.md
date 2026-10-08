@@ -43,7 +43,9 @@ documentation described them inaccurately:
 - The V Point Pay id is the SHA-256 of the stored notification message (the
   outer message hash for a direct delivery, not for a forwarded one, so two
   deliveries of one notice can carry two ids), recorded as
-  `normalized-event-id`, which stage A reads as provider-issued; the
+  `normalized-event-id`, which stage A reads as provider-issued (no effect
+  today: V Point Pay is in no reconciliation slice; only Vpass and MyJCB are);
+  the
   documentation listed it as a provider row id.
 - V Point history rows carry no external id at all.
 
@@ -146,8 +148,10 @@ roadmap's phases 6–7, and a [domain contracts](../domain-contracts.md) entry.
   emits a transaction or position row on its fixtures, or a parser name is
   added to or removed from PARSERS without a registry decision. It proves what
   the fixtures exercise, not every shape a provider can send: a link field
-  whose key does not look like one (a name outside the test's pattern) or a
-  row shape no fixture carries is not caught. A new family or reason is a
+  whose key does not look like one (a name outside the test's pattern), a
+  value inside an array (the scan walks object keys only, so the SBI domestic
+  trade `rawCells` and the GLOBAL PASS `sourceViews` cell arrays are never
+  checked), or a row shape no fixture carries is not caught. A new family or reason is a
   reviewed contract change.
 - The writer/guard contract shared with #550 and #556 — where own-transfer
   candidates live, what adopts a transfer, the cross-family holder (INV06),

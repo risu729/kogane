@@ -25,7 +25,9 @@ export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-
  *   (a Suica SF balance, a PayPay balance, a V Point Pay prepaid balance): a
  *   fare or payment is spending from it, a charge is funding it (and also
  *   `prepaid-funding`). Never paired as an own-account transfer leg.
- * - `fx-exchange`: one currency exchanged for another inside one provider.
+ * - `fx-exchange`: one currency exchanged for another inside one provider,
+ *   including the conversion inside a foreign-currency card or wallet use
+ *   (GLOBAL PASS, Vpass, Sony WALLET, PayPay).
  * - `overseas-remittance`: money sent to or received from another country.
  * - `securities-order`, `securities-execution`, `securities-settlement-cash`:
  *   a securities order, its fill (quantity change), and the cash that settles it.
@@ -542,7 +544,8 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     // delivery the outer message hash, for a forwarded one not (so two
     // deliveries of one notice can carry two ids). The parser records it as
     // `normalized-event-id`, which stage A reads as provider-issued — a limit
-    // until a parser release records its origin. A notification does not
+    // until a parser release records its origin, with no effect today: V Point
+    // Pay is in no reconciliation slice (only Vpass and MyJCB are). A notification does not
     // establish settlement; charge events fund the balance from a source the
     // notice does not link.
     sourceId: "v-point-pay",
@@ -578,8 +581,8 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     // The customized (unconfirmed) rows have an exact key set that includes
     // the local-currency amount and code (`genchiKin`, `tukaRyaku`) and the
     // conversion rate (`kanzanRate`). Not declared: `tesuWariKin` (equal to the
-    // usage amount on the fixture rows; whether it is ever a separate fee is
-    // unobserved), `kanzanDate` (a conversion date, not a settlement date) and
+    // magnitude of the usage amount on the fixture rows, the refund row
+    // included; whether it is ever a separate fee is unobserved), `kanzanDate` (a conversion date, not a settlement date) and
     // the row `shiharaiDate` (empty on every fixture row; meaning unobserved).
     sourceId: "vpass",
     parserName: "vpass-statement-page",
