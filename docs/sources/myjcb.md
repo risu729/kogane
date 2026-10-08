@@ -578,7 +578,7 @@ round 4 の構造調査で、position 8 の page は h1 「ショッピングス
 
 - **保存名。** collector は支払予定 page の h1 だけを見る（`schedulePageKind`）。空白を除いて 「ショッピングスキップ払いご利用明細(未確定分)」 に一致する h1 がちょうど一つなら `credit-skip-payment-NN.html`、それ以外（ボーナス払いの page、見出しがない・二つある・全角括弧など）は従来どおり `credit-schedule-NN.html` として保存する。ボーナス払いの h1 は amendment (j) から種類 `bonus` として認識するが、保存名は `credit-schedule-NN.html` のままである。manifest、code、coverage は変わらない。
 - **registration。** `credit-skip-payment-NN.html` だけが dataset `credit-schedule` を得る。`credit-schedule-NN.html` は dataset なしで、parse job は作られない。
-- **parser。** `myjcb-skip-payment-schedule@0.1.1`（amendment (f)、観測は 0.1.0 と同じ）は観測された形だけを読む。h1、行がある場合の as-of 見出し（一つ、暦上の日付と月）、行のある ledger が一つ以下、head が観測どおりの 3 cell、ledger の子要素が head とそれに続く `content` 行だけ（ほかの入れ子の行は空の ledger と読まずに拒否する）、各行が 3 cell の `item-cell` 一つで中央の cell がちょうど 2 行（1 行目がご利用先など、2 行目がお支払日）、日付が `YYYY/MM/DD`、金額が exact な円。本文の配置は記録されていないので、head と同じ配置だけを読む。それ以外は閉じた code（`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`）で拒否し、message はその code だけである。行のない ledger は 0 行で、失敗ではない。空の ledger は、`content` 行が一つだけで、それが観測された空の行（`item-cell` 一つ、その中に `div.cell.w-100per` 一つ、空白を除いて 「ご利用明細はございません。」）の場合に限る。空の行がほかの行と並べば、未観測の組み合わせとして `schedule_row_shape_unobserved` で拒否する。kind が `types.ts` の外で宣言されているので、processor が書き込む前に `scheduled_payment` の行を検査する（`scheduledPaymentRows`: このパーサー以外からの行、宣言外の key、暦上でない日付、正準でない整数の金額などは `parse_contract_invalid`）。
+- **parser。** `myjcb-skip-payment-schedule@0.1.2`（amendment (f) と (k)、観測は 0.1.0 と同じ）は観測された形だけを読む。h1、行がある場合の as-of 見出し（一つ、暦上の日付と月）、行のある ledger が一つ以下、head が観測どおりの 3 cell、ledger の子要素が head とそれに続く `content` 行だけ（ほかの入れ子の行は空の ledger と読まずに拒否する）、各行が 3 cell の `item-cell` 一つで中央の cell がちょうど 2 行（1 行目がご利用先など、2 行目がお支払日）、日付が `YYYY/MM/DD`、金額が exact な円。本文の配置は記録されていないので、head と同じ配置だけを読む。それ以外は閉じた code（`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`）で拒否し、message はその code だけである。行のない ledger は 0 行で、失敗ではない。空の ledger は、`content` 行が一つだけで、それが観測された空の行（`item-cell` 一つ、その中に `div.cell.w-100per` 一つ、空白を除いて 「ご利用明細はございません。」。または、その `item-cell` が reader の class を持たない `div` 一つに包まれた形。amendment (k)）の場合に限る。空の行がほかの行と並べば、未観測の組み合わせとして `schedule_row_shape_unobserved` で拒否する。kind が `types.ts` の外で宣言されているので、processor が書き込む前に `scheduled_payment` の行を検査する（`scheduledPaymentRows`: このパーサー以外からの行、宣言外の key、暦上でない日付、正準でない整数の金額などは `parse_contract_invalid`）。
 - **観測。** 各行は `scheduled_payment` の観測として `scheduled_payment_observations`（migration 0061、append-only）に入る：ご利用日、お支払日（`due_date`）、今後のお支払い金額（exact な整数の decimal 文字列、表示の符号）、ご利用先など（`counterparty`）、page の as-of 日付、`extra_json` に表示 cell と 「YYYY年M月以降のお支払い分」 の月。external id は表示 cell の fingerprint と出現順で、as-of 日付を含まない。
 - **読むもの。** 取引でも残高でもないので、read path、card purchase recognition、settlement の候補、identity はこの table を読まない。二重計上はない（INV06）。
 
@@ -680,6 +680,20 @@ collector と明細 parser の変更：
 production への影響（制限として）：保存済みの `credit-detail-07.html` はすべてボーナス払い page で、月として登録されている（position 7 を保存した run 215–719 の 12 run、run 908、この deploy までの以後の run。run 956 の 10 明細 page にも含まれる。run 921 と 940 は position 別に数えていない）。amendment (h) の前に保存された `credit-detail-08.html`（スキップ払い page）も同じである。どれも 1.3.0（2026-09-29 以降。それ以前は前の version）で観測なしの `ok` と `statement_total_not_confirmed` になり、total は出ていない（`(確定分)` の h1 がない）。ただし公開されている読みは明細の読みで、ボーナス払い page の日付つき h2 と total の間には h1 の規則しかなかった。deploy は何も書き換えない。repair lane が保存済みの page を 1.4.0 で再 parse し、その `ok` run（`schedule_page_not_statement`）が各 artifact の 1.3.0 の `ok` run を置き換えて公開の pointer を持つ（`publishBatch`）。read model から見える観測は変わらない（どちらも観測なし）。run 908、921、940 の `manifest_artifact_ambiguous` の artifact は、manifest が固定の evidence なので 1.4.0 でも失敗のままである。対象の artifact の数は数えていない。
 
 制限：round 9 の menu は一つの connection の一夜である。支払予定の見出しの level が変わる、または案内の見出しが link より前に移ると、connection は最初の月の前で止まる（推測しない）。ボーナス払い page は行のある状態でまだ観測されていない。請求なしの page を認識する独自の規則はなく、`(確定分)` の h1 も ledger もないので `unknown` になる。
+
+### 一段深い空の行（2026-10-08、ADR 0005 の amendment (k)）
+
+owner は、2026-10-06 の夜間 run で保存されたスキップ払い page 一件（artifact 11644。`myjcb-skip-payment-schedule@0.1.1` が `schedule_row_shape_unobserved` で拒否した）を、SHA-256 と大きさで特定して読み、構造、件数、真偽値だけを共有した。文字列、値、provider の class 名は共有されておらず、ここにも記録しない。
+
+- **page。** スキップ払いの h1 ちょうど一つ、`detail-list-01` 一つ（子要素は `div.head` とそれに続く `content` 行だけ）、head は観測どおりの 3 cell。ここまでは空の page として知られた形である。
+- **行。** `content` 行は一つで、`div.content > div > div.item-cell > div.cell.w-100per` である。間の `div` は reader が見る class（`detail-list-01`、`head`、`content`、`item-cell`、`cell`、`w-100per`）をどれも持たない。どの段も子要素はちょうど一つで、cell は子要素を持たない。行から cell までのどの段も、空白を除いた文字列がちょうど 「ご利用明細はございません。」 である。amendment (f) の空の行が一段深くなった形で、0.1.1 は `item-cell` が行の直接の子であることを求めたので、行として数えて拒否した。
+- **parser（`myjcb-skip-payment-schedule@0.1.2`）。** `isEmptyLedgerRow` がこの形も空の行と読む。規則は amendment (f) と同じで、ledger の `content` 行が一つだけのときに限り 0 行、ほかの行と並ぶ、または二つあれば `schedule_row_shape_unobserved` で拒否する。包む `div` が二段以上、包む要素が `div` でない、reader の class を持つ、ほかの子要素や文字列を持つ、別の文言、cell の中の要素、データ行を包んだ形は拒否する。データ行は従来どおり、包まれない 3 cell の `item-cell` だけを読む。拒否の code は増やさない。観測は 0.1.1 と同じ。判定は reader の既存の helper（`children`、`hasClass`、`text`、`compact`）で書き、別の module や依存は足さない。
+- **release。** reader の module は h1 の判定（amendment (j) の `myjcb-schedule-page-kind.ts`）を通じて四つの MyJCB 明細 parser の digest に含まれる。そのため `myjcb-credit-ledger@1.2.3`、`myjcb-credit-past-month-balances@1.1.6`、`myjcb-credit-statement-total@1.4.1`、`myjcb-canonical-evidence-boundary@1.1.6` は digest だけが変わり、どの page も前の release と同じに読む。processor が release を自分で登録するので migration は追加しない。
+- **collector。** 変えない。共有の明細の読み取りは行の下のどの深さの `item-cell` も見るので、この行をすでに 0 行と数えていた。page は h1 で保存される。
+
+deploy は何も書き換えない。repair lane が保存済みの artifact を五つの新しい release で読み直すと、この形のスキップ払い page は観測なしの `ok` になり、明細の artifact は同じ観測の `ok` run が前の run を置き換える（件数は数えていない）。
+
+制限：読んだのは一件だけで、ほかの保存済みスキップ払い page（amendment (i) の最初の一件を含む）がこの形かどうかは確かめていない。round 5 の要約がこの `div` を省いたのか、その後に page が変わったのかも分からない。ほかの形は従来どおり拒否する。行のある page は未観測のままである。production での replay と deploy はこの変更では確かめていない。
 
 ## カード情報（引落口座）（2026-09-27、ADR 0032 の amendment）
 

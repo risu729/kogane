@@ -17,6 +17,53 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MyJCB: the skip-payment empty row inside one more div (schedule parser 0.1.2)
+
+2026-10-08. The owner read one stored skip-payment capture from the nightly
+run of 2026-10-06 (artifact 11644), which `myjcb-skip-payment-schedule@0.1.1`
+had refused with `schedule_row_shape_unobserved`, and reported its structure,
+counts and booleans only, no text or value
+([ADR 0005's amendment (k)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-08-k-the-skip-payment-empty-row-inside-one-more-div)):
+
+- **The page is the known empty page but for one level.** One exact skip h1,
+  one `detail-list-01` whose children are its head and then `content` rows
+  only, and the observed three-cell head. Its one `content` row is
+  `div.content > div > div.item-cell > div.cell.w-100per`: the `div` carries
+  none of the reader's classes, every level has exactly one element child,
+  the cell has none, and every level shows exactly the empty label
+  「ご利用明細はございません。」 after whitespace removal. It is amendment (f)'s
+  empty row one level down; 0.1.1 required the `item-cell` as the row's own
+  child, so the row was a row and the page was refused.
+- **`myjcb-skip-payment-schedule@0.1.2`** reads that row as the empty row,
+  under the same rule as amendment (f)'s: zero rows only as its ledger's one
+  `content` row; beside any other row, or twice, it is refused
+  (`schedule_row_shape_unobserved`). Two wrapper levels, a wrapper with a
+  reader class, another element child or text, another label, and a wrapped
+  data row are refused. Every observation is as in 0.1.1; no refusal code is
+  added.
+- **Four statement releases, digest only.** The reader's module is in the
+  digest closure of the four MyJCB statement parsers (their h1 reading,
+  amendment (j)), so `myjcb-credit-ledger@1.2.3`,
+  `myjcb-credit-past-month-balances@1.1.6`,
+  `myjcb-credit-statement-total@1.4.1` and
+  `myjcb-canonical-evidence-boundary@1.1.6` are released; each reads every
+  page as its previous release did. No migration: the processor registers
+  releases itself.
+- **The collector is unchanged.** Its shared statement reading finds the
+  `item-cell` at any depth under the row, so it already counted this row as
+  zero and stored the page by its h1.
+
+Deploying rewrites nothing. The repair lane re-parses stored artifacts under
+the five new releases: a stored skip page of this shape can then be read
+`ok` with no observation, and each re-parsed statement artifact gets an `ok`
+run with the same observations, superseding its previous one. Limits: one
+capture was read, and whether the other stored skip pages have this shape is
+not established; production replay and deployment are not verified by this
+change. Tests: `packages/parsers/test/myjcb-skip-payment-schedule.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`,
+`packages/read-model/test/card-usage.test.ts`,
+`services/processor/test/myjcb-shared-r2.test.ts`.
+
 ## GLOBAL PASS empty months are read as no rows (activity parser 1.2.0)
 
 2026-10-04. The owner observed live (round 8, English display) that a month

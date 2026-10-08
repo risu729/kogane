@@ -51,7 +51,10 @@ const PAST_ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-past-months\.json$
  */
 export const myJcbCreditLedger: Parser = {
   name: "myjcb-credit-ledger",
-  version: "1.2.2",
+  // 1.2.3 reads every page as 1.2.2: only its digest moved, with the shared
+  // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
+  // amendment k).
+  version: "1.2.3",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -206,7 +209,10 @@ export const myJcbCreditLedger: Parser = {
 
 export const myJcbPastMonthBalances: Parser = {
   name: "myjcb-credit-past-month-balances",
-  version: "1.1.5",
+  // 1.1.6 reads every page as 1.1.5: only its digest moved, with the shared
+  // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
+  // amendment k).
+  version: "1.1.6",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -393,7 +399,10 @@ function statementPageState(document: StatementNode): {
  */
 export const myJcbCreditStatement: Parser = {
   name: "myjcb-credit-statement-total",
-  version: "1.4.0",
+  // 1.4.1 reads every page as 1.4.0: only its digest moved, with the shared
+  // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
+  // amendment k).
+  version: "1.4.1",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.dataset === "credit-detail" &&
@@ -508,7 +517,10 @@ export const myJcbCreditStatement: Parser = {
 
 export const myJcbEvidenceOnly: Parser = {
   name: "myjcb-canonical-evidence-boundary",
-  version: "1.1.5",
+  // 1.1.6 reads every page as 1.1.5: only its digest moved, with the shared
+  // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
+  // amendment k).
+  version: "1.1.6",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
