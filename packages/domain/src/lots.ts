@@ -231,6 +231,7 @@ export const LOT_REASON_CODES = [
   "unknown_time",
   "negative_holding",
   "unknown_cost",
+  "unknown_acquisition_fee",
   "unknown_proceeds",
   "snapshot_mismatch",
   "unknown_lot",
@@ -321,8 +322,8 @@ export const LOT_DISPOSAL_OUTCOMES = ["allocated", "limited", "indeterminate"] a
 export type LotDisposalOutcome = (typeof LOT_DISPOSAL_OUTCOMES)[number];
 
 /**
- * `allocated`: every unit came from a lot and cost, proceeds and fees are
- * known. `limited`: every unit came from a lot, but something is unknown or
+ * `allocated`: every unit came from a lot and cost, acquisition fees,
+ * proceeds and disposal fees are all known. `limited`: every unit came from a lot, but something is unknown or
  * not summable (the reasons say what). `indeterminate`: no allocation at all.
  * There is no gain field: cost and proceeds are reported side by side.
  */
@@ -1016,6 +1017,10 @@ function applyDisposal(
       roundingInputs: { cost: cost.roundingInputs, acquisitionFees: fees?.roundingInputs ?? null },
     });
     for (const reason of amountReasons(cost.share, "unknown_cost")) reasons.add(reason);
+    // An unknown acquisition fee is reported under either fee mode: excluded
+    // from cost, it is still part of what a later P&L would need.
+    for (const reason of amountReasons(fees?.share ?? null, "unknown_acquisition_fee"))
+      reasons.add(reason);
     lot.remaining = subtractDecimals(lot.remaining, take);
     lot.remainingCost = combine(lot.remainingCost, cost.share, -1);
     if (lot.remainingFees !== null && fees !== null)

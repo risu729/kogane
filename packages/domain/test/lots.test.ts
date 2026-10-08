@@ -312,14 +312,21 @@ describe("acquisition fees", () => {
     expect(amountText(disposal!.allocations[0]!.cost)).toBe("unknown:fee_unknown");
     expect(disposal!.allocatedCost).toBeNull();
     expect(disposal!.outcome).toBe("limited");
-    expect(disposal!.reasonCodes).toEqual(["unknown_cost"]);
+    expect(disposal!.reasonCodes).toEqual(["unknown_acquisition_fee", "unknown_cost"]);
     expect(computed(computeLots(inputs, policy())).partition).toBe("partial-verified-scope");
-    const excluded = onlyBook(computeLots(inputs, policy({ acquisitionFee: "exclude" })));
-    expect(amountText(excluded.disposals[0]!.allocations[0]!.cost)).toBe("400 JPY");
-    expect(amountText(excluded.disposals[0]!.allocations[0]!.acquisitionFees)).toBe(
-      "unknown:fee_unknown",
-    );
-    expect(excluded.disposals[0]!.outcome).toBe("allocated");
+  });
+
+  test("review finding 4: an unknown excluded fee keeps the disposal limited, never complete", () => {
+    const fees = [absentQuantity("JPY", "missing", "not_stated")];
+    const inputs = [...withFee(fees), sell("s", "2030-01-07", "10", "1200")];
+    const result = computeLots(inputs, policy({ acquisitionFee: "exclude" }));
+    const disposal = onlyBook(result).disposals[0]!;
+    expect(amountText(disposal.allocations[0]!.cost)).toBe("1000 JPY");
+    expect(amountText(disposal.allocations[0]!.acquisitionFees)).toBe("unknown:fee_unknown");
+    expect(quantityText(disposal.allocatedCost)).toBe("1000");
+    expect(disposal.outcome).toBe("limited");
+    expect(disposal.reasonCodes).toEqual(["unknown_acquisition_fee"]);
+    expect(computed(result).partition).toBe("partial-verified-scope");
   });
 
   test("a consideration that is not stated is consideration_missing, never zero", () => {
