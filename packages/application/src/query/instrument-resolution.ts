@@ -1,4 +1,4 @@
-// Cross-identifier instrument resolution (ADR 0046, docs/identity.md): which
+// Cross-identifier instrument resolution (ADR 0048, docs/identity.md): which
 // stored instrument identifiers may denote the same instrument, on what
 // evidence, what keeps a pair apart, and where each identifier stands. A read
 // only: it never writes and never adopts. A candidate names the existing

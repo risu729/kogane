@@ -1,4 +1,4 @@
-# ADR 0046: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping
+# ADR 0048: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping
 
 - Status: proposed until this PR merges; accepted upon merge
 - Date: 2026-10-08

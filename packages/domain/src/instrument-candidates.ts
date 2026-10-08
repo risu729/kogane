@@ -1,4 +1,4 @@
-// Cross-identifier instrument candidates (ADR 0046, docs/identity.md).
+// Cross-identifier instrument candidates (ADR 0048, docs/identity.md).
 //
 // Two stored instrument identifiers can denote the same instrument: the same
 // security seen under a listing identifier at one source and under a bare

@@ -76,7 +76,7 @@ at one source and a provider code at another, or a listing and a code inside
 SBI when a trade names a venue the SBI rule does not map. Every such
 identifier keeps its own rule mapping until a person re-maps it.
 `queryInstrumentResolution` (`packages/application/src/query/instrument-resolution.ts`,
-[ADR 0046](adr/0046-instrument-candidates.md)) reads the security, crypto and
+[ADR 0048](adr/0048-instrument-candidates.md)) reads the security, crypto and
 product identifiers that current published observations use and answers,
 under policy `instrument-candidates-v1`:
 
