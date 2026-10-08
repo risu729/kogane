@@ -13,6 +13,7 @@ are separate claims. Historical acceptance records are linked from the
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Collection           | Twelve enabled daily collector schedules, shared raw evidence and source-specific manual paths; separate PRESTIA bank Worker implemented                        | A collector's presence does not prove every account/data type is captured or published                                     |
 | Evidence and parsing | Immutable raw evidence, sealed inventories, versioned parsers, adoption and replay                                                                              | Older permanently blocked terminals remain blocked; partial or unsupported shapes remain explicit                          |
+| Collection quality   | Read-only per job, source and source/unit/dataset/period stage states in closed reason codes ([ADR 0045](adr/0045-collection-quality-read.md))                  | No page yet; not verified on production; some per-query rules, empty captures and retention caps are not distinguished     |
 | Scheduling           | Fourteen active alarm jobs: twelve daily collectors, SBI VC keepalive and Processor tick; two unsupported source jobs and the pending PRESTIA bank job disabled | Maintenance research is manually refreshed; a saved setting with pending reservation is not an armed alarm                 |
 | UI                   | Evidence/history, transactions, balances, positions, reported state, card review and schedule settings                                                          | A view or empty list is not proof of complete financial coverage                                                           |
 | Identity             | Source-local identities, mappings and append-only decisions                                                                                                     | Cross-source account/instrument equivalence and unresolved identities still need review                                    |
@@ -55,9 +56,14 @@ are separate claims. Historical acceptance records are linked from the
   (`parser_rejected`, as under 1.0.0 and 1.1.0). Which check refused those 2
   is not stored; the owner's counts-only replay
   (`replay-diagnostics.ts globalpass-activity 2`, see
-  [operations](operations.md#replaying-a-parser-rejection)) names it. The
-  empty month was observed in English only. A newer empty capture of a month
-  supersedes an older capture with rows under the per-month rule; since
+  [operations](operations.md#replaying-a-parser-rejection)) names it. For one
+  of them it reported `unclassified_table`: 10 records but 9 detail pairs
+  and a two-header table whose meaning is unobserved; the replay now also
+  prints which record each pair carries and how that table compares, as
+  closed values, and no parser change has followed
+  ([observations](observations.md#global-pass-a-refused-page-has-ten-records-and-nine-detail-pairs-replay-diagnostics-no-parser-release)).
+  The empty month was observed in English only. A newer empty capture of a
+  month supersedes an older capture with rows under the per-month rule; since
   2026-10-08 `/api/meta` names such months (`globalPassEmptyMonths`) and the
   web app shows a notice to check the provider, without changing what is
   current (implemented; its deployment is not asserted here). A read-only
