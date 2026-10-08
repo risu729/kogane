@@ -285,11 +285,42 @@ row recognition stores as `NULL` never pairs rows there either.
 
 ### Common consumption guard (migration 0070)
 
-[ADR 0054](adr/0054-economic-consumption-guard.md). **Schema only: no writer
-writes claims, seals or commit rows yet.** The card purchase lane and the card
-settlement commands write exactly what they wrote before; they join in G1b.
-0070 is additive (nothing rewritten, no backfill), and every new trigger on an
-existing table fires only once a seal or an `economic_claims` row exists.
+[ADR 0054](adr/0054-economic-consumption-guard.md). 0070 is additive (nothing
+rewritten, no backfill), and every new trigger on an existing table fires only
+once a seal or an `economic_claims` row exists. Two writers write the guard's
+rows (G1b, [ADR 0054 amendment](adr/0054-economic-consumption-guard.md#amendment-g1b-as-implemented-2026-10-08)):
+
+- the [card purchase lane](#card-purchase-recognition) ends every batch
+  (recognize, revise, reanchor, retire, merge, split, rule or reviewed) with a
+  revision seal per member revision and one commit row. Its keys are its claims
+  in book `card-usage`, read through `economic_revision_claims`; it writes no
+  `economic_claims` row and releases nothing (a revision restates its prior's
+  keys, a merge holds both events' keys, a split divides them between its two
+  members, all checked by statement 1; a draft that dropped a key would be
+  refused with `economic_commit_released_mismatch`). Its entry is its decision,
+  whose digest names the writer release (`CARD_PURCHASE_WRITER_RELEASE`), so a
+  batch of this release never reuses a pre-guard decision id. Its seals pin no
+  identity revision, only the identity epoch the tick read;
+- the [card settlement commands](#statement-settlement-review): an acceptance
+  writes an `economic_claims` row for its bank debit (book `cash-movement`,
+  the `bank_key` 5-tuple, the alias class below), its accepted decision, a
+  seal and a commit row; a withdrawal seals its `unknown` revision and logs a
+  commit row releasing that claim, and still writes
+  `card_settlement_allocation_withdrawals`. Both are entered on the receipt
+  for the operation's payload and plan. The plan pins the event head
+  (`economic-event:<id>`: 0 for an acceptance, the accepted revision for a
+  withdrawal).
+
+A human-adopted writer (today the settlement acceptance) consumes a row only
+through `humanAdoptedRowIdentity` (`packages/domain/src/row-identity.ts`):
+`admitIdentity` decides from the registry and the row's recorded origin, and an
+admitted row's alias class is
+`[source, components, resolved account id, rule version]` from the registry's
+provider identity function (`PROVIDER_IDENTITY_FUNCTIONS`): SMBC's provider id
+(`smbc-meisai-id-v1`) and SBI Shinsei's `txnReferenceNo`
+(`sbi-shinsei-txn-reference-no-v1`), each unique within one resolved account.
+SBI Shinsei's parser records no identity origin, so its debits are refused
+(`identity_origin_unrecorded`) until a parser release records it.
 
 | Object                          | Role                                                                                                                                                                                                                                                                                |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -320,15 +351,50 @@ none still held elsewhere, and the decisions under one operation and
 principal. Any of these raises, and D1 rolls the whole batch back. The closed
 codes are `ECONOMIC_GUARD_CODES` in `packages/domain/src/economic-contract.ts`.
 
-Limits, as of this migration: legacy settlements carry no alias class, so the
-same bank debit collected under two producers or namespaces is two keys to
-0070 and to today's readiness (0052 partitions by producer, 0044 compares the
-whole key) until the settlement writer records one (G1b). Whether production
-holds such a debit is not verified. 0070 refuses a new seal under a stale
-identity epoch, but does not refuse superseding a holder sealed under an older
-epoch: routing such holders to needs-review is the planners' and the
-selector's job (ADR 0054). Trigger behaviour and cost on remote D1 are not
-verified.
+A refused batch is rolled back whole; the change lifecycle's commit answers
+with the code as the second ref (`stale_context` for `economic_claim_held`,
+`alias_conflict`, `identity_epoch_changed`,
+`economic_commit_prior_not_superseded`, `economic_event_live_conflict` and
+`economic_revision_sealed`, `commit_failed` for the others), and the purchase
+lane counts it as `failed`.
+
+Limits:
+
+- Settlements accepted before G1b carry no alias class, so the same bank debit
+  collected under two producers or namespaces is two keys for them (0052
+  partitions by producer, 0044 compares the whole key); a settlement accepted
+  since G1b records its class. The class carries the resolved account, so the
+  two collection paths conflict only when their source accounts resolve to one
+  account (an identity assignment), not while they are two accounts. Whether
+  production holds such a debit is not verified.
+- Pre-guard revisions stay unlogged (`unlogged_economic_revisions`): a guard-era
+  revision that supersedes one is logged, its prior is not, and nothing is
+  backdated. A pre-guard decision id replayed after its revision was
+  superseded is refused (`economic_seal_invalid`), never written.
+- 0070 refuses a new seal under a stale identity epoch, but does not refuse
+  superseding a holder sealed under an older epoch: routing such holders to
+  needs-review is the planners' and the selector's job (ADR 0054).
+- Settlement leg subjects stay bare account ids (read through 0044's
+  tolerance); neither writer writes event times or leg effects.
+- Trigger behaviour and cost on remote D1 are not verified.
+
+Verified locally (synthetic data only): `packages/storage-d1/test/economic-commit-guard.test.ts`
+(the triggers and builders, ADR 0054), `packages/storage-d1/test/economic-card-purchase-lane.test.ts`
+(every lane batch sealed and logged with its keys as claims and nothing
+released, a replay writing nothing, a dropped key refused, guard-era decision
+ids apart from pre-guard ones and the pre-guard revision left unlogged, a
+pre-guard id replayed after supersession refused, merge and split commits
+listing every member, a failure at any statement of a split writing nothing,
+sealed merged revisions taking no sidecar or leg, a stale epoch refused, the
+`economic-event:` head), `packages/domain/test/row-identity.test.ts` (the
+provider identity functions and every refusal),
+`packages/read-model/test/card-settlement-readiness.test.ts` (`claim_available`),
+`services/processor/test/economic-card-settlement.test.ts` (what an acceptance
+and a withdrawal write, a resend, W1 in both orders with a synthetic
+own-transfer-shaped writer, T1 across two producers, W2, W3, W4, W6, W7, W8 and
+W9 with every table compared) and the last test of
+`services/processor/test/card-purchase.test.ts` (the lane's seals under the
+epoch its tick read).
 
 ### Where the decisions live
 
@@ -735,9 +801,16 @@ re-fetch that shows the same row is not a revision. Per key the lane writes:
 A different kind for a held key is never a revision; it is counted as a
 conflict and left for review. Every revision is one guarded `db.batch`
 (`cardPurchaseRecognitionWrites`), and its decision id is a digest of event,
-revision, content digest and action. A replay, a stale plan or a concurrent
-duplicate writes nothing in any table, and the 0047 trigger lets at most one
-live revision hold a key.
+revision, content digest, action and writer release
+(`card-purchase-recognition-v1:economic-guard-v1`). A replay, a stale plan or
+a concurrent duplicate writes nothing in any table, and the 0047 trigger lets
+at most one live revision hold a key. Each batch ends with a revision seal per
+member and one commit row of the [common consumption guard](#common-consumption-guard-migration-0070)
+(kind `card-purchase.<action>`, principal the rule's actor or the reviewer,
+the decision digest as payload digest, the keys as `card-usage` claims, nothing
+released), sealed under the identity epoch the tick read; a batch the commit
+row refuses (a key an economic claim holds, an epoch declared during the tick)
+is rolled back and counted as `failed`.
 
 A retired event keeps its keys, so no other event can take the row. Typical
 retirements: a pending row the next capture no longer shows (a Vpass month's
@@ -1427,3 +1500,11 @@ The confirmation flow uses `card-settlement.accept`, `card-settlement.reject`
 and `card-settlement.withdraw`. The last withdraws a judgement, not funds.
 All effects, receipt reservation and approval consumption share one guarded
 batch. Original source observations and historical decisions are preserved.
+Since G1b an acceptance and a withdrawal are writers of the
+[common consumption guard](#common-consumption-guard-migration-0070): an
+acceptance claims its bank debit in book `cash-movement` under the debit's
+alias class, after admitting the debit's identity (SMBC debits are admitted,
+SBI Shinsei debits are refused with `identity_origin_unrecorded`), and is
+refused while another writer holds the debit's key or alias class
+(`claim_available`); a withdrawal releases the claim. The event revision cites
+its statement and bank rows as `SourceFactRef` objects.

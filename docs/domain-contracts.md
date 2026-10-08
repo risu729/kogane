@@ -218,8 +218,15 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
   `_kogane` key of its recorded origin and how stage A reads it, the status
   vocabulary, the provider-stated link fields, and the family memberships with
   writer status `supported` (card purchases from Vpass/MyJCB, card settlement
-  debits from SMBC/SBI Shinsei) or `unsupported` with closed reasons.
+  debits from SMBC) or `unsupported` with closed reasons (SBI Shinsei
+  settlement debits: `identity_origin_unrecorded`, since registry v2).
   `FAMILY_SUPPORT` is the family-level statement.
+- `PROVIDER_IDENTITY_FUNCTIONS` (ADR 0054): the declared provider identity
+  functions a human-adopted writer computes alias classes with, per source,
+  parser and source-account scope, with their component fields and rule
+  version: SMBC's `id` (`smbc-meisai-id-v1`) and SBI Shinsei's
+  `txnReferenceNo` (`sbi-shinsei-txn-reference-no-v1`), each unique within one
+  resolved account. `providerIdentityFunction` is the lookup.
 - `transactionFamilyEntry`, `transactionFamilyEntries` and
   `familyUnsupportedReasons` are the pure lookups;
   `validTransactionFamilyEntry` rejects unknown keys and codes. The registry is
@@ -303,7 +310,9 @@ specific-identification`), scope, time basis, ordering rule, fee and FX
 ## `economic-contract.ts` — consumption, seals and commits
 
 [ADR 0054](adr/0054-economic-consumption-guard.md); enforced by CORE 0070, built
-by `packages/storage-d1/src/atomic/economic-commit.ts`. No writer uses it yet.
+by `packages/storage-d1/src/atomic/economic-commit.ts`. The card purchase lane
+and the card settlement acceptance and withdrawal write through it since G1b
+([economic events](economic-events.md#common-consumption-guard-migration-0070)).
 
 - `BOOKS` (`card-usage`, `cash-movement`, `security-quantity`) and
   `ConsumptionKey`, the 5-tuple whose text (`consumptionKeyText`) equals
@@ -330,6 +339,24 @@ by `packages/storage-d1/src/atomic/economic-commit.ts`. No writer uses it yet.
   `identity_resolver_missing`, `identity_absent`. `IDENTITY_REFUSALS` adds the
   holder-dependent `duplicate_unresolved`, `alias_conflict`,
   `identity_rekeyed` and `identity_epoch_changed`.
+
+## `row-identity.ts` — may a human-adopted writer consume this row
+
+[ADR 0054](adr/0054-economic-consumption-guard.md), identity rules.
+
+- `rowOriginBasis` reads a stored row's origin basis from the registry entry of
+  its parser and the row's own recorded `_kogane.identityOrigin`: a provider id
+  is `provider-id` only when the row records `provider-id`, otherwise
+  `unrecorded`; fingerprints, collector fingerprints and evidence digests keep
+  their basis whatever the row records; a parser outside the registry is
+  `unrecorded`.
+- `declaredAliasClass` applies the declared provider identity function to a
+  row and an account (null when none is declared, a component is missing or
+  not text, or the class is not the contract's); the readiness read computes
+  the same class in SQL.
+- `humanAdoptedRowIdentity` admits the row through `admitIdentity` (writer
+  `human`) and returns its alias class, or the closed refusal; a declared
+  function whose field the row lacks is `identity_absent`.
 
 ## `result.ts` — the shape UI and agents share
 

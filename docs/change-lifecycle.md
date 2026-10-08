@@ -57,13 +57,14 @@ the run is published.
 
 `expectedRevisions` is `{ subjectRef: revision }`:
 
-| Subject prefix                  | Meaning                        | "Current revision" is                                   |
-| ------------------------------- | ------------------------------ | ------------------------------------------------------- |
-| `account_mapping:`              | a `source_accounts.id`         | `max(account_mappings.revision)` for that reference     |
-| `instrument_mapping:`           | an `instrument_identifiers.id` | `max(instrument_mappings.revision)` for that identifier |
-| `relation:<kind>\|<from>\|<to>` | one typed relation triple      | the number of `entity_relations` rows for the triple    |
-| `proposal:`                     | a reconciliation proposal      | the highest revision of its `proposal:<id>` decisions   |
-| `card-purchase:`                | a recognised card purchase     | the event's live revision, 0 when it has none           |
+| Subject prefix                  | Meaning                        | "Current revision" is                                                                                                                                                            |
+| ------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account_mapping:`              | a `source_accounts.id`         | `max(account_mappings.revision)` for that reference                                                                                                                              |
+| `instrument_mapping:`           | an `instrument_identifiers.id` | `max(instrument_mappings.revision)` for that identifier                                                                                                                          |
+| `relation:<kind>\|<from>\|<to>` | one typed relation triple      | the number of `entity_relations` rows for the triple                                                                                                                             |
+| `proposal:`                     | a reconciliation proposal      | the highest revision of its `proposal:<id>` decisions                                                                                                                            |
+| `card-purchase:`                | a recognised card purchase     | the event's live revision, 0 when it has none                                                                                                                                    |
+| `economic-event:`               | an economic event's head       | its highest revision while live, its negation once superseded without a newer revision of its own (merged away), 0 when it has none (ADR 0054; the card settlement plans pin it) |
 
 A subject with no history answers `0`. The check is **not** a preceding
 `SELECT`: `expectedRevisionsSql()` is a condition of the receipt-reservation
@@ -432,7 +433,17 @@ Statuses: 400 invalid input, 403 refusal (`approval_required`,
 (`grants_misconfigured`, `command_executor_unavailable`). No error text
 carries provider content, an amount, a token or an exception string; `refs`
 holds safe identifiers only, and neither authorization code carries a subject
-or a configured value.
+or a configured value. A refusal by the common consumption guard (ADR 0054,
+CORE 0070) or by identity admission puts its closed code after the subject or
+plan id: `stale_context` with `economic_claim_held`, `alias_conflict`,
+`identity_epoch_changed`, `economic_commit_prior_not_superseded`,
+`economic_event_live_conflict` or `economic_revision_sealed` when a fresh plan
+would see the change; `commit_failed` with any other guard code; and
+`unsupported_semantics` with `identity_fingerprint_only`,
+`identity_origin_unrecorded`, `identity_digest_not_provider`,
+`identity_resolver_missing` or `identity_absent` when a card settlement's bank
+debit cannot be consumed by a human-adopted writer. A batch the guard refuses
+is rolled back whole; the commit answers with the code instead of an error.
 
 ## UI
 

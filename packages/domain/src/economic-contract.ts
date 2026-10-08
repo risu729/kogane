@@ -224,9 +224,10 @@ export function validHeadRef(value: unknown): value is HeadRef {
 }
 
 /**
- * The expected-revision subject of an event head (core/operations.ts
- * REVISION_OF gains this prefix when the first writer joins, G1b in ADR 0054;
- * `card-purchase:` keeps its meaning).
+ * The expected-revision subject of an event head. core/operations.ts
+ * REVISION_OF answers it (ADR 0054, G1b) with the highest revision while it is
+ * live, its negation once it is merged away, and 0 when there is none;
+ * `card-purchase:` keeps its meaning.
  */
 export const ECONOMIC_EVENT_SUBJECT_PREFIX = "economic-event:";
 export function economicEventSubject(eventId: string): string {
