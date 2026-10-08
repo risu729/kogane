@@ -126,6 +126,13 @@ the local synthetic snapshot adapter, and the production Worker are told apart b
 they implement, not by what they are called. The full table is in
 [frontend.md](frontend.md#api-metadata-and-capabilities).
 
+Beside the capabilities the production Worker reports two advisory counts,
+neither a capability nor a freshness claim: `parsingHealth` (registered parse
+jobs pending, running or failed) and `globalPassEmptyMonths` (GLOBAL PASS
+months whose current empty capture supersedes an older capture with rows;
+identifiers only, see [read model](read-model.md#card-snapshot-currentness-and-current-card-usage)).
+The web app shows each as a notice; the local store omits both.
+
 The schema for this object and for the query parameters each capability
 unlocks lives once, in `shared/api-schema.ts`. The local server's parameter
 rejection, the production Worker's, the response validator, and the client's

@@ -15,7 +15,12 @@
 //  * without table statistics (D1 runs no `ANALYZE`), the Transactions plan
 //    reads the artifacts once for the snapshot, as the per-key ranking did,
 //    and reaches a run's pages of a month by index, never by a scan per month
-//    (docs/read-model.md, Cost).
+//    (docs/read-model.md, Cost);
+//  * the empty-month notice (ADR 0026's amendment of 2026-10-08) names a month
+//    exactly when its current snapshot is empty and an older eligible snapshot
+//    of the month had rows, composes the currentness CTEs unchanged, matches
+//    an independent model on a scaled store with empty captures, and probes
+//    observations by run and month through the artifact index only.
 // Everything is synthetic: placeholder rows on CORE stores.
 import type { Database } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
@@ -23,7 +28,11 @@ import { CardStore } from "./card-usage-fixture";
 import { explain, type PlanStep } from "./card-usage-plan";
 import { fullCoreSchema } from "./card-usage-scale-fixture";
 import { activeStateProjection } from "../src/index";
-import { GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES, transactionsSql } from "../src/sql";
+import {
+  GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES,
+  GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL,
+  transactionsSql,
+} from "../src/sql";
 
 const ACTIVE = activeStateProjection.predicate;
 const PARSE_CHAIN = activeStateProjection.parseChain;
@@ -120,6 +129,18 @@ class GlobalPassStore {
       .all()
       .map((row) => (row as { id: number }).id);
   }
+  notices(): NoticeRow[] {
+    return this.store.db.query(GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL).all() as NoticeRow[];
+  }
+}
+
+/** One row of the empty-month notice read, as the SQL returns it. */
+interface NoticeRow {
+  source_id: string;
+  activity_month: string;
+  current_fetch_run_id: number;
+  superseded_fetch_run_id: number;
+  superseded_runs: number;
 }
 
 /** A deterministic generator, so a failing store can be rebuilt. */
@@ -221,6 +242,105 @@ describe("GLOBAL PASS activity snapshots", () => {
     expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([other, refilled]);
   });
 
+  test("notice: a newer empty month over an older capture with rows names the month and both runs", () => {
+    // The currentness is the limit pinned above: the empty page is current
+    // and the older rows are not. The notice reports exactly that pair and
+    // moves nothing.
+    const s = new GlobalPassStore();
+    const older = s.run();
+    s.page(older, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 2);
+    s.page(older, "activity-2099-01-p2.html", "2099-02-01T00:00:00Z");
+    const other = s.page(older, "activity-2098-12.html", "2099-02-01T00:00:00Z");
+    const newer = s.run();
+    const empty = s.page(newer, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 0);
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([other, empty]);
+    expect(s.notices()).toEqual([
+      {
+        source_id: "global-pass",
+        activity_month: "2099-01",
+        current_fetch_run_id: newer,
+        superseded_fetch_run_id: older,
+        superseded_runs: 1,
+      },
+    ]);
+    // The notice read leaves the current set exactly as it was.
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([other, empty]);
+    // A still newer capture with rows supersedes the empty one and clears it.
+    const latest = s.run();
+    const refilled = s.page(latest, "activity-2099-01.html", "2099-02-03T00:00:00Z");
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([other, refilled]);
+    expect(s.notices()).toEqual([]);
+  });
+
+  test("notice: a month that was only ever empty is not reported", () => {
+    const s = new GlobalPassStore();
+    const first = s.run();
+    s.page(first, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 0);
+    const second = s.run();
+    s.page(second, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 0);
+    // A sibling month with rows in both runs is not an empty month either.
+    s.page(first, "activity-2098-12.html", "2099-02-01T00:00:00Z");
+    s.page(second, "activity-2098-12.html", "2099-02-02T00:00:00Z");
+    expect(s.notices()).toEqual([]);
+  });
+
+  test("notice: a newer run that is not current (failed, or a page unparsed) is not reported", () => {
+    const s = new GlobalPassStore();
+    const older = s.run();
+    const rows = s.page(older, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 3);
+    // A failed run's empty page is never current, so the older rows stay current.
+    const failed = s.run("failure");
+    s.page(failed, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 0);
+    // A success run whose page 2 has no active parse is passed over as a whole.
+    const unparsed = s.run();
+    s.page(unparsed, "activity-2099-01.html", "2099-02-03T00:00:00Z", true, 0);
+    s.page(unparsed, "activity-2099-01-p2.html", "2099-02-03T00:00:00Z", false);
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([rows]);
+    expect(s.notices()).toEqual([]);
+  });
+
+  test("notice: an older capture that was never a whole snapshot does not count as rows that were shown", () => {
+    const s = new GlobalPassStore();
+    const older = s.run();
+    s.page(older, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 2);
+    // Its page 2 never parsed, so the month never had a current snapshot with rows.
+    s.page(older, "activity-2099-01-p2.html", "2099-02-01T00:00:00Z", false);
+    const newer = s.run();
+    const empty = s.page(newer, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 0);
+    expect(s.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual([empty]);
+    expect(s.notices()).toEqual([]);
+  });
+
+  test("notice: several older captures with rows are counted once each and the newest is named", () => {
+    const s = new GlobalPassStore();
+    const emptyFirst = s.run();
+    s.page(emptyFirst, "activity-2099-01.html", "2099-02-01T00:00:00Z", true, 0);
+    const rowsA = s.run();
+    s.page(rowsA, "activity-2099-01.html", "2099-02-02T00:00:00Z", true, 1);
+    const rowsB = s.run();
+    s.page(rowsB, "activity-2099-01.html", "2099-02-03T00:00:00Z", true, 4);
+    s.page(rowsB, "activity-2099-01-p2.html", "2099-02-03T00:00:00Z", true, 1);
+    const emptyLast = s.run();
+    s.page(emptyLast, "activity-2099-01.html", "2099-02-04T00:00:00Z", true, 0);
+    // Another month in the same store, current with rows: not reported.
+    s.page(rowsA, "activity-2098-12.html", "2099-02-02T00:00:00Z");
+    s.page(emptyLast, "activity-2098-12.html", "2099-02-04T00:00:00Z");
+    expect(s.notices()).toEqual([
+      {
+        source_id: "global-pass",
+        activity_month: "2099-01",
+        current_fetch_run_id: emptyLast,
+        superseded_fetch_run_id: rowsB,
+        superseded_runs: 2,
+      },
+    ]);
+  });
+
+  test("notice: composes the currentness CTEs verbatim", () => {
+    // The notice is a reading of the shipped rule, not a second rule.
+    expect(GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL).toContain(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES);
+  });
+
   test("a newer run whose pages are not all parsed keeps the older whole month", () => {
     const s = new GlobalPassStore();
     const older = s.run();
@@ -246,6 +366,8 @@ interface ScaledPage {
   month: string;
   at: number;
   parsed: boolean;
+  /** Placeholder rows its parse carries; 0 is the empty month 1.2.0 reads. */
+  rows: number;
 }
 
 /**
@@ -283,8 +405,14 @@ class ScaledGlobalPassStore {
     return this.id;
   }
 
-  /** One sealed `success` run; each month lists its pages' parse states, page 1 first. */
-  capture(at: number, months: readonly { month: string; parsed: readonly boolean[] }[]): void {
+  /**
+   * One sealed `success` run; each month lists its pages' parse states, page 1
+   * first, and optionally the rows each page carries (one by default).
+   */
+  capture(
+    at: number,
+    months: readonly { month: string; parsed: readonly boolean[]; rows?: readonly number[] }[],
+  ): void {
     const db = this.db;
     const session = this.next();
     db.run(
@@ -335,12 +463,13 @@ class ScaledGlobalPassStore {
       stored.push({ key, id });
       return id;
     };
-    for (const { month, parsed } of months) {
+    for (const { month, parsed, rows } of months) {
       for (const [index, ok] of parsed.entries()) {
         const key = index === 0 ? `activity-${month}.html` : `activity-${month}-p${index + 1}.html`;
         const id = artifact(key, "globalpass-activity", "sanitized_provider_capture", "text/html");
-        this.pages.push({ run, id, month, at, parsed: ok });
-        if (ok) this.parse(id);
+        const count = rows?.[index] ?? 1;
+        this.pages.push({ run, id, month, at, parsed: ok, rows: count });
+        if (ok) this.parse(id, count);
       }
     }
     artifact("manifest.json", "collector-manifest", "collector_manifest", "application/json");
@@ -367,18 +496,19 @@ class ScaledGlobalPassStore {
     );
   }
 
-  private parse(artifact: number): void {
+  private parse(artifact: number, rows = 1): void {
     const db = this.db;
     const parse = this.next();
     db.run(
       "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'global-pass-activity','1.1.0','2026-09-01','pending','[]')",
       [parse, artifact],
     );
-    db.run(
-      `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,amount_text,amount_scale,currency,description,as_of,raw_locator,extra_json)
-       VALUES(?,'global-pass:card',?,'1.00',2,'USD','SYNTHETIC','2099-01-02','html:activity-record=1','{}')`,
-      [parse, `global-pass:synthetic-${artifact}:0`],
-    );
+    for (let row = 0; row < rows; row += 1)
+      db.run(
+        `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,amount_text,amount_scale,currency,description,as_of,raw_locator,extra_json)
+         VALUES(?,'global-pass:card',?,'1.00',2,'USD','SYNTHETIC','2099-01-02',?,'{}')`,
+        [parse, `global-pass:synthetic-${artifact}:${row}`, `html:activity-record=${row + 1}`],
+      );
     db.run("UPDATE parse_runs SET status='ok' WHERE id=?", [parse]);
     db.run(
       "INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at) VALUES(?,'global-pass-activity',NULL,?,'normal','pipeline','parse_ok','2026-09-01')",
@@ -405,23 +535,81 @@ class ScaledGlobalPassStore {
    * parsed, and every one of those pages.
    */
   modelled(): number[] {
+    const best = new Map<string, EligibleSnapshot>();
+    for (const snapshot of this.eligible()) {
+      const held = best.get(snapshot.month);
+      if (held === undefined || newer(snapshot, held)) best.set(snapshot.month, snapshot);
+    }
+    return [...best.values()].flatMap((entry) => entry.pages).sort((a, b) => a - b);
+  }
+
+  /**
+   * The notice written independently of the SQL: per month, order the
+   * eligible snapshots newest first; when the newest carries no row and any
+   * older one does, name the month, the newest run and the newest older run
+   * with rows, and count the older runs with rows.
+   */
+  modelledNotices(): NoticeRow[] {
+    const byMonth = new Map<string, EligibleSnapshot[]>();
+    for (const snapshot of this.eligible())
+      byMonth.set(snapshot.month, [...(byMonth.get(snapshot.month) ?? []), snapshot]);
+    const notices: NoticeRow[] = [];
+    for (const [month, snapshots] of byMonth) {
+      snapshots.sort((a, b) => (newer(a, b) ? -1 : 1));
+      const [latest, ...older] = snapshots;
+      if (latest === undefined || latest.rows > 0) continue;
+      const withRows = older.filter((snapshot) => snapshot.rows > 0);
+      if (withRows.length === 0) continue;
+      notices.push({
+        source_id: "global-pass",
+        activity_month: month,
+        current_fetch_run_id: latest.run,
+        superseded_fetch_run_id: withRows[0]!.run,
+        superseded_runs: withRows.length,
+      });
+    }
+    return notices.sort((a, b) => (a.activity_month < b.activity_month ? 1 : -1));
+  }
+
+  notices(): NoticeRow[] {
+    return this.db.query(GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL).all() as NoticeRow[];
+  }
+
+  /** Every (run, month) whose pages all parsed, with its ranking keys and row total. */
+  private eligible(): EligibleSnapshot[] {
     const byRunMonth = new Map<string, ScaledPage[]>();
     for (const page of this.pages) {
       const key = `${page.run}/${page.month}`;
       byRunMonth.set(key, [...(byRunMonth.get(key) ?? []), page]);
     }
-    const best = new Map<string, { at: number; id: number; pages: number[] }>();
+    const eligible: EligibleSnapshot[] = [];
     for (const pages of byRunMonth.values()) {
       if (!pages.every((page) => page.parsed)) continue;
-      const month = pages[0]!.month;
-      const at = Math.max(...pages.map((page) => page.at));
-      const id = Math.max(...pages.map((page) => page.id));
-      const held = best.get(month);
-      if (held === undefined || at > held.at || (at === held.at && id > held.id))
-        best.set(month, { at, id, pages: pages.map((page) => page.id) });
+      eligible.push({
+        run: pages[0]!.run,
+        month: pages[0]!.month,
+        at: Math.max(...pages.map((page) => page.at)),
+        id: Math.max(...pages.map((page) => page.id)),
+        pages: pages.map((page) => page.id),
+        rows: pages.reduce((sum, page) => sum + page.rows, 0),
+      });
     }
-    return [...best.values()].flatMap((entry) => entry.pages).sort((a, b) => a - b);
+    return eligible;
   }
+}
+
+interface EligibleSnapshot {
+  run: number;
+  month: string;
+  at: number;
+  id: number;
+  pages: number[];
+  rows: number;
+}
+
+/** The snapshot ranking: newest page time, then newest page id. */
+function newer(a: EligibleSnapshot, b: EligibleSnapshot): boolean {
+  return a.at > b.at || (a.at === b.at && a.id > b.id);
 }
 
 /** Every step under `root`, the root included (steps come parent first). */
@@ -447,6 +635,31 @@ function baseTableScans(steps: readonly PlanStep[], root: PlanStep): string[] {
     .map(({ step, name }) => `${name}<${byId.get(step.parent)?.detail}>`);
 }
 
+/**
+ * The base relations the notice plan scans whole, as `name<parent step>`: the
+ * notice's own CTEs and aliases are bounded by the eligible snapshots, never
+ * by the store, and `unit_policy` is the handful of `dataset_snapshot_policies`
+ * rows the active-state predicate reads (as in `card-usage-plan.ts`).
+ */
+function noticeBaseTableScans(steps: readonly PlanStep[]): string[] {
+  const byId = new Map(steps.map((step) => [step.id, step]));
+  const bounded = new Set([
+    "eligible_global_pass_snapshots",
+    "ranked_global_pass_snapshots",
+    "emptied_global_pass_months",
+    "superseded_global_pass_rows",
+    "latest",
+    "emptied",
+    "older",
+    "unit_policy",
+  ]);
+  return steps
+    .filter((step) => step.detail.startsWith("SCAN "))
+    .map((step) => ({ step, name: step.detail.slice(5).split(" ")[0]! }))
+    .filter(({ name }) => !bounded.has(name) && !/^\(subquery-\d+\)$/u.test(name))
+    .map(({ step, name }) => `${name}<${byId.get(step.parent)?.detail}>`);
+}
+
 /** The step holding the GLOBAL PASS snapshot (the Transactions read's IN list). */
 function globalPassRoot(steps: readonly PlanStep[]): PlanStep {
   const ranked = steps.find((step) =>
@@ -460,6 +673,7 @@ function globalPassRoot(steps: readonly PlanStep[]): PlanStep {
 describe("GLOBAL PASS activity snapshots on the complete CORE schema without statistics", () => {
   let single: ScaledGlobalPassStore;
   let walked: ScaledGlobalPassStore;
+  let emptied: ScaledGlobalPassStore;
 
   beforeAll(() => {
     const next = random(2026);
@@ -481,6 +695,22 @@ describe("GLOBAL PASS activity snapshots on the complete CORE schema without sta
           month,
           parsed: Array.from({ length: 1 + Math.floor(next() * 3) }, () => next() > 0.1),
         })),
+      );
+    // Empty months among walked ones: a quarter of the captures of a month
+    // are the one-page empty reading (ADR 0026's empty-month amendment), the
+    // rest one to three pages with rows, now and then a page unparsed.
+    emptied = new ScaledGlobalPassStore();
+    for (let capture = 0; capture < 160; capture += 1)
+      emptied.capture(
+        START_MS + Math.floor(capture / 2) * DAY_MS,
+        MONTHS.filter(() => next() < 0.8).map((month) =>
+          next() < 0.25
+            ? { month, parsed: [next() > 0.1], rows: [0] }
+            : {
+                month,
+                parsed: Array.from({ length: 1 + Math.floor(next() * 3) }, () => next() > 0.1),
+              },
+        ),
       );
   }, 60_000);
 
@@ -507,6 +737,36 @@ describe("GLOBAL PASS activity snapshots on the complete CORE schema without sta
     // The store exercises the change: the per-key ranking keeps a page of an
     // older capture current beside a newer capture's page 1.
     expect(walked.current(FROZEN_PER_KEY_CTES)).not.toEqual(chosen);
+  });
+
+  test("empty captures: the notice matches the independent model and currentness is unchanged", () => {
+    expect(emptied.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual(emptied.modelled());
+    const notices = emptied.notices();
+    expect(notices).toEqual(emptied.modelledNotices());
+    // The store exercises the notice: some months are reported, not all.
+    expect(notices.length).toBeGreaterThan(0);
+    expect(notices.length).toBeLessThan(MONTHS.length + 1);
+    expect(new Set(notices.map((notice) => notice.activity_month)).size).toBe(notices.length);
+    // Reading the notice moves nothing.
+    expect(emptied.current(GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES)).toEqual(emptied.modelled());
+  });
+
+  test("the notice plan reads the artifacts once and probes rows by run and month through the index", () => {
+    for (const db of [single.db, walked.db, emptied.db]) {
+      const steps = explain(db, GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL, []);
+      // One whole pass over the artifacts, the one the snapshot CTEs make;
+      // never a scan of the observations, the parses or the runs.
+      expect(noticeBaseTableScans(steps)).toEqual([
+        "a<MATERIALIZE eligible_global_pass_snapshots>",
+      ]);
+      // Each row probe reaches a run's pages through the run index.
+      const byRun = steps.filter((step) =>
+        /^SEARCH a USING (?:COVERING )?INDEX idx_fetch_artifacts_run_role \(fetch_run_id=\?/u.test(
+          step.detail,
+        ),
+      );
+      expect(byRun.length).toBeGreaterThanOrEqual(2);
+    }
   });
 
   test("the Transactions plan reads the artifacts once and each snapshot's pages by run", () => {
