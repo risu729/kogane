@@ -1381,3 +1381,40 @@ describe("moving-average pools are listed once per book, not once per allocation
     expect(book.pools).toEqual([]);
   });
 });
+
+describe("instants beside dates are laid out by their own wall time", () => {
+  test("an evening fill at a negative offset is before the next day's dated sale", () => {
+    const fill: TemporalValue = {
+      kind: "instant",
+      value: "2030-01-06T20:00:00-05:00",
+      zone: "America/New_York",
+      basis: "provider",
+    };
+    const row: TemporalValue = {
+      kind: "local-date",
+      value: "2030-01-07",
+      zone: "America/New_York",
+      basis: "provider",
+    };
+    const book = onlyBook(
+      computeLots(
+        [
+          input("a", {
+            kind: "acquisition",
+            consideration: usd("100"),
+            time: { trade: fill, settlement: fill },
+          }),
+          input("s", {
+            kind: "disposal",
+            quantity: "5",
+            consideration: usd("60"),
+            time: { trade: row, settlement: row },
+          }),
+        ],
+        policy(),
+      ),
+    );
+    expect(book.indeterminateFrom).toBeNull();
+    expect(book.disposals[0]!.outcome).toBe("allocated");
+  });
+});

@@ -1241,10 +1241,14 @@ function applyEntry(state: BookState, entry: Entry, policy: LotPolicy): void {
 // Ordering
 
 /**
- * Where a time sits on one absolute line, in seconds: an instant is a point
- * (its epoch), a date or a period is the span of its civil days read as UTC.
- * Used only to lay inputs out and to skip comparisons that cannot fail; every
- * decision about order is `compareTemporal`'s.
+ * Where a time sits on one line, in seconds: a date or a period is the span
+ * of its civil days; an instant is a point at its epoch when the book has
+ * only instants. When the book also has dates or periods, an instant sits at
+ * the start of its own calendar day (from epoch + its own offset), because
+ * `compareTemporal` places an instant against a date by that day, and the
+ * instants of one day follow each other by epoch. Used only to lay inputs out
+ * and to skip comparisons that cannot fail; whether two inputs are ordered is
+ * decided by `strictlyBefore`.
  */
 interface TimeSpan {
   lo: number;
@@ -1257,20 +1261,40 @@ interface TimeSpan {
 
 const DAY_SECONDS = 86_400;
 /**
- * Two spans further apart than this are ordered whatever the offsets: an
- * instant's own calendar day is at most 18 hours from its UTC day, so a gap of
- * two days settles every instant/date/period pair in a compatible zone.
+ * Two spans this far apart are ordered, whatever the offsets. Beside dates,
+ * an instant's position is its own calendar day, so against a date or period
+ * the skip is exact. Two instants are compared by epoch: three days between
+ * their calendar days means more than 48 hours between their wall times, and
+ * an instant's wall time is at most 18 hours from its epoch, so their epochs
+ * are ordered the same way. For instants this does not depend on zones; an
+ * instant against a date relies on the book's single zone, which
+ * `zonesConflict` guarantees.
  */
-const ORDERED_GAP_SECONDS = 2 * DAY_SECONDS;
+const ORDERED_GAP_SECONDS = 3 * DAY_SECONDS;
 
-function timeSpan(time: TemporalValue): TimeSpan {
+const OFFSET = /(Z|([+-])(\d{2}):(\d{2}))$/u;
+
+/** The instant's own UTC offset in seconds, from its validated text. */
+function offsetSeconds(value: string): number {
+  const match = OFFSET.exec(value)!;
+  if (match[1] === "Z") return 0;
+  const seconds = Number(match[3]) * 3600 + Number(match[4]) * 60;
+  return match[2] === "-" ? -seconds : seconds;
+}
+
+function timeSpan(time: TemporalValue, wallTime: boolean): TimeSpan {
   switch (time.kind) {
     case "instant": {
       const parsed = parseInstant(time.value)!;
+      // Beside dates, an instant sits at the start of its own calendar day
+      // and instants of one day follow each other by epoch.
+      const at = wallTime
+        ? Math.floor((parsed.epochSeconds + offsetSeconds(time.value)) / DAY_SECONDS) * DAY_SECONDS
+        : parsed.epochSeconds;
       return {
-        lo: parsed.epochSeconds,
-        loNanos: parsed.nanoseconds,
-        hi: parsed.epochSeconds,
+        lo: at,
+        loNanos: 0,
+        hi: at,
         epoch: parsed.epochSeconds,
         nanos: parsed.nanoseconds,
       };
@@ -1318,6 +1342,8 @@ function compareLaidOut(a: LaidOut, b: LaidOut): number {
   return (
     a.span.lo - b.span.lo ||
     a.span.loNanos - b.span.loNanos ||
+    a.span.epoch - b.span.epoch ||
+    a.span.nanos - b.span.nanos ||
     a.span.hi - b.span.hi ||
     (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0)
   );
@@ -1454,8 +1480,9 @@ function computeBook(
       indeterminateFrom: state.indeterminate,
     };
   }
+  const wallTime = entries.some(({ time }) => time.kind === "local-date" || time.kind === "period");
   const ordered = entries
-    .map((entry) => ({ ...entry, span: timeSpan(entry.time) }))
+    .map((entry) => ({ ...entry, span: timeSpan(entry.time, wallTime) }))
     .sort(compareLaidOut);
   if (zonesConflict(ordered)) {
     failAll(state, ordered, "order_tie", policy);
