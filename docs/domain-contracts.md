@@ -48,6 +48,17 @@ conflict`; `Quantity { unitRef, value }`.
   and DST-free. No time-zone database is embedded; `zone` names the deadline
   or display zone, the instant string carries the offset in effect.
 
+## `civil-date.ts` — civil dates in named zones
+
+- `civilDateOfInstant(text, zone)` and `canonicalZone(zone)` are the domain's
+  only uses of zone data: the civil date of an instant in a named zone, and
+  the runtime's spelling of a zone name, from the runtime's own
+  `Intl.DateTimeFormat("en-CA", { timeZone })` (one formatter cached per
+  zone). A non-instant, a malformed zone name or a zone the runtime does not
+  know is `null`, never UTC, and no date becomes an instant. The module is
+  separate from `time.ts`, which is in the parser digest closure
+  (`packages/parsers/src/parsers/digests.ts`) and stays free of zone data.
+
 ## `metrics.ts` — what a number measures
 
 - `MetricDefinition`: `metricId`, `providerMetric`, `measurementKind` (stock,
@@ -70,6 +81,42 @@ conflict`; `Quantity { unitRef, value }`.
 - `PriceObservation` states `quoteAmount` per `baseQuantity`; `valueAtPrice`
   checks the unit and price basis (12,500 fund units at 8,000 JPY per 10,000
   units is 10,000 JPY, not 12,500 × 8,000).
+
+## `market-data.ts` — as-of price and FX selection
+
+[ADR 0056](adr/0056-as-of-price-fx-selection.md). Every function takes the
+policy it applies; none has a default.
+
+- `PriceSelectionPolicy` (admitted rules, price kinds, temporal bases, zone,
+  freshness in calendar or business days, date-only rule, multi-source rule,
+  candidate scope), `FxConversionPolicy` (pivot, quotable currencies, one
+  selection policy with one kind, inverse rounding or none), `MarketCalendar`
+  (supplied with evidence; none shipped) and `SelectionBound` (exclusive
+  `effectiveBefore`, `asOfDate`, `current` or `known-at` knowledge). The
+  validators reject unknown keys, empty or duplicated lists, bad day counts,
+  zones the runtime does not know or spells differently, a bound that is not
+  exactly the end of its date in the policy zone, and a known-at instant finer
+  than a millisecond (`validKnownAtInstant`). A policy's digest is its
+  `canonicalDigest`.
+- `selectPrice(key, candidates, bound, policy, calendar)` runs six checks in
+  order and returns one selected price (with its age and corroborating ids)
+  or one closed refusal (`PRICE_SELECTION_REFUSALS`), with every removed
+  candidate counted by `CANDIDATE_EXCLUSIONS`. Instants are compared through
+  `parseInstant`, prices per unit of base with exact decimals.
+  `selectFxRate(currency, …)` answers a currency outside the FX policy
+  `unsupported_pair` and otherwise selects under the policy's selection policy.
+- `fxPath`, `convertToBase` and `valueInBase` go through one pivot: into it
+  exactly, out of it as one ratio rounded once with `RoundingInputs`, a missing
+  or refused rate a refusal (`CONVERSION_REFUSALS`), never 1:1. An FX
+  selection of another key or another selection policy throws.
+- `freshnessWindowStart` and `selectionReadWindow` size the candidate read;
+  `selectionManifest` builds the sorted input set whose digest is a context id.
+  `isCurrencyCode` is the shared three-letter check.
+- `PROPOSED_FX_SELECTION_POLICY_V1`, `PROPOSED_FX_CONVERSION_POLICY_V1` and
+  `PROPOSED_EQUITY_SELECTION_POLICY_V1` hold recommended values only; their
+  ids start with `PROPOSAL_POLICY_PREFIX`, which `selectMarketData` refuses,
+  and a test fails if a production source, script or task outside the module
+  names one.
 
 ## `scope.ts` — what set a number covers, and adoption
 
