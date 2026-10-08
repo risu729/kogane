@@ -828,3 +828,6 @@ export const RAW_DOWNLOAD_SQL = `SELECT o.sha256, o.blob_key, o.byte_size,
         a.artifact_key, a.mime AS declared_media_type
       FROM raw_objects o JOIN ${visibleEvidence.fetchArtifacts} a ON a.sha256 = o.sha256
       WHERE o.sha256 = ? ORDER BY a.id ASC LIMIT 1`;
+
+/** The period expressions the collection quality read groups by (collection-quality.ts). */
+export { GLOBAL_PASS_MONTH, VPASS_STATEMENT_MONTH };
