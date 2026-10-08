@@ -87,7 +87,10 @@ under policy `instrument-candidates-v1`:
   sources;
 - **separated** pairs: they share such a value but state a different
   instrument kind, ISIN, RIC, country, MIC, currency, share class or product
-  class. They are never candidates;
+  class. Each side counts with every identifier that maps to its instrument
+  now (`via` names the others whose facts conflict), so a code a person
+  mapped onto one listing is separated from a listing on another market.
+  They are never candidates;
 - **hints**: equal current mapping labels (after width, case and whitespace
   normalisation) with no shared value. A name is never evidence; a hint has no
   status and nothing to adopt;
@@ -107,7 +110,11 @@ current instrument to the other identifier is rejected. A proposed candidate
 names those two commands (assign the subject identifier to the anchor's
 instrument; reject `listed_as` from the anchor's instrument to the subject) for
 a person to plan with a reason through the [change lifecycle](change-lifecycle.md),
-where agents can plan but never approve or commit. `queryInstrumentHistory`
+where agents can plan but never approve or commit. A manually mapped
+identifier, or one sharing its instrument, is always the anchor over one that
+is not; when both identifiers are settled that way the candidate names no
+command and a `hold` code (`subject-decided-elsewhere`,
+`subject-shares-instrument`) says why. `queryInstrumentHistory`
 lists an identifier's mapping revisions, mapping decisions and `listed_as`
 relations, oldest first; a correction is always a later entry.
 

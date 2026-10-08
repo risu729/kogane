@@ -671,6 +671,174 @@ describe("only a person's decision adopts or rejects, and the history keeps ever
   });
 });
 
+describe("a decision binds every identifier on the decided instrument", () => {
+  const domestic = "sbi-securities:domestic";
+  /** A domestic trade on a venue the SBI rule does not map: `sbi-security-code/JP/<code>`. */
+  const venueTrade = (code: string, name: string): Trade => ({
+    account: domestic,
+    currency: "JPY",
+    extra: {
+      issueCode: code,
+      issueName: name,
+      marketLabel: "SYNTHETIC-VENUE",
+      accountLabel: "synthetic",
+    },
+  });
+
+  test("S1: a code a person mapped onto one listing is separated from the other listing", async () => {
+    const w = new World();
+    await w.capture(
+      "sbi-securities",
+      [
+        {
+          account: domestic,
+          code: "SYN9102",
+          name: "Synthetic Dual",
+          market: "TKY",
+          currency: "JPY",
+        },
+        {
+          account: domestic,
+          code: "SYN9102",
+          name: "Synthetic Dual",
+          market: "NGY",
+          currency: "JPY",
+        },
+      ],
+      [venueTrade("SYN9102", "Synthetic Dual")],
+    );
+    const tokyo = w.identifier("mic-symbol", "XTKS", "SYN9102");
+    const nagoya = w.identifier("mic-symbol", "XNGO", "SYN9102");
+    const venue = w.identifier("sbi-security-code", "JP", "SYN9102");
+
+    const open = await queryInstrumentResolution(w.sql);
+    const toTokyo = candidateOf(open, tokyo, venue);
+    expect(toTokyo).toMatchObject({ anchorIdentifierId: tokyo, subjectIdentifierId: venue });
+    expect(candidateOf(open, nagoya, venue)).toMatchObject({
+      anchorIdentifierId: nagoya,
+      subjectIdentifierId: venue,
+    });
+    const outcome = await decide(
+      w,
+      OPERATOR,
+      "identity.assign",
+      { ...toTokyo.commands!.adopt.payload, reason: "the venue trade is the Tokyo listing" },
+      "op-s1-adopt",
+    );
+    expect(outcome.result.ok).toBe(true);
+
+    const after = await queryInstrumentResolution(w.sql);
+    expect(candidateOf(after, tokyo, venue)).toMatchObject({ status: "adopted", commands: null });
+    // No command now offers to move the decided code onto the Nagoya listing.
+    expect(
+      after.candidates.some(
+        (row) =>
+          [row.anchorIdentifierId, row.subjectIdentifierId].includes(nagoya) &&
+          [row.anchorIdentifierId, row.subjectIdentifierId].includes(venue),
+      ),
+    ).toBe(false);
+    expect(after.separated).toContainEqual({
+      pairId: `instrument-pair:${[nagoya, venue].sort().join("|")}`,
+      identifierIds: [nagoya, venue].sort() as [string, string],
+      evidence: ["security-code-equal"],
+      conflicts: ["market-differs"],
+      via: [tokyo],
+      sharedInstrument: false,
+    });
+    expect(stateOf(after, venue)).toBe("resolved-by-decision");
+    expect(stateOf(after, nagoya)).toBe("no-candidate");
+  });
+
+  test("S2: the identifier a person mapped is the anchor even when a new code has a lower id", async () => {
+    const w = new World();
+    await w.capture("sbi-securities", [
+      { account: domestic, code: "SYN9101", name: "Synthetic Tie", market: "TKY", currency: "JPY" },
+    ]);
+    await w.capture(BROKER_B, [
+      {
+        account: "synthetic-broker-b:custody",
+        code: "SYN9101",
+        name: "Synthetic Tie",
+        currency: "JPY",
+        extra: { country: "JP" },
+      },
+    ]);
+    const listing = w.identifier("mic-symbol", "XTKS", "SYN9101");
+    const broker = w.identifier("synthetic-broker-b-code", "JP", "SYN9101");
+    const adopt = candidateOf(await queryInstrumentResolution(w.sql), listing, broker);
+    expect(adopt).toMatchObject({ anchorIdentifierId: listing, subjectIdentifierId: broker });
+    expect(
+      (
+        await decide(
+          w,
+          OPERATOR,
+          "identity.assign",
+          { ...adopt.commands!.adopt.payload, reason: "same security, checked" },
+          "op-s2-adopt",
+        )
+      ).result.ok,
+    ).toBe(true);
+
+    // A later trade on an unmapped venue adds a bare code whose hashed id
+    // sorts before the decided broker code: the tie the anchor rule once broke by id.
+    await w.capture("sbi-securities", [], [venueTrade("SYN9101", "Synthetic Tie")]);
+    const venue = w.identifier("sbi-security-code", "JP", "SYN9101");
+    expect(venue < broker).toBe(true);
+
+    const after = await queryInstrumentResolution(w.sql);
+    const listingInstrument = after.identifiers.find(
+      (row) => row.identifierId === listing,
+    )!.instrumentId;
+    const tie = candidateOf(after, broker, venue);
+    expect(tie).toMatchObject({
+      anchorIdentifierId: broker,
+      subjectIdentifierId: venue,
+      status: "proposed",
+      hold: null,
+    });
+    expect(tie.commands!.adopt.payload).toEqual({
+      subject: "instrument",
+      referenceId: venue,
+      targetId: listingInstrument,
+    });
+    expect(tie.commands!.keepApart.payload).toMatchObject({
+      fromRef: `instrument:${listingInstrument}`,
+      toRef: `identifier:${venue}`,
+    });
+    expect(candidateOf(after, listing, venue)).toMatchObject({
+      anchorIdentifierId: listing,
+      subjectIdentifierId: venue,
+    });
+
+    // Once a person maps the bare code somewhere else (here: onto its own
+    // instrument), no candidate offers to move it again.
+    const ownInstrument = after.identifiers.find((row) => row.identifierId === venue)!.instrumentId;
+    expect(
+      (
+        await decide(
+          w,
+          OPERATOR,
+          "identity.assign",
+          {
+            subject: "instrument",
+            referenceId: venue,
+            targetId: ownInstrument,
+            reason: "kept on its own instrument, checked",
+          },
+          "op-s2-own",
+        )
+      ).result.ok,
+    ).toBe(true);
+    const held = await queryInstrumentResolution(w.sql);
+    for (const other of [listing, broker])
+      expect(candidateOf(held, other, venue)).toMatchObject({
+        status: "proposed",
+        hold: "subject-decided-elsewhere",
+        commands: null,
+      });
+  });
+});
+
 describe("cost", () => {
   test("the reads scan no observation table, and reach mappings, decisions and relations by index", () => {
     const w = new World();

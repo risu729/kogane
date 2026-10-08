@@ -7,7 +7,10 @@
 // stored, pairs identifiers that share an identifier value of a closed list
 // (ISIN, RIC, country-scoped security code), keeps apart every pair whose
 // stated market, currency, share class, product class, country or instrument
-// kind disagree, and names what it could not compare. Nothing here changes a
+// kind disagree, and names what it could not compare. A pair is compared as
+// two instruments: each side together with every identifier that maps to its
+// instrument now, so a decision already taken binds the identifiers it
+// joined. Nothing here changes a
 // mapping: adoption is a human `identity.assign` through the change lifecycle,
 // and a candidate whose two identifiers already map to one instrument is
 // reported as adopted because of that mapping, never because of this module
@@ -119,19 +122,42 @@ export type CandidateGap = (typeof CANDIDATE_GAPS)[number];
 export const CANDIDATE_STATUSES = ["proposed", "adopted", "rejected"] as const;
 export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
 
+/**
+ * Why a proposed candidate names no command, a closed list. Adopting re-maps
+ * the subject, so a subject that is already settled is not offered for it:
+ * - `subject-decided-elsewhere`: a person mapped the subject (a manual
+ *   mapping) to an instrument the anchor does not map to;
+ * - `subject-shares-instrument`: the subject's instrument is shared with
+ *   another identifier, so re-mapping it would split that instrument.
+ * Only arises when both identifiers are settled; otherwise the settled one is
+ * the anchor.
+ */
+export const CANDIDATE_HOLDS = ["subject-decided-elsewhere", "subject-shares-instrument"] as const;
+export type CandidateHold = (typeof CANDIDATE_HOLDS)[number];
+
 export interface InstrumentCandidate {
   /** Orientation-free id: `instrument-candidate:<lower id>|<higher id>`. */
   candidateId: string;
-  /** The identifier whose instrument the subject would be assigned to. */
+  /**
+   * The identifier whose instrument the subject would be assigned to. An
+   * identifier that is settled (manually mapped, or sharing its instrument
+   * with another identifier) is always the anchor over one that is not.
+   */
   anchorIdentifierId: string;
   /** The identifier an adoption would re-map. */
   subjectIdentifierId: string;
   evidence: CandidateEvidence[];
   agreements: CandidateAgreement[];
   gaps: CandidateGap[];
-  /** The two identifiers are used by different sources. */
+  /**
+   * False only when both identifiers are used by exactly one source, the
+   * same one; true otherwise, including when both are used by one source and
+   * either is also used by another.
+   */
   crossSource: boolean;
   status: CandidateStatus;
+  /** Why a `proposed` candidate names no command; null otherwise. */
+  hold: CandidateHold | null;
 }
 
 /** A pair that shares an identifier value but states a conflicting fact. */
@@ -140,6 +166,12 @@ export interface SeparatedPair {
   identifierIds: [string, string];
   evidence: CandidateEvidence[];
   conflicts: CandidateConflict[];
+  /**
+   * Identifiers other than the two that map to either side's instrument now
+   * and whose stated facts produced a conflict, sorted. Empty when the two's
+   * own facts conflict and nothing else does.
+   */
+  via: string[];
   /**
    * The two already map to one instrument (a manual decision): the stated
    * facts now contradict that decision, which stays as it is until a person
@@ -266,20 +298,33 @@ export function compareIdentifierFacts(
   return out;
 }
 
-/** ISIN-bearing identifiers first, then listing identifiers (RIC, MIC), then provider codes; ties by id. */
+/** ISIN-bearing identifiers first, then listing identifiers (RIC, MIC), then provider codes. */
 function anchorRank(facts: InstrumentIdentifierFacts): number {
   if (facts.isin !== null) return 0;
   if (facts.ric !== null || facts.mic !== null) return 1;
   return 2;
 }
 
+/**
+ * The anchor first. A settled identifier (manually mapped, or sharing its
+ * instrument) anchors one that is not, so an adoption never moves a decided
+ * identifier; then `anchorRank`; then the lower id.
+ */
 function orient(
   a: InstrumentIdentifierFacts,
   b: InstrumentIdentifierFacts,
+  settled: (facts: InstrumentIdentifierFacts) => boolean,
 ): [InstrumentIdentifierFacts, InstrumentIdentifierFacts] {
+  if (settled(a) !== settled(b)) return settled(a) ? [a, b] : [b, a];
   const rank = anchorRank(a) - anchorRank(b);
   if (rank !== 0) return rank < 0 ? [a, b] : [b, a];
   return a.identifierId < b.identifierId ? [a, b] : [b, a];
+}
+
+/** Conflicts in `CANDIDATE_CONFLICTS` order, each once. */
+function orderedConflicts(codes: Iterable<CandidateConflict>): CandidateConflict[] {
+  const present = new Set(codes);
+  return CANDIDATE_CONFLICTS.filter((code) => present.has(code));
 }
 
 function byIdentifier(a: InstrumentIdentifierFacts, b: InstrumentIdentifierFacts): number {
@@ -358,6 +403,34 @@ export function instrumentCandidates(
           return { ok: false, error: "candidate_limit_exceeded" };
       }
 
+  // Every identifier that maps to an instrument now, so a pair is compared as
+  // the two instruments it would join.
+  const byInstrument = new Map<string, InstrumentIdentifierFacts[]>();
+  for (const row of eligible) {
+    const members = byInstrument.get(row.instrumentId) ?? [];
+    members.push(row);
+    byInstrument.set(row.instrumentId, members);
+  }
+  const settled = (row: InstrumentIdentifierFacts) =>
+    row.mappingMethod === "manual" || byInstrument.get(row.instrumentId)!.length > 1;
+  // The stated conflicts between two instruments' identifiers, once per
+  // instrument pair: every member of one against every member of the other.
+  const between = new Map<string, { a: string; b: string; conflicts: CandidateConflict[] }[]>();
+  const instrumentConflicts = (left: string, right: string) => {
+    const key = left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
+    let found = between.get(key);
+    if (found === undefined) {
+      found = [];
+      for (const a of byInstrument.get(left)!)
+        for (const b of byInstrument.get(right)!) {
+          const { conflicts } = compareIdentifierFacts(a, b);
+          if (conflicts.length > 0) found.push({ a: a.identifierId, b: b.identifierId, conflicts });
+        }
+      between.set(key, found);
+    }
+    return found;
+  };
+
   const candidates: InstrumentCandidate[] = [];
   const separated: SeparatedPair[] = [];
   for (const pair of [...pairs].sort()) {
@@ -366,17 +439,31 @@ export function instrumentCandidates(
     const right = byId.get(rightId)!;
     const comparison = compareIdentifierFacts(left, right);
     if (comparison.evidence.length === 0) continue;
-    if (comparison.conflicts.length > 0) {
+    const shared = left.instrumentId === right.instrumentId;
+    // Two identifiers on one instrument are a decision already taken: only
+    // their own facts are reported against it. Otherwise every identifier on
+    // either instrument counts.
+    const found = shared ? [] : instrumentConflicts(left.instrumentId, right.instrumentId);
+    const conflicts = orderedConflicts([
+      ...comparison.conflicts,
+      ...found.flatMap((entry) => entry.conflicts),
+    ]);
+    if (conflicts.length > 0) {
+      const via = new Set(found.flatMap((entry) => [entry.a, entry.b]));
+      via.delete(leftId);
+      via.delete(rightId);
       separated.push({
         pairId: pairId("instrument-pair", leftId, rightId),
         identifierIds: sortedPair(leftId, rightId),
         evidence: comparison.evidence,
-        conflicts: comparison.conflicts,
-        sharedInstrument: left.instrumentId === right.instrumentId,
+        conflicts,
+        via: [...via].sort(),
+        sharedInstrument: shared,
       });
       continue;
     }
-    const [anchor, subject] = orient(left, right);
+    const [anchor, subject] = orient(left, right, settled);
+    const status = candidateStatus(anchor, subject, listedAs);
     candidates.push({
       candidateId: pairId("instrument-candidate", leftId, rightId),
       anchorIdentifierId: anchor.identifierId,
@@ -385,7 +472,13 @@ export function instrumentCandidates(
       agreements: comparison.agreements,
       gaps: comparison.gaps,
       crossSource: !sameSingleSource(anchor, subject),
-      status: candidateStatus(anchor, subject, listedAs),
+      status,
+      hold:
+        status !== "proposed" || !settled(subject)
+          ? null
+          : subject.mappingMethod === "manual"
+            ? "subject-decided-elsewhere"
+            : "subject-shares-instrument",
     });
   }
 

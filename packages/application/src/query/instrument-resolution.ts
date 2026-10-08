@@ -67,7 +67,10 @@ export interface CandidateCommands {
 }
 
 export interface ResolutionCandidate extends InstrumentCandidate {
-  /** Present only while the candidate is `proposed`. */
+  /**
+   * Present only while the candidate is `proposed` and has no `hold`: a held
+   * candidate's subject is already settled, and adopting would re-map it.
+   */
   commands: CandidateCommands | null;
 }
 
@@ -132,7 +135,7 @@ function commandsFor(
   candidate: InstrumentCandidate,
   byId: ReadonlyMap<string, InstrumentIdentifierFacts>,
 ): CandidateCommands | null {
-  if (candidate.status !== "proposed") return null;
+  if (candidate.status !== "proposed" || candidate.hold !== null) return null;
   const anchor = byId.get(candidate.anchorIdentifierId)!;
   const subject = byId.get(candidate.subjectIdentifierId)!;
   return {

@@ -104,6 +104,7 @@ describe("evidence-backed candidates", () => {
         gaps: [],
         crossSource: true,
         status: "proposed",
+        hold: null,
       },
     ]);
     expect(result.separated).toEqual([]);
@@ -178,6 +179,7 @@ describe("pairs that state different facts stay apart", () => {
         identifierIds: ["a-listing", "b-code"],
         evidence: ["security-code-equal"],
         conflicts: ["market-differs"],
+        via: [],
         sharedInstrument: false,
       },
     ]);
@@ -454,5 +456,168 @@ describe("determinism and bounds", () => {
       ok: false,
       error: "duplicate_identifier",
     });
+  });
+});
+
+describe("a decision binds every identifier that shares the decided instrument", () => {
+  // One code listed on two markets and seen bare at a venue no rule maps.
+  const tokyo = facts("a-tokyo", {
+    namespace: "mic-symbol",
+    scope: "XSYN",
+    value: "SYNC001",
+    countryCode: "ZZ",
+    securityCode: "SYNC001",
+    mic: "XSYN",
+    currencies: ["JPY"],
+  });
+  const nagoya = { ...tokyo, identifierId: "b-nagoya", instrumentId: "instrument-b-nagoya" };
+  const nagoyaListing = { ...nagoya, scope: "XSYM", mic: "XSYM" };
+  const venue = facts("c-venue", {
+    countryCode: "ZZ",
+    securityCode: "SYNC001",
+    currencies: ["JPY"],
+  });
+
+  test("S1: once a person maps the bare code onto one listing, the other listing is separated from it", () => {
+    const open = set([tokyo, nagoyaListing, venue]);
+    expect(
+      open.candidates.map((row) => [row.anchorIdentifierId, row.subjectIdentifierId, row.status]),
+    ).toEqual([
+      ["a-tokyo", "c-venue", "proposed"],
+      ["b-nagoya", "c-venue", "proposed"],
+    ]);
+
+    const decided = {
+      ...venue,
+      instrumentId: tokyo.instrumentId,
+      mappingMethod: "manual" as const,
+    };
+    const after = set([tokyo, nagoyaListing, decided]);
+    expect(after.candidates).toEqual([
+      expect.objectContaining({
+        candidateId: "instrument-candidate:a-tokyo|c-venue",
+        anchorIdentifierId: "a-tokyo",
+        subjectIdentifierId: "c-venue",
+        status: "adopted",
+        hold: null,
+      }),
+    ]);
+    expect(after.separated).toEqual([
+      {
+        pairId: "instrument-pair:a-tokyo|b-nagoya",
+        identifierIds: ["a-tokyo", "b-nagoya"],
+        evidence: ["security-code-equal"],
+        conflicts: ["market-differs"],
+        via: [],
+        sharedInstrument: false,
+      },
+      {
+        // The bare code states no market itself; the listing it now shares
+        // an instrument with does, and that market differs.
+        pairId: "instrument-pair:b-nagoya|c-venue",
+        identifierIds: ["b-nagoya", "c-venue"],
+        evidence: ["security-code-equal"],
+        conflicts: ["market-differs"],
+        via: ["a-tokyo"],
+        sharedInstrument: false,
+      },
+    ]);
+    expect(
+      identifierResolutions([tokyo, nagoyaListing, decided], after).map((row) => row.state),
+    ).toEqual(["resolved-by-decision", "no-candidate", "resolved-by-decision"]);
+  });
+
+  test("S2: an identifier a person already mapped is the anchor, whatever the ids", () => {
+    // Two id spellings, so the decided identifier sorts after and before the new one.
+    for (const [decidedId, freshId] of [
+      ["z-decided", "c-fresh"],
+      ["c-decided", "z-fresh"],
+    ] as const) {
+      const listingS2 = facts("a-listing", {
+        namespace: "mic-symbol",
+        scope: "XSYN",
+        value: "SYNC002",
+        countryCode: "ZZ",
+        securityCode: "SYNC002",
+        mic: "XSYN",
+      });
+      const decided = facts(decidedId, {
+        instrumentId: listingS2.instrumentId,
+        mappingMethod: "manual",
+        sources: ["synthetic-broker-b"],
+        countryCode: "ZZ",
+        securityCode: "SYNC002",
+      });
+      const fresh = facts(freshId, {
+        sources: ["synthetic-broker-c"],
+        countryCode: "ZZ",
+        securityCode: "SYNC002",
+      });
+      const result = set([listingS2, decided, fresh]);
+      const between = result.candidates.find(
+        (row) =>
+          row.candidateId === `instrument-candidate:${[decidedId, freshId].sort().join("|")}`,
+      );
+      expect(between).toMatchObject({
+        anchorIdentifierId: decidedId,
+        subjectIdentifierId: freshId,
+        status: "proposed",
+        hold: null,
+      });
+      expect(
+        result.candidates.find(
+          (row) => row.candidateId === `instrument-candidate:a-listing|${freshId}`,
+        ),
+      ).toMatchObject({ anchorIdentifierId: "a-listing", subjectIdentifierId: freshId });
+    }
+  });
+
+  test("a candidate whose subject is already decided or shared names why no command fits", () => {
+    const left = facts("p-left", {
+      countryCode: "ZZ",
+      securityCode: "SYNC003",
+      mappingMethod: "manual",
+    });
+    const right = facts("q-right", {
+      countryCode: "ZZ",
+      securityCode: "SYNC003",
+      mappingMethod: "manual",
+      sources: ["synthetic-broker-b"],
+    });
+    expect(set([left, right]).candidates[0]).toMatchObject({
+      anchorIdentifierId: "p-left",
+      subjectIdentifierId: "q-right",
+      status: "proposed",
+      hold: "subject-decided-elsewhere",
+    });
+
+    // The subject shares a rule instrument with another identifier: moving
+    // it would split that instrument, so no command is named either.
+    const listed = facts("r-listed", {
+      mic: "XSYN",
+      countryCode: "ZZ",
+      securityCode: "SYNC004",
+      mappingMethod: "manual",
+    });
+    const sharedA = facts("s-shared", { countryCode: "ZZ", securityCode: "SYNC004" });
+    const sharedB = facts("t-shared", {
+      countryCode: "ZZ",
+      securityCode: "SYNC004",
+      instrumentId: sharedA.instrumentId,
+      sources: ["synthetic-broker-b"],
+    });
+    const shared = set([listed, sharedA, sharedB]);
+    expect(
+      shared.candidates.map((row) => [
+        row.anchorIdentifierId,
+        row.subjectIdentifierId,
+        row.status,
+        row.hold,
+      ]),
+    ).toEqual([
+      ["r-listed", "s-shared", "proposed", "subject-shares-instrument"],
+      ["r-listed", "t-shared", "proposed", "subject-shares-instrument"],
+      ["s-shared", "t-shared", "adopted", null],
+    ]);
   });
 });

@@ -80,6 +80,15 @@ and `packages/application/src/query/instrument-resolution.ts`:
    instrument kind, ISIN, RIC (two RICs are two listings), country, MIC,
    currency, share class and product class, each when both sides state it and
    they differ. Currencies conflict when the two stated sets are disjoint.
+   A pair on two instruments is compared as those two instruments: every
+   identifier that maps to one side's instrument now is compared with every
+   identifier that maps to the other's, and any conflict among them separates
+   the pair. `via` names the identifiers other than the two whose facts
+   produced a conflict. So once a person maps a bare code onto one listing, a
+   second listing of the same code on another market is separated from that
+   code (`market-differs` via the first listing) instead of being offered as a
+   place to move it. Two identifiers already on one instrument are a decision:
+   only their own facts are reported against it (`sharedInstrument`).
 4. **Gaps** name what one side does not state (ISIN, market, currency, share
    class, product class). A candidate with gaps is still only a proposal.
 5. **Market** is compared through MIC or RIC only. The provider's own market
@@ -106,9 +115,17 @@ and `packages/application/src/query/instrument-resolution.ts`:
 10. **Commands** a proposed candidate names, for a person to plan with a
     reason: adopt is `identity.assign` of the subject identifier to the
     anchor's instrument; keep apart is `relation.reject` of `listed_as` from
-    `instrument:<anchor's instrument>` to `identifier:<subject>`. The anchor is
-    ranked by ISIN first, then a listing identifier (RIC or MIC), then a
-    provider code; a tie goes to the lower id.
+    `instrument:<anchor's instrument>` to `identifier:<subject>`. An identifier
+    that is settled (its current mapping is manual, or its instrument is
+    shared with another identifier) is always the anchor over one that is
+    not, so an adoption never moves a decided identifier. Between two settled
+    or two unsettled identifiers the anchor is ranked by ISIN first, then a
+    listing identifier (RIC or MIC), then a provider code; a tie goes to the
+    lower id. When both are settled the candidate stays `proposed` with no
+    commands and a closed `hold` code: `subject-decided-elsewhere` (the
+    subject's mapping is manual) or `subject-shares-instrument` (re-mapping
+    it would split a shared instrument). Re-deciding it is a person's
+    correction of the earlier decision, not an adoption.
 11. **History** of an identifier: every mapping revision, every decision on
     the mapping and every `listed_as` relation naming it, oldest first.
 12. **Bounds.** 5,000 pairs, 1,000 hints, 10,000 fact rows, 10,000 relations
@@ -136,8 +153,10 @@ tests reuse `packages/storage-d1/test/sqlite.ts`,
   reference, and no reader uses the candidate set, so no price, quantity or
   cost crosses identifiers because of it.
 - An adoption re-maps one identifier. It does not resolve a third identifier
-  transitively: a candidate between the anchor and another identifier stays
-  open until it is decided.
+  transitively: a candidate between the decided instrument and another
+  identifier stays open until it is decided, with the decided identifier as
+  its anchor, unless a fact stated by any identifier now on that instrument
+  conflicts, in which case it is separated.
 - A pair whose providers state amounts in different currencies (a foreign
   holding valued in yen at one broker, say) is separated, not proposed. A
   person can still assign it with `identity.assign`; the separated list names
