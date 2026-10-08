@@ -451,7 +451,10 @@ describe("identity", () => {
                 ? "admitted+alias"
                 : "admitted"
               : outcome.refusal;
-            expect({ name, outcome: actual }).toEqual({ name, outcome: expected[name] });
+            expect({ name, outcome: actual }).toEqual({
+              name,
+              outcome: expected[name] ?? "unpinned",
+            });
             if (!outcome.admitted) expect(IDENTITY_REFUSALS).toContain(outcome.refusal);
             cases += 1;
           }
