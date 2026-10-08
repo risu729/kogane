@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { startPipeline } from "./harness";
+import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
   markAbandonedOccurrences,
   releaseCollectionLease,
@@ -81,6 +82,112 @@ test("operator recovery requires stopped confirmation and exact active lease ref
   ).toEqual({ released: true });
   expect((await scheduleSnapshot(env)).leases).toEqual([]);
 });
+test("repeated releases still validate confirmation, reference and source", async () => {
+  const ref = "12345678-1234-4234-8234-123456789abc";
+  expect(
+    await releaseCollectionLease(env, "mizuho-bank", { leaseRef: ref, confirmedStopped: true }),
+  ).toEqual({ released: true });
+  await expect(
+    releaseCollectionLease(env, "mizuho-bank", { leaseRef: ref, confirmedStopped: false }),
+  ).rejects.toThrow("confirmation_required");
+  await expect(
+    releaseCollectionLease(env, "mizuho-bank", { leaseRef: "invalid", confirmedStopped: true }),
+  ).rejects.toThrow("confirmation_required");
+  for (const [value, code] of [
+    [null, "invalid_request"],
+    [{ leaseRef: ref, confirmedStopped: true, extra: true }, "invalid_request"],
+    [{ confirmedStopped: true }, "confirmation_required"],
+    [{ leaseRef: null, confirmedStopped: true }, "confirmation_required"],
+    [{ leaseRef: ref }, "confirmation_required"],
+  ] as const)
+    await expect(releaseCollectionLease(env, "mizuho-bank", value)).rejects.toThrow(code);
+  await expect(
+    releaseCollectionLease(env, "unknown-source", { leaseRef: ref, confirmedStopped: true }),
+  ).rejects.toThrow("schedule_not_found");
+  expect((await scheduleSnapshot(env)).leases).toEqual([]);
+});
+
+test("concurrent releases of the same reference both succeed with an empty lease", async () => {
+  const ref = "12345678-1234-4234-8234-123456789abc";
+  await env.DB.prepare(
+    "UPDATE collection_execution_leases SET lease_ref=?,started_at='2026-03-01T00:00:00.000Z' WHERE source='mizuho-bank'",
+  )
+    .bind(ref)
+    .run();
+  expect(
+    await Promise.all([
+      releaseCollectionLease(env, "mizuho-bank", { leaseRef: ref, confirmedStopped: true }),
+      releaseCollectionLease(env, "mizuho-bank", { leaseRef: ref, confirmedStopped: true }),
+    ]),
+  ).toEqual([{ released: true }, { released: true }]);
+  expect(
+    await env.DB.prepare(
+      "SELECT lease_ref,started_at FROM collection_execution_leases WHERE source='mizuho-bank'",
+    ).first<{ lease_ref: null; started_at: null }>(),
+  ).toEqual({ lease_ref: null, started_at: null });
+});
+
+test("an old duplicate racing acquisition cannot clear the new execution's lease", async () => {
+  const oldRef = "12345678-1234-4234-8234-123456789abc";
+  let entered!: () => void, finish!: () => void;
+  const acquired = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const running = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const execution = withCollectionLease({ SCHEDULE_DB: env.DB }, "mizuho-bank", async () => {
+    entered();
+    await running;
+  });
+  // Depending on statement ordering, the duplicate succeeds before the new
+  // claim or conflicts after it. Neither ordering may empty the new lease.
+  const retry = releaseCollectionLease(env, "mizuho-bank", {
+    leaseRef: oldRef,
+    confirmedStopped: true,
+  });
+  try {
+    const [result] = await Promise.allSettled([retry, acquired]);
+    if (result!.status === "fulfilled") expect(result!.value).toEqual({ released: true });
+    else expect(result!.reason).toMatchObject({ code: "lease_conflict", status: 409 });
+    const current = await env.DB.prepare(
+      "SELECT lease_ref,started_at FROM collection_execution_leases WHERE source='mizuho-bank'",
+    ).first<{ lease_ref: string; started_at: string }>();
+    expect(current!.lease_ref).not.toBe(oldRef);
+    expect(current!.started_at).not.toBeNull();
+    await expect(
+      releaseCollectionLease(env, "mizuho-bank", {
+        leaseRef: oldRef,
+        confirmedStopped: true,
+      }),
+    ).rejects.toMatchObject({ code: "lease_conflict", status: 409 });
+    expect(
+      await env.DB.prepare(
+        "SELECT lease_ref,started_at FROM collection_execution_leases WHERE source='mizuho-bank'",
+      ).first<{ lease_ref: string; started_at: string }>(),
+    ).toEqual(current);
+  } finally {
+    finish();
+    await execution;
+  }
+  expect(
+    await releaseCollectionLease(env, "mizuho-bank", {
+      leaseRef: oldRef,
+      confirmedStopped: true,
+    }),
+  ).toEqual({ released: true });
+});
+
+test("a missing source lease row is still a conflict", async () => {
+  await env.DB.prepare("DELETE FROM collection_execution_leases WHERE source='sony-bank'").run();
+  await expect(
+    releaseCollectionLease(env, "sony-bank", {
+      leaseRef: "12345678-1234-4234-8234-123456789abc",
+      confirmedStopped: true,
+    }),
+  ).rejects.toMatchObject({ code: "lease_conflict", status: 409 });
+});
+
 test("occurrence identity remains immutable while closed outcome is mutable", async () => {
   await expect(
     env.DB.prepare(
