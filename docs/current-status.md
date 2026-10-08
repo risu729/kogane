@@ -44,18 +44,19 @@ are separate claims. Historical acceptance records are linked from the
 - MyJCB partial/unsafe unit coverage is not promoted into complete statement
   evidence. GLOBAL PASS pagination support does not by itself prove that a
   particular production month's capture and parse are complete.
-- GLOBAL PASS shared-run pages have no observations: the first run to be
-  admitted (2026-10-04, one page per selected month) had both pages refused
-  by `global-pass-activity@1.1.0` (`parser_rejected`), which still reads the
-  importer-era pages 1.0.0 read. Which check refused them is not stored; the
-  owner's counts-only replay
+- GLOBAL PASS shared runs have no transaction observations yet: the only
+  admitted run (fetch_run 989, 2026-10-04, one page per selected month)
+  captured two empty months (no Found line, no pager, no table). 1.1.0
+  refused both; `global-pass-activity@1.2.0` (deployed 2026-10-04) reads them
+  `ok` with no row, and they are those months' current empty snapshots. Of the
+  72 parse-eligible activity pages, 1.2.0 reads 70 `ok` (48 importer-era
+  pages with the same 372 rows as 1.1.0, and 22 empty pages in 7 months: 20
+  importer-era, 2 from run 989) and refuses 2 importer-era pages
+  (`parser_rejected`, as under 1.0.0 and 1.1.0). Which check refused those 2
+  is not stored; the owner's counts-only replay
   (`replay-diagnostics.ts globalpass-activity 2`, see
-  [operations](operations.md#replaying-a-parser-rejection)) names it. See
-  [observations](observations.md#global-pass-the-first-shared-run-pages-were-refused-no-parser-release).
-  A month the collector proves empty (no Found line, no pager, no table) was
-  refused by 1.1.0 too; `global-pass-activity@1.2.0` reads it as no rows. The
-  empty month was observed in English only and no shared run has stored one
-  yet. See
+  [operations](operations.md#replaying-a-parser-rejection)) names it. The
+  empty month was observed in English only. See
   [observations](observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).
 - Money Forward identity revisions and the SBI Shinsei bank adapter are
   implemented; fresh production adoption/mapping counts are not asserted here.

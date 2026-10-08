@@ -12,6 +12,6 @@
     "miniflare": "5.20260831.0-alpha",
     "typescript": "7.0.2",
     "undici": "8.11.2",
-    "wrangler": "4.146.0"
+    "wrangler": "4.147.0"
   }
 }

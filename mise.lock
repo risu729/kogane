@@ -73,16 +73,16 @@ url = "https://github.com/jdx/hk/releases/download/v2.5.0/hk-x86_64-pc-windows-m
 signer = "sigstore-oidc:https://github.com/jdx/hk/.github/workflows/release.yml"
 
 [[tools.node]]
-version = "26.10.0"
+version = "26.11.1"
 backend = "core:node"
 
 [tools.node."platforms.linux-x64"]
-checksum = "sha256:cb5c9ce9c80d7b8821e3a258543c71b939138cf17c74d5cc44bbe85d6dbc5ad8"
-url = "https://nodejs.org/dist/v26.10.0/node-v26.10.0-linux-x64.tar.gz"
+checksum = "sha256:15fc043a51a5783f2f4b634561091658f5a7f0e3db03f997dca3a8033a33e45b"
+url = "https://nodejs.org/dist/v26.11.1/node-v26.11.1-linux-x64.tar.gz"
 
 [tools.node."platforms.windows-x64"]
-checksum = "sha256:9fef7eca6743a6b910989cd8e78712376b394fcb9b6e1e9c44a0799a287f90c5"
-url = "https://nodejs.org/dist/v26.10.0/node-v26.10.0-win-x64.zip"
+checksum = "sha256:97f36a8a9684ff0d3e35758b4610fef5b628a5880e96f2ccc11240e5daf9934e"
+url = "https://nodejs.org/dist/v26.11.1/node-v26.11.1-win-x64.zip"
 
 [[tools.oxfmt]]
 version = "0.71.0"
@@ -149,34 +149,34 @@ url = "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellche
 url_api = "https://api.github.com/repos/koalaman/shellcheck/releases/assets/279056944"
 
 [[tools.tombi]]
-version = "1.7.2"
+version = "1.7.3"
 backend = "aqua:tombi-toml/tombi"
 
 [tools.tombi."platforms.linux-x64"]
-checksum = "sha256:70d702da0bb92758469c4f85761935b93c8172598b2682d9c89d7ab383a23a4c"
-url = "https://github.com/tombi-toml/tombi/releases/download/v1.7.2/tombi-cli-1.7.2-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/610147847"
+checksum = "sha256:90aa18e34c5133879942272fda31677d78dd4221ce8eb06e991c487893aaaba4"
+url = "https://github.com/tombi-toml/tombi/releases/download/v1.7.3/tombi-cli-1.7.3-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/615901928"
 provenance = "github-attestations"
 
 [tools.tombi."platforms.windows-x64"]
-checksum = "sha256:b5bf95bf49a8624e3fa2e7d3ee64d02fe06a42678731f1ba392abb72e161608a"
-url = "https://github.com/tombi-toml/tombi/releases/download/v1.7.2/tombi-cli-1.7.2-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/610147849"
+checksum = "sha256:6f72039120a4b0b2821a032a1ea6c98b502d2568a650b5cdb106abd67a187478"
+url = "https://github.com/tombi-toml/tombi/releases/download/v1.7.3/tombi-cli-1.7.3-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/615901924"
 provenance = "github-attestations"
 
 [[tools.typos]]
-version = "1.50.3"
+version = "1.51.1"
 backend = "aqua:crate-ci/typos"
 
 [tools.typos."platforms.linux-x64"]
-checksum = "sha256:aca6b5d546307092b8d0a8e0a89dd80f9da51f2f7617c5e45c5607c1684ffbf2"
-url = "https://github.com/crate-ci/typos/releases/download/v1.50.3/typos-v1.50.3-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/crate-ci/typos/releases/assets/589000924"
+checksum = "sha256:93c301fd4120ff076e2cc2a6d6a61cab4a4bdb81899287c0938b452e56d1f454"
+url = "https://github.com/crate-ci/typos/releases/download/v1.51.1/typos-v1.51.1-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/crate-ci/typos/releases/assets/616653682"
 
 [tools.typos."platforms.windows-x64"]
-checksum = "sha256:b59f149d84e86aab535d52db029fa8d3ac5ecba9ae5c7f19cf07acb5aa0caaaf"
-url = "https://github.com/crate-ci/typos/releases/download/v1.50.3/typos-v1.50.3-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/crate-ci/typos/releases/assets/589001623"
+checksum = "sha256:518f759fba43205f17a717656054c1d25bc883455a6296989e9d021c6edb7c59"
+url = "https://github.com/crate-ci/typos/releases/download/v1.51.1/typos-v1.51.1-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/crate-ci/typos/releases/assets/616657506"
 
 [[tools.uv]]
 version = "0.12.23"

@@ -167,7 +167,7 @@ jobs:
         # its mise configuration and the scripts below are reviewed code.
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.2
+          version: 2026.10.4
           # No tool cache anywhere in this job: its cache scope is shared with
           # pull request CI, which runs pull request code, so a restored archive
           # is not a trusted source of the interpreter that decides whether this
@@ -226,7 +226,7 @@ jobs:
         if: steps.decide.outputs.proceed == 'true'
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.2
+          version: 2026.10.4
           cache: false
       - name: Install the locked dependencies
         if: steps.decide.outputs.proceed == 'true'
@@ -362,7 +362,7 @@ jobs:
         run: node "${CONTAINER_GUARD}" bind
       - name: Upload the release manifest
         if: steps.decide.outputs.proceed == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-manifest-${{ inputs.sha }}
           path: |
@@ -1050,7 +1050,7 @@ jobs:
             --out "${RUNNER_TEMP}/release-progress.json"
       - name: Upload the release progress
         if: ${{ always() && steps.decide.outputs.proceed == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-progress-${{ inputs.sha }}
           path: ${{ runner.temp }}/release-progress.json
