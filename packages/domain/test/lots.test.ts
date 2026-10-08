@@ -198,7 +198,11 @@ describe("methods allocate a partial disposal across lots and conserve exactly",
     const [disposal] = book.disposals;
     expect(disposal!.allocations).toHaveLength(1);
     expect(disposal!.allocations[0]!.lotId).toBe(`pool:${ref("a")}`);
-    expect(disposal!.allocations[0]!.acquisitionRefs).toEqual([ref("a"), ref("b")]);
+    expect(disposal!.allocations[0]!.acquisitionRefs).toBeNull();
+    expect(disposal!.allocations[0]!.poolMembers).toBe(2);
+    expect(book.pools).toEqual([
+      { lotId: `pool:${ref("a")}`, acquisitionRefs: [ref("a"), ref("b")] },
+    ]);
     expect(amountText(disposal!.allocations[0]!.cost)).toBe("1650 JPY");
     const [pool] = book.remainingLots!;
     expect(quantityText(pool!.quantity)).toBe("20");
@@ -1335,5 +1339,45 @@ describe("review nits: refusals instead of silent reads or throws", () => {
     );
     expect(result.disposals[0]!.quantity).toEqual(disposalInput.quantity);
     expect(result.disposals[0]!.quantity).not.toBe(disposalInput.quantity);
+  });
+});
+
+describe("moving-average pools are listed once per book, not once per allocation", () => {
+  test("each allocation names how many pool members had joined; the pool lists them in join order", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-06", "10", "1000"),
+          sell("s1", "2030-01-07", "5", "600"),
+          buy("b", "2030-01-08", "5", "700"),
+          sell("s2", "2030-01-09", "10", "1500"),
+          buy("c", "2030-01-10", "4", "400"),
+        ],
+        policy({ method: "moving-average" }),
+      ),
+    );
+    expect(
+      book.disposals.map((d) => [d.allocations[0]!.lotId, d.allocations[0]!.poolMembers]),
+    ).toEqual([
+      [`pool:${ref("a")}`, 1],
+      [`pool:${ref("a")}`, 2],
+    ]);
+    // s2 empties the first pool; c opens a second one.
+    expect(book.pools).toEqual([
+      { lotId: `pool:${ref("a")}`, acquisitionRefs: [ref("a"), ref("b")] },
+      { lotId: `pool:${ref("c")}`, acquisitionRefs: [ref("c")] },
+    ]);
+    expect(book.remainingLots!.map((lot) => [lot.lotId, lot.acquisitionRefs])).toEqual([
+      [`pool:${ref("c")}`, [ref("c")]],
+    ]);
+  });
+
+  test("FIFO allocations name their one acquisition and the book has no pools", () => {
+    const book = onlyBook(computeLots(twoLotsThenPartialSale(), policy()));
+    expect(book.disposals[0]!.allocations.map((a) => [a.acquisitionRefs, a.poolMembers])).toEqual([
+      [[ref("a")], null],
+      [[ref("b")], null],
+    ]);
+    expect(book.pools).toEqual([]);
   });
 });

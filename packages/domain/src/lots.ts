@@ -313,9 +313,26 @@ export interface LotState {
   lineage: LotLineage;
 }
 
-export interface LotAllocation {
+/** A moving-average pool of a book: its id and every ref that joined it, in join order. */
+export interface LotPool {
   lotId: string;
   acquisitionRefs: string[];
+}
+
+export interface LotAllocation {
+  lotId: string;
+  /**
+   * The lot's acquisition (or seeding snapshot) ref. Null for a
+   * moving-average pool, whose members are listed once in the book's `pools`
+   * rather than repeated on every allocation.
+   */
+  acquisitionRefs: string[] | null;
+  /**
+   * For a pool: how many of its `acquisitionRefs` (in join order) had joined
+   * when this allocation was made, so the members it drew on are that prefix.
+   * Null for a lot.
+   */
+  poolMembers: number | null;
   /** In the lot's units at the time of the disposal; `lineage.splits` of the lot says what came later. */
   quantity: Quantity;
   cost: LotAmount;
@@ -362,6 +379,8 @@ export type LotBook =
       wrapperKey: string;
       instrumentClass: InstrumentClass;
       disposals: LotDisposal[];
+      /** Every moving-average pool opened in the book, in order; empty under other methods. */
+      pools: LotPool[];
       /** Null once the book is indeterminate: what is left is then not known. */
       remainingLots: LotState[] | null;
       /**
@@ -731,6 +750,8 @@ interface BookState {
   firstOpen: number;
   /** Sum of every lot's remaining quantity, kept as inputs apply. */
   held: ExactDecimal;
+  /** Moving-average pools that were emptied, in order. */
+  closedPools: LotPool[];
   /** True once any input has been applied: a snapshot after that is a check, not a seed. */
   history: boolean;
   indeterminate: { refs: string[]; reasonCode: LotReasonCode } | null;
@@ -750,13 +771,17 @@ function emptyState(): BookState {
     index: new Map(),
     firstOpen: 0,
     held: ZERO,
+    closedPools: [],
     history: false,
     indeterminate: null,
     disposals: [],
   };
 }
 
-/** A trial copy for a commuting group: the lots are copied, disposals start empty. */
+/**
+ * A trial copy for a commuting group: the lots are copied, disposals start
+ * empty. `closedPools` is shared; a failed trial truncates it back.
+ */
 function trialState(state: BookState): BookState {
   return {
     ...state,
@@ -772,6 +797,10 @@ function trialState(state: BookState): BookState {
   };
 }
 
+function poolOf(lot: Lot): LotPool {
+  return { lotId: lot.lotId, acquisitionRefs: [...lot.acquisitionRefs] };
+}
+
 function addLot(state: BookState, lot: Lot): void {
   state.index.set(lot.lotId, state.lots.length);
   state.lots.push(lot);
@@ -781,7 +810,7 @@ function addLot(state: BookState, lot: Lot): void {
 function lotState(lot: Lot, instrumentRef: string): LotState {
   return {
     lotId: lot.lotId,
-    acquisitionRefs: [...lot.acquisitionRefs].sort(),
+    acquisitionRefs: [...lot.acquisitionRefs],
     acquiredAt: lot.acquiredAt,
     quantity: exactQuantity(instrumentRef, lot.quantity),
     remainingQuantity: exactQuantity(instrumentRef, lot.remaining),
@@ -1063,7 +1092,8 @@ function applyDisposal(
     const { cost, fees } = shares[index]!;
     allocations.push({
       lotId: lot.lotId,
-      acquisitionRefs: [...lot.acquisitionRefs].sort(),
+      acquisitionRefs: policy.method === "moving-average" ? null : [...lot.acquisitionRefs],
+      poolMembers: policy.method === "moving-average" ? lot.acquisitionRefs.length : null,
       quantity: exactQuantity(entry.input.instrumentRef, take),
       cost: lotAmount(cost.share),
       acquisitionFees: fees === null ? null : lotAmount(fees.share),
@@ -1092,6 +1122,7 @@ function applyDisposal(
     state.lots[0] &&
     isZeroDecimal(state.lots[0].remaining)
   ) {
+    state.closedPools.push(poolOf(state.lots[0]));
     state.lots = [];
     state.index = new Map();
     state.firstOpen = 0;
@@ -1399,7 +1430,12 @@ function failAll(
 function computeBook(
   entries: readonly Entry[],
   policy: LotPolicy,
-): { disposals: LotDisposal[]; lots: Lot[] | null; indeterminateFrom: BookState["indeterminate"] } {
+): {
+  disposals: LotDisposal[];
+  pools: LotPool[];
+  lots: Lot[] | null;
+  indeterminateFrom: BookState["indeterminate"];
+} {
   const state = emptyState();
   const byRef = [...entries].sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
   // An input with no known time could sit anywhere in the history.
@@ -1411,14 +1447,24 @@ function computeBook(
       "unknown_time",
     );
     failAll(state, byRef, "unknown_time", policy);
-    return { disposals: state.disposals, lots: null, indeterminateFrom: state.indeterminate };
+    return {
+      disposals: state.disposals,
+      pools: [],
+      lots: null,
+      indeterminateFrom: state.indeterminate,
+    };
   }
   const ordered = entries
     .map((entry) => ({ ...entry, span: timeSpan(entry.time) }))
     .sort(compareLaidOut);
   if (zonesConflict(ordered)) {
     failAll(state, ordered, "order_tie", policy);
-    return { disposals: state.disposals, lots: null, indeterminateFrom: state.indeterminate };
+    return {
+      disposals: state.disposals,
+      pools: [],
+      lots: null,
+      indeterminateFrom: state.indeterminate,
+    };
   }
   for (const group of timeGroups(ordered)) {
     if (state.indeterminate !== null || group.length === 1) {
@@ -1438,8 +1484,10 @@ function computeBook(
       continue;
     }
     const trial = trialState(state);
+    const poolsBefore = state.closedPools.length;
     for (const entry of group) applyEntry(trial, entry, policy);
     if (trial.indeterminate !== null) {
+      state.closedPools.length = poolsBefore;
       failAll(state, group, trial.indeterminate.reasonCode, policy);
       continue;
     }
@@ -1447,8 +1495,10 @@ function computeBook(
     Object.assign(state, trial, { disposals });
     disposals.push(...trial.disposals);
   }
+  const open = policy.method === "moving-average" ? state.lots.slice(0, 1).map(poolOf) : [];
   return {
     disposals: state.disposals,
+    pools: [...state.closedPools, ...open],
     lots: state.indeterminate === null ? state.lots : null,
     indeterminateFrom: state.indeterminate,
   };
@@ -1629,6 +1679,7 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
       status: "computed",
       ...head,
       disposals: computed.disposals,
+      pools: computed.pools,
       remainingLots:
         computed.lots === null
           ? null

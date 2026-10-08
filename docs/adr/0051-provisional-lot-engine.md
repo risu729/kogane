@@ -132,8 +132,12 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   `upstream_indeterminate` and remaining lots are not reported. A disposal is
   never filled by a synthetic short, and a stale specific-identification
   selection is never reassigned to another lot.
-- **Output.** Per book: disposals with allocations (lot, quantity, cost,
-  acquisition fees, FX basis, rounding inputs), allocated cost or null,
+- **Output.** Per book: disposals with allocations (lot, its acquisition ref
+  or, for a moving-average pool, the number of pool members that had joined,
+  quantity, cost, acquisition fees, FX basis, rounding inputs), the book's
+  moving-average pools listed once each with their members in join order (so
+  output grows with the inputs, not with inputs × disposals), allocated cost
+  or null,
   proceeds and disposal fees side by side, an outcome
   (`allocated | limited | indeterminate`) and closed reason codes; remaining
   lots with a `lineage` (origin ref, origin acquisition time, origin cost unit,

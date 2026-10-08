@@ -184,8 +184,9 @@ specific-identification`), scope, time basis, ordering rule, fee and FX
   the time does not order, is `indeterminateFrom` and later disposals
   are `upstream_indeterminate`; amounts that are not known are typed reasons,
   never zero, and costs in different units are never summed.
-- Output: disposals with allocations, allocated cost, proceeds and disposal
-  fees, outcome `allocated | limited | indeterminate`; remaining lots with a
+- Output: disposals with allocations (a pool allocation names how many of
+  the pool's members had joined; `pools` lists each pool's members once),
+  allocated cost, proceeds and disposal fees, outcome `allocated | limited | indeterminate`; remaining lots with a
   `lineage`; a manifest of policy, refs and the validated inputs for
   `canonicalDigest`, so equal digests mean equal results. No gain, no tax
   conclusion. No adapter produces these inputs yet
