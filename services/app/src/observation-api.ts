@@ -162,6 +162,7 @@ export async function observationApi(
     return json({
       apiVersion: 1,
       parsingHealth: await reader.parsingHealth(),
+      globalPassEmptyMonths: await reader.globalPassEmptyMonths(),
       source: { kind: "central-store", classification: "financial" },
       // What this server can actually serve, not what the contract defaults
       // to: the object resolved above, which the agent API reads through the

@@ -349,7 +349,10 @@ export async function releaseCollectionLease(
   )
     throw new ScheduleError("confirmation_required");
   const released = await env.DB.prepare(
-    "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL WHERE source=? AND lease_ref=?",
+    // A repeated release is already satisfied while the source is unlocked.
+    // Check this in the same statement as the write: a newly acquired lease
+    // must never be cleared by a delayed retry of the previous reference.
+    "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL WHERE source=? AND (lease_ref=? OR lease_ref IS NULL)",
   )
     .bind(source, v.leaseRef)
     .run();
