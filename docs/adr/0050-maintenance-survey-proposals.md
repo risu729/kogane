@@ -198,6 +198,8 @@ codes are checked closed sets in the schema itself.
   pruning. Each distinct body is stored once.
 - CORE 0069 follows the numbering agreed for the open PRs: CORE 0067 is
   #560's and 0068 #544's, so 0069 lands after them whatever the merge order.
+  Main's 0070 (#586) merged first; a database that already has it applies
+  0069 afterwards, and the two share no table.
 
 ## Verification
 

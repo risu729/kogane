@@ -305,6 +305,16 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   economic_event_revisions: { classification: "core-keep", planRow: "economic events" },
   economic_legs: { classification: "core-keep", planRow: "economic events" },
   obligation_revisions: { classification: "core-keep", planRow: "economic events" },
+  // 0070 (ADR 0054): the common consumption guard. Claims, seals, role-typed
+  // times, leg effects and the commit log are append-only records of what was
+  // adopted and when it became known; the identity epochs are append-only
+  // declarations. None is lane state.
+  economic_claims: { classification: "core-keep", planRow: "economic events" },
+  economic_commit_log: { classification: "core-keep", planRow: "economic events" },
+  economic_event_times: { classification: "core-keep", planRow: "economic events" },
+  economic_identity_epochs: { classification: "core-keep", planRow: "economic events" },
+  economic_leg_effects: { classification: "core-keep", planRow: "economic events" },
+  economic_revision_seals: { classification: "core-keep", planRow: "economic events" },
   settlement_relations: { classification: "core-keep", planRow: "economic events" },
   // reward_programs, expiry_rules, conversion_offers → CORE
   conversion_offers: { classification: "core-keep", planRow: "reward reference claims" },

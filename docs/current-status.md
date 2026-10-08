@@ -85,7 +85,7 @@ are separate claims. Historical acceptance records are linked from the
 The committed [App config](../services/app/wrangler.jsonc) and
 [Processor config](../services/processor/wrangler.jsonc) enable their existing
 boolean feature flags, including scheduling, operations, purchase recognition,
-rewards, reports and READ projections. CORE migrations reach 0069; READ reaches 0003. These are repository facts, not live database/deployment readback.
+rewards, reports and READ projections. CORE migrations reach 0070; READ reaches 0003. These are repository facts, not live database/deployment readback.
 
 App names a human operator in `OPERATOR_SUBJECTS`. `AGENT_GRANTS` and
 `AGENT_API_GRANTS` remain empty. The MCP handler requires an agent-API grant
