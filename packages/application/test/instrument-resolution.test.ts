@@ -6,7 +6,8 @@
 // that states a code and a country the way a provider rule would. Decisions
 // go through the change lifecycle (plan, approve, commit) with the same
 // identity writer the Processor commits with. Every code, name and account
-// here is invented.
+// here is invented; domestic codes are 7-character `SYN…` strings, a shape no
+// exchange assigns.
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { resolveIdentity } from "../../identity/src/index.ts";
@@ -320,12 +321,12 @@ class World {
 
 /**
  * A store with:
- * - SBI domestic `9001` held on XTKS, and traded on a venue the SBI rule does
+ * - SBI domestic `SYN9001` held on XTKS, and traded on a venue the SBI rule does
  *   not map (a provider-code identifier), and held at broker B in JPY;
- * - SBI domestic `9002` held on XTKS and on XNGO (two listings);
- * - SBI domestic `9003` held in JPY and broker B's `9003` stated in USD;
+ * - SBI domestic `SYN9002` held on XTKS and on XNGO (two listings);
+ * - SBI domestic `SYN9003` held in JPY and broker B's `SYN9003` stated in USD;
  * - SBI foreign `SYN` with a provider RIC, and traded without one;
- * - SBI `9004` and broker B `9005` under one display name.
+ * - SBI `SYN9004` and broker B `SYN9005` under one display name.
  */
 async function world(): Promise<World> {
   const w = new World();
@@ -335,17 +336,23 @@ async function world(): Promise<World> {
     [
       {
         account: domestic,
-        code: "9001",
+        code: "SYN9001",
         name: "Synthetic Holdings",
         market: "TKY",
         currency: "JPY",
       },
-      { account: domestic, code: "9002", name: "Synthetic Two", market: "TKY", currency: "JPY" },
-      { account: domestic, code: "9002", name: "Synthetic Two", market: "NGY", currency: "JPY" },
-      { account: domestic, code: "9003", name: "Synthetic Three", market: "TKY", currency: "JPY" },
+      { account: domestic, code: "SYN9002", name: "Synthetic Two", market: "TKY", currency: "JPY" },
+      { account: domestic, code: "SYN9002", name: "Synthetic Two", market: "NGY", currency: "JPY" },
       {
         account: domestic,
-        code: "9004",
+        code: "SYN9003",
+        name: "Synthetic Three",
+        market: "TKY",
+        currency: "JPY",
+      },
+      {
+        account: domestic,
+        code: "SYN9004",
         name: "Synthetic Shared Name",
         market: "TKY",
         currency: "JPY",
@@ -366,7 +373,7 @@ async function world(): Promise<World> {
         account: domestic,
         currency: "JPY",
         extra: {
-          issueCode: "9001",
+          issueCode: "SYN9001",
           issueName: "Synthetic Holdings",
           marketLabel: "SYNTHETIC-VENUE",
           accountLabel: "synthetic",
@@ -387,21 +394,21 @@ async function world(): Promise<World> {
   await w.capture(BROKER_B, [
     {
       account: "synthetic-broker-b:custody",
-      code: "9001",
+      code: "SYN9001",
       name: "SYNTHETIC HOLDINGS",
       currency: "JPY",
       extra: { country: "JP" },
     },
     {
       account: "synthetic-broker-b:custody",
-      code: "9003",
+      code: "SYN9003",
       name: "Synthetic Three",
       currency: "USD",
       extra: { country: "JP" },
     },
     {
       account: "synthetic-broker-b:custody",
-      code: "9005",
+      code: "SYN9005",
       name: "Synthetic Shared Name",
       currency: "JPY",
       extra: { country: "JP" },
@@ -412,15 +419,15 @@ async function world(): Promise<World> {
 
 function ids(w: World) {
   return {
-    listing9001: w.identifier("mic-symbol", "XTKS", "9001"),
-    venue9001: w.identifier("sbi-security-code", "JP", "9001"),
-    broker9001: w.identifier("synthetic-broker-b-code", "JP", "9001"),
-    tokyo9002: w.identifier("mic-symbol", "XTKS", "9002"),
-    nagoya9002: w.identifier("mic-symbol", "XNGO", "9002"),
-    listing9003: w.identifier("mic-symbol", "XTKS", "9003"),
-    broker9003: w.identifier("synthetic-broker-b-code", "JP", "9003"),
-    shared9004: w.identifier("mic-symbol", "XTKS", "9004"),
-    broker9005: w.identifier("synthetic-broker-b-code", "JP", "9005"),
+    listing9001: w.identifier("mic-symbol", "XTKS", "SYN9001"),
+    venue9001: w.identifier("sbi-security-code", "JP", "SYN9001"),
+    broker9001: w.identifier("synthetic-broker-b-code", "JP", "SYN9001"),
+    tokyo9002: w.identifier("mic-symbol", "XTKS", "SYN9002"),
+    nagoya9002: w.identifier("mic-symbol", "XNGO", "SYN9002"),
+    listing9003: w.identifier("mic-symbol", "XTKS", "SYN9003"),
+    broker9003: w.identifier("synthetic-broker-b-code", "JP", "SYN9003"),
+    shared9004: w.identifier("mic-symbol", "XTKS", "SYN9004"),
+    broker9005: w.identifier("synthetic-broker-b-code", "JP", "SYN9005"),
     ric: w.identifier("ric", "", "SYN.X"),
     foreignCode: w.identifier("sbi-security-code", "US", "SYN"),
   };
@@ -641,12 +648,19 @@ describe("only a person's decision adopts or rejects, and the history keeps ever
       mappingRevision: 2,
       sharedWith: [id.listing9001],
     });
-    // The listing still has an open candidate with the venue code, so it is
-    // unresolved; broker B's code is resolved.
+    // Broker B's code shares its code with the venue identifier, and that
+    // candidate is still open, so broker B's code is still unresolved: one
+    // decision does not resolve a third identifier transitively.
     expect(stateOf(after, id.broker9001)).toBe("unresolved-candidates");
-    // The venue code's candidates are still open: one decision does not
-    // resolve a third identifier transitively.
     expect(candidateOf(after, id.listing9001, id.venue9001).status).toBe("proposed");
+    // The decided broker code anchors that open candidate, so adopting it
+    // moves the venue code, never the decided one.
+    expect(candidateOf(after, id.broker9001, id.venue9001)).toMatchObject({
+      anchorIdentifierId: id.broker9001,
+      subjectIdentifierId: id.venue9001,
+      status: "proposed",
+      hold: null,
+    });
 
     const [history] = await queryInstrumentHistory(w.sql, [id.broker9001]);
     expect(

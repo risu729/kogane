@@ -85,7 +85,8 @@ under policy `instrument-candidates-v1`:
   conflicting fact. Each names its evidence, the facts that agree, the facts
   one side or both sides do not state (market, currency, share class, product
   class, ISIN; no rule records the last three, so every pair names them) and
-  whether the two are used by different sources;
+  `crossSource`, which is false only when both identifiers are used by
+  exactly one source, the same one;
 - **separated** pairs: they share such a value but state a different
   instrument kind, ISIN, RIC, country, MIC, currency, share class or product
   class. Each side counts with every identifier that maps to its instrument
@@ -93,7 +94,9 @@ under policy `instrument-candidates-v1`:
   mapped onto one listing is separated from a listing on another market.
   They are never candidates;
 - **hints**: equal current mapping labels (after width, case and whitespace
-  normalisation) with no shared value. A name is never evidence; a hint has no
+  normalisation) with no shared value, unless the two are already on one
+  instrument or a label is only the identifier's own code (a rule's fallback
+  when the provider gives no name). A name is never evidence; a hint has no
   status and nothing to adopt;
 - each identifier's state: `unresolved-candidates`, `resolved-by-decision`,
   `kept-separate`, `no-candidate` (it stays what its own mapping says, which

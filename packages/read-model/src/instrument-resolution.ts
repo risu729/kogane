@@ -3,8 +3,10 @@
 //
 // - `INSTRUMENT_FACTS_SQL`: every identifier whose current mapping targets a
 //   security, crypto or product instrument and that a currently published,
-//   sealed identity observation uses, one row per (identifier, source, stated
-//   currency, unconfirmed). A use as `security` is denominated by the unit
+//   sealed identity observation uses (`current_identity_observations` is
+//   driven by `published_parse_runs` since CORE 0026, so it is not checked
+//   again here), one row per (identifier, source, stated currency,
+//   unconfirmed). A use as `security` is denominated by the unit
 //   the same identity observation names as its `trade-unit`; by its `unit`
 //   only when it names no trade unit or the trade unit is a crypto asset
 //   code (`provider-asset-code`, an exchange product's base). A denominating
@@ -16,18 +18,21 @@
 //   identifier), ordered as the change lifecycle orders a relation's history.
 // - `INSTRUMENT_HISTORY_SQL`: the mapping revisions, mapping decisions and
 //   `listed_as` relations of up to `INSTRUMENT_HISTORY_BOUND` identifiers, in
-//   the order they were written.
+//   the order they were written. The bound is on identifiers, not rows: every
+//   entry of each named identifier is returned.
 //
-// The facts read scans `identity_instrument_uses` once, as the identity
-// catalogue's instrument list already does; there is no index on its
-// identifier column and this change adds no migration.
+// The facts read walks every current identity observation once, as the
+// identity catalogue's instrument list already does, and reaches each
+// observation's uses by the primary key (identity_observation_id, role); no
+// index on the use table's identifier column is needed and this change adds
+// no migration. Its D1 cost is not measured.
 import type { SqlExecutor } from "./reader";
 
 /** Rows of `INSTRUMENT_FACTS_SQL` one read may return; more is refused, never cut. */
 export const INSTRUMENT_FACTS_ROW_BOUND = 10_000;
 /** `listed_as` relations one read may return; more is refused, never cut. */
 export const LISTED_AS_ROW_BOUND = 10_000;
-/** Identifiers one history read may name. */
+/** Identifiers one history read may name. A bound on identifiers, not on rows. */
 export const INSTRUMENT_HISTORY_BOUND = 100;
 
 export const INSTRUMENT_FACTS_SQL = `WITH eligible AS MATERIALIZED (
@@ -40,7 +45,6 @@ export const INSTRUMENT_FACTS_SQL = `WITH eligible AS MATERIALIZED (
  JOIN current_identity_observations o ON o.id=u.identity_observation_id
  JOIN source_accounts s ON s.id=o.source_account_id
  WHERE u.identifier_id IN (SELECT identifier_id FROM eligible)
-  AND EXISTS(SELECT 1 FROM published_parse_runs p WHERE p.parse_run_id=o.parse_run_id)
 ), denominated AS (
  SELECT x.identifier_id,x.source_id,
   CASE WHEN x.role<>'security' THEN NULL

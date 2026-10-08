@@ -362,6 +362,36 @@ describe("display names are never evidence", () => {
     expect(after.hints).toEqual([]);
   });
 
+  test("no hint for two identifiers already on one instrument, or for a label that is only the code", () => {
+    const named = facts("j1", { label: "Synthetic Joined" });
+    const joined = facts("j2", {
+      label: "Synthetic Joined",
+      instrumentId: named.instrumentId,
+      mappingMethod: "manual",
+      sources: ["synthetic-broker-b"],
+    });
+    expect(set([named, joined]).hints).toEqual([]);
+
+    // One code in two countries, each labelled with the code a rule fell
+    // back to: not a name, so no hint. Real equal names in two countries
+    // still hint, with the country conflict named.
+    const inCountry = (id: string, country: string, label: string) =>
+      facts(id, { value: "SYNC005", countryCode: country, securityCode: "SYNC005", label });
+    expect(set([inCountry("k1", "ZZ", "SYNC005"), inCountry("k2", "ZY", "SYNC005")]).hints).toEqual(
+      [],
+    );
+    expect(
+      set([inCountry("k1", "ZZ", "Synthetic Name"), inCountry("k2", "ZY", "Synthetic Name")]).hints,
+    ).toEqual([
+      {
+        pairId: "instrument-pair:k1|k2",
+        identifierIds: ["k1", "k2"],
+        reason: "same-display-name",
+        conflicts: ["country-differs"],
+      },
+    ]);
+  });
+
   test("normalisation is width, case and whitespace only", () => {
     expect(normalisedDisplayName("  ＡＢＣ　 Fund ")).toBe("abc fund");
     expect(normalisedDisplayName("ABC Fund (A)")).not.toBe(normalisedDisplayName("ABC Fund (B)"));

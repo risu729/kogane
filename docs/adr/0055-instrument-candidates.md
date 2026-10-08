@@ -114,7 +114,10 @@ and `packages/application/src/query/instrument-resolution.ts`:
 7. **Names** are never evidence. Two identifiers whose names are equal after
    NFKC, whitespace and case normalisation, and that share no evidence, are a
    `hint` with the conflicts already known; a hint has no status and no
-   command.
+   command. Two identifiers already on one instrument are not hinted, and a
+   label that is only the identifier's own value or security code (the SBI
+   rule falls back to the code when the provider gives no name) is not a name
+   and hints nothing.
 8. **Status from stored records only.** `adopted` when both identifiers map to
    one instrument now; `rejected` when the newest `listed_as` relation from
    either identifier's current instrument to the other identifier is rejected;
@@ -141,8 +144,11 @@ and `packages/application/src/query/instrument-resolution.ts`:
     correction of the earlier decision, not an adoption.
 11. **History** of an identifier: every mapping revision, every decision on
     the mapping and every `listed_as` relation naming it, oldest first.
-12. **Bounds.** 5,000 pairs, 1,000 hints, 10,000 fact rows, 10,000 relations
-    and 100 identifiers per history read; a larger read is refused, never cut.
+12. **Bounds.** 5,000 pairs, 1,000 hints, 10,000 fact rows and 10,000
+    relations; a larger read is refused, never cut. A history read names at
+    most 100 identifiers and is refused beyond that; the cap is on
+    identifiers, not rows, so every entry of each named identifier is
+    returned.
 
 No migration, route or page is part of this decision.
 
@@ -231,8 +237,10 @@ nothing more:
     share class and product class when both sides lack them;
   - names: equal normalised names without evidence are a hint with no status;
     same-name products with different ISINs and share classes stay apart;
-    renaming either side changes nothing; normalisation is width, case and
-    whitespace only;
+    renaming either side changes nothing; no hint for two identifiers on one
+    instrument or for a label that is only the code, while equal real names
+    in two countries still hint with `country-differs`; normalisation is
+    width, case and whitespace only;
   - status: an accepted `listed_as` alone does not adopt; a shared instrument
     is `adopted`; a rejection in either orientation rejects and a released one
     reopens; identifier states, including `shared-without-decision`;
@@ -252,7 +260,8 @@ nothing more:
     every named command is a valid change payload once a reason is added;
   - an agent can plan an adoption but not approve it; a person's
     `identity.assign` adopts as a new manual revision with the rule revision
-    kept; a person's `relation.reject` keeps a pair apart; the history lists
+    kept, and the decided identifier then anchors the candidate still open
+    with a third identifier; a person's `relation.reject` keeps a pair apart; the history lists
     both; a history read of more than 100 identifiers is refused;
   - S1 and S2 through the change lifecycle, with the anchor, the adopt and
     keep-apart payloads, and `subject-decided-elsewhere` with no commands once

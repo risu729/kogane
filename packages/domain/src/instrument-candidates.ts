@@ -494,11 +494,18 @@ export function instrumentCandidates(
     });
   }
 
-  // Hints: equal normalised names, no shared evidence key.
+  // Hints: equal normalised names, no shared evidence key. A label that is
+  // only the identifier's own code (a rule falls back to it when the provider
+  // gives no name) is not a name, so it hints nothing.
   const byName = new Map<string, string[]>();
   for (const row of eligible) {
     const name = normalisedDisplayName(row.label);
-    if (name === "") continue;
+    if (
+      name === "" ||
+      name === normalisedDisplayName(row.value) ||
+      (row.securityCode !== null && name === normalisedDisplayName(row.securityCode))
+    )
+      continue;
     const members = byName.get(name) ?? [];
     members.push(row.identifierId);
     byName.set(name, members);
@@ -510,6 +517,8 @@ export function instrumentCandidates(
         const left = byId.get(members[i]!)!;
         const right = byId.get(members[j]!)!;
         if (pairs.has(`${left.identifierId}\u0000${right.identifierId}`)) continue;
+        // Already one instrument: a decision joined them, nothing to hint.
+        if (left.instrumentId === right.instrumentId) continue;
         const comparison = compareIdentifierFacts(left, right);
         if (comparison.evidence.length > 0) continue;
         hints.push({
