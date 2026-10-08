@@ -90,7 +90,8 @@ Every `ExpiringBucket` carries `expiryBasis: { displayed, computed, agreement }`
 - `computed` is the derivation under one rule version, stamped
   `EXPIRY_DERIVATION_RELEASE = "reward-expiry-v1"`:
   - `status`: `date` (a calendar day in the rule's deadline calendar),
-    `no-expiry` (only from verified, open-ended terms of family `none`), or
+    `no-expiry` (only from verified, open-ended terms of family `none`, and
+    for a tier-gated version only with a required tier on the evaluation day), or
     `unavailable` with exactly one `reasonCode`;
   - `rule`: rule ref, id, version, family, verification, the version's
     `validPeriod`, the evidence refs that confirm its terms, the
@@ -116,14 +117,16 @@ Only when every input the rule needs is present:
    evaluation day (an open-ended version always is; a period that cannot be read
    covers nothing);
 2. the bucket's kind is in the rule's applicability;
-3. for an inactivity rule: no qualifying activity has an unreadable date; at
-   least one qualifying activity is observed (excluded kinds never anchor); the
-   history's completeness is not `unknown` (a `partial` window, whose older end
-   is unobserved, still contains the newest activity and only adds
-   `history_incomplete`); same-day anchors are chosen by activity ref, so input
-   order does not matter;
+3. for an inactivity rule: no qualifying activity has an unreadable date (under
+   a `member-used` basis, a missing usage date is unreadable, not the posting
+   date); at least one qualifying activity is observed (excluded kinds never
+   anchor); the history's completeness is not `unknown` (a `partial` window,
+   whose older end is unobserved, still contains the newest activity and only
+   adds `history_incomplete`); same-day anchors are chosen by activity ref, so
+   input order does not matter;
 4. for a tier-gated rule: a claim of a required tier exists for this programme
-   and holding and covers the anchor day;
+   and holding and covers the anchor day (for family `none`, whose answer is
+   "no expiry", the evaluation day);
 5. the anchor and the computed deadline both lie inside the version's own
    period. How a later version treats a deadline that crosses the boundary is
    not recorded, so it is not guessed.
@@ -168,8 +171,11 @@ disagreement; `partial` when a covered bucket's deadline is not established
   `reward_expiry_estimates.expiry_basis_json` (a JSON object). The row digest
   covers it; sealed snapshots stay immutable under the existing guards.
 - `GET /api/v2/rewards/expiry` returns `expiryBasis` per row: the stored basis
-  when it validates, else `null`, which means "not recorded" (a row built before
-  v2), never "no computed expiry". Nothing is reconstructed from other columns.
+  when it validates, else `null`: not recorded (a row built before v2) or a
+  stored value that fails the check, never "no computed expiry". Nothing is
+  reconstructed from other columns. The validator also refuses a date or "no
+  expiry" under a version that cannot give one, and an agreement claimed for an
+  unreadable display.
 - `RewardReadExpiryRow` in the shared response validator is unchanged; the
   field is typed as `RewardReadExpiryBasisFields` with its own validator
   `validRewardExpiryBasis` in `reward-contract.ts`, and the screen renders the
@@ -204,7 +210,13 @@ this decision, not a defect: the inputs that would allow one are not confirmed.
   anchor and deadlines crossing a version boundary now yield no date; an
   unreadable display beside a computed date is no longer `conflict`; a display
   beside verified "no expiry" is `conflict`; a fixed-lot bucket with an
-  unreadable display is `partial`.
+  unreadable display is `partial`; a tier-gated "no expiry" rule whose tier
+  does not cover the evaluation day yields `membership_not_retroactive`, and the
+  estimate carries `no_expiry_under_verified_terms` only when a bucket's answer
+  is "no expiry"; under a `member-used` policy a qualifying activity without a
+  usage date is `activity_date_unknown`, not dated by its posting. A stored rule
+  whose tier list or period cannot be read is mapped to "a tier no claim names"
+  and "a period covering no day", never to "every tier" or "always in force".
 - A programme with no stored rule at all still produces no expiry row (the
   holdings route lists its buckets with their displays). Every seeded programme
   has at least one rule; a migration that adds a programme must add at least an
@@ -233,14 +245,20 @@ this decision, not a defect: the inputs that would allow one are not confirmed.
   an unreadable period; a combination sweep (6 rules × 2 histories × 4 kinds ×
   3 quantities × 4 displays) asserting every bucket is listed, quantities are
   unchanged, and `deadline_passed` appears only on a displayed or computed day;
-  validator refusals.
+  a tier-gated `none` rule with a current and an ended tier; validator refusals
+  (contradictory status and reason, a date or "no expiry" from a version that
+  cannot give one, agreement with an unreadable display).
 - `packages/domain/test/rewards.test.ts`: the existing SC11–SC14 / AT43–AT54
-  cases pass unchanged.
+  cases pass unchanged; the `member-used` case also checks that a missing usage
+  date yields `activity_date_unknown`.
 - `packages/read-model/test/reward-projection.test.ts`: the seeded rules read
   from the migrated CORE schema, applied to synthetic V Point, V Point Pay and
   Mobile Suica buckets; every row's basis validates; the reasons per rule and
   bucket kind are those in the table above; unparsed and missing quantities stay
   non-exact; unverified rules never yield "no expiry".
+- `packages/read-model/test/rewards.test.ts`: a stored rule's unreadable tier
+  list or period is never read as "every tier" or "always in force", and
+  verified `none` terms with an unreadable period yield no "no expiry".
 - `apps/web/test/rewards-contract.test.tsx`: the response with `expiryBasis`
   still passes the shared validator, the screen renders both sides, and a
   missing or malformed basis is shown as "not recorded".

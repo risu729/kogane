@@ -239,6 +239,7 @@ describe("displayed and computed expiry are two answers with their own basis", (
       reasonCode: "no_expiry_under_verified_terms",
     });
     expect(plain.row.reasonCodes).toEqual(["no_expiry_under_verified_terms"]);
+    expect(plain.estimate.uncertaintyCodes).toContain("no_expiry_under_verified_terms");
 
     const shown = only(
       noExpiry,
@@ -261,6 +262,40 @@ describe("displayed and computed expiry are two answers with their own basis", (
     expect(bounded.row.expiryBasis.computed.status).toBe("unavailable");
     expect(bounded.row.expiryBasis.computed.reasonCode).toBe("rule_transition_unconfirmed");
     expect(bounded.estimate.state).toBe("partial");
+    // No bucket got "no expiry", so the estimate does not say it either.
+    expect(bounded.estimate.uncertaintyCodes).not.toContain("no_expiry_under_verified_terms");
+  });
+
+  test("a tier-gated 'no expiry' needs a required tier on the evaluation day", () => {
+    const tieredNone: ExpiryRule = {
+      ...noExpiry,
+      ruleId: "rule:program-a:tiered-no-expiry",
+      applicability: { ...noExpiry.applicability, tiers: ["elite"] },
+    };
+    const claim: MembershipState = {
+      programId: "program:a",
+      holdingRef: "holding:member-1",
+      tier: "elite",
+      valid: period("2026-01-01", "2026-12-31"),
+      source: "provider",
+      evidenceRefs: ["evidence:tier:1"],
+    };
+    const current = only(tieredNone, bucket("bucket:regular", "regular"), { membership: [claim] });
+    expect(current.row.expiryBasis.computed.status).toBe("no-expiry");
+    expect(current.estimate.state).toBe("computed");
+
+    // The same tier, ended before the evaluation day: "no expiry" is not claimed.
+    const ended = only(tieredNone, bucket("bucket:regular", "regular"), {
+      membership: [{ ...claim, valid: period("2024-01-01", "2024-12-31") }],
+    });
+    expect(ended.row.expiryBasis.computed.status).toBe("unavailable");
+    expect(ended.row.expiryBasis.computed.reasonCode).toBe("membership_not_retroactive");
+    expect(ended.row.expiryBasis.computed.membership?.claims).toHaveLength(1);
+    expect(ended.row.reasonCodes).not.toContain("no_expiry_under_verified_terms");
+    expect(ended.estimate.uncertaintyCodes).not.toContain("no_expiry_under_verified_terms");
+    expect(ended.row.deadline.kind).toBe("unknown");
+    expect(ended.estimate.state).toBe("partial");
+    expect(validBucketExpiryBasis(ended.row.expiryBasis)).toBe(true);
   });
 
   test("a tier-gated rule records the membership claims it consumed", () => {
@@ -675,6 +710,40 @@ describe("the stored basis shape refuses contradictions", () => {
         },
       }),
     ).toBe(false);
+  });
+
+  test("a date or 'no expiry' from a version that cannot give one is refused", () => {
+    const unverified = { ...basis.computed.rule, verification: "needs-rule-verification" };
+    expect(
+      validBucketExpiryBasis({ ...basis, computed: { ...basis.computed, rule: unverified } }),
+    ).toBe(false);
+    const noneRule = { ...basis.computed.rule, family: "none" };
+    const noExpiryAnswer = { ...basis.computed, status: "no-expiry", value: null, activity: null };
+    const withRule = (rule: object, agreement = "disagree") => ({
+      ...basis,
+      computed: { ...noExpiryAnswer, rule },
+      agreement,
+    });
+    expect(validBucketExpiryBasis(withRule(noneRule))).toBe(true);
+    expect(
+      validBucketExpiryBasis(withRule({ ...noneRule, verification: "needs-rule-verification" })),
+    ).toBe(false);
+    expect(
+      validBucketExpiryBasis(
+        withRule({ ...noneRule, validPeriod: period("2026-01-01", "2026-12-31") }),
+      ),
+    ).toBe(false);
+    // "No expiry" from an inactivity rule, and "agree" with "no expiry".
+    expect(validBucketExpiryBasis(withRule(basis.computed.rule))).toBe(false);
+    expect(validBucketExpiryBasis(withRule(noneRule, "agree"))).toBe(false);
+  });
+
+  test("an unreadable display neither agrees nor disagrees", () => {
+    const unreadable = { kind: "unknown", reasonCode: "provider_expiry_unparsed" };
+    const displayed = { ...basis.displayed!, value: unreadable };
+    expect(validBucketExpiryBasis({ ...basis, displayed })).toBe(false);
+    expect(validBucketExpiryBasis({ ...basis, displayed, agreement: "disagree" })).toBe(false);
+    expect(validBucketExpiryBasis({ ...basis, displayed, agreement: "not-comparable" })).toBe(true);
   });
 
   test("agreement needs two sides, unknown keys are refused and the rule reference must match", () => {

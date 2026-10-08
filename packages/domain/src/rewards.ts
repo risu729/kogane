@@ -312,9 +312,9 @@ export const COMPUTED_EXPIRY_REASONS = [
   "qualifying_activity_policy_missing",
   /** A tier-gated rule and no claim of a required tier for this holding. */
   "membership_out_of_scope",
-  /** A required tier exists but did not cover the anchor activity. */
+  /** A required tier exists but did not cover the anchor activity (for family `none`, the evaluation day). */
   "membership_not_retroactive",
-  /** A qualifying activity's date could not be read, so it may be the newest one. */
+  /** A qualifying activity's date could not be read (or, under `member-used`, is missing), so it may be the newest one. */
   "activity_date_unknown",
   /** No qualifying activity in the observed history. */
   "no_qualifying_activity_observed",
@@ -775,6 +775,19 @@ function validExpiryMembershipBasis(value: unknown): value is ExpiryMembershipBa
   );
 }
 
+/**
+ * Whether a rule version can give this answer at all: an unverified or
+ * unsupported version never gives a date or "no expiry", and "no expiry" comes
+ * only from open-ended terms of family `none`.
+ */
+function answerableBy(status: ComputedExpiryStatus, rule: ExpiryRuleBasis): boolean {
+  if (status === "unavailable") return true;
+  if (rule.verification !== "verified") return false;
+  return status === "no-expiry"
+    ? rule.family === "none" && rule.validPeriod === null
+    : rule.family !== "none" && rule.family !== "unsupported";
+}
+
 function validComputedExpiry(value: unknown): value is ComputedExpiry {
   if (
     !isRecord(value) ||
@@ -804,6 +817,7 @@ function validComputedExpiry(value: unknown): value is ComputedExpiry {
   return (
     shape &&
     validExpiryRuleBasis(value.rule) &&
+    answerableBy(value.status as ComputedExpiryStatus, value.rule) &&
     (value.activity === null || validExpiryActivityBasis(value.activity)) &&
     (value.membership === null || validExpiryMembershipBasis(value.membership)) &&
     isRefList(value.uncertaintyCodes, 100) &&
@@ -819,9 +833,14 @@ export function validBucketExpiryBasis(value: unknown): value is BucketExpiryBas
     (value.displayed === null || validDisplayedExpiry(value.displayed)) &&
     validComputedExpiry(value.computed) &&
     isOneOf(EXPIRY_AGREEMENTS)(value.agreement) &&
-    // Agreement needs two sides: no display, or no computed answer, is never "agree".
+    // Agreement needs two calendar answers: no display, an unreadable one, or
+    // no computed answer is never "agree" or "disagree", and "agree" needs a date.
     (value.agreement === "not-comparable" ||
-      (value.displayed !== null && value.computed.status !== "unavailable"))
+      (value.displayed !== null &&
+        value.displayed.value.kind !== "unknown" &&
+        (value.agreement === "agree"
+          ? value.computed.status === "date"
+          : value.computed.status !== "unavailable")))
   );
 }
 
@@ -1015,8 +1034,16 @@ function asLocalDate(date: CivilDate, zone: string): LocalDateValue {
   return { kind: "local-date", value: formatLocalDate(date), zone, basis: "derived" };
 }
 
-function activityDate(activity: RewardActivity, basis: QualifyingActivityPolicy["dateBasis"]) {
-  return basis === "member-used" ? (activity.usedDate ?? activity.postedDate) : activity.postedDate;
+/**
+ * The date the policy anchors on. Under `member-used`, a missing usage date is
+ * an unknown date, never the provider's posting date in its place.
+ */
+function activityDate(
+  activity: RewardActivity,
+  basis: QualifyingActivityPolicy["dateBasis"],
+): TemporalValue {
+  if (basis === "provider-posted") return activity.postedDate;
+  return activity.usedDate ?? { kind: "unknown", reasonCode: "activity_used_date_missing" };
 }
 
 function push(codes: string[], code: string): void {
@@ -1086,8 +1113,9 @@ function agreementOf(displayed: DisplayedExpiry | null, computed: ComputedExpiry
  *     is dropped even when it is the most recent row; an activity whose date
  *     cannot be read, a history of unknown completeness, or no qualifying
  *     activity at all leaves the date unavailable;
- *   * a tier-gated rule needs a claim of a required tier covering the anchor;
- *     a tier granted later is never applied backwards;
+ *   * a tier-gated rule needs a claim of a required tier covering the anchor
+ *     (for family `none`, the evaluation day); a tier granted later is never
+ *     applied backwards;
  *   * the anchor and the deadline both lie inside the version's own period.
  *     How a later version treats a deadline that crosses the boundary is not
  *     recorded, so it is not guessed.
@@ -1239,14 +1267,18 @@ export function estimateExpiry(
       }
     }
   }
-  if (
-    ruleFailure === null &&
-    rule.family === "none" &&
-    matching.length > 0 &&
-    !matching.some((state) => state.source === "provider")
-  ) {
-    push(uncertaintyCodes, "membership_self_reported");
-    push(derivationCodes, "membership_self_reported");
+  // A tier-gated "no expiry" is a claim about the evaluation day: a tier that
+  // has ended, or not yet begun, on that day cannot support it.
+  if (ruleFailure === null && rule.family === "none" && tiers !== null && matching.length > 0) {
+    const covering = now === null ? [] : matching.filter((state) => coversDay(state.valid, now));
+    if (covering.length === 0) {
+      notRetroactive = true;
+      push(uncertaintyCodes, "membership_not_retroactive");
+      push(derivationCodes, "membership_not_retroactive");
+    } else if (!covering.some((state) => state.source === "provider")) {
+      push(uncertaintyCodes, "membership_self_reported");
+      push(derivationCodes, "membership_self_reported");
+    }
   }
 
   const computedFor = (bucket: RewardBucket): ComputedExpiry => {
@@ -1264,6 +1296,7 @@ export function estimateExpiry(
         // "No expiry" is a claim about the version's terms; a version with an
         // end cannot say what happens after it.
         if (outOfScope) reasonCode = "membership_out_of_scope";
+        else if (notRetroactive) reasonCode = "membership_not_retroactive";
         else if (rule.applicability.validPeriod !== null)
           reasonCode = "rule_transition_unconfirmed";
         else status = "no-expiry";
@@ -1321,7 +1354,10 @@ export function estimateExpiry(
     const agreement = agreementOf(displayed, computed);
     const reasonCodes: string[] = [];
     if (computed.reasonCode !== null) push(reasonCodes, computed.reasonCode);
-    if (computed.status === "no-expiry") push(reasonCodes, "no_expiry_under_verified_terms");
+    if (computed.status === "no-expiry") {
+      push(reasonCodes, "no_expiry_under_verified_terms");
+      push(uncertaintyCodes, "no_expiry_under_verified_terms");
+    }
     if (computed.reasonCode === "rule_bucket_kind_not_covered")
       push(uncertaintyCodes, "rule_bucket_kind_not_covered");
     if (computed.reasonCode === "rule_transition_unconfirmed")
@@ -1382,9 +1418,6 @@ export function estimateExpiry(
       expiryBasis: { displayed, computed, agreement },
     });
   }
-  if (ruleFailure === null && rule.family === "none" && !outOfScope)
-    push(uncertaintyCodes, "no_expiry_under_verified_terms");
-
   const partial =
     undetermined ||
     outOfScope ||

@@ -72,7 +72,8 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
   source fact参照を伴う。表示がなければ `null`。
 - `computed` — 1つのrule版による算定（導出）。`EXPIRY_DERIVATION_RELEASE`（`reward-expiry-v1`）を持つ。
   - `status`: `date`（ruleの期限calendarでの暦日）、`no-expiry`（確認済みで期間の定めのない
-    `family='none'` のときだけ）、`unavailable`（理由コードが必ず1つ）。
+    `family='none'` のときだけ。tier条件つきなら評価日をカバーする必要tierのclaimがあるときだけ）、
+    `unavailable`（理由コードが必ず1つ）。
   - `rule`: rule参照・版・family・確認状態・版の適用期間 `validPeriod`・規約の根拠
     （`evidenceRefs`、`docs/sources` の記録）・対象活動policy参照・期限calendar。
   - `activity`: inactivity ruleが消費した履歴窓・完全性・最古観測日・起算活動（参照と日付）。
@@ -90,20 +91,20 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
 版をまたぐ期限の扱いは規約に記録がないため推測しない。それ以外は `unavailable` で、理由は次の
 閉じた一覧（`COMPUTED_EXPIRY_REASONS`）のどれか1つである。
 
-| reasonCode                           | 意味                                                                       |
-| ------------------------------------ | -------------------------------------------------------------------------- |
-| `rule_not_verified`                  | 規約がrepositoryで確認されていない                                         |
-| `rule_family_unsupported`            | 規約を計算方式へ落とし込めていない                                         |
-| `rule_out_of_force`                  | 評価日がこの版の適用期間外（読めない期間は「常に有効」と扱わない）         |
-| `rule_transition_unconfirmed`        | 起算日か期限が版の適用期間外で、版の切替時の扱いが記録されていない         |
-| `rule_bucket_kind_not_covered`       | この版はこのkindを対象にしていない                                         |
-| `fixed_deadline_not_derivable`       | 期限はロットごとに決まり、providerの表示以外に根拠がない                   |
-| `qualifying_activity_policy_missing` | inactivity ruleの対象活動定義が解決できない                                |
-| `membership_out_of_scope`            | tier条件つきruleで、この保有に必要tierのclaimがない                        |
-| `membership_not_retroactive`         | 必要tierのclaimが起算日をカバーしない                                      |
-| `activity_date_unknown`              | 日付を読めない対象活動があり、それが最新かもしれない                       |
-| `no_qualifying_activity_observed`    | 観測した履歴に対象活動がない                                               |
-| `history_completeness_unknown`       | 履歴に欠落があるか分からず、より新しい対象活動を見落としているかもしれない |
+| reasonCode                           | 意味                                                                                               |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `rule_not_verified`                  | 規約がrepositoryで確認されていない                                                                 |
+| `rule_family_unsupported`            | 規約を計算方式へ落とし込めていない                                                                 |
+| `rule_out_of_force`                  | 評価日がこの版の適用期間外（読めない期間は「常に有効」と扱わない）                                 |
+| `rule_transition_unconfirmed`        | 起算日か期限が版の適用期間外で、版の切替時の扱いが記録されていない                                 |
+| `rule_bucket_kind_not_covered`       | この版はこのkindを対象にしていない                                                                 |
+| `fixed_deadline_not_derivable`       | 期限はロットごとに決まり、providerの表示以外に根拠がない                                           |
+| `qualifying_activity_policy_missing` | inactivity ruleの対象活動定義が解決できない                                                        |
+| `membership_out_of_scope`            | tier条件つきruleで、この保有に必要tierのclaimがない                                                |
+| `membership_not_retroactive`         | 必要tierのclaimが起算日（`family='none'` では評価日）をカバーしない                                |
+| `activity_date_unknown`              | 日付を読めない対象活動（`member-used` 基準で利用日がないものを含む）があり、それが最新かもしれない |
+| `no_qualifying_activity_observed`    | 観測した履歴に対象活動がない                                                                       |
+| `history_completeness_unknown`       | 履歴に欠落があるか分からず、より新しい対象活動を見落としているかもしれない                         |
 
 一覧の期日（`deadline` / READの `expires_on`・`deadline_basis`）は並べ替えのための選択で、
 読める表示期限、なければ算定期限、どちらもなければ不明である。読めない表示は期日ではなく、
@@ -360,8 +361,12 @@ digestは入力ではない。今日のofferで計算し直した別物を「同
 | `GET /api/v2/rewards/offers/simulate` | 純粋なquery、書き込みなし           | 同左                                                                             |
 
 `expiryBasis` は保存された根拠が `validRewardExpiryBasis` を満たすときだけ返し、それ以外は `null`
-である。`null` は「`reward-projection-v2` より前のbuildで根拠が記録されていない」という意味で、
-「算定期限がない」ではない。他の列から根拠を組み立て直すことはしない。共有のresponse validator
+である。`null` は「`reward-projection-v2` より前のbuildで根拠が記録されていない」か「保存値が
+検証を通らない」という意味で、「算定期限がない」ではない。他の列から根拠を組み立て直すことはしない。
+検証は、確認済みでないrule版の `date`・`no-expiry`、期間の定めがあるか `none` 以外のruleの
+`no-expiry`、読めない表示期限との `agree`/`disagree` も拒否する。COREに保存されたruleの
+`applicability_json` の `tiers`・`validPeriod` が読めないときは「どのclaimも満たさないtier」
+「どの日も含まない期間」として扱い、「全tier」「常に有効」にはしない。共有のresponse validator
 （`api-validation.ts`）の `RewardReadExpiryRow` はまだこのfieldを名指ししておらず、画面は
 `reward-contract.ts` の validator で確認したものだけを表示する。
 

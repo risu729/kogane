@@ -47,7 +47,8 @@ const BASIS_LABELS: Record<string, string> = {
 const AGREEMENT_LABELS: Record<string, string> = {
   agree: "取得元の表示期限と規約からの算定が一致しています",
   disagree: "取得元の表示期限と規約からの算定が異なります。両方を表示しています",
-  "not-comparable": "照合できません（どちらかが無いか、読み取れません）",
+  "not-comparable":
+    "照合できません（どちらかが無い、読み取れない、または暦日どうしとして比べられません）",
 };
 const VERIFICATION_LABELS: Record<string, string> = {
   verified: "規約の確認済み",
@@ -341,7 +342,7 @@ export function ExpiryBasisView({ basis }: { basis: RewardExpiryBasis | null }):
   if (basis === null)
     return (
       <p className="footnote">
-        この判定には、表示期限と算定期限を分けた根拠の記録がありません（記録を始める前の判定です）。
+        この判定には、表示期限と算定期限を分けた根拠の記録がありません（記録を始める前の判定か、保存された根拠を読み取れませんでした）。
       </p>
     );
   const { displayed, computed, agreement } = basis;
