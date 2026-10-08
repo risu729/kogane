@@ -177,7 +177,7 @@ class World {
 
   constructor() {
     this.db
-      .exec(`INSERT INTO sources VALUES('sbi-securities','synthetic'),('${BROKER_B}','synthetic');
+      .exec(`INSERT INTO sources VALUES('sbi-securities','synthetic'),('sbi-vc-trade','synthetic'),('${BROKER_B}','synthetic');
       INSERT INTO producers VALUES('${PRODUCER}');`);
     const db = this.db;
     this.sql = {
@@ -839,6 +839,78 @@ describe("a decision binds every identifier on the decided instrument", () => {
   });
 });
 
+describe("currencies the observations state", () => {
+  test("an unresolved trade currency is unconfirmed, never replaced by the settlement unit", async () => {
+    const w = new World();
+    await w.capture(
+      "sbi-securities",
+      [
+        {
+          account: "sbi-securities:foreign",
+          code: "SYNVN01",
+          name: "Synthetic Overseas",
+          currency: "JPY",
+          extra: {
+            specificAccountCode: "SYNTHETIC",
+            securities: { securitiesCode: "SYNVN01", ric: "SYNVN01.X", countryCode: "VN" },
+          },
+        },
+      ],
+      [
+        {
+          account: "sbi-securities:foreign",
+          currency: "JPY",
+          extra: {
+            specificAccountCode: "SYNTHETIC",
+            // Not in the explicit currency catalogue: the rule stores it unresolved.
+            tradeCurrencyCode: "VND",
+            settlementCurrencyCode: "JPY",
+            securities: { securitiesCode: "SYNVN01", countryCode: "VN" },
+          },
+        },
+      ],
+    );
+    const ric = w.identifier("ric", "", "SYNVN01.X");
+    const code = w.identifier("sbi-security-code", "VN", "SYNVN01");
+    const result = await queryInstrumentResolution(w.sql);
+    expect(result.identifiers.find((row) => row.identifierId === code)).toMatchObject({
+      currencies: [],
+      currencyUnconfirmed: true,
+    });
+    expect(result.identifiers.find((row) => row.identifierId === ric)).toMatchObject({
+      currencies: ["JPY"],
+      currencyUnconfirmed: false,
+    });
+    const candidate = candidateOf(result, ric, code);
+    expect(candidate.agreements).not.toContain("currency-agrees");
+    expect(candidate.gaps).toContain("currency-unconfirmed");
+  });
+
+  test("an exchange product states its quote unit, not the coin it trades", async () => {
+    const w = new World();
+    await w.capture(
+      "sbi-vc-trade",
+      [],
+      [
+        {
+          account: "sbi-vc-trade:main",
+          currency: "JPY",
+          extra: {
+            productId: "SYNCOINJPY",
+            _kogane: { currencyPair: { base: "SYNCOIN", quote: "JPY" } },
+          },
+        },
+      ],
+    );
+    const product = w.identifier("provider-product", "sbi-vc-trade", "SYNCOINJPY");
+    expect(
+      (await queryInstrumentResolution(w.sql)).identifiers.find(
+        (row) => row.identifierId === product,
+      ),
+    ).toMatchObject({ kind: "product", currencies: ["JPY"], currencyUnconfirmed: false });
+  });
+});
+
 describe("cost", () => {
   test("the reads scan no observation table, and reach mappings, decisions and relations by index", () => {
     const w = new World();
@@ -858,6 +930,11 @@ describe("cost", () => {
     // its primary key, never by scanning the use table.
     expect(facts).not.toMatch(/SCAN u\b/u);
     expect(facts).toContain("SEARCH u USING INDEX sqlite_autoindex_identity_instrument_uses_1");
+    // A use's trade unit and unit are reached by the same primary key.
+    for (const alias of ["t", "n"])
+      expect(facts).toContain(
+        `SEARCH ${alias} USING INDEX sqlite_autoindex_identity_instrument_uses_1 (identity_observation_id=? AND role=?) LEFT-JOIN`,
+      );
     const listed = plan(LISTED_AS_SQL);
     expect(listed).toMatch(/SEARCH r USING INDEX entity_relations_(from|to)\b/u);
     expect(listed).not.toMatch(/SCAN r\b/u);

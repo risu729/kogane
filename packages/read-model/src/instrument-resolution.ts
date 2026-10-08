@@ -4,9 +4,14 @@
 // - `INSTRUMENT_FACTS_SQL`: every identifier whose current mapping targets a
 //   security, crypto or product instrument and that a currently published,
 //   sealed identity observation uses, one row per (identifier, source, stated
-//   currency). The stated currency of a use as `security` is the money unit
-//   the same identity observation names as its `trade-unit`, else as its
-//   `unit`; a use in another role states none.
+//   currency, unconfirmed). A use as `security` is denominated by the unit
+//   the same identity observation names as its `trade-unit`; by its `unit`
+//   only when it names no trade unit or the trade unit is a crypto asset
+//   code (`provider-asset-code`, an exchange product's base). A denominating
+//   unit that is a resolved currency (`iso4217`, `currency-variant`) is
+//   stated; any other (an unresolved provider code, say) makes the use's
+//   currency unconfirmed, never dropped and never replaced by the other
+//   unit. A use in another role states none.
 // - `LISTED_AS_SQL`: the newest `listed_as` relation per (instrument,
 //   identifier), ordered as the change lifecycle orders a relation's history.
 // - `INSTRUMENT_HISTORY_SQL`: the mapping revisions, mapping decisions and
@@ -36,23 +41,27 @@ export const INSTRUMENT_FACTS_SQL = `WITH eligible AS MATERIALIZED (
  JOIN source_accounts s ON s.id=o.source_account_id
  WHERE u.identifier_id IN (SELECT identifier_id FROM eligible)
   AND EXISTS(SELECT 1 FROM published_parse_runs p WHERE p.parse_run_id=o.parse_run_id)
-), stated AS (
- SELECT DISTINCT x.identifier_id,x.source_id,
-  CASE WHEN x.role='security' THEN coalesce(
-   (SELECT d.value FROM identity_instrument_uses t JOIN instrument_identifiers d ON d.id=t.identifier_id
-    WHERE t.identity_observation_id=x.identity_observation_id AND t.role='trade-unit'
-    AND d.namespace IN ('iso4217','currency-variant')),
-   (SELECT d.value FROM identity_instrument_uses t JOIN instrument_identifiers d ON d.id=t.identifier_id
-    WHERE t.identity_observation_id=x.identity_observation_id AND t.role='unit'
-    AND d.namespace IN ('iso4217','currency-variant'))) END AS currency
+), denominated AS (
+ SELECT x.identifier_id,x.source_id,
+  CASE WHEN x.role<>'security' THEN NULL
+   WHEN t.identifier_id IS NOT NULL AND td.namespace<>'provider-asset-code' THEN t.identifier_id
+   ELSE n.identifier_id END AS unit_id
  FROM used x
+ LEFT JOIN identity_instrument_uses t ON t.identity_observation_id=x.identity_observation_id AND t.role='trade-unit'
+ LEFT JOIN instrument_identifiers td ON td.id=t.identifier_id
+ LEFT JOIN identity_instrument_uses n ON n.identity_observation_id=x.identity_observation_id AND n.role='unit'
+), stated AS (
+ SELECT DISTINCT y.identifier_id,y.source_id,
+  CASE WHEN c.namespace IN ('iso4217','currency-variant') THEN c.value END AS currency,
+  CASE WHEN c.namespace NOT IN ('iso4217','currency-variant') THEN 1 ELSE 0 END AS unconfirmed
+ FROM denominated y LEFT JOIN instrument_identifiers c ON c.id=y.unit_id
 )
 SELECT e.identifier_id AS identifierId,e.instrument_id AS instrumentId,e.method,e.status,
  e.revision,e.kind,e.label,d.namespace,d.scope,d.value,d.details_json AS details,
- s.source_id AS sourceId,s.currency
+ s.source_id AS sourceId,s.currency,s.unconfirmed AS currencyUnconfirmed
 FROM stated s JOIN eligible e ON e.identifier_id=s.identifier_id
 JOIN instrument_identifiers d ON d.id=s.identifier_id
-ORDER BY e.identifier_id,s.source_id,s.currency
+ORDER BY e.identifier_id,s.source_id,s.currency,s.unconfirmed
 LIMIT ${INSTRUMENT_FACTS_ROW_BOUND + 1}`;
 
 export interface InstrumentFactsRow {
@@ -69,7 +78,10 @@ export interface InstrumentFactsRow {
   /** `instrument_identifiers.details_json`, as the identity rule stored it. */
   details: string;
   sourceId: string;
+  /** A resolved currency the use is denominated in, or null. */
   currency: string | null;
+  /** 1 when the use is denominated in a unit that is not a resolved currency. */
+  currencyUnconfirmed: 0 | 1;
 }
 
 /**

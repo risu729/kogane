@@ -66,10 +66,16 @@ export interface InstrumentIdentifierFacts {
   shareClass: string | null;
   productClass: string | null;
   /**
-   * Distinct currencies the observations using it as a security state its
-   * trade or amount in, sorted. Empty when no observation states one.
+   * Distinct resolved currencies the observations using it as a security are
+   * denominated in, sorted. Empty when no observation states one.
    */
   currencies: readonly string[];
+  /**
+   * Some observation using it as a security is denominated in a unit that is
+   * not a resolved currency (an unresolved provider code, say). Its currency
+   * set is then incomplete, so it is never compared as agreeing or differing.
+   */
+  currencyUnconfirmed: boolean;
   /** Display only. Never evidence. */
   label: string;
 }
@@ -276,10 +282,12 @@ export function compareIdentifierFacts(
   } else if (bothRic && a.ric === b.ric) out.agreements.push("market-agrees");
   else if (!bothRic) out.gaps.push("market-unconfirmed");
 
-  // Currency: two single stated currencies agree or differ; two disjoint sets
-  // differ; anything else (none stated, several stated) is unconfirmed.
+  // Currency: a side with an unconfirmed use is unconfirmed; otherwise two
+  // single stated currencies agree or differ, two disjoint sets differ, and
+  // anything else (none stated, several stated) is unconfirmed.
   const shared = a.currencies.filter((currency) => b.currencies.includes(currency));
-  if (a.currencies.length > 0 && b.currencies.length > 0 && shared.length === 0)
+  if (a.currencyUnconfirmed || b.currencyUnconfirmed) out.gaps.push("currency-unconfirmed");
+  else if (a.currencies.length > 0 && b.currencies.length > 0 && shared.length === 0)
     out.conflicts.push("currency-differs");
   else if (a.currencies.length === 1 && b.currencies.length === 1)
     out.agreements.push("currency-agrees");

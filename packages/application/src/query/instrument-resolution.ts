@@ -53,6 +53,8 @@ export interface ResolutionIdentifier {
   mappingRevision: number;
   sources: string[];
   currencies: string[];
+  /** A use is denominated in a unit that is not a resolved currency. */
+  currencyUnconfirmed: boolean;
   /** The provider's own market wording, shown to a reviewer and never compared. */
   providerMarket: string | null;
   state: IdentifierResolutionState;
@@ -126,6 +128,7 @@ function identifierFacts(rows: readonly InstrumentFactsRow[]): {
     currencies: [
       ...new Set(rows.flatMap((item) => (item.currency === null ? [] : [item.currency]))),
     ].sort(),
+    currencyUnconfirmed: rows.some((item) => item.currencyUnconfirmed === 1),
     label: row.label,
   };
   return { facts, row, providerMarket: string(stored.providerMarket) };
@@ -206,6 +209,7 @@ export async function queryInstrumentResolution(sql: SqlExecutor): Promise<Instr
       mappingRevision: row.revision,
       sources: [...item.sources],
       currencies: [...item.currencies],
+      currencyUnconfirmed: item.currencyUnconfirmed,
       providerMarket,
       state: resolution.state,
       sharedWith: resolution.sharedWith,

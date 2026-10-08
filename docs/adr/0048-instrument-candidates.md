@@ -94,10 +94,21 @@ and `packages/application/src/query/instrument-resolution.ts`:
 5. **Market** is compared through MIC or RIC only. The provider's own market
    wording is shown to the reviewer and never compared: SBI's codes and labels
    already differ between its own datasets.
-6. **Currency** of an identifier: for each observation that uses it as a
-   security, the money `trade-unit` of the same identity observation, else its
-   money `unit`; the identifier's set is the distinct values. A use in another
-   role states none.
+6. **Currency** of an identifier: each observation that uses it as a
+   security is denominated by the `trade-unit` of the same identity
+   observation; by its `unit` only when there is no `trade-unit` or the
+   `trade-unit` is a crypto asset code (`provider-asset-code`, the base of an
+   SBI VC Trade product). A denominating unit that is a resolved currency
+   (`iso4217`, `currency-variant`) is stated; any other (a trade currency
+   outside the explicit catalogue, stored as `unresolved-currency`) makes the
+   identifier's currency unconfirmed, so its pairs report
+   `currency-unconfirmed`: such a use is neither dropped nor replaced by the
+   settlement unit. The identifier's set is the distinct stated values. A use
+   in another role states none. Valuation observations count like any other
+   use: SBI's foreign position valuations are stated in yen as well as in the
+   trading currency, so a foreign RIC identifier traded in USD reads as
+   {JPY, USD}, and a pair with it is `currency-unconfirmed` rather than
+   agreeing.
 7. **Names** are never evidence. Two identifiers whose names are equal after
    NFKC, whitespace and case normalisation, and that share no evidence, are a
    `hint` with the conflicts already known; a hint has no status and no

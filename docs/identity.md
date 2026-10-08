@@ -101,7 +101,13 @@ under policy `instrument-candidates-v1`:
 
 Market is compared through MIC or RIC only; the provider's market wording is
 shown, never compared. An identifier's currencies are those the observations
-using it as a security state as their money trade unit, else their money unit.
+using it as a security are denominated in: the trade unit, or the unit when
+there is no trade unit or the trade unit is a crypto asset code (SBI VC
+Trade). A trade or unit code outside the explicit currency catalogue makes the
+currency unconfirmed rather than falling back to the settlement unit, and
+valuations count, so SBI's yen valuations of a foreign holding beside its
+trading-currency ones make its currencies several and the comparison
+`currency-unconfirmed`.
 
 Nothing here adopts. A candidate is `adopted` only when its two identifiers
 map to one instrument, which only a manual `identity.assign` does today, and

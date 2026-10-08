@@ -41,6 +41,7 @@ function facts(
     shareClass: null,
     productClass: null,
     currencies: [],
+    currencyUnconfirmed: false,
     label: `Synthetic ${id}`,
     ...overrides,
   };
@@ -211,6 +212,18 @@ describe("pairs that state different facts stay apart", () => {
     );
     expect(overlapping.conflicts).toEqual([]);
     expect(overlapping.gaps).toContain("currency-unconfirmed");
+  });
+
+  test("a currency a use states but the rules could not resolve is unconfirmed, never agreeing or differing", () => {
+    for (const other of [["JPY"], ["USD"]]) {
+      const comparison = compareIdentifierFacts(
+        facts("x", { currencies: ["JPY"], currencyUnconfirmed: true }),
+        facts("y", { currencies: other }),
+      );
+      expect(comparison.agreements).not.toContain("currency-agrees");
+      expect(comparison.conflicts).toEqual([]);
+      expect(comparison.gaps).toContain("currency-unconfirmed");
+    }
   });
 
   test("one ISIN in two share classes is separated; a share class on one side only is a gap", () => {
