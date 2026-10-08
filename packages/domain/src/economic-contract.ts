@@ -446,6 +446,19 @@ export function validCommitMember(value: unknown): value is CommitMember {
  */
 export const IDENTITY_RESOLUTION_KIND = "economic-event.resolve-identity";
 
+/**
+ * A commit's known_at: `YYYY-MM-DDTHH:MM:SS.sssZ` exactly, a real UTC
+ * instant (`Date#toISOString`'s form). One format only, because the log, its
+ * regression check and every instant cut compare known_at as text, and
+ * `...T10:00:00Z` sorts after `...T10:00:00.500Z`. CORE 0070 checks the same.
+ */
+export function validKnownAt(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value))
+    return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString() === value;
+}
+
 /** The command and rule kinds a commit row records: a code, never text. */
 const COMMIT_KIND = /^[a-z0-9.-]{1,64}$/u;
 
@@ -496,7 +509,7 @@ export function validCommitLogRecord(value: unknown): value is CommitLogRecord {
     new Set(members.map((member) => member.eventId)).size !== members.length ||
     !validBookClaimSet(claims) ||
     !validBookClaimSet(released) ||
-    !isText(value.knownAt, 64)
+    !validKnownAt(value.knownAt)
   )
     return false;
   const claimed = new Set(claims.map(bookClaimId));

@@ -133,7 +133,9 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
 - **Commit sequence.** One dense counter per `core_epoch` (a restored CORE
   takes a new epoch, 0038), computed in SQL as `max + 1`; `known_at` is
   `max(worker now, previous known_at)`, also in SQL, because worker clocks are
-  not monotonic. A resend returns the original receipt and sequence. Revisions
+  not monotonic. `known_at` has exactly one form, canonical UTC
+  `YYYY-MM-DDTHH:MM:SS.sssZ` (checked by the table, `validKnownAt` and the
+  builder), because the log and every instant cut compare it as text. A resend returns the original receipt and sequence. Revisions
   written before the log, or by an older build after it, are listed by
   `unlogged_economic_revisions` and read as `knowledge_unlogged`, never
   backdated.

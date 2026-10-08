@@ -940,6 +940,35 @@ describe("the finalization", () => {
     db.close();
   });
 
+  test("known_at is one canonical UTC format, so text order is time order", async () => {
+    const db = database();
+    await run(
+      db,
+      adoptWrites(db, { eventId: "transfer-x", revision: 1, now: "2026-10-08T10:00:00.000Z" }),
+    );
+    // "...T10:00:00Z" sorts after "...T10:00:00.500Z" as text: mixed formats
+    // would misorder the log. The builder refuses another format outright ...
+    for (const now of [
+      "2026-10-08T10:00:00Z",
+      "2026-10-08T19:00:00.000+09:00",
+      "2026-02-30T00:00:00.000Z",
+    ])
+      expect(() => adoptWrites(db, { eventId: "transfer-y", revision: 1, now })).toThrow(
+        "economic commit is not the contract",
+      );
+    // ... and the table refuses a hand-written one.
+    const writes = adoptWrites(db, { eventId: "transfer-y", revision: 1, now: LATER });
+    writes[writes.length - 1] = {
+      sql: `INSERT INTO economic_commit_log(core_epoch,commit_seq,decision_revision_id,operation_id,principal,payload_digest,kind,members_json,claims_json,released_json,known_at)
+ VALUES('core-epoch-1',2,'dr-transfer-y-1',NULL,?,?,'synthetic.adopt','[{"eventId":"transfer-y","revision":1,"supersedes":[]}]','[]','[]','2026-10-08T11:00:00Z')`,
+      binds: [PRINCIPAL, "d".repeat(64)],
+    };
+    const before = snapshot(db);
+    await expect(run(db, writes)).rejects.toThrow("CHECK constraint failed");
+    expect(snapshot(db)).toEqual(before);
+    db.close();
+  });
+
   test("a seal must state the stored children exactly", async () => {
     const db = database();
     const writes = adoptWrites(db, { eventId: "transfer-x", revision: 1 });

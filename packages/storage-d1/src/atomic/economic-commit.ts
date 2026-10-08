@@ -40,6 +40,7 @@ import {
   validEconomicClaimRecord,
   validEventTimeRecord,
   validIdentityPins,
+  validKnownAt,
   validLegEffectRecord,
   type BookClaim,
   type CommitMember,
@@ -221,6 +222,7 @@ export interface CommitInput {
   members: readonly CommitMember[];
   claims: readonly BookClaim[];
   released: readonly BookClaim[];
+  /** The worker's clock, canonical UTC (`validKnownAt`). */
   now: string;
 }
 
@@ -261,7 +263,8 @@ function checkCommit(commit: CommitInput): void {
     !validBookClaimSet(commit.released) ||
     commit.released.some((claim) => claimed.has(bookClaimId(claim))) ||
     !/^[0-9a-f]{64}$/u.test(commit.payloadDigest) ||
-    !/^[a-z0-9.-]{1,64}$/u.test(commit.kind)
+    !/^[a-z0-9.-]{1,64}$/u.test(commit.kind) ||
+    !validKnownAt(commit.now)
   )
     throw new RangeError("economic commit is not the contract");
 }

@@ -201,7 +201,9 @@ CREATE TABLE economic_commit_log (
  members_json TEXT NOT NULL CHECK(json_valid(members_json) AND json_type(members_json)='array' AND json_array_length(members_json) BETWEEN 1 AND 16),
  claims_json TEXT NOT NULL CHECK(json_valid(claims_json) AND json_type(claims_json)='array' AND json_array_length(claims_json)<=64),
  released_json TEXT NOT NULL CHECK(json_valid(released_json) AND json_type(released_json)='array' AND json_array_length(released_json)<=64),
- known_at TEXT NOT NULL CHECK(length(known_at) BETWEEN 1 AND 64),
+ -- One canonical UTC form (YYYY-MM-DDTHH:MM:SS.sssZ, a real instant): the
+ -- log, its regression check and every cut compare known_at as text.
+ known_at TEXT NOT NULL CHECK(length(known_at)=24 AND known_at IS strftime('%Y-%m-%dT%H:%M:%fZ',known_at)),
  PRIMARY KEY(core_epoch,commit_seq)
 ) STRICT;
 CREATE TRIGGER economic_commit_log_no_update BEFORE UPDATE ON economic_commit_log BEGIN SELECT RAISE(ABORT,'the economic commit log is append-only'); END;

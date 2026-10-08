@@ -10,6 +10,7 @@ import {
   aliasClassText,
   validAliasClass,
   validIdentityAdmissionInput,
+  validKnownAt,
   ECONOMIC_GUARD_CODES,
   bookClaimsJson,
   commitMembersJson,
@@ -184,6 +185,16 @@ describe("heads, commits and cuts", () => {
     ).toBe(false);
     expect(validCommitLogRecord({ ...record, released: record.claims })).toBe(false);
     expect(validCommitLogRecord({ ...record, kind: "Card Settlement" })).toBe(false);
+    // known_at is the canonical UTC form, milliseconds and Z, a real date.
+    for (const knownAt of [
+      "2026-10-08T00:00:00Z",
+      "2026-10-08T09:00:00.000+09:00",
+      "2026-02-30T00:00:00.000Z",
+      "2026-10-08 00:00:00.000Z",
+    ])
+      expect(validCommitLogRecord({ ...record, knownAt })).toBe(false);
+    expect(validCommitLogRecord({ ...record, knownAt: "2026-12-31T23:59:59.999Z" })).toBe(true);
+    expect(validKnownAt("2026-10-08T00:00:00.000Z")).toBe(true);
   });
 });
 
