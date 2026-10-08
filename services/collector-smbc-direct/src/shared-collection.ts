@@ -2,9 +2,8 @@
 //
 // This source is human-triggered: a person approves a QR challenge, and the
 // backfill then runs across many Durable Object alarms, one month chunk at a
-// time. The run is finished exactly once — when the last chunk lands, or when
-// the run fails — and that is where the `terminal-v1` manifest is written, last
-// and only once, so one backfill produces one terminal (plan 03 §2).
+// time. Each stopped session publishes an immutable terminal. Resumes publish
+// only new normalized evidence in continuation terminals (ADR 0044).
 //
 // Because the chunks are written across alarms, the bytes are re-read from the
 // collector's own staging bucket at that point and verified against the
@@ -20,6 +19,7 @@
 // reference reaches the terminal (12 §4).
 import {
   persistRun,
+  readTerminal,
   type CoverageStatus,
   type PersistArtifact,
   type PersistRunPlan,
@@ -31,6 +31,7 @@ import {
   type TerminalTransformation,
 } from "../../../packages/collection/src/index";
 import { sha256Hex } from "./storage";
+import { monthRanges } from "./dates";
 import type { BackfillManifest, BackfillProgress, StoredArtifact } from "./types";
 
 /** `runs/<source>/…` in DATA. The Processor maps it to the CORE source `smbc-bank`. */
@@ -72,10 +73,11 @@ export interface SharedRunIdentity {
   readonly attemptId: string;
   /**
    * The generation of the authenticated session that opened this backfill. A
-   * resumed run keeps the generation it started with; the Durable Object tracks
-   * the live one separately. Only the opaque id travels (12 §4).
+   * initial terminal keeps the generation it started with; continuations name
+   * the current approved generation. Only opaque ids travel (12 §4).
    */
   readonly acquisitionSessionRef?: string;
+  readonly continuationSessionRef?: string;
 }
 
 /**
@@ -182,6 +184,7 @@ export interface SharedRunInput {
   readonly prefix: string;
   readonly bytesByKey: SharedArtifactBytes;
   readonly identity: SharedRunIdentity;
+  readonly cumulativeManifestBytes?: Uint8Array;
 }
 
 /**
@@ -267,6 +270,16 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
     }),
   );
 
+  if (input.cumulativeManifestBytes) {
+    artifacts.push(
+      await artifactOf({
+        artifactKey: "backfill-manifest.json",
+        bytes: input.cumulativeManifestBytes,
+        mediaType: JSON_MEDIA_TYPE,
+        role: COLLECTOR_MANIFEST_ROLE,
+      }),
+    );
+  }
   const outcome = sharedOutcome(input.manifest);
   const run: TerminalRunFields = {
     source: SHARED_SOURCE,
@@ -360,6 +373,157 @@ export async function persistSharedRun(
       ? { reasonCode: result.reasonCode }
       : {}),
   };
+}
+
+/**
+ * Publish a resumed backfill without changing an earlier immutable terminal.
+ * Continuations contain only previously unpublished normalized observations.
+ */
+export async function persistBackfillRun(
+  bucket: R2BucketLike,
+  input: SharedRunInput,
+): Promise<SharedRunSummary> {
+  const root = await readTerminal(bucket, SHARED_SOURCE, input.manifest.runId);
+  if (root.outcome === "blocked") throw new SharedCollectionError("shared_prior_terminal_invalid");
+  const digest = await sha256Hex(input.manifestBytes);
+  if (root.outcome === "missing") {
+    return persistSharedRun(bucket, {
+      ...input,
+      identity: { ...input.identity, attemptId: "attempt-" + digest },
+    });
+  }
+  const prefix = "runs/" + SHARED_SOURCE + "/" + input.manifest.runId + "-continuation-";
+  const listed = await bucket.list({ prefix, limit: 128 });
+  if (listed.truncated) throw new SharedCollectionError("shared_continuation_limit");
+  const prior = [root];
+  for (const object of listed.objects) {
+    if (!object.key.endsWith("/terminal.json")) {
+      throw new SharedCollectionError("shared_prior_terminal_invalid");
+    }
+    const runId = object.key.slice(
+      ("runs/" + SHARED_SOURCE + "/").length,
+      -"/terminal.json".length,
+    );
+    const read = await readTerminal(bucket, SHARED_SOURCE, runId);
+    if (read.outcome !== "found") throw new SharedCollectionError("shared_prior_terminal_invalid");
+    prior.push(read);
+  }
+  const published = new Map<string, Set<string>>();
+  for (const read of prior) {
+    if (read.manifest.producer !== PRODUCER) {
+      throw new SharedCollectionError("shared_prior_terminal_invalid");
+    }
+    for (const artifact of read.manifest.artifacts) {
+      if (artifact.role === COLLECTOR_MANIFEST_ROLE) continue;
+      const hashes = published.get(artifact.artifactKey) ?? new Set<string>();
+      hashes.add(artifact.sha256);
+      published.set(artifact.artifactKey, hashes);
+    }
+  }
+  // Completed normalized chunks are not recollected by a resume. Missing or
+  // changed ones refuse publication rather than silently duplicating rows.
+  for (const [key, hashes] of published) {
+    if (!key.endsWith(".normalized.json")) continue;
+    const current = input.manifest.artifacts.find(
+      (artifact) => relativeArtifactKey(artifact.key, input.prefix) === key,
+    );
+    if (!current || !hashes.has(current.sha256)) {
+      throw new SharedCollectionError("shared_published_normalized_changed");
+    }
+  }
+  const added = input.manifest.artifacts.filter(
+    (artifact) =>
+      !published.get(relativeArtifactKey(artifact.key, input.prefix))?.has(artifact.sha256),
+  );
+  const identical = prior.find((read) =>
+    read.manifest.artifacts.some(
+      (artifact) => artifact.role === COLLECTOR_MANIFEST_ROLE && artifact.sha256 === digest,
+    ),
+  );
+  if (identical) {
+    return {
+      target: "shared",
+      outcome: "already_persisted",
+      terminalKey: identical.key,
+      terminalDigest: identical.terminalDigest,
+      objectCount: identical.manifest.artifacts.length,
+      waitingForHuman: waitingForHuman(input.manifest),
+    };
+  }
+  if (added.length === 0 && input.manifest.status === "success") {
+    throw new SharedCollectionError("shared_success_without_new_evidence");
+  }
+  // A failed chunk may have published raw bytes only. Include those bytes as
+  // input of its later normalization, without re-publishing normalized rows.
+  const selected = new Set(added.map((artifact) => artifact.key));
+  for (const artifact of added) {
+    if (!artifact.dataset.endsWith("-normalized")) continue;
+    const parent = artifact.key.replace(".normalized.json", ".raw.json.sjis");
+    const raw = input.manifest.artifacts.find((candidate) => candidate.key === parent);
+    if (!raw) throw new SharedCollectionError("shared_normalized_parent_missing");
+    selected.add(raw.key);
+  }
+  const artifacts = input.manifest.artifacts.filter((artifact) => selected.has(artifact.key));
+  const starts = artifacts.flatMap((artifact) => (artifact.range ? [artifact.range.start] : []));
+  const remaining = monthRanges(
+    input.manifest.requestedRange.start,
+    input.manifest.requestedRange.end,
+  )[input.manifest.completedChunks];
+  const start = starts.sort()[0] ?? remaining?.start ?? input.manifest.requestedRange.start;
+  const manifest: BackfillManifest = {
+    ...input.manifest,
+    runId: input.manifest.runId + "-continuation-" + digest,
+    status: added.length === 0 ? "failed" : input.manifest.status,
+    requestedRange: { start, end: input.manifest.requestedRange.end },
+    completedChunks: artifacts.filter((artifact) => artifact.dataset === "transactions-normalized")
+      .length,
+    totalChunks: monthRanges(start, input.manifest.requestedRange.end).length,
+    transactionCount: artifacts.reduce(
+      (count, artifact) =>
+        count +
+        (artifact.dataset === "transactions-normalized" ? (artifact.transactionCount ?? 0) : 0),
+      0,
+    ),
+    artifacts,
+  };
+  if (manifest.status === "success") {
+    const expected = monthRanges(start, manifest.requestedRange.end);
+    const collected = artifacts.filter(
+      (artifact) => artifact.dataset === "transactions-normalized",
+    );
+    if (
+      collected.length !== expected.length ||
+      expected.some(
+        (range) =>
+          !collected.some(
+            (artifact) => artifact.range?.start === range.start && artifact.range.end === range.end,
+          ),
+      )
+    )
+      throw new SharedCollectionError("shared_continuation_coverage_incomplete");
+  }
+  const segmentBytes = encoder.encode(
+    JSON.stringify({
+      ...manifest,
+      backfillRunId: input.manifest.runId,
+      priorTerminalKeys: prior.map((read) => read.key).sort(),
+    }) + "\n",
+  );
+  return persistSharedRun(bucket, {
+    ...input,
+    manifest,
+    manifestBytes: segmentBytes,
+    cumulativeManifestBytes: input.manifestBytes,
+    identity: {
+      ...input.identity,
+      attemptId: "attempt-" + digest,
+      ...(input.identity.continuationSessionRef === undefined
+        ? {}
+        : {
+            acquisitionSessionRef: input.identity.continuationSessionRef,
+          }),
+    },
+  });
 }
 
 /** `persisted` and `already_persisted` are the only completion outcomes. */

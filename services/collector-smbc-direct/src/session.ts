@@ -6,7 +6,7 @@ import { isResumable } from "./progress";
 import {
   dataBucket,
   manifestBytes,
-  persistSharedRun,
+  persistBackfillRun,
   readStagedArtifacts,
   sharedRunPersisted,
 } from "./shared-collection";
@@ -54,6 +54,18 @@ export class SmbcBackfillSession extends DurableObject<Env> {
   #operationTail: Promise<void> = Promise.resolve();
   async getStatus(): Promise<BackfillProgress> {
     return { ...INITIAL_PROGRESS, ...(await this.ctx.storage.get<BackfillProgress>("progress")) };
+  }
+  async publishStoredRun(): Promise<BackfillProgress> {
+    return this.#exclusive(async () => {
+      const progress = await this.getStatus();
+      if (!["success", "partial", "failed"].includes(progress.phase)) {
+        throw new Error("backfill_not_finished");
+      }
+      const artifacts = (await this.ctx.storage.get<StoredArtifact[]>("artifacts")) ?? [];
+      const failureCodes = (await this.ctx.storage.get<string[]>("failureCodes")) ?? [];
+      await this.#finishRun(progress, artifacts, failureCodes);
+      return this.getStatus();
+    });
   }
   async startChallenge(): Promise<StartChallengeResult> {
     return this.#exclusive(async () => {
@@ -154,6 +166,8 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           retryCount: 0,
           lastErrorCode: null,
           logoutSucceeded: null,
+          publicationStatus: "pending",
+          publicationErrorCode: null,
         };
         await this.ctx.storage.put({
           progress: resumed,
@@ -178,6 +192,8 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       const progress: BackfillProgress = {
         ...INITIAL_PROGRESS,
         phase: "running",
+        publicationStatus: "pending",
+        publicationErrorCode: null,
         runId,
         startedAt,
         from,
@@ -496,8 +512,8 @@ export class SmbcBackfillSession extends DurableObject<Env> {
    * U09: finish the run where `COLLECTION_TARGET` says. In legacy mode this is
    * the central importer call, unchanged. In shared mode the run's own bytes
    * are re-read from the staging bucket, verified against the manifest and
-   * written into DATA with the `terminal-v1` manifest last — one terminal per
-   * backfill run, whether it succeeded, ended partial or failed — and the
+   * written into DATA with immutable terminals for each published segment.
+   * A resumed segment excludes earlier normalized observations, and the
    * importer is not called (G1-15).
    */
   async #finishRun(
@@ -509,9 +525,10 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     const manifest = this.#manifest(progress, artifacts, failureCodes);
     const prefix = runPrefix(progress.startedAt, progress.runId);
     const acquisitionSessionRef = await this.ctx.storage.get<string>("runSessionRef");
+    const continuationSessionRef = await this.ctx.storage.get<string>("sessionRef");
     try {
       const staging = dataBucket(this.env.DATA);
-      const summary = await persistSharedRun(dataBucket(this.env.DATA), {
+      const summary = await persistBackfillRun(dataBucket(this.env.DATA), {
         manifest,
         manifestBytes: manifestBytes(manifest),
         prefix,
@@ -519,8 +536,12 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         identity: {
           attemptId: `attempt-${crypto.randomUUID()}`,
           ...(acquisitionSessionRef === undefined ? {} : { acquisitionSessionRef }),
+          ...(continuationSessionRef === undefined ? {} : { continuationSessionRef }),
         },
       });
+      progress.publicationStatus = sharedRunPersisted(summary) ? "persisted" : "failed";
+      progress.publicationErrorCode = summary.reasonCode ?? null;
+      await this.ctx.storage.put("progress", progress);
       console[sharedRunPersisted(summary) ? "log" : "error"](
         JSON.stringify({
           message: "smbc_shared_persist",
@@ -538,6 +559,9 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     } catch (error) {
       // No terminal exists, so the run is not reported persisted (G1-01). The
       // staging bucket still holds every byte, so a repeat finishes it.
+      progress.publicationStatus = "failed";
+      progress.publicationErrorCode = safeSharedErrorCode(error);
+      await this.ctx.storage.put("progress", progress);
       console.error(
         JSON.stringify({
           message: "smbc_shared_persist_failed",

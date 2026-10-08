@@ -63,6 +63,8 @@ export interface BackfillProgress {
   lastErrorCode: string | null;
   logoutSucceeded: boolean | null;
   manifestKey: string | null;
+  publicationStatus?: "pending" | "persisted" | "failed";
+  publicationErrorCode?: string | null;
 }
 
 export interface StoredArtifact {
