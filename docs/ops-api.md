@@ -1,8 +1,10 @@
 # Operations API
 
 The committed App configuration enables `OPS_API_ENABLED` and names a human
-operator; agent grants remain empty. MCP additionally requires the agent-API
-transport grant, so an operations flag alone does not enable a client. These
+operator; agent grants remain empty. The operations are not served over MCP:
+`/mcp` accepts only agent-only MCP clients
+([ADR 0047](adr/0047-mcp-client-connection.md)), and an agent cannot request
+an operation. These
 six operation-request kinds are distinct from the newer operator-only
 [schedule settings API](schedules.md#settings-api). Collection/session-refresh
 requests remain pending executor wiring; see [current status](current-status.md).
@@ -10,8 +12,9 @@ requests remain pending executor wiring; see [current status](current-status.md)
 The six things an operator asks this system to _do_ — collect a source,
 re-register a persisted run, replay a parse, rebuild the read model, refresh a
 session, and read what happened — as one authenticated API under
-`/api/ops/v1`, served by the same Worker that serves the reads, and reachable
-through MCP under the same names.
+`/api/ops/v1`, served by the same Worker that serves the reads. Their MCP tool
+definitions still exist but are not published to, and refuse, every `/mcp`
+caller ([MCP](#mcp)).
 
 This implements unified plan 02 §4-5 and the U06 backlog row. Everything here
 is **off by default**: with `OPS_API_ENABLED` unset these paths answer exactly
@@ -34,9 +37,9 @@ identity, one record and one vocabulary, so that:
   lost notification loses a dispatch, never the request (02 §5);
 - re-sending the same request is the same operation rather than a second bank
   session (G3-06, G3-14);
-- a person looking at a screen, an operator with `curl` and a model with an
-  MCP client all reach the same application service and get the same record
-  (G3-05).
+- a person looking at a screen and an operator with `curl` reach the same
+  application service and get the same record (G3-05); a model with an MCP
+  client cannot request an operation at all (ADR 0047).
 
 The one thing the API deliberately cannot be is a generic proxy: there is no
 route that takes SQL, a table name, a bucket key, a URL, a database id or a
@@ -214,11 +217,9 @@ already does:
    `subject_not_granted` until a deployment names its operator. That is
    intended.**
 
-   Both transports go through the same resolver, so a misconfigured deployment
-   cannot serve one and refuse the other. While the lists are unreadable the
-   six MCP tools are not published either (a deployment that grades nobody can
-   authorize none of them) and remain callable only to answer
-   `grants_misconfigured`.
+   The routes are the only transport that reaches this resolver: `/mcp`
+   refuses an operations tool from its caller object before any grading
+   ([MCP](#mcp)).
 
 Reads are scoped to the principal that accepted the operation. An operation
 belonging to someone else answers `404 receipt_not_found`, exactly like one
@@ -253,8 +254,8 @@ misconfiguration is logged once as
 
 ## MCP
 
-The same six operations are MCP tools on the existing `POST /mcp` endpoint,
-published **only while the flag is on and the grant lists are readable**:
+The six operations have MCP tool definitions (`src/ops-tools.ts`), each
+generated from the Zod schema its route validates with:
 
 | Tool                            | Route                                        |
 | ------------------------------- | -------------------------------------------- |
@@ -265,16 +266,15 @@ published **only while the flag is on and the grant lists are readable**:
 | `kogane.ops.session.refresh`    | `POST /api/ops/v1/sessions/{source}/refresh` |
 | `kogane.ops.operation.get`      | `GET /api/ops/v1/operations/{id}`            |
 
-Each tool's published JSON Schema is generated from the same Zod schema its
-route validates with, so the wire contract and the advertised contract cannot
-drift. Reaching `/mcp` still needs an `AGENT_API_GRANTS` grant (that is the MCP
-endpoint's own gate) _and_ the operator capability above, so a read-only agent
-principal sees the tools refuse exactly as the routes do. An identity that
-reached `/mcp` through the MCP Access application is the agent-only principal
-`mcp-client:<sub>` ([ADR 0047](adr/0047-mcp-client-connection.md)): the six
-tools are neither listed nor callable for it, and the grader refuses it with
-`403 actor_not_supported` whatever the lists say — including when the same
-person's bare subject is the operator.
+**No `/mcp` caller can use them.** Since
+[ADR 0047](adr/0047-mcp-client-connection.md), `/mcp` accepts only an identity
+that came through the MCP Access application, and that identity is the
+agent-only caller `mcp-client:<sub>` — the operator's own identity included.
+The tools are not published to it, and `callOpsTool` refuses a call from the
+caller object with `403 actor_not_supported` before `opsContext` or the
+resolver runs, writing nothing. An operation is requested over the routes
+above, with the browser application's identity, where the operator is graded
+as before.
 
 ## Session refresh and human-required states
 
@@ -363,8 +363,10 @@ Synthetic data only.
   impossible dates (G3-13), error bodies that carry no rejected value — not
   the unknown source or release either (G3-08), the four other routes, the
   replay plan written into the 0035 tables exactly once, `waiting_for_human`
-  (G3-11), stage progress and completion, the MCP tool list pinned on both
-  flag states, and HTTP/MCP parity down to the stored row (G3-05).
+  (G3-11), stage progress and completion, and that `/mcp` publishes none of
+  the operations and refuses each of them without writing a row, even to the
+  operator's own MCP client, while HTTP still serves the operator (G3-05,
+  ADR 0047).
 - `packages/application/test/operations.test.ts` (10 checks; the SQL half
   runs against the real migrations in `bun:sqlite`): request identity,
   principal binding, the stage table per kind, the session policy's safe
@@ -382,15 +384,15 @@ Processor execution, no real provider or session. No MCP client has connected.
 
 Acceptance ids and the test that carries each:
 
-| Id    | Asked                                             | Test                                                                                                                        |
-| ----- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| G3-01 | absence is reported as absence, not empty success | `ops-api.test.ts` "stores one record … pending, not as success (G3-01)"                                                     |
-| G3-05 | the same request over UI/HTTP and MCP is the same | `ops-api.test.ts` "HTTP and MCP are one API (G3-05)"                                                                        |
-| G3-06 | a re-sent operation returns the existing record   | `ops-api.test.ts` "collection requests are accepted, not executed (G3-06, G3-14)"; `operations.test.ts` raced re-send tests |
-| G3-08 | a secret in the input leaves only a safe code     | `ops-api.test.ts` "the schema is the boundary (G3-08, G3-13)"                                                               |
-| G3-11 | human-required state, no login retry              | `ops-api.test.ts` "waiting_for_human … (G3-11)"; `operations.test.ts` "a session refresh needs a person … (G3-11)"          |
-| G3-13 | SQL / bucket key / URL is not executed            | `ops-api.test.ts` "refuses arbitrary SQL, storage keys and external URLs by shape"                                          |
-| G3-14 | a duplicated acceptance maps to one run           | `operations.test.ts` "a second dispatch of one operation finds the first executor's run … (G3-14)"                          |
+| Id    | Asked                                                         | Test                                                                                                                        |
+| ----- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| G3-01 | absence is reported as absence, not empty success             | `ops-api.test.ts` "stores one record … pending, not as success (G3-01)"                                                     |
+| G3-05 | the same request over UI/HTTP is the same; MCP cannot make it | `ops-api.test.ts` "operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)"                                          |
+| G3-06 | a re-sent operation returns the existing record               | `ops-api.test.ts` "collection requests are accepted, not executed (G3-06, G3-14)"; `operations.test.ts` raced re-send tests |
+| G3-08 | a secret in the input leaves only a safe code                 | `ops-api.test.ts` "the schema is the boundary (G3-08, G3-13)"                                                               |
+| G3-11 | human-required state, no login retry                          | `ops-api.test.ts` "waiting_for_human … (G3-11)"; `operations.test.ts` "a session refresh needs a person … (G3-11)"          |
+| G3-13 | SQL / bucket key / URL is not executed                        | `ops-api.test.ts` "refuses arbitrary SQL, storage keys and external URLs by shape"                                          |
+| G3-14 | a duplicated acceptance maps to one run                       | `operations.test.ts` "a second dispatch of one operation finds the first executor's run … (G3-14)"                          |
 
 ## Flags, deploy order and rollback
 

@@ -12,10 +12,11 @@ acceptance, no simulation, no commit, no calculation job, no collection
 request, no export, and no external money action in _this_ API. Those
 capabilities are not disabled by a flag; they have no name in the grant type.
 
-The operations API ([ops-api.md](ops-api.md)) shares this Worker's `/mcp`
-transport and nothing else: it is a different tool set, graded by the change
-lifecycle's operator capability rather than by a grant here, published only
-while its own flag is on, and no capability in the table below reaches it.
+The operations API ([ops-api.md](ops-api.md)) is not served over `/mcp`:
+`/mcp` has only agent-only callers
+([ADR 0047](adr/0047-mcp-client-connection.md)), and an operation needs the
+change lifecycle's operator capability, which no capability in the table
+below reaches.
 
 **Agent access is not configured in the committed deployment.**
 `AGENT_API_GRANTS` and `AGENT_GRANTS` are empty. With an absent or empty
@@ -87,7 +88,11 @@ A grant also carries a scope and a budget:
 A listed scope is **not** a display filter. Each source in the list is read
 with its own reader query, and every count, gap, coverage record, error and
 explanation is computed inside the list, so a narrower grant recomputes
-smaller numbers rather than subtracting hidden ones. Nothing tells the caller
+smaller numbers rather than subtracting hidden ones. The context an answer
+is pinned to is built inside the list too: its source selection names only
+granted sources, and its publication and parser-build digests are read from
+those sources' parse runs, so another source's activity does not move it
+([ADR 0047](adr/0047-mcp-client-connection.md)). Nothing tells the caller
 that a source or an account it cannot see exists (SC18).
 
 Bounds a configured grant may not exceed: `maxRows` ≤ 1000,
@@ -191,14 +196,11 @@ follows the operator route it shares a query with: while `/api/meta` reports
 `cardPurchaseRecognition: true` (the event reader flag on and CORE 0047
 applied) it is appended to the five above, and otherwise its name is
 `unknown_tool` and its HTTP path answers `404 not_found`, after the Access and
-grant checks every agent path makes. With `OPS_API_ENABLED` on **and
-this deployment's command grant lists readable**, the six `kogane.ops.*` tools
-of [ops-api.md](ops-api.md) are appended after them; with the flag off,
-`tools/list` holds no operations tool and an operations tool name is
-`unknown_tool`. While the grant lists cannot be read, they are not published
-either — a deployment that grades nobody can authorize none of them — but they
-stay callable, so a client that asks anyway is told
-`grants_misconfigured` rather than that the tool does not exist.
+grant checks every agent path makes. The six `kogane.ops.*` tools of
+[ops-api.md](ops-api.md) are never published on `/mcp`, whose callers are all
+agent-only: with `OPS_API_ENABLED` off an operations tool name is
+`unknown_tool`, and with it on `callOpsTool` refuses the call from the caller
+object (`actor_not_supported`) before any grader runs.
 
 ### Intents
 
@@ -497,26 +499,30 @@ attenuates it.
    and `sub`, and names the caller **`mcp-client:<sub>`**.
 5. The grant is `AGENT_API_GRANTS["mcp-client:<sub>"]`, and the tool runs.
 
-| Assertion reaching the Worker                                            | On `/mcp`                            | On every other route          |
-| ------------------------------------------------------------------------ | ------------------------------------ | ----------------------------- |
-| MCP application (`aud` = `ACCESS_MCP_AUDIENCE`)                          | `mcp-client:<sub>`, agent-only       | `401 authentication_required` |
-| browser application (`aud` = `ACCESS_AUDIENCE`)                          | `<sub>`, as before                   | `<sub>`, as before            |
-| both audiences in one assertion                                          | `401 authentication_required`        | `<sub>` (browser audience)    |
-| browser subject starting `mcp-client:`                                   | `403 actor_not_supported`            | —                             |
-| service token (no `sub`)                                                 | `401 authentication_required`        | unchanged (health, bootstrap) |
-| `ACCESS_MCP_AUDIENCE` unset or `""` (committed)                          | MCP-application assertions are `401` | —                             |
-| `ACCESS_MCP_AUDIENCE` = `ACCESS_AUDIENCE`, padded or over 256 characters | `503 auth_not_configured`            | —                             |
+| Assertion reaching the Worker                                            | On `/mcp`                                  | On every other route                           |
+| ------------------------------------------------------------------------ | ------------------------------------------ | ---------------------------------------------- |
+| MCP application (`aud` = `ACCESS_MCP_AUDIENCE`)                          | caller `mcp-client:<sub>`, agent-only      | `401 authentication_required`                  |
+| browser application (`aud` = `ACCESS_AUDIENCE`)                          | `401 authentication_required`              | `<sub>`, as before                             |
+| both audiences in one assertion                                          | `401 authentication_required`              | `401 authentication_required`                  |
+| service token (no `sub`)                                                 | `401 authentication_required`              | unchanged (health and bootstrap only)          |
+| subject starting `mcp-client:`                                           | `401 authentication_required`              | `403 actor_not_supported` on `/api/agent/v1/*` |
+| `ACCESS_MCP_AUDIENCE` unset or `""` (committed)                          | `401 authentication_required` for everyone | as before                                      |
+| `ACCESS_MCP_AUDIENCE` = `ACCESS_AUDIENCE`, padded or over 256 characters | `503 auth_not_configured`                  | as before (ignored)                            |
 
-**Agent-only attenuation.** `mcp-client:<sub>` is graded by its own
-`AGENT_API_GRANTS` entry and by nothing else: the bare `<sub>`'s entry is not
-a fallback, and `principalFor` — the gate behind `opsContext`, `callOpsTool`,
-the command routes and the operations routes — answers it
-`403 actor_not_supported` before it reads `OPERATOR_SUBJECTS` or
-`AGENT_GRANTS`, even when `<sub>` is the operator. The operations tools are
-neither listed nor callable for it. It can record an inert proposal (actor
-`mcp-client:<sub>`) under `interpretation.propose`, and nothing approves or
-commits. The browser application, its audience and every operator route are
-unchanged.
+**Agent-only attenuation.** The boundary turns the assertion into an
+`AgentCaller` object once (`mcpCaller`, `src/auth.ts`), and that object —
+not the subject it came from — is what every grader and tool receives.
+`mcp-client:<sub>` is graded by its own `AGENT_API_GRANTS` entry and by
+nothing else: the bare `<sub>`'s entry is not a fallback. `callOpsTool`
+refuses an `mcp-client` caller with `403 actor_not_supported` before
+`opsContext` or `principalFor` runs, and the operations tools are not
+published on `/mcp`; `principalFor` also refuses the `mcp-client:` name as a
+string, even when `<sub>` is the operator. It reaches no other route. It can
+record an inert proposal (actor `mcp-client:<sub>`) under
+`interpretation.propose`, and nothing approves or commits. The same person
+keeps the operator's rights over the browser application, whose audience and
+routes are unchanged — and only there: no caller can request an operation
+over MCP.
 
 ### Endpoint and transport
 
@@ -537,22 +543,22 @@ unchanged.
 
 ### Refusals a client sees
 
-| Failure                                                                          | Answered by       | HTTP / result                                                                          |
-| -------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| no token, expired token, person not in the MCP application's policy              | Cloudflare Access | Access's own `401` (Managed OAuth) — not this Worker                                   |
-| assertion missing, forged, not for an accepted audience, or without `sub`        | Worker            | `401 authentication_required`                                                          |
-| Access keys unreachable; audiences not configured or misconfigured               | Worker            | `503 identity_keys_unavailable` / `503 auth_not_configured`                            |
-| browser subject in the agent-only namespace                                      | Worker            | `403 actor_not_supported`                                                              |
-| `Origin` of another site                                                         | Worker            | `403 origin_not_allowed`                                                               |
-| principal not in `AGENT_API_GRANTS` (empty or unreadable table included)         | Worker            | `403 agent_api_not_configured`                                                         |
-| `GET` / `DELETE`; a query string                                                 | Worker            | `405 method_not_allowed` / `400 invalid_query`                                         |
-| media type, `Accept`, protocol version header, malformed JSON, body bound        | SDK               | `415` / `406` / `400` / `400` / `413`                                                  |
-| unknown method; unknown or unpublished tool (operations tools for `mcp-client:`) | SDK / dispatcher  | JSON-RPC `-32601`; `-32602 unknown_tool`                                               |
-| capability not granted                                                           | tool              | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                   |
-| source, account or row outside the scope                                         | tool              | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`) |
-| raw evidence without `evidence.read`                                             | tool              | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`       |
-| page or proposal beyond the budget                                               | tool              | `isError: true`, `code: budget_exceeded`, `refs: ["budget:…"]`                         |
-| approve, commit, operations                                                      | —                 | no such tool for `mcp-client:`; every command route is `401` for it                    |
+| Failure                                                                                                                                                           | Answered by                           | HTTP / result                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
+| no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                     | Access's own `401` (Managed OAuth) — not this Worker                                   |
+| assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                | `401 authentication_required`                                                          |
+| Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                | `503 identity_keys_unavailable` / `503 auth_not_configured`                            |
+| `Origin` of another site                                                                                                                                          | Worker                                | `403 origin_not_allowed`                                                               |
+| principal not in `AGENT_API_GRANTS` (empty or unreadable table included)                                                                                          | Worker                                | `403 agent_api_not_configured`                                                         |
+| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                | `405 method_not_allowed` / `400 invalid_query`                                         |
+| media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                   | `415` / `406` / `400` / `400` / `413`                                                  |
+| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                      | JSON-RPC `-32601`; `-32602 unknown_tool`                                               |
+| an operations tool, while the operations API is on                                                                                                                | `callOpsTool`, from the caller object | `isError: true`, `{"error":"actor_not_supported"}`; nothing written                    |
+| capability not granted                                                                                                                                            | tool                                  | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                   |
+| source, account or row outside the scope                                                                                                                          | tool                                  | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`) |
+| raw evidence without `evidence.read`                                                                                                                              | tool                                  | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`       |
+| page or proposal beyond the budget                                                                                                                                | tool                                  | `isError: true`, `code: budget_exceeded`, `refs: ["budget:…"]`                         |
+| approve, commit                                                                                                                                                   | —                                     | no such tool; every command route is `401` for an MCP token                            |
 
 A tool's refusal is the same financial error object its HTTP route answers,
 in `structuredContent`; `content[0].text` is that object serialised.
@@ -630,13 +636,27 @@ kind of change it is. Steps 1–2 open nothing.
 9. _Client registration_ — add the connector in claude.ai, the app in
    ChatGPT, and the server in Codex, as the table above says, signing in at
    Access's login as the owner.
-10. _Live check_ — in each client: `tools/list` shows the five tools of
-    [Tools](#tools) and no `kogane.ops.*`; `kogane.capabilities` reports
-    `principal: "mcp-client:<owner-sub>"`, `["summary.read"]` and the listed
-    source; `kogane.financial.query` `{"intent":"coverage"}` answers; two
-    refusals — `filters.source` outside the grant (`evidence_restricted`) and
-    `{"intent":"activity"}` (`unauthorized`, `capability:records.read`).
-    The browser UI and the operator's routes behave as before.
+10. _Live check, and the evidence that a client really connected_ — in
+    each client (claude.ai, ChatGPT, Codex), in a fresh conversation with
+    only this connector enabled, ask for these four calls and keep what each
+    shows:
+    - `kogane.capabilities` — evidence: the tool result shows
+      `"principal": "mcp-client:<owner-sub>"`, `"capabilities": ["summary.read"]`
+      and the listed source;
+    - `kogane.financial.query` with `{"intent":"coverage"}` — evidence: a
+      result with `"schemaVersion": "kogane-query-response-v1"`;
+    - the same with `filters.source` set to a source outside the grant —
+      evidence: `isError` with `"code": "evidence_restricted"`;
+    - `{"intent":"activity"}` — evidence: `"code": "unauthorized"` with
+      `capability:records.read`.
+      Corroborate each client from the server side for the same minutes: the
+      Access log of the MCP application shows the owner's sign-in and the
+      requests, and the Worker's request log shows
+      `"route":"mcp","status":200` lines (codes only; it never logs a
+      principal). A client that only lists tools, or a request made with the
+      browser's cookie, is not evidence. Before sharing any of it, replace the
+      owner's subject with `<owner-sub>`. The browser UI and the operator's
+      routes must behave as before.
 11. _Grant additions, later, one release each_ — `records.read`; then
     `interpretation.propose` (ChatGPT asks for confirmation before a tool
     without `readOnlyHint`; a proposal stays `proposed` until the operator
@@ -686,15 +706,16 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   `tools/call` by name; a name the dispatcher returns `null` for is
   `unknown_tool`. A tool set that is off — for the deployment, or for this
   caller — is neither listed nor dispatched.
-- **Identity.** The dispatcher has the principal `agentPrincipal` proved
-  (`subject`) and its resolved `Grant`. Never read identity from a body, a
-  header or a tool argument. Test agent-only principals with
-  `isAgentOnlyPrincipal` (`src/auth.ts`), never by parsing the string.
+- **Identity.** The dispatcher has the `AgentCaller` the boundary proved
+  (`caller`, `src/auth.ts`) and its resolved `Grant`. Pass the caller object
+  on; never derive a role from `caller.principal`, and never read identity
+  from a body, a header or a tool argument. On `/mcp` the caller is always
+  `kind: "mcp-client"`.
 - **Capability.** A tool graded by the agent API declares the
   `AgentCapability` it needs and checks it with `grantAllows` on that `Grant`
-  (scope and budget likewise). A tool graded by the change lifecycle calls
-  `principalFor`, which refuses an agent-only principal by itself; hide such a
-  tool from one, as the operations tools are hidden.
+  (scope and budget likewise). A tool that would need an operator must refuse
+  an `mcp-client` caller from the caller object before any grader runs, as
+  `callOpsTool` does, and is not published to one.
 - **Result.** Return a `ToolResult` (`status`, `body`): a 4xx status with a
   closed code reaches the client as `isError: true` with the same object the
   HTTP route answers. No tool approves or commits for an agent-only
@@ -706,7 +727,8 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
 mise run //services/app:ci
 # or only the MCP and agent API suites:
 cd services/app && mise exec -- ./node_modules/.bin/vitest run \
-  test/mcp-client.test.ts test/agent-api.test.ts test/ops-api.test.ts test/purchases-explain.test.ts
+  test/mcp-client.test.ts test/mcp-sdk-client.test.ts test/agent-api.test.ts \
+  test/ops-api.test.ts test/purchases-explain.test.ts test/health.test.ts
 ```
 
 They run the real Worker under workerd with synthetic Access keys, audiences,
@@ -747,24 +769,32 @@ on and off, and
 `packages/observation-shared/test/card-purchase-candidates.test.ts` pins the
 contract (`validAgentCardPurchasePage` refuses an action or a plan payload).
 
-`test/mcp-client.test.ts` (23 tests over the real Worker and the SDK) checks
-what a client meets on `/mcp`: the initialize → `notifications/initialized` →
-`tools/list` → `tools/call` sequence and version negotiation; `server/discover`,
-`tools/list` and `tools/call` on 2026-07-28 with the same answer as on
-2025-11-25; `405` and no session; `Origin`; a `tools/call` notification running
-nothing; the SDK's `415`/`406`/`400`/`413`; the published tool definitions
-against the SEP-986 name rule and Claude Code's load-time property-name and
-root-combinator checks; the agent-only attenuation under a configuration where
-the same person is the operator, holds a full grant on the bare subject and
-has the agent-only name listed on the command path (graded only by its own
-entry, no operations tool listed or callable and no `ops_requests` row,
-`principalFor`, `opsContext` and `callOpsTool` each refusing it, `401` on ten
-non-MCP routes, the proposal's actor pinned, the fail-closed audience rules);
-`tools/list` and `tools/call` under each single capability; the refusals of
-[the table above](#refusals-a-client-sees); and that the UI's
+The boundary has its own tests; the agent and MCP tests that passed before it
+were not evidence of it (they never presented an MCP-audience token, never
+had one person as both operator and MCP client, and never inspected context
+metadata). `test/mcp-client.test.ts` covers the same person as operator in
+the browser and agent-only on `/mcp` (no operations tool, no `ops_requests`
+row, `callOpsTool`, `opsContext` and `principalFor` each refusing the MCP
+caller); an MCP-audience token refused on every ordinary route (commands
+including approve and commit, card settlements and purchases, operations and
+health, browser reads, the shared query, raw evidence, the HTTP agent routes,
+assets) and `/mcp` refusing the browser audience, both audiences, another
+audience or issuer, an expired or forged assertion, service tokens and
+spoofed headers; the grant failing closed (absent, empty, unparsable,
+mis-shaped, out-of-vocabulary, only the bare subject's, another person's);
+source, account and budget limits on reads and proposals; the whole answer
+of every tool naming no denied source or account, the context's source
+selection being exactly the granted source, and a denied source's new
+publication leaving a scoped context identical; a server-derived proposal
+actor that a body or header cannot change, and adopted answers identical
+before and after a proposal; unpublished tools; the connection in both
+eras; the SDK's transport refusals; tool definitions against SEP-986 and
+Claude Code's load-time checks; each single capability; and the UI's
 `GET /api/v2/query`, `POST /api/agent/v1/financial.query` and MCP in both
-eras return deep-equal objects with the same gap reasons for four intents,
-and one refusal object over HTTP and MCP.
+eras returning deep-equal objects with the same gap reasons.
+`test/mcp-sdk-client.test.ts` drives `/mcp` with the official
+`@modelcontextprotocol/client` in `legacy` (2025-11-25) and `auto`
+(2026-07-28) negotiation.
 
 Not verified: no deployed instance, no MCP Access application, Managed OAuth
 setting or policy, no real provider data, and no MCP client has connected to

@@ -60,6 +60,13 @@ read that assertion:
    posture, has no OAuth configuration and no MCP portal, and that
    `AGENT_API_GRANTS` and `AGENT_GRANTS` are empty. None of this may be
    weakened, and no setting is approved yet.
+4. **Context metadata was computed outside the grant.** The independent
+   review of an earlier head of this change found that `contextInputs`
+   (`services/app/src/agent-service.ts`) built every context from the whole
+   store: a grant limited to one source received a context whose
+   `sourceSelectionManifestRef` named every source, and whose publication
+   and parser digests moved when a source outside the grant published. The
+   result data, coverage and gaps were already scoped; the context was not.
 
 The current MCP revision is 2026-07-28 ([versioning][mcp-versioning]),
 stateless, with `server/discover` and per-request versions; the clients above
@@ -128,28 +135,43 @@ call is graded on its own, with a closed reason.
    Worker) with Managed OAuth on, an identity-based policy for the people
    allowed to use an MCP client, and DCR redirect URIs for the clients. The
    browser application is not changed.
-2. `ACCESS_MCP_AUDIENCE` names that application's AUD tag. On `/mcp`,
-   `agentPrincipal` (`services/app/src/auth.ts`) verifies the assertion
-   against the issuer and either audience; one whose `aud` is the MCP
-   application's is the principal **`mcp-client:<sub>`**. An assertion for
-   the browser application is its subject, exactly as before.
-3. Fail-closed rules: `ACCESS_MCP_AUDIENCE` unset or empty means an
-   MCP-application assertion is accepted nowhere (`401`); a value equal to
-   `ACCESS_AUDIENCE`, longer than 256 characters or padded is
-   `503 auth_not_configured` on `/mcp`; an assertion naming both audiences is
-   `401`; every other route verifies against `ACCESS_AUDIENCE` only, so an
-   MCP-application assertion is `401` there; a browser subject that claims the
-   `mcp-client:` namespace is `403 actor_not_supported`; a service token is
-   `401` on every agent path.
-4. **Agent-only attenuation, server-side.** `mcp-client:<sub>` is graded only
-   by its own `AGENT_API_GRANTS` entry — never by the bare subject's entry, as
-   a fallback or otherwise. `principalFor` (`services/app/src/grants.ts`), the
-   one gate behind `opsContext`, `callOpsTool`, the command routes and the
-   operations routes, answers it `403 actor_not_supported` before reading
-   `OPERATOR_SUBJECTS` or `AGENT_GRANTS`. The operations tools are neither
-   listed nor callable for it (`unknown_tool`). The agent-API capability
-   vocabulary has no acceptance, so at most it records an inert proposal
-   whose actor is `mcp-client:<sub>`; there is no approve or commit tool.
+2. **Two audiences, never crossed.** `ACCESS_MCP_AUDIENCE` names that
+   application's AUD tag. `/mcp` accepts only an assertion for it
+   (`mcpCaller`, `services/app/src/auth.ts`); an assertion for the browser
+   application, one naming both audiences, one without a subject (a service
+   token) and one whose subject claims the agent-only namespace are
+   `401 authentication_required` there. Every other route accepts only the
+   browser application (`accessIdentity`, `authenticate`) and refuses an
+   assertion that names the MCP audience. `ACCESS_MCP_AUDIENCE` unset or
+   empty — the committed state — means `/mcp` accepts nothing (`401`); a value
+   equal to `ACCESS_AUDIENCE`, padded or over 256 characters is
+   `503 auth_not_configured` on `/mcp` and is ignored by the browser routes.
+3. **An attenuated caller object, decided once.** The boundary builds an
+   `AgentCaller`: `{ kind: "mcp-client", principal: "mcp-client:<sub>" }` on
+   `/mcp`, `{ kind: "browser", principal: <sub> }` on `/api/agent/v1/*`. That
+   object — not the subject it came from — is what `agentApi` grades and
+   hands to every tool. Whoever signed in through the MCP application, the
+   operator included, is agent-only:
+   - its grant is the `AGENT_API_GRANTS` entry for `mcp-client:<sub>`, and
+     the bare subject's entry is never a fallback;
+   - `callOpsTool` receives the caller object and refuses an `mcp-client`
+     caller with `403 actor_not_supported` before `opsContext` or
+     `principalFor` runs, and the operations tools are not published on
+     `/mcp`; `principalFor` also refuses the `mcp-client:` name as a string,
+     whatever `OPERATOR_SUBJECTS` and `AGENT_GRANTS` say;
+   - it reaches no route but `/mcp`;
+   - the agent-API capability vocabulary has no acceptance, so at most it
+     records an inert proposal whose actor is `mcp-client:<sub>`.
+     The operations remain the operator's over the browser routes. Requesting
+     one over MCP, which an operator subject could do before this change, is no
+     longer possible for anyone.
+4. **Contexts are built inside the grant.** `contextInputs` restricts the
+   visible sources to the granted ones and, for a listed grant, reads the
+   publication high-water and the parser builds from the newest visible
+   parse runs of those sources only (the read model's `visibleEvidence`
+   relation and page limit, filtered by source before it is bounded). A
+   whole-store grant — the browser reader's — keeps the overview's window,
+   so the UI and agent answers stay identical.
 5. The transport is `@modelcontextprotocol/server` 2.3.1: a request of an
    initialize-based revision goes to the SDK's stateless
    `WebStandardStreamableHTTPServerTransport` in JSON mode, a 2026-07-28
@@ -161,22 +183,26 @@ call is graded on its own, with a closed reason.
 The first grant is `summary.read` on one listed source for
 `mcp-client:<owner sub>`; `records.read`, then `interpretation.propose`, one
 release at a time; `evidence.read` only by a separate decision. Revocation:
-remove the entry (or set `AGENT_API_GRANTS` to `""`), unset
-`ACCESS_MCP_AUDIENCE`, or remove the person from the MCP application's policy;
-Access re-evaluates the policy at the next token refresh.
+remove the person from the MCP application's policy, unset
+`ACCESS_MCP_AUDIENCE`, or remove the grant entry (or set `AGENT_API_GRANTS`
+to `""`).
 
 ## Consequences
 
 - With `ACCESS_MCP_AUDIENCE` unset and the grants empty, which is the
-  committed state, the change opens nothing: the browser application, its
-  audience and every operator route behave as before.
+  committed state, `/mcp` accepts no caller at all and every other route
+  behaves as before: the browser application, its audience and the
+  operator's routes are unchanged.
 - Every MCP client a person connects (claude.ai, ChatGPT, Codex) is the same
   principal `mcp-client:<sub>`. Separating them needs separate Access
   identities.
-- The operator's existing path — the browser application's audience on
-  `/mcp`, with the operations tools — is unchanged. Once the MCP application
-  covers `/mcp`, Access routes that path through it, so in practice every
-  `/mcp` caller is agent-only.
+- The operations MCP tools of [ops-api.md](../ops-api.md#mcp) are no longer
+  served to anyone: `/mcp` has no operator caller. Operations are requested
+  over the browser routes.
+- A listed grant's context costs one more bounded read per tool call (the
+  scoped parse-run window). An account-scoped grant still shares its
+  sources' publication digest with the accounts it cannot see: parse runs are
+  per source, not per account.
 - A client of only the 2026-07-28 revision can connect.
 - Gaps the documentation does not settle (each is an owner question, not a
   reason for code):
@@ -192,39 +218,71 @@ Access re-evaluates the policy at the next token refresh.
   - that the MCP application's policy cannot require the browser
     application's device posture, because the clients call from their own
     clouds;
-  - whether claude.ai accepts tool names with dots (the 2025-11-25 naming
-    guidance allows them).
+  - whether claude.ai and ChatGPT accept tool names with dots (the
+    2025-11-25 naming guidance allows them).
 
 ## Verification
 
 In this repository, with synthetic keys, audiences, principals and store,
-over the real Worker under workerd:
+over the real Worker under workerd. The earlier passing MCP tests were not
+evidence of the boundary — they never presented an MCP-audience token, never
+had the same person as operator and MCP client, and never inspected context
+metadata — so the boundary has its own tests:
 
-- `services/app/test/mcp-client.test.ts` (23 tests): the initialize →
-  `notifications/initialized` → `tools/list` → `tools/call` sequence and
-  version negotiation through the SDK; `server/discover`, `tools/list` and
-  `tools/call` on 2026-07-28 with the same answer as 2025-11-25; GET/DELETE
-  `405`; `Origin`; a `tools/call` notification running nothing; the SDK's
-  `415`/`406`/`400`/`413`; `-32601`/`-32602`; tool definitions against the
-  SEP-986 names and Claude Code's load-time checks; the attenuation under a
-  hostile configuration (the same person as operator, with a full grant on
-  the bare subject and the agent-only name listed on the command path):
-  graded only by its own entry, no fallback, no operations tool listed or
-  callable and no `ops_requests` row, `principalFor`, `opsContext` and
-  `callOpsTool` each refusing it for three list configurations, `401` on ten
-  non-MCP routes, the proposal actor pinned, and the fail-closed audience
-  rules; `tools/list` and `tools/call` under each single capability; scope,
-  raw-evidence and budget refusals; and the UI's query route, the HTTP agent
-  route and MCP in both eras returning deep-equal objects with the same gap
-  reasons for four intents, and one refusal object over HTTP and MCP.
-- `test/agent-api.test.ts`, `test/ops-api.test.ts`,
-  `test/purchases-explain.test.ts` and `test/health.test.ts` pass with MCP
-  requests that carry a real client's headers and `initialize` parameters.
+- `services/app/test/mcp-client.test.ts`:
+  - _the same person_ (matrix 1): the operator, with a full grant on the bare
+    subject and the agent-only name even listed in `AGENT_GRANTS`, is
+    `mcp-client:<sub>` with only that entry's grant on `/mcp`, keeps the
+    operator's answers on the HTTP agent route, the operations route and the
+    browser reads, is offered no operations tool and is refused each one
+    (`actor_not_supported`, no `ops_requests` row), and `callOpsTool`,
+    `opsContext` and `principalFor` refuse it for three list configurations;
+  - _no cross-over_ (matrix 2, 3): an MCP-audience token — alone or together
+    with the browser audience — is `401` on the command routes (plan,
+    approve, commit), the card settlement and card purchase routes, the
+    operations routes and health, the browser reads, the shared query, raw
+    evidence, the HTTP agent routes and the assets; `/mcp` refuses the
+    browser audience, both audiences, another audience, another issuer, an
+    expired or forged assertion, a service token through either application,
+    an agent-only subject and spoofed identity headers; the audience
+    configuration fails closed and never takes the browser routes down;
+  - _the grant_ (matrix 4): absent, empty, unparsable, mis-shaped, carrying
+    a capability outside the vocabulary, only the bare subject's, or
+    another person's — `403 agent_api_not_configured` for list and call;
+  - _limits_ (matrix 5): source, account and budget refusals on reads and
+    proposals;
+  - _metadata_ (matrix 6): for a listed grant, the whole answer of every tool
+    — context, manifests, digests, counts, errors — never names the denied
+    source, its account or its source account, `sourceSelectionManifestRef`
+    is exactly the granted source, a denied source's new publication by a new
+    parser build leaves the scoped context identical while the whole-store
+    context moves, and the scoped context moves with its own source;
+  - _actor and adopted state_ (matrix 7): a body that names an actor is
+    refused and writes nothing, an identity header is ignored, the stored
+    actor is `mcp-client:<sub>`, and every adopted answer is identical before
+    and after a proposal;
+  - _unpublished tools_ (matrix 8): `-32602` and nothing written;
+  - the connection in both eras, `Origin`, the SDK's refusals, tool
+    definitions against the SEP-986 names and Claude Code's load-time checks,
+    `tools/list` and `tools/call` under each single capability, and the UI's
+    query route, the HTTP agent route and MCP in both eras returning
+    deep-equal objects with the same gap reasons.
+- `services/app/test/mcp-sdk-client.test.ts` (matrix 9): the official
+  `@modelcontextprotocol/client` (2.3.1, a test dependency) connects, lists
+  and calls the tools in `legacy` mode (2025-11-25) and in `auto` mode
+  (2026-07-28), sees a refusal as a tool error, and cannot connect without a
+  grant or with a browser-audience token.
+- `test/agent-api.test.ts`, `test/ops-api.test.ts` (whose MCP block now pins
+  that no operation is published or accepted on `/mcp` while HTTP still
+  serves the operator), `test/purchases-explain.test.ts` and
+  `test/health.test.ts` pass with MCP requests signed for the MCP
+  application.
 
-Not verified: no Access application, Managed OAuth setting, policy, client
-registration or MCP client against a deployment; the gaps above; and the
-JSON Schema 2020-12 meta-schema check Claude Code also runs. The owner's
-ordered steps and live checks are in
+Not verified (matrix 10, owner-executed): no Access application, Managed
+OAuth setting, policy, client registration or MCP client against a
+deployment; the gaps above; and the JSON Schema 2020-12 meta-schema check
+Claude Code also runs. The owner's ordered steps, live checks and what
+counts as evidence are in
 [agent-api.md](../agent-api.md#connecting-an-mcp-client).
 
 [cf-managed-oauth]: https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/

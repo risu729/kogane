@@ -362,8 +362,10 @@ the committed configuration, and both allow-lists:
 One resolver reads them — `resolvePrincipal` in
 `packages/application/src/command/grants.ts`, through the Worker's adapter
 `services/app/src/grants.ts` — and it is the only grading on any command
-surface: the five command routes, the six `/api/ops/v1` routes and the six
-operations MCP tools all call it.
+surface: the five command routes and the six `/api/ops/v1` routes call it.
+The six operations MCP tools would too, but `/mcp` refuses them from its
+agent-only caller before they get that far
+([ADR 0047](adr/0047-mcp-client-connection.md)).
 
 - A subject in `OPERATOR_SUBJECTS` is the human operator.
 - A subject in `AGENT_GRANTS` is an agent. Its `approve`/`commit` is
