@@ -237,6 +237,12 @@ describe("myjcb-skip-payment-schedule: the wrapped empty row (ADR 0005 amendment
   const DATA_ITEM_CELL = inner(ROWS[0]!);
   /** The empty `item-cell` under two wrapper levels. */
   const TWICE_WRAPPED_EMPTY_ROW = wrappedRow(inner(WRAPPED_EMPTY_ROW));
+  /** `EMPTY_ITEM_CELL` with a `span` in place of the `item-cell`'s `div`. */
+  const SPAN_ITEM_CELL =
+    '<span class="item-cell"><div class="cell w-100per">ご利用明細はございません。</div></span>';
+  /** `EMPTY_ITEM_CELL` with a `span` in place of the cell's `div`. */
+  const SPAN_CELL_ITEM_CELL =
+    '<div class="item-cell"><span class="cell w-100per">ご利用明細はございません。</span></div>';
   const ROW_SHAPE = /^schedule_row_shape_unobserved$/u;
 
   test("the lone wrapped empty row is zero rows, with or without the as-of heading", () => {
@@ -333,7 +339,19 @@ describe("myjcb-skip-payment-schedule: the wrapped empty row (ADR 0005 amendment
       "an element inside the wrapped cell",
       wrappedRow(EMPTY_ITEM_CELL.replace(/>(ご利用明細はございません。)</u, "><span>$1</span><")),
     ],
+    // Every observed level is a `div`; any other element is a row, in the
+    // wrapped shape and, since 0.1.2, in the unwrapped one too.
     ["a span wrapper", `<div class="content"><span>${EMPTY_ITEM_CELL}</span></div>`],
+    ["a section wrapper", `<div class="content"><section>${EMPTY_ITEM_CELL}</section></div>`],
+    // The HTML parser closes a `p` before a `div`, so this reaches the reader
+    // as siblings, not as a wrapper; refused either way.
+    ["a p wrapper", `<div class="content"><p>${EMPTY_ITEM_CELL}</p></div>`],
+    ["a span.content row, wrapped", `<span class="content"><div>${EMPTY_ITEM_CELL}</div></span>`],
+    ["a span.content row, unwrapped", `<span class="content">${EMPTY_ITEM_CELL}</span>`],
+    ["a span.item-cell, wrapped", wrappedRow(SPAN_ITEM_CELL)],
+    ["a span.item-cell, unwrapped", `<div class="content">${SPAN_ITEM_CELL}</div>`],
+    ["a span.cell.w-100per, wrapped", wrappedRow(SPAN_CELL_ITEM_CELL)],
+    ["a span.cell.w-100per, unwrapped", `<div class="content">${SPAN_CELL_ITEM_CELL}</div>`],
     ["a wrapped data row", wrappedRow(DATA_ITEM_CELL)],
   ])("%s is a row, and the page is refused", (_name, row) => {
     expect(() => parse(skipPage({ ledgers: [ledger(SKIP_HEAD, [row])] }))).toThrow(ROW_SHAPE);

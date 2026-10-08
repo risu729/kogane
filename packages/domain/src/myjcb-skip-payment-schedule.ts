@@ -257,20 +257,24 @@ function ledgerRows(ledger: SchedulePageNode): SchedulePageNode[] {
 const READER_CLASSES = ["detail-list-01", "head", "content", "item-cell", "cell", "w-100per"];
 
 /**
- * The observed empty row, in its two observed shapes:
+ * The observed empty row, in its two observed shapes, each a `div` at every
+ * level (the row a `div.content`):
  *
  * - its only element child an `item-cell` showing the empty label
  *   (`isEmptyItemCell`, amendment f);
  * - its only element child a `div` carrying none of `READER_CLASSES`, whose
- *   only element child is a `div.item-cell` showing the empty label, the
- *   cell itself with no element child, and the row, the wrapper and the
+ *   only element child is an `item-cell` showing the empty label, the cell
+ *   itself with no element child, and the row, the wrapper and the
  *   `item-cell` each showing exactly `EMPTY_LEDGER_LABEL` (amendment k). A
  *   second wrapper, a wrapper with any other element child or text, or a
  *   wrapper around anything else is a row.
+ *
+ * Any other element in place of a `div` is a row (since amendment k; before
+ * it, the row and the `item-cell` could be any element).
  */
 function isEmptyLedgerRow(row: SchedulePageNode): boolean {
   const rowChildren = children(row);
-  if (rowChildren.length !== 1) return false;
+  if (row.tagName !== "div" || rowChildren.length !== 1) return false;
   const child = rowChildren[0]!;
   if (hasClass(child, "item-cell")) return isEmptyItemCell(child);
   const wrapped = children(child);
@@ -281,8 +285,7 @@ function isEmptyLedgerRow(row: SchedulePageNode): boolean {
   )
     return false;
   const itemCell = wrapped[0]!;
-  if (itemCell.tagName !== "div" || !hasClass(itemCell, "item-cell") || !isEmptyItemCell(itemCell))
-    return false;
+  if (!hasClass(itemCell, "item-cell") || !isEmptyItemCell(itemCell)) return false;
   const cell = children(itemCell)[0]!;
   return (
     children(cell).length === 0 &&
@@ -291,12 +294,13 @@ function isEmptyLedgerRow(row: SchedulePageNode): boolean {
 }
 
 /**
- * The empty row's `item-cell`: its only element child is one
+ * The empty row's `item-cell`: a `div` whose only element child is one
  * `div.cell.w-100per` showing exactly `EMPTY_LEDGER_LABEL`.
  */
 function isEmptyItemCell(itemCell: SchedulePageNode): boolean {
   const cells = children(itemCell);
   return (
+    itemCell.tagName === "div" &&
     cells.length === 1 &&
     cells[0]!.tagName === "div" &&
     hasClass(cells[0]!, "cell") &&

@@ -39,8 +39,10 @@ counts and booleans only, no text or value
   `content` row; beside any other row, or twice, it is refused
   (`schedule_row_shape_unobserved`). Two wrapper levels, a wrapper with a
   reader class, another element child or text, another label, and a wrapped
-  data row are refused. Every observation is as in 0.1.1; no refusal code is
-  added.
+  data row are refused, and so is any level that is not a `div`, in either
+  shape (0.1.1 took any element as the unwrapped row and its `item-cell`;
+  both observed shapes are `div`s). Every observation is as in 0.1.1; no
+  refusal code is added.
 - **Four statement releases, digest only.** The reader's module is in the
   digest closure of the four MyJCB statement parsers (their h1 reading,
   amendment (j)), so `myjcb-credit-ledger@1.2.3`,

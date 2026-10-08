@@ -2090,46 +2090,67 @@ provider class name was shared, and none is recorded here.
 3. **C: accept exactly the observed wrapper, every level checked.** Chosen.
    Where it lives:
    - **C1: in the reader's `isEmptyLedgerRow`, with the reader's own
-     helpers** (`children`, `hasClass`, `text`, `compact`). Chosen. It moves
-     the four MyJCB statement parsers' digest (context 5), so they are
-     released again with nothing else changed.
-   - **C2: a separate module, imported only by the skip-payment parser,
-     that removes the wrapper before the reader reads the page.** Rejected:
-     it keeps the four statement parsers' digests (the reason amendment (f)
-     kept amendment (d)'s path), but it needs its own copies of the reader's
-     tree helpers and of the empty label, and splits one rule over two
-     modules. The owner asked that the fix reuse the reader's existing
-     helpers and add no generic utilities. No dependency is added either
-     way: the input is still the parse5 tree the parser already builds.
+     helpers** (`children`, `hasClass`, `text`, `compact`). Chosen. The
+     empty-row rule is the reader's: inside `readMyJcbSkipPaymentSchedule`,
+     `ledgerRows` decides whether a ledger has rows, and that answer feeds
+     every later check in their fixed order (which ledger is read and
+     `schedule_ledger_ambiguous`, the head, the row limit, the as-of rule)
+     before the row check. Only the reader can change that answer without a
+     second reading of the same rows. It moves the four MyJCB statement
+     parsers' digest (context 5), so they are released again with nothing
+     else changed (decision).
+   - **C2: a parser-local override**: a module imported only by the
+     skip-payment parser that removes the wrapper from the parse tree before
+     the reader reads the page (or re-decides the empty ledger around it).
+     Rejected: it would keep the four statement parsers' digests (the reason
+     amendment (f) kept amendment (d)'s path), but it needs its own copies of
+     the reader's tree helpers and of the empty label, splits one rule over
+     two modules, and leaves `readMyJcbSkipPaymentSchedule` refusing a page
+     the parser reads. The owner asked that the fix reuse the reader's
+     existing helpers and add no generic utilities. No dependency is added
+     either way: the input is still the parse5 tree the parser already
+     builds.
 
 ### Decision
 
-- `isEmptyLedgerRow` accepts two shapes. The amendment (f) shape is
-  unchanged: the row's only element child an `item-cell` whose only element
-  child is one `div.cell.w-100per` showing exactly the label
-  (`isEmptyItemCell`). The amendment (k) shape: the row's only element child
-  is a `div` carrying none of `READER_CLASSES`; its only element child is a
-  `div.item-cell` that `isEmptyItemCell` accepts; that cell has no element
-  child; and the row, the wrapper and the `item-cell` each show exactly the
-  label after whitespace removal (the cell is checked by
-  `isEmptyItemCell`).
+- `isEmptyLedgerRow` accepts two shapes. The amendment (f) shape: the
+  row's only element child an `item-cell` whose only element child is one
+  `div.cell.w-100per` showing exactly the label (`isEmptyItemCell`). The
+  amendment (k) shape: the row's only element child is a `div` carrying none
+  of `READER_CLASSES`; its only element child is an `item-cell` that
+  `isEmptyItemCell` accepts; that cell has no element child; and the row,
+  the wrapper and the `item-cell` each show exactly the label after
+  whitespace removal (the cell is checked by `isEmptyItemCell`).
+- Both shapes are `div`s at every level, as both were observed: the row
+  (`div.content`), the wrapper, the `item-cell` and the cell. Any other
+  element in their place is a row. For the amendment (f) shape this narrows
+  0.1.1, which required only the cell to be a `div` and took any element
+  as the row and the `item-cell`; that difference is in shapes nobody has
+  observed.
 - `ledgerRows` is unchanged: the empty row, in either shape, is zero rows
   only when it is its ledger's one `content` row. Beside any other row,
   twice, or beside the other shape, each is a row and the page is refused
   with `schedule_row_shape_unobserved`.
-- Not accepted, so a row and refused: two or more wrapper levels; a wrapper
-  that is not a `div`, that carries any of the reader's classes, or that
-  has another element child; text anywhere beside the label; another label;
-  an element inside the cell; and a wrapper around a data row. A data row is
-  read only as before: the row's only element child is one `item-cell` of
+- Not accepted, so a row and refused: two or more wrapper levels; any
+  element other than a `div` at any level of either shape (a `span.content`
+  row, a `span`, `section` or `p` wrapper, a `span.item-cell`, a
+  `span.cell`); a wrapper that carries any of the reader's classes or has
+  another element child; text anywhere beside the label; another label; an
+  element inside the cell; and a wrapper around a data row. A data row is
+  read exactly as before: the row's only element child is one `item-cell` of
   three `cell`s.
 - The refusal codes are unchanged; there is no new code.
-- `myjcb-skip-payment-schedule@0.1.2`. Every page 0.1.1 read, it reads the
-  same, and every observation it writes is 0.1.1's (and 0.1.0's).
+- `myjcb-skip-payment-schedule@0.1.2`. Every page 0.1.1 read whose empty
+  row is `div`s, it reads the same, and every observation it writes is
+  0.1.1's (and 0.1.0's).
 - `myjcb-credit-ledger@1.2.3`, `myjcb-credit-past-month-balances@1.1.6`,
   `myjcb-credit-statement-total@1.4.1` and
-  `myjcb-canonical-evidence-boundary@1.1.6` change digest only: they call
-  only the h1 reading of the changed module, which is unchanged.
+  `myjcb-canonical-evidence-boundary@1.1.6` change digest only, and their
+  output is byte-identical. From this module they reach only
+  `myjcbSchedulePageKind` and its `skipHeadingCount` (through
+  `myjcbSchedulePageHeadingKind`), which are unchanged; the changed
+  functions are reachable only from `readMyJcbSkipPaymentSchedule`. No other
+  release changes.
 - No migration: the processor registers each deployed release in
   `parser_releases` itself, and no migration pins a MyJCB parser version (as
   for amendment j). Amendment (i) expected one; none is needed.
@@ -2179,12 +2200,27 @@ provider class name was shared, and none is recorded here.
   (either order), and a wrapped data row beside data rows are refused. The
   positive tests fail without the reader change. Every input is synthetic
   and mirrors the reported structure; no stored text is copied.
-- `packages/parsers/test/parser-digests.test.ts`: `mise run
-//packages/parsers:digests` changes exactly five releases, the skip parser
-  (0.1.2) and the four MyJCB statement parsers (one shared digest);
-  `packages/read-model/test/card-usage.test.ts` pins
-  `myjcb-credit-ledger@1.2.3`, its rows otherwise unchanged;
-  `packages/parsers/test/myjcb-statement.test.ts` passes unchanged.
+- The same file, the element cases: a `span.content` row, a `span.item-cell`
+  and a `span.cell.w-100per`, each wrapped and unwrapped, and a `span`,
+  `section` or `p` wrapper are refused with `schedule_row_shape_unobserved`;
+  the observed `div` shapes, wrapped and unwrapped, read as zero rows.
+  Without the `div` checks on the row and the `item-cell`, the `span.content`
+  and `span.item-cell` cases fail.
+- `packages/parsers/test/parser-digests.test.ts`: the digests regenerated
+  with `mise run //packages/parsers:digests` change exactly five releases,
+  the skip parser (0.1.2) and the four MyJCB statement parsers (one shared
+  digest).
+- The four statement parsers' output is unchanged:
+  `packages/parsers/test/myjcb-statement.test.ts` (their statement, schedule
+  and bonus page cases) passes unchanged, and
+  `packages/read-model/test/card-usage.test.ts` pins the ledger's rows with
+  only the parser label changed to `myjcb-credit-ledger@1.2.3`. A one-off
+  differential run of the four parsers at the base commit and at this
+  change, over every synthetic MyJCB input in the repository (the
+  observation-pipeline fixture run, the collector's fixture pages as
+  `credit-detail` in three states, and skip and bonus pages with rows, the
+  empty row and the wrapped empty row; 40 parses), gave byte-identical
+  output.
 - `services/processor/test/myjcb-shared-r2.test.ts`: the skip page job runs
   under 0.1.2.
 - Production was read only by the owner, structure and counts only.
