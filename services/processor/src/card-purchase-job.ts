@@ -34,9 +34,12 @@
 //      event's content follows its posted row, still holding its pending key;
 //      its pending row has nothing to add;
 //   3. each event is written by the guarded 0047 batch
-//      (`cardPurchaseRecognitionWrites`) as its own `db.batch`. A replay, a
-//      stale plan or a key another live event holds writes nothing in any
-//      table and counts as a conflict;
+//      (`cardPurchaseRecognitionWrites`) as its own `db.batch`, ending with its
+//      revision seal and commit row (CORE 0070, ADR 0054), under the identity
+//      epoch the tick read. A replay, a stale plan or a key another live event
+//      holds writes nothing in any table and counts as a conflict; a batch the
+//      commit row refuses (a key an economic claim holds, a stale epoch)
+//      raises, is rolled back whole and counts as failed;
 //   4. the cursor moves to the last row handled, and back to 0 after the last
 //      page: a row below the cursor can become current again later. It moves
 //      only from the value this tick read, so an overlapping tick never pulls
@@ -108,6 +111,7 @@ import {
   type CurrentCardUsageRow,
 } from "../../../packages/read-model/src/card-usage.ts";
 import {
+  CURRENT_IDENTITY_EPOCH_SQL,
   cardPurchaseMergeWrites,
   cardPurchaseRecognitionWrites,
 } from "../../../packages/storage-d1/src/atomic/card-purchase-recognition.ts";
@@ -259,16 +263,22 @@ async function run(db: D1Database, writes: readonly SqlWrite[]): Promise<Outcome
   }
 }
 
+/** What every batch of one tick is written under: the clock and the current identity epoch. */
+interface WriteAt {
+  now: string;
+  identityEpoch: string;
+}
+
 /** One event, one guarded batch. */
 async function commit(
   db: D1Database,
   draft: CardPurchaseDraft,
   expectedRevision: number | null,
-  now: string,
+  at: WriteAt,
 ): Promise<Outcome> {
   let writes: SqlWrite[];
   try {
-    writes = cardPurchaseRecognitionWrites({ draft, expectedRevision, now });
+    writes = cardPurchaseRecognitionWrites({ draft, expectedRevision, ...at });
   } catch {
     return "failed";
   }
@@ -302,7 +312,7 @@ async function retirePass(
   db: D1Database,
   result: CardPurchaseSweepResult,
   limit: number,
-  now: string,
+  at: WriteAt,
 ): Promise<boolean> {
   const check = await db
     .prepare(
@@ -360,7 +370,7 @@ async function retirePass(
       result.conflicts += 1;
       continue;
     }
-    const outcome = await commit(db, draft, current.revision.revision, now);
+    const outcome = await commit(db, draft, current.revision.revision, at);
     if (outcome === "written") retired += 1;
     else if (outcome === "conflict") result.conflicts += 1;
     else result.failed += 1;
@@ -377,7 +387,7 @@ async function recognitionPass(
   db: D1Database,
   result: CardPurchaseSweepResult,
   limits: { scan: number; write: number },
-  now: string,
+  at: WriteAt,
 ): Promise<CurrentCardUsageRow[]> {
   const cursor =
     (
@@ -446,7 +456,7 @@ WHERE recognition_key IN (SELECT value FROM json_each(?1))`,
       break;
     }
     writes += 1;
-    const outcome = await commit(db, planned.draft, planned.expected, now);
+    const outcome = await commit(db, planned.draft, planned.expected, at);
     if (outcome === "written") {
       if (planned.draft.action === "recognize") result.recognized += 1;
       else if (planned.draft.action === "reanchor") result.reanchored += 1;
@@ -801,8 +811,9 @@ async function mergeLinked(
   db: D1Database,
   result: CardPurchaseSweepResult,
   proposalIds: readonly string[],
-  now: string,
+  at: WriteAt,
 ): Promise<void> {
+  const { now } = at;
   const reader = readerOf(db);
   // A merged pair holds several keys and is no longer paired, so every id
   // here is a pair still apart.
@@ -847,7 +858,14 @@ async function mergeLinked(
       sql: `${proposalState.sql}\n AND NOT EXISTS(${REVIEWED_EVENT_SQL})`,
       binds: [...proposalState.binds, ...events],
     };
-    const writes = cardPurchaseMergeWrites({ merge, now, guard: state });
+    // The seal and commit row end the merge's economic statements; the link's
+    // proposal, relation and resolution rows below are not economic rows.
+    const writes = cardPurchaseMergeWrites({
+      merge,
+      now,
+      guard: state,
+      identityEpoch: at.identityEpoch,
+    });
     if (open) {
       const mergeDecision = merge.draft.decisionRevisionId;
       const proposalDecision = `dr_link_${await canonicalDigest({ proposalId, mergeDecision, kind: "proposal" })}`;
@@ -923,6 +941,11 @@ export async function cardPurchaseSweep(
   options: CardPurchaseSweepOptions = {},
 ): Promise<CardPurchaseSweepResult> {
   const now = options.now ?? new Date().toISOString();
+  // Read once a tick. A rewrite declared after this read makes every batch of
+  // the tick fail closed (identity_epoch_changed) until the next tick.
+  const epoch = await db.prepare(CURRENT_IDENTITY_EPOCH_SQL).first<{ identity_epoch: string }>();
+  if (!epoch) throw new Error("no identity epoch is declared");
+  const at: WriteAt = { now, identityEpoch: epoch.identity_epoch };
   const retireLimit = bounded(options.retireLimit, RETIRE_LIMIT, STALE_CARD_PURCHASE_KEY_LIMIT);
   const result: CardPurchaseSweepResult = {
     scanned: 0,
@@ -938,7 +961,7 @@ export async function cardPurchaseSweep(
     merged: 0,
     groupsSkipped: 0,
   };
-  if (await retirePass(db, result, retireLimit, now)) {
+  if (await retirePass(db, result, retireLimit, at)) {
     result.deferred = true;
     return result;
   }
@@ -949,7 +972,7 @@ export async function cardPurchaseSweep(
       scan: bounded(options.scanLimit, SCAN_LIMIT, CARD_USAGE_PAGE_LIMIT),
       write: bounded(options.writeLimit, WRITE_LIMIT, Number.MAX_SAFE_INTEGER),
     },
-    now,
+    at,
   );
   const linked = await candidatePass(
     db,
@@ -961,6 +984,6 @@ export async function cardPurchaseSweep(
     },
     now,
   );
-  await mergeLinked(db, result, linked, now);
+  await mergeLinked(db, result, linked, at);
   return result;
 }

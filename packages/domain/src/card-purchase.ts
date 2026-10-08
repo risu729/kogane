@@ -49,6 +49,15 @@ export { MYJCB_NOT_SINGLE_WORDS, myjcbSinglePayment } from "./myjcb-amounts.ts";
 export const CARD_PURCHASE_POLICY = "card-purchase-recognition-v1";
 /** The actor every rule decision of this policy is recorded under. */
 export const CARD_PURCHASE_ACTOR = `rule:${CARD_PURCHASE_POLICY}`;
+/**
+ * The writer release the lane's batches are sealed under (ADR 0054, G1b): the
+ * release that appends a revision seal and a commit row to every batch. It is
+ * part of every decision id (`cardPurchaseDecisionId`), so a batch of this
+ * release never reuses a decision id a pre-guard batch wrote: the rule
+ * writer's entry is "this decision exists", and a pre-guard id would let a
+ * replay seal and log a pre-guard revision.
+ */
+export const CARD_PURCHASE_WRITER_RELEASE = `${CARD_PURCHASE_POLICY}:economic-guard-v1`;
 /** The provider usage date is a Japanese civil date, as for card statements. */
 export const CARD_PURCHASE_ZONE = "Asia/Tokyo";
 /** The one basis these events carry; a card purchase moves no cash by itself. */
@@ -519,9 +528,12 @@ export function cardPurchaseContent(
 }
 
 /**
- * `dr_cp_<sha256>`: one decision per (event, revision, content, action). A
- * reviewed merge or split also names the operation that decided it, so a
- * human's decision and the rule's are never the same row.
+ * `dr_cp_<sha256>`: one decision per (event, revision, content, action) and
+ * writer release (`CARD_PURCHASE_WRITER_RELEASE`). A reviewed merge or split
+ * also names the operation that decided it, so a human's decision and the
+ * rule's are never the same row. Before the release joined the digest (ADR
+ * 0054, G1b) the same inputs named another id; that id is never produced
+ * again.
  */
 export async function cardPurchaseDecisionId(input: {
   eventId: string;
@@ -535,6 +547,7 @@ export async function cardPurchaseDecisionId(input: {
     revision: input.revision,
     contentDigest: input.contentDigest,
     action: input.action,
+    writerRelease: CARD_PURCHASE_WRITER_RELEASE,
     ...(input.operationId == null ? {} : { operationId: input.operationId }),
   })}`;
 }
