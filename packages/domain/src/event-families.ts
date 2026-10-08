@@ -247,14 +247,20 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
   {
     // GLOBAL PASS debit card activity: fingerprint of all provider fields
     // (+ page) + occurrence; no status; amounts may be unsigned; whether a
-    // pending row keeps its id when it is confirmed is unproven.
+    // pending row keeps its id when it is confirmed is unproven. The expanded
+    // view must carry exactly three " Fee" fields (Transaction, ATM, FX) among
+    // its ten; the observed view also states the local and funded currency
+    // amounts and the applicable rate (kept in `expandedFields`).
     sourceId: "global-pass",
     parserName: "global-pass-activity",
     observationKinds: ["transaction"],
     identity: identity("fingerprint_occurrence", "identityOrigin", "fingerprint"),
     statuses: ABSENT,
-    providerLinks: NO_LINK,
-    families: [unsupported("card-purchase", "identity_fingerprint_only", "semantics_unobserved")],
+    providerLinks: ["settlement_amount", "commission_stated", "exchange_rate_stated"],
+    families: [
+      unsupported("card-purchase", "identity_fingerprint_only", "semantics_unobserved"),
+      unsupported("fx-exchange", "identity_fingerprint_only", "semantics_unobserved"),
+    ],
   },
   {
     sourceId: "mizuho-bank",

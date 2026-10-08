@@ -342,6 +342,11 @@ const CASES: Case[] = [
  * test proves the field is on at least one fixture row of the parser.
  */
 const LINK_FIELDS: Record<string, Partial<Record<ProviderLinkCode, readonly string[]>>> = {
+  "global-pass/global-pass-activity": {
+    settlement_amount: ["expandedFields", "Funded Currency and Amount"],
+    commission_stated: ["expandedFields", "Transaction Fee"],
+    exchange_rate_stated: ["expandedFields", "Applicable Rate"],
+  },
   "paypay/paypay-csv": {
     settlement_amount: ["overseas", "amount"],
     exchange_rate_stated: ["overseas", "conversionRateJpy"],

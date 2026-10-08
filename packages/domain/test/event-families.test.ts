@@ -136,7 +136,7 @@ describe("registry entries", () => {
         );
         memberships += 1;
       }
-    expect(memberships).toBe(33);
+    expect(memberships).toBe(34);
   });
 
   test("only Vpass/MyJCB card purchases and SMBC/SBI Shinsei card settlement debits have writers", () => {
@@ -307,6 +307,7 @@ describe("lookups", () => {
       "sbi-securities/sbi-foreign-trade-records",
     ]);
     expect(keysOf("fx-exchange")).toEqual([
+      "global-pass/global-pass-activity",
       "paypay/paypay-csv",
       "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
       "sony-bank/sony-bank-history-csv",
