@@ -133,6 +133,10 @@ What existed before this change:
   not cover is `unsupported_pair`. A missing, stale or disagreeing rate is that
   refusal for the FX leg; nothing is converted 1:1 and nothing becomes zero.
   `valueInBase` reports both legs with price ids, effective times and ages.
+  An FX selection of another key, or made under another selection policy than
+  the conversion policy's (`fx_selection_policy_mismatch`), is a caller error
+  and throws; `selectMarketData` refuses policies that share an id with
+  different content.
 - **Identity.** A price is keyed by the provider-scoped base reference the
   promotion rule wrote (`instrument:<source>:<market>:<code>`, an ISO code for
   FX); another source's price for the same instrument is not used.

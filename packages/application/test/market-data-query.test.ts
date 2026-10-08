@@ -204,6 +204,16 @@ describe("selectMarketData", () => {
         price: { ...EQUITY, extra: 1 } as PriceSelectionPolicy,
       }),
     ).toBe("invalid_policy");
+    // One id, two different policies: the manifest could not tell them apart.
+    expect(
+      await refused(REQUEST, {
+        ...POLICIES,
+        price: { ...EQUITY, policyId: FX.selection.policyId },
+      }),
+    ).toBe("invalid_policy");
+    expect(await refused(REQUEST, { ...POLICIES, fx: { ...FX, policyId: EQUITY.policyId } })).toBe(
+      "invalid_policy",
+    );
     expect(await refused(REQUEST, POLICIES)).toBe("accepted");
   });
 });

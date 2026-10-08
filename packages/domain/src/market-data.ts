@@ -924,7 +924,9 @@ function legOf(
  * selections keyed by currency. Into the pivot is one exact hop
  * (`valueAtPrice`); out of the pivot, or across it, is one exact ratio rounded
  * once under `policy.inverse` at the target unit's scale, with the operands
- * kept. A missing, stale or disagreeing rate is that refusal, never 1:1.
+ * kept. A missing, stale or disagreeing rate is that refusal, never 1:1. An
+ * FX selection of another key, or made under another selection policy than
+ * `policy.selection`, is a caller error and throws.
  */
 export function convertToBase(
   amount: Quantity,
@@ -961,6 +963,10 @@ export function convertToBase(
       };
     if (!sameKey(selection.key, fxKey(step.base, policy)))
       throw new RangeError("fx_selection_key_mismatch");
+    // A rate selected under another policy (another freshness, other rules)
+    // is not this policy's rate, whatever it says about itself.
+    if (selection.policyId !== policy.selection.policyId)
+      throw new RangeError("fx_selection_policy_mismatch");
     if (selection.status !== "selected")
       return {
         ok: false,

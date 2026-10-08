@@ -6,7 +6,7 @@
 // price policy, the FX conversion policy and any calendars, and the manifest
 // records each by digest, so the same inputs give the same context id and a
 // new price or a changed policy gives a new one (INV04, INV09).
-import { canonicalDigest } from "../../../domain/src/context.ts";
+import { canonicalDigest, canonicalJson } from "../../../domain/src/context.ts";
 import {
   selectionManifest,
   selectionReadWindow,
@@ -79,6 +79,20 @@ function calendarFor(
   return calendars.find((calendar) => calendar.calendarRef === ref) ?? null;
 }
 
+/** Two different policies under one id would be indistinguishable in a selection. */
+function idsAreUnambiguous(
+  policies: readonly (PriceSelectionPolicy | FxConversionPolicy)[],
+): boolean {
+  const seen = new Map<string, string>();
+  for (const policy of policies) {
+    const text = canonicalJson(policy);
+    const earlier = seen.get(policy.policyId);
+    if (earlier !== undefined && earlier !== text) return false;
+    seen.set(policy.policyId, text);
+  }
+  return true;
+}
+
 export async function selectMarketData(
   sql: SqlExecutor,
   request: MarketDataRequest,
@@ -88,6 +102,7 @@ export async function selectMarketData(
     !validPriceSelectionPolicy(policies.price) ||
     !validFxConversionPolicy(policies.fx) ||
     policies.fx.selection.candidateScope !== "latest-in-window" ||
+    !idsAreUnambiguous([policies.price, policies.fx.selection, policies.fx]) ||
     !policies.calendars.every(validMarketCalendar) ||
     new Set(policies.calendars.map((calendar) => calendar.calendarRef)).size !==
       policies.calendars.length

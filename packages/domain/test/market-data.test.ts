@@ -659,6 +659,34 @@ describe("FX path and conversion", () => {
     expect(even.roundingInputs?.preRounding).toEqual(decimalLiteral("10"));
   });
 
+  test("a rate selected under another policy is refused, however fresh it claims to be", () => {
+    const loose = policy({
+      policyId: "test:loose",
+      freshness: { unit: "calendar-days", maxAgeDays: 36_600 },
+    });
+    const old = selectPrice(
+      USD,
+      [candidate({ id: "old", amount: "100", at: "2020-09-10T10:00:00+09:00" })],
+      BOUND,
+      loose,
+      null,
+    );
+    expect(selected(old).ageDays).toBe(2191);
+    expect(() => convertToBase(q("USD", "10"), "JPY", fxMap(old), fxPolicy())).toThrow(
+      "fx_selection_policy_mismatch",
+    );
+    const stock = selectPrice(
+      ALPHA,
+      [candidate({ key: ALPHA, amount: "130.70" })],
+      BOUND,
+      EQUITY,
+      null,
+    );
+    expect(() =>
+      valueInBase(q(ALPHA.baseInstrumentRef, "1"), stock, "JPY", fxMap(old), fxPolicy()),
+    ).toThrow("fx_selection_policy_mismatch");
+  });
+
   test("a refused price leg names itself; a holding of another instrument is refused", () => {
     const stale = selectPrice(
       ALPHA,
