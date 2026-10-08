@@ -1,6 +1,6 @@
 # ADR 0051: A pure lot engine over a provisional input contract
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (merged 2026-10-08 in #582)
 - Date: 2026-10-08
 - Issue: #556
 

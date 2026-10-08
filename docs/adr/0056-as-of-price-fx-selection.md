@@ -1,6 +1,6 @@
 # ADR 0056: Price and FX selection at an as-of under an explicit, versioned policy
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (merged 2026-10-08 in #581)
 - Date: 2026-10-08
 - Issue: #552 (this record covers its selection part; acquisition stays open)
 - Carried by: `packages/domain/src/market-data.ts`,
