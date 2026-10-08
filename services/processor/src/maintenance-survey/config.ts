@@ -36,7 +36,7 @@ const target = z
     message: "fetch_requires_confirmed_terms",
   });
 
-export const surveyConfigSchema = z
+const surveyConfigSchema = z
   .strictObject({
     /** Pages fetched per Processor tick at most. */
     targetsPerTick: z.int().min(1).max(5),
@@ -57,7 +57,7 @@ export function loadSurveyConfig(value: unknown = surveyConfig): SurveyConfig {
   if (!parsed.success) throw new SurveyConfigError();
   return parsed.data;
 }
-export class SurveyConfigError extends Error {
+class SurveyConfigError extends Error {
   constructor() {
     super("survey_config_invalid");
     this.name = "SurveyConfigError";

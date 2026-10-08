@@ -17,7 +17,7 @@ import { EXTRACTOR_VERSION, MAX_WINDOWS, extractWindows, type Extraction } from 
 import { decodePage, fetchPage, pageLines, type SurveyTransport } from "./page.ts";
 
 /** R2 prefix of stored page bodies, content-addressed like `objects/<2 hex>/<sha256>`. */
-export const SURVEY_OBJECT_PREFIX = "maintenance-survey/objects";
+const SURVEY_OBJECT_PREFIX = "maintenance-survey/objects";
 /** How long a claimed page stays claimed if the tick dies mid-way. */
 const CLAIM_MS = 30 * 60_000;
 const HOUR = 3_600_000;

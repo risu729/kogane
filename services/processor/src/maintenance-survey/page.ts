@@ -10,8 +10,8 @@ import type { SurveyFailureCode } from "../../../../packages/collection/src/main
 export type SurveyTransport = (url: string, init: RequestInit) => Promise<Response>;
 
 export const MAX_PAGE_BYTES = 2 * 1024 * 1024;
-export const FETCH_TIMEOUT_MS = 15_000;
-export const SURVEY_USER_AGENT = "kogane-maintenance-survey/1";
+const FETCH_TIMEOUT_MS = 15_000;
+const SURVEY_USER_AGENT = "kogane-maintenance-survey/1";
 const MEDIA_TYPES = ["text/html", "application/xhtml+xml", "text/plain"] as const;
 export type SurveyMediaType = (typeof MEDIA_TYPES)[number];
 

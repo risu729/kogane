@@ -63,7 +63,7 @@ export type ProposalReason = (typeof PROPOSAL_REASONS)[number];
 /** A window not in the rules, a revision of one rule, or one rule the page no longer states. */
 export type ProposalKind = "new" | "changed" | "absent";
 
-export interface MaintenanceSurveyTargetView {
+interface MaintenanceSurveyTargetView {
   id: string;
   source: string;
   url: string;

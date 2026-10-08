@@ -34,7 +34,7 @@ export const EXTRACTOR_VERSION = "maintenance-survey-extract-1.0.0";
 /** More current windows than this on one page is `too_many_windows`, and nothing is proposed. */
 export const MAX_WINDOWS = 40;
 /** A dated window longer than this needs review. */
-export const LONG_WINDOW_MS = 3 * 86_400_000;
+const LONG_WINDOW_MS = 3 * 86_400_000;
 const DAY = 86_400_000;
 const DAYS = "日月火水木金土";
 

@@ -13,7 +13,7 @@ import type {
 } from "../../../../packages/collection/src/schedule-model.ts";
 import { clockOverlap, patternKey, type Extraction, type WindowCandidate } from "./extract.ts";
 
-export interface ProposalDraft {
+interface ProposalDraft {
   kind: ProposalKind;
   /** The rule a `changed`/`absent` draft revises; null for `new`. */
   ruleId: string | null;
