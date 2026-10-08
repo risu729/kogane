@@ -136,7 +136,7 @@ describe("registry entries", () => {
         );
         memberships += 1;
       }
-    expect(memberships).toBe(34);
+    expect(memberships).toBe(35);
   });
 
   test("only Vpass/MyJCB card purchases and SMBC/SBI Shinsei card settlement debits have writers", () => {
@@ -313,6 +313,7 @@ describe("lookups", () => {
       "sony-bank/sony-bank-history-csv",
       "sony-bank/sony-bank-history-json",
       "sony-bank/sony-bank-wallet-history",
+      "vpass/vpass-statement-page",
     ]);
     // No parser identifies these rows today.
     expect(keysOf("securities-order")).toEqual([]);

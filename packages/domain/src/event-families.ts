@@ -548,13 +548,22 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     families: [unsupported("reward-exchange", "identity_absent", "semantics_unobserved")],
   },
   {
+    // The customized (unconfirmed) rows have an exact key set that includes
+    // the local-currency amount and code (`genchiKin`, `tukaRyaku`) and the
+    // conversion rate (`kanzanRate`). Not declared: `tesuWariKin` (equal to the
+    // usage amount on the fixture rows; whether it is ever a separate fee is
+    // unobserved), `kanzanDate` (a conversion date, not a settlement date) and
+    // the row `shiharaiDate` (empty on every fixture row; meaning unobserved).
     sourceId: "vpass",
     parserName: "vpass-statement-page",
     observationKinds: ["transaction"],
     identity: identity("fingerprint_occurrence", "identityOrigin", "fingerprint"),
     statuses: { kind: "closed", values: ["posted", "unconfirmed"] },
-    providerLinks: NO_LINK,
-    families: [supported("card-purchase")],
+    providerLinks: ["settlement_amount", "exchange_rate_stated"],
+    families: [
+      supported("card-purchase"),
+      unsupported("fx-exchange", "identity_fingerprint_only", "semantics_unobserved"),
+    ],
   },
 ];
 

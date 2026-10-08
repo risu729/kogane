@@ -364,6 +364,10 @@ const LINK_FIELDS: Record<string, Partial<Record<ProviderLinkCode, readonly stri
   },
   "sony-bank/sony-bank-history-csv": { exchange_rate_stated: ["為替レート"] },
   "sony-bank/sony-bank-history-json": { exchange_rate_stated: ["applicationExchRt"] },
+  "vpass/vpass-statement-page": {
+    settlement_amount: ["genchiKin"],
+    exchange_rate_stated: ["kanzanRate"],
+  },
   "sony-bank/sony-bank-wallet-history": {
     value_date: ["primary", "確定日"],
     settlement_amount: ["primary", "お取引通貨 金額"],
