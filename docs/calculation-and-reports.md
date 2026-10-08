@@ -219,7 +219,8 @@ What it does today:
   (`capitalize | exclude`) and disposal (`reduce-proceeds | separate`), FX
   (`lot-currency`, or `convert-at-input-rate` into `costUnitRef` with the
   input's own rate and its ref) with an FX policy ref, and rounding. None of
-  them has a default; no policy is `policy_missing`, and a `tax` purpose is
+  them has a default; no policy is `policy_missing`, a rounding policy other
+  than `leg` with `carry` is `policy_unsupported`, and a `tax` purpose is
   refused `tax_rules_unverified` through `costBasis()`.
 - Partial allocation takes `cost × q / Q` exactly; without rounding an
   inexact share is `inexact_allocation`, with a `leg`/`carry` rounding policy

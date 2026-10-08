@@ -826,9 +826,19 @@ describe("gates", () => {
     expect(result.refs).toContain("missing:jurisdiction");
   });
 
-  test("a rounding policy other than leg-and-carry is refused rather than reinterpreted", () => {
-    const result = computeLots([], policy({ rounding: { ...yenLegRounding, residual: "refuse" } }));
-    expect(result).toMatchObject({
+  test("a well-formed rounding policy other than leg-and-carry is policy_unsupported", () => {
+    for (const rounding of [
+      { ...yenLegRounding, residual: "refuse" as const },
+      { ...yenLegRounding, where: "aggregate" as const },
+      { ...yenLegRounding, residual: "largest-remainder" as const },
+    ])
+      expect(computeLots([], policy({ rounding }))).toMatchObject({
+        status: "refused",
+        reasonCode: "policy_unsupported",
+        refs: ["policy:rounding"],
+      });
+    const malformed = { ...yenLegRounding, precision: -1 };
+    expect(computeLots([], policy({ rounding: malformed }))).toMatchObject({
       status: "refused",
       reasonCode: "invalid_input",
       refs: ["policy"],
@@ -1283,5 +1293,47 @@ describe("review finding 8: the zone rule is whole-book; overlapping periods tie
       ),
     );
     expect(adjacent.disposals[0]!.outcome).toBe("allocated");
+  });
+});
+
+describe("review nits: refusals instead of silent reads or throws", () => {
+  test("lot selections under FIFO or moving average are refused, not ignored", () => {
+    const withSelection = sell("s", "2030-01-08", "5", "600", {
+      lotSelections: [{ lotId: ref("a"), quantity: q(ALPHA, "5") }],
+    });
+    for (const method of ["fifo", "moving-average"] as const)
+      expect(
+        computeLots([buy("a", "2030-01-06", "10", "1000"), withSelection], policy({ method })),
+      ).toMatchObject({ status: "refused", reasonCode: "invalid_input", refs: [ref("s")] });
+  });
+
+  test("a snapshot dated the same day as a trade is an order tie", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-06", "10", "1000"),
+          input("p", { kind: "snapshot", date: "2030-01-06", quantity: "10" }),
+        ],
+        policy({ method: "moving-average" }),
+      ),
+    );
+    expect(book.indeterminateFrom).toEqual({ refs: [ref("a"), ref("p")], reasonCode: "order_tie" });
+  });
+
+  test("inputs that are not a list are invalid_input, not a throw", () => {
+    expect(computeLots(null as unknown as LotInput[], policy())).toMatchObject({
+      status: "refused",
+      reasonCode: "invalid_input",
+      refs: ["inputs"],
+    });
+  });
+
+  test("a disposal record does not alias the caller's input", () => {
+    const disposalInput = sell("s", "2030-01-07", "5", "600");
+    const result = onlyBook(
+      computeLots([buy("a", "2030-01-06", "10", "1000"), disposalInput], policy()),
+    );
+    expect(result.disposals[0]!.quantity).toEqual(disposalInput.quantity);
+    expect(result.disposals[0]!.quantity).not.toBe(disposalInput.quantity);
   });
 });

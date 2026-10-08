@@ -39,6 +39,7 @@ import {
 } from "./time.ts";
 import {
   addDecimals,
+  addQuantities,
   alignScales,
   compareDecimals,
   decimalEquals,
@@ -49,6 +50,7 @@ import {
   multiplyDecimals,
   negateDecimal,
   subtractDecimals,
+  subtractQuantities,
   validExactDecimal,
   validExactRatio,
   validQuantity,
@@ -125,8 +127,8 @@ export interface LotSelection {
  *                 null when not known; `fees` the complete list of
  *                 acquisition fees (empty = the evidence states none).
  *   disposal    — `quantity` disposed (> 0); `consideration` received or
- *                 null; `fees` the disposal fees; `lotSelections` read only
- *                 under specific identification.
+ *                 null; `fees` the disposal fees; `lotSelections` required
+ *                 under specific identification and refused otherwise.
  *   split       — `split` the exact ratio new/old (> 0); `quantity` the
  *                 holding the evidence states after it, checked against the
  *                 scaled lots.
@@ -184,7 +186,8 @@ export type LotOrderingRule = (typeof LOT_ORDERING_RULES)[number];
  * exactly when amounts are converted (`convert-at-input-rate`). A rounding
  * policy, when given, rounds each partial allocation (`where: "leg"`) and the
  * last consumption of a lot carries the exact remainder (`residual: "carry"`);
- * any other rounding policy is refused rather than reinterpreted.
+ * any other well-formed rounding policy is refused `policy_unsupported`
+ * rather than reinterpreted.
  */
 export interface LotPolicy {
   policyId: string;
@@ -212,6 +215,7 @@ export const LOT_SUPPORTED_INSTRUMENT_CLASSES = [
 /** Whole-run refusals first, then the two that refuse one book. */
 export const LOT_REFUSAL_CODES = [
   "policy_missing",
+  "policy_unsupported",
   "tax_rules_unverified",
   "invalid_input",
   "duplicate_ref",
@@ -317,7 +321,11 @@ export interface LotAllocation {
   cost: LotAmount;
   acquisitionFees: LotAmount | null;
   fxBasis: LotFxRate[];
-  /** Operands and policy of each rounded share; null where the share was exact or the whole remainder. */
+  /**
+   * Operands and policy of each rounded share. Set for every partial share
+   * when the policy rounds; null when it does not, when the share took the
+   * whole remainder, or when the amount was unknown.
+   */
   roundingInputs: { cost: RoundingInputs | null; acquisitionFees: RoundingInputs | null };
 }
 
@@ -547,9 +555,7 @@ export function validLotPolicy(value: unknown): value is LotPolicy {
     (value.rounding === null ||
       (isRecord(value.rounding) &&
         hasExactKeys(value.rounding, ROUNDING_KEYS) &&
-        validRoundingPolicy(value.rounding) &&
-        value.rounding.where === "leg" &&
-        value.rounding.residual === "carry"))
+        validRoundingPolicy(value.rounding)))
   );
 }
 
@@ -574,7 +580,7 @@ function signRefused(quantity: Quantity, allowZero: boolean): boolean {
   return allowZero ? order < 0 : order <= 0;
 }
 
-function inputRulesHold(input: LotInput): boolean {
+function inputRulesHold(input: LotInput, policy: LotPolicy): boolean {
   if (input.quantity.unitRef !== input.instrumentRef) return false;
   if (input.fees.some((fee) => signRefused(fee, true))) return false;
   if (input.consideration !== null && signRefused(input.consideration, true)) return false;
@@ -596,6 +602,9 @@ function inputRulesHold(input: LotInput): boolean {
     case "disposal": {
       if (signRefused(input.quantity, false) || input.split !== null) return false;
       if (input.lotSelections === null) return true;
+      // Selections are read only under specific identification; elsewhere
+      // they would be silently ignored, so they are refused.
+      if (policy.method !== "specific-identification") return false;
       const ids = input.lotSelections.map((selection) => selection.lotId);
       return (
         new Set(ids).size === ids.length &&
@@ -643,14 +652,14 @@ function lotAmount(amount: Amount): LotAmount {
     : { status: "unknown", reasonCode: amount.reasonCode };
 }
 
+/** `a ± b` through the shared quantity arithmetic; an unknown operand or a unit mismatch stays a reason. */
 function combine(a: Amount, b: Amount, sign: 1 | -1): Amount {
   if (!a.known) return a;
   if (!b.known) return b;
-  if (a.unitRef !== b.unitRef) return unknownAmount("unit_mismatch");
-  return knownAmount(
-    a.unitRef,
-    sign === 1 ? addDecimals(a.value, b.value) : subtractDecimals(a.value, b.value),
-  );
+  const operate = sign === 1 ? addQuantities : subtractQuantities;
+  const result = operate(exactQuantity(a.unitRef, a.value), exactQuantity(b.unitRef, b.value));
+  if (!result.ok) return unknownAmount("unit_mismatch");
+  return knownAmount(result.quantity.unitRef, exactValue(result.quantity)!);
 }
 
 /** Null for an empty list: no fee was stated, which is not the same as an unknown fee. */
@@ -1152,9 +1161,8 @@ function applyEntry(state: BookState, entry: Entry, policy: LotPolicy): void {
       applySnapshot(state, entry, quantity, policy);
       break;
     case "transfer":
-      // Unreachable: a book with a transfer is refused before it is computed.
-      markIndeterminate(state, [entry.ref], "upstream_indeterminate");
-      break;
+      // A book with a transfer is refused before it is computed.
+      throw new Error("lot engine invariant: a transfer reached a computed book");
   }
   state.history = true;
 }
@@ -1417,6 +1425,14 @@ function isSupportedClass(value: InstrumentClass): boolean {
 export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | null): LotResult {
   if (policy === null) return refused("policy_missing", []);
   if (!validLotPolicy(policy)) return refused("invalid_input", ["policy"]);
+  // Largest-remainder needs every disposal up front, `leave` breaks
+  // conservation and `refuse` is what no rounding already does: only a
+  // per-share rounding with the remainder carried is supported.
+  if (
+    policy.rounding !== null &&
+    (policy.rounding.where !== "leg" || policy.rounding.residual !== "carry")
+  )
+    return refused("policy_unsupported", ["policy:rounding"]);
   if (policy.purpose === "tax") {
     // The existing gate decides; it holds no verified rule package, so it
     // always answers needs-policy and this module never reaches a number.
@@ -1436,6 +1452,7 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
       ...gate.missing.map((input) => `missing:${input}`),
     ]);
   }
+  if (!Array.isArray(inputs)) return refused("invalid_input", ["inputs"]);
   const invalid: string[] = [];
   const entries: Entry[] = [];
   for (const input of inputs as readonly unknown[]) {
@@ -1448,7 +1465,7 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
       continue;
     }
     const ref = lotInputRefText(input.ref);
-    if (!inputRulesHold(input)) invalid.push(ref);
+    if (!inputRulesHold(input, policy)) invalid.push(ref);
     else
       entries.push({
         input,
@@ -1562,7 +1579,7 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
         .map(({ input }) => plainCopy(input)),
     },
     partition: partitionOf(results),
-    books: results,
+    books: plainCopy(results),
   };
 }
 

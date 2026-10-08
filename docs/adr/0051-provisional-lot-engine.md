@@ -70,10 +70,16 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   (`capitalize | exclude`), disposal fee (`reduce-proceeds | separate`), FX
   (`lot-currency | convert-at-input-rate`) with `fxPolicyRef` and, when
   converting, `costUnitRef`, and rounding (a `RoundingPolicy` at `leg` with
-  `carry`, or null). A null policy is `policy_missing`; a `tax` purpose is
-  refused `tax_rules_unverified` by calling the unchanged `costBasis()` gate.
-- **Gates.** Whole-run refusals: `policy_missing`, `tax_rules_unverified`,
-  `invalid_input`, `duplicate_ref` (one ref in one book twice, or in two
+  `carry`, or null). A null policy is `policy_missing`; a well-formed
+  rounding policy at another point or with another residual is
+  `policy_unsupported` (largest-remainder needs every disposal up front,
+  `leave` breaks conservation, `refuse` is what no rounding already does); a
+  `tax` purpose is refused `tax_rules_unverified` by calling the unchanged
+  `costBasis()` gate.
+- **Gates.** Whole-run refusals: `policy_missing`, `policy_unsupported`,
+  `tax_rules_unverified`, `invalid_input` (including inputs that are not a
+  list, and lot selections under FIFO or moving average, which would
+  otherwise be ignored), `duplicate_ref` (one ref in one book twice, or in two
   books of the same instrument unless every occurrence is a transfer),
   `same_event_revisions` (two revisions of one event) and
   `same_observation_parse_runs` (one observation and JSON path under two
@@ -112,7 +118,10 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
 - **Snapshots.** A snapshot with no earlier input in its book seeds a lot of
   unknown cost (`snapshot_only`); it never carries a cost, so a provider's
   stated acquisition cost is never seeded into a lot. A later snapshot is a
-  check: disagreement is `snapshot_mismatch`.
+  check: disagreement is `snapshot_mismatch`. There is no separate
+  `history_gap` reason: a gap between a history and a later snapshot surfaces
+  as `snapshot_mismatch`, and a holding known only from a snapshot as
+  `snapshot_only`.
 - **Stops.** The first input that makes a book ambiguous or inconsistent
   (`negative_holding`, `order_tie`, `snapshot_mismatch`,
   `lot_selection_missing`, `unknown_lot`, `lot_selection_mismatch`,
@@ -128,11 +137,14 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   proceeds and disposal fees side by side, an outcome
   (`allocated | limited | indeterminate`) and closed reason codes; remaining
   lots with a `lineage` (origin ref, origin acquisition time, origin cost unit,
-  `fragmentOf`, splits). A manifest of the contract, the engine version, the
+  `fragmentOf`, splits). A lot's id is its acquisition's (or seeding
+  snapshot's) ref text; a moving-average pool's is `pool:<first ref>`, the
+  first acquisition or snapshot since the holding was last empty. A manifest of the contract, the engine version, the
   policy, the sorted refs and the validated inputs themselves (copied, sorted
   by book and ref) is returned for the caller to digest with
   `canonicalDigest`. The manifest therefore fixes the inputs: equal digests
-  mean equal inputs, policy and engine, and so an equal result. There is no realized gain and no tax conclusion.
+  mean equal inputs, policy and engine, and so an equal result. There is no
+  realized gain and no tax conclusion.
 
 ## Consequences
 
@@ -154,21 +166,25 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   the observed date-only broker rows will therefore be indeterminate wherever
   two of them for one instrument fall on one day, until evidence or a decided
   rule orders them.
+- A snapshot dated the same day as a trade of its book is an order tie as
+  well: a date-only position row cannot say whether it includes that day's
+  trade. Every daily position row next to a same-day trade therefore stops
+  its book unless the snapshot's boundary is stated more precisely.
 
 External advice relayed by the owner on 2026-10-08 was reviewed against the
 code before this decision (external advice: adopted / changed / deferred):
 
-| Advice                                                                                         | Status   | Where                                                                                                                                  |
-| ---------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Pin method, scope, basis, ordering and FX version in the policy                                | Adopted  | `LotPolicy` fields with no defaults; a null policy is `policy_missing`                                                                 |
-| Pin rounding scale, mode and residual; FIFO has a residual problem too                         | Changed  | `RoundingPolicy` pinned; only `leg` with `carry` is accepted, anything else is `invalid_input`; no rounding means `inexact_allocation` |
-| Never derive economic order from UUIDs, ids or recorded-at                                     | Adopted  | `temporal-then-indeterminate` is the only rule; ties are `order_tie`                                                                   |
-| Keep lot origin, original acquisition time, cost unit and fragment lineage                     | Adopted  | `lineage` reserved on every lot; transfers deferred to the common contract PR                                                          |
-| Fee and FX treatment as explicit policy                                                        | Adopted  | `acquisitionFee`, `disposalFee`, `fx`, `fxPolicyRef`, `costUnitRef`                                                                    |
-| Tax purpose refused without verified rules                                                     | Adopted  | `tax_rules_unverified` through the unchanged `costBasis()`                                                                             |
-| No synthetic short; no automatic reassignment of a stale selection                             | Adopted  | `negative_holding`, `lot_selection_mismatch`, `unknown_lot`                                                                            |
-| Unknown snapshot boundary is indeterminate; a filled gap is recomputed                         | Adopted  | `unknown_time` on the policy's basis; a new run over new inputs                                                                        |
-| Adapter from the common knowledge selector; manifest pins of identity, coverage and FX sources | Deferred | A later PR; this manifest pins the inputs, refs, policy, contract and engine version only                                              |
+| Advice                                                                                         | Status                                     | Where                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pin method, scope, basis, ordering and FX version in the policy                                | Adopted                                    | `LotPolicy` fields with no defaults; a null policy is `policy_missing`                                                                                      |
+| Pin rounding scale, mode and residual; FIFO has a residual problem too                         | Changed                                    | `RoundingPolicy` pinned; only `leg` with `carry` is supported, any other well-formed policy is `policy_unsupported`; no rounding means `inexact_allocation` |
+| Never derive economic order from UUIDs, ids or recorded-at                                     | Adopted                                    | `temporal-then-indeterminate` is the only rule; ties are `order_tie`                                                                                        |
+| Keep lot origin, original acquisition time, cost unit and fragment lineage                     | Adopted (field); transfer lineage deferred | `lineage` reserved on every lot with splits recorded; `fragmentOf` stays null until the common contract PR decides transfers                                |
+| Fee and FX treatment as explicit policy                                                        | Adopted                                    | `acquisitionFee`, `disposalFee`, `fx`, `fxPolicyRef`, `costUnitRef`                                                                                         |
+| Tax purpose refused without verified rules                                                     | Adopted                                    | `tax_rules_unverified` through the unchanged `costBasis()`                                                                                                  |
+| No synthetic short; no automatic reassignment of a stale selection                             | Adopted                                    | `negative_holding`, `lot_selection_mismatch`, `unknown_lot`                                                                                                 |
+| Unknown snapshot boundary is indeterminate; a filled gap is recomputed                         | Adopted                                    | `unknown_time` on the policy's basis; a new run over new inputs                                                                                             |
+| Adapter from the common knowledge selector; manifest pins of identity, coverage and FX sources | Deferred                                   | A later PR; this manifest pins the inputs, refs, policy, contract and engine version only                                                                   |
 
 ## Verification
 
@@ -182,9 +198,19 @@ recording the rate ref, and `fx_rate_missing`; a split, a reverse split and
 unsupported ratios; a snapshot-only lot giving a limited disposal with null
 cost, a snapshot carrying cost refused, `snapshot_mismatch`, and an unknown
 snapshot boundary; `negative_holding` then `upstream_indeterminate`;
-missing, unknown, stale and mismatched selections; `duplicate_ref` and
-`same_event_revisions`; same-date ties, moving-average commuting, `within_day`
-and `unknown_time` under the chosen time basis; the gates (tax, null policy,
-non-leg rounding, margin class, transfer); identical results and manifest
-digests under input permutation; validators rejecting unknown keys. Not
+missing, unknown, stale and mismatched selections; `duplicate_ref` in one
+book and across books of one instrument, the transfer exemption,
+`same_event_revisions` and `same_observation_parse_runs`; same-date ties,
+moving-average commuting, `within_day` and `unknown_time` under the chosen
+time basis; closure grouping (a dated acquisition beside same-day instants, a
+period overlapping later inputs, instants with different offsets); the
+whole-book zone rule and overlapping versus adjacent periods; group failures
+reported as a whole whatever the ref names; an unknown excluded acquisition
+fee kept limited; a rounded share that would overshoot refused; splits
+skipping consumed lots; the gates (tax, null policy, `policy_unsupported` for
+`leg`/`refuse`, `aggregate` and largest-remainder rounding, malformed
+rounding as `invalid_input`, selections under FIFO and moving average, a
+non-list input, margin class, transfer); identical results and manifest
+digests under input permutation, and different digests for a different
+input under the same ref; validators rejecting unknown keys. Not
 verified: any real evidence, any adapter, D1, Workers or production data.
