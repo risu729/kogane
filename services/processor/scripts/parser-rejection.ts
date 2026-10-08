@@ -946,6 +946,8 @@ const GLOBAL_PASS_SURVEYED_JAPANESE = [
 /** The pager text `global-pass-activity` reads (`requirePagerPage`). */
 const GLOBAL_PASS_PAGER = /^\[\s*(\d{1,4})\s*\/\s*(\d{1,4})\s*(?:pages?|ページ)\s*\]$/iu;
 const EIGHT_DIGITS = /^\d{8}$/u;
+/** A page-1 or walked-page key of `globalpass-activity` (`parseArtifactKey`); group 1 is a later page. */
+const GLOBAL_PASS_ARTIFACT_KEY = /^activity-\d{4}-\d{2}(?:-p([2-9]))?\.html$/u;
 /** The date form the parser looks for in a desktop row (`global-pass-activity.ts`, `dates`). */
 export const GLOBAL_PASS_DATE_CELL = /^\d{4}[/-]\d{2}[/-]\d{2}$/u;
 /** The displayed amount the parser reads (`parseDisplayedAmount`), on trimmed text. */
@@ -1315,7 +1317,7 @@ export function globalPassActivityShape(
   const pagers = gpElements(document, "div").filter((div) =>
     (gpAttribute(div, "class") ?? "").split(/\s+/u).includes("nablarch_currentPageNumber"),
   );
-  const key = /^activity-\d{4}-\d{2}(?:-p([2-9]))?\.html$/u.exec(artifactKey ?? "");
+  const key = GLOBAL_PASS_ARTIFACT_KEY.exec(artifactKey ?? "");
   const keyPage = key ? (key[1] === undefined ? 1 : Number(key[1])) : null;
   const readable = pagers
     .map((pager) => GLOBAL_PASS_PAGER.exec(gpText(pager)))
@@ -1804,9 +1806,6 @@ export function globalPassReplaySelectionSql(filter: { version?: string } = {}):
 }
 
 // ── GLOBAL PASS: the same page in the newest published capture ──────────────
-
-/** A page-1 or walked-page key of `globalpass-activity` (the parser's own key form). */
-const GLOBAL_PASS_ARTIFACT_KEY = /^activity-\d{4}-\d{2}(?:-p[2-9])?\.html$/u;
 
 /**
  * The read-only lookup `replay-diagnostics.ts` runs for each replayed
