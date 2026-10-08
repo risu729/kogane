@@ -58,5 +58,6 @@ for current behavior.
 - [ADR 0051: A pure lot engine over a provisional input contract](0051-provisional-lot-engine.md) — proposed until merge
 - [ADR 0052: Reconstructed state is a pure fold over a provisional adopted-event input, compared with reported snapshots](0052-reconstructed-state-fold.md) — proposed until this PR merges
 - [ADR 0053: A closed transaction-family registry states which families have an event writer and why the others do not](0053-transaction-family-registry.md) — proposed until this PR merges
+- [ADR 0054: One consumption guard for every economic writer: claims, seals and a commit log](0054-economic-consumption-guard.md) — proposed until merge
 - [ADR 0055: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping](0055-instrument-candidates.md) — proposed
 - [ADR 0056: Price and FX selection at an as-of under an explicit, versioned policy](0056-as-of-price-fx-selection.md) — proposed until merge; policy values are open questions

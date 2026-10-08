@@ -300,6 +300,37 @@ specific-identification`), scope, time basis, ordering rule, fee and FX
   in a log or tick record. No gain, no tax conclusion. No adapter produces
   these inputs yet ([ADR 0051](adr/0051-provisional-lot-engine.md)).
 
+## `economic-contract.ts` — consumption, seals and commits
+
+[ADR 0054](adr/0054-economic-consumption-guard.md); enforced by CORE 0070, built
+by `packages/storage-d1/src/atomic/economic-commit.ts`. No writer uses it yet.
+
+- `BOOKS` (`card-usage`, `cash-movement`, `security-quantity`) and
+  `ConsumptionKey`, the 5-tuple whose text (`consumptionKeyText`) equals
+  SQLite's `json_array` of the same columns; `parseConsumptionKey` accepts only
+  that canonical text. `AliasClass` (source, provider identity components,
+  resolved account, rule version: never the producer, namespace or raw id
+  text) and `aliasClassText`.
+- Claim sets (`BookClaim`): no repeated (book, key), `sameBookClaims`,
+  `releasedBookClaims` (what a correction or withdrawal releases),
+  `bookClaimsJson` (the stored sorted set).
+- `RevisionRef`, `HeadRef` (version 0 = the event never existed),
+  `economicEventSubject` (`economic-event:<id>`), `CommitRef`, `KnowledgeCut`
+  (a commit sequence or an instant inside one core epoch).
+- The record shapes of the 0070 tables (`EconomicClaimRecord`,
+  `EventTimeRecord`, `LegEffectRecord`, `RevisionSealRecord`, `CommitMember`,
+  `CommitLogRecord`), each with an exact-key validator, and
+  `commitMembersJson`.
+- `ECONOMIC_GUARD_CODES`, the closed codes the 0070 triggers raise (a storage
+  test compares them with the SQL), and `economicGuardCode`.
+- `admitIdentity` over a closed input (origin basis, resolver declared, rule
+  or human writer, retire-before-recognise) → admitted (with or without an
+  alias class) or one of `identity_fingerprint_only`,
+  `identity_origin_unrecorded`, `identity_digest_not_provider`,
+  `identity_resolver_missing`, `identity_absent`. `IDENTITY_REFUSALS` adds the
+  holder-dependent `duplicate_unresolved`, `alias_conflict`,
+  `identity_rekeyed` and `identity_epoch_changed`.
+
 ## `result.ts` — the shape UI and agents share
 
 - `QuerySpec` with the intents of addendum 09 §1 (holdings, reported-state,

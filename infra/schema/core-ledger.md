@@ -10,20 +10,20 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `cdb732d32955a6b1b891cdaff5566cd12252c21dac9fa65acabf5a551ad5029c`
+Schema digest: `9be881e3c2780a796f015650aeb35ecc6b951573c5e829bc8ac1798234ba0341`
 
 ## Summary
 
-- Migrations applied: 65
-- Tables: 123 (all `STRICT`: yes)
-- Views: 39
-- Triggers: 455
-- Explicit indexes: 121
+- Migrations applied: 66
+- Tables: 129 (all `STRICT`: yes)
+- Views: 44
+- Triggers: 490
+- Explicit indexes: 127
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
 | classification | count | tables |
 | --- | --- | --- |
-| `core-keep` | 103 | account_connection_reviews, account_mappings, accounts, acquisition_sessions, active_releases, allocations, approvals, artifact_email_metadata, artifact_file_metadata, artifact_http_metadata, artifact_ranges, artifact_relations, artifact_storage_metadata, artifact_transform_steps, balance_observations, calculation_policies, calculation_results, calculation_runs, card_debit_account_statement, card_purchase_recognition_keys, card_purchase_recognitions, card_settlement_allocation_withdrawals, card_settlement_candidates, card_settlement_debit_account_evidence, card_settlement_decisions, change_plans, collection_run_stages, collection_runs, collection_schedule_revisions, conversion_offers, core_source_revision, decision_operations, decision_outbox, decision_revisions, economic_event_revisions, economic_legs, entity_relations, evidence_use_restrictions, expiry_rules, fetch_artifacts, fetch_page_groups, fetch_run_ranges, fetch_run_reports, fetch_run_seals, fetch_runs, fetch_unit_reports, fetch_units, http_scope_rules, identity_instrument_uses, identity_observations, identity_run_policies, identity_run_seals, identity_runs, identity_vpass_bindings, ingest_client_producers, ingest_client_routes, ingest_clients, ingestion_attempts, instrument_identifiers, instrument_mappings, instruments, membership_state_claims, metadata_projection_inputs, metadata_projections, obligation_revisions, observation_decimal_values, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_coverage_claims, parse_input_references, parse_run_candidates, parse_runs, parser_releases, position_observations, price_observation_claims, price_observations, producer_sources, producers, projection_input_records, provider_maintenance_rules, publication_events, published_parse_runs, raw_object_verification_events, raw_objects, reconciliation_proposals, release_activation_events, release_comparisons, report_artifacts, report_events, retention_classes, reward_bucket_claims, reward_programs, run_inventories, run_inventory_items, scheduled_payment_observations, settlement_relations, source_accounts, source_external_ids, sources, transaction_observations, valuation_observations |
+| `core-keep` | 109 | account_connection_reviews, account_mappings, accounts, acquisition_sessions, active_releases, allocations, approvals, artifact_email_metadata, artifact_file_metadata, artifact_http_metadata, artifact_ranges, artifact_relations, artifact_storage_metadata, artifact_transform_steps, balance_observations, calculation_policies, calculation_results, calculation_runs, card_debit_account_statement, card_purchase_recognition_keys, card_purchase_recognitions, card_settlement_allocation_withdrawals, card_settlement_candidates, card_settlement_debit_account_evidence, card_settlement_decisions, change_plans, collection_run_stages, collection_runs, collection_schedule_revisions, conversion_offers, core_source_revision, decision_operations, decision_outbox, decision_revisions, economic_claims, economic_commit_log, economic_event_revisions, economic_event_times, economic_identity_epochs, economic_leg_effects, economic_legs, economic_revision_seals, entity_relations, evidence_use_restrictions, expiry_rules, fetch_artifacts, fetch_page_groups, fetch_run_ranges, fetch_run_reports, fetch_run_seals, fetch_runs, fetch_unit_reports, fetch_units, http_scope_rules, identity_instrument_uses, identity_observations, identity_run_policies, identity_run_seals, identity_runs, identity_vpass_bindings, ingest_client_producers, ingest_client_routes, ingest_clients, ingestion_attempts, instrument_identifiers, instrument_mappings, instruments, membership_state_claims, metadata_projection_inputs, metadata_projections, obligation_revisions, observation_decimal_values, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_coverage_claims, parse_input_references, parse_run_candidates, parse_runs, parser_releases, position_observations, price_observation_claims, price_observations, producer_sources, producers, projection_input_records, provider_maintenance_rules, publication_events, published_parse_runs, raw_object_verification_events, raw_objects, reconciliation_proposals, release_activation_events, release_comparisons, report_artifacts, report_events, retention_classes, reward_bucket_claims, reward_programs, run_inventories, run_inventory_items, scheduled_payment_observations, settlement_relations, source_accounts, source_external_ids, sources, transaction_observations, valuation_observations |
 | `read-candidate` | 0 | — |
 | `operational-mutable` | 15 | card_purchase_retirement_check, card_purchase_scan_cursor, card_settlement_scan_cursor, collection_execution_leases, collection_scan_state, collection_schedule_occurrences, collection_schedules, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_work_items, price_promotion_cursor, processor_lane_ticks, provider_maintenance_references, reconciliation_scan_cursor |
 | `unclassified-keep` | 5 | dataset_snapshot_policies, fetch_run_annotations, observation_artifact_metadata, observation_scan_state, parse_issues |
@@ -56,14 +56,14 @@ active_releases, allocations, approvals, calculation_runs, card_purchase_retirem
 | `calculation_results` | core-keep | calculation runs and reports | yes | no | yes | calculation_results_no_update | calculation_results_no_delete | 10 | 1 | 1 | 3 |
 | `calculation_runs` | core-keep | calculation runs and reports | yes | no | no | — | calculation_runs_no_delete | 8 | 0 | 1 | 3 |
 | `card_debit_account_statement` | core-keep | card settlement evidence and decisions | yes | no | yes | card_debit_account_statement_no_update | card_debit_account_statement_no_delete | 17 | 2 | 1 | 2 |
-| `card_purchase_recognition_keys` | core-keep | card purchase recognition evidence | yes | no | yes | card_purchase_recognition_keys_no_update | card_purchase_recognition_keys_no_delete | 6 | 4 | 2 | 8 |
-| `card_purchase_recognitions` | core-keep | card purchase recognition evidence | yes | no | yes | card_purchase_recognitions_no_update | card_purchase_recognitions_no_delete | 10 | 3 | 1 | 8 |
+| `card_purchase_recognition_keys` | core-keep | card purchase recognition evidence | yes | no | yes | card_purchase_recognition_keys_no_update | card_purchase_recognition_keys_no_delete | 6 | 4 | 2 | 10 |
+| `card_purchase_recognitions` | core-keep | card purchase recognition evidence | yes | no | yes | card_purchase_recognitions_no_update | card_purchase_recognitions_no_delete | 10 | 3 | 1 | 9 |
 | `card_purchase_retirement_check` | operational-mutable | latched clean proof for purchase retirement; invalidate by clearing clean_revision | yes | no | no | — | — | 5 | 0 | 0 | 0 |
 | `card_purchase_scan_cursor` | operational-mutable | bounded card purchase scan progress | yes | no | no | — | — | 2 | 0 | 0 | 0 |
 | `card_settlement_allocation_withdrawals` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_allocation_withdrawals_no_update | card_settlement_allocation_withdrawals_no_delete | 3 | 2 | 0 | 3 |
 | `card_settlement_candidates` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_candidates_no_update | card_settlement_candidates_no_delete | 11 | 4 | 3 | 3 |
 | `card_settlement_debit_account_evidence` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_debit_account_evidence_no_update | card_settlement_debit_account_evidence_no_delete | 9 | 2 | 1 | 3 |
-| `card_settlement_decisions` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_decisions_no_update | card_settlement_decisions_no_delete | 8 | 3 | 0 | 6 |
+| `card_settlement_decisions` | core-keep | card settlement evidence and decisions | yes | no | yes | card_settlement_decisions_no_update | card_settlement_decisions_no_delete | 8 | 3 | 1 | 8 |
 | `card_settlement_scan_cursor` | operational-mutable | bounded card settlement scan progress | yes | no | no | — | — | 2 | 0 | 0 | 0 |
 | `change_plans` | core-keep | change plans, approvals and receipts | yes | no | no | — | change_plans_no_delete | 10 | 0 | 1 | 3 |
 | `collection_execution_leases` | operational-mutable | provider execution exclusion | yes | no | no | — | — | 3 | 0 | 0 | 0 |
@@ -79,8 +79,14 @@ active_releases, allocations, approvals, calculation_runs, card_purchase_retirem
 | `decision_operations` | core-keep | decisions and relations | yes | no | yes | decision_operations_no_update | decision_operations_no_delete | 7 | 0 | 0 | 3 |
 | `decision_outbox` | core-keep | change plans, approvals and receipts | yes | no | no | — | decision_outbox_no_delete | 19 | 3 | 2 | 4 |
 | `decision_revisions` | core-keep | decisions and relations | yes | no | yes | decision_revisions_no_update | decision_revisions_no_delete | 13 | 2 | 2 | 7 |
-| `economic_event_revisions` | core-keep | economic events | yes | no | no | — | economic_event_revisions_no_delete | 11 | 1 | 3 | 7 |
-| `economic_legs` | core-keep | economic events | yes | no | yes | economic_legs_no_update | economic_legs_no_delete | 11 | 2 | 2 | 4 |
+| `economic_claims` | core-keep | economic events | yes | no | yes | economic_claims_no_update | economic_claims_no_delete | 8 | 5 | 3 | 8 |
+| `economic_commit_log` | core-keep | economic events | yes | no | yes | economic_commit_log_no_update | economic_commit_log_no_delete | 11 | 1 | 0 | 4 |
+| `economic_event_revisions` | core-keep | economic events | yes | no | no | — | economic_event_revisions_no_delete | 11 | 1 | 4 | 7 |
+| `economic_event_times` | core-keep | economic events | yes | no | yes | economic_event_times_no_update | economic_event_times_no_delete | 4 | 2 | 0 | 5 |
+| `economic_identity_epochs` | core-keep | economic events | yes | no | yes | economic_identity_epochs_no_update | economic_identity_epochs_no_delete | 4 | 0 | 0 | 3 |
+| `economic_leg_effects` | core-keep | economic events | yes | no | yes | economic_leg_effects_no_update | economic_leg_effects_no_delete | 5 | 3 | 0 | 5 |
+| `economic_legs` | core-keep | economic events | yes | no | yes | economic_legs_no_update | economic_legs_no_delete | 11 | 2 | 2 | 5 |
+| `economic_revision_seals` | core-keep | economic events | yes | no | yes | economic_revision_seals_no_update | economic_revision_seals_no_delete | 13 | 3 | 1 | 4 |
 | `entity_relations` | core-keep | decisions and relations | yes | no | yes | entity_relations_no_update | entity_relations_no_delete | 10 | 1 | 2 | 7 |
 | `evidence_use_restrictions` | core-keep | evidence use restrictions and retention | yes | no | yes | evidence_use_restrictions_no_update | evidence_use_restrictions_no_delete | 7 | 0 | 1 | 5 |
 | `expiry_rules` | core-keep | reward reference claims | yes | no | yes | expiry_rules_no_update | expiry_rules_no_delete | 11 | 1 | 1 | 5 |
@@ -176,6 +182,7 @@ Full column, foreign-key, index and trigger detail per table is in
 | `card_settlement_readiness` | id, statement_current, bank_current, ownership_current, allocation_available |
 | `card_settlement_reviews` | id, statement_key, bank_key, statement_observation_id, statement_parse_run_id, bank_observation_id, bank_parse_run_id, policy_release, facts_json, proposal_digest, created_at, revision, status, decision_revision_id, event_id, obligation_id, settlement_id |
 | `card_statement_facts` | id, parse_run_id, source_account, unit_ref, source_id, fetched_at, value_status, coefficient, scale, payment_date, period, statement_key, position |
+| `consumption_claim_conflicts` | dimension, book, claim_ref, holder_count |
 | `current_account_connection_reviews` | id, producer_id, connection_key, revision, label, status, related_source_id, direct_producer_id, reason, verifier_version, detail_artifact_id, direct_artifact_id, branch_artifact_id, direct_reference_ids_json, created_at, evidence_eligible |
 | `current_account_mappings` | id, source_account_id, revision, account_id, method, reason, policy_version, created_at, label, status |
 | `current_allocations` | id, source_component_ref, target_effect_ref, role, unit_ref, coefficient, scale, decision_revision_id, superseded_by, created_at |
@@ -187,12 +194,15 @@ Full column, foreign-key, index and trigger detail per table is in
 | `current_instrument_mappings` | id, identifier_id, revision, instrument_id, method, reason, policy_version, created_at, label, status |
 | `current_obligations` | obligation_id, revision, creditor_ref, debtor_ref, principal_unit_ref, principal_status, principal_coefficient, principal_scale, fee_components_json, schedule_json, state, unknown_reason, state_evidence_refs_json, decision_revision_id, superseded_by, created_at |
 | `current_settlement_relations` | id, obligation_id, settlement_component_ref, unit_ref, coefficient, scale, occurred_json, unresolved_coefficient, unresolved_scale, decision_revision_id, superseded_by, created_at |
+| `economic_event_live_conflicts` | event_id, live_revisions |
+| `economic_revision_claims` | event_id, revision, book, consumption_key, alias_class |
 | `effective_identity_instruments` | identity_observation_id, role, identifier_id, instrument_mapping_id, instrument_id, effective_instrument_mapping_id |
 | `effective_identity_observations` | id, identity_run_id, kind, observation_id, source_account_id, account_mapping_id, issues_json, policy_version, parse_run_id, account_id, effective_account_mapping_id |
 | `eligible_identity_runs` | id, parse_run_id, policy_version, created_at |
 | `financial_fetch_runs` | id, acquisition_session_id, producer_id, source_id, first_recorded_by_client_id, source_run_key, first_recorded_at_ms |
 | `identity_run_contexts` | identity_run_id, parse_run_id, policy_version, created_at, policy_family, policy_release, dependency_digest, policy_recorded |
 | `legacy_metadata_projections` | id, fetch_artifact_id, extractor_release, input_digest, output_json, output_digest, status, created_at |
+| `live_consumption_claims` | book, consumption_key, alias_class, event_id, revision |
 | `observation_decimal_candidates_v1` | kind, observation_id, parse_run_id, basis, valid, missing, raw_minor, coefficient, scale |
 | `observation_decimal_inputs_v1` | kind, observation_id, parse_run_id, amount_minor, amount_text, unit |
 | `observation_decimal_projection_v1` | kind, observation_id, parse_run_id, policy_version, status, coefficient, scale, basis |
@@ -207,6 +217,7 @@ Full column, foreign-key, index and trigger detail per table is in
 | `published_observation_parses` | id, fetch_artifact_id, parser_name, parser_version, parsed_at, status, error, warnings_json, superseded_by_parse_run_id, published_at, publication_kind, release_id |
 | `release_candidate_runs` | release_id, state, fingerprint, parse_run_id, fetch_artifact_id, parser_name, parser_version, source_id, dataset |
 | `trusted_vpass_card_bindings` | financial_artifact_id, financial_unit_id, financial_unit_key, binding_artifact_id, card_token |
+| `unlogged_economic_revisions` | event_id, revision, kind, live, created_at, after_log_start |
 
 ## Migrations that INSERT rows
 
@@ -255,5 +266,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0064_purchase_retirement_and_reconciliation_cost.sql` | 43 | card_purchase_retirement_check |
 | `0065_alarm_schedules.sql` | 59 | collection_schedule_revisions, collection_schedules, provider_maintenance_references, provider_maintenance_rules |
 | `0066_prestia_bank_snapshot_schedule.sql` | 3 | collection_schedule_revisions, collection_schedules, dataset_snapshot_policies |
+| `0070_economic_commit_guard.sql` | 53 | economic_identity_epochs |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql
