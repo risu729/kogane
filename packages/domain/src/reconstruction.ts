@@ -1480,12 +1480,12 @@ function classifyLeg(
   const placement = place(row);
   const rule = policy.legEffects[leg.effect];
   if (rule === "link-never-added") return classified("correspondence_link", null, placement);
+  const effect = policy.stateEffects[row.kind][row.state];
+  if (effect === "no-effect") return classified("state_no_effect", null, placement);
   if (rule === "attribution-never-added")
     return negative(leg.quantity) && placement !== "outside"
       ? classified("unknown_effect", "leg_sign_unknown", placement)
       : classified("breakdown_attribution", null, placement);
-  const effect = policy.stateEffects[row.kind][row.state];
-  if (effect === "no-effect") return classified("state_no_effect", null, placement);
   if (placement === "outside") return classified("outside_range", null, placement);
   if (effect === undefined) return classified("unknown_effect", "leg_effect_unknown", placement);
   if (!accountKnown) return classified("unknown_effect", "leg_subject_unrecognized", placement);
@@ -1633,11 +1633,13 @@ function flagReach(
   requested: ReadonlySet<string>,
 ): FlagReach {
   const predecessors = new Map<string, ProvisionalEventRevision[]>();
-  for (const { revision: row } of selection.revisions)
-    if (row.supersededBy !== null) {
-      const list = predecessors.get(row.supersededBy) ?? [];
+  // Only supersessions in force at the cut: a revision committed after the
+  // cut is no predecessor of anything yet.
+  for (const { revision: row, status, supersededAtCutBy } of selection.revisions)
+    if (status === "superseded_at_cut" && supersededAtCutBy !== null) {
+      const list = predecessors.get(supersededAtCutBy) ?? [];
       list.push(row);
-      predecessors.set(row.supersededBy, list);
+      predecessors.set(supersededAtCutBy, list);
     }
   const reach: FlagReach = { cells: new Map(), units: new Map() };
   const add = <K>(

@@ -1796,3 +1796,56 @@ describe("refusals and comparisons the first round left untested", () => {
     );
   });
 });
+
+describe("second review", () => {
+  test("a flag never reaches through a revision committed after the cut", () => {
+    const state = run({
+      set: eventSet([
+        rev({
+          eventId: "event:test:x",
+          commit: 150,
+          supersededBy: "event:test:y@1",
+          legs: [leg({ quantity: q("JPY", "100") })],
+        }),
+        rev({
+          eventId: "event:test:y",
+          commit: 10,
+          flags: ["identity_changed"],
+          legs: [leg({ accountId: B, quantity: q("JPY", "100") })],
+        }),
+      ]),
+      request: { accountIds: [A, B] },
+      start: side(START_DATE, [balance(), balance({ ref: "balance:test:b", accountId: B })]),
+      end: side(END_DATE, [
+        endBalance("10000"),
+        endBalance("10000", { ref: "balance:test:b-end", accountId: B }),
+      ]),
+    });
+    expect(cell(state, A).gaps).not.toContain("identity_changed");
+    expect(cell(state, A).needsReview).toBe(false);
+    expect(cell(state, B).gaps).toContain("identity_changed");
+  });
+
+  test("a canceled purchase with a negative breakdown has no effect", () => {
+    const state = run({
+      set: eventSet([
+        rev({
+          kind: "purchase",
+          state: "canceled",
+          legs: [
+            leg({ quantity: q("JPY", "101") }),
+            leg({
+              legIndex: 1,
+              effect: "breakdown",
+              role: "fee",
+              ofLegIndex: 0,
+              quantity: q("JPY", "-1"),
+            }),
+          ],
+        }),
+      ]),
+    });
+    expect(disposition(state, "event:test:1@1#1")).toBe("state_no_effect");
+    expect(cell(state).gaps).toEqual([]);
+  });
+});

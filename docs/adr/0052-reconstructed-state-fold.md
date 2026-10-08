@@ -95,7 +95,10 @@ review shaped the provisional input this PR uses.
    `knowledge_unlogged`, and so is every revision of its event. The exported
    provisional names (`ProvisionalCommitRef`, `ProvisionalKnowledgeCut`,
    `PROVISIONAL_CLAIM_BOOKS`, `PROVISIONAL_LEG_EFFECTS`, …) are prefixed so
-   that the common contract's own names can be exported beside them. An input the adapter already resolved
+   that the common contract's own names can be exported beside them. That no
+   name collides was verified by a merged typecheck against the guard's
+   `economic-contract.ts` on 549-g1 at `61e4e8b`; it must be repeated whenever
+   either branch moves. An input the adapter already resolved
    (`resolved-at-cut`) is only checked for one revision per event.
 3. **Leg effects.** A `movement` (`increase` or `decrease`) is what moved and
    is applied once; a `breakdown` (principal 100 and fee 1 of a 101 debit)
@@ -183,8 +186,8 @@ now)`, a pure diff of two selections of one scope (the baseline is the cut
   (account, unit) once and each selection is checked once, but checking a
   selection re-runs the selector and compares canonical text. At the budget
   (5,000 revisions, 20,000 legs) on `bun` locally, a selection takes about
-  60–90 ms and the fold about 0.45 s for 100 to 1,000 cells and 0.7 s for
-  20,000 cells, 0.8 s with a baseline (most of it the two selection checks).
+  60–90 ms and the fold 0.45–0.72 s without a baseline and 0.92–1.38 s with
+  one, over 100 to 20,000 cells (most of it the selection checks).
   Branding the selector's output (a module-private `WeakSet`) instead of
   re-checking it is left to the PR that moves the selector; nothing was
   measured on workerd.

@@ -60,13 +60,13 @@ events included), and only then does the fold filter by range, account,
 instrument, kind and leg. A date, account or instrument correction and a
 dateless withdrawal therefore always decide which revision is active.
 
-| Selection status     | When                                                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------- |
-| `active`             | Committed by the cut, no successor committed by it                                                      |
-| `superseded_at_cut`  | Its successor was committed by the cut                                                                  |
-| `recorded_after_cut` | Committed after the cut                                                                                 |
-| `chain_inconsistent` | Two active revisions of one event, a cycle, a successor committed earlier, or a pointer the input lacks |
-| `knowledge_unlogged` | No commit, or its successor has none: when it became known is not recorded                              |
+| Selection status     | When                                                                                                                                                            |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `active`             | Committed by the cut, no successor committed by it                                                                                                              |
+| `superseded_at_cut`  | Its successor was committed by the cut                                                                                                                          |
+| `recorded_after_cut` | Committed after the cut                                                                                                                                         |
+| `chain_inconsistent` | Two active revisions of one event, a cycle, a successor committed earlier, or a pointer the input lacks                                                         |
+| `knowledge_unlogged` | No commit, a commit of another epoch, or a successor without one: when it became known is not recorded in this history; every revision of the event is affected |
 
 Claim holders at the cut are the active revisions only; a `(book, key)` two
 active events hold is listed in `duplicateClaims`.
@@ -77,32 +77,34 @@ Cells are per (account, unit) and per (account, instrument). Each leg of a
 cell gets exactly one disposition, decided in this order (the first rule
 that matches):
 
-| #   | Disposition (gap)                                                            | Rule                                                                                                                                                                                         |
-| --- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `recorded_after_knowledge_time`, `superseded_at_knowledge_time`              | From the selection                                                                                                                                                                           |
-| 2   | `other_basis`                                                                | The leg's basis is not the request's (cash → `cash-movement`, and so on); no fallback                                                                                                        |
-| 3   | `knowledge_unlogged` (`knowledge_unlogged`)                                  | From the selection, whatever the date                                                                                                                                                        |
-| 4   | `unknown_effect` (`revision_chain_inconsistent`)                             | From the selection, whatever the date                                                                                                                                                        |
-| 5   | `identity_changed`, `alias_conflict`, `claim_conflict`, `writer_unsupported` | Adapter flags, whatever the date; also reach every requested cell the flagged revision's chain touched (its predecessors' legs, a legless withdrawal's included) and mark them `needsReview` |
-| 6   | `unknown_effect` (`leg_effect_unknown`)                                      | A leg on the `unknown` basis: not even its time role is known                                                                                                                                |
-| —   | —                                                                            | The leg is placed by the time of the basis's role (below)                                                                                                                                    |
-| 7   | `correspondence_link`                                                        | A correspondence of a movement: never added                                                                                                                                                  |
-| 8   | `breakdown_attribution`, or `unknown_effect` (`leg_sign_unknown`)            | A breakdown of a movement: never added; a negative one not outside the window is refused                                                                                                     |
-| 9   | `state_no_effect`                                                            | `canceled`, `returned`, `unknown`                                                                                                                                                            |
-| 10  | `outside_range`                                                              | Before the start capture or after the end capture                                                                                                                                            |
-| 11  | `unknown_effect` (`leg_effect_unknown`)                                      | A state the policy does not map                                                                                                                                                              |
-| 12  | `unknown_effect` (`leg_subject_unrecognized`)                                | A movement no account resolves                                                                                                                                                               |
-| 13  | `unknown_effect` (`own_transfer_held`)                                       | Movements on two own accounts in one revision                                                                                                                                                |
-| 14  | `unknown_effect` (`event_time_unknown`)                                      | No time to place it by                                                                                                                                                                       |
-| 15  | `unknown_effect` (`leg_value_not_exact`)                                     | An inexact value                                                                                                                                                                             |
-| 16  | `unknown_effect` (`leg_sign_unknown`)                                        | A negative value: the direction is the role, the value a magnitude                                                                                                                           |
-| 17  | `boundary_same_day`                                                          | On a capture's boundary: a candidate, never adopted                                                                                                                                          |
-| 18  | `applied`, `pending_shown_apart`                                             | `captured`/`debited`/`credited`/`confirmed`; `authorized`/`requested`/`in-transit`/`proposed`                                                                                                |
+| #   | Disposition (gap)                                                            | Rule                                                                                                                                                                                                                     |
+| --- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `recorded_after_knowledge_time`, `superseded_at_knowledge_time`              | From the selection                                                                                                                                                                                                       |
+| 2   | `other_basis`                                                                | The leg's basis is not the request's (cash → `cash-movement`, and so on); no fallback                                                                                                                                    |
+| 3   | `knowledge_unlogged` (`knowledge_unlogged`)                                  | From the selection, whatever the date                                                                                                                                                                                    |
+| 4   | `unknown_effect` (`revision_chain_inconsistent`)                             | From the selection, whatever the date                                                                                                                                                                                    |
+| 5   | `identity_changed`, `alias_conflict`, `claim_conflict`, `writer_unsupported` | Adapter flags, whatever the date; also reach every requested cell the flagged revision's chain touched (the legs of its predecessors superseded by the cut, a legless withdrawal's included) and mark them `needsReview` |
+| 6   | `unknown_effect` (`leg_effect_unknown`)                                      | A leg on the `unknown` basis: not even its time role is known                                                                                                                                                            |
+| —   | —                                                                            | The leg is placed by the time of the basis's role (below)                                                                                                                                                                |
+| 7   | `correspondence_link`                                                        | A correspondence of a movement: never added                                                                                                                                                                              |
+| 8   | `state_no_effect`                                                            | `canceled`, `returned`, `unknown`                                                                                                                                                                                        |
+| 9   | `breakdown_attribution`, or `unknown_effect` (`leg_sign_unknown`)            | A breakdown of a movement: never added; a negative one not outside the window is refused                                                                                                                                 |
+| 10  | `outside_range`                                                              | Before the start capture or after the end capture                                                                                                                                                                        |
+| 11  | `unknown_effect` (`leg_effect_unknown`)                                      | A state the policy does not map                                                                                                                                                                                          |
+| 12  | `unknown_effect` (`leg_subject_unrecognized`)                                | A movement no account resolves                                                                                                                                                                                           |
+| 13  | `unknown_effect` (`own_transfer_held`)                                       | Movements on two own accounts in one revision                                                                                                                                                                            |
+| 14  | `unknown_effect` (`event_time_unknown`)                                      | No time to place it by                                                                                                                                                                                                   |
+| 15  | `unknown_effect` (`leg_value_not_exact`)                                     | An inexact value                                                                                                                                                                                                         |
+| 16  | `unknown_effect` (`leg_sign_unknown`)                                        | A negative value: the direction is the role, the value a magnitude                                                                                                                                                       |
+| 17  | `boundary_same_day`                                                          | On a capture's boundary: a candidate, never adopted                                                                                                                                                                      |
+| 18  | `applied`, `pending_shown_apart`                                             | `captured`/`debited`/`credited`/`confirmed`; `authorized`/`requested`/`in-transit`/`proposed`                                                                                                                            |
 
 A movement no account resolves is classified against every requested cell of
 its unit (with rule 12 in place of being counted) and recorded once, with its
 most severe outcome in closed-code order; when no requested cell has its unit
-it is classified against the requested range. Legs of no cell are recorded
+it is classified against the requested range. In each cell of its unit its
+outcome adds to the ignored counts (counts only, never a total), so one such
+leg can be counted in several cells. Legs of no cell are recorded
 once as `recorded_after_knowledge_time`, `superseded_at_knowledge_time`,
 `other_basis` or `other_account`. A revision without legs gets one record:
 `recorded_after_knowledge_time`, `superseded_at_knowledge_time`,
@@ -174,8 +176,12 @@ Any input order gives the same output and the same id.
 
 ## Limits
 
-- Cost: at the budget a fold takes about 0.45–0.8 s on `bun` locally, most of
-  it re-checking each selection; not measured on workerd (ADR 0052).
+- Cost: at the budget a fold takes about 0.45–0.72 s on `bun` locally without
+  a baseline and 0.92–1.38 s with one, most of it re-checking each selection;
+  not measured on workerd (ADR 0052).
+- Knowledge, chain and adapter-flag blocks apply whatever the date: a flagged
+  chain dated outside the window still blocks the cell, and a flagged leg no
+  account resolves blocks every requested cell of its unit.
 - No read path: no adapter, query, route or page. The provisional input is
   not filled from the stored rows by anything yet.
 - The input is provisional and is replaced by the hand-off contract; the
