@@ -1,6 +1,6 @@
 # ADR 0055: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (merged 2026-10-08 in #578)
 - Date: 2026-10-08
 - Issue: part of #546
 

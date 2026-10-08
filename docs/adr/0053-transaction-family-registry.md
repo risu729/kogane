@@ -1,6 +1,6 @@
 # ADR 0053: A closed transaction-family registry states which families have an event writer and why the others do not
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (merged 2026-10-08 in #577)
 - Date: 2026-10-08
 - Issue: #549 (first, pure slice)
 - Related: ADR 0001 (INV05, INV06, INV07), ADR 0002, ADR 0004, ADR 0006,
