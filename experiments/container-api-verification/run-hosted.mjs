@@ -28,6 +28,10 @@ const fail = (code) => {
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const root = dirname(fileURLToPath(import.meta.url));
 
+export function wranglerArgs(...args) {
+  return [resolve(root, "node_modules/wrangler/bin/wrangler.js"), ...args];
+}
+
 export function inputs(env, { tempFixture } = {}) {
   const account = env.CONTAINER_VERIFICATION_ACCOUNT_ID;
   const token = env.CONTAINER_VERIFICATION_API_TOKEN;
@@ -799,7 +803,7 @@ export async function cleanup(
         { tag: "v2", deleted_classes: ["VerificationContainer"] },
       ],
     });
-    await run("bun", ["exec", "wrangler", "deploy", "--config", teardownPath], {
+    await run("node", wranglerArgs("deploy", "--config", teardownPath), {
       env: commandEnv(input),
       timeout: 180000,
     });
@@ -904,16 +908,8 @@ export async function execute(
     state.imageAttempted = true;
     writeProtected(statePath, state);
     await boundedRun(
-      "bun",
-      [
-        "exec",
-        "wrangler",
-        "containers",
-        "push",
-        tag,
-        "--config",
-        resolve(root, "wrangler.sdk.jsonc"),
-      ],
+      "node",
+      wranglerArgs("containers", "push", tag, "--config", resolve(root, "wrangler.sdk.jsonc")),
       { env, timeout: 300000 },
     );
     const image = await registry();
@@ -937,12 +933,12 @@ export async function execute(
       const path = resolve(input.temp, `container-api-verification-${phase}.json`);
       writeProtected(path, config(source, { account: input.account, image, phase }), true);
       if (phase === "baseline_sdk")
-        await boundedRun(
-          "bun",
-          ["exec", "wrangler", "secret", "put", "HARNESS_KEY", "--config", path],
-          { env, stdin: `${key}\n`, timeout: 120000 },
-        );
-      await boundedRun("bun", ["exec", "wrangler", "deploy", "--config", path], {
+        await boundedRun("node", wranglerArgs("secret", "put", "HARNESS_KEY", "--config", path), {
+          env,
+          stdin: `${key}\n`,
+          timeout: 120000,
+        });
+      await boundedRun("node", wranglerArgs("deploy", "--config", path), {
         env,
         timeout: 300000,
       });
@@ -989,16 +985,14 @@ export async function execute(
     await holder.stop();
     holder = undefined;
     await boundedRun(
-      "bun",
-      [
-        "exec",
-        "wrangler",
+      "node",
+      wranglerArgs(
         "rollback",
         state.workerVersion,
         "--yes",
         "--config",
         resolve(input.temp, "container-api-verification-baseline_sdk.json"),
-      ],
+      ),
       { env, timeout: 180000 },
     );
     await verify("rollback_sdk");

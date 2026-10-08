@@ -21,6 +21,7 @@ import {
   driverReport,
   apiClient,
   apiHttpCode,
+  wranglerArgs,
   preflight,
   namespaces,
   activeVersion,
@@ -423,7 +424,7 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
         }
         if (args.includes("deploy")) deployed = true;
         if (args.includes("delete")) throw new Error("child deletion is forbidden");
-        if (command === "node") {
+        if (command === "node" && args[0].endsWith("/driver.mjs")) {
           const phase = options.env.HARNESS_PHASE;
           if (phase === "baseline_sdk")
             protectedFile(resolve(temp, "container-api-verification-baseline.json"), {
@@ -444,11 +445,18 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
     });
     expect(calls.filter(([command]) => command === "docker")).toHaveLength(1);
     expect(calls.some(([, args]) => args.includes("delete"))).toBe(false);
+    const cliCalls = calls.filter(([, args]) => args[0] === wranglerArgs()[0]);
+    expect(cliCalls).toHaveLength(8); // push, secret, four deploys, exact rollback and namespace teardown
+    for (const [command, args] of cliCalls) {
+      expect(command).toBe("node");
+      expect(args).toEqual(wranglerArgs(...args.slice(1)));
+    }
+    expect(calls.some(([command]) => command === "bun")).toBe(false);
     expect(calls.filter(([, args]) => args.includes("push"))[0]?.[1]).toContain(`${APP}:${sha}`);
     expect(calls.filter(([, args]) => args.includes("rollback"))[0]?.[1]).toContain(workerVersion);
     expect(
       calls
-        .filter(([command]) => command === "node")
+        .filter(([command, args]) => command === "node" && args[0].endsWith("/driver.mjs"))
         .map(([, , options]) => options.env.HARNESS_PHASE),
     ).toEqual(["baseline_sdk", "native", "native_unmonitored", "native_recovered", "rollback_sdk"]);
     expect(reports.some((text) => text.includes(token))).toBe(false);
@@ -612,8 +620,10 @@ test("cleanup deletes the exact app, explicit synthetic class, Worker, then imag
         if (!imageExists) steps.push("image_404");
         return imageExists ? image : undefined;
       },
-      run: async (_command: string, args: string[]) => {
-        if (args.includes("deploy")) {
+      run: async (command: string, args: string[]) => {
+        expect(command).toBe("node");
+        expect(args[0]).toBe(wranglerArgs()[0]);
+        if (args[1] === "deploy") {
           expect(appExists).toBe(false);
           expect(workerExists).toBe(true);
           const path = args[args.indexOf("--config") + 1];
@@ -1206,3 +1216,65 @@ test("unknown endpoint diagnostics stay generic and allowed missing404 remains s
   );
   expect(await absent(`workers/scripts/${WORKER}/settings`, { missing: true })).toBeUndefined();
 });
+
+test("real pinned Wrangler receives each production subcommand and positional argv without a shell or remote access", async () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "verification-cli-"));
+  try {
+    const installed = JSON.parse(
+      readFileSync(new URL("../node_modules/wrangler/package.json", import.meta.url), "utf8"),
+    );
+    const declared = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    expect(installed.version).toBe(declared.devDependencies.wrangler);
+    const blockNetwork = resolve(temp, "block-network.cjs");
+    writeFileSync(
+      blockNetwork,
+      `const blocked = () => { throw new Error("test_network_forbidden"); };
+globalThis.fetch = blocked;
+for (const moduleName of ["node:http", "node:https"]) {
+  const transport = require(moduleName);
+  transport.request = blocked;
+  transport.get = blocked;
+}
+`,
+      { mode: 0o600, flag: "wx" },
+    );
+    const env = {
+      PATH: process.env.PATH!,
+      HOME: temp,
+      XDG_CONFIG_HOME: temp,
+      CI: "true",
+      WRANGLER_SEND_METRICS: "false",
+      NODE_OPTIONS: `--require=${blockNetwork}`,
+    };
+    const cases: Array<[string[], string]> = [
+      [["containers", "push", `${APP}:${sha}`], "wrangler containers push <TAG>"],
+      [["secret", "put", "HARNESS_KEY"], "wrangler secret put <key>"],
+      [["deploy"], "wrangler deploy [path]"],
+      [["rollback", workerVersion, "--yes"], "wrangler rollback [version-id]"],
+    ];
+    for (const [args, usage] of cases) {
+      const output = await child(
+        "node",
+        wranglerArgs(
+          ...args,
+          "--config",
+          new URL("../wrangler.sdk.jsonc", import.meta.url).pathname,
+          "--help",
+        ),
+        {
+          env,
+          stdin: "synthetic-stdin\n",
+          timeout: 10000,
+        },
+      );
+      expect(output).toContain(usage);
+      expect(output).not.toContain("synthetic-stdin");
+    }
+    // An invalid subcommand reaches Wrangler's parser and fails rather than succeeding with generic help.
+    await expect(
+      child("node", wranglerArgs("containers", "verification_unknown"), { env, timeout: 10000 }),
+    ).rejects.toThrow("verification_runner_child");
+  } finally {
+    rmSync(temp, { recursive: true });
+  }
+}, 60000);
