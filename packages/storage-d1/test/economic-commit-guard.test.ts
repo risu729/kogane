@@ -39,6 +39,72 @@ import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
 
 const MIGRATION = "0070_economic_commit_guard.sql";
 
+/** ADR 0054, "Rebuilding a table 0070 reads": what a rebuild must drop and recreate (the ADR table mirrors it). */
+const REBUILD_DEPENDENTS: Record<string, string[]> = {
+  acquisition_sessions: ["economic_claims_guard"],
+  card_purchase_recognition_keys: [
+    "card_purchase_recognition_keys_economic_claim_held",
+    "card_purchase_recognition_keys_economic_sealed",
+    "consumption_claim_conflicts",
+    "economic_claims_one_live_holder",
+    "economic_commit_log_guard",
+    "economic_revision_claims",
+    "economic_revision_seals_guard",
+    "live_consumption_claims",
+  ],
+  card_purchase_recognitions: ["card_purchase_recognitions_economic_sealed"],
+  card_settlement_candidates: [
+    "card_settlement_decisions_economic_claim_held",
+    "consumption_claim_conflicts",
+    "economic_claims_one_live_holder",
+    "economic_commit_log_guard",
+    "economic_revision_claims",
+    "economic_revision_seals_guard",
+    "live_consumption_claims",
+  ],
+  card_settlement_decisions: [
+    "card_settlement_decisions_economic_claim_held",
+    "card_settlement_decisions_economic_sealed",
+    "card_settlement_decisions_event",
+    "consumption_claim_conflicts",
+    "economic_claims_one_live_holder",
+    "economic_commit_log_guard",
+    "economic_revision_claims",
+    "economic_revision_seals_guard",
+    "live_consumption_claims",
+  ],
+  core_source_revision: ["economic_commit_log_guard", "economic_revision_seals_guard"],
+  decision_revisions: ["economic_commit_log", "economic_commit_log_guard"],
+  economic_event_revisions: [
+    "card_purchase_recognition_keys_economic_claim_held",
+    "card_settlement_decisions_economic_claim_held",
+    "consumption_claim_conflicts",
+    "economic_claims",
+    "economic_claims_alias_one_live_holder",
+    "economic_claims_guard",
+    "economic_claims_one_live_holder",
+    "economic_commit_log_guard",
+    "economic_event_live_conflicts",
+    "economic_event_revisions_superseded_by",
+    "economic_event_times",
+    "economic_event_times_guard",
+    "economic_leg_effects_guard",
+    "economic_revision_seals",
+    "economic_revision_seals_guard",
+    "live_consumption_claims",
+    "unlogged_economic_revisions",
+  ],
+  economic_legs: [
+    "economic_leg_effects",
+    "economic_leg_effects_guard",
+    "economic_legs_sealed",
+    "economic_revision_seals_guard",
+  ],
+  fetch_artifacts: ["economic_claims_guard"],
+  fetch_runs: ["economic_claims_guard"],
+  parse_runs: ["economic_claims", "economic_claims_guard"],
+  transaction_observations: ["economic_claims", "economic_claims_guard"],
+};
 const NOW = "2026-10-08T00:00:00.000Z";
 const LATER = "2026-10-08T01:00:00.000Z";
 const PRINCIPAL = "rule:synthetic-writer-v1";
@@ -705,6 +771,57 @@ describe("migration 0070", () => {
       db.exec(`DROP TABLE ${table}`);
       expect(() => db.exec(`ALTER TABLE ${table}_rebuilt RENAME TO ${table}`)).not.toThrow();
     }
+    db.close();
+  });
+
+  test("the 0070 objects a rebuild of each existing table must drop and recreate", () => {
+    // Pins the list ADR 0054 states: every 0070 index, trigger and view that
+    // reads (or is attached to) a table that predates 0070, with the views
+    // that read those views. Foreign keys from the 0070 tables are listed too:
+    // a rebuild carries its children as the 0051 rebuild did.
+    const db = new Database(":memory:");
+    for (const file of migrationFiles(CORE_MIGRATIONS_URL).filter((name) => name < MIGRATION))
+      db.exec(migrationSql(CORE_MIGRATIONS_URL, file));
+    const existing = (
+      db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+    ).map((row) => row.name);
+    const before = new Set(
+      (db.query("SELECT name FROM sqlite_master").all() as { name: string }[]).map(
+        (row) => row.name,
+      ),
+    );
+    db.exec(migrationSql(CORE_MIGRATIONS_URL, MIGRATION));
+    const created = (
+      db.query("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE sql IS NOT NULL").all() as {
+        type: string;
+        name: string;
+        tbl_name: string;
+        sql: string;
+      }[]
+    ).filter((object) => !before.has(object.name));
+    const reads = (object: { tbl_name: string; sql: string }, name: string) =>
+      object.tbl_name === name || new RegExp(`\\b${name}\\b`, "u").test(object.sql);
+    const affected: Record<string, string[]> = {};
+    for (const table of existing) {
+      const names = new Set(created.filter((object) => reads(object, table)).map((o) => o.name));
+      // Views (and triggers) that read an affected view are affected too.
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const object of created)
+          if (
+            !names.has(object.name) &&
+            [...names].some(
+              (name) =>
+                created.some((o) => o.name === name && o.type === "view") && reads(object, name),
+            )
+          ) {
+            names.add(object.name);
+            grew = true;
+          }
+      }
+      if (names.size > 0) affected[table] = [...names].sort();
+    }
+    expect(affected).toEqual(REBUILD_DEPENDENTS);
     db.close();
   });
 

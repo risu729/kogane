@@ -257,11 +257,19 @@ recording the alias class on every new settlement accept.
   meaning).
 - **G2:** migration 0071, the command-kind vocabulary (`economic-event.adopt`,
   `correct`, `withdraw`, `move`) by the 0051 rebuild pattern; no planner, so
-  every new kind is `unsupported_semantics`. Amends this ADR.
+  every new kind is `unsupported_semantics`. Amends this ADR. No 0070 object
+  reads the command tables, so their rebuild is unaffected. When G2 opens the
+  identity-resolution exemption it drops and recreates
+  `economic_commit_log_guard` with the receipt binding, and from then on any
+  rebuild of `operation_receipts` must drop and recreate that trigger too.
 - **G3:** its own ADR and migration 0072, own-transfer proposals (proposal-only)
   and their planners, behind the production gate below.
 - **Later:** widening the event kind CHECK (0032) for trades and FX, and the
-  securities writer that admits `security-quantity`.
+  securities writer that admits `security-quantity`. The kind-CHECK widening
+  rebuilds `economic_event_revisions`, which 0070 reads: that migration drops
+  the 0070 objects listed below for it before the rename and recreates them
+  after, and carries 0070's child tables as the 0051 rebuild carried its FK
+  graph.
 
 ### Production gate
 
@@ -287,6 +295,37 @@ build does: it never writes a seal, so nothing it writes is sealed. Its
 revisions show as unlogged and are read fail-closed. Schema-floor rules as in
 [economic events](../economic-events.md#deploy-order-and-rollback).
 
+### Rebuilding a table 0070 reads
+
+SQLite re-checks every trigger and view when a table is renamed, so the
+create-copy-drop-rename rebuild of 0051 fails on a table that a 0070 trigger
+or view reads, unless those objects are dropped first. Indexes and triggers
+attached to the rebuilt table go with it, and foreign keys from the 0070
+tables point at it. Any later migration that rebuilds one of the tables
+below therefore drops the listed 0070 objects before the rename and recreates
+them, unchanged, after it (child tables are carried as 0051 carried its FK
+graph). `PRAGMA legacy_alter_table` is not relied on: its behaviour on remote
+D1 is not verified. The list is pinned by a storage test (every 0070 index,
+trigger and view reading or attached to a pre-0070 table, with the views that
+read those views; the 0070 tables are the foreign-key children). Pre-0070
+objects that read the same tables are the rebuild's own concern, as before.
+
+| Table rebuilt                    | 0070 objects to drop before the rename and recreate after                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `acquisition_sessions`           | `economic_claims_guard`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `card_purchase_recognition_keys` | `card_purchase_recognition_keys_economic_claim_held`, `card_purchase_recognition_keys_economic_sealed`, `consumption_claim_conflicts`, `economic_claims_one_live_holder`, `economic_commit_log_guard`, `economic_revision_claims`, `economic_revision_seals_guard`, `live_consumption_claims`                                                                                                                                                                                                                                                                                  |
+| `card_purchase_recognitions`     | `card_purchase_recognitions_economic_sealed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `card_settlement_candidates`     | `card_settlement_decisions_economic_claim_held`, `consumption_claim_conflicts`, `economic_claims_one_live_holder`, `economic_commit_log_guard`, `economic_revision_claims`, `economic_revision_seals_guard`, `live_consumption_claims`                                                                                                                                                                                                                                                                                                                                         |
+| `card_settlement_decisions`      | `card_settlement_decisions_economic_claim_held`, `card_settlement_decisions_economic_sealed`, `card_settlement_decisions_event`, `consumption_claim_conflicts`, `economic_claims_one_live_holder`, `economic_commit_log_guard`, `economic_revision_claims`, `economic_revision_seals_guard`, `live_consumption_claims`                                                                                                                                                                                                                                                         |
+| `core_source_revision`           | `economic_commit_log_guard`, `economic_revision_seals_guard`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `decision_revisions`             | `economic_commit_log`, `economic_commit_log_guard`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `economic_event_revisions`       | `card_purchase_recognition_keys_economic_claim_held`, `card_settlement_decisions_economic_claim_held`, `consumption_claim_conflicts`, `economic_claims`, `economic_claims_alias_one_live_holder`, `economic_claims_guard`, `economic_claims_one_live_holder`, `economic_commit_log_guard`, `economic_event_live_conflicts`, `economic_event_revisions_superseded_by`, `economic_event_times`, `economic_event_times_guard`, `economic_leg_effects_guard`, `economic_revision_seals`, `economic_revision_seals_guard`, `live_consumption_claims`, `unlogged_economic_revisions` |
+| `economic_legs`                  | `economic_leg_effects`, `economic_leg_effects_guard`, `economic_legs_sealed`, `economic_revision_seals_guard`                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `fetch_artifacts`                | `economic_claims_guard`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `fetch_runs`                     | `economic_claims_guard`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `parse_runs`                     | `economic_claims`, `economic_claims_guard`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `transaction_observations`       | `economic_claims`, `economic_claims_guard`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
 ### Migration number gap
 
 0070 follows 0066 on main; 0067, 0068 and 0069 are held by other open pull
@@ -296,7 +335,9 @@ contiguous). If those pull requests merge after 0070 is deployed, production
 applies them after 0070 while a fresh database applies them before it; none
 of them may therefore depend on 0070's objects or be depended on by it, and
 `services/processor/test/lanes.test.ts` lists 0070 last today and must be
-edited when they merge.
+edited when they merge. If one of them rebuilds a table listed under "Rebuilding a table
+0070 reads" and is applied after 0070 in production, it must drop and
+recreate the listed 0070 objects as that section says.
 
 ### Deviations recorded in this PR
 

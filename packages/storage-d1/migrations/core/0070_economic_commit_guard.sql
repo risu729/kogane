@@ -14,6 +14,20 @@
 -- So the card purchase lane and the card settlement commands are unaffected
 -- until they join (G1b in ADR 0054).
 --
+-- Rebuilding a table these objects read. SQLite re-checks every trigger and
+-- view on ALTER TABLE ... RENAME, so a later create-copy-drop-rename rebuild
+-- (the 0051 pattern) of economic_event_revisions, economic_legs,
+-- card_purchase_recognitions, card_purchase_recognition_keys,
+-- card_settlement_candidates, card_settlement_decisions, decision_revisions,
+-- core_source_revision, transaction_observations, parse_runs,
+-- fetch_artifacts, fetch_runs or acquisition_sessions must drop the 0070
+-- triggers, views and indexes that read or sit on it before the rename and
+-- recreate them after (ADR 0054, "Rebuilding a table 0070 reads", lists them
+-- by name; a storage test pins the list). legacy_alter_table is not relied
+-- on: its behaviour on remote D1 is not verified. No 0070 object reads the
+-- command tables (change_plans, approvals, operation_receipts,
+-- decision_outbox).
+--
 -- Vocabulary (packages/domain/src/economic-contract.ts states the same codes):
 --   * book: the dimension a provider row is consumed in -- card-usage (a card
 --     usage row recognised as a purchase or refund), cash-movement (a posted
