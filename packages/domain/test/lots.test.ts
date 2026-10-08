@@ -443,7 +443,7 @@ describe("splits keep cost and acquisition time and record the quantity lineage"
     const book = onlyBook(computeLots(inputs, policy()));
     expect(amountText(book.disposals[0]!.allocations[0]!.cost)).toBe("250 JPY");
     const lot = book.remainingLots![0]!;
-    expect(quantityText(lot.quantity)).toBe("20");
+    expect(quantityText(lot.quantity)).toBe("10");
     expect(quantityText(lot.remainingQuantity)).toBe("15");
     expect(amountText(lot.remainingCost)).toBe("750 JPY");
     expect(lot.acquiredAt).toEqual(day("2030-01-06"));
@@ -1129,5 +1129,56 @@ describe("review finding 5: a rounded share never exceeds what is left nor flips
       "0 JPY",
       "0.9 JPY",
     ]);
+  });
+});
+
+describe("review finding 6: a split scales what is left, not what was consumed", () => {
+  const split = (id: string, date: string, stated: string) =>
+    input(id, {
+      kind: "split",
+      date,
+      quantity: stated,
+      split: { numerator: "1", denominator: "3" },
+    });
+
+  test("a fully consumed lot does not block a reverse split of the rest", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-06", "1", "100"),
+          buy("b", "2030-01-07", "3", "300"),
+          sell("s", "2030-01-08", "1", "100"),
+          split("x", "2030-01-09", "1"),
+        ],
+        policy(),
+      ),
+    );
+    expect(book.indeterminateFrom).toBeNull();
+    const [lot] = book.remainingLots!;
+    expect(lot!.lotId).toBe(ref("b"));
+    expect(quantityText(lot!.quantity)).toBe("3");
+    expect(quantityText(lot!.remainingQuantity)).toBe("1");
+    expect(amountText(lot!.remainingCost)).toBe("300 JPY");
+    expect(lot!.lineage.splits).toEqual([
+      { splitRef: ref("x"), ratio: { numerator: "1", denominator: "3" } },
+    ]);
+  });
+
+  test("only the remaining quantity of a partly sold lot has to scale exactly", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-06", "4", "400"),
+          sell("s", "2030-01-08", "1", "100"),
+          split("x", "2030-01-09", "1"),
+        ],
+        policy(),
+      ),
+    );
+    expect(book.indeterminateFrom).toBeNull();
+    const [lot] = book.remainingLots!;
+    expect(quantityText(lot!.quantity)).toBe("4");
+    expect(quantityText(lot!.remainingQuantity)).toBe("1");
+    expect(amountText(lot!.remainingCost)).toBe("300 JPY");
   });
 });

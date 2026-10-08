@@ -281,7 +281,7 @@ export interface LotLineage {
   /** Unit of the cost at origin; null when the cost is unknown. */
   originCostUnit: string | null;
   fragmentOf: string | null;
-  /** Every split applied since origin, in order: the quantity basis of earlier allocations. */
+  /** Every split applied to the remainder since origin, in order: the quantity basis of earlier allocations. */
   splits: LotSplitStep[];
 }
 
@@ -289,8 +289,10 @@ export interface LotLineage {
  * One lot. Under FIFO and specific identification a lot is one acquisition
  * (`lotId` is its ref text) or one history-less snapshot; under moving average
  * it is the pool since the holding was last empty (`lotId` `pool:<first ref>`,
- * `acquiredAt` null). `quantity` and `cost` are what entered the lot, in the
- * units after any split; `remaining*` is what is left after the allocations.
+ * `acquiredAt` null). `quantity` and `cost` are what entered the lot,
+ * `quantity` in the units of entry; `remainingQuantity` is in the units after
+ * every split in `lineage.splits`, which apply only to what was left when
+ * each split happened. `remaining*` is what is left after the allocations.
  */
 export interface LotState {
   lotId: string;
@@ -1062,17 +1064,20 @@ function applyDisposal(
 
 function applySplit(state: BookState, entry: Entry, stated: ExactDecimal): void {
   const ratio = entry.input.split!;
-  const scaled: { lot: Lot; quantity: ExactDecimal; remaining: ExactDecimal }[] = [];
+  const scaled: { lot: Lot; remaining: ExactDecimal }[] = [];
+  // Only what is left is split. A consumed lot keeps its history as it was,
+  // and the quantity that entered a lot stays in its units of entry;
+  // `lineage.splits` says which splits apply to the remainder.
   for (const lot of state.lots) {
-    const quantity = multiplyByRatio(lot.quantity, ratio);
+    if (isZeroDecimal(lot.remaining)) continue;
     const remaining = multiplyByRatio(lot.remaining, ratio);
-    // A split that does not scale every lot exactly is a different corporate
+    // A split that does not scale a holding exactly is a different corporate
     // action (cash in lieu of fractions, for one); it is not modelled here.
-    if (!quantity.ok || !remaining.ok) {
+    if (!remaining.ok) {
       markIndeterminate(state, [entry.ref], "corporate_action_unsupported");
       return;
     }
-    scaled.push({ lot, quantity: quantity.value, remaining: remaining.value });
+    scaled.push({ lot, remaining: remaining.value });
   }
   const after = scaled.reduce((total, step) => addDecimals(total, step.remaining), ZERO);
   if (!decimalEquals(after, stated)) {
@@ -1080,7 +1085,6 @@ function applySplit(state: BookState, entry: Entry, stated: ExactDecimal): void 
     return;
   }
   for (const step of scaled) {
-    step.lot.quantity = step.quantity;
     step.lot.remaining = step.remaining;
     step.lot.lineage.splits = [...step.lot.lineage.splits, { splitRef: entry.ref, ratio }];
   }

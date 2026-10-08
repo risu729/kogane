@@ -95,10 +95,11 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   share that would exceed what is left or flip its sign is
   `inexact_allocation`. Moving
   average keeps exact pool totals and never stores a unit price. A split
-  scales quantities by its exact ratio, keeps cost and acquisition time, and
-  is recorded in the lot's lineage; a ratio that does not scale exactly or
-  disagrees with the stated post-split holding is
-  `corporate_action_unsupported`.
+  scales the remaining quantity of every lot still held by its exact ratio,
+  keeps cost, acquisition time and the quantity as entered, and is recorded
+  in the lot's lineage; consumed lots are left as they were. A ratio that does
+  not scale a remainder exactly or disagrees with the stated post-split
+  holding is `corporate_action_unsupported`.
 - **Snapshots.** A snapshot with no earlier input in its book seeds a lot of
   unknown cost (`snapshot_only`); it never carries a cost, so a provider's
   stated acquisition cost is never seeded into a lot. A later snapshot is a
