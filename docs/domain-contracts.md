@@ -179,6 +179,7 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
   a statement about the code, never adoption: nothing reads it to write
   ([economic events](economic-events.md#non-card-families-unsupported-today),
   [ADR 0053](adr/0053-transaction-family-registry.md)).
+
 ## `instrument-candidates.ts` — which identifiers may be one instrument
 
 [ADR 0055](adr/0055-instrument-candidates.md); the read that feeds it is
