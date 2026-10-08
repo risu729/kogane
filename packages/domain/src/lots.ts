@@ -725,6 +725,12 @@ interface Lot {
 
 interface BookState {
   lots: Lot[];
+  /** Position of each lot in `lots`, by lot id. */
+  index: Map<string, number>;
+  /** Every lot before this position is fully consumed; FIFO never looks before it. */
+  firstOpen: number;
+  /** Sum of every lot's remaining quantity, kept as inputs apply. */
+  held: ExactDecimal;
   /** True once any input has been applied: a snapshot after that is a check, not a seed. */
   history: boolean;
   indeterminate: { refs: string[]; reasonCode: LotReasonCode } | null;
@@ -738,8 +744,22 @@ interface Entry {
   time: TemporalValue;
 }
 
-function cloneState(state: BookState): BookState {
+function emptyState(): BookState {
   return {
+    lots: [],
+    index: new Map(),
+    firstOpen: 0,
+    held: ZERO,
+    history: false,
+    indeterminate: null,
+    disposals: [],
+  };
+}
+
+/** A trial copy for a commuting group: the lots are copied, disposals start empty. */
+function trialState(state: BookState): BookState {
+  return {
+    ...state,
     lots: state.lots.map((lot) => ({
       ...lot,
       acquisitionRefs: [...lot.acquisitionRefs],
@@ -747,20 +767,21 @@ function cloneState(state: BookState): BookState {
       costUnits: [...lot.costUnits],
       lineage: { ...lot.lineage, splits: [...lot.lineage.splits] },
     })),
-    history: state.history,
-    indeterminate: state.indeterminate,
-    disposals: [...state.disposals],
+    index: new Map(state.index),
+    disposals: [],
   };
 }
 
-function holding(state: BookState): ExactDecimal {
-  return state.lots.reduce((total, lot) => addDecimals(total, lot.remaining), ZERO);
+function addLot(state: BookState, lot: Lot): void {
+  state.index.set(lot.lotId, state.lots.length);
+  state.lots.push(lot);
+  state.held = addDecimals(state.held, lot.remaining);
 }
 
 function lotState(lot: Lot, instrumentRef: string): LotState {
   return {
     lotId: lot.lotId,
-    acquisitionRefs: [...lot.acquisitionRefs],
+    acquisitionRefs: [...lot.acquisitionRefs].sort(),
     acquiredAt: lot.acquiredAt,
     quantity: exactQuantity(instrumentRef, lot.quantity),
     remainingQuantity: exactQuantity(instrumentRef, lot.remaining),
@@ -840,7 +861,7 @@ function applyAcquisition(
   }
   if (policy.method !== "moving-average" || state.lots.length === 0) {
     const acquiredAt = policy.method === "moving-average" ? null : entry.time;
-    state.lots.push({
+    addLot(state, {
       lotId: policy.method === "moving-average" ? `pool:${entry.ref}` : entry.ref,
       acquisitionRefs: [entry.ref],
       acquiredAt,
@@ -860,9 +881,10 @@ function applyAcquisition(
   pool.costUnits = costUnits;
   const addFees = (a: Amount | null, b: Amount | null): Amount | null =>
     a === null ? b : b === null ? a : combine(a, b, 1);
-  pool.acquisitionRefs = [...pool.acquisitionRefs, entry.ref].sort();
+  pool.acquisitionRefs.push(entry.ref);
   pool.quantity = addDecimals(pool.quantity, quantity);
   pool.remaining = addDecimals(pool.remaining, quantity);
+  state.held = addDecimals(state.held, quantity);
   pool.cost = combine(pool.cost, cost, 1);
   pool.remainingCost = combine(pool.remainingCost, cost, 1);
   pool.fees = addFees(pool.fees, amounts.fees);
@@ -991,21 +1013,23 @@ function applyDisposal(
     markIndeterminate(state, [entry.ref], reasonCode);
     state.disposals.push(indeterminateDisposal(entry, policy, reasonCode));
   };
-  if (compareDecimals(holding(state), quantity) < 0) return fail("negative_holding");
+  if (compareDecimals(state.held, quantity) < 0) return fail("negative_holding");
   const plan: { lot: Lot; take: ExactDecimal }[] = [];
   if (policy.method === "specific-identification") {
     const selections = entry.input.lotSelections;
     if (selections === null) return fail("lot_selection_missing");
-    const takes = new Map<string, ExactDecimal>();
+    const picked: { position: number; take: ExactDecimal }[] = [];
     for (const selection of selections) {
       const take = exactValue(selection.quantity);
       if (take === null) return fail("value_not_exact");
-      if (!state.lots.some((lot) => lot.lotId === selection.lotId)) return fail("unknown_lot");
-      takes.set(selection.lotId, take);
+      const position = state.index.get(selection.lotId);
+      if (position === undefined) return fail("unknown_lot");
+      picked.push({ position, take });
     }
-    for (const lot of state.lots) {
-      const take = takes.get(lot.lotId);
-      if (take === undefined) continue;
+    // Allocations follow lot order, not the order the selections were listed in.
+    picked.sort((a, b) => a.position - b.position);
+    for (const { position, take } of picked) {
+      const lot = state.lots[position]!;
       if (compareDecimals(take, lot.remaining) > 0) return fail("lot_selection_mismatch");
       plan.push({ lot, take });
     }
@@ -1013,7 +1037,8 @@ function applyDisposal(
     if (!decimalEquals(selected, quantity)) return fail("lot_selection_mismatch");
   } else {
     let left = quantity;
-    for (const lot of state.lots) {
+    for (let position = state.firstOpen; position < state.lots.length; position += 1) {
+      const lot = state.lots[position]!;
       if (isZeroDecimal(left)) break;
       if (isZeroDecimal(lot.remaining)) continue;
       const take = compareDecimals(lot.remaining, left) < 0 ? lot.remaining : left;
@@ -1038,7 +1063,7 @@ function applyDisposal(
     const { cost, fees } = shares[index]!;
     allocations.push({
       lotId: lot.lotId,
-      acquisitionRefs: [...lot.acquisitionRefs],
+      acquisitionRefs: [...lot.acquisitionRefs].sort(),
       quantity: exactQuantity(entry.input.instrumentRef, take),
       cost: lotAmount(cost.share),
       acquisitionFees: fees === null ? null : lotAmount(fees.share),
@@ -1055,9 +1080,22 @@ function applyDisposal(
     if (lot.remainingFees !== null && fees !== null)
       lot.remainingFees = combine(lot.remainingFees, fees.share, -1);
   });
+  state.held = subtractDecimals(state.held, quantity);
+  while (
+    state.firstOpen < state.lots.length &&
+    isZeroDecimal(state.lots[state.firstOpen]!.remaining)
+  )
+    state.firstOpen += 1;
   // A moving-average pool that is emptied closes; the next acquisition opens a new one.
-  if (policy.method === "moving-average" && state.lots[0] && isZeroDecimal(state.lots[0].remaining))
+  if (
+    policy.method === "moving-average" &&
+    state.lots[0] &&
+    isZeroDecimal(state.lots[0].remaining)
+  ) {
     state.lots = [];
+    state.index = new Map();
+    state.firstOpen = 0;
+  }
   const total = sumAmounts(shares.map(({ cost }) => cost.share));
   let allocatedCost: Quantity | null = null;
   if (total !== null && total.known) allocatedCost = exactQuantity(total.unitRef, total.value);
@@ -1083,7 +1121,7 @@ function applySplit(state: BookState, entry: Entry, stated: ExactDecimal): void 
   // Only what is left is split. A consumed lot keeps its history as it was,
   // and the quantity that entered a lot stays in its units of entry;
   // `lineage.splits` says which splits apply to the remainder.
-  for (const lot of state.lots) {
+  for (const lot of state.lots.slice(state.firstOpen)) {
     if (isZeroDecimal(lot.remaining)) continue;
     const remaining = multiplyByRatio(lot.remaining, ratio);
     // A split that does not scale a holding exactly is a different corporate
@@ -1099,6 +1137,7 @@ function applySplit(state: BookState, entry: Entry, stated: ExactDecimal): void 
     markIndeterminate(state, [entry.ref], "corporate_action_unsupported");
     return;
   }
+  state.held = after;
   for (const step of scaled) {
     step.lot.remaining = step.remaining;
     step.lot.lineage.splits = [...step.lot.lineage.splits, { splitRef: entry.ref, ratio }];
@@ -1107,7 +1146,7 @@ function applySplit(state: BookState, entry: Entry, stated: ExactDecimal): void 
 
 function applySnapshot(state: BookState, entry: Entry, stated: ExactDecimal, policy: LotPolicy) {
   if (state.history) {
-    if (!decimalEquals(holding(state), stated))
+    if (!decimalEquals(state.held, stated))
       markIndeterminate(state, [entry.ref], "snapshot_mismatch");
     return;
   }
@@ -1117,7 +1156,7 @@ function applySnapshot(state: BookState, entry: Entry, stated: ExactDecimal, pol
   const unknownCost = unknownAmount("snapshot_only");
   const acquiredAt: TemporalValue | null =
     policy.method === "moving-average" ? null : { kind: "unknown", reasonCode: "snapshot_only" };
-  state.lots.push({
+  addLot(state, {
     lotId: policy.method === "moving-average" ? `pool:${entry.ref}` : entry.ref,
     acquisitionRefs: [entry.ref],
     acquiredAt,
@@ -1180,6 +1219,9 @@ interface TimeSpan {
   lo: number;
   loNanos: number;
   hi: number;
+  /** An instant's absolute time; 0 for dates and periods. */
+  epoch: number;
+  nanos: number;
 }
 
 const DAY_SECONDS = 86_400;
@@ -1194,11 +1236,17 @@ function timeSpan(time: TemporalValue): TimeSpan {
   switch (time.kind) {
     case "instant": {
       const parsed = parseInstant(time.value)!;
-      return { lo: parsed.epochSeconds, loNanos: parsed.nanoseconds, hi: parsed.epochSeconds };
+      return {
+        lo: parsed.epochSeconds,
+        loNanos: parsed.nanoseconds,
+        hi: parsed.epochSeconds,
+        epoch: parsed.epochSeconds,
+        nanos: parsed.nanoseconds,
+      };
     }
     case "local-date": {
       const day = daysFromCivil(parseLocalDate(time.value)!);
-      return { lo: day * DAY_SECONDS, loNanos: 0, hi: (day + 1) * DAY_SECONDS };
+      return { lo: day * DAY_SECONDS, loNanos: 0, hi: (day + 1) * DAY_SECONDS, epoch: 0, nanos: 0 };
     }
     case "period": {
       const bounds = periodBounds(time)!;
@@ -1206,14 +1254,34 @@ function timeSpan(time: TemporalValue): TimeSpan {
         lo: daysFromCivil(bounds.start) * DAY_SECONDS,
         loNanos: 0,
         hi: daysFromCivil(bounds.endExclusive) * DAY_SECONDS,
+        epoch: 0,
+        nanos: 0,
       };
     }
     case "unknown":
-      return { lo: 0, loNanos: 0, hi: 0 };
+      return { lo: 0, loNanos: 0, hi: 0, epoch: 0, nanos: 0 };
   }
 }
 
 type LaidOut = Entry & { span: TimeSpan };
+
+/**
+ * `compareTemporal(a, b)` is ordered −1, computed without re-parsing where it
+ * is cheap: two instants by their epoch, two dates or periods (one zone per
+ * book, see `zonesConflict`) by their civil-day bounds. An instant against a
+ * date or period goes through `compareTemporal` itself.
+ */
+function strictlyBefore(a: LaidOut, b: LaidOut): boolean {
+  const aInstant = a.time.kind === "instant";
+  const bInstant = b.time.kind === "instant";
+  if (aInstant && bInstant)
+    return (
+      a.span.epoch < b.span.epoch || (a.span.epoch === b.span.epoch && a.span.nanos < b.span.nanos)
+    );
+  if (!aInstant && !bInstant) return a.span.hi <= b.span.lo;
+  const order = compareTemporal(a.time, b.time);
+  return order.kind === "ordered" && order.order < 0;
+}
 
 function compareLaidOut(a: LaidOut, b: LaidOut): number {
   return (
@@ -1236,10 +1304,10 @@ function timeGroups(ordered: readonly LaidOut[]): LaidOut[][] {
   let active: number[] = [];
   ordered.forEach((entry, index) => {
     active = active.filter((j) => ordered[j]!.span.hi + ORDERED_GAP_SECONDS > entry.span.lo);
-    for (const j of active) {
-      const order = compareTemporal(ordered[j]!.time, entry.time);
-      if (order.kind !== "ordered" || order.order >= 0) reach[j] = index;
-    }
+    // The earliest earlier input not strictly before this one spans the
+    // widest range; later ones fall inside it, so the scan stops there.
+    const conflict = active.find((j) => !strictlyBefore(ordered[j]!, entry));
+    if (conflict !== undefined) reach[conflict] = index;
     active.push(index);
   });
   const groups: LaidOut[][] = [];
@@ -1332,7 +1400,7 @@ function computeBook(
   entries: readonly Entry[],
   policy: LotPolicy,
 ): { disposals: LotDisposal[]; lots: Lot[] | null; indeterminateFrom: BookState["indeterminate"] } {
-  const state: BookState = { lots: [], history: false, indeterminate: null, disposals: [] };
+  const state = emptyState();
   const byRef = [...entries].sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
   // An input with no known time could sit anywhere in the history.
   const unknown = byRef.filter(({ time }) => time.kind === "unknown");
@@ -1369,10 +1437,15 @@ function computeBook(
       failAll(state, group, failure, policy);
       continue;
     }
-    const trial = cloneState(state);
+    const trial = trialState(state);
     for (const entry of group) applyEntry(trial, entry, policy);
-    if (trial.indeterminate === null) Object.assign(state, trial);
-    else failAll(state, group, trial.indeterminate.reasonCode, policy);
+    if (trial.indeterminate !== null) {
+      failAll(state, group, trial.indeterminate.reasonCode, policy);
+      continue;
+    }
+    const disposals = state.disposals;
+    Object.assign(state, trial, { disposals });
+    disposals.push(...trial.disposals);
   }
   return {
     disposals: state.disposals,
@@ -1476,7 +1549,9 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
   const books = new Map<string, Entry[]>();
   for (const entry of entries) {
     const key = JSON.stringify(bookKeyOf(entry.input));
-    books.set(key, [...(books.get(key) ?? []), entry]);
+    const book = books.get(key);
+    if (book) book.push(entry);
+    else books.set(key, [entry]);
   }
   for (const book of books.values()) {
     const classes = new Set(book.map(({ input }) => input.instrumentClass));
