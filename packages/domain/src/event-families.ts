@@ -64,8 +64,9 @@ export type TransactionFamily = (typeof TRANSACTION_FAMILIES)[number];
  * - `identity_evidence_digest`: the row id is a digest of the stored evidence
  *   message, not an id the provider issued; another delivery of the same
  *   notice (a forwarded copy) can carry another id.
- * - `identity_origin_unrecorded`: the row id may be the provider's, but the
- *   parser records no `_kogane.identityOrigin`, so stage A reads it as unknown.
+ * - `identity_origin_unrecorded`: the parser records no `_kogane.identityOrigin`
+ *   (none at all, or an origin under another key), so stage A reads the
+ *   origin as unknown, whatever the id is.
  * - `identity_absent`: the row carries no external id at all.
  * - `direction_code_unmapped`: which way the quantity or cash moves is a
  *   provider code nobody has mapped (ADR 0004: never guessed).
@@ -278,7 +279,8 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     families: [unsupported("bank-movement", "identity_fingerprint_only", "counterpart_not_stated")],
   },
   {
-    // Rows of kind charge (card → SF), payment, rail and bus; the funding card
+    // Row kinds charge (card → SF), payment, rail, bus, carryover and other
+    // (a carryover without an amount emits no transaction); the funding card
     // of a charge is not stated.
     sourceId: "mobile-suica",
     parserName: "mobile-suica-sf-history",
@@ -322,7 +324,9 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
   },
   {
     // `transactionNumber` is a provider row id, but the parser records no
-    // `_kogane` at all. The method column names the funding instrument as text.
+    // `_kogane` at all; a row whose number is blank has no external id, so the
+    // basis holds only when it is filled. The method column names the funding
+    // instrument as text.
     sourceId: "paypay",
     parserName: "paypay-csv",
     observationKinds: ["transaction"],
@@ -388,7 +392,12 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
   },
   {
     // The provider `did` is the row id; no origin is recorded; `payDepKbn`
-    // gives the direction; no security code links a row to a trade.
+    // gives the direction; no security code links a row to a trade. Not
+    // `bank-movement`: the parser's `transactionType: "transfer"` is derived
+    // from the detail text (振替, 入出金), not a provider code, which of those
+    // rows are own-account transfers is unobserved, and whether own-transfer
+    // pairing reads broker and exchange cash (as with SBI VC cash flows) is for
+    // the writer/guard contract to decide.
     sourceId: "sbi-securities",
     parserName: "sbi-yen-detail-history",
     observationKinds: ["transaction"],

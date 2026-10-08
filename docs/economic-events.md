@@ -95,6 +95,10 @@ proves every entry against the parser registry and the synthetic fixtures;
 `packages/domain/test/event-families.test.ts` checks the codes and that each
 family maps onto the display kinds `classifyActivity` knows.
 
+In the table, "Writer" is the family-level status (`FAMILY_SUPPORT`); "(writer)"
+marks the parsers whose rows a writer reads. For a supported family the reasons
+column lists why the sources its writer does not read have no event.
+
 | Family                       | Writer      | Parsers whose rows belong to it                                                                                                                                                                                  | Why no event is written (`familyUnsupportedReasons`)                                                                                                                               |
 | ---------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bank-movement`              | unsupported | `mizuho-ordinary-history`, `moneyforward-monthly-transactions`, `sbi-shinsei-top-balances-and-activity`, `smbc-direct-transactions`, `sony-bank-history-csv`, `sony-bank-history-json`, `st-george-transactions` | `no_event_writer`, `identity_fingerprint_only`, `identity_origin_unrecorded`, `counterpart_not_stated`, `semantics_unobserved`, `writer_guard_pending`                             |
@@ -165,6 +169,10 @@ Limits, as the code stands:
   `prepaid-funding`). A parser's families are the families of its rows as a
   set; which row is which (a Suica charge versus a fare, a PayPay balance
   payment versus a card payment) is not classified per row.
+- Broker and exchange cash transfers (the SBI Securities yen detail rows the
+  parser types `transfer` from their detail text, SBI VC Trade fiat
+  remittances) are in their own families, not `bank-movement`; whether
+  own-transfer pairing reads them is for the writer/guard contract.
 - Card statement totals are balance rows (`credit_statement_payment_amount`),
   so they are outside the registry: `myjcb-credit-statement-total` has no entry,
   and the `vpass-statement-page` entry describes its usage rows only. The
