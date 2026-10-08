@@ -1399,12 +1399,20 @@ const classified = (
   placement: Placement | null = null,
 ): Classified => ({ disposition, gap, placement });
 
-/** Steps 2 and 3 for one leg of a cell (a requested account and the cell's unit). */
+/**
+ * Steps 2 and 3 for one leg. Holds that come from the knowledge, the chain or
+ * an adapter flag do not depend on the date; every other hold (an unmapped
+ * state, an unresolved account, an own transfer, an inexact or negative value)
+ * applies only to a leg inside the window, on its boundary, or without a time
+ * to place it by. `accountKnown` is false for a leg no account resolves,
+ * classified against each requested cell of its unit.
+ */
 function classifyLeg(
   view: LegView,
   policy: FoldPolicy,
   basis: ReconstructionBasis,
   place: (row: ProvisionalEventRevision) => Placement,
+  accountKnown: boolean,
 ): Classified {
   const { leg, selected } = view;
   const row = selected.revision;
@@ -1418,16 +1426,20 @@ function classifyLeg(
     return classified("unknown_effect", "revision_chain_inconsistent");
   const flag = FLAG_ORDER.find((code) => row.flags.includes(code));
   if (flag !== undefined) return classified(flag, flag);
+  // On an unknown basis even the time role to place it by is unknown.
   if (leg.basis === "unknown") return classified("unknown_effect");
+  const placement = place(row);
   const rule = policy.legEffects[leg.effect];
+  if (rule === "link-never-added") return classified("correspondence_link", null, placement);
   if (rule === "attribution-never-added")
-    return negative(leg.quantity)
-      ? classified("unknown_effect", "leg_sign_unknown")
-      : classified("breakdown_attribution");
-  if (rule === "link-never-added") return classified("correspondence_link");
+    return negative(leg.quantity) && placement !== "outside"
+      ? classified("unknown_effect", "leg_sign_unknown", placement)
+      : classified("breakdown_attribution", null, placement);
   const effect = policy.stateEffects[row.kind][row.state];
-  if (effect === "no-effect") return classified("state_no_effect");
-  if (effect === undefined) return classified("unknown_effect");
+  if (effect === "no-effect") return classified("state_no_effect", null, placement);
+  if (placement === "outside") return classified("outside_range", null, placement);
+  if (effect === undefined) return classified("unknown_effect", null, placement);
+  if (!accountKnown) return classified("unknown_effect", "leg_subject_unrecognized", placement);
   const ownAccounts = new Set(
     row.legs.flatMap((other) =>
       other.effect === "movement" && other.basis === legBasis && other.accountId !== null
@@ -1435,10 +1447,8 @@ function classifyLeg(
         : [],
     ),
   );
-  if (ownAccounts.size > 1) return classified("unknown_effect", "own_transfer_held");
-  const placement = place(row);
+  if (ownAccounts.size > 1) return classified("unknown_effect", "own_transfer_held", placement);
   if (placement === "unknown") return classified("unknown_effect", "event_time_unknown", placement);
-  if (placement === "outside") return classified("outside_range", null, placement);
   if (leg.quantity.value.status !== "exact")
     return classified("unknown_effect", "leg_value_not_exact", placement);
   if (negative(leg.quantity)) return classified("unknown_effect", "leg_sign_unknown", placement);
@@ -1643,9 +1653,11 @@ function foldCell(
   for (const selected of selection.revisions) {
     const row = selected.revision;
     for (const leg of row.legs) {
-      if (leg.accountId !== frame.accountId || leg.quantity.unitRef !== frame.unitRef) continue;
+      if (leg.quantity.unitRef !== frame.unitRef) continue;
+      if (leg.accountId !== null && leg.accountId !== frame.accountId) continue;
       const view = { selected, leg, ref: `${refOf(row)}#${leg.legIndex}` };
-      views.push({ view, classified: classifyLeg(view, policy, request.basis, place) });
+      const known = leg.accountId !== null;
+      views.push({ view, classified: classifyLeg(view, policy, request.basis, place, known) });
     }
   }
   return { views };
@@ -1655,6 +1667,13 @@ function appliedOf(fold: CellFold): LegView[] {
   return fold.views
     .filter((item) => item.classified.disposition === "applied")
     .map((item) => item.view);
+}
+
+function isBlocking(disposition: LegDisposition): boolean {
+  return (
+    !COUNTED.includes(disposition) &&
+    !(IGNORED_DISPOSITIONS as readonly string[]).includes(disposition)
+  );
 }
 
 const COUNTED: readonly LegDisposition[] = ["applied", "pending_shown_apart", "boundary_same_day"];
@@ -1702,11 +1721,21 @@ export function reconstructState(input: {
   );
   const duplicated = new Set(selection.duplicateClaims.flatMap((claim) => claim.holders));
 
+  const cellUnits = new Set(
+    cellFrames.flatMap((frame) => (frame.unitRef === null ? [] : [frame.unitRef])),
+  );
+  const requestPlace = placer(
+    policy,
+    request.basis,
+    { kind: "end-of-date", date: request.startDate },
+    { kind: "end-of-date", date: request.endDate },
+  );
   // Legs outside every cell are recorded here; a leg of a cell is recorded
-  // with its cell below, so every leg has exactly one record. A movement no
-  // account resolves may belong to any requested cell of its unit.
-  const unrecognized = new Map<string, string[]>();
+  // with its cell below, and a leg no account resolves once after the cells
+  // (it is classified against every requested cell of its unit), so every
+  // leg has exactly one record.
   const records: LegDispositionRecord[] = [];
+  const strays = new Map<string, { record: LegDispositionRecord; outcomes: Classified[] }>();
   for (const selected of selection.revisions) {
     const row = selected.revision;
     const effect = policy.stateEffects[row.kind][row.state];
@@ -1746,31 +1775,24 @@ export function reconstructState(input: {
     }
     for (const leg of row.legs) {
       const unitRef = leg.quantity.unitRef;
-      if (leg.accountId !== null && cellKeys.has(cellKey(leg.accountId, unitRef))) continue;
       const ref = `${refOf(row)}#${leg.legIndex}`;
       const common = { ...base, ref, legIndex: leg.legIndex, accountId: leg.accountId, unitRef };
+      if (leg.accountId === null) {
+        const record = { ...common, disposition: "unknown_effect" as LegDisposition, gap: null };
+        if (cellUnits.has(unitRef)) strays.set(ref, { record, outcomes: [] });
+        else {
+          const view = { selected, leg, ref };
+          const outcome = classifyLeg(view, policy, request.basis, requestPlace, false);
+          records.push({ ...record, disposition: outcome.disposition, gap: outcome.gap });
+        }
+        continue;
+      }
+      if (cellKeys.has(cellKey(leg.accountId, unitRef))) continue;
       if (statusDisposition !== null)
         records.push({ ...common, disposition: statusDisposition, gap: null });
       else if (leg.basis !== legBasis && leg.basis !== "unknown")
         records.push({ ...common, disposition: "other_basis", gap: null });
-      else if (leg.accountId === null) {
-        if (leg.effect === "breakdown")
-          records.push({ ...common, disposition: "breakdown_attribution", gap: null });
-        else if (leg.effect === "correspondence")
-          records.push({ ...common, disposition: "correspondence_link", gap: null });
-        else if (selected.status === "active" && flag === null && effect === "no-effect")
-          records.push({ ...common, disposition: "state_no_effect", gap: null });
-        else {
-          records.push({
-            ...common,
-            disposition: "unknown_effect",
-            gap: "leg_subject_unrecognized",
-          });
-          const list = unrecognized.get(unitRef) ?? [];
-          list.push(ref);
-          unrecognized.set(unitRef, list);
-        }
-      } else if (!requested.has(leg.accountId))
+      else if (!requested.has(leg.accountId))
         records.push({ ...common, disposition: "other_account", gap: null });
       // A requested account's leg on the selected basis, not superseded and
       // not after the cut, always opens a cell; nothing reaches here.
@@ -1811,8 +1833,6 @@ export function reconstructState(input: {
     if (start.accountsWithoutContainer.includes(frame.accountId)) gaps.add("no_start_snapshot");
     for (const item of fold.views) if (item.classified.gap !== null) gaps.add(item.classified.gap);
     if (conflicted.size > 0) gaps.add("duplicate_claim");
-    const strays = frame.unitRef === null ? [] : (unrecognized.get(frame.unitRef) ?? []);
-    if (strays.length > 0) gaps.add("leg_subject_unrecognized");
     const family = familyRows(frame.accountId);
     if (family.length === 0 || family.some((row) => row.status !== "evented"))
       gaps.add("family_not_evented");
@@ -1846,7 +1866,7 @@ export function reconstructState(input: {
           !(IGNORED_DISPOSITIONS as readonly string[]).includes(item.classified.disposition),
       )
       .map((item) => item.view.ref);
-    const unknownRefs = [...blockedRefs, ...strays].sort(cmp);
+    const unknownRefs = blockedRefs.sort(cmp);
     const appliedTotal = total(unit, appliedViews);
     const ignored = emptyIgnored();
     for (const item of fold.views)
@@ -1937,17 +1957,19 @@ export function reconstructState(input: {
     }
 
     for (const { view, classified: item } of fold.views)
-      records.push({
-        ref: view.ref,
-        eventId: view.selected.revision.eventId,
-        revision: view.selected.revision.revision,
-        legIndex: view.leg.legIndex,
-        accountId: view.leg.accountId,
-        unitRef: view.leg.quantity.unitRef,
-        disposition: item.disposition,
-        gap: item.gap,
-        conflict: conflicted.has(view.ref) ? "duplicate_claim" : null,
-      });
+      if (view.leg.accountId === null) strays.get(view.ref)?.outcomes.push(item);
+      else
+        records.push({
+          ref: view.ref,
+          eventId: view.selected.revision.eventId,
+          revision: view.selected.revision.revision,
+          legIndex: view.leg.legIndex,
+          accountId: view.leg.accountId,
+          unitRef: view.leg.quantity.unitRef,
+          disposition: item.disposition,
+          gap: item.gap,
+          conflict: conflicted.has(view.ref) ? "duplicate_claim" : null,
+        });
 
     const refsOf = (views: readonly LegView[]) => views.map((view) => view.ref).sort(cmp);
     cells.push({
@@ -1984,6 +2006,16 @@ export function reconstructState(input: {
         sameDayBoundary: { total: boundaryTotal, refs: refsOf(boundaryViews) },
       },
     });
+  }
+  // A leg no account resolves: the most severe of its outcomes over the cells
+  // of its unit, chosen by the closed code order so input order cannot matter.
+  const rank = (item: Classified) =>
+    (isBlocking(item.disposition) ? 0 : 1) * 10_000 +
+    (item.gap === null ? RECONSTRUCTION_GAPS.length : RECONSTRUCTION_GAPS.indexOf(item.gap)) * 100 +
+    LEG_DISPOSITIONS.indexOf(item.disposition);
+  for (const { record, outcomes } of strays.values()) {
+    const chosen = [...outcomes].sort((a, b) => rank(a) - rank(b))[0]!;
+    records.push({ ...record, disposition: chosen.disposition, gap: chosen.gap });
   }
   cells.sort(
     (a, b) =>

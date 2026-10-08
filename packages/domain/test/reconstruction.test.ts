@@ -1336,3 +1336,70 @@ describe("signs", () => {
     expect(cell(state).gaps).toContain("leg_sign_unknown");
   });
 });
+
+describe("placement before holds", () => {
+  test("an own transfer dated after the window is outside it, not held", () => {
+    const state = run({
+      set: eventSet([
+        rev({
+          kind: "transfer",
+          times: [on("2026-04-20")],
+          legs: [
+            leg({ quantity: q("JPY", "100") }),
+            leg({ legIndex: 1, accountId: B, role: "increase", quantity: q("JPY", "100") }),
+          ],
+        }),
+      ]),
+      request: { accountIds: [A, B] },
+      start: side(START_DATE, [balance(), balance({ ref: "balance:test:b", accountId: B })]),
+      end: side(END_DATE, [
+        endBalance("10000"),
+        endBalance("10000", { ref: "balance:test:b-end", accountId: B }),
+      ]),
+    });
+    for (const accountId of [A, B]) {
+      expect(cell(state, accountId).gaps).toEqual([]);
+      expect(cell(state, accountId).explanation.status).toBe("reconciled");
+    }
+    expect(disposition(state, "event:test:1@1#0")).toBe("outside_range");
+  });
+
+  test("an unmapped state dated before the window is outside it", () => {
+    const state = run({
+      set: eventSet([
+        rev({
+          kind: "charge",
+          state: "issued",
+          times: [on("2025-01-01")],
+          legs: [leg({ quantity: q("JPY", "1") })],
+        }),
+      ]),
+    });
+    expect(disposition(state, "event:test:1@1#0")).toBe("outside_range");
+    expect(cell(state).partition).toBe("complete");
+  });
+
+  test("a movement no account resolves, dated before the window, blocks nothing", () => {
+    const state = run({
+      set: eventSet([
+        rev({
+          times: [on("2025-01-01")],
+          legs: [leg({ accountId: null, quantity: q("JPY", "1") })],
+        }),
+      ]),
+    });
+    expect(cell(state).gaps).toEqual([]);
+    expect(disposition(state, "event:test:1@1#0")).toBe("outside_range");
+  });
+
+  test("chain, knowledge and adapter blocks do not depend on the date", () => {
+    const flagged = run({
+      set: eventSet([debit("event:test:1", "1", "2025-01-01", { flags: ["writer_unsupported"] })]),
+    });
+    expect(cell(flagged).gaps).toContain("writer_unsupported");
+    const unlogged = run({
+      set: eventSet([debit("event:test:1", "1", "2025-01-01", { commit: null })]),
+    });
+    expect(cell(unlogged).gaps).toContain("knowledge_unlogged");
+  });
+});
