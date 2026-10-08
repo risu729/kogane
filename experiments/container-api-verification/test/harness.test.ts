@@ -8,6 +8,9 @@ import {
   chmodSync,
   statSync,
   linkSync,
+  openSync,
+  closeSync,
+  constants,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -478,7 +481,12 @@ test("driver records use private owned directories, exclusive600 files and bound
     chmodSync(path, 0o644);
     expect(() => readRecord(temp, name)).toThrow("verification_record");
     chmodSync(path, 0o600);
-    writeFileSync(path, "x".repeat(1025));
+    const oversizedFd = openSync(path, constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+    try {
+      writeFileSync(oversizedFd, "x".repeat(1025));
+    } finally {
+      closeSync(oversizedFd);
+    }
     expect(() => readRecord(temp, name)).toThrow("verification_record");
     rmSync(path);
     const target = resolve(temp, "target");
