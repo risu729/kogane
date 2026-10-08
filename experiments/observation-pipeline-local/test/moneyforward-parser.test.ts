@@ -376,6 +376,77 @@ describe("moneyforward Layer B parsers", () => {
     store.db.close();
   });
 
+  test("validates both calendar edges and lets a later empty snapshot supersede only its month", () => {
+    const withEdges = (
+      selected: string,
+      neighbors: readonly string[],
+      occurrences = 1,
+    ): Uint8Array =>
+      new TextEncoder().encode(
+        [
+          tooltip(selected, occurrences),
+          ...neighbors.map((date) => tooltip(date).replace(' id="calendar"', "")),
+        ].join(""),
+      );
+    const dates = (rows: { as_of: string | null }[]): (string | null)[] =>
+      rows.map((row) => row.as_of).sort();
+    const februaryKey = "account-01-month-2099-02.html";
+    const decemberKey = "account-01-month-2099-12.html";
+    const february = withEdges("2099-02-03", ["2099-01-31", "2099-03-01"], 2);
+    const december = withEdges("2099-12-15", ["2099-11-30", "2100-01-04"]);
+    expect(
+      moneyForwardMonthlyTransactions
+        .parse(february, meta({ artifactKey: februaryKey }))
+        .observations.map((row) => row.asOf),
+    ).toEqual(["2099-02-03", "2099-02-03"]);
+    expect(
+      moneyForwardMonthlyTransactions
+        .parse(december, meta({ artifactKey: decemberKey }))
+        .observations.map((row) => row.asOf),
+    ).toEqual(["2099-12-15"]);
+    const invalidNeighbor = new TextEncoder().encode(
+      tooltip("2099-02-04") +
+        tooltip("2099-03-02").replace(' id="calendar"', "").replace("-123", "unsigned"),
+    );
+    expect(() =>
+      moneyForwardMonthlyTransactions.parse(invalidNeighbor, meta({ artifactKey: februaryKey })),
+    ).toThrow(/signed JPY/u);
+
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-edges-")));
+    upsertSource(store, {
+      id: "moneyforward-me",
+      provider: "MoneyForward ME",
+      ingestion: "collector-r2",
+    });
+    addSnapshot(store, "february-complete", "2099-04-01T00:00:00.000Z", february, februaryKey);
+    addSnapshot(
+      store,
+      "february-invalid-neighbor",
+      "2099-04-02T00:00:00.000Z",
+      invalidNeighbor,
+      februaryKey,
+    );
+    addSnapshot(store, "december-complete", "2099-04-03T00:00:00.000Z", december, decemberKey);
+    expect(runParsers(store).errors).toBe(1);
+    expect(dates(currentTransactions(store))).toEqual(["2099-02-03", "2099-02-03", "2099-12-15"]);
+
+    addSnapshot(
+      store,
+      "december-empty",
+      "2099-04-04T00:00:00.000Z",
+      fixture("account-01-month-2099-03-empty.html"),
+      decemberKey,
+    );
+    expect(runParsers(store).errors).toBe(1);
+    expect(dates(currentTransactions(store))).toEqual(["2099-02-03", "2099-02-03"]);
+
+    addSnapshot(store, "december-restored", "2099-04-05T00:00:00.000Z", december, decemberKey);
+    expect(runParsers(store).errors).toBe(1);
+    expect(dates(currentTransactions(store))).toEqual(["2099-02-03", "2099-02-03", "2099-12-15"]);
+    expect(currentTransactions(store).every((row) => row.amount_minor === "-123")).toBe(true);
+    store.db.close();
+  });
+
   test("allows whitespace around fixed template operators but never inside amount digits", () => {
     const original = tooltip("2099-02-03");
     const valid = new TextEncoder().encode(original.replace("-123", `' + "" + '-123' + '`));
