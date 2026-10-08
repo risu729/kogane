@@ -19,7 +19,7 @@ are separate claims. Historical acceptance records are linked from the
 | Identity             | Source-local identities, mappings and append-only decisions                                                                                                     | Cross-source account/instrument equivalence and unresolved identities still need review                                    |
 | Card flows           | Vpass/MyJCB single-payment purchase/refund recognition, pending-to-posted review, statement/debit review with SMBC and SBI Shinsei adapters                     | Full source coverage, installments/revolving/bonus rows, partial payments and refund allocation are incomplete             |
 | State                | Provider-reported balances, holdings, valuations and card payables on a date; a pure reconstruction fold with no read path yet                                  | Full event-reconstructed balances/positions and all liabilities are incomplete                                             |
-| Rewards              | Bucket/quantity/observed-expiry display, claim/read projections and pure simulation components                                                                  | Useful forecasts need actual activity, verified rules, membership and applicable offers; no external exchange is performed |
+| Rewards              | Bucket/quantity display; displayed and computed expiry apart with basis or closed reason; claim/read projections; pure simulation components                    | Useful forecasts need actual activity, verified rules, membership and applicable offers; no external exchange is performed |
 | Valuation/reports    | Provider price claims, pure valuation components, fixed report artifacts and as-of price/FX selection under an explicit policy                                  | No adopted selection policy, no general external price/FX acquisition or complete portfolio valuation product              |
 | Cost basis/P&L/tax   | Typed input/policy gates, decomposition components and a pure lot engine over provisional inputs                                                                | `costBasis()` always returns `needs-policy`; no adapter feeds lots; transfers, persistence, P&L and tax are absent         |
 | AI/MCP               | Shared query/explanation/proposal service and `/mcp` transport exist                                                                                            | Agent grants are empty; maintenance has no MCP tool; client access is not established by having an adapter                 |
@@ -85,7 +85,7 @@ are separate claims. Historical acceptance records are linked from the
 The committed [App config](../services/app/wrangler.jsonc) and
 [Processor config](../services/processor/wrangler.jsonc) enable their existing
 boolean feature flags, including scheduling, operations, purchase recognition,
-rewards, reports and READ projections. CORE migrations reach 0066; READ reaches 0002. These are repository facts, not live database/deployment readback.
+rewards, reports and READ projections. CORE migrations reach 0066; READ reaches 0003. These are repository facts, not live database/deployment readback.
 
 App names a human operator in `OPERATOR_SUBJECTS`. `AGENT_GRANTS` and
 `AGENT_API_GRANTS` remain empty. The MCP handler requires an agent-API grant

@@ -43,8 +43,8 @@ Two consequences, and both are rules rather than preferences:
 
 ## The schema
 
-`packages/storage-d1/migrations/read/0001_read_baseline.sql` and
-`0002_reward_read.sql`, generated into
+`packages/storage-d1/migrations/read/0001_read_baseline.sql`,
+`0002_reward_read.sql` and `0003_reward_expiry_basis.sql`, generated into
 [`infra/schema/read-ledger.md`](../infra/schema/read-ledger.md). Every table is
 `STRICT`; no foreign key names a CORE table; the mutable tables are mutable on
 purpose, because a rebuildable database gains nothing from append-only guards

@@ -14,6 +14,12 @@
       "statementCount": 34,
       "insertStatements": [],
       "sha256": "402b9a0a3cd7e45be98abd0579760ccbf89e88922366222510389f6a34c7dec4"
+    },
+    {
+      "file": "0003_reward_expiry_basis.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "0f863f9ba99081a8938bd21415abe3bfed332a9fb82dde27aaab73e0d8274bd4"
     }
   ],
   "tables": [
@@ -1147,6 +1153,13 @@
           "notNull": true,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "expiry_basis_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -1207,7 +1220,7 @@
         "reward_expiry_estimates_sealed_no_delete"
       ],
       "appendOnly": true,
-      "sqlSha256": "d71fc8dbe5746503"
+      "sqlSha256": "ce6f6c40b61c3a6b"
     },
     {
       "name": "reward_expiry_snapshots",
@@ -2217,6 +2230,6 @@
     "nonStrictTables": [],
     "withoutRowidTables": [],
     "migrationsWithInserts": [],
-    "schemaSha256": "75c2db1b78a8e251cdd1084222b653dcf97e40dcf0906987a498f5bdf19f5e15"
+    "schemaSha256": "dbd72fae1db4e1fb4229b7b84c312ff63522e1581449c9a138d96b3c706b8574"
   }
 }
