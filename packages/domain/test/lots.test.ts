@@ -1182,3 +1182,31 @@ describe("review finding 6: a split scales what is left, not what was consumed",
     expect(amountText(lot!.remainingCost)).toBe("300 JPY");
   });
 });
+
+describe("review finding 7: the manifest fixes the inputs, not only their refs", () => {
+  test("the same ref with a different quantity is a different manifest digest", async () => {
+    const ten = computed(computeLots([buy("a", "2030-01-06", "10", "1000")], policy()));
+    const twenty = computed(computeLots([buy("a", "2030-01-06", "20", "1000")], policy()));
+    expect(ten.manifest.refs).toEqual(twenty.manifest.refs);
+    expect(await canonicalDigest(ten.manifest)).not.toBe(await canonicalDigest(twenty.manifest));
+  });
+
+  test("manifest inputs are sorted by book and ref and do not alias the caller's objects", () => {
+    const inputs = [
+      buy("b", "2030-01-07", "10", "1000"),
+      buy("c", "2030-01-06", "1", "1", { wrapperKey: "wrapper:test:a-first" }),
+      buy("a", "2030-01-08", "10", "1000"),
+    ];
+    const pinned = policy();
+    const result = computed(computeLots(inputs, pinned));
+    expect(result.manifest.inputs.map((item) => lotInputRefText(item.ref))).toEqual([
+      ref("c"),
+      ref("a"),
+      ref("b"),
+    ]);
+    expect(result.manifest.inputs[1]).toEqual(inputs[2]!);
+    expect(result.manifest.inputs[1]).not.toBe(inputs[2]!);
+    expect(result.manifest.policy).toEqual(pinned);
+    expect(result.manifest.policy).not.toBe(pinned);
+  });
+});

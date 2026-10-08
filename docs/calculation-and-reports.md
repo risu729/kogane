@@ -241,7 +241,8 @@ What it does today:
   (`unsupported_instrument`).
 - Results carry allocations, allocated cost, proceeds and disposal fees side
   by side with closed reason codes, remaining lots with a reserved `lineage`,
-  and a manifest the caller digests with `canonicalDigest`. There is no gain
+  and a manifest holding the policy and the validated inputs, which the
+  caller digests with `canonicalDigest`. There is no gain
   and no tax conclusion.
 
 Limits: no adapter maps events or observations to these inputs, so the

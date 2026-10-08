@@ -184,7 +184,8 @@ specific-identification`), scope, time basis, ordering rule, fee and FX
   never zero, and costs in different units are never summed.
 - Output: disposals with allocations, allocated cost, proceeds and disposal
   fees, outcome `allocated | limited | indeterminate`; remaining lots with a
-  `lineage`; a manifest for `canonicalDigest`. No gain, no tax conclusion. No
+  `lineage`; a manifest of policy, refs and the validated inputs for
+  `canonicalDigest`, so equal digests mean equal results. No gain, no tax conclusion. No
   adapter produces these inputs yet ([ADR 0051](adr/0051-provisional-lot-engine.md)).
 
 ## `result.ts` — the shape UI and agents share

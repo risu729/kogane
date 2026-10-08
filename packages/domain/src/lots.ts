@@ -372,13 +372,19 @@ export type LotBook =
       refs: string[];
     };
 
-/** What the result was computed from. The caller digests it with `canonicalDigest`. */
+/**
+ * What the result was computed from. The caller digests it with
+ * `canonicalDigest`; because it holds the validated inputs themselves, equal
+ * digests mean equal inputs, policy and engine, and so an equal result.
+ */
 export interface LotManifest {
   contract: typeof LOT_INPUT_CONTRACT;
   engineVersion: typeof LOT_ENGINE_VERSION;
   policy: LotPolicy;
   /** Sorted, distinct ref texts of every input. */
   refs: string[];
+  /** Every input, copied, sorted by holder, instrument, wrapper key and ref. */
+  inputs: LotInput[];
 }
 
 export type LotResult =
@@ -1370,6 +1376,21 @@ function computeBook(
 // ---------------------------------------------------------------------------
 // Entry point
 
+function bookKeyOf(input: LotInput): string[] {
+  return [input.holderRef, input.instrumentRef, input.wrapperKey];
+}
+
+function compareTuples(a: readonly string[], b: readonly string[]): number {
+  for (let index = 0; index < Math.min(a.length, b.length); index += 1)
+    if (a[index] !== b[index]) return a[index]! < b[index]! ? -1 : 1;
+  return a.length - b.length;
+}
+
+/** A deep copy of a validated, JSON-shaped value, so results never alias the caller's objects. */
+function plainCopy<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function refused(reasonCode: LotRefusalCode, refs: Iterable<string>): LotResult {
   return {
     status: "refused",
@@ -1437,8 +1458,7 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
   }
   const books = new Map<string, Entry[]>();
   for (const entry of entries) {
-    const { holderRef, instrumentRef, wrapperKey } = entry.input;
-    const key = JSON.stringify([holderRef, instrumentRef, wrapperKey]);
+    const key = JSON.stringify(bookKeyOf(entry.input));
     books.set(key, [...(books.get(key) ?? []), entry]);
   }
   for (const book of books.values()) {
@@ -1487,9 +1507,10 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
   if (reparsed.length > 0) return refused("same_observation_parse_runs", reparsed);
 
   const results: LotBook[] = [];
-  const keys = [...books.keys()].sort();
-  for (const key of keys) {
-    const book = books.get(key)!;
+  const ordered = [...books.values()].sort((a, b) =>
+    compareTuples(bookKeyOf(a[0]!.input), bookKeyOf(b[0]!.input)),
+  );
+  for (const book of ordered) {
     const { holderRef, instrumentRef, wrapperKey, instrumentClass } = book[0]!.input;
     const head = { holderRef, instrumentRef, wrapperKey, instrumentClass };
     if (!isSupportedClass(instrumentClass)) {
@@ -1533,8 +1554,12 @@ export function computeLots(inputs: readonly LotInput[], policy: LotPolicy | nul
     manifest: {
       contract: LOT_INPUT_CONTRACT,
       engineVersion: LOT_ENGINE_VERSION,
-      policy,
+      policy: plainCopy(policy),
       refs: [...new Set(entries.map(({ ref }) => ref))].sort(),
+      inputs: entries
+        .map((entry) => ({ key: [...bookKeyOf(entry.input), entry.ref], input: entry.input }))
+        .sort((a, b) => compareTuples(a.key, b.key))
+        .map(({ input }) => plainCopy(input)),
     },
     partition: partitionOf(results),
     books: results,

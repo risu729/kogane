@@ -119,9 +119,11 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   proceeds and disposal fees side by side, an outcome
   (`allocated | limited | indeterminate`) and closed reason codes; remaining
   lots with a `lineage` (origin ref, origin acquisition time, origin cost unit,
-  `fragmentOf`, splits). A manifest of the sorted refs, the policy, the
-  contract and the engine version is returned for the caller to digest with
-  `canonicalDigest`. There is no realized gain and no tax conclusion.
+  `fragmentOf`, splits). A manifest of the contract, the engine version, the
+  policy, the sorted refs and the validated inputs themselves (copied, sorted
+  by book and ref) is returned for the caller to digest with
+  `canonicalDigest`. The manifest therefore fixes the inputs: equal digests
+  mean equal inputs, policy and engine, and so an equal result. There is no realized gain and no tax conclusion.
 
 ## Consequences
 
@@ -157,7 +159,7 @@ code before this decision (external advice: adopted / changed / deferred):
 | Tax purpose refused without verified rules                                                     | Adopted  | `tax_rules_unverified` through the unchanged `costBasis()`                                                                             |
 | No synthetic short; no automatic reassignment of a stale selection                             | Adopted  | `negative_holding`, `lot_selection_mismatch`, `unknown_lot`                                                                            |
 | Unknown snapshot boundary is indeterminate; a filled gap is recomputed                         | Adopted  | `unknown_time` on the policy's basis; a new run over new inputs                                                                        |
-| Adapter from the common knowledge selector; manifest pins of identity, coverage and FX sources | Deferred | A later PR; this manifest pins refs, policy, contract and engine version only                                                          |
+| Adapter from the common knowledge selector; manifest pins of identity, coverage and FX sources | Deferred | A later PR; this manifest pins the inputs, refs, policy, contract and engine version only                                              |
 
 ## Verification
 
