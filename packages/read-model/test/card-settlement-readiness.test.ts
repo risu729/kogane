@@ -17,7 +17,10 @@ import { createHash } from "node:crypto";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { aliasClassText } from "../../domain/src/economic-contract";
 import { declaredAliasClass } from "../../domain/src/row-identity";
-import { cardSettlementReadinessCtes } from "../src/card-settlement-readiness";
+import {
+  CARD_SETTLEMENT_KEY_AVAILABLE_SQL,
+  cardSettlementReadinessCtes,
+} from "../src/card-settlement-readiness";
 import {
   LEGACY_CARD_SETTLEMENT_READINESS_CTES,
   LEGACY_CARD_SETTLEMENT_READINESS_CTES_SHA256,
@@ -451,6 +454,25 @@ describe("claim_available on random stores (ADR 0054, G1b)", () => {
       );
     });
     expect(caught).toBe(true);
+  });
+
+  test("the key half a plan reads alone equals the CTEs' key terms and searches by key only", () => {
+    const { db } = store(1);
+    const steps = explain(db, CARD_SETTLEMENT_KEY_AVAILABLE_SQL, ["cs_missing"]);
+    expect(
+      steps
+        .filter((step) => step.detail.startsWith("SCAN ") && !step.detail.includes("VIRTUAL TABLE"))
+        .map((step) => step.detail),
+    ).toEqual([]);
+    for (const id of ids(db)) {
+      const [found] = all(db, CARD_SETTLEMENT_KEY_AVAILABLE_SQL, [id]) as {
+        key_available: number;
+      }[];
+      const causes = claimCauses(db, id).filter(
+        (cause) => cause !== "claim_available=0: alias class only",
+      );
+      expect(found!.key_available).toBe(causes.length === 0 ? 1 : 0);
+    }
   });
 
   test("its plan reads holders by key, alias class and candidate only, without table statistics", () => {

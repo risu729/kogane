@@ -149,6 +149,21 @@ export async function cardSettlementPlan(
       key?.key_available === 1 ? "alias_conflict" : "economic_claim_held",
     ]);
   }
+  if (withdraw) {
+    // A withdrawal releases the debit's key (CORE 0070). Another live holder
+    // of it is a double holder the release would wash, which the commit row
+    // refuses (economic_claim_conflict_unresolved) and only a reviewed
+    // resolution naming every holder may settle: refuse it here already. The
+    // same key half of claim_available, by the candidate's id and its key.
+    const key = await store.first<{ key_available: number }>(CARD_SETTLEMENT_KEY_AVAILABLE_SQL, [
+      proposalId,
+    ]);
+    if (key?.key_available !== 1)
+      return commandError("needs_scope_resolution", [
+        subjectRef,
+        "economic_claim_conflict_unresolved",
+      ]);
+  }
   const eventId = await cardSettlementEventId(proposalId, withdraw, row.event_id);
   const target: PlanTarget = {
     subjectRef,

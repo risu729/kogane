@@ -227,6 +227,20 @@ describe("card settlement plan pins server facts", () => {
         targets: [{ proposedTargetRef: "withdrawn" }],
       },
     });
+    // Another live holder of the key: the release would wash a double holder (ADR 0054).
+    expect(
+      await resolveAndSimulate(
+        store({ ...row, status: "accepted", revision: 1, event_id: "settlement-event" }, bankRow, {
+          key_available: 0,
+        }),
+        "card-settlement.withdraw",
+        payload,
+      ),
+    ).toEqual({
+      ok: false,
+      error: "needs_scope_resolution",
+      refs: ["card-settlement:candidate", "economic_claim_conflict_unresolved"],
+    });
     for (const status of ["proposed", "rejected", "withdrawn"])
       expect(
         await resolveAndSimulate(store({ ...row, status }), "card-settlement.withdraw", payload),
