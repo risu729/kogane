@@ -339,6 +339,46 @@ describe("myjcb-skip-payment-schedule: the wrapped empty row (ADR 0005 amendment
       "an element inside the wrapped cell",
       wrappedRow(EMPTY_ITEM_CELL.replace(/>(ご利用明細はございません。)</u, "><span>$1</span><")),
     ],
+    [
+      "a wrapper around the cell's parent without the item-cell class",
+      wrappedRow(EMPTY_ITEM_CELL.replace('<div class="item-cell">', "<div>")),
+    ],
+    [
+      "an item-cell with a second element child, wrapped",
+      wrappedRow(EMPTY_ITEM_CELL.replace("</div></div>", "</div><span></span></div>")),
+    ],
+    [
+      "an item-cell with two empty cells, wrapped",
+      wrappedRow(
+        EMPTY_ITEM_CELL.replace(
+          "</div></div>",
+          '</div><div class="cell w-100per">ご利用明細はございません。</div></div>',
+        ),
+      ),
+    ],
+    [
+      "text in the row after the wrapper",
+      `<div class="content"><div>${EMPTY_ITEM_CELL}</div>x</div>`,
+    ],
+    // Since 0.1.2 the unwrapped row is held to the same levels: nothing but
+    // the label in the row and its `item-cell`, and no element in the cell.
+    [
+      "text in the unwrapped row beside the item-cell",
+      `<div class="content">x${EMPTY_ITEM_CELL}</div>`,
+    ],
+    [
+      "an amount in the unwrapped row beside the item-cell",
+      `<div class="content">${EMPTY_ITEM_CELL}12,000円</div>`,
+    ],
+    [
+      "text in the unwrapped item-cell beside the cell",
+      `<div class="content">${EMPTY_ITEM_CELL.replace('<div class="item-cell">', '<div class="item-cell">x')}</div>`,
+    ],
+    [
+      "an element inside the unwrapped cell",
+      EMPTY_ROW.replace(/>(ご利用明細はございません。)</u, "><span>$1</span><"),
+    ],
+    ["a line break inside the unwrapped cell", EMPTY_ROW.replace("明細は", "明細は<br>")],
     // Every observed level is a `div`; any other element is a row, in the
     // wrapped shape and, since 0.1.2, in the unwrapped one too.
     ["a span wrapper", `<div class="content"><span>${EMPTY_ITEM_CELL}</span></div>`],

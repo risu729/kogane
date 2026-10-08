@@ -19,7 +19,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "packages/domain/src/myjcb-schedule-page-kind.ts":
       "89fba9fd5860dbabc0c1e15e97a5318bb69e8d0ecd6409c504e7c73d25e0f3d1",
     "packages/domain/src/myjcb-skip-payment-schedule.ts":
-      "feac7cd8ebcf9da64e2232289e3708e787437710b8354c32a07a18967b89b5dd",
+      "73f68bde3baede21b9c3826eb1c42c04fc315d684e927aec0bf28932e6548d48",
     "packages/domain/src/myjcb-statement-heading.ts":
       "cc3b16e3df6274bb2cbaf86275a30ec2fa836fc8160052115a2ee5b1b12248ca",
     "packages/domain/src/myjcb-statement-page.ts":
@@ -51,7 +51,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
       "00f80782d205b967c6c7d9719d18b7800a0ff9b0a6dd992b0991cd840a564815",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
-      "e6facde93543fdb6896f09b2720d3c3021cdebf6ac7d56bb0bacdbe8ebf4e2e9",
+      "7c0f8cef804522f0cc19902aceacc64dd017c65a917575de55b81618c8fd4c69",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
       "7d5429e4af80b8dd56ef66a6133a629bd39f7c14c0006a8591b99b28fe7e9c22",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
@@ -205,7 +205,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-canonical-evidence-boundary": {
       version: "1.1.6",
-      codeDigest: "054ea649851a86e77a7257e9e4d61b8020f34fcd5b3725d53271c03be10afdff",
+      codeDigest: "80d1d6d70a7e73bb63eaba384da6d6f3ee9b806399bb2ce235bd50aa07b6ce72",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -226,7 +226,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-credit-ledger": {
       version: "1.2.3",
-      codeDigest: "054ea649851a86e77a7257e9e4d61b8020f34fcd5b3725d53271c03be10afdff",
+      codeDigest: "80d1d6d70a7e73bb63eaba384da6d6f3ee9b806399bb2ce235bd50aa07b6ce72",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -247,7 +247,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-credit-past-month-balances": {
       version: "1.1.6",
-      codeDigest: "054ea649851a86e77a7257e9e4d61b8020f34fcd5b3725d53271c03be10afdff",
+      codeDigest: "80d1d6d70a7e73bb63eaba384da6d6f3ee9b806399bb2ce235bd50aa07b6ce72",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -268,7 +268,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-credit-statement-total": {
       version: "1.4.1",
-      codeDigest: "054ea649851a86e77a7257e9e4d61b8020f34fcd5b3725d53271c03be10afdff",
+      codeDigest: "80d1d6d70a7e73bb63eaba384da6d6f3ee9b806399bb2ce235bd50aa07b6ce72",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -289,7 +289,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-skip-payment-schedule": {
       version: "0.1.2",
-      codeDigest: "badbe7ad62645e47bd588919e50382bf4d08f2bb9a4bd20e523b8a4e7a3dcb6e",
+      codeDigest: "47b732b9ddfbeab03214e516b31b754f11b0a599db797683034931cf0b9d3e47",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

@@ -22,7 +22,8 @@
 // other row is a mix nobody has observed and is refused (ADR 0005
 // amendment f). A later stored page shows that `item-cell` inside exactly one
 // more `div` carrying none of this reader's classes; that row is the same
-// empty row, under the same rule (amendment k). A data row is read only
+// empty row, under the same rule (amendment k). In either shape every level
+// is a `div` showing nothing but the label. A data row is read only
 // unwrapped.
 //
 // The input is a parse5 document; only the structural fields are named here,
@@ -263,39 +264,45 @@ const READER_CLASSES = ["detail-list-01", "head", "content", "item-cell", "cell"
  * - its only element child an `item-cell` showing the empty label
  *   (`isEmptyItemCell`, amendment f);
  * - its only element child a `div` carrying none of `READER_CLASSES`, whose
- *   only element child is an `item-cell` showing the empty label, the cell
- *   itself with no element child, and the row, the wrapper and the
- *   `item-cell` each showing exactly `EMPTY_LEDGER_LABEL` (amendment k). A
- *   second wrapper, a wrapper with any other element child or text, or a
- *   wrapper around anything else is a row.
+ *   only element child is such an `item-cell` (amendment k). A second
+ *   wrapper, a wrapper with any other element child, or a wrapper around
+ *   anything else is a row.
  *
- * Any other element in place of a `div` is a row (since amendment k; before
- * it, the row and the `item-cell` could be any element).
+ * In both shapes the row, the wrapper and the `item-cell` each show exactly
+ * `EMPTY_LEDGER_LABEL` after whitespace removal: text beside the cell at any
+ * level is a row. Any other element in place of a `div` is a row. Both are
+ * since amendment k; before it, the unwrapped row and its `item-cell` could
+ * be any element and hold text beside the cell, and the cell could hold
+ * elements.
  */
 function isEmptyLedgerRow(row: SchedulePageNode): boolean {
   const rowChildren = children(row);
   if (row.tagName !== "div" || rowChildren.length !== 1) return false;
   const child = rowChildren[0]!;
-  if (hasClass(child, "item-cell")) return isEmptyItemCell(child);
-  const wrapped = children(child);
-  if (
-    child.tagName !== "div" ||
-    READER_CLASSES.some((name) => hasClass(child, name)) ||
-    wrapped.length !== 1
-  )
-    return false;
-  const itemCell = wrapped[0]!;
-  if (!hasClass(itemCell, "item-cell") || !isEmptyItemCell(itemCell)) return false;
-  const cell = children(itemCell)[0]!;
+  const levels = [row, child];
+  let itemCell = child;
+  if (!hasClass(child, "item-cell")) {
+    const wrapped = children(child);
+    if (
+      child.tagName !== "div" ||
+      READER_CLASSES.some((name) => hasClass(child, name)) ||
+      wrapped.length !== 1
+    )
+      return false;
+    itemCell = wrapped[0]!;
+    levels.push(itemCell);
+  }
   return (
-    children(cell).length === 0 &&
-    [row, child, itemCell].every((level) => compact(text(level)) === EMPTY_LEDGER_LABEL)
+    hasClass(itemCell, "item-cell") &&
+    isEmptyItemCell(itemCell) &&
+    levels.every((level) => compact(text(level)) === EMPTY_LEDGER_LABEL)
   );
 }
 
 /**
  * The empty row's `item-cell`: a `div` whose only element child is one
- * `div.cell.w-100per` showing exactly `EMPTY_LEDGER_LABEL`.
+ * `div.cell.w-100per` with no element child, showing exactly
+ * `EMPTY_LEDGER_LABEL`.
  */
 function isEmptyItemCell(itemCell: SchedulePageNode): boolean {
   const cells = children(itemCell);
@@ -305,6 +312,7 @@ function isEmptyItemCell(itemCell: SchedulePageNode): boolean {
     cells[0]!.tagName === "div" &&
     hasClass(cells[0]!, "cell") &&
     hasClass(cells[0]!, "w-100per") &&
+    children(cells[0]!).length === 0 &&
     compact(text(cells[0]!)) === EMPTY_LEDGER_LABEL
   );
 }

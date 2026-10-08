@@ -2115,18 +2115,20 @@ provider class name was shared, and none is recorded here.
 
 - `isEmptyLedgerRow` accepts two shapes. The amendment (f) shape: the
   row's only element child an `item-cell` whose only element child is one
-  `div.cell.w-100per` showing exactly the label (`isEmptyItemCell`). The
-  amendment (k) shape: the row's only element child is a `div` carrying none
-  of `READER_CLASSES`; its only element child is an `item-cell` that
-  `isEmptyItemCell` accepts; that cell has no element child; and the row,
-  the wrapper and the `item-cell` each show exactly the label after
-  whitespace removal (the cell is checked by `isEmptyItemCell`).
+  `div.cell.w-100per` with no element child, showing exactly the label
+  (`isEmptyItemCell`). The amendment (k) shape: the row's only element
+  child is a `div` carrying none of `READER_CLASSES`, whose only element
+  child is an `item-cell` that `isEmptyItemCell` accepts. In both shapes
+  the row, the wrapper (when there is one) and the `item-cell` each show
+  exactly the label after whitespace removal (the cell is checked by
+  `isEmptyItemCell`).
 - Both shapes are `div`s at every level, as both were observed: the row
   (`div.content`), the wrapper, the `item-cell` and the cell. Any other
   element in their place is a row. For the amendment (f) shape this narrows
   0.1.1, which required only the cell to be a `div` and took any element
-  as the row and the `item-cell`; that difference is in shapes nobody has
-  observed.
+  as the row and the `item-cell`, text beside the cell in the row or the
+  `item-cell`, and elements inside the cell; that difference is in shapes
+  nobody has observed.
 - `ledgerRows` is unchanged: the empty row, in either shape, is zero rows
   only when it is its ledger's one `content` row. Beside any other row,
   twice, or beside the other shape, each is a row and the page is refused
@@ -2135,13 +2137,15 @@ provider class name was shared, and none is recorded here.
   element other than a `div` at any level of either shape (a `span.content`
   row, a `span`, `section` or `p` wrapper, a `span.item-cell`, a
   `span.cell`); a wrapper that carries any of the reader's classes or has
-  another element child; text anywhere beside the label; another label; an
-  element inside the cell; and a wrapper around a data row. A data row is
+  another element child; in either shape, text anywhere beside the label,
+  another label, and an element inside the cell; and a wrapper around a
+  data row. A data row is
   read exactly as before: the row's only element child is one `item-cell` of
   three `cell`s.
 - The refusal codes are unchanged; there is no new code.
 - `myjcb-skip-payment-schedule@0.1.2`. Every page 0.1.1 read whose empty
-  row is `div`s, it reads the same, and every observation it writes is
+  row is `div`s showing nothing but the label, with no element in the cell,
+  it reads the same, and every observation it writes is
   0.1.1's (and 0.1.0's).
 - `myjcb-credit-ledger@1.2.3`, `myjcb-credit-past-month-balances@1.1.6`,
   `myjcb-credit-statement-total@1.4.1` and
@@ -2206,6 +2210,14 @@ provider class name was shared, and none is recorded here.
   the observed `div` shapes, wrapped and unwrapped, read as zero rows.
   Without the `div` checks on the row and the `item-cell`, the `span.content`
   and `span.item-cell` cases fail.
+- The same file, the level cases: text (an invented amount included) in the
+  unwrapped row beside its `item-cell`, text in the unwrapped `item-cell`
+  beside its cell, and an element or a line break inside the unwrapped
+  cell are refused, as in the wrapped shape; so are a wrapper around the
+  cell's parent without the `item-cell` class, an `item-cell` with a second
+  element child or a second cell, and text in the row after the wrapper.
+  Without the level text check, or without the check that the cell has no
+  element child, the matching cases fail.
 - `packages/parsers/test/parser-digests.test.ts`: the digests regenerated
   with `mise run //packages/parsers:digests` change exactly five releases,
   the skip parser (0.1.2) and the four MyJCB statement parsers (one shared
