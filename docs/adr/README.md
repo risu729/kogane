@@ -53,3 +53,4 @@ for current behavior.
 - [ADR 0040: Deploy compatible Workers through prebuilt cf versions](0040-compatible-cf-version-deployment.md)
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — proposed; production verification pending
+- [ADR 0050: Re-survey official maintenance pages as proposals an operator accepts](0050-maintenance-survey-proposals.md) — proposed; no page enabled until the owner confirms it

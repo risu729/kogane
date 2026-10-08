@@ -49,6 +49,7 @@ const ALL_FLAGS = {
   REWARD_READ_PROJECTION_ENABLED: "true",
   REPORTS_ENABLED: "true",
   OPS_DISPATCH_ENABLED: "true",
+  MAINTENANCE_SURVEY_ENABLED: "true",
 };
 const withFlags = (flags: Record<string, string | undefined>) =>
   ({ ...env, ...flags }) as unknown as Env;
@@ -126,6 +127,18 @@ const RESULTS = {
     published: 1,
     outcomes: { "blocked:synthetic_code": 0 },
   },
+  maintenanceSurvey: {
+    targets: 2,
+    due: 2,
+    extracted: 1,
+    failed: 1,
+    windows: 3,
+    unchanged: 2,
+    proposed: 0,
+    reviewPending: 1,
+    known: 0,
+    failures: { timeout: 1, not_a_code: 4 },
+  },
 } satisfies Record<keyof ScheduledStages, object>;
 
 /** Every stage wired, each resolving to its synthetic result and counting its calls. */
@@ -153,11 +166,12 @@ const RECORDED = [
   "purchase_recognition",
   "reward_claims_sweep",
   "price_promotion",
+  "maintenance_survey",
   "operation_dispatch",
   "decision_outbox",
 ];
 
-test("the recorded lanes are exactly the ones that keep no state of their own", () => {
+test("the recorded lanes are exactly the ones whose own records do not say a tick ran", () => {
   expect(Object.keys(LANE_TICK_COUNTS)).toEqual(RECORDED);
   // A lane with its own bookkeeping is not recorded twice.
   for (const lane of [
@@ -192,6 +206,7 @@ test("a tick records one row per recorded lane with exactly the counts its log l
     "reward_read_projection",
     "price_promotion",
     "report_job",
+    "maintenance_survey",
     "operation_dispatch",
     "decision_outbox",
   ]);
@@ -231,6 +246,11 @@ test("a tick records one row per recorded lane with exactly the counts its log l
     waiting: 0,
     blocked: 0,
     published: 1,
+  });
+  // Only the closed failure codes of the survey are kept (ADR 0050).
+  expect(counts["maintenance_survey"]).toEqual({
+    ...RESULTS.maintenanceSurvey,
+    failures: { timeout: 1 },
   });
   const stored = rows.map((row) => row.counts_json).join("\n");
   for (const text of ["reward-promotion-v1", "812", "synthetic_code", "report-synthetic"])
@@ -312,7 +332,14 @@ test("a lane whose flag is off records `skipped-by-flag`, is not run and still l
     "operation_dispatch",
     "decision_outbox",
   ]);
-  for (const stage of ["reconcile", "debitAccounts", "settlements", "purchases", "rewards"])
+  for (const stage of [
+    "reconcile",
+    "debitAccounts",
+    "settlements",
+    "purchases",
+    "rewards",
+    "maintenanceSurvey",
+  ])
     expect(calls[stage]).toBeUndefined();
   const rows = await ticks();
   expect(rows.map((row) => [row.lane, row.outcome])).toEqual([
@@ -323,6 +350,7 @@ test("a lane whose flag is off records `skipped-by-flag`, is not run and still l
     ["purchase_recognition", "skipped-by-flag"],
     ["reward_claims_sweep", "skipped-by-flag"],
     ["price_promotion", "ran"],
+    ["maintenance_survey", "skipped-by-flag"],
     ["operation_dispatch", "skipped-by-flag"],
     ["decision_outbox", "ran"],
   ]);
