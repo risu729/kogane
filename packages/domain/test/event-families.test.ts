@@ -36,6 +36,7 @@ describe("closed codes", () => {
     expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v1");
     expect(TRANSACTION_FAMILIES).toEqual([
       "bank-movement",
+      "stored-value-movement",
       "fx-exchange",
       "overseas-remittance",
       "securities-order",
@@ -136,7 +137,7 @@ describe("registry entries", () => {
         );
         memberships += 1;
       }
-    expect(memberships).toBe(35);
+    expect(memberships).toBe(36);
   });
 
   test("only Vpass/MyJCB card purchases and SMBC/SBI Shinsei card settlement debits have writers", () => {
@@ -315,6 +316,14 @@ describe("lookups", () => {
       "sony-bank/sony-bank-wallet-history",
       "vpass/vpass-statement-page",
     ]);
+    expect(keysOf("stored-value-movement")).toEqual([
+      "mobile-suica/mobile-suica-sf-history",
+      "paypay/paypay-csv",
+      "v-point-pay/v-point-pay-notification-event",
+    ]);
+    // Deposit accounts only: no stored-value parser is a bank-movement source.
+    for (const name of keysOf("stored-value-movement"))
+      expect(keysOf("bank-movement")).not.toContain(name);
     // No parser identifies these rows today.
     expect(keysOf("securities-order")).toEqual([]);
     expect(keysOf("overseas-remittance")).toEqual([]);
@@ -363,6 +372,7 @@ describe("lookups", () => {
  */
 const ACTIVITY_KINDS: Record<TransactionFamily, readonly ActivityMeaning["kind"][]> = {
   "bank-movement": ["cash_movement"],
+  "stored-value-movement": ["cash_movement", "notification"],
   "fx-exchange": ["cash_movement", "card_activity"],
   "overseas-remittance": ["cash_movement"],
   "securities-order": ["trade"],

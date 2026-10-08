@@ -117,7 +117,7 @@ functions alone do not complete this stage.
 | Reward exchanges and stored-value funding          | Request, deduction, arrival, cancellation and return as separate stages |
 
 Limit: only the card purchase and card settlement rows have an event writer
-today. No event is written for bank movements, transfers, FX, remittances,
+today. No event is written for bank or stored-value movements, transfers, FX, remittances,
 securities, crypto, reward exchanges or stored-value funding; the
 transaction-family registry states, per parser, which family its rows belong to
 and the closed reasons no event is written

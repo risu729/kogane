@@ -160,8 +160,8 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
 
 ## `event-families.ts` — which transaction families have an event writer
 
-- `TRANSACTION_FAMILIES` is a closed list of 13 economic-event families
-  (bank movement, FX, remittance, securities order/execution/settlement cash,
+- `TRANSACTION_FAMILIES` is a closed list of 14 economic-event families
+  (deposit-account movement, stored-value movement, FX, remittance, securities order/execution/settlement cash,
   crypto execution and fiat remittance, reward exchange, prepaid funding and
   notification, card purchase, card settlement);
   `FAMILY_UNSUPPORTED_REASONS`, `PROVIDER_LINK_CODES`, `EXTERNAL_ID_BASES` and

@@ -71,16 +71,32 @@ sub-number) also differs per parser and was written down nowhere.
    stored or displayed state and gives the later writers and the contract ADR
    one reviewed statement of the starting point.
 
+Within option 3, where the deposit/stored-value boundary falls:
+
+- **One movement family for deposit and stored-value balances.** Fewer codes,
+  and Suica, PayPay and bank rows are all "money in an account went up or
+  down". But own-transfer pairing (two own accounts, one decrease and one
+  increase) must never pair a stored-value row: a Suica charge is a card
+  purchase or a bank debit on the other side, a fare is spending, and a PayPay
+  card payment does not move the PayPay balance. One family would make every
+  reader filter by source, and a closed list is a contract once something reads
+  it, so splitting later would change what readers already rely on.
+- **A separate `stored-value-movement` family (chosen).** `bank-movement` is
+  deposit accounts only and is what own-transfer pairing reads; Mobile Suica SF,
+  PayPay and V Point Pay balance rows are `stored-value-movement`, with fares
+  and payments as spending from the balance and charges also `prepaid-funding`.
+
 ## Decision
 
 Add `packages/domain/src/event-families.ts`, exported from the package index:
 
-- `TRANSACTION_FAMILIES`, closed: `bank-movement`, `fx-exchange`,
-  `overseas-remittance`, `securities-order`, `securities-execution`,
-  `securities-settlement-cash`, `crypto-execution`, `crypto-fiat-remittance`,
-  `reward-exchange`, `prepaid-funding`, `prepaid-notification`,
-  `card-purchase`, `card-settlement`. `bank-movement` covers deposit and
-  stored-value balances alike.
+- `TRANSACTION_FAMILIES`, closed: `bank-movement`, `stored-value-movement`,
+  `fx-exchange`, `overseas-remittance`, `securities-order`,
+  `securities-execution`, `securities-settlement-cash`, `crypto-execution`,
+  `crypto-fiat-remittance`, `reward-exchange`, `prepaid-funding`,
+  `prepaid-notification`, `card-purchase`, `card-settlement`.
+  `bank-movement` is deposit accounts only; stored-value balances are
+  `stored-value-movement`.
 - `FAMILY_UNSUPPORTED_REASONS`, closed: `no_event_writer`,
   `identity_fingerprint_only`, `identity_evidence_digest`,
   `identity_origin_unrecorded`, `identity_absent`,

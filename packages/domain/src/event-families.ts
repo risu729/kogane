@@ -18,9 +18,13 @@ export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-
 /**
  * The closed list of economic-event families.
  *
- * - `bank-movement`: an increase or decrease of a deposit or stored-value
- *   balance as the row states it (a bank account, a Suica SF balance, a PayPay
- *   balance), whatever caused it. An own-account transfer is two such rows.
+ * - `bank-movement`: an increase or decrease of a deposit account balance as
+ *   the row states it, whatever caused it. An own-account transfer is two such
+ *   rows; own-transfer pairing reads this family only.
+ * - `stored-value-movement`: an increase or decrease of a stored-value balance
+ *   (a Suica SF balance, a PayPay balance, a V Point Pay prepaid balance): a
+ *   fare or payment is spending from it, a charge is funding it (and also
+ *   `prepaid-funding`). Never paired as an own-account transfer leg.
  * - `fx-exchange`: one currency exchanged for another inside one provider.
  * - `overseas-remittance`: money sent to or received from another country.
  * - `securities-order`, `securities-execution`, `securities-settlement-cash`:
@@ -34,6 +38,7 @@ export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-
  */
 export const TRANSACTION_FAMILIES = [
   "bank-movement",
+  "stored-value-movement",
   "fx-exchange",
   "overseas-remittance",
   "securities-order",
@@ -192,6 +197,7 @@ const PENDING: readonly FamilyUnsupportedReason[] = ["no_event_writer", "writer_
 /** The family-level statement. A supported family can still have unsupported sources. */
 export const FAMILY_SUPPORT: Readonly<Record<TransactionFamily, FamilySupport>> = {
   "bank-movement": { writer: "unsupported", reasons: PENDING },
+  "stored-value-movement": { writer: "unsupported", reasons: PENDING },
   "fx-exchange": { writer: "unsupported", reasons: PENDING },
   "overseas-remittance": {
     writer: "unsupported",
@@ -281,7 +287,7 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     statuses: POSTED,
     providerLinks: NO_LINK,
     families: [
-      unsupported("bank-movement", "identity_fingerprint_only"),
+      unsupported("stored-value-movement", "identity_fingerprint_only"),
       unsupported("prepaid-funding", "identity_fingerprint_only", "counterpart_not_stated"),
     ],
   },
@@ -324,7 +330,7 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     statuses: ABSENT,
     providerLinks: ["settlement_amount", "exchange_rate_stated"],
     families: [
-      unsupported("bank-movement", "identity_origin_unrecorded", "semantics_unobserved"),
+      unsupported("stored-value-movement", "identity_origin_unrecorded", "semantics_unobserved"),
       unsupported("prepaid-funding", "identity_origin_unrecorded", "counterpart_not_stated"),
       unsupported("fx-exchange", "identity_origin_unrecorded", "semantics_unobserved"),
     ],
@@ -538,6 +544,7 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     providerLinks: NO_LINK,
     families: [
       unsupported("prepaid-notification", "identity_evidence_digest"),
+      unsupported("stored-value-movement", "identity_evidence_digest", "semantics_unobserved"),
       unsupported(
         "prepaid-funding",
         "identity_evidence_digest",
