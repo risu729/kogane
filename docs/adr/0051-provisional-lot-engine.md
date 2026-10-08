@@ -99,15 +99,18 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   the day `compareTemporal` uses against a date), and the instants of one day
   follow each other by epoch. Two instants are compared by epoch, two dates or
   periods by their day bounds, and an instant against a date or period by
-  `compareTemporal`. A group of more than one input (same date, an instant
+  the instant's own calendar day against the interval's day bounds (the
+  same order `compareTemporal` gives; it is not called during grouping). A group of more than one input (same date, an instant
   inside a dated day, overlapping periods, two instants whose calendar-day
   and epoch orders disagree) is `order_tie`, except same-time acquisitions
   under moving average and same-time disposals under moving average without
   rounding, which commute. A cut after an input is allowed exactly when every
   later input is strictly after every earlier one; with one zone per book
-  that holds when the latest epoch, instant calendar day and date or period
-  end before the cut are below the earliest epoch, instant calendar day and
-  date or period start after it, so the cut is decided from running extremes
+  that holds when, before the cut against after it, the latest instant epoch
+  is earlier than the earliest instant epoch, the latest instant calendar day
+  is before the earliest date or period start, and the latest date or period
+  exclusive end is on or before both the earliest instant calendar day and
+  the earliest date or period start, so the cut is decided from running extremes
   in constant time per input and no comparison window is involved. Two
   rules apply to the whole book: an unknown time is `unknown_time`, and dates
   or periods in two named zones, or an instant in another zone than the
