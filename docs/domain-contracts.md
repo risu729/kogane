@@ -158,6 +158,28 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
   `checkSourceAllocations` (sums never exceed the limit; negative allocations
   rejected).
 
+## `event-families.ts` — which transaction families have an event writer
+
+- `TRANSACTION_FAMILIES` is a closed list of 13 economic-event families
+  (bank movement, FX, remittance, securities order/execution/settlement cash,
+  crypto execution and fiat remittance, reward exchange, prepaid funding and
+  notification, card purchase, card settlement);
+  `FAMILY_UNSUPPORTED_REASONS`, `PROVIDER_LINK_CODES`, `EXTERNAL_ID_BASES` and
+  the recorded origin keys and classes are closed as well.
+- `TRANSACTION_FAMILY_REGISTRY` has one entry per parser whose rows are
+  transactions or positions: observation kinds, the external id basis and the
+  `_kogane` key and stage A class of its recorded origin, the status
+  vocabulary, the provider-stated link fields, and the family memberships with
+  writer status `supported` (card purchases from Vpass/MyJCB, card settlement
+  debits from SMBC/SBI Shinsei) or `unsupported` with closed reasons.
+  `FAMILY_SUPPORT` is the family-level statement.
+- `transactionFamilyEntry`, `transactionFamilyEntries` and
+  `familyUnsupportedReasons` are the pure lookups;
+  `validTransactionFamilyEntry` rejects unknown keys and codes. The registry is
+  a statement about the code, never adoption: nothing reads it to write
+  ([economic events](economic-events.md#non-card-families-unsupported-today),
+  [ADR 0053](adr/0053-transaction-family-registry.md)).
+
 ## `result.ts` — the shape UI and agents share
 
 - `QuerySpec` with the intents of addendum 09 §1 (holdings, reported-state,

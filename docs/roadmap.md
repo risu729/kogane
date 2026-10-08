@@ -116,6 +116,14 @@ functions alone do not complete this stage.
 | Securities orders, executions, settlement and cash | Quantity changes linked to the relevant cash movement                   |
 | Reward exchanges and stored-value funding          | Request, deduction, arrival, cancellation and return as separate stages |
 
+Limit: only the card purchase and card settlement rows have an event writer
+today. No event is written for bank movements, transfers, FX, remittances,
+securities, crypto, reward exchanges or stored-value funding; the
+transaction-family registry states, per parser, which family its rows belong to
+and the closed reasons no event is written
+([economic events](economic-events.md#non-card-families-unsupported-today),
+[ADR 0053](adr/0053-transaction-family-registry.md)).
+
 Connect candidate review, acceptance, rejection and correction to guarded
 commands and the UI. Amount/date proximity stays a proposal; provider evidence
 or an explicit recorded decision establishes adoption. Preserve explanation
