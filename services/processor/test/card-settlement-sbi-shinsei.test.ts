@@ -11,6 +11,7 @@ import type { Miniflare } from "miniflare";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import { sweep } from "../src/worker.ts";
 import { cardSettlementSweep } from "../src/card-settlement-job.ts";
+import { cardSettlementReadinessCtes } from "../../../packages/read-model/src/card-settlement-readiness.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
 import {
   approve,
@@ -438,6 +439,86 @@ test("ownership is still required; an SBI Shinsei debit's identity is refused, a
   expect(
     await count("SELECT count(*) AS n FROM card_bank_debit_facts WHERE adapter='sbi-shinsei-bank'"),
   ).toBe(1);
+}, 60000);
+
+test("an SBI Shinsei acceptance made before G1b still reserves every candidate of its provider id; the G1b withdrawal releases it", async () => {
+  const [sbi] = (
+    await candidates("json_extract(facts_json,'$.ownership')='established-same'")
+  ).filter((row) => bankSource(row) === "sbi-shinsei-bank");
+  const others = (await candidates()).filter(
+    (row) => row.id !== sbi!.id && bankSource(row) === "sbi-shinsei-bank",
+  );
+  expect(others.length).toBeGreaterThan(0);
+  // The acceptance as a build before G1b wrote it: no claim row, no seal, no
+  // commit row; its settlement allocation cites the debit's observation.
+  const decision = (id: string, subject: string) =>
+    db
+      .prepare(
+        `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,created_at)
+ VALUES(?,'relation',?,1,'accept','manual','synthetic-human',NULL,'synthetic pre-guard acceptance','[]',NULL,?)`,
+      )
+      .bind(id, subject, now);
+  await db.batch([
+    decision("dr-legacy-sbi", `card-settlement:${sbi!.id}`),
+    decision("dr-legacy-sbi-event", "event:legacy-sbi-event"),
+    decision("dr-legacy-sbi-allocation", "allocation:legacy-sbi-allocation"),
+    db
+      .prepare(
+        `INSERT INTO economic_event_revisions(event_id,revision,kind,state,unknown_reason,effective_time_json,basis,evidence_support_json,decision_revision_id,created_at)
+ VALUES('legacy-sbi-event',1,'card_settlement','debited',NULL,'{}','cash-movement','["synthetic-evidence"]','dr-legacy-sbi-event',?)`,
+      )
+      .bind(now),
+    db
+      .prepare(
+        `INSERT INTO allocations(id,source_component_ref,target_effect_ref,role,unit_ref,coefficient,scale,decision_revision_id,created_at)
+ SELECT 'legacy-sbi-allocation','transaction:'||bank_observation_id,'event:legacy-sbi-event','settlement','JPY','1200',0,'dr-legacy-sbi-allocation',?
+ FROM card_settlement_candidates WHERE id=?`,
+      )
+      .bind(now, sbi!.id),
+    db
+      .prepare(
+        `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+ VALUES(?,1,'accepted','dr-legacy-sbi','legacy-sbi-event',NULL,'legacy-sbi-allocation',?)`,
+      )
+      .bind(sbi!.id, now),
+  ]);
+  // Every other candidate of the provider id is reserved, by the 0044 view
+  // and by the legacy holder claim_available reads.
+  const claim = async (id: string) =>
+    (await db
+      .prepare(
+        `WITH chosen AS (SELECT ?1 AS id), ${cardSettlementReadinessCtes()} SELECT claim_available FROM readiness`,
+      )
+      .bind(id)
+      .first<{ claim_available: number }>())!.claim_available;
+  for (const other of others) {
+    expect(await readiness(other.id)).toMatchObject({ allocation_available: 0 });
+    expect(await claim(other.id)).toBe(0);
+  }
+  // Withdrawn through the G1b writer: sealed, logged, the key released.
+  const withdrawn = await command("card-settlement.withdraw", {
+    proposalId: sbi!.id,
+    reason: "correspondence judgement corrected",
+  });
+  if (!withdrawn.ok) throw new Error(JSON.stringify(withdrawn));
+  const bankKey = (await db
+    .prepare("SELECT bank_key FROM card_settlement_candidates WHERE id=?")
+    .bind(sbi!.id)
+    .first<{ bank_key: string }>())!.bank_key;
+  expect(
+    await db
+      .prepare(
+        "SELECT kind,released_json FROM economic_commit_log ORDER BY commit_seq DESC LIMIT 1",
+      )
+      .first<Record<string, unknown>>(),
+  ).toEqual({
+    kind: "card-settlement.withdraw",
+    released_json: JSON.stringify([["cash-movement", bankKey]]),
+  });
+  for (const other of others) {
+    expect(await readiness(other.id)).toMatchObject({ allocation_available: 1 });
+    expect(await claim(other.id)).toBe(1);
+  }
 }, 60000);
 
 test("another allocation of the SBI Shinsei provider id blocks its review", async () => {
