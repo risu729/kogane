@@ -167,4 +167,21 @@ describe("collection quality", () => {
     expect((await call(PATH, { schema: false })).status).toBe(404);
     expect(await collectionQualityAvailable(env as Env)).toBe(true);
   });
+
+  // Last: it adds configured jobs to this file's store.
+  it("refuses more jobs than the bound with 413, never a cut answer", async () => {
+    await env.DB.batch(
+      Array.from({ length: 201 }, (_, index) =>
+        env.DB.prepare(
+          `INSERT INTO collection_schedules(id,source,kind,enabled,supported,timezone,pattern_json,updated_at,updated_by)
+           VALUES(?,NULL,'processor',0,1,'UTC','{"kind":"interval","minutes":60}','2099-01-01T00:00:00.000Z','synthetic')`,
+        ).bind(`synthetic-${index}`),
+      ),
+    );
+    const refused = await call(PATH);
+    expect(refused.status).toBe(413);
+    expect(((await refused.json()) as { error: string }).error).toBe("result_limit_exceeded");
+    // One source's cells do not read the jobs and are still served.
+    expect((await call(`${PATH}/sony-bank`)).status).toBe(200);
+  });
 });

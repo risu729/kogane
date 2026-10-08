@@ -263,6 +263,23 @@ describe("the summary", () => {
       CollectionQualityLimitError,
     );
   });
+
+  test("more visible sources than the bound are refused, never cut", async () => {
+    const crowded = new QualityStore();
+    const visible = crowded.all<{ n: number }>("SELECT count(*) AS n FROM observation_sources")[0]!
+      .n;
+    for (let index = visible; index <= 200; index += 1)
+      crowded.db.run(
+        "INSERT INTO sources(id,provider,display_name) VALUES(?,'Synthetic','Synthetic source')",
+        [`synthetic-source-${index}`],
+      );
+    expect(crowded.all<{ n: number }>("SELECT count(*) AS n FROM observation_sources")[0]!.n).toBe(
+      201,
+    );
+    await expect(queryCollectionQualitySummary(executor(crowded))).rejects.toBeInstanceOf(
+      CollectionQualityLimitError,
+    );
+  });
 });
 
 describe("the cells of a source", () => {
