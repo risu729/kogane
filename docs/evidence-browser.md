@@ -126,7 +126,7 @@ the local synthetic snapshot adapter, and the production Worker are told apart b
 they implement, not by what they are called. The full table is in
 [frontend.md](frontend.md#api-metadata-and-capabilities).
 
-Beside the capabilities the production Worker reports two advisory counts,
+Beside the capabilities the production Worker reports two advisory fields,
 neither a capability nor a freshness claim: `parsingHealth` (registered parse
 jobs pending, running or failed) and `globalPassEmptyMonths` (GLOBAL PASS
 months whose current empty capture supersedes an older capture with rows;

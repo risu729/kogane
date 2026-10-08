@@ -395,9 +395,11 @@ const GLOBAL_PASS_MONTH_ROWS = (snapshot: string): string => `SELECT 1
  * and unchanged: this read names the months where that rule hid rows, it never
  * moves a page back into the current set and never counts a row. Per month: the
  * current run, the newest older eligible run that had rows, and how many older
- * eligible runs had rows. Only months whose current snapshot is empty probe the
- * observations, each by run and month through the artifact index; the result
- * is bounded to `GLOBAL_PASS_NOTICE_LIMIT` months plus one row for truncation.
+ * eligible runs had rows. Every current snapshot is probed once for a row (an
+ * EXISTS that stops at the first), and only a month whose current snapshot has
+ * none probes its older snapshots; each probe reaches the run's pages through
+ * the artifact index. The result is bounded to `GLOBAL_PASS_NOTICE_LIMIT`
+ * months plus one row for truncation.
  */
 export const GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL = `WITH ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}, emptied_global_pass_months AS (
          SELECT latest.source_id, latest.activity_month, latest.fetch_run_id

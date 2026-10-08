@@ -1163,10 +1163,11 @@ and settlement do not read them.
   transaction row (read through the same active chain as the Transactions
   page, so "had rows" means rows the page showed) and some ranked snapshot of
   a lower rank of the same month has one: the current run, the newest older
-  run with rows and how many older runs had rows. Only months whose current
-  snapshot is empty probe the observations, each by run and month through the
-  artifact index. The result is bounded to 100 months plus one row so the
-  caller can report truncation.
+  run with rows and how many older runs had rows. Every current snapshot is
+  probed once for a row (an `EXISTS` that stops at the first) and only a month
+  whose current snapshot has none probes its older snapshots, each by run and
+  month through the artifact index. The result is bounded to 100 months plus
+  one row so the caller can report truncation.
 - **Not reported.** A month that was only ever empty; a newer run that is not
   current (a failed run, or a run with a page that has no active parse), since
   the older rows are then still current; an older capture that was never a
@@ -1191,8 +1192,9 @@ and settlement do not read them.
   not this read, is what would justify option 3 or a parser change.
 - `/api/meta` grows by one optional object; clients that do not read it are
   unaffected. The read runs on every metadata request; its cost is the
-  snapshot CTEs' one pass over the GLOBAL PASS artifacts plus an index probe
-  per empty current month and per older eligible run of such a month.
+  snapshot CTEs' one pass over the artifacts (the pass the Transactions page
+  makes) plus an index probe per current month and per older eligible run of a
+  month whose current snapshot is empty.
 - **Limits.** The notice cannot say which of the two readings (a true empty
   month, a failed render) happened; only the provider's display can. It does
   not cover a newer capture with fewer rows than an older one, which the

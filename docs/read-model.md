@@ -153,9 +153,12 @@ It reads nothing into the lists and moves nothing: the newer empty page stays
 current, the older rows stay out, and a person checks the provider. A month
 that was only ever empty, a newer run that is not current (failed, or a page
 unparsed) and an older capture that was never a whole snapshot are not
-reported. Only months whose current snapshot is empty probe the observations,
-each by run and month through `idx_fetch_artifacts_run_role`; the plan makes
-the snapshot CTEs' one pass over the artifacts and no other whole scan
+reported; rows are those of the published parse, so an older capture re-parsed
+to no row does not count. Every current snapshot is probed once for a row (an
+`EXISTS` that stops at the first) and only a month whose current snapshot has
+none probes its older snapshots, each by run and month through
+`idx_fetch_artifacts_run_role`; the plan makes the snapshot CTEs' one pass over
+the artifacts and no other whole scan
 (`test/global-pass-snapshots.test.ts`: hand-built cases, an independent model
 on a scaled store with empty captures, and the plan check;
 [ADR 0026's notice amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-empty-months-that-supersede-rows-are-reported)).
