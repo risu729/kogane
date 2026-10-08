@@ -14,7 +14,10 @@ import { Badge, EmptyState, Kv, KvRow, Nullable, Panel, QueryBoundary } from "..
 import {
   useRewardExpiry,
   useRewardHoldings,
+  validRewardExpiryBasis,
+  type RewardExpiryBasis,
   type RewardExpiryRow,
+  type RewardReadExpiryBasisFields,
   type RewardReadExpiryRow,
   type RewardExpiryPage,
   type RewardHoldingRow,
@@ -39,6 +42,21 @@ const BASIS_LABELS: Record<string, string> = {
   "provider-observed": "取得元の表示",
   "policy-estimated": "規約からの推定",
   unknown: "期限未確認",
+};
+/** Displayed against computed, in words; never carried by colour alone. */
+const AGREEMENT_LABELS: Record<string, string> = {
+  agree: "取得元の表示期限と規約からの算定が一致しています",
+  disagree: "取得元の表示期限と規約からの算定が異なります。両方を表示しています",
+  "not-comparable": "照合できません（どちらかが無いか、読み取れません）",
+};
+const VERIFICATION_LABELS: Record<string, string> = {
+  verified: "規約の確認済み",
+  "needs-rule-verification": "規約未確認",
+};
+const COMPLETENESS_LABELS: Record<string, string> = {
+  complete: "取得範囲は完全",
+  partial: "古い側が未取得",
+  unknown: "完全性は未確認",
 };
 const HOLDING_KIND_LABELS: Record<string, string> = {
   "reward-points": "ポイント",
@@ -72,6 +90,14 @@ const REASON_LABELS: Record<string, string> = {
   qualification_not_consumable: "資格指標は利用できる量ではありません",
   award_not_yet_held: "付与予定であり、まだ保有していません",
   observed_at_unparsed: "取得時刻の表記を読み取れませんでした",
+  rule_transition_unconfirmed:
+    "期限か起算日がこの規約版の適用期間を外れ、版の切替時の扱いが記録されていません",
+  fixed_deadline_not_derivable:
+    "この規約では期限が個別に決まり、取得元の表示以外に根拠がありません",
+  qualifying_activity_policy_missing: "期限延長の対象になる活動の定義が見つかりません",
+  provider_expiry_unparsed: "取得元の期限表示を読み取れませんでした",
+  provider_expiry_not_a_calendar_date: "取得元の期限表示が暦日として成立しません",
+  stored_expiry_invalid: "保存された期限の形式を読み取れませんでした",
 };
 
 function reasonText(code: string): string {
@@ -305,8 +331,114 @@ function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
   );
 }
 
-function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
+/**
+ * One bucket's deadline from both sides: the provider's display as observed,
+ * and the computed answer with the rule version, activity and membership it
+ * used — or the one reason it could not be computed. A missing basis is said
+ * in words; it is never shown as "no expiry".
+ */
+export function ExpiryBasisView({ basis }: { basis: RewardExpiryBasis | null }): ReactNode {
+  if (basis === null)
+    return (
+      <p className="footnote">
+        この判定には、表示期限と算定期限を分けた根拠の記録がありません（記録を始める前の判定です）。
+      </p>
+    );
+  const { displayed, computed, agreement } = basis;
+  return (
+    <>
+      <section className="reward-block">
+        <h3>取得元が表示した期限（観測）</h3>
+        {displayed === null ? (
+          <p className="reward-block-text">取得元は期限を表示していません。</p>
+        ) : (
+          <Kv>
+            <KvRow label="表示">
+              <Time time={displayed.value} />
+              {displayed.value.kind === "unknown"
+                ? ` ${reasonText(displayed.value.reasonCode)}`
+                : null}
+            </KvRow>
+            <KvRow label="取得時点">
+              <Time time={displayed.observedAt} />
+            </KvRow>
+            <KvRow label="取得元の記録">{displayed.sourceFactRefs.join("、")}</KvRow>
+          </Kv>
+        )}
+      </section>
+      <section className="reward-block">
+        <h3>規約からの算定（導出）</h3>
+        <Kv>
+          <KvRow label="結果">
+            {computed.status === "date" ? (
+              <Time time={computed.value} />
+            ) : computed.status === "no-expiry" ? (
+              "確認済みの規約上、期限はありません"
+            ) : (
+              <>
+                <Badge tone="warn">算定できません</Badge> {reasonText(computed.reasonCode ?? "")}
+              </>
+            )}
+          </KvRow>
+          <KvRow label="規約版">
+            {computed.rule.ruleRef}（
+            {VERIFICATION_LABELS[computed.rule.verification] ?? computed.rule.verification}）
+          </KvRow>
+          <KvRow label="適用期間">
+            {computed.rule.validPeriod === null ? (
+              "期間の定めなし"
+            ) : (
+              <Time time={computed.rule.validPeriod} />
+            )}
+          </KvRow>
+          <KvRow label="規約の根拠">
+            {computed.rule.evidenceRefs.length === 0
+              ? "記録なし"
+              : computed.rule.evidenceRefs.join("、")}
+          </KvRow>
+          {computed.activity === null ? null : (
+            <KvRow label="活動履歴">
+              {computed.activity.windowRef} ／{" "}
+              {COMPLETENESS_LABELS[computed.activity.completeness] ??
+                computed.activity.completeness}{" "}
+              ／ 起算:{" "}
+              {computed.activity.anchorActivityRef === null || computed.activity.anchorDate === null
+                ? "対象になる活動なし"
+                : `${computed.activity.anchorActivityRef}（${computed.activity.anchorDate.value}）`}
+            </KvRow>
+          )}
+          {computed.membership === null ? null : (
+            <KvRow label="会員資格">
+              必要: {computed.membership.requiredTiers.join("、")} ／{" "}
+              {computed.membership.claims.length === 0
+                ? "該当する記録なし"
+                : computed.membership.claims
+                    .map(
+                      (claim) =>
+                        `${claim.tier}（${claim.source === "provider" ? "取得元で確認" : "自己申告"}）`,
+                    )
+                    .join("、")}
+            </KvRow>
+          )}
+          <KvRow label="照合">{AGREEMENT_LABELS[agreement] ?? agreement}</KvRow>
+        </Kv>
+        <Codes codes={computed.uncertaintyCodes} />
+      </section>
+    </>
+  );
+}
+
+function ReadExpiry({
+  row,
+}: {
+  row: RewardReadExpiryRow & Partial<RewardReadExpiryBasisFields>;
+}): ReactNode {
   const codes = [...new Set([...row.reasonCodes, ...row.uncertaintyCodes])];
+  // A basis that does not validate is shown as "not recorded", not trusted.
+  const basis =
+    row.expiryBasis !== undefined && validRewardExpiryBasis(row.expiryBasis)
+      ? row.expiryBasis
+      : null;
   return (
     <Panel
       id={domId("reward-read-expiry", row.holdingRef, row.ruleRef, row.bucketRef)}
@@ -332,6 +464,7 @@ function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
           </KvRow>
         </Kv>
         <Codes codes={codes} />
+        <ExpiryBasisView basis={basis} />
       </div>
     </Panel>
   );

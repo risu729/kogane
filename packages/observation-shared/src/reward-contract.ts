@@ -1,6 +1,12 @@
 // Wire contract shared by runtime validation and the rewards screen.
 import type { Quantity, ValueState } from "../../domain/src/values.ts";
 import type { TemporalValue } from "../../domain/src/time.ts";
+import {
+  validBucketExpiryBasis,
+  type BucketExpiryBasis,
+  type ComputedExpiry,
+  type DisplayedExpiry,
+} from "../../domain/src/rewards.ts";
 export type RewardValue = ValueState;
 export type RewardQuantity = Quantity;
 export type RewardTime = TemporalValue;
@@ -80,6 +86,30 @@ export interface RewardReadExpiryRow {
   uncertaintyCodes: string[];
   basisRefs: string[];
 }
+/**
+ * One bucket's deadline from both sides (ADR 0049): what the provider
+ * displayed — an observation — and what the stored rule version computed — a
+ * derivation, with the rule, activity and membership facts it used, or one
+ * closed reason it is unavailable. The wire shape is the domain's.
+ */
+export type RewardExpiryBasis = BucketExpiryBasis;
+export type RewardDisplayedExpiry = DisplayedExpiry;
+export type RewardComputedExpiry = ComputedExpiry;
+
+/**
+ * Carried by every `/api/v2/rewards/expiry` READ row beside
+ * `RewardReadExpiryRow`. `null` means the snapshot's build recorded no basis
+ * (a build before `reward-projection-v2`), never "no computed expiry".
+ */
+export interface RewardReadExpiryBasisFields {
+  expiryBasis: RewardExpiryBasis | null;
+}
+
+/** Exact-key check of one basis; anything else is shown as "not recorded". */
+export function validRewardExpiryBasis(value: unknown): value is RewardExpiryBasis {
+  return validBucketExpiryBasis(value);
+}
+
 export interface RewardReadExpiryPage {
   rows: RewardReadExpiryRow[];
   page: { limit: number; hasMore: boolean; nextCursor: string | null };

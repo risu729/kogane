@@ -29,6 +29,10 @@ import { CURRENT_REWARD_CONTEXT_SQL } from "../../../packages/storage-d1/src/rea
 import type { D1Like, D1StatementLike } from "../../../packages/storage-d1/src/d1.ts";
 import { checkReadCursor } from "../../../packages/storage-d1/src/read/index.ts";
 import { sha256Hex } from "../../../packages/domain/src/context.ts";
+import {
+  validBucketExpiryBasis,
+  type BucketExpiryBasis,
+} from "../../../packages/domain/src/rewards.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 
 let mf: Miniflare;
@@ -197,6 +201,29 @@ test("G2-19: a build fixes its evaluation instant, publishes it, and writes noth
   );
   expect(rows.length).toBe(2);
   expect(rows.map((row) => row.expires_on)).toEqual(["2026-12-31", null]);
+
+  // ADR 0049: every row stores the displayed and the computed expiry apart.
+  // Under the seeded fixed-lot rule the dated bucket's date is only the
+  // provider's display and nothing is computed beside it; the undated bucket
+  // is regular, a kind that rule does not cover. Each reason says so.
+  const bases = await readAll<{ rule_id: string; expiry_basis_json: string | null }>(
+    `SELECT rule_id,expiry_basis_json FROM reward_expiry_estimates
+     WHERE snapshot_id=?1 ORDER BY row_seq`,
+    built.snapshotId,
+  );
+  expect(bases.length).toBe(built.estimateCount);
+  for (const row of bases) {
+    const basis: unknown = JSON.parse(row.expiry_basis_json ?? "null");
+    expect(validBucketExpiryBasis(basis)).toBe(true);
+  }
+  const lots = bases
+    .filter((row) => row.rule_id === "rule:v-point:fixed-expiry-lot")
+    .map((row) => JSON.parse(row.expiry_basis_json!) as BucketExpiryBasis);
+  expect(lots.map((basis) => basis.computed.reasonCode)).toEqual([
+    "fixed_deadline_not_derivable",
+    "rule_bucket_kind_not_covered",
+  ]);
+  expect(lots.map((basis) => basis.displayed?.value.kind ?? null)).toEqual(["local-date", null]);
 
   // CORE's own reward projections are untouched: the flag moves where the rows
   // are written, never what CORE holds.
