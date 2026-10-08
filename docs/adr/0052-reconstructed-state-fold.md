@@ -1,6 +1,6 @@
 # ADR 0052: Reconstructed state is a pure fold over a provisional adopted-event input, compared with reported snapshots
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (merged 2026-10-08 in #579)
 - Date: 2026-10-08
 - Issue: #550 (指定日状態: 採用イベントから残高・保有数量を再構成する), first PR (engine only)
 - Carried by: [reconstructed state](../reconstructed-state.md),

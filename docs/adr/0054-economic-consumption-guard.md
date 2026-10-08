@@ -1,6 +1,6 @@
 # ADR 0054: One consumption guard for every economic writer: claims, seals and a commit log
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (merged 2026-10-08 in #586)
 - Date: 2026-10-08
 - Issues: #549, #550, #556
 - Carried by: [economic events](../economic-events.md#common-consumption-guard-migration-0070),
