@@ -1210,3 +1210,78 @@ describe("review finding 7: the manifest fixes the inputs, not only their refs",
     expect(result.manifest.policy).not.toBe(pinned);
   });
 });
+
+describe("review finding 8: the zone rule is whole-book; overlapping periods tie", () => {
+  const zoned = (value: string, zone: string): TemporalValue => ({
+    kind: "local-date",
+    value,
+    zone,
+    basis: "provider",
+  });
+  const at = (time: TemporalValue) => ({ time: { trade: time, settlement: time } });
+  const period = (start: string, end: string): TemporalValue => ({
+    kind: "period",
+    start,
+    end,
+    endExclusive: false,
+    zone: "Asia/Tokyo",
+    granularity: "day",
+  });
+
+  test("dates in two named zones stop the whole book, however far apart", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-06", "10", "1000"),
+          buy("b", "2030-03-06", "10", "1000", at(zoned("2030-03-06", "UTC"))),
+          sell("s", "2030-06-06", "1", "100"),
+        ],
+        policy(),
+      ),
+    );
+    expect(book.indeterminateFrom).toEqual({
+      refs: [ref("a"), ref("b"), ref("s")],
+      reasonCode: "order_tie",
+    });
+    expect(book.disposals[0]!.reasonCodes).toEqual(["order_tie"]);
+  });
+
+  test("an instant in another zone than the book's dates stops the whole book", () => {
+    const utc: TemporalValue = {
+      kind: "instant",
+      value: "2030-03-06T00:00:00Z",
+      zone: "UTC",
+      basis: "provider",
+    };
+    const book = onlyBook(
+      computeLots(
+        [buy("a", "2030-01-06", "10", "1000"), sell("s", "2030-03-06", "1", "100", at(utc))],
+        policy(),
+      ),
+    );
+    expect(book.indeterminateFrom!.reasonCode).toBe("order_tie");
+  });
+
+  test("overlapping periods tie; adjacent periods are ordered", () => {
+    const overlap = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-01", "10", "1000", at(period("2030-01-01", "2030-01-10"))),
+          sell("s", "2030-01-05", "5", "600", at(period("2030-01-05", "2030-01-15"))),
+        ],
+        policy(),
+      ),
+    );
+    expect(overlap.indeterminateFrom!.reasonCode).toBe("order_tie");
+    const adjacent = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-01", "10", "1000", at(period("2030-01-01", "2030-01-10"))),
+          sell("s", "2030-01-11", "5", "600", at(period("2030-01-11", "2030-01-20"))),
+        ],
+        policy(),
+      ),
+    );
+    expect(adjacent.disposals[0]!.outcome).toBe("allocated");
+  });
+});

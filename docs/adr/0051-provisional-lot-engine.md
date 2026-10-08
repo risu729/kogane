@@ -82,11 +82,20 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   long spot) and `transfer_contract_pending` (any transfer input).
 - **Ordering.** Inputs are ordered by `compareTemporal` on the policy's basis.
   No id, ref, revision or recorded-at time ever decides an economic order.
-  Two inputs the time does not order (same date, an instant inside a dated
-  day, overlapping periods, conflicting zones) are `order_tie`, except
-  same-time acquisitions under moving average and same-time disposals under
-  moving average without rounding, which commute. An unknown time is
-  `unknown_time` for the whole book.
+  Inputs are laid out on one absolute line (instants by epoch, dates and
+  periods by their civil days) and cut into groups so that every input of a
+  later group is strictly after every input of every earlier group; an input
+  joins the current group as soon as one earlier input is not strictly before
+  it. A group of more than one input (same date, an instant inside a dated
+  day, overlapping periods) is `order_tie`, except same-time acquisitions
+  under moving average and same-time disposals under moving average without
+  rounding, which commute. Two rules apply to the whole book: an unknown time
+  is `unknown_time`, and dates or periods in two named zones, or an instant in
+  another zone than the book's dates, are `order_tie` for every input,
+  however far apart. The zone rule is whole-book because `compareTemporal`
+  never orders a date against a date or instant in another named zone, and
+  the grouping skips comparisons between inputs more than two days apart only
+  because one zone holds across the book.
 - **Allocation.** Partial consumption takes `cost × q / Q` of the lot's
   remaining cost through `multiplyByRatio`. Without rounding an inexact share
   is `inexact_allocation`; with rounding each share is rounded and keeps its
