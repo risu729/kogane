@@ -1022,11 +1022,13 @@ empty month. It removes one known, observed gap.
     current, with no reason shown. Nobody has observed a month's statements
     disappearing from the provider's list, so such a pair would be either
     that unobserved provider behaviour or a failed render read as empty.
-    Nothing guards against it today; it is pinned by
+    Nothing guards against it; it is pinned by
     `packages/read-model/test/global-pass-snapshots.test.ts` ("limit: a newer
     empty month ... supersedes an older capture with rows") so a change to
     it is visible. A guard would change the read model's query and needs its
     own frozen-SQL differential proof; it is not part of this amendment.
+    Since [the amendment of 2026-10-08](#amendment-2026-10-08-global-pass-empty-months-that-supersede-rows-are-reported)
+    the case is reported, with the currentness unchanged.
   - The rule has met production markup only in the two empty months of
     fetch_run 989 (English display) and the 20 importer-era zero-table
     pages; a Japanese empty page has still not been seen.
@@ -1094,6 +1096,145 @@ transaction observation yet.
   value appears here. The production result above was re-queried the same
   way (parse runs of 1.2.0 by fetch run, status, warnings and observation
   count; 1.1.0 runs by supersession).
+
+## Amendment 2026-10-08: GLOBAL PASS empty months that supersede rows are reported
+
+- Status: accepted (#563, merged 2026-10-08)
+- Date: 2026-10-08
+- Carried by: `packages/read-model/src/sql.ts`
+  (`GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL`), `packages/read-model/src/observation-reader.ts`
+  (`globalPassEmptyMonths`), `packages/observation-shared/src/api-contract.ts`
+  (`ApiMetadata.globalPassEmptyMonths`), `services/app/src/observation-api.ts`
+  (`/api/meta`), `apps/web/src/global-pass-empty-months.tsx`,
+  [read model](../read-model.md#card-snapshot-currentness-and-current-card-usage),
+  the tests listed under Verification
+
+### Context
+
+The empty-month amendment above left one limit open: the read model's
+per-month rule does not look at row counts, so a newer run's `ok` empty page
+becomes its month's current snapshot and an older run's rows for that month
+stop being current, with no reason shown. The parser cannot tell the observed
+empty month from a page whose list failed to render (the same markup), and
+nobody has observed a month's statements disappearing from the provider's
+list, so a month that goes from rows to empty is either that unobserved
+provider behaviour or a failed render read as empty.
+
+A read-only aggregate count of production on 2026-10-08 found 16 months with
+an `ok` 1.2.0 parse, 7 of them with an empty current snapshot, and none whose
+empty current snapshot hides an older capture with rows: the hazard is latent,
+not realised. GLOBAL PASS rows reach only the Transactions list; recognition
+and settlement do not read them.
+
+### Options considered
+
+1. **Keep the limit as it is.** Consistent with the Vpass and MyJCB rules,
+   which do not look at row counts either, but a month's rows can leave the
+   lists with no trace (INV05: a missing value is a reason, never a silent
+   gap).
+2. **Report the case without changing what is current.** **Chosen.** The
+   newer empty capture stays current, the older rows stay out, and `/api/meta`
+   names the month, the current run and the superseded run so a person checks
+   the provider's display. The currentness query is composed verbatim, so no
+   differential proof of a changed rule is needed; the new read needs its own
+   plan check.
+3. **Keep the older rows current when the newer capture is empty.** No silent
+   loss, but it asserts a provider semantics nobody has observed (that a
+   statement never leaves a month's list); a statement that moved to another
+   month would then be counted in both (INV06), and a month that really became
+   empty would keep stale rows. It changes the currentness query and needs a
+   frozen copy, a differential proof and a plan check of its own. Deferred
+   until the owner has observed a month going from rows to empty on the live
+   site.
+4. **Strengthen the evidence in the collector** (record the stated total and
+   block count per page in the manifest; re-select an empty month once and
+   compare). The manifest counts help forensics but do not tell the two
+   readings apart; the re-select changes the provider interaction and touches
+   the collector Worker another change is refactoring. Not part of this
+   amendment.
+
+### Decision
+
+**Option 2.**
+
+- **Read.** `GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL` composes
+  `GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES` unchanged and reports, per source and
+  month, the case where the ranked snapshot of rank 1 has no visible
+  transaction row (read through the same active chain as the Transactions
+  page, so "had rows" means rows the page showed) and some ranked snapshot of
+  a lower rank of the same month has one: the current run, the newest older
+  run with rows and how many older runs had rows. Every current snapshot is
+  probed once for a row (an `EXISTS` that stops at the first) and only a month
+  whose current snapshot has none probes its older snapshots, each by run and
+  month through the artifact index. The result is bounded to 100 months plus
+  one row so the caller can report truncation.
+- **Not reported.** A month that was only ever empty; a newer run that is not
+  current (a failed run, or a run with a page that has no active parse), since
+  the older rows are then still current; an older capture that was never a
+  whole snapshot, since its rows were never shown.
+- **Surface.** `ObservationReader.globalPassEmptyMonths()`; `/api/meta`
+  carries it as `globalPassEmptyMonths` (`months`: source, `YYYY-MM`, current
+  fetch run id, superseded fetch run id, superseded run count; `truncated`),
+  validated by the shared response validator; the web app shows a notice
+  beside the parsing-health notice naming the months and both runs, saying
+  that the lists follow the current capture, that the older rows are not
+  brought back automatically, that the provider's display and the capture
+  history need a check, and that the count is neither a collection outcome
+  nor a freshness claim. The local store omits the field.
+- **Unchanged.** Which pages are current, every list, every amount and every
+  observation. No row is counted; no evidence is written.
+
+### Consequences
+
+- The limit of the empty-month amendment is no longer silent: when a month's
+  current capture is empty over older rows, the owner sees which month and
+  which runs, and can look at the provider's live display. That observation,
+  not this read, is what would justify option 3 or a parser change.
+- `/api/meta` grows by one optional object; clients that do not read it are
+  unaffected. The read runs on every metadata request; its cost is the
+  snapshot CTEs' one pass over the artifacts (the pass the Transactions page
+  makes) plus an index probe per current month and per older eligible run of a
+  month whose current snapshot is empty.
+- **Limits.** The notice cannot say which of the two readings (a true empty
+  month, a failed render) happened; only the provider's display can. It does
+  not cover a newer capture with fewer rows than an older one, which the
+  current rule replaces whole and which no evidence distinguishes from a
+  provider correction. Production has been read only with aggregate counts
+  (above); the notice has not been seen firing on production data.
+
+### Verification
+
+- `packages/read-model/test/global-pass-snapshots.test.ts`: a newer empty
+  month over an older capture with rows is reported with both runs and the
+  current set is unchanged before and after the read; a still newer capture
+  with rows clears it; a month only ever empty, a failed newer run, a newer
+  run with an unparsed page and an older capture that was never whole are not
+  reported; several older captures with rows are counted once each and the
+  newest is named; rows then two empty captures name the capture with rows; a
+  walked month is empty only when none of its current pages has a row; rows
+  are those of the published parse (an older capture re-parsed to no row stops
+  counting, a current empty page re-parsed with a row clears the month);
+  sources are kept apart and ordered by source, then month newest first; the
+  reader returns 100 months newest first with `truncated` set when a 101st
+  exists and unset at exactly 100; the notice text contains the currentness
+  CTEs verbatim; on
+  a scaled store with the complete CORE schema, no table statistics and a
+  quarter of the captures empty, the notice equals an independently written
+  model and the current set equals the snapshot model before and after; the
+  plan scans the artifacts once (the snapshot CTEs' pass) and no observation,
+  parse or run table whole, and reaches each run's pages through
+  `idx_fetch_artifacts_run_role`.
+- `packages/read-model/test/read-model.test.ts`: the read compiles against the
+  migrated CORE schema and is empty on an empty store.
+- `services/app/test/api.test.ts`: `/api/meta` carries an empty, valid notice
+  on a store without GLOBAL PASS months.
+- `apps/web/test/global-pass-empty-months.test.ts`: the response validator
+  accepts the shape and refuses a malformed month, a zero superseded count, a
+  negative or fractional run id and a missing `truncated`; the notice text
+  names the month and both runs, counts the rest, marks truncation, and
+  carries the no-freshness sentence.
+- Production was read only with a read-only aggregate query (counts of
+  months and pages); no value appears here.
 
 ## Amendment 2026-10-08: GLOBAL PASS replay compares records with detail tables
 
