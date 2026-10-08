@@ -64,11 +64,7 @@ import {
   rollbackRelease,
   type AdoptionRequest,
 } from "./release-adoption.ts";
-import {
-  collectionScan,
-  handleTerminalNotification,
-  type CollectionEnv,
-} from "./collection/index.ts";
+import { collectionScan, handleTerminalNotification } from "./collection/index.ts";
 import {
   invocationContext,
   invocationProbe,
@@ -78,7 +74,8 @@ import {
   type InvocationContext,
 } from "./invocation-probe.ts";
 import { OperationMeter } from "../../../packages/application/src/collection/index.ts";
-import { dispatchOperations } from "./operations/dispatch.ts";
+import { collectorBinding } from "./collector-binding.ts";
+import { dispatchOperations, type CollectorRpc, type DispatchEnv } from "./operations/dispatch.ts";
 import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
 import {
   rewardReadProjectionEnabled,
@@ -1816,8 +1813,14 @@ const defaultStages: ScheduledStages = {
     dispatchDecisionOutbox(env.DB, {
       processors: { "balance-projection": balanceProjectionOutboxProcessor(env) },
     }),
+  // ADR 0048: a collector request reaches the same named RPC binding the
+  // alarm calls, and only for connections OPS_COLLECTOR_DISPATCH_CONNECTIONS
+  // names.
   operations: (env, context) =>
-    dispatchOperations(collectionEnv(env), { budget: context.registration }),
+    dispatchOperations(collectionEnv(env), {
+      budget: context.registration,
+      collectors: (connection) => collectorBinding<CollectorRpc>(env, connection.workspace),
+    }),
 };
 
 /**
@@ -1825,8 +1828,8 @@ const defaultStages: ScheduledStages = {
  * optional there, so a deployment that has not been given them behaves as if
  * the flags were off rather than failing to start.
  */
-function collectionEnv(env: Env): CollectionEnv & { OPS_DISPATCH_ENABLED?: string } {
-  return env as unknown as CollectionEnv & { OPS_DISPATCH_ENABLED?: string };
+function collectionEnv(env: Env): DispatchEnv {
+  return env as unknown as DispatchEnv;
 }
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event

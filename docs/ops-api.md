@@ -4,8 +4,12 @@ The committed App configuration enables `OPS_API_ENABLED` and names a human
 operator; agent grants remain empty. MCP additionally requires the agent-API
 transport grant, so an operations flag alone does not enable a client. These
 six operation-request kinds are distinct from the newer operator-only
-[schedule settings API](schedules.md#settings-api). Collection/session-refresh
-requests remain pending executor wiring; see [current status](current-status.md).
+[schedule settings API](schedules.md#settings-api). A collection or unattended
+session-refresh request reaches a collector only through the named collector RPC
+the alarm uses, and only for a connection the Processor's
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names none
+([collector execution](#collector-execution-adr-0048),
+[ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
 The six things an operator asks this system to _do_ — collect a source,
 re-register a persisted run, replay a parse, rebuild the read model, refresh a
@@ -62,7 +66,9 @@ All six are authenticated, and all six are refused unless `OPS_API_ENABLED` is
 
 `status` is the stored operation status, not a promise: `accepted` or
 `waiting_for_human` on acceptance, and later `running`, `completed`, `failed`
-or `blocked`. **A 202 never means the work happened.** Queued work, a flag
+or `blocked`. **A 202 never means the work happened.** For a collection or
+session refresh, the record's `execution` block says what the collector did
+([collector execution](#collector-execution-adr-0048)). Queued work, a flag
 that is off, a missing processor and a `building` snapshot are never
 completion (`contracts/stages.json`, 05 §6).
 
@@ -134,6 +140,21 @@ a Worker that can grade nobody.
   "failureCode": null,
   "acceptedAt": "2026-09-11T00:00:00Z",
   "updatedAt": "2026-09-11T00:00:00Z",
+  // collection and session-refresh only; null for the other kinds
+  "execution": {
+    "action": "collect", // or "refresh-session"
+    "state": "accepted",
+    "connectionId": null, // the alarm job id, once the Processor bound it
+    "reasonCode": null,
+    "scope": "collector_default", // null for a refresh
+    "waits": 0,
+    "expiresAt": "2026-09-12T00:00:00.000Z",
+    "startedAt": null,
+    "collectedAt": null,
+    "publishedAt": null,
+    "finishedAt": null,
+    "runs": [],
+  },
 }
 ```
 
@@ -155,7 +176,9 @@ the four reasons that are never completion (`queued`, `building`, `flag_off`,
 
 A stage nobody has reported is `pending`. Silence is never progress, and an
 operation turns `completed` only when every stage of its kind has a
-`completed` row written by the executor that held the evidence.
+`completed` row written by the executor that held the evidence. Nothing writes
+`projected` yet, so a published collection keeps `status: running`
+([limits](#collector-execution-adr-0048)).
 
 ## Idempotency
 
@@ -179,9 +202,11 @@ is the validated request without its key.
   different payload is `409 idempotency_conflict`. A replay plan raced this
   way is planned once (`packages/application/test/operations.test.ts`).
 
-The collector's side of this (G3-14) is `target_ref`: the executor writes the
-run it started once, and a second dispatch of the same operation finds it set
-and must reuse that run rather than open a second provider session.
+The collector's side of this (G3-14) is the execution row of 0068 and
+`target_ref`: the one start of an operation is a guarded `waiting → started`
+update in the same batch that binds `target_ref` to
+`collector:<connection>`, so a second dispatch, a re-send under the same key or
+a raced tick finds the row started and never calls the collector again.
 `recordDispatch` answers with the target the row holds and whether this call
 bound it (`{targetRef, boundHere}`); `boundHere: false` with a non-null target
 is the signal to continue the first executor's run. The 0040 trigger refuses
@@ -271,6 +296,11 @@ drift. Reaching `/mcp` still needs an `AGENT_API_GRANTS` grant (that is the MCP
 endpoint's own gate) _and_ the operator capability above, so a read-only agent
 principal sees the tools refuse exactly as the routes do.
 
+`kogane.ops.operation.get` calls the same service as the read route, so it
+returns the same record, `execution` block included. No MCP tool, schema or
+grant was added for collector execution, and no MCP client has connected;
+client access is the work of #559.
+
 ## Session refresh and human-required states
 
 `SESSION_REFRESH_POLICY` is a wrangler var holding `{"<source>": "unattended"}`
@@ -282,7 +312,102 @@ A human-required refresh is stored with `status: "waiting_for_human"` and
 `dispatch_state: "not_required"`. Nothing retries a login, nothing repeats a
 password, and no policy in this repository automates an MFA or a passkey
 challenge (G3-11). The response carries an id and a state and never a
-credential.
+credential. Its `execution.state` reads `waiting_for_human` (本人操作待ち) with no
+expiry: nothing dispatches it, so nothing expires it.
+
+An unattended refresh is executed like a collection (below) through a
+`refresh-session` connection. The only one is SBI VC's keepalive job
+(`sbi-vc-keepalive`); for every other source an unattended refresh ends
+`unsupported` with `session_refresh_unsupported` and contacts nobody.
+
+## Collector execution (ADR 0048)
+
+An accepted `collection` or unattended `session-refresh` is executed by the
+Processor's `operation_dispatch` lane through the **named collector RPC the
+alarm already uses**: the `SCHEDULE_<WORKSPACE>` Service Binding to the
+collector's `ScheduledCollection` entrypoint, method `runOperation`. There is no
+URL, no generic executor and no other transport
+([ADR 0048](adr/0048-operation-collector-dispatch.md)).
+
+**Connection.** The request's CORE source and action select one connection — an
+alarm job of `config/alarm-jobs.json`, mirrored as `OPERATION_CONNECTIONS` in
+`packages/collection/src/operation-rpc.ts`. The call carries
+`{version, operationId, connectionId, source, action, requestedAtMs}` and
+nothing else. The collector checks it against the same table (another
+collector's connection, another source or an action the connection lacks is
+refused before anything runs) and then runs the connection's job exactly as
+its alarm would, through `runScheduled` and the same execution lease. It
+collects the job's daily scope: **the requested window is stored and not
+applied** (`execution.scope: "collector_default"`).
+
+**States.** `execution.state` is closed:
+
+| State               | Means                                                                                      | `status` of the request  |
+| ------------------- | ------------------------------------------------------------------------------------------ | ------------------------ |
+| `accepted`          | stored; no executor has looked at it                                                       | `accepted`               |
+| `waiting_for_human` | a refresh the source policy hands to a person; never dispatched, never expires             | `waiting_for_human`      |
+| `waiting`           | not started, nothing contacted; `reasonCode` says why                                      | `accepted`               |
+| `started`           | the collector was called; no answer recorded yet                                           | `running`                |
+| `collected`         | the collector reports its terminal(s) persisted; `runs` lists them                          | `running`                |
+| `refreshed`         | the collector reports the session renewed                                                  | `completed`              |
+| `published`         | every reported run settled and at least one has an adopted (published) parse              | `running` (see limits)   |
+| `unpublished`       | every run settled with nothing adopted, or nothing settled within 48 h; `reasonCode` says why | `failed`              |
+| `failed`            | the collector's own closed failure code                                                    | `failed`                 |
+| `uncertain`         | the call threw, answered outside the closed shape, or never recorded an outcome in an hour | `failed`                 |
+| `expired`           | not started within 24 h of acceptance                                                      | `blocked`                |
+| `unsupported`       | no connection (or no binding) serves the source and action                                 | `blocked`                |
+
+`startedAt`, `collectedAt`, `publishedAt` and `finishedAt` are set when the
+state is reached; `expiresAt` is acceptance + 24 h.
+
+**Before a start** (each check contacts nobody):
+
+| Reason code                   | When                                                            | Next look                |
+| ----------------------------- | --------------------------------------------------------------- | ------------------------ |
+| `collection_unsupported`      | no `collect` connection for the source (SMBC Direct, V Point Pay) | terminal (`unsupported`) |
+| `session_refresh_unsupported` | no `refresh-session` connection for the source                  | terminal (`unsupported`) |
+| `collector_binding_missing`   | the connection has no Service Binding in this deployment        | terminal (`unsupported`) |
+| `operation_expired`           | 24 h after acceptance                                           | terminal (`expired`)     |
+| `collector_dispatch_disabled` | the connection is not in `OPS_COLLECTOR_DISPATCH_CONNECTIONS`   | 1 h                      |
+| `provider_maintenance`        | the source's collection/session maintenance window is open      | when it closes           |
+| `collection_lease_held`       | another execution (the alarm, a manual trigger) holds the lease | 5 min                    |
+| `dispatch_deferred`           | this Processor invocation already started a collector           | 5 min                    |
+
+Waits never pass the expiry. **The lease is only read**: the operation path never
+takes, releases, replaces or expires `collection_execution_leases`; the collector
+claims it inside `runScheduled` as for the alarm, so the same source never runs
+twice at once. If another execution takes the lease between the lane's read and
+the collector's claim, the collector refuses before contacting anyone and the
+request ends `failed` with `collection_busy`.
+
+**After a start nothing is retried.** A collector failure, an uncertain call
+and a start that never recorded an outcome are terminal; a provider login is
+never repeated by this path (G3-11, ADR 0039). Re-sending the same key returns
+the same operation; a new key is a new request.
+
+**The trail.** For a `collected` execution, each tick reads (at most five
+executions, every five minutes each) and the record shows live, per reported run:
+
+| Field                                   | From                                                                  |
+| --------------------------------------- | --------------------------------------------------------------------- |
+| `state: not_registered` / `registering` | no `collection_runs` row yet / seen, not yet registered               |
+| `state: blocked`, `blockedCode`         | registration refused (`collection_runs.blocked_code`)                 |
+| `evidenceRunId`, `registeredAt`         | the registered fetch run (`r_<id>`, the 取得記録 link)                |
+| `state: parsing`                        | the sealed run's parse scheduling is unprocessed, or a job is pending |
+| `artifacts.total` / `parseSelected`     | the run's artifacts / those a parser job or parse run exists for      |
+| `artifacts.published`                   | selected artifacts with a CORE publication (`published_parse_runs`)   |
+| `artifacts.pending` / `parseFailed`     | still queued or parsing / settled with an error parse run             |
+| `state: published` / `unpublished`      | settled; `reasonCode` is `provider_failed`, `no_parser_selected`, `parse_failed` or `not_adopted` |
+
+The stages `registered`, `parsed` and `adopted` are written from those rows
+only. A collected execution with no reported run is `unpublished`
+(`run_not_reported`); one whose runs do not settle within 48 h of collection is
+`unpublished` (`publication_not_observed`).
+
+Limits: no deployed collector has served `runOperation` and no connection is
+enabled; `projected` (READ) is not traced, so a published collection stays
+`running`; the requested window is not applied; one collector call is awaited
+per Processor invocation, inside the tick; the web UI has no operations view.
 
 ## Storage
 
@@ -306,7 +431,15 @@ Migration `0040_operations_api.sql` (CORE), additive:
   to. The 0035 plan tables stay the only place a replay plan lives; this API
   creates a `planned` row there rather than a second copy of the plan.
 
-Both new tables are classified `core-keep` in `infra/schema/core-ledger.md`,
+Migration `0068_ops_collector_dispatches.sql` (CORE), additive, adds
+`ops_collector_dispatches`: one execution row per collection or refresh
+operation (state, closed reason, connection, terminal source, reported run ids,
+timestamps). Its triggers refuse deletion, an insert in a started state, a
+started row returning to `waiting` (`starts` is 0 or 1), reopening a terminal
+state and rewriting reported runs. It is `operational-mutable`: execution
+state, not evidence.
+
+The two 0040 tables are classified `core-keep` in `infra/schema/core-ledger.md`,
 on the chapter 04 §2 row "change_plans, approvals, operation_receipts,
 decision_outbox → CORE" (acceptance and the promise of follow-up work): an
 accepted request is that promise and its stage rows are the evidence it was
@@ -338,13 +471,27 @@ loses the request. Nothing in this change contacts a collector.
 U08 built the scheduled side of that contract: the `operation_dispatch` lane of
 `services/processor` (`docs/processor.md` §7), behind
 `OPS_DISPATCH_ENABLED`, default off. It re-registers a stored terminal in
-process, starts the replay plan an acceptance created, and hands a projection
-over; `collection` and an unattended `session-refresh` stay
-`dispatch_pending` with `awaiting_collector_dispatch` until U09 adds the
-Service Binding. `operationRequestPayload(store, operationId)` is the reader
-the executor uses to see what was accepted — the dispatch acts on the durable
-row, never on the contents of a notification. No branch of it completes an
-operation merely by handing the work over.
+process, starts the replay plan an acceptance created, hands a projection
+over, and — since ADR 0048 — starts a `collection` or an unattended
+`session-refresh` through the collector's named RPC and follows it
+([collector execution](#collector-execution-adr-0048)).
+`operationRequestPayload(store, operationId)` is the reader the executor uses
+to see what was accepted — the dispatch acts on the durable row, never on the
+contents of a notification. No branch of it completes an operation merely by
+handing the work over.
+
+The collector execution services are in
+`packages/application/src/operations/collector-dispatch.ts` (writes) and
+`collector-trail.ts` (reads):
+
+| Service                                                                     | For                                                                 |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `claimCollectorStart`                                                       | the one start of an operation, with the request row in the same batch |
+| `recordCollectorWait` / `recordCollectorDeclined`                           | a closed reason to wait, or to end before any start                 |
+| `recordCollectorOutcome`                                                    | what the collector answered: collected, refreshed, failed, uncertain |
+| `abandonStartedCollectorDispatches`                                         | a start nobody finished, after an hour: `uncertain`                 |
+| `collectedDispatchesDue` / `trackCollectorPublication`                      | the trail of a collected execution, until published or a reason     |
+| `collectorExecution` / `collectorRunTrails` / `trailOutcome`                | the `execution` block and the stage ladder it supports              |
 
 ## What was verified locally, and what was not
 

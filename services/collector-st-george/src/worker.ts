@@ -1,5 +1,6 @@
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
+  scheduledFailure,
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
@@ -219,7 +220,7 @@ export async function alarmCollection(
     const state = env.SESSION_STATE.get(env.SESSION_STATE.idFromName("st-george"));
     const response = await state.fetch(new Request("https://state/trigger", { method: "POST" }));
     return scheduledResult(await response.json());
-  } catch {
-    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  } catch (error) {
+    return scheduledFailure(error);
   }
 }

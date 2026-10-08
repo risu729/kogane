@@ -188,6 +188,13 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "core-keep",
     planRow: "change plans, approvals and receipts",
   },
+  // The collector execution of an accepted request (0068, ADR 0048): job
+  // state that moves forward through closed states, like the scheduling
+  // receipts. The request it executes and its stage evidence stay core-keep.
+  ops_collector_dispatches: {
+    classification: "operational-mutable",
+    planRow: "operation collector execution state",
+  },
   // The shared-R2 terminal registration records (0039) sit in the same row as
   // the rest of the acquisition history: `collection_runs` is the fact that a
   // terminal was seen for one run under one registration contract, and its

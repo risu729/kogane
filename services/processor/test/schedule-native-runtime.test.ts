@@ -33,14 +33,19 @@ beforeAll(async () => {
           compatibilityFlags: ["nodejs_compat", "enable_ctx_exports"],
           d1Databases: ["DB", "READ"],
           r2Buckets: ["EVIDENCE", "DATA"],
-          bindings: { SCHEDULES_ENABLED: "true" },
+          // ADR 0048: the dispatch lane may call the mizuho-bank connection only.
+          bindings: {
+            SCHEDULES_ENABLED: "true",
+            OPS_DISPATCH_ENABLED: "true",
+            OPS_COLLECTOR_DISPATCH_CONNECTIONS: JSON.stringify(["mizuho-bank"]),
+          },
           serviceBindings,
           durableObjects: { SCHEDULE_ALARMS: { className: "ScheduleAlarm", useSQLite: true } },
         },
         {
           name: "provider",
           modules: true,
-          script: `import {WorkerEntrypoint} from "cloudflare:workers";let calls=0;export class ScheduledCollection extends WorkerEntrypoint {async runScheduled(cron,time) {calls++;return {status:"completed",runIds:["synthetic-native-run"],failureCode:null};}}export default {fetch(){return Response.json({calls});}};`,
+          script: `import {WorkerEntrypoint} from "cloudflare:workers";let calls=0,ops=[];export class ScheduledCollection extends WorkerEntrypoint {async runScheduled(cron,time) {calls++;return {status:"completed",runIds:["synthetic-native-run"],failureCode:null};}async runOperation(request) {ops.push(request);return {status:"completed",runIds:["synthetic-operation-run"],failureCode:null};}}export default {fetch(request){return Response.json(new URL(request.url).pathname==="/ops"?{ops}:{calls});}};`,
           compatibilityDate: "2026-09-07",
         },
       ],
@@ -116,4 +121,57 @@ test("native processor alarm uses ctx.exports and can reconcile its own object w
   expect(await (await provider.fetch("https://synthetic.internal/count")).json()).toEqual({
     calls: 1,
   });
+}, 10000);
+test("native processor tick starts an accepted collection once over the named collector RPC", async () => {
+  // An accepted request, as the App stores it (CORE 0040), for a declared source.
+  await db.prepare("INSERT OR IGNORE INTO sources(id,provider) VALUES('mizuho-bank','Synthetic')").run();
+  const operationId = `op_${"e".repeat(64)}`;
+  const acceptedAt = new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/u, "Z");
+  await db
+    .prepare(
+      `INSERT INTO ops_requests(operation_id,kind,principal,idempotency_key,payload_digest,source_id,
+        request_json,status,dispatch_state,dispatch_attempts,available_at_ms,created_at,updated_at)
+       VALUES(?,'collection','synthetic-operator','native-key',?,'mizuho-bank',
+        '{"source":"mizuho-bank","requestedScope":{"from":"2026-01-01","to":"2026-01-02"}}',
+        'accepted','dispatch_pending',0,0,?,?)`,
+    )
+    .bind(operationId, "f".repeat(64), acceptedAt, acceptedAt)
+    .run();
+  await db.prepare("UPDATE collection_schedules SET enabled=0 WHERE id='processor-tick'").run();
+  await alarms.getByName("processor-tick").reconcile("processor-tick");
+  const nominal = new Date(Date.now() - 60000).toISOString();
+  await db
+    .prepare(
+      "UPDATE collection_schedules SET enabled=1,next_nominal_at=?,next_run_at=? WHERE id='processor-tick'",
+    )
+    .bind(nominal, nominal)
+    .run();
+  await alarms.getByName("processor-tick").reconcile("processor-tick");
+  expect(await completed("processor-tick", nominal)).toMatchObject({ status: "completed" });
+  const execution = await db
+    .prepare(
+      "SELECT state,connection_id,run_ids_json,starts FROM ops_collector_dispatches WHERE operation_id=?",
+    )
+    .bind(operationId)
+    .first();
+  expect(execution).toEqual({
+    state: "collected",
+    connection_id: "mizuho-bank",
+    run_ids_json: '["synthetic-operation-run"]',
+    starts: 1,
+  });
+  const provider = await mf.getWorker("provider");
+  const { ops } = (await (await provider.fetch("https://synthetic.internal/ops")).json()) as {
+    ops: Record<string, unknown>[];
+  };
+  expect(ops).toEqual([
+    {
+      version: "kogane-collector-operation-v1",
+      operationId,
+      connectionId: "mizuho-bank",
+      source: "mizuho-bank",
+      action: "collect",
+      requestedAtMs: expect.any(Number),
+    },
+  ]);
 }, 10000);

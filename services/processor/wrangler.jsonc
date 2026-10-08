@@ -32,6 +32,12 @@
     // The shared layout is consumed before collectors switch their target.
     "SHARED_R2_INGEST_ENABLED": "true",
     "OPS_DISPATCH_ENABLED": "true",
+    // ADR 0048: a JSON array of connection ids (alarm job ids, e.g.
+    // ["sony-bank"]) whose collector an accepted collection or unattended
+    // session-refresh request may start through the named collector RPC.
+    // Empty means none: such requests wait with `collector_dispatch_disabled`
+    // and expire after 24 hours without contacting any provider.
+    "OPS_COLLECTOR_DISPATCH_CONNECTIONS": "",
     // The shared DATA bucket is the existing central bucket; the name is
     // declared so a notification about another bucket is refused.
     "COLLECTION_DATA_BUCKET": "kogane-raw-evidence",

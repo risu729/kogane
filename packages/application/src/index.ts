@@ -165,6 +165,45 @@ export {
   type StageState,
 } from "./operations/requests.ts";
 
+// ── collector execution of operations (issue #544, ADR 0048) ─────────
+export {
+  COLLECTOR_ACTIONS,
+  COLLECTOR_DISPATCH_STATES,
+  COLLECTOR_EXECUTION_STATES,
+  COLLECTOR_START_TTL_MS,
+  type CollectorAction,
+  collectorActionForKind,
+  type CollectorDispatchRow,
+  type CollectorDispatchState,
+  collectorExecution,
+  type CollectorExecutionReport,
+  type CollectorExecutionState,
+  type CollectorRunArtifacts,
+  type CollectorRunTrail,
+  collectorRunTrails,
+  expiresAtFor,
+  PUBLICATION_HORIZON_MS,
+  readCollectorDispatch,
+  RUN_TRAIL_STATES,
+  type RunTrailState,
+  type StageVerdict,
+  storedRunIds,
+  trailOutcome,
+  type TrailOutcome,
+} from "./operations/collector-trail.ts";
+export {
+  abandonStartedCollectorDispatches,
+  claimCollectorStart,
+  type CollectorBinding,
+  collectedDispatchesDue,
+  type CollectorOutcome,
+  recordCollectorDeclined,
+  recordCollectorOutcome,
+  recordCollectorWait,
+  trackCollectorPublication,
+  type TrackingResult,
+} from "./operations/collector-dispatch.ts";
+
 // ── query services (A08) ─────────────────────────────────────────────
 export {
   AGENT_CAPABILITIES as QUERY_GRANT_CAPABILITIES,
