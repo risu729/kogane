@@ -11,9 +11,16 @@ import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 import {
   classifyGlobalPassMessage,
   classifyParserRejection,
+  GLOBAL_PASS_AMOUNT_CELL,
+  GLOBAL_PASS_DATE_CELL,
   GLOBAL_PASS_REJECTIONS,
   globalPassActivityShape,
+  globalPassCellPattern,
+  globalPassLatestOkComparison,
+  globalPassLatestOkSql,
+  globalPassPageText,
   globalPassReplaySelectionSql,
+  type GlobalPassCellPattern,
   type RejectionCategory,
 } from "../scripts/parser-rejection.ts";
 
@@ -379,6 +386,37 @@ describe("global-pass-activity: the stored page's shape in counts and booleans",
         },
       },
       pager: { blocks: 0, readable: 0, english: 0, japanese: 0, agreesWithKey: true },
+      // The comparisons of ADR 0026's amendment of 2026-10-08: the fixture's
+      // three tables are children of body, and its one record is carried by
+      // its one pair.
+      detailTables: {
+        compactHeadersUniform: true,
+        expandedHeadersUniform: true,
+        compactClassTokensUniform: true,
+        expandedClassTokensUniform: true,
+      },
+      detailContainer: {
+        childCount: 5,
+        children: [
+          { tag: "h1", th: null, wrapped: false, known: false, tables: 0 },
+          { tag: "select", th: null, wrapped: false, known: false, tables: 0 },
+          { tag: "table", th: 4, wrapped: false, known: true, tables: 1 },
+          { tag: "table", th: 10, wrapped: false, known: true, tables: 1 },
+          { tag: "table", th: 12, wrapped: false, known: true, tables: 1 },
+        ],
+        pairsInOrder: 1,
+      },
+      otherTables: [],
+      recordDetailAlignment: {
+        compact: [{ table: 0, valueCells: 4, records: [0], matchedCells: 4, best: 0 }],
+        // Nine non-empty values; the rate is in neither activity row.
+        expanded: [{ table: 0, valueCells: 9, records: [0], matchedCells: 8, best: 0 }],
+        unmatchedRecords: [],
+        monotonic: true,
+        pairsAgree: true,
+        indexAligned: true,
+      },
+      unmatchedRecords: [],
     });
   });
 
@@ -455,17 +493,16 @@ describe("global-pass-activity: the stored page's shape in counts and booleans",
       "Transaction",
     ])
       expect(printed).not.toContain(forbidden);
-    // Every word of the line is a field name, a boolean, null or a count.
+    // Every word of the line is a field name, a closed tag name, a boolean,
+    // null or a count.
     const words = printed.match(/[A-Za-z_][A-Za-z0-9_]*/gu) ?? [];
     const allowed = new Set([
-      ...Object.keys(shapeOf(FIXTURE)),
-      ...Object.keys(shapeOf(FIXTURE).monthSelect!),
-      ...Object.keys(shapeOf(FIXTURE).tables!),
-      ...Object.keys(shapeOf(FIXTURE).activityTable!),
-      ...Object.keys(shapeOf(FIXTURE).activityTable!.bodyRowsByCells),
-      ...Object.keys(shapeOf(FIXTURE).activityTable!.nineCellRowsByDateCells),
-      ...Object.keys(shapeOf(FIXTURE).activityTable!.headers),
-      ...Object.keys(shapeOf(FIXTURE).pager!),
+      ...fieldNames(shapeOf(FIXTURE)),
+      "h1",
+      "select",
+      "table",
+      "div",
+      "p",
       "true",
       "false",
       "null",
@@ -473,6 +510,554 @@ describe("global-pass-activity: the stored page's shape in counts and booleans",
     expect(words.filter((word) => !allowed.has(word))).toEqual([]);
   });
 });
+
+// ── a synthetic month in the observed layout ─────────────────────────────────
+//
+// The layout the owner observed in one refused page (counts only): the
+// detail tables share one parent div (ancestors div, form, div, div, body),
+// whose children are a compact table and a div wrapping an expanded table
+// per record, and the activity table lies outside it. Every text below is
+// synthetic, and none of it may reach the shape.
+
+const ACTIVITY_HEADERS = [
+  "Transaction Date",
+  "Transaction Detail",
+  "Transaction Currency and Amount",
+  "Transaction Fee",
+  "ATM Fee",
+  "FX Fee",
+  "Status",
+  "Approval Number",
+  "Remarks",
+  "Local Currency and Amount",
+  "Applicable Rate",
+  "Funded Currency and Amount",
+];
+const COMPACT_LABELS = [
+  "Transaction Currency and Amount",
+  "Transaction Detail",
+  "Local Currency and Amount",
+  "Funded Currency and Amount",
+];
+const EXPANDED_LABELS = [
+  "Transaction Currency and Amount",
+  "Transaction Fee",
+  "ATM Fee",
+  "FX Fee",
+  "Status",
+  "Approval Number",
+  "Remarks",
+  "Local Currency and Amount",
+  "Applicable Rate",
+  "Funded Currency and Amount",
+];
+const MONTH_SELECT = FIXTURE.match(/<select[\s\S]*?<\/select>/u)![0];
+
+/** Record i of the synthetic month: distinct texts, except the shared fee, status and remarks. */
+function syntheticRecord(index: number) {
+  const letter = String.fromCharCode(65 + index);
+  const yen = `JPY ${index + 1},${index}50`;
+  return {
+    date: `2099/02/${String(index + 1).padStart(2, "0")}`,
+    merchant: `SYNTHETIC SHOP ${letter}`,
+    amount: `USD ${index + 1}1.25`,
+    fee: "JPY 0",
+    status: "SYNTHETIC STATUS",
+    approval: `SYN-APPROVAL-${letter}`,
+    remarks: "",
+    local: yen,
+    rate: `15${index}.1234`,
+    funded: yen,
+  };
+}
+type SyntheticRecord = ReturnType<typeof syntheticRecord>;
+const th = (labels: readonly string[]) => labels.map((label) => `<th>${label}</th>`).join("");
+const td = (values: readonly string[]) => values.map((value) => `<td>${value}</td>`).join("");
+const compactTable = (record: SyntheticRecord, index: number) =>
+  `<table class="synthetic-compact" id="compactTable${index}"><thead><tr>${th(COMPACT_LABELS)}</tr></thead><tbody>` +
+  `<tr>${td([record.amount])}</tr><tr>${td([record.merchant])}</tr><tr>${td([record.local, record.funded])}</tr></tbody></table>`;
+const expandedTable = (record: SyntheticRecord, index: number) =>
+  `<div class="synthetic-wrap" id="expandedWrap${index}"><table class="synthetic-expanded"><thead><tr>${th(EXPANDED_LABELS)}</tr></thead><tbody>` +
+  [
+    record.amount,
+    record.fee,
+    record.fee,
+    record.fee,
+    record.status,
+    record.approval,
+    record.remarks,
+    record.local,
+    record.rate,
+    record.funded,
+  ]
+    .map((value) => `<tr>${td([value])}</tr>`)
+    .join("") +
+  "</tbody></table></div>";
+const desktopCells = (record: SyntheticRecord) => [
+  record.date,
+  record.merchant,
+  record.amount,
+  record.fee,
+  record.fee,
+  record.fee,
+  record.status,
+  record.approval,
+  record.remarks,
+];
+const responsiveCells = (record: SyntheticRecord) => [
+  record.amount,
+  record.merchant,
+  record.local,
+  record.funded,
+];
+/** A third kind of table: two headers, one body row of one cell, in the detail parent after the pairs. */
+const otherTable = (headers: readonly string[], cell: string, id = "") =>
+  `<table class="synthetic-compact"${id === "" ? "" : ` id="${id}"`}><thead><tr>${th(headers)}</tr></thead><tbody><tr>${td([cell])}</tr></tbody></table>`;
+
+/** `records` activity records, the first `pairs` with their detail pair, then `extra` in the detail parent. */
+function syntheticMonth(records: number, pairs: number, extra = ""): string {
+  const all = Array.from({ length: records }, (_, index) => syntheticRecord(index));
+  const details = all
+    .slice(0, pairs)
+    .map((record, index) => compactTable(record, index) + expandedTable(record, index))
+    .join("\n");
+  const rows = all
+    .map(
+      (record) => `<tr>${td(desktopCells(record))}</tr>\n<tr>${td(responsiveCells(record))}</tr>`,
+    )
+    .join("\n");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Synthetic month</title></head>
+<body><div class="synthetic-frame"><div class="synthetic-body">
+<form action="/synthetic" method="post">
+${MONTH_SELECT}
+<div class="synthetic-details">
+${details}
+${extra}
+</div>
+</form>
+<table class="synthetic-activity"><thead><tr>${th(ACTIVITY_HEADERS)}</tr></thead><tbody>
+${rows}
+</tbody></table>
+</div></div></body></html>`;
+}
+const RECORDS = 4;
+const LAST = syntheticRecord(RECORDS - 1);
+const WHOLE = syntheticMonth(RECORDS, RECORDS);
+const ONE_SHORT = syntheticMonth(
+  RECORDS,
+  RECORDS - 1,
+  otherTable(
+    ["SYNTHETIC HEADER ONE", "SYNTHETIC HEADER TWO"],
+    LAST.amount,
+    `compactTable${RECORDS - 1}`,
+  ),
+);
+const pattern = (overrides: Partial<GlobalPassCellPattern>): GlobalPassCellPattern => ({
+  empty: false,
+  digitsOnly: false,
+  dateLike: false,
+  amountLike: false,
+  asciiOnly: true,
+  hasJapanese: false,
+  lengthBucket: "5-16",
+  ...overrides,
+});
+
+describe("global-pass-activity: detail tables, unclassified tables and records compared", () => {
+  const shapeOf = (html: string) => globalPassActivityShape(encode(html), "activity-2099-02.html");
+
+  test("a whole month: every record carried by its pair, in order, nothing unclassified", () => {
+    expect(globalPassActivity.parse(encode(WHOLE), meta()).observations).toHaveLength(RECORDS);
+    const shape = shapeOf(WHOLE);
+    expect(shape.tables).toEqual({ total: 9, th12: 1, th4: 4, th10: 4, other: 0 });
+    expect(shape.detailTables).toEqual({
+      compactHeadersUniform: true,
+      expandedHeadersUniform: true,
+      compactClassTokensUniform: true,
+      expandedClassTokensUniform: true,
+    });
+    const compactChild = { tag: "table", th: 4, wrapped: false, known: true, tables: 1 };
+    const expandedChild = { tag: "div", th: 10, wrapped: true, known: true, tables: 1 };
+    expect(shape.detailContainer).toEqual({
+      childCount: 8,
+      children: Array.from({ length: RECORDS }, () => [compactChild, expandedChild]).flat(),
+      pairsInOrder: RECORDS,
+    });
+    expect(shape.otherTables).toEqual([]);
+    const indices = Array.from({ length: RECORDS }, (_, index) => index);
+    expect(shape.recordDetailAlignment).toEqual({
+      // A compact table's four values are all its own record's.
+      compact: indices.map((index) => ({
+        table: index,
+        valueCells: 4,
+        records: [index],
+        matchedCells: 4,
+        best: index,
+      })),
+      // The shared fee and status reach every record; the rate is in no row.
+      expanded: indices.map((index) => ({
+        table: index,
+        valueCells: 9,
+        records: indices,
+        matchedCells: 8,
+        best: index,
+      })),
+      unmatchedRecords: [],
+      monotonic: true,
+      pairsAgree: true,
+      indexAligned: true,
+    });
+    expect(shape.unmatchedRecords).toEqual([]);
+  });
+
+  test("one record short of a pair, with a third table last: the record and the table are named", () => {
+    expect(refusal(ONE_SHORT)).toEqual({ reason: "unclassified_table" });
+    const shape = shapeOf(ONE_SHORT);
+    expect(shape.tables).toEqual({ total: 8, th12: 1, th4: 3, th10: 3, other: 1 });
+    expect(shape.detailContainer!.childCount).toBe(2 * (RECORDS - 1) + 1);
+    expect(shape.detailContainer!.children.at(-1)).toEqual({
+      tag: "table",
+      th: 2,
+      wrapped: false,
+      known: false,
+      tables: 1,
+    });
+    expect(shape.detailContainer!.pairsInOrder).toBe(RECORDS - 1);
+    expect(shape.otherTables).toEqual([
+      {
+        th: 2,
+        td: 1,
+        bodyRows: 1,
+        cellsPerRow: [1],
+        colspanMax: null,
+        theadPresent: true,
+        nestedTables: 0,
+        positionInParent: 2 * (RECORDS - 1),
+        parentIsDetailContainer: true,
+        classTokenCount: 1,
+        classTokensEqualCompact: true,
+        classTokensEqualExpanded: false,
+        attributeNames: ["class", "id"],
+        // Its id's number is after the three compact tables' and the three wrappers'.
+        idNumericSuffixRank: RECORDS - 1,
+        idNumericSuffixDistinct: RECORDS,
+        idNumericSuffixPeers: 2 * (RECORDS - 1),
+        headerMatches: [
+          { activity: null, compact: null, expanded: null, surveyed: false },
+          { activity: null, compact: null, expanded: null, surveyed: false },
+        ],
+        cells: [
+          {
+            ...pattern({ amountLike: true }),
+            equalsRecordCell: [
+              { record: RECORDS - 1, row: "desktop", cell: 2 },
+              { record: RECORDS - 1, row: "responsive", cell: 0 },
+            ],
+          },
+        ],
+      },
+    ]);
+    const alignment = shape.recordDetailAlignment!;
+    expect(alignment.compact.map((match) => [match.records, match.best])).toEqual([
+      [[0], 0],
+      [[1], 1],
+      [[2], 2],
+    ]);
+    expect(alignment.expanded.map((match) => match.best)).toEqual([0, 1, 2]);
+    expect(alignment).toMatchObject({
+      unmatchedRecords: [RECORDS - 1],
+      monotonic: true,
+      pairsAgree: true,
+      indexAligned: true,
+    });
+    const [unmatched] = shape.unmatchedRecords!;
+    expect(shape.unmatchedRecords).toHaveLength(1);
+    expect(unmatched!.record).toBe(RECORDS - 1);
+    expect(unmatched!.desktop).toHaveLength(9);
+    expect(unmatched!.responsive).toHaveLength(4);
+    // Each cell has the pattern the carried records have there.
+    expect(
+      [...unmatched!.desktop, ...unmatched!.responsive].map((cell) => cell.patternEqualsMajority),
+    ).toEqual(Array(13).fill(true));
+    expect(unmatched!.desktop[0]).toMatchObject(pattern({ dateLike: true }));
+    expect(unmatched!.desktop[8]).toMatchObject(pattern({ empty: true, lengthBucket: "0" }));
+    // The third table's cell is this record's amount, in both views.
+    expect(unmatched!.desktop.map((cell) => cell.equalsOtherTableCell)).toEqual([
+      [],
+      [],
+      [{ table: 0, cell: 0 }],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+    ]);
+    expect(unmatched!.responsive.map((cell) => cell.equalsOtherTableCell)).toEqual([
+      [{ table: 0, cell: 0 }],
+      [],
+      [],
+      [],
+    ]);
+  });
+
+  test("a third table's header equal to a compact header is located in each header list", () => {
+    const page = syntheticMonth(
+      RECORDS,
+      RECORDS - 1,
+      otherTable(["Transaction Detail", "SYNTHETIC HEADER TWO"], "SYNTHETIC CELL"),
+    );
+    const [table] = globalPassActivityShape(encode(page), "activity-2099-02.html").otherTables!;
+    expect(table!.headerMatches).toEqual([
+      { activity: 1, compact: 1, expanded: null, surveyed: true },
+      { activity: null, compact: null, expanded: null, surveyed: false },
+    ]);
+    // No id: no rank. A cell no record has: no match.
+    expect(table).toMatchObject({
+      attributeNames: ["class"],
+      idNumericSuffixRank: null,
+      idNumericSuffixDistinct: null,
+      cells: [{ ...pattern({ lengthBucket: "5-16" }), equalsRecordCell: [] }],
+    });
+  });
+
+  test("pairs out of order, ties and a nested table are visible", () => {
+    // Swap the first two pairs: the parser's index pairing no longer holds.
+    const [first, second] = [0, 1].map(
+      (index) =>
+        compactTable(syntheticRecord(index), index) + expandedTable(syntheticRecord(index), index),
+    );
+    const swapped = WHOLE.replace(first!, "FIRST")
+      .replace(second!, first!)
+      .replace("FIRST", second!);
+    expect(shapeOf(swapped).recordDetailAlignment).toMatchObject({
+      monotonic: false,
+      pairsAgree: true,
+      indexAligned: false,
+      unmatchedRecords: [],
+    });
+    // Two records with the same texts: their tables tie, so no record is carried.
+    const twins = WHOLE.replaceAll("SYNTHETIC SHOP B", "SYNTHETIC SHOP A")
+      .replaceAll("USD 21.25", "USD 11.25")
+      .replaceAll("JPY 2,150", "JPY 1,050")
+      .replaceAll("SYN-APPROVAL-B", "SYN-APPROVAL-A")
+      .replaceAll("2099/02/02", "2099/02/01");
+    const tied = shapeOf(twins).recordDetailAlignment!;
+    expect(tied.compact.slice(0, 2).map((match) => [match.records, match.best])).toEqual([
+      [[0, 1], null],
+      [[0, 1], null],
+    ]);
+    expect(tied).toMatchObject({ unmatchedRecords: [0, 1], monotonic: false });
+    // A table nested in a third table, with a colspan.
+    const nested = shapeOf(
+      syntheticMonth(
+        RECORDS,
+        RECORDS - 1,
+        '<table class="synthetic-outer"><tr><th colspan="3">SYNTHETIC HEADER</th></tr><tr><td><table><tr><td>SYNTHETIC CELL</td></tr></table></td></tr></table>',
+      ),
+    );
+    expect(
+      nested.otherTables!.map((table) => [table.th, table.nestedTables, table.colspanMax]),
+    ).toEqual([
+      [1, 1, 3],
+      [0, 0, null],
+    ]);
+    expect(nested.otherTables![1]!.parentIsDetailContainer).toBe(false);
+  });
+
+  test("the cell patterns are the parser's date and amount forms, character classes and length buckets", () => {
+    expect(globalPassCellPattern("")).toEqual(
+      pattern({ empty: true, asciiOnly: true, lengthBucket: "0" }),
+    );
+    expect(globalPassCellPattern("0123")).toEqual(
+      pattern({ digitsOnly: true, lengthBucket: "1-4" }),
+    );
+    expect(globalPassCellPattern("2099-02-03").dateLike).toBe(true);
+    expect(globalPassCellPattern("2099.02.03").dateLike).toBe(false);
+    expect(globalPassCellPattern("JPY -1,234.5").amountLike).toBe(true);
+    expect(globalPassCellPattern("1,234 JPY").amountLike).toBe(false);
+    expect(globalPassCellPattern("お取引 X")).toMatchObject({
+      asciiOnly: false,
+      hasJapanese: true,
+      lengthBucket: "5-16",
+    });
+    expect(globalPassCellPattern("Ｘ".repeat(17))).toMatchObject({
+      hasJapanese: true,
+      lengthBucket: "17-64",
+    });
+    expect(globalPassCellPattern("x".repeat(65)).lengthBucket).toBe("65+");
+    // The two patterns are the parser's own literals: a change there fails
+    // here. The transpiler may write a non-ASCII character of a literal as a
+    // `\uXXXX` escape, so both sides are compared with escapes read back.
+    const unescaped = (source: string) =>
+      source.replaceAll(/\\u([0-9A-Fa-f]{4})/gu, (_, hex: string) =>
+        String.fromCharCode(Number.parseInt(hex, 16)),
+      );
+    const literals = [...SOURCE.matchAll(/\/(\^[^\n]*?\$)\/u/gu)].map((match) => match[1]!);
+    expect(literals).toContain(unescaped(GLOBAL_PASS_DATE_CELL.source));
+    expect(literals).toContain(unescaped(GLOBAL_PASS_AMOUNT_CELL.source));
+    expect([GLOBAL_PASS_DATE_CELL.flags, GLOBAL_PASS_AMOUNT_CELL.flags]).toEqual(["u", "u"]);
+  });
+
+  test("on pages the parser accepts, the comparisons read the records, headers and values it emits", () => {
+    for (const page of [FIXTURE, WHOLE, syntheticMonth(1, 1)]) {
+      const parsed = globalPassActivity.parse(encode(page), meta()).observations;
+      const read = globalPassPageText(encode(page));
+      const extra = parsed.map((observation) => observation.extra as Record<string, any>);
+      expect(read.records).toEqual(
+        extra.map((item) => ({
+          desktop: item["sourceViews"].desktopCells,
+          responsive: item["sourceViews"].responsiveCells,
+        })),
+      );
+      for (const [kind, fields] of [
+        ["compact", "compactFields"],
+        ["expanded", "expandedFields"],
+      ] as const)
+        expect(read[kind]).toEqual(
+          extra.map((item) => ({
+            headers: Object.keys(item[fields]),
+            values: Object.values(item[fields]),
+          })),
+        );
+    }
+  });
+
+  test("the newest published capture of the key is compared by desktop row, in counts", () => {
+    const refused = encode(ONE_SHORT);
+    expect(globalPassLatestOkComparison(refused, null)).toEqual({
+      found: false,
+      artifact: null,
+      intact: null,
+      records: null,
+      recordsAlsoPresent: null,
+      unmatchedRecordPresent: null,
+    });
+    expect(
+      globalPassLatestOkComparison(refused, { artifact: 7, bytes: encode(WHOLE), intact: false }),
+    ).toEqual({
+      found: true,
+      artifact: 7,
+      intact: false,
+      records: null,
+      recordsAlsoPresent: null,
+      unmatchedRecordPresent: null,
+    });
+    // An accepted capture with every record: the unmatched one is among them.
+    expect(
+      globalPassLatestOkComparison(refused, { artifact: 7, bytes: encode(WHOLE), intact: true }),
+    ).toEqual({
+      found: true,
+      artifact: 7,
+      intact: true,
+      records: RECORDS,
+      recordsAlsoPresent: RECORDS,
+      unmatchedRecordPresent: true,
+    });
+    // An accepted capture without the last record: it is not.
+    expect(
+      globalPassLatestOkComparison(refused, {
+        artifact: 8,
+        bytes: encode(syntheticMonth(RECORDS - 1, RECORDS - 1)),
+        intact: true,
+      }),
+    ).toMatchObject({
+      records: RECORDS - 1,
+      recordsAlsoPresent: RECORDS - 1,
+      unmatchedRecordPresent: false,
+    });
+    // An accepted empty month: nothing to compare with; a whole refused page has no unmatched record.
+    const empty = FIXTURE.replace(/<table[\s\S]*<\/table>/u, "");
+    expect(
+      globalPassLatestOkComparison(encode(WHOLE), {
+        artifact: 9,
+        bytes: encode(empty),
+        intact: true,
+      }),
+    ).toMatchObject({ records: 0, recordsAlsoPresent: 0, unmatchedRecordPresent: null });
+  });
+
+  test("the lookup names only a key of the parser's form and another artifact", () => {
+    const sql = globalPassLatestOkSql({ id: 679, artifactKey: "activity-2099-02.html" })!;
+    expect(sql).toContain("a.artifact_key='activity-2099-02.html' AND a.id<>679");
+    expect(sql).toContain("FROM published_parse_runs p");
+    for (const artifactKey of [null, "", "activity-2099-02.html' OR '1'='1", "SENTINEL.html"])
+      expect(globalPassLatestOkSql({ id: 1, artifactKey })).toBeNull();
+    for (const id of [0, -1, 1.5, Number.NaN])
+      expect(globalPassLatestOkSql({ id, artifactKey: "activity-2099-02.html" })).toBeNull();
+  });
+
+  test("no synthetic text, attribute value, id or number of the page reaches the line", () => {
+    const pages = [
+      ONE_SHORT,
+      syntheticMonth(
+        RECORDS,
+        RECORDS - 1,
+        otherTable(["Transaction Detail", "SYNTHETIC HEADER TWO"], LAST.approval, "sentinelTable9"),
+      ),
+    ];
+    const forbidden = new Set<string>([
+      "SYNTHETIC",
+      "SYN-",
+      "2099",
+      "USD",
+      "JPY",
+      "Transaction",
+      ".1234",
+      "synthetic-",
+      "compactTable",
+      "expandedWrap",
+      "sentinelTable",
+      "/synthetic",
+    ]);
+    for (let index = 0; index < RECORDS; index++)
+      for (const value of Object.values(syntheticRecord(index)))
+        if (value !== "") forbidden.add(value);
+    for (const page of pages) {
+      const printed = JSON.stringify({
+        shape: shapeOf(page),
+        latestOkCapture: globalPassLatestOkComparison(encode(page), {
+          artifact: 1,
+          bytes: encode(WHOLE),
+          intact: true,
+        }),
+      });
+      for (const text of forbidden) expect(printed, text).not.toContain(text);
+      // Every word is a field name, a closed tag or attribute name, a row kind, a boolean or null.
+      const closed = new Set([
+        ...fieldNames(shapeOf(FIXTURE)),
+        ...fieldNames(shapeOf(ONE_SHORT)),
+        "found",
+        "artifact",
+        "intact",
+        "records",
+        "recordsAlsoPresent",
+        "unmatchedRecordPresent",
+        "latestOkCapture",
+        "shape",
+        "table",
+        "div",
+        "class",
+        "id",
+        "desktop",
+        "responsive",
+        "true",
+        "false",
+        "null",
+      ]);
+      const words = printed.match(/[A-Za-z_][A-Za-z0-9_]*/gu) ?? [];
+      expect(words.filter((word) => !closed.has(word))).toEqual([]);
+    }
+  });
+});
+
+/** Every object key in a value, at any depth. */
+function fieldNames(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(fieldNames);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, item]) => [key, ...fieldNames(item)]);
+}
 
 describe("globalpass-activity selection text", () => {
   test("a version filter is a semantic version or nothing", () => {

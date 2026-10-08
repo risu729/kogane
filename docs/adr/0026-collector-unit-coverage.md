@@ -1094,3 +1094,174 @@ transaction observation yet.
   value appears here. The production result above was re-queried the same
   way (parse runs of 1.2.0 by fetch run, status, warnings and observation
   count; 1.1.0 runs by supersession).
+
+## Amendment 2026-10-08: GLOBAL PASS replay compares records with detail tables
+
+- Status: proposed
+- Date: 2026-10-08
+- Carried by: `services/processor/scripts/parser-rejection.ts`
+  (`globalPassActivityShape`: `detailTables`, `detailContainer`,
+  `otherTables`, `recordDetailAlignment`, `unmatchedRecords`;
+  `globalPassCellPattern`, `globalPassLatestOkSql`,
+  `globalPassLatestOkComparison`),
+  `services/processor/scripts/replay-diagnostics.ts`,
+  [operations](../operations.md#replaying-a-parser-rejection),
+  [observations](../observations.md#global-pass-a-refused-page-has-ten-records-and-nine-detail-pairs-replay-diagnostics-no-parser-release),
+  [PRESTIA / GLOBAL PASS source note](../sources/prestia.md#global-pass-first-shared-run-parse-2026-10-04),
+  the tests listed under Verification
+
+### Context
+
+After #474, `global-pass-activity@1.2.0` refuses 2 of the 72 eligible
+activity pages, both importer-era. The owner replayed one of them (artifact 679) and reported closed counts only: `unclassified_table`; 20 tables (one
+with twelve `th`, nine with four, nine with ten, one other); an activity
+table of 20 body rows, a nine-cell and a four-cell row for each of 10
+records; the detail tables in one parent `div` outside the activity table,
+whose children are a four-`th` table and a `div` wrapping a ten-`th` table
+nine times, then the other table (2 `th`, 1 `td`, one body row of one cell).
+So 10 records have 9 detail pairs, and a two-header table stands where a
+tenth pair would be
+([observations](../observations.md#global-pass-a-refused-page-has-ten-records-and-nine-detail-pairs-replay-diagnostics-no-parser-release)).
+
+The parser pairs compact table i and expanded table i with record i by
+index and requires twice as many activity rows as pairs, so leaving the
+two-header table out would still fail its row check. Which record each pair
+carries, which record is the one without a pair, and how the two-header
+table relates to the records and the detail tables, the replay's shape
+(#439) cannot say: it counts structures but does not compare them. What
+the table means is unobserved, so the parser cannot be changed for it
+([ADR 0004](0004-payment-type-shapes-from-evidence.md)).
+
+### Options considered
+
+1. **Admit the page by leaving the two-header table out.** Rejected: the
+   row check still fails, and dropping a table that may carry a record's
+   values would guess provider semantics; the 2026-09-08 investigation
+   already said it must not be ignored to admit the other rows.
+2. **Read the R2 object by hand.** Answers the question once, but means a
+   person reading provider text, and leaves nothing for the next refusal.
+   Not the standing answer.
+3. **Print more of the page** (cell texts, headers). Rejected: logs and
+   operational output carry counts and closed codes only.
+4. **Compare the page with itself in the replay, printing only positions,
+   booleans, counts and closed classes.** **Chosen.**
+
+For the reading itself: importing the parser's private DOM helpers and
+patterns would mean exporting them from `global-pass-activity.ts`, which
+changes its code digest, and migration 0028 refuses a new digest under the
+same version, so it would need a parser release this change must not make.
+The diagnostics keep reading the tree with their existing copies of those
+helpers (`gpElements`, `gpOwned`, `gpClosest`, `gpText`, `gpDirectCells`,
+`gpAttribute`; `shapeChildren` from the MyJCB shape) and parse5, already a
+dependency of the processor, and two tests guard the copy (Verification).
+No dependency is added. Moving the helpers into a module both import is
+left for the parser's next release.
+
+### Decision
+
+**Option 4.** The GLOBAL PASS `shape` keeps every key it had, with the same
+meaning, and gains:
+
+- `detailTables`: whether the four-`th` and the ten-`th` tables agree among
+  themselves on header lists and class-token sets.
+- `detailContainer`: for the one parent of every four-`th` table (null if
+  none or several), its element children in order, each as its tag (closed
+  list, else `other`), the `th` count of the table it is or wraps, whether
+  it wraps one, whether that count is one the parser classifies and how many
+  tables it holds; and `pairsInOrder`, the leading four-`th`/ten-`th` pairs
+  among the children holding a table.
+- `otherTables`: for every table whose `th` count is not 12, 4 or 10: `th`
+  and `td` counts, body rows and cells per row, the largest `colspan`,
+  `thead`, nested tables, its position among its parent's children and
+  whether that parent is the detail container, its class-token count and
+  whether its tokens equal those shared by the compact or expanded tables,
+  its attribute names (a closed list, else `data-*`, `aria-*`, `on*` or
+  `other`), the rank of the number ending its id or name among those of the
+  detail tables (never the number), for each `th` the index of an equal
+  header in the activity, compact and expanded header lists and whether it
+  is a surveyed label, and for each `td` its pattern class and the activity
+  record cells (record, `desktop` or `responsive`, cell index) with exactly
+  its text.
+- `recordDetailAlignment`: for each compact and each expanded table, the
+  records with a non-empty cell equal to one of its value cells, the most
+  of its cells one record has, and that record when it is the only one
+  (`best`); the records no compact table has as `best`; whether the `best`
+  records strictly increase with the table index (`monotonic`), whether
+  compact and expanded table i agree (`pairsAgree`), and whether table i
+  carries record i (`indexAligned`).
+- `unmatchedRecords`: for each record no compact table carries, every cell
+  of its desktop and responsive rows as a pattern class, whether that
+  pattern is the one more than half of the carried records have at the
+  cell, and the other tables' cells with exactly its text.
+- A pattern class is `empty`, `digitsOnly`, `dateLike` and `amountLike` (the
+  parser's own date and amount patterns), `asciiOnly`, `hasJapanese`, and a
+  length bucket (`0`, `1-4`, `5-16`, `17-64`, `65+`).
+
+Next to the shape, the replay prints `latestOkCapture` for each refused
+GLOBAL PASS page: it looks up the newest other artifact with the same key
+(same month and page) that has a published `global-pass-activity` parse
+(`published_parse_runs`, the adoption pointer the replay's selection reads;
+`globalPassLatestOkSql`, one more D1 `SELECT`), reads its raw object from R2,
+verifies it against the stored SHA-256 and size, and prints whether one was
+found, its internal artifact id, whether it was intact, its record count, how
+many records of the refused page have a desktop row equal cell for cell to
+one of its desktop rows, and whether every record without a pair is among
+them. Which artifacts the replay selects is unchanged.
+
+Texts are only ever compared for exact equality after the parser's own
+normalisation (text nodes joined by a space, whitespace collapsed, trimmed),
+and only the positions of equal cells are printed. No cell or header text,
+attribute value, id, number, date or amount read from the page is printed.
+The parser, its version and its code digest are unchanged.
+
+### Consequences
+
+- A replayed GLOBAL PASS refusal now says which record each detail pair
+  carries, which record has none, and how the unclassified table relates to
+  that record and to the detail tables, without anyone reading the page. A
+  parser change for the two-header table, if any, follows from that report
+  and the owner's confirmation; this amendment admits no page.
+- The line says more than before: that two cells hold the same text (as
+  positions), a cell's pattern class and length bucket, and an id's rank.
+  It still carries no text, value or number of the page; the line grows with
+  the number of other tables and unmatched records.
+- The GLOBAL PASS replay reads one more D1 row and at most one more R2
+  object per refused page, through the same read-only configuration.
+- **Limits.** Equality is exact, so a value the provider writes differently
+  in two views is not matched, and two records with the same texts tie and
+  are both unmatched. The diagnostics read the tree with a copy of the
+  parser's private helpers, held equal by tests on pages the parser accepts,
+  not by construction. The comparisons have run on synthetic pages only;
+  none has run on production, and the meaning of the two-header table stays
+  unknown until the owner reports it.
+
+### Verification
+
+- `services/processor/test/global-pass-rejection.test.ts`, on a synthetic
+  month in the observed layout (detail tables in one parent `div` inside a
+  `form`, expanded tables wrapped in a `div`, the activity table outside):
+  four records with four pairs parse `ok` and print every new key, no
+  unmatched record, `monotonic` true; four records with three pairs and a
+  two-header table last, whose cell is the last record's amount, are refused
+  as `unclassified_table` and print the alignment of records 0 to 2, the
+  last record as unmatched, the table's cell equal to that record's desktop
+  cell 2 and responsive cell 0, its id ranked after the detail tables', and
+  `pairsInOrder` 3; a two-header table whose header is a compact header
+  gets its index in the activity and compact lists; swapped pairs, tied
+  records and a nested table are visible; the synthetic page's texts,
+  class values, ids and numbers never appear in the printed line, and every
+  word of it is a field name, a closed name or a literal; the pattern classes
+  use the parser's date and amount literals, read from the parser source;
+  on pages the parser accepts, the records, header lists and value cells
+  the diagnostics read equal the parser's `extra.sourceViews`,
+  `compactFields` and `expandedFields`; the comparison with a published
+  capture counts present records and says whether the unmatched one is
+  among them, and the lookup accepts only a key of the parser's form.
+- `services/processor/test/parser-rejection.test.ts`: the lookup on the
+  migrated CORE schema finds the newest other artifact of the same key whose
+  parse is published, never the refused one, another month or an artifact
+  whose `ok` parse was never published, and leaves the failure selection
+  unchanged.
+- The existing shape expectations hold with the new keys added.
+- No production data was read for this amendment; the counts in Context are
+  the owner's report.
