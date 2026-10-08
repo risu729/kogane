@@ -3,8 +3,8 @@ import {
   EVIDENCE_API_VERSION,
   type EvidenceMeta,
 } from "../../../packages/observation-shared/src/evidence-contract";
-import { authenticate } from "./auth";
-import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
+import { agentPrincipal, authenticate } from "./auth";
+import { agentApi, classifyAgentPath, isAgentPath, MCP_PATH, sharedQueryApi } from "./agent-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { classifyOpsPath, opsApi } from "./ops-api";
 import { healthApi } from "./health";
@@ -55,16 +55,28 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (healthResponse) return healthResponse;
   const bootstrapResponse = await scheduleBootstrapApi(request, env, url);
   if (bootstrapResponse) return bootstrapResponse;
+  // The agent API (docs/agent-api.md). Its principal is `agentPrincipal`'s:
+  // on `/mcp`, an identity that came through the MCP Access application is the
+  // agent-only `mcp-client:<sub>` (ADR 0047); otherwise it is the subject
+  // `authenticate` would return. Every path below accepts only this Worker's
+  // own Access application, as before.
+  const agentResponse = isAgentPath(url.pathname)
+    ? await agentApi(
+        request,
+        env,
+        url,
+        await agentPrincipal(request, env, url.pathname === MCP_PATH),
+      )
+    : null;
+  if (agentResponse) return agentResponse;
   const subject = await authenticate(request, env);
   const schedulesResponse = await schedulesApi(request, env, url, subject);
   if (schedulesResponse) return schedulesResponse;
   // The only non-GET boundary of this Worker: three explicit allow-lists of
   // authenticated POST paths, each checking its own grant — the agent API
-  // (docs/agent-api.md), the change lifecycle (A09) and the operations API
-  // (docs/ops-api.md). They own disjoint paths, all keep the closed 401/403
-  // answers, and everything outside them stays GET-only.
-  const agentResponse = await agentApi(request, env, url, subject);
-  if (agentResponse) return agentResponse;
+  // (above, docs/agent-api.md), the change lifecycle (A09) and the operations
+  // API (docs/ops-api.md). They own disjoint paths, all keep the closed
+  // 401/403 answers, and everything outside them stays GET-only.
   const commandResponse = await commandApi(request, env, url, subject);
   if (commandResponse) return commandResponse;
   // Off by default: with `OPS_API_ENABLED` unset this returns null and the

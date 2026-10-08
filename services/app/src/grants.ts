@@ -20,6 +20,7 @@ import {
   subjectGrantTable,
   type SubjectGrantVars,
 } from "../../../packages/application/src/index";
+import { isAgentOnlyPrincipal } from "./auth";
 import { HttpError } from "./http";
 
 export type { SubjectGrantVars };
@@ -46,9 +47,18 @@ function reportProblem(problem: GrantConfigProblem): void {
  * `403 subject_not_granted`, and a deployment whose lists cannot be read is
  * `503 grants_misconfigured` for *everyone* — including a subject that a
  * readable configuration would have graded an agent. Nothing widens.
+ *
+ * An agent-only principal (`mcp-client:<sub>`, an identity that arrived
+ * through the MCP Access application, ADR 0047) is not a subject and is never
+ * graded here: it is `403 actor_not_supported` before either list is read,
+ * whatever they say — including a list that names the same person's bare
+ * subject as the operator. This is the one gate every command surface passes
+ * (command routes, operations routes, operations MCP tools), so no path
+ * downstream of `/mcp` can re-classify an MCP client as the operator.
  */
 export function principalFor(env: SubjectGrantVars, subject: string): Principal {
-  if (!ACTOR_PATTERN.test(subject)) throw new HttpError(403, "actor_not_supported");
+  if (!ACTOR_PATTERN.test(subject) || isAgentOnlyPrincipal(subject))
+    throw new HttpError(403, "actor_not_supported");
   const resolved = resolvePrincipal(env, subject);
   if (resolved.ok) return resolved.principal;
   if (resolved.problem !== undefined) reportProblem(resolved.problem);

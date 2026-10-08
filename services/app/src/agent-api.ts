@@ -15,9 +15,13 @@
 // `AGENT_API_GRANTS`
 // and an agent grant is never widened to serve a page.
 //
-// The principal on both paths is the subject `authenticate` returned. Nothing
-// here parses the token again, and nothing reads an actor from a body or a
-// header (review rule 9, addendum 10 section 5).
+// The principal of the shared query route is the subject `authenticate`
+// returned. The principal of an agent path is `agentPrincipal`'s, from the
+// same verified token: the subject as before, or — on `/mcp`, for an identity
+// that came through the MCP Access application — the agent-only
+// `mcp-client:<sub>` (ADR 0047). Nothing here parses the token again, and
+// nothing reads an actor from a body or a header (review rule 9, addendum 10
+// section 5).
 import {
   DEFAULT_QUERY_LIMIT,
   type Grant,
@@ -34,9 +38,10 @@ import {
   queryResponse,
   toolContext,
 } from "./agent-service";
+import { isAgentOnlyPrincipal } from "./auth";
 import { cardPurchasesAvailable } from "./card-purchases-api";
 import { grantsUsable } from "./grants";
-import { handleMcp, MCP_TOOLS, PURCHASES_MCP_TOOLS } from "./mcp";
+import { assertAgentTransport, handleMcp, MCP_TOOLS, PURCHASES_MCP_TOOLS } from "./mcp";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
 import { HttpError, json } from "./http";
@@ -133,20 +138,22 @@ export function readerGrant(principal: string): Grant {
 
 /**
  * POST routes. Returns `null` when the path is not an agent path. The
- * principal is the subject the Access gate proved, the same one the change
- * lifecycle uses; nothing here reads the token a second time.
+ * principal is the one the Access gate proved (`agentPrincipal`): a user's
+ * subject, the same one the change lifecycle uses, or an agent-only
+ * `mcp-client:<sub>`; nothing here reads the token a second time.
  */
 export async function agentApi(
   request: Request,
   env: Env,
   url: URL,
-  /** The subject `authenticate` proved; never a body or header claim. */
+  /** The principal `agentPrincipal` proved; never a body or header claim. */
   subject: string,
 ): Promise<Response | null> {
   const path = url.pathname;
   if (!isAgentPath(path)) return null;
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   if (url.search) throw new HttpError(400, "invalid_query");
+  assertAgentTransport(request, url);
   const grant = agentGrant(env, subject);
   if (grant === null) throw new HttpError(403, "agent_api_not_configured");
   const now = new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
@@ -158,8 +165,10 @@ export async function agentApi(
     // and the operations tools are graded by the change lifecycle's principal
     // inside `callOpsTool`, exactly as their HTTP routes are. With
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
-    // surface matches the routes this deployment actually serves.
-    const ops = opsApiEnabled(env);
+    // surface matches the routes this deployment actually serves. An
+    // agent-only principal is never an operator (ADR 0047): for it they do
+    // not exist, and `principalFor` refuses it again behind them.
+    const ops = opsApiEnabled(env) && !isAgentOnlyPrincipal(subject);
     // A deployment whose command grant lists cannot be read grades nobody, so
     // it can authorize none of the operations tools; publishing them would
     // describe a capability this deployment does not have. They stay callable,
@@ -173,7 +182,7 @@ export async function agentApi(
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
     const message = await handleMcp(
-      await boundedJson(request),
+      request,
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (isAgentToolName(name)) return callTool(name, body, context);
@@ -186,8 +195,7 @@ export async function agentApi(
         ...(listOps ? OPS_MCP_TOOLS : []),
       ],
     );
-    if (message === null) return new Response(null, { status: 202 });
-    return json(message);
+    return message;
   }
   const tool = toolForPath(path);
   if (tool === null) throw new HttpError(404, "not_found");

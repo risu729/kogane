@@ -27,6 +27,7 @@ import { seedRegistry } from "./fixtures";
 import { MCP_TOOLS } from "../src/mcp";
 import { OPS_TOOL_NAMES } from "../src/ops-tools";
 import { d1CommandStore, recordOperationStage } from "../../../packages/application/src/index";
+import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
 const OPS = "/api/ops/v1";
 const OPERATOR = "ops-operator";
@@ -109,7 +110,11 @@ async function call(
   const jwt = await token(options.subject);
   const init: RequestInit = {
     method: options.method ?? (options.body === undefined ? "GET" : "POST"),
-    headers: { "cf-access-jwt-assertion": jwt },
+    headers: {
+      "cf-access-jwt-assertion": jwt,
+      // What an MCP client sends on every POST (Streamable HTTP).
+      ...(path === "/mcp" ? MCP_CLIENT_HEADERS : {}),
+    },
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
   const handler = options.target ?? worker;
