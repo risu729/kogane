@@ -2,9 +2,9 @@
 // `selectPriceCandidates`, ADR 0050) over the migrated CORE schema, decided by
 // the domain's `selectPrice`. Synthetic prices, claims, parses and
 // publications only; every instrument and amount is invented.
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { sha256Hex } from "../../domain/src/context.ts";
 import {
@@ -28,130 +28,11 @@ import {
   selectPrices,
   type PriceCandidateWant,
 } from "../src/price-selection";
-import type { SqlExecutor } from "../src/reader";
-import { fromTemplate } from "./schema-template";
-
-const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
-
-function migratedDatabase(): Database {
-  return fromTemplate("core", () => {
-    const db = new Database(":memory:");
-    for (const name of readdirSync(MIGRATIONS)
-      .filter((entry) => entry.endsWith(".sql"))
-      .sort())
-      db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
-    return db;
-  });
-}
+import { executor, migratedDatabase, PriceStore, USD } from "./price-candidates-fixture";
 
 beforeAll(() => {
   migratedDatabase().close();
 }, 60_000);
-
-function executor(db: Database): SqlExecutor {
-  return {
-    all: async <T>(text: string, args: readonly unknown[]) =>
-      db.query(text).all(...(args as never[])) as T[],
-    first: async <T>(text: string, args: readonly unknown[]) =>
-      (db.query(text).get(...(args as never[])) as T | null) ?? null,
-  };
-}
-
-const PARSER = "sbi-shinsei-exchange-rate";
-const USD: PriceKey = { baseInstrumentRef: "USD", quoteUnitRef: "JPY", priceKind: "reference" };
-
-/** A store with parse runs, publication history and promoted prices. */
-class Store {
-  readonly db = migratedDatabase();
-  private observation = 1;
-  private readonly published = new Map<number, number>();
-
-  parse(id: number, artifact: number, version = `1.0.${id}`): this {
-    this.db
-      .query(
-        `INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
-         VALUES(?,?,?,?,'2026-09-01T00:00:00Z','ok','[]')`,
-      )
-      .run(id, artifact, PARSER, version);
-    return this;
-  }
-
-  /** Moves the pointer and appends the event, as the pipeline writer does. */
-  publish(artifact: number, run: number, at: string, kind = "normal"): this {
-    const version = (this.db.query("SELECT parser_version FROM parse_runs WHERE id=?").get(run) as {
-      parser_version: string;
-    })!.parser_version;
-    this.db
-      .query(
-        `INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind)
-         VALUES(?,?,?,?,?,?)
-         ON CONFLICT(fetch_artifact_id,parser_name) DO UPDATE SET parse_run_id=excluded.parse_run_id,
-           parser_version=excluded.parser_version, published_at=excluded.published_at,
-           publication_kind=excluded.publication_kind`,
-      )
-      .run(artifact, PARSER, run, version, at, kind);
-    this.db
-      .query(
-        `INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at)
-         VALUES(?,?,?,?,?,'pipeline','test',?)`,
-      )
-      .run(artifact, PARSER, this.published.get(artifact) ?? null, run, kind, at);
-    this.published.set(artifact, run);
-    return this;
-  }
-
-  price(options: {
-    id: string;
-    run: number;
-    at?: string;
-    amount: string;
-    key?: PriceKey;
-    rule?: string;
-    recordedAt?: string;
-    effective?: string;
-  }): this {
-    const key = options.key ?? USD;
-    const observation = this.observation++;
-    this.db
-      .query(
-        `INSERT INTO valuation_observations(id,parse_run_id,source_account,subject,metric,amount_text,amount_scale,currency,raw_locator,extra_json)
-         VALUES(?,?,'test:board','USD','bank_mid_rate',?,0,'JPY','json:$','{}')`,
-      )
-      .run(observation, options.run, options.amount);
-    const [coefficient, fraction = ""] = options.amount.split(".");
-    this.db
-      .query(
-        `INSERT INTO price_observations(id,base_instrument_ref,base_quantity_coefficient,base_quantity_scale,
-           quote_unit_ref,quote_amount_coefficient,quote_amount_scale,price_kind,effective_time,
-           source_claim_ref,recorded_at)
-         VALUES(?,?,'1',0,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        options.id,
-        key.baseInstrumentRef,
-        key.quoteUnitRef,
-        `${coefficient}${fraction}`,
-        fraction.length,
-        key.priceKind,
-        options.effective ??
-          JSON.stringify({
-            kind: "instant",
-            value: options.at ?? "2026-09-10T10:00:00+09:00",
-            zone: "Asia/Tokyo",
-            basis: "provider",
-          }),
-        `valuation_observations/${observation}#$.amount_text`,
-        options.recordedAt ?? "2026-09-10T02:00:00.000Z",
-      );
-    this.db
-      .query(
-        `INSERT INTO price_observation_claims(price_id,rule_id,claim_kind,observation_id,parse_run_id,json_path,created_at)
-         VALUES(?,?,'valuation',?,?,'$.amount_text','2026-09-10T02:00:00.000Z')`,
-      )
-      .run(options.id, options.rule ?? "fx-sbi-shinsei-board-v1", observation, options.run);
-    return this;
-  }
-}
 
 const POLICY: PriceSelectionPolicy = {
   policyId: "test:fx-selection",
@@ -173,7 +54,7 @@ const bound = (knowledge: KnowledgeMode = CURRENT, asOfDate = "2026-09-10"): Sel
 });
 
 async function select(
-  store: Store,
+  store: PriceStore,
   options: {
     knowledge?: KnowledgeMode;
     key?: PriceKey;
@@ -212,8 +93,8 @@ describe("knowledge: current and known-at", () => {
   const T1 = "2026-09-08T00:00:00.000Z";
   const T2 = "2026-09-09T00:00:00.000Z";
   const T3 = "2026-09-09T12:00:00.000Z";
-  function history(): Store {
-    return new Store()
+  function history(): PriceStore {
+    return new PriceStore()
       .parse(1, 1)
       .publish(1, 1, T1)
       .price({ id: "p-first", run: 1, amount: "146", recordedAt: "2026-09-08T00:01:00.000Z" })
@@ -253,7 +134,7 @@ describe("knowledge: current and known-at", () => {
   });
 
   test("ties at the knowledge instant are included: recorded at K, published at K", async () => {
-    const store = new Store()
+    const store = new PriceStore()
       .parse(1, 1)
       .publish(1, 1, "2026-09-10T01:00:00.000Z")
       .price({ id: "at-k", run: 1, amount: "146", recordedAt: "2026-09-10T02:00:00.000Z" });
@@ -263,7 +144,7 @@ describe("knowledge: current and known-at", () => {
     expect(
       chosen(await select(store, { knowledge: knownAt("2026-09-10T01:59:59.999Z") })),
     ).toBeNull();
-    const published = new Store()
+    const published = new PriceStore()
       .parse(1, 1)
       .publish(1, 1, "2026-09-10T03:00:00.000Z")
       .price({ id: "p", run: 1, amount: "146", recordedAt: "2026-09-10T02:00:00.000Z" });
@@ -276,7 +157,7 @@ describe("knowledge: current and known-at", () => {
   });
 
   test("same effective and recorded time: equal amounts tie-break by id, different ones disagree", async () => {
-    const store = new Store().parse(1, 1).publish(1, 1, "2026-09-10T01:00:00.000Z");
+    const store = new PriceStore().parse(1, 1).publish(1, 1, "2026-09-10T01:00:00.000Z");
     store.parse(2, 2).publish(2, 2, "2026-09-10T01:00:00.000Z");
     store.price({ id: "a", run: 1, amount: "146" }).price({ id: "b", run: 2, amount: "146" });
     const agree = await select(store);
@@ -296,7 +177,7 @@ describe("knowledge: current and known-at", () => {
 
 describe("scope, window and stored shapes", () => {
   test("same-snapshot never takes an older snapshot's price", async () => {
-    const store = new Store()
+    const store = new PriceStore()
       .parse(1, 1)
       .publish(1, 1, "2026-09-09T01:00:00.000Z")
       .parse(2, 2)
@@ -309,7 +190,7 @@ describe("scope, window and stored shapes", () => {
   });
 
   test("the newest rows before the window are returned so that stale is told from missing", async () => {
-    const store = new Store()
+    const store = new PriceStore()
       .parse(1, 1)
       .publish(1, 1, "2026-09-01T01:00:00.000Z")
       .price({ id: "old-a", run: 1, amount: "140", at: "2026-08-20T10:00:00+09:00" })
@@ -337,7 +218,7 @@ describe("scope, window and stored shapes", () => {
   });
 
   test("an unreadable stored effective time is returned and counted, a date-only one is placed", async () => {
-    const store = new Store()
+    const store = new PriceStore()
       .parse(1, 1)
       .publish(1, 1, "2026-09-01T01:00:00.000Z")
       .price({
@@ -400,7 +281,7 @@ describe("scope, window and stored shapes", () => {
   });
 
   test("the read is refused, never cut, past its bounds", async () => {
-    const store = new Store().parse(1, 1).publish(1, 1, "2026-09-01T01:00:00.000Z");
+    const store = new PriceStore().parse(1, 1).publish(1, 1, "2026-09-01T01:00:00.000Z");
     const window = selectionReadWindow(POLICY, bound(), null);
     const want: PriceCandidateWant = { key: USD, snapshotParseRunId: null, window };
     const sql = executor(store.db);
@@ -454,7 +335,7 @@ describe("plans without table statistics", () => {
   ]);
 
   test("both candidate texts reach prices by instrument, claims by key and publication by key", () => {
-    const db = new Store().db;
+    const db = new PriceStore().db;
     expect(
       db.query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'").get(),
     ).toEqual({ n: 0 });
@@ -565,7 +446,7 @@ describe("differential against selectPrices", () => {
     for (let seed = 1; seed <= 30; seed += 1) {
       const next = random(seed);
       const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)]!;
-      const store = new Store();
+      const store = new PriceStore();
       let run = 0;
       const runs: number[] = [];
       for (let artifact = 1; artifact <= 4; artifact += 1) {
