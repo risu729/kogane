@@ -1134,9 +1134,11 @@ format change is needed for that step.
 
 - **Immutable terminals per published segment** ([ADR 0044](adr/0044-smbc-resume-publication.md)).
   The initial stopped session keeps the backfill ID. Resumed sessions publish
-  only additional artifacts in digest-addressed continuation terminals.
-  Previously published normalized artifacts remain unchanged and are not
-  catalogued again. Each continuation attaches its segment manifest plus the
+  additional partial evidence or a full success snapshot in digest-addressed
+  continuation terminals. Partial SMBC account units are not parseable, so
+  final success includes their earlier chunks; only artifacts from clean
+  successful complete terminals are excluded. Previously catalogued normalized
+  bytes must remain unchanged. Each continuation attaches its segment manifest plus the
   exact cumulative staging manifest as a non-unit collector artifact.
   A changed failure with no new provider bytes publishes only manifests and
   reports failed; an exact snapshot retry is a no-op.
@@ -1162,7 +1164,9 @@ format change is needed for that step.
   live generation, rotated on every approved sign-in) and `runSessionRef` (the
   generation that opened the current run, kept across a resume). The terminal
   carries `runSessionRef` for the initial publication and the current
-  `sessionRef` for continuations; the credential, the encrypted session envelope, the
+  `sessionRef` for partial continuation segments. The full successful snapshot
+  retains `runSessionRef` and its prior-terminal lineage because it spans
+  approved sessions. The credential, the encrypted session envelope, the
   challenge state and the page cookies stay in Durable Object state (12 §4).
 - Human-required: this source has **no unattended re-authentication at all**,
   and none was added. Any run that does not reach `success` needs a person to

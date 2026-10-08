@@ -82,7 +82,7 @@ async function input(value: BackfillManifest, session = "synthetic-session") {
 }
 
 describe("SMBC resumed publication", () => {
-  it("recovers a legacy partial terminal, spans three sessions and publishes each normalized chunk once", async () => {
+  it("recovers a legacy partial terminal and exposes all chunks once in the final parseable snapshot", async () => {
     const run = "synthetic-resume-multi";
     const prefix = runPrefix(STARTED, run);
     const first = await month(prefix, 1);
@@ -118,15 +118,19 @@ describe("SMBC resumed publication", () => {
           expect(artifactDataset("smbc-direct", artifact)).toBe("transactions-normalized");
         }
       }
-      keys.push(
-        ...read.manifest.artifacts
-          .filter((a) => a.artifactKey.endsWith(".normalized.json"))
-          .map((a) => a.artifactKey),
-      );
+      if (
+        read.manifest.providerOutcome === "success" &&
+        read.manifest.coverageStatus === "complete"
+      )
+        keys.push(
+          ...read.manifest.artifacts
+            .filter((a) => a.artifactKey.endsWith(".normalized.json"))
+            .map((a) => a.artifactKey),
+        );
       if (object.key === final.terminalKey) {
-        expect(read.manifest.requestedScope.startValue).toBe("2099-03-01");
+        expect(read.manifest.requestedScope.startValue).toBe("2099-01-01");
         expect(read.manifest.coverageStatus).toBe("complete");
-        expect(read.manifest.acquisitionSessionRef).toBe("synthetic-session-three");
+        expect(read.manifest.acquisitionSessionRef).toBe("synthetic-initial-session");
         const snapshot = read.manifest.artifacts.find(
           (a) => a.artifactKey === "backfill-manifest.json",
         )!;
@@ -222,7 +226,7 @@ describe("SMBC resumed publication", () => {
     expect((await env.DATA.list({ prefix: "runs/smbc-direct/" + run })).objects).toHaveLength(2);
   });
 
-  it("pins a missing initial publication to the original session and refuses success without new evidence", async () => {
+  it("pins a missing initial publication to the original session and refuses incomplete success", async () => {
     const run = "synthetic-resume-provenance";
     const bucket = dataBucket(env.DATA);
     const first = await month(runPrefix(STARTED, run), 1);
@@ -235,6 +239,6 @@ describe("SMBC resumed publication", () => {
     expect(read.manifest.acquisitionSessionRef).toBe("synthetic-initial-session");
     await expect(
       persistBackfillRun(bucket, await input(manifest(run, first, 1, true))),
-    ).rejects.toThrow("shared_success_without_new_evidence");
+    ).rejects.toThrow("shared_continuation_coverage_incomplete");
   });
 });

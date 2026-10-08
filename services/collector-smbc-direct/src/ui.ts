@@ -54,7 +54,7 @@ const showProgress=(progress)=>{
   if(progress.phase!=="idle"&&progress.phase!=="waiting_for_approval")lines.push("明細: "+progress.transactionCount+"件", "保存物: "+progress.artifactCount+"件");
   const ended=["success","partial","failed"].includes(progress.phase);
   publish.hidden=!ended||progress.publicationStatus==="persisted";
-  if(ended)lines.push("共有保存: "+(progress.publicationStatus==="persisted"?"完了（中央で取り込み・解析待ち）":progress.publicationStatus==="failed"?"失敗":"未確認"));
+  if(ended)lines.push("共有保存: "+(progress.publicationStatus==="persisted"?"完了（Koganeへの反映状況は別途確認）":progress.publicationStatus==="failed"?"失敗":"未確認"));
   if(progress.publicationErrorCode)lines.push("共有保存エラー: "+progress.publicationErrorCode);
   if(progress.lastErrorCode)lines.push("エラー: "+progress.lastErrorCode);
   if(progress.manifestKey)lines.push("Manifest: "+progress.manifestKey);

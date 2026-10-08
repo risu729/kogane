@@ -513,7 +513,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
    * the central importer call, unchanged. In shared mode the run's own bytes
    * are re-read from the staging bucket, verified against the manifest and
    * written into DATA with immutable terminals for each published segment.
-   * A resumed segment excludes earlier normalized observations, and the
+   * A final success includes earlier ineligible partial evidence, and the
    * importer is not called (G1-15).
    */
   async #finishRun(
@@ -557,7 +557,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         }),
       );
     } catch (error) {
-      // No terminal exists, so the run is not reported persisted (G1-01). The
+      // No new terminal is confirmed, so publication is not reported complete (G1-01). The
       // staging bucket still holds every byte, so a repeat finishes it.
       progress.publicationStatus = "failed";
       progress.publicationErrorCode = safeSharedErrorCode(error);

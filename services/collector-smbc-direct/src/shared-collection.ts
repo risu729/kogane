@@ -3,7 +3,8 @@
 // This source is human-triggered: a person approves a QR challenge, and the
 // backfill then runs across many Durable Object alarms, one month chunk at a
 // time. Each stopped session publishes an immutable terminal. Resumes publish
-// only new normalized evidence in continuation terminals (ADR 0044).
+// new partial evidence or a complete parseable snapshot in continuation
+// terminals (ADR 0044).
 //
 // Because the chunks are written across alarms, the bytes are re-read from the
 // collector's own staging bucket at that point and verified against the
@@ -377,7 +378,8 @@ export async function persistSharedRun(
 
 /**
  * Publish a resumed backfill without changing an earlier immutable terminal.
- * Continuations contain only previously unpublished normalized observations.
+ * Partial continuations contain new evidence. Final success includes earlier
+ * partial evidence, which CORE never parsed, and excludes prior success rows.
  */
 export async function persistBackfillRun(
   bucket: R2BucketLike,
@@ -409,6 +411,7 @@ export async function persistBackfillRun(
     prior.push(read);
   }
   const published = new Map<string, Set<string>>();
+  const parseablePublished = new Map<string, Set<string>>();
   for (const read of prior) {
     if (read.manifest.producer !== PRODUCER) {
       throw new SharedCollectionError("shared_prior_terminal_invalid");
@@ -418,6 +421,20 @@ export async function persistBackfillRun(
       const hashes = published.get(artifact.artifactKey) ?? new Set<string>();
       hashes.add(artifact.sha256);
       published.set(artifact.artifactKey, hashes);
+      // Partial account units are not parseable under either run or unit
+      // eligibility. A complete snapshot must include their earlier evidence.
+      if (
+        read.manifest.providerOutcome === "success" &&
+        read.manifest.coverageStatus === "complete" &&
+        read.manifest.units.every(
+          (unit) => unit.coverageStatus === "complete" && unit.safeErrorCode === undefined,
+        ) &&
+        !read.manifest.artifacts.some((candidate) => candidate.role === "collector_error")
+      ) {
+        const eligibleHashes = parseablePublished.get(artifact.artifactKey) ?? new Set<string>();
+        eligibleHashes.add(artifact.sha256);
+        parseablePublished.set(artifact.artifactKey, eligibleHashes);
+      }
     }
   }
   // Completed normalized chunks are not recollected by a resume. Missing or
@@ -431,9 +448,10 @@ export async function persistBackfillRun(
       throw new SharedCollectionError("shared_published_normalized_changed");
     }
   }
+  const priorInventory = input.manifest.status === "success" ? parseablePublished : published;
   const added = input.manifest.artifacts.filter(
     (artifact) =>
-      !published.get(relativeArtifactKey(artifact.key, input.prefix))?.has(artifact.sha256),
+      !priorInventory.get(relativeArtifactKey(artifact.key, input.prefix))?.has(artifact.sha256),
   );
   const identical = prior.find((read) =>
     read.manifest.artifacts.some(
@@ -517,7 +535,7 @@ export async function persistBackfillRun(
     identity: {
       ...input.identity,
       attemptId: "attempt-" + digest,
-      ...(input.identity.continuationSessionRef === undefined
+      ...(input.manifest.status === "success" || input.identity.continuationSessionRef === undefined
         ? {}
         : {
             acquisitionSessionRef: input.identity.continuationSessionRef,
