@@ -81,6 +81,7 @@ function everyRead(reader: ObservationReader): Promise<unknown>[] {
     reader.overview(),
     reader.unitUpdates(),
     reader.parsingHealth(),
+    reader.globalPassEmptyMonths(),
     reader.listTransactions(NO_FILTER),
     reader.listTransactions(FULL_TRANSACTION_SCOPE),
     reader.listLatestBalances({ ...NO_FILTER, limit: CANDIDATE_LIMIT }),
@@ -126,10 +127,11 @@ describe("read model over the production schema", () => {
   test("every read compiles against the migrated views and is empty on an empty store", async () => {
     const reader = createObservationReader(sqliteExecutor(migratedDatabase()));
     const results = await Promise.all(everyRead(reader));
-    const [overview, unitUpdates, health, ...rest] = results as [
+    const [overview, unitUpdates, health, emptyMonths, ...rest] = results as [
       { counts: { table: string; rows: number }[]; sources: unknown[]; unitUpdates?: unknown },
       unknown[],
       { pending: number; running: number; failed: number },
+      unknown,
       ...unknown[],
     ];
     // D13: no dataset is seeded on the unit scope, so there is no partial
@@ -155,6 +157,7 @@ describe("read model over the production schema", () => {
     );
     expect(overview.sources.length).toBe(overview.counts[0]!.rows);
     expect(health).toEqual({ pending: 0, running: 0, failed: 0 });
+    expect(emptyMonths).toEqual({ months: [], truncated: false });
     for (const result of rest) {
       if (Array.isArray(result)) expect(result).toEqual([]);
       else if (result && typeof result === "object")

@@ -182,4 +182,72 @@ describe("Worker collector", () => {
     ).rejects.toThrow("executions_recent_page_limit_exceeded");
     expect(artifacts.at(-1)?.dataset).toBe("executions-recent-page-0001");
   });
+
+  test("keeps both historical pages when a later total contradicts the first", async () => {
+    const artifacts: CollectorArtifact[] = [];
+    const requests: Array<{ event: string; data: Record<string, unknown> }> = [];
+    const page = (
+      pageNumber: number,
+      totalSize: number,
+      listLength: number,
+      totalNumOfPages: number,
+    ) => ({
+      list: Array.from({ length: listLength }, () => ({ synthetic: true })),
+      pageNumber,
+      pageSize: 30,
+      totalNumOfPages,
+      totalSize,
+    });
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      requests.push(request);
+      const historical = request.event === "executionList" && request.data.historical === "true";
+      const recent = request.event === "executionList" && request.data.historical === "false";
+      const pageNumber = Number(request.data.pageNumber);
+      const body = recent
+        ? page(0, 1, 1, 1)
+        : historical && pageNumber === 0
+          ? page(0, 31, 30, 2)
+          : historical && pageNumber === 1
+            ? page(1, 32, 1, 2)
+            : { synthetic: true };
+      return Response.json({ meta: { status: "OK", secureKey: "next-secure" }, body });
+    }) as typeof fetch;
+
+    await expect(
+      collectSbiVcTrade({
+        session: seed,
+        fetcher,
+        onSession: async () => undefined,
+        onArtifact: async (artifact) => {
+          artifacts.push(artifact);
+        },
+      }),
+    ).rejects.toThrow("executions-historical_pagination_total_changed");
+
+    expect(artifacts.map((artifact) => artifact.dataset)).toEqual([
+      "cash-balances",
+      "account-margin",
+      "position-summary",
+      "executions-recent-page-0001",
+      "executions-historical-page-0001",
+      "executions-historical-page-0002",
+    ]);
+    const executions = requests.filter((request) => request.event === "executionList");
+    expect(executions.map((request) => request.data.historical)).toEqual(["false", "true", "true"]);
+    expect(executions.map((request) => request.data.pageNumber)).toEqual(["0", "0", "1"]);
+    for (const request of executions) {
+      expect(request.data).toMatchObject({
+        pageSize: "30",
+        sortKey: "executionDatetime",
+        sortAsc: "false",
+        isExOrder: "true",
+        isCloseOrder: "false",
+      });
+    }
+    expect(requests.some((request) => request.event === "getCashflowList")).toBe(false);
+  });
 });

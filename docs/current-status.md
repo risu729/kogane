@@ -56,7 +56,13 @@ are separate claims. Historical acceptance records are linked from the
   is not stored; the owner's counts-only replay
   (`replay-diagnostics.ts globalpass-activity 2`, see
   [operations](operations.md#replaying-a-parser-rejection)) names it. The
-  empty month was observed in English only. See
+  empty month was observed in English only. A newer empty capture of a month
+  supersedes an older capture with rows under the per-month rule; since
+  2026-10-08 `/api/meta` names such months (`globalPassEmptyMonths`) and the
+  web app shows a notice to check the provider, without changing what is
+  current (implemented; its deployment is not asserted here). A read-only
+  count on 2026-10-08 found no such month in production (7 months with an
+  empty current snapshot, none with older rows). See
   [observations](observations.md#global-pass-empty-months-are-read-as-no-rows-activity-parser-120).
 - Money Forward identity revisions and the SBI Shinsei bank adapter are
   implemented; fresh production adoption/mapping counts are not asserted here.
