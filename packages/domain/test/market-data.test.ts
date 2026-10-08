@@ -342,15 +342,34 @@ describe("disagreement and sources", () => {
     ).toBe("later");
   });
 
-  test("two admitted rules with prices for one key are refused unless a priority is declared", () => {
+  test("two admitted rules with possibly fresh prices are refused unless a priority is declared", () => {
     const both = policy({
       admittedRules: ["fx-sbi-shinsei-board-v1", "sbi-domestic-current-price-v1"],
     });
     const board = candidate({ id: "board", amount: "146", at: "2026-09-05T10:00:00+09:00" });
     const other = candidate({ id: "other", amount: "147", rule: "sbi-domestic-current-price-v1" });
-    expect(refused(selectPrice(USD, [board, other], BOUND, both, null))).toMatchObject({
-      reason: "sources_overlap",
-      candidateIds: ["board", "other"],
+    // Overlap is decided among prices that could be fresh: a stale row of
+    // another rule, however old, does not refuse a fresh one.
+    expect(selected(selectPrice(USD, [board, other], BOUND, both, null)).candidate.price.id).toBe(
+      "other",
+    );
+    const ancient = candidate({ id: "ancient", amount: "90", at: "2016-01-04T10:00:00+09:00" });
+    expect(selected(selectPrice(USD, [ancient, other], BOUND, both, null)).candidate.price.id).toBe(
+      "other",
+    );
+    // Two rules with prices inside the freshness span are refused, with only those ids.
+    const boardFresh = candidate({
+      id: "board-fresh",
+      amount: "146",
+      at: "2026-09-06T10:00:00+09:00",
+    });
+    expect(
+      refused(selectPrice(USD, [ancient, boardFresh, other], BOUND, both, null)),
+    ).toMatchObject({ reason: "sources_overlap", candidateIds: ["board-fresh", "other"] });
+    // Two rules with only stale prices: stale, not an overlap.
+    expect(refused(selectPrice(USD, [ancient, board], BOUND, both, null))).toMatchObject({
+      reason: "stale",
+      candidateIds: ["board"],
     });
     const priority = { ...both, multiSource: "priority-order" as const };
     // The first rule's price is stale, so the second rule's fresh one is taken.

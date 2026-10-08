@@ -325,6 +325,42 @@ describe("scope, window and stored shapes", () => {
   });
 });
 
+describe("overlap does not depend on the read margin", () => {
+  test("a stale row of another rule refuses nothing, inside or outside the margin", async () => {
+    const both: PriceSelectionPolicy = {
+      ...POLICY,
+      admittedRules: ["fx-sbi-shinsei-board-v1", "sbi-domestic-current-price-v1"],
+    };
+    // Inside the one-day margin: read, and five days old.
+    const inMargin = new PriceStore()
+      .parse(1, 1)
+      .publish(1, 1, "2026-09-01T00:00:00.000Z")
+      .price({ id: "a-fresh", run: 1, amount: "146", at: "2026-09-10T10:00:00+09:00" })
+      .price({
+        id: "b-old",
+        run: 1,
+        amount: "140",
+        rule: "sbi-domestic-current-price-v1",
+        at: "2026-09-05T10:00:00+09:00",
+      });
+    // Outside it, behind a newer row of the first rule: not read.
+    const outside = new PriceStore()
+      .parse(1, 1)
+      .publish(1, 1, "2026-09-01T00:00:00.000Z")
+      .price({ id: "a-fresh", run: 1, amount: "146", at: "2026-09-10T10:00:00+09:00" })
+      .price({ id: "a-old", run: 1, amount: "141", at: "2026-09-04T12:00:00+09:00" })
+      .price({
+        id: "b-old",
+        run: 1,
+        amount: "140",
+        rule: "sbi-domestic-current-price-v1",
+        at: "2026-09-04T10:00:00+09:00",
+      });
+    expect(chosen(await select(inMargin, { policy: both }))).toBe("a-fresh");
+    expect(chosen(await select(outside, { policy: both }))).toBe("a-fresh");
+  });
+});
+
 describe("plans without table statistics", () => {
   const plan = (db: Database, text: string, args: unknown[]): string[] =>
     (db.query(`EXPLAIN QUERY PLAN ${text}`).all(...(args as never[])) as { detail: string }[]).map(

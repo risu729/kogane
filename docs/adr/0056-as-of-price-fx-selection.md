@@ -91,8 +91,12 @@ What existed before this change:
   removed candidate by `rule_not_admitted`, `kind_not_admitted`,
   `invalid_effective_time`, `basis_not_admitted`, `date_only_excluded` or
   `effective_at_or_after_bound`; (2) none left → `missing`; (3) more than one
-  admitted rule left under `refuse-on-overlap` → `sources_overlap`
-  (`priority-order` takes the first rule that yields a selection); (4) rank by
+  admitted rule with a candidate that could still be fresh (its latest
+  possible civil day on or after the first day of the freshness window) under
+  `refuse-on-overlap` → `sources_overlap`, so a stale row of another rule never
+  refuses a fresh one and the answer does not depend on how much history the
+  read returned (`priority-order` takes the first rule that yields a
+  selection); (4) rank by
   instant, a date-only price by its civil date in the policy zone, and a top
   that cannot be ordered → `time_incomparable`; (5) age from the top's civil
   date to the as-of date, in calendar days or in open days of a calendar that

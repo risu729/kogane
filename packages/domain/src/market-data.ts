@@ -13,8 +13,9 @@
 //      (rule, kind, effective-time shape, basis, date-only policy, not
 //      strictly before the bound);
 //   2. nothing left                                   → `missing`;
-//   3. more than one admitted rule left and the policy refuses overlap
-//                                                     → `sources_overlap`;
+//   3. more than one admitted rule with a candidate that could still be fresh
+//      (on or after the freshness window's first day), and the policy
+//      refuses overlap                                → `sources_overlap`;
 //   4. rank by effective instant (a date-only price by its civil date in the
 //      policy's zone); a top that cannot be ordered   → `time_incomparable`;
 //   5. freshness from the top's civil date to the as-of date; a business-day
@@ -485,6 +486,18 @@ function shiftDate(text: string, days: number): string {
   return formatLocalDate(addDays(civil(text), days));
 }
 
+/**
+ * The latest civil day of the policy zone an eligible candidate may fall on:
+ * an instant's own day, a date of the zone itself, or the last day a date of
+ * another zone (or none) can reach. Null when an instant cannot be placed.
+ */
+function latestPossibleDay(candidate: PriceCandidate, policy: PriceSelectionPolicy): string | null {
+  const time = candidate.price.effectiveTime;
+  if (time.kind === "instant") return civilDateOfInstant(time.value, policy.zone);
+  if (time.kind !== "local-date") return null;
+  return time.zone === policy.zone ? time.value : shiftDate(time.value, 1);
+}
+
 /** Why a candidate is not considered at all, or null when it is eligible. */
 function exclusionOf(
   candidate: PriceCandidate,
@@ -771,16 +784,27 @@ export function selectPrice(
   });
   // Step 2.
   if (eligible.length === 0) return refused("missing", [], null);
-  // Step 3: one source, or a declared priority among them.
-  const rules = policy.admittedRules.filter((rule) =>
-    eligible.some((candidate) => candidate.claim.ruleId === rule),
+  // Step 3: one source, or a declared priority among them. Overlap is
+  // decided among candidates that could still be fresh (their latest
+  // possible civil day is on or after the freshness window's start), so a
+  // stale row of another rule, however old, never refuses a fresh one, and
+  // the answer does not depend on how much history the read returned.
+  const windowStart = freshnessWindowStart(policy, bound, calendar);
+  const possiblyFresh = eligible.filter((candidate) => {
+    const day = latestPossibleDay(candidate, policy);
+    return day === null || day >= windowStart;
+  });
+  const freshRules = policy.admittedRules.filter((rule) =>
+    possiblyFresh.some((candidate) => candidate.claim.ruleId === rule),
   );
+  if (freshRules.length > 1 && policy.multiSource === "refuse-on-overlap")
+    return refused("sources_overlap", ids(possiblyFresh.map((candidate) => ({ candidate }))), null);
   const groups =
-    rules.length > 1 && policy.multiSource === "refuse-on-overlap"
-      ? null
-      : rules.map((rule) => eligible.filter((candidate) => candidate.claim.ruleId === rule));
-  if (groups === null)
-    return refused("sources_overlap", ids(eligible.map((candidate) => ({ candidate }))), null);
+    policy.multiSource === "refuse-on-overlap"
+      ? [eligible]
+      : policy.admittedRules
+          .map((rule) => eligible.filter((candidate) => candidate.claim.ruleId === rule))
+          .filter((group) => group.length > 0);
   // Under priority-order the first rule with a selectable price wins; when
   // none has one, the highest-priority rule's refusal is reported.
   let first: GroupOutcome | null = null;
