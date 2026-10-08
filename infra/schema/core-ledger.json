@@ -1081,7 +1081,7 @@
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "22f7b144437d860faa6b0993e73b1094bd0d34ed4cc11743ddc36fd537457276"
+      "sha256": "38c1508d3be1f2f2627f91c01bc705ffa0303efe2d78f180f6ea7e1d68a394cd"
     }
   ],
   "tables": [
@@ -16693,7 +16693,7 @@
       "table": "economic_commit_log",
       "timing": "BEFORE",
       "event": "INSERT",
-      "sqlSha256": "661152a10beb8cfb"
+      "sqlSha256": "5da32721fca82bae"
     },
     {
       "name": "economic_commit_log_no_delete",
@@ -19915,6 +19915,6 @@
       "0066_prestia_bank_snapshot_schedule.sql",
       "0070_economic_commit_guard.sql"
     ],
-    "schemaSha256": "9feb23c3291646f9fc6ce4faf24f677cfb71585949ea892c69255a31af3c4fc0"
+    "schemaSha256": "860066059cb2d0fe81b0e344f8ba0f8b2a4b4bdc65b68b93488d7512323ab4e6"
   }
 }

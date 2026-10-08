@@ -143,12 +143,15 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   are not pinned. `economic_identity_epochs` is append-only, seeded with
   `identity-epoch-1`; a declared identity rewrite (as 0063 was) appends the
   next epoch. A commit whose member is sealed under a non-current epoch is
-  refused (`identity_epoch_changed`) unless it is a reviewed identity
-  resolution: kind `economic-event.resolve-identity` **and** an operation
-  receipt of that kind for the commit's operation and principal. The
-  receipt kind CHECK (0051) admits no such kind, so the exemption is closed
-  until the vocabulary migration that adds it together with its planner; a
-  rule writer, or any writer that only names the kind, is refused.
+  refused (`identity_epoch_changed`). The reviewed identity resolution that
+  may one day be exempt has the reserved kind
+  `economic-event.resolve-identity`, and 0070 refuses that kind outright, for
+  every principal, with the same code. G2 opens it: it recreates the commit
+  trigger so the exemption needs an operation receipt of that kind for the
+  commit's operation and principal, and adds the kind to the receipt
+  vocabulary with its planner (the receipt kind CHECK in force, 0058's, admits
+  no such kind today). 0070 itself reads no command table, so G2 can rebuild
+  them (see "Rebuilding a table 0070 reads").
   That is all 0070 enforces about epochs: a new seal under the current
   epoch. It does **not** refuse a commit that supersedes a holder sealed
   under an older epoch, because it cannot tell which such supersession needs
@@ -409,9 +412,9 @@ Synthetic data only. This PR tests:
   for card purchase keys; T2c (two captures of one row sharing a 5-tuple); a
   released key with another live holder; T1 in both
   orders and its pinned legacy limit; T4; alias source; P11 (pins that a correction under the new epoch may supersede an old-epoch
-  holder: routing is the planner's), T9 (also refused for a rule writer that names the resolution kind, and no
-  receipt of that kind can be stored) and the reserved
-  resolution kind; epochs append-only; every 0070 table append-only.
+  holder: routing is the planner's), T9 (the reserved resolution kind is refused outright, under the old
+  epoch and the current one, and no receipt of that kind can be stored); the
+  command tables can be rebuilt the 0051 way after 0070; epochs append-only; every 0070 table append-only.
 - `services/processor/test/lanes.test.ts`: the migration pin includes 0070;
   the whole processor suite runs against the new triggers.
 

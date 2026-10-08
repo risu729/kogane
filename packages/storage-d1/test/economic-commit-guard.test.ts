@@ -38,6 +38,7 @@ import { applyMigration, factOf, seedCardRows } from "./card-purchase-fixture.ts
 import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
 
 const MIGRATION = "0070_economic_commit_guard.sql";
+
 const NOW = "2026-10-08T00:00:00.000Z";
 const LATER = "2026-10-08T01:00:00.000Z";
 const PRINCIPAL = "rule:synthetic-writer-v1";
@@ -679,6 +680,30 @@ describe("migration 0070", () => {
       expect(
         plan.filter((detail) => detail.startsWith("SCAN") && !detail.includes("VIRTUAL TABLE")),
       ).toEqual([]);
+    }
+    db.close();
+  });
+
+  test("the command tables can still be rebuilt the 0051 way after 0070", () => {
+    // G2 rebuilds operation_receipts (create a copy, drop, rename). SQLite
+    // re-checks every trigger and view on the rename, so no 0070 object may
+    // read the command tables: ADR 0054, "Rebuilding a table 0070 reads".
+    const db = fullCoreDatabase();
+    // (change_plans and approvals are rebuilt as one graph, as 0051 did; their
+    // own pre-0070 triggers read each other. No 0070 object reads any of them.)
+    for (const table of ["operation_receipts"]) {
+      const sql = (
+        db.query("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table) as {
+          sql: string;
+        }
+      ).sql;
+      db.exec("PRAGMA foreign_keys=OFF");
+      db.exec(
+        sql.replace(new RegExp(`^CREATE TABLE "?${table}"?`, "u"), `CREATE TABLE ${table}_rebuilt`),
+      );
+      db.exec(`INSERT INTO ${table}_rebuilt SELECT * FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`);
+      expect(() => db.exec(`ALTER TABLE ${table}_rebuilt RENAME TO ${table}`)).not.toThrow();
     }
     db.close();
   });
@@ -1502,11 +1527,25 @@ describe("identity epochs", () => {
     await expect(run(db, correction())).rejects.toThrow("identity_epoch_changed");
     expect(snapshot(db)).toEqual(before);
     expect(liveHolders(db)).toEqual(holders);
-    // The resolution kind is bound to a reviewed receipt of that kind: a rule
-    // writer naming it is refused like any other commit.
+    // The reserved resolution kind is refused outright for every principal
+    // until G2 recreates this trigger with its receipt binding.
     await expect(run(db, correction("economic-event.resolve-identity"))).rejects.toThrow(
       "identity_epoch_changed",
     );
+    expect(snapshot(db)).toEqual(before);
+    // Even under the current epoch.
+    await expect(
+      run(
+        db,
+        adoptWrites(db, {
+          eventId: "transfer-z",
+          revision: 1,
+          sealEpoch: "identity-epoch-2",
+          kind: "economic-event.resolve-identity",
+          now: LATER,
+        }),
+      ),
+    ).rejects.toThrow("identity_epoch_changed");
     expect(snapshot(db)).toEqual(before);
     // And no receipt of that kind can exist until G2 adds it to the vocabulary.
     expect(() =>

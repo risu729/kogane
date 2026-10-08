@@ -423,12 +423,11 @@ BEGIN SELECT RAISE(ABORT,'economic_revision_sealed'); END;
 --   3. every member revision exists, is live, is the newest revision of its
 --      event and is sealed for exactly this commit, and the seals of this
 --      commit are exactly the members;
---   3a. every member was sealed under the current identity epoch, unless the
---      commit is a reviewed identity resolution: kind
---      economic-event.resolve-identity with an operation receipt of that kind
---      for this operation and principal. The receipt kind CHECK (0051) admits
---      no such kind, so the exemption is closed until a later vocabulary
---      migration adds it with its planner;
+--   3a. every member was sealed under the current identity epoch, and the
+--      kind is not the reserved economic-event.resolve-identity, which is
+--      refused outright: G2 recreates this trigger with that kind's receipt
+--      binding when it opens the exemption together with its planner. No
+--      0070 object reads the command tables, so G2 can rebuild them;
 --   4. every revision a member names in supersedes points at that member,
 --      and every revision that points at a member is named in its
 --      supersedes (an undeclared supersession would release claims, or wash
@@ -487,9 +486,7 @@ BEGIN
    WHERE s.core_epoch=NEW.core_epoch AND s.commit_seq=NEW.commit_seq)<>json_array_length(NEW.members_json);
 
  SELECT RAISE(ABORT,'identity_epoch_changed')
- WHERE NOT (NEW.kind='economic-event.resolve-identity' AND EXISTS(SELECT 1 FROM operation_receipts o
-   WHERE o.operation_id=NEW.operation_id AND o.principal=NEW.principal AND o.operation_kind=NEW.kind))
- AND EXISTS(SELECT 1 FROM economic_revision_seals s
+ WHERE NEW.kind='economic-event.resolve-identity' OR EXISTS(SELECT 1 FROM economic_revision_seals s
   WHERE s.core_epoch=NEW.core_epoch AND s.commit_seq=NEW.commit_seq
   AND s.identity_epoch IS NOT (SELECT e.identity_epoch FROM economic_identity_epochs e ORDER BY e.ordinal DESC LIMIT 1));
 
