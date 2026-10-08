@@ -200,6 +200,26 @@ test("READ expiry shows the displayed and the computed expiry apart, each with i
     expect(html).toContain(text);
 });
 
+test("the shared response check enforces expiryBasis: a malformed basis is refused, null and an older response pass", () => {
+  const withBasis = (expiryBasis: unknown) => ({
+    ...page,
+    rows: [{ ...basisRow, expiryBasis }],
+  });
+  expect(validApiResponse("/api/v2/rewards/expiry", withBasis(basisRow.expiryBasis))).toBe(true);
+  // Not recorded by the build that wrote the row.
+  expect(validApiResponse("/api/v2/rewards/expiry", withBasis(null))).toBe(true);
+  // A response from an App build before the field existed has no key at all.
+  expect(page.rows.every((row) => !("expiryBasis" in row))).toBe(true);
+  expect(validApiResponse("/api/v2/rewards/expiry", page)).toBe(true);
+  for (const malformed of [
+    { ...basisRow.expiryBasis, agreement: "agree", displayed: null },
+    { ...basisRow.expiryBasis, computed: { ...basisRow.expiryBasis.computed, reasonCode: null } },
+    { ...basisRow.expiryBasis, total: "0" },
+    "not-a-basis",
+  ])
+    expect(validApiResponse("/api/v2/rewards/expiry", withBasis(malformed))).toBe(false);
+});
+
 test("a row without a recorded basis, or with a malformed one, says so instead of inventing one", () => {
   for (const expiryBasis of [
     null,

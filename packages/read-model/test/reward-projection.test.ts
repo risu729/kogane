@@ -106,7 +106,7 @@ const DISPLAYED: TemporalValue = {
 };
 const UNREADABLE: TemporalValue = { kind: "unknown", reasonCode: "provider_expiry_unparsed" };
 
-function projection(): RewardExpiryProjectionRow[] {
+function projection(ruleRows: ExpiryRuleSqlRow[] = rules): RewardExpiryProjectionRow[] {
   const buckets = [
     bucketRow(
       "program:v-point",
@@ -156,13 +156,13 @@ function projection(): RewardExpiryProjectionRow[] {
       promotionRelease: "reward-promotion-v1",
       policyRelease: REWARD_PROJECTION_RELEASE,
       claimsHighWater: nextId,
-      ruleCount: rules.length,
+      ruleCount: ruleRows.length,
       bucketCount: buckets.length,
       membershipCount: 0,
       offerCount: 0,
       simulationCount: 0,
     },
-    rules,
+    rules: ruleRows,
     buckets,
     membership: [],
     offers: [],
@@ -283,6 +283,21 @@ describe("the stored buckets against the seeded rules", () => {
     const store = row(projection(), "rule:v-point:fixed-expiry-lot", "store");
     expect(store.expiryBasis.displayed?.value).toEqual(UNREADABLE);
     expect(store.state).toBe("partial");
+  });
+
+  test("a programme with no stored rule computes nothing: no expiry row, never a date", () => {
+    // Without a rule there is nothing to derive from; the holdings route still
+    // lists the buckets with their displays (ADR 0049, consequences).
+    const rows = projection(rules.filter((rule) => rule.program_id !== "program:v-point"));
+    expect(rows.some((entry) => entry.programId === "program:v-point")).toBe(false);
+    expect(rows.map((entry) => entry.programId).sort()).toEqual([
+      "program:mobile-suica-sf",
+      "program:v-point-pay",
+    ]);
+    for (const entry of rows) {
+      expect(entry.expiryBasis.computed.status).toBe("unavailable");
+      expect(entry.expiresOn).toBeNull();
+    }
   });
 
   test("an unverified rule is never 'no expiry' and leaves the prepaid balances undated", () => {

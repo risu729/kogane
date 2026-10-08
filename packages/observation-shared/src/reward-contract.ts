@@ -85,6 +85,14 @@ export interface RewardReadExpiryRow {
   reasonCodes: string[];
   uncertaintyCodes: string[];
   basisRefs: string[];
+  /**
+   * The provider's display and the computed expiry apart (ADR 0049). `null`
+   * means the snapshot's build recorded no basis (before
+   * `reward-projection-v2`) or the stored value no longer validates — never
+   * "no computed expiry". Absent only in a response from an App build that
+   * predates the field.
+   */
+  expiryBasis?: RewardExpiryBasis | null;
 }
 /**
  * One bucket's deadline from both sides (ADR 0049): what the provider
@@ -96,16 +104,7 @@ export type RewardExpiryBasis = BucketExpiryBasis;
 export type RewardDisplayedExpiry = DisplayedExpiry;
 export type RewardComputedExpiry = ComputedExpiry;
 
-/**
- * Carried by every `/api/v2/rewards/expiry` READ row beside
- * `RewardReadExpiryRow`. `null` means the snapshot's build recorded no basis
- * (a build before `reward-projection-v2`), never "no computed expiry".
- */
-export interface RewardReadExpiryBasisFields {
-  expiryBasis: RewardExpiryBasis | null;
-}
-
-/** Exact-key check of one basis; anything else is shown as "not recorded". */
+/** Exact-key check of one basis: the shared response check and the screen both use it. */
 export function validRewardExpiryBasis(value: unknown): value is RewardExpiryBasis {
   return validBucketExpiryBasis(value);
 }

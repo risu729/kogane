@@ -17,7 +17,6 @@ import {
   validRewardExpiryBasis,
   type RewardExpiryBasis,
   type RewardExpiryRow,
-  type RewardReadExpiryBasisFields,
   type RewardReadExpiryRow,
   type RewardExpiryPage,
   type RewardHoldingRow,
@@ -429,17 +428,11 @@ export function ExpiryBasisView({ basis }: { basis: RewardExpiryBasis | null }):
   );
 }
 
-function ReadExpiry({
-  row,
-}: {
-  row: RewardReadExpiryRow & Partial<RewardReadExpiryBasisFields>;
-}): ReactNode {
+function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
   const codes = [...new Set([...row.reasonCodes, ...row.uncertaintyCodes])];
-  // A basis that does not validate is shown as "not recorded", not trusted.
-  const basis =
-    row.expiryBasis !== undefined && validRewardExpiryBasis(row.expiryBasis)
-      ? row.expiryBasis
-      : null;
+  // The response check already refused a malformed basis; a row rendered
+  // without that check still shows one as "not recorded", never trusted.
+  const basis = validRewardExpiryBasis(row.expiryBasis) ? row.expiryBasis : null;
   return (
     <Panel
       id={domId("reward-read-expiry", row.holdingRef, row.ruleRef, row.bucketRef)}

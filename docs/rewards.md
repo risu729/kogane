@@ -367,8 +367,9 @@ digestは入力ではない。今日のofferで計算し直した別物を「同
 `no-expiry`、読めない表示期限との `agree`/`disagree` も拒否する。COREに保存されたruleの
 `applicability_json` の `tiers`・`validPeriod` が読めないときは「どのclaimも満たさないtier」
 「どの日も含まない期間」として扱い、「全tier」「常に有効」にはしない。共有のresponse validator
-（`api-validation.ts`）の `RewardReadExpiryRow` はまだこのfieldを名指ししておらず、画面は
-`reward-contract.ts` の validator で確認したものだけを表示する。
+（`api-validation.ts`）は `RewardReadExpiryRow.expiryBasis` を
+`optional(nullable(validRewardExpiryBasis))` で検証する。壊れた根拠を含む応答は拒否し、`null` と、
+fieldそのものがない応答（このfieldより前のApp）は受け付ける。画面も描画前に同じ検証を行う。
 
 公開snapshotが無い・別epoch・制限改訂後は、空の成功ではなく503（`reward_read_model_unavailable` /
 `reward_read_model_context_changed` / `reward_read_model_restriction_changed`）を返す。cursorは
@@ -412,8 +413,10 @@ COREのclaim・rule・offer、保存済み入力と原本は維持する。
   `deadline_passed` が根拠のある暦日にだけ付くこと、validatorの拒否。
 - `packages/read-model/test/reward-projection.test.ts` — migrationが投入したruleをそのまま読み、
   合成のV Point・V Point Pay・Mobile Suica bucketへ適用した結果が§3の説明どおりであること。
+  ruleが1つもないプログラムには期限行も日付も作らないこと。
 - `apps/web/test/rewards-contract.test.tsx` — `expiryBasis` 付きの応答が共有validatorを通り、
-  画面が観測と導出を分けて表示し、根拠がない・壊れている行は「記録がありません」と表示すること。
+  壊れた根拠を含む応答は拒否され、`null` とfieldのない応答は通ること。画面が観測と導出を分けて
+  表示し、根拠がない・壊れている行は「記録がありません」と表示すること。
 
 確認していないこと: 本番D1・本番Workerでの動作、実際のprovider規約の現在の内容、
 本番規模でのpage性能、保存済みsimulationの実データ（現状COREに書き込むwriterは無い）。

@@ -176,11 +176,12 @@ disagreement; `partial` when a covered bucket's deadline is not established
   reconstructed from other columns. The validator also refuses a date or "no
   expiry" under a version that cannot give one, and an agreement claimed for an
   unreadable display.
-- `RewardReadExpiryRow` in the shared response validator is unchanged; the
-  field is typed as `RewardReadExpiryBasisFields` with its own validator
-  `validRewardExpiryBasis` in `reward-contract.ts`, and the screen renders the
-  basis only after that check. Folding it into the shared validator is a
-  separate, ordered edit to `packages/observation-shared/src/api-validation.ts`.
+- `RewardReadExpiryRow` carries `expiryBasis?: RewardExpiryBasis | null`, and
+  the shared response check (`packages/observation-shared/src/api-validation.ts`)
+  validates it with `optional(nullable(validRewardExpiryBasis))`: a malformed
+  basis fails the response; `null`, and a row without the key (a response from
+  an App before the field), pass. The screen checks the basis again before
+  rendering it.
 - `/rewards` shows, per READ row, "取得元が表示した期限（観測）" and
   "規約からの算定（導出）" with the rule version, its period and evidence, the
   activity window and anchor, the membership claims, the reason in words and
@@ -255,12 +256,14 @@ this decision, not a defect: the inputs that would allow one are not confirmed.
   from the migrated CORE schema, applied to synthetic V Point, V Point Pay and
   Mobile Suica buckets; every row's basis validates; the reasons per rule and
   bucket kind are those in the table above; unparsed and missing quantities stay
-  non-exact; unverified rules never yield "no expiry".
+  non-exact; unverified rules never yield "no expiry"; a programme with no
+  stored rule gets no expiry row and no date.
 - `packages/read-model/test/rewards.test.ts`: a stored rule's unreadable tier
   list or period is never read as "every tier" or "always in force", and
   verified `none` terms with an unreadable period yield no "no expiry".
 - `apps/web/test/rewards-contract.test.tsx`: the response with `expiryBasis`
-  still passes the shared validator, the screen renders both sides, and a
-  missing or malformed basis is shown as "not recorded".
+  passes the shared validator, a malformed basis fails it while `null` and a
+  row without the key pass, the screen renders both sides, and a missing or
+  malformed basis is shown as "not recorded".
 - `packages/storage-d1` and `scripts/core-schema-ledger.test.ts`: the READ
   migration list and the regenerated `infra/schema/read-ledger.*`.
