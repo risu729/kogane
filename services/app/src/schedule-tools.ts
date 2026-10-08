@@ -32,8 +32,8 @@ import {
 import { TIME, ZONES } from "../../../packages/collection/src/schedule-model";
 import type { ToolResult } from "./agent-service";
 
-export const SCHEDULE_READ_TOOL = "kogane.schedules.maintenance.read";
-export const SCHEDULE_UPDATE_TOOL = "kogane.schedules.maintenance.update";
+const SCHEDULE_READ_TOOL = "kogane.schedules.maintenance.read";
+const SCHEDULE_UPDATE_TOOL = "kogane.schedules.maintenance.update";
 export const SCHEDULE_TOOL_NAMES = [SCHEDULE_READ_TOOL, SCHEDULE_UPDATE_TOOL] as const;
 export type ScheduleToolName = (typeof SCHEDULE_TOOL_NAMES)[number];
 
@@ -52,7 +52,7 @@ const instant = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 const weekday = z.int().min(0).max(6);
 
 /** `kogane.schedules.maintenance.read`: one granted source, or all of them. */
-export const scheduleReadSchema = z.strictObject({ source: sourceId.optional() });
+const scheduleReadSchema = z.strictObject({ source: sourceId.optional() });
 
 /** `kogane.schedules.maintenance.update`: one revision of one rule of one source. */
 export const scheduleUpdateSchema = z.strictObject({

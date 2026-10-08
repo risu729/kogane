@@ -121,7 +121,10 @@ run during it; each such revision is visible with its kind and reason on the
 read tool and remains in the table. Like the operator path, an agent revision
 confirms the source's reference status and replaces the reference URL's path
 on the same host. Recurring windows beyond the 92-day horizon (a fifth-weekday
-monthly rule) are not part of the bound. The bound and budget are constants,
+monthly rule) are not part of the bound, and the bound reads the source's
+rules before the INSERT, so two concurrent revisions of different rules of
+one source can each pass it; the budget limits how often, and both show on
+the read tool. The bound and budget are constants,
 not grant fields. The schedule model keeps its own Intl-based calendar
 arithmetic; this change only caches its formatters.
 

@@ -263,9 +263,9 @@ export type MaintenanceWriteResult =
   | { ok: false; code: MaintenanceWriteCode; status: number };
 
 /** Agent revisions one principal may write per rolling day (ADR 0046). */
-export const AGENT_MAINTENANCE_WRITES_PER_DAY = 30;
+const AGENT_MAINTENANCE_WRITES_PER_DAY = 30;
 /** Longest joined deferral an agent revision may create (ADR 0046). */
-export const AGENT_MAX_DEFERRAL_MS = 7 * 86_400_000;
+const AGENT_MAX_DEFERRAL_MS = 7 * 86_400_000;
 /** Recurring windows are checked over this horizon; dated windows at any date. */
 const DEFERRAL_HORIZON_MS = 92 * 86_400_000;
 const RULE_ID = /^[a-z0-9-]{1,100}$/u;
@@ -576,7 +576,7 @@ export async function updateMaintenance(env: Env, value: unknown, actor: string)
  * `scheduleSources`; the writer adds what only the store can check. The
  * answer carries the source's view after the save.
  */
-export async function updateMaintenanceAsAgent(env: Env, value: unknown, agent: string) {
+async function updateMaintenanceAsAgent(env: Env, value: unknown, agent: string) {
   const v = bodyObject(value);
   exactKeys(v, [
     "source",
@@ -760,7 +760,7 @@ function revisionView(row: RevisionRow, agent: string) {
   };
 }
 /** Maintenance settings of the requested sources the jobs configuration declares. */
-export async function agentMaintenanceRead(env: Env, value: unknown, agent: string) {
+async function agentMaintenanceRead(env: Env, value: unknown, agent: string) {
   const v = bodyObject(value);
   exactKeys(v, ["sources"]);
   const declared = [
