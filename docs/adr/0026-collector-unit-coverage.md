@@ -1231,15 +1231,18 @@ The parser, its version and its code digest are unchanged.
   in two views is not matched, and two records with the same texts tie and
   are both unmatched. The diagnostics read the tree with a copy of the
   parser's private helpers, held equal by tests on pages the parser accepts,
-  not by construction. The comparisons have run on synthetic pages only;
-  the meaning of the two-header table stays unknown until the owner reports
-  it.
-- **`latestOkCapture` is unexercised on production data.** The owner's
-  read-only audit of this change's first commit found no other capture with
-  the refused page's artifact key that the parser accepted, so for that page
-  the lookup returns `found: false` and the row comparison does not run (the
-  lookup wrote nothing). The comparison itself is verified on synthetic pages
-  only.
+  not by construction. The meaning of the two-header table stays unknown
+  until the owner reports what the comparisons print.
+- **What has met the stored capture.** The owner's private read-only replay
+  of this change ran the structural comparisons (`detailContainer`,
+  `otherTables`, `recordDetailAlignment`, `unmatchedRecords`) on the stored
+  refused page. For that page the `latestOkCapture` lookup returned
+  `found: false`: no other capture with the same artifact key has a
+  published `global-pass-activity` parse (whether one has a successful but
+  unpublished parse was not checked), and the lookup wrote nothing. So the
+  row comparison against such a capture (`recordsAlsoPresent`,
+  `unmatchedRecordPresent`) has not run on real data; it is verified on
+  synthetic pages only.
 
 ### Verification
 
@@ -1270,7 +1273,8 @@ The parser, its version and its code digest are unchanged.
   unchanged.
 - The existing shape expectations hold with the new keys added.
 - No production data was read for this amendment; the counts in Context are
-  the owner's report. The owner's audit of the first commit re-ran the replay
-  read-only: the target page is still refused as `unclassified_table`, and
-  `latestOkCapture` found no comparable capture (above), so its comparison
-  is unverified on real data.
+  the owner's report. The owner's private read-only replay of this change
+  refused the target page as `unclassified_table` and ran the structural
+  comparisons on it; `latestOkCapture` found no other capture of the same key
+  with a published parse, so its row comparison is unverified on real data
+  (above).

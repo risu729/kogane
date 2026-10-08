@@ -64,12 +64,13 @@ mise exec -- bun services/processor/scripts/replay-diagnostics.ts globalpass-act
 ```
 
 and shares the `shape` and `latestOkCapture` of each refused page; a parser
-change, if any, follows from what they show. Limits: the comparisons have run
-only on synthetic pages; they match texts exactly as the parser normalises
-them, so a value the provider reformats between views is not matched. No
-other capture with this page's key was accepted, so `latestOkCapture` finds
-nothing to compare it with (owner's read-only audit); that comparison is
-unverified on real data. Tests:
+change, if any, follows from what they show. The owner's private read-only
+replay ran the structural comparisons on this stored page. Limits: they match
+texts exactly as the parser normalises them, so a value the provider
+reformats between views is not matched. For this page `latestOkCapture`
+found no other capture with the same key and a published parse (an
+unpublished successful parse was not checked), so its row comparison
+(`recordsAlsoPresent`, `unmatchedRecordPresent`) has not run on real data. Tests:
 `services/processor/test/global-pass-rejection.test.ts`,
 `services/processor/test/parser-rejection.test.ts` (the lookup).
 
