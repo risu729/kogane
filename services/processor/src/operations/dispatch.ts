@@ -565,7 +565,11 @@ async function dispatchCollector(
           ? action === "collect"
             ? { kind: "collected", runIds: result.runIds }
             : { kind: "refreshed" }
-          : { kind: "failed", reasonCode: result.failureCode ?? "collection_failed" },
+          : {
+              kind: "failed",
+              reasonCode: result.failureCode ?? "collection_failed",
+              runIds: result.runIds,
+            },
   });
   return "started";
 }

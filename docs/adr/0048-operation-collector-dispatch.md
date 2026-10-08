@@ -123,8 +123,10 @@ sees it and nothing expires it (本人操作待ち).
 - The answer is re-validated (`collectorOperationResult`). `completed` →
   `collected` with the `persisted` stage (or `refreshed`, completing a refresh,
   which has no stages). A collector failure → `failed` with its closed code
-  (`collection_busy` included: the lease was taken between the lane's read and
-  the collector's claim). An exception, or an answer outside the closed shape →
+  and any run it still persisted (`collection_busy` included: the lease was
+  taken between the lane's read and the collector's claim; St George's
+  coordinator instead persists a failed run for a refused lease, its existing
+  behaviour, and answers `collection_failed`). An exception, or an answer outside the closed shape →
   `uncertain` (`dispatch_uncertain`, `collector_result_invalid`). A start with
   no recorded outcome after one hour → `uncertain`. **Nothing after a start is
   retried automatically**; a new idempotency key is how an operator asks again.
@@ -179,7 +181,7 @@ retry/backoff library, because the policy after a start is "never retry".
 - The trail read is bounded by the reported runs (≤ 100) and their artifacts,
   every lookup keyed (checked without table statistics).
 - The alarm receipts now say `collection_busy` where a lease refusal used to be
-  `collection_failed`; Mizuho's alarm path now awaits its handler, so a lease
+  `collection_failed` (St George excepted, see above); Mizuho's alarm path now awaits its handler, so a lease
   refusal there is `collection_busy` instead of an RPC rejection recorded as
   `uncertain`.
 - `awaiting_collector_dispatch` is no longer written.

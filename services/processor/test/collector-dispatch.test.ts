@@ -348,7 +348,13 @@ test("a started execution is claimed once even when two ticks race", async () =>
 
 test("failure: the collector's closed code ends the operation, and it is never retried", async () => {
   const w = world();
-  w.answer = async () => ({ status: "failed", runIds: [], failureCode: "collection_failed" });
+  // The collector persisted a failed terminal and says so: the run is kept
+  // on the operation, so the trail shows what was written.
+  w.answer = async () => ({
+    status: "failed",
+    runIds: ["failed-run-001"],
+    failureCode: "collection_failed",
+  });
   const operationId = await collect(w);
   expect(await w.tick(T0 + MINUTE)).toMatchObject({ started: 1 });
   const failed = await read(w, operationId);
@@ -358,6 +364,8 @@ test("failure: the collector's closed code ends the operation, and it is never r
     state: "failed",
     reasonCode: "collection_failed",
     finishedAt: "2026-09-11T00:01:00.000Z",
+    collectedAt: null,
+    runs: [{ runId: "failed-run-001", state: "not_registered" }],
   });
   await w.tick(T0 + 2 * HOUR);
   expect(await collect(w)).toBe(operationId);

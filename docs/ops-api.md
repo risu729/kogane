@@ -352,7 +352,7 @@ applied** (`execution.scope: "collector_default"`).
 | `refreshed`         | the collector reports the session renewed                                                     | `completed`             |
 | `published`         | every reported run settled and at least one has an adopted (published) parse                  | `running` (see limits)  |
 | `unpublished`       | every run settled with nothing adopted, or nothing settled within 48 h; `reasonCode` says why | `failed`                |
-| `failed`            | the collector's own closed failure code                                                       | `failed`                |
+| `failed`            | the collector's own closed failure code; a run it still persisted is listed in `runs`         | `failed`                |
 | `uncertain`         | the call threw, answered outside the closed shape, or never recorded an outcome in an hour    | `failed`                |
 | `expired`           | not started within 24 h of acceptance                                                         | `blocked`               |
 | `unsupported`       | no connection (or no binding) serves the source and action                                    | `blocked`               |
@@ -378,7 +378,10 @@ takes, releases, replaces or expires `collection_execution_leases`; the collecto
 claims it inside `runScheduled` as for the alarm, so the same source never runs
 twice at once. If another execution takes the lease between the lane's read and
 the collector's claim, the collector refuses before contacting anyone and the
-request ends `failed` with `collection_busy`.
+request ends `failed` with `collection_busy`. St George is the exception: its
+session coordinator already turns a refused lease into a persisted failed run
+(an existing behaviour of that collector), so there the race ends `failed` with
+`collection_failed` and that run listed.
 
 **After a start nothing is retried.** A collector failure, an uncertain call
 and a start that never recorded an outcome are terminal; a provider login is

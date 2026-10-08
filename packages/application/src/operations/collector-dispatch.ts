@@ -204,8 +204,12 @@ export type CollectorOutcome =
   | { kind: "collected"; runIds: readonly string[] }
   /** A session the collector reports renewed. */
   | { kind: "refreshed" }
-  /** The collector's own closed failure code; terminal. */
-  | { kind: "failed"; reasonCode: string }
+  /**
+   * The collector's own closed failure code; terminal. A failed collection may
+   * still have persisted a (failed or partial) terminal: its runs are kept so
+   * the trail shows what was written.
+   */
+  | { kind: "failed"; reasonCode: string; runIds?: readonly string[] }
   /** The call's outcome cannot be known; terminal, never replayed. */
   | { kind: "uncertain"; reasonCode: string };
 
@@ -257,15 +261,18 @@ export async function recordCollectorOutcome(
         },
       ]);
       return;
-    default:
+    default: {
+      const runIds =
+        outcome.kind === "failed" ? [...new Set(outcome.runIds ?? [])].slice(0, 100) : [];
       await store.batch([
         {
-          sql: `UPDATE ops_collector_dispatches SET state=?2,reason_code=?3,finished_at=?4,updated_at=?4
-            WHERE operation_id=?1 AND state='started'`,
-          binds: [operationId, outcome.kind, outcome.reasonCode, now],
+          sql: `UPDATE ops_collector_dispatches SET state=?2,reason_code=?3,run_ids_json=json(?5),
+            finished_at=?4,updated_at=?4 WHERE operation_id=?1 AND state='started'`,
+          binds: [operationId, outcome.kind, outcome.reasonCode, now, JSON.stringify(runIds)],
         },
         failRequest(operationId, outcome.reasonCode, now),
       ]);
+    }
   }
 }
 

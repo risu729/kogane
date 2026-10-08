@@ -55,7 +55,9 @@ held the request waits (`collection_lease_held`) instead of starting. The
 Processor's dispatch only reads the lease and never releases or replaces it;
 the collector acquires and releases it exactly as for an alarm run, and a
 stopped execution's lease is still released only by the operator. A collector that finds its lease held reports `collection_busy` (alarm
-receipts included) rather than `collection_failed`.
+receipts included) rather than `collection_failed`; St George, whose session
+coordinator records a refused lease as a failed run, still reports
+`collection_failed`.
 
 Deployment applies CORE 0065 and uploads named collector entrypoints before the
 Processor and App. It removes the fourteen configured Cron jobs and reconciles
