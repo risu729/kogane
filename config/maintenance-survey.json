@@ -1,0 +1,159 @@
+{
+  "targetsPerTick": 2,
+  "targets": [
+    {
+      "id": "prestia-globalpass",
+      "source": "prestia-globalpass",
+      "url": "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "vpass",
+      "source": "vpass",
+      "url": "https://www.smbc-card.com/mem/index.jsp",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "myjcb",
+      "source": "myjcb",
+      "url": "https://www.jcb.co.jp/jcb_mente/mente_service.html",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "sbi-securities",
+      "source": "sbi-securities",
+      "url": "https://search.sbisec.co.jp/v2/popwin/info/home/pop6040_maintenance.html",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "sbi-shinsei",
+      "source": "sbi-shinsei",
+      "url": "https://www.sbishinseibank.co.jp/news/news22.html",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "sony-bank",
+      "source": "sony-bank",
+      "url": "https://sonybank.jp/guide/hours.html",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "sbi-vc-trade",
+      "source": "sbi-vc-trade",
+      "url": "https://www.sbivc.co.jp/assets/docs/manual_tt.pdf",
+      "scope": "session",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "mobile-suica",
+      "source": "mobile-suica",
+      "url": "https://www.jreast.co.jp/mobilesuica/use/sf/chk_account.html",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "moneyforward-me",
+      "source": "moneyforward-me",
+      "url": "https://support.me.moneyforward.com/hc/ja",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "vpoint",
+      "source": "vpoint",
+      "url": "https://t-point.tsite.jp/get/service/vrank/",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "st-george",
+      "source": "st-george",
+      "url": "https://www.stgeorge.com.au/online-services/internet-banking",
+      "scope": "collection",
+      "timezone": "Australia/Sydney",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "mizuho-bank",
+      "source": "mizuho-bank",
+      "url": "https://www.mizuhobank.co.jp/direct/time.html",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "smbc-direct",
+      "source": "smbc-direct",
+      "url": "https://www.smbc.co.jp/kojin/direct/jikan/",
+      "scope": "feature-only",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    },
+    {
+      "id": "vpoint-pay",
+      "source": "vpoint-pay",
+      "url": "https://www.smbc-card.com/prepaid/vpoint/index.jsp",
+      "scope": "collection",
+      "timezone": "Asia/Tokyo",
+      "cadenceHours": 24,
+      "terms": "unconfirmed",
+      "cost": "unconfirmed",
+      "fetch": "disabled"
+    }
+  ]
+}

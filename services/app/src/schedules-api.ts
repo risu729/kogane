@@ -136,7 +136,13 @@ export async function schedulesApi(
   const suffix = url.pathname.slice(SCHEDULES_PATH.length);
   if (request.method === "GET" && suffix === "") return relay(request, env, "");
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
-  if (!/^\/(?:[a-z0-9-]{1,100}|leases\/[a-z0-9-]{1,100})$/u.test(suffix) || suffix === "/bootstrap")
+  // A job id, a lease release, or the decision on one survey proposal (ADR 0050).
+  if (
+    !/^\/(?:[a-z0-9-]{1,100}|leases\/[a-z0-9-]{1,100}|proposals\/[1-9][0-9]{0,15})$/u.test(
+      suffix,
+    ) ||
+    suffix === "/bootstrap"
+  )
     throw new HttpError(404, "not_found");
   if (
     request.headers.get("origin") !== url.origin ||

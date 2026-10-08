@@ -89,6 +89,13 @@ MoneyForward, and the same instrument held at different brokers, with explicit
 evidence. Preserve different products with similar names and unresolved
 references. Expose the existing correction history in the review flow.
 
+Collection timing depends on provider maintenance windows. The official-site
+re-survey only proposes window changes for an operator to accept
+([ADR 0050](adr/0050-maintenance-survey-proposals.md)); no page is enabled
+until the owner confirms its URL, terms and cadence, so the windows are still
+refreshed by hand, and pages that are PDFs, need a login or render with
+JavaScript stay manual ([schedules](schedules.md#official-site-re-survey)).
+
 Source expansion remains part of this work: the inventory includes further
 payments, banks, overseas accounts and reward programs. Complete representative
 flows first, then extend them under the same contracts.

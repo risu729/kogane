@@ -36,7 +36,11 @@ for anything else, so a listing can skip unrelated objects.
 
 The object prefix is the same content-addressed layout `docs/raw-store.md`
 already describes for `kogane-raw-evidence`; this contract adds the `runs/`,
-`reports/` and `projection-inputs/` prefixes beside it. Prefixes exist for
+`reports/` and `projection-inputs/` prefixes beside it. One prefix in the same
+bucket is not this contract's: the Processor's maintenance re-survey stores
+official notice pages at `maintenance-survey/objects/<first two hex>/<sha256>`,
+outside every run and terminal
+([ADR 0050](adr/0050-maintenance-survey-proposals.md)). Prefixes exist for
 organisation, notification filters and recovery scans. They are **not** a
 per-source ACL: a trusted collector holds a binding to the whole bucket.
 
