@@ -83,6 +83,7 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
 | `getArtifact`           | `observation_fetch_artifacts` + reachable raw object + `observation_fetch_runs`    | recorded: every non-pending parse run of the artifact                         | —                                                                                                                                                                                              | parse runs by id                                    | 5,000 bound per list                |
 | `getObservation`        | the observation table via `visibleEvidence.observations`                           | recorded: failed and superseded results are shown with provenance             | —                                                                                                                                                                                              | —                                                   | —                                   |
 | `getRawDownload`        | `raw_objects` joined to `observation_fetch_artifacts`                              | reachable through a visible artifact                                          | —                                                                                                                                                                                              | lowest artifact id                                  | 1                                   |
+| collection quality      | `src/collection-quality.ts`; see [Collection quality](#collection-quality)         | per cell, by the composed snapshot rules                                      | Cells per (dataset, parser, unit, period) of one source, ranked whole, then paged.                                                                                                             | dataset, unit, period desc, parser                  | 501 cells; 200 jobs and sources     |
 
 ### Limits
 
@@ -315,3 +316,63 @@ exact-arithmetic subtotal over the filter scope. `legacyLatestPage` serves the
 v1 `/api/balances` window from the same rows in the same order, which is what
 the compatibility adapter uses. See
 [Balance read model](balance-read-model.md) for the contract.
+
+## Collection quality
+
+`src/collection-quality.ts` ([ADR 0045](adr/0045-collection-quality-read.md))
+holds the SQL behind `GET /api/collection-quality` and
+`GET /api/collection-quality/<sourceId>`; `packages/application/src/query/collection-quality.ts`
+maps its rows to the contract and the closed reason codes. It is not an
+`ObservationReader` method: like the dated reads it is composed by an
+application query over an executor.
+
+| Text                       | Reads                                                                                                                                                        | Bound                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `SCHEDULE_QUALITY_SQL`     | every `collection_schedules` row, its newest receipt by `nominal_at` (the unique index) and its held lease                                                   | 201 rows; more is refused                                |
+| `TERMINAL_QUALITY_SQL`     | the `collection_runs` rows of exactly the (collector, run id) pairs a receipt names, with the newest `registered` stage and the visible fetch run            | the pairs given                                          |
+| `UNREGISTERED_QUALITY_SQL` | never-registered terminals of the given collectors, once per run by its newest row, grouped by code                                                          | every row of those sources, by index; grows with history |
+| `SOURCE_QUALITY_SQL`       | every visible source and its newest visible fetch run, read by id                                                                                            | 201 rows; more is refused                                |
+| `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership | 501 cells from an offset                                 |
+
+A cell is (dataset, parser, fetch unit, period, MyJCB statement state,
+currentness rule). Its newest capture is its newest fetch run by capture time;
+its current capture is the newest fetch run with a member of the current set,
+decided by `current_global_pass_snapshots`, `current_vpass_snapshots`
+(`VPASS_SNAPSHOT_MEMBER`), `current_myjcb_snapshots` (`MYJCB_LEDGER_MEMBER`),
+or `activeStateProjection` with `completeSnapshotCandidates.currentMember`. The
+CTE texts are composed unchanged; `GLOBAL_PASS_MONTH` and
+`VPASS_STATEMENT_MONTH` are exported from `src/sql.ts` so the cell's period is
+the expression the snapshot partitions on. The parsers whose current set a
+read narrows further (`UNCOMPOSED_QUERY_RULE_PARSERS`) carry
+`query_rule_not_composed`. A capture no job or parse names is its own cell,
+shown only while it is newer than every parsed capture of its slot. The read
+counts no observation, so an empty current capture is `current` like any
+other; the GLOBAL PASS months where such a capture supersedes an older one
+with rows are named by `globalPassEmptyMonths` (the Queries table), not by
+this read. A
+`container-snapshot` cell is current in the sense of the Balances and
+Positions reads: the Transactions read applies no snapshot selection, so the
+transactions a snapshot parser also emits
+(`sbi-shinsei-top-balances-and-activity`) stay listed from a capture this read
+calls not current.
+
+### Cost
+
+D1 has no table statistics. `test/collection-quality.test.ts` checks every plan
+on a complete-CORE store with none: the summary reads are keyed by job, run
+and source. `UNREGISTERED_QUALITY_SQL` reads every `collection_runs` row of
+each visible collector source on each call through `collection_runs_run
+(source)`, so it grows with the terminal history (measured once in review on a
+loaded machine with every row never registered, the worst case: about 20 ms at
+4,000 rows, 200 ms at 16,000; not asserted). The cell read reaches the source's artifacts by
+`idx_fetch_artifacts_source_dataset_time (source_id=?)`, its runs by
+`idx_fetch_runs_source` and their units by `idx_fetch_units_run`, and every
+job, parse, publication, claim and unit report by key; no observation table is
+read. Its only whole-store passes are inside the composed snapshot CTEs, the
+passes the Transactions, Balances and Positions reads already make, and each is
+evaluated once (an `IN` list materialized once, or an automatic index built
+once), never per row. A per-source CTE is reached only from a cell of its
+dataset: measured once on `bun:sqlite`, a Sony Bank page took the same time
+with 0 or 2,000 GLOBAL PASS pages in the store (not asserted). On the test's
+scaled store (90 daily captures of four sources) one source's cells take
+roughly 10 to 50 ms on `bun:sqlite`; not measured on workerd or D1.
