@@ -7,6 +7,9 @@ decided in [ADR 0019](adr/0019-dated-reported-state.md). It is a list of
 provider figures, never a total: nothing is added, converted or netted, and a
 container without a capture is named, never shown as zero.
 
+What adopted events imply from a start snapshot, compared with these figures,
+is [reconstructed state](reconstructed-state.md) (a pure engine; no read path yet).
+
 | Layer        | Where                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------------------------- |
 | Snapshot CTE | `SnapshotCteOptions.cutoffParam` in `packages/parsers/src/snapshot-query.ts`                            |
