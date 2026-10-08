@@ -373,6 +373,12 @@ operations MCP tools all call it.
   every command route, every operations route and every operations MCP tool.
   It never becomes a `Principal`, so no capability-less principal reaches the
   forwarded actor headers or a decision row.
+- **An MCP client is in neither role, whatever the lists say.** An identity
+  that reached `/mcp` through the MCP Access application is the agent-only
+  principal `mcp-client:<sub>` ([ADR 0047](adr/0047-mcp-client-connection.md)),
+  and the resolver's adapter answers it `403 actor_not_supported` before
+  either list is read — even when the bare `<sub>` is the operator. Listing it
+  in `AGENT_GRANTS` is neither needed nor effective.
 
 **Empty means nobody, and that is intended.** With both variables empty — the
 shipped default — no authenticated subject can plan, simulate, approve or

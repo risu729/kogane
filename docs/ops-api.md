@@ -269,7 +269,12 @@ Each tool's published JSON Schema is generated from the same Zod schema its
 route validates with, so the wire contract and the advertised contract cannot
 drift. Reaching `/mcp` still needs an `AGENT_API_GRANTS` grant (that is the MCP
 endpoint's own gate) _and_ the operator capability above, so a read-only agent
-principal sees the tools refuse exactly as the routes do.
+principal sees the tools refuse exactly as the routes do. An identity that
+reached `/mcp` through the MCP Access application is the agent-only principal
+`mcp-client:<sub>` ([ADR 0047](adr/0047-mcp-client-connection.md)): the six
+tools are neither listed nor callable for it, and the grader refuses it with
+`403 actor_not_supported` whatever the lists say — including when the same
+person's bare subject is the operator.
 
 ## Session refresh and human-required states
 
