@@ -111,9 +111,16 @@ review shaped the provisional input this PR uses.
    `compareTemporal`. The window runs from the start capture to the end
    capture of the cell (a stale capture moves the window, it does not drop
    events); without a start it starts after the start date, without an end it
-   ends with the end date. An event on a capture's Tokyo day is a boundary
-   candidate, counted apart and never adopted; an unknown time, a missing
-   time of the basis's role or two of them is `event_time_unknown`.
+   ends with the end date. An event instant is ordered against a capture
+   instant exactly (only an equal instant is a boundary candidate); a date on
+   a capture's Tokyo day is a boundary candidate, counted apart and never
+   adopted. An unknown time, a missing time of the basis's role, two of them,
+   a period overlapping a capture's day, or a date or period in another zone
+   than Asia/Tokyo is `event_time_unknown`. A leg is placed before any hold
+   that depends on it: an unmapped state, an unresolved account, an own
+   transfer, an inexact or negative value hold a leg only inside the window,
+   on its boundary or without a time; knowledge, chain and adapter-flag
+   blocks do not depend on the date.
 5. **Fold and output.** Per (account, unit) and (account, instrument): the
    start (one stock balance with `asset-positive` or `liability-positive`
    sign, negated when liability-positive; or one identified position), the
@@ -142,8 +149,13 @@ now)`, a pure diff of two selections of one scope (the baseline is the cut
    `reported_end_not_exact`, `reconstruction_incomplete`,
    `snapshot_basis_unknown`, the last also for every basis but cash, since no
    container says which basis its figure reflects, ADR 0004);
-   `unavailable` (`no_reported_container`). Coverage that is not complete is
-   never reconciled, even at a zero remainder.
+   `unavailable` (`no_reported_container`, a cell of an account no reported
+   container lists; a card account produces no cell at all on the cash basis,
+   since its movements are on the purchase-recognition basis and are listed
+   as `other_basis`). Coverage that is not complete is never reconciled, even
+   at a zero remainder. Boundary candidates are tried all in or all out:
+   start and end candidates whose subset alone would explain the remainder
+   leave it `difference_unexplained`.
 7. **Reproducibility and bounds.** The manifest pins schema, engine release,
    input contract, resolution, policies, zone, basis, range, accounts,
    `knowledgeAt`, the cut and the baseline cut, both reported context ids, the

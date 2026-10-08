@@ -1574,3 +1574,88 @@ describe("a baseline is of the same set", () => {
     ).toBe(true);
   });
 });
+
+describe("time placement as documented", () => {
+  const atInstant = (value: string) =>
+    rev({
+      times: [
+        {
+          role: "posting",
+          time: { kind: "instant", value, zone: "Asia/Tokyo", basis: "provider" },
+        },
+      ],
+      legs: [leg({ quantity: q("JPY", "100") })],
+    });
+
+  test("an event instant is ordered against a capture instant exactly", () => {
+    const after = run({ set: eventSet([atInstant("2026-03-01T05:00:00Z")]) });
+    expect(disposition(after, "event:test:1@1#0")).toBe("applied");
+    const before = run({ set: eventSet([atInstant("2026-03-01T02:00:00Z")]) });
+    expect(disposition(before, "event:test:1@1#0")).toBe("outside_range");
+    const equal = run({ set: eventSet([atInstant(START_CAPTURE)]) });
+    expect(disposition(equal, "event:test:1@1#0")).toBe("boundary_same_day");
+  });
+
+  test("a date in another zone, or a period over a capture's day, is not placed", () => {
+    const utc = run({
+      set: eventSet([
+        rev({
+          times: [
+            {
+              role: "posting",
+              time: { kind: "local-date", value: "2026-03-15", zone: "UTC", basis: "provider" },
+            },
+          ],
+          legs: [leg({ quantity: q("JPY", "100") })],
+        }),
+      ]),
+    });
+    expect(cell(utc).gaps).toContain("event_time_unknown");
+    const period = run({
+      set: eventSet([
+        rev({
+          times: [
+            {
+              role: "posting",
+              time: {
+                kind: "period",
+                start: "2026-02-25",
+                end: "2026-03-05",
+                endExclusive: false,
+                zone: "Asia/Tokyo",
+                granularity: "day",
+              },
+            },
+          ],
+          legs: [leg({ quantity: q("JPY", "100") })],
+        }),
+      ]),
+    });
+    expect(cell(period).gaps).toContain("event_time_unknown");
+  });
+
+  test("a card account produces no cell on the cash basis", () => {
+    const state = run({
+      set: eventSet([
+        rev({
+          kind: "purchase",
+          state: "captured",
+          times: [on("2026-03-15", "usage")],
+          legs: [
+            leg({ accountId: CARD, basis: "purchase-recognition", quantity: q("JPY", "800") }),
+          ],
+        }),
+      ]),
+      request: { accountIds: [CARD] },
+      start: side(START_DATE, [], { accountsWithoutContainer: [CARD] }),
+      end: side(END_DATE, [], { accountsWithoutContainer: [CARD] }),
+    });
+    expect(state.cells).toHaveLength(0);
+    expect(state.accounts[0]).toMatchObject({
+      startContainer: false,
+      endContainer: false,
+      cells: 0,
+    });
+    expect(disposition(state, "event:test:1@1#0")).toBe("other_basis");
+  });
+});

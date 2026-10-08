@@ -46,8 +46,9 @@ computes a reconstructed state.
   `settlement-date`, `knowledgeAt` and the cut it was resolved to.
 
 Every validator rejects unknown keys. An input over 5,000 revisions or 20,000
-legs is refused with `event_budget_exceeded`, over 5,000 reported rows with
-`reported_budget_exceeded`; nothing is cut to fit.
+legs is refused with `event_budget_exceeded`, a reported side over 5,000 rows
+(balances and positions, counted per side) with `reported_budget_exceeded`;
+nothing is cut to fit.
 
 ## Step 1: knowledge selection
 
@@ -72,32 +73,53 @@ active events hold is listed in `duplicateClaims`.
 ## Steps 2–6: the fold
 
 Cells are per (account, unit) and per (account, instrument). Each leg of a
-cell gets exactly one disposition, decided in this order:
+cell gets exactly one disposition, decided in this order (the first rule
+that matches):
 
-| Disposition                                                                  | Rule                                                                                                                                                                                                                                                                                             |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `recorded_after_knowledge_time`, `superseded_at_knowledge_time`              | From the selection                                                                                                                                                                                                                                                                               |
-| `other_basis`                                                                | The leg's basis is not the request's (cash → `cash-movement`, and so on); no fallback                                                                                                                                                                                                            |
-| `knowledge_unlogged`                                                         | From the selection; blocks the figure                                                                                                                                                                                                                                                            |
-| `unknown_effect` (`revision_chain_inconsistent`)                             | From the selection; blocks the figure                                                                                                                                                                                                                                                            |
-| `identity_changed`, `alias_conflict`, `claim_conflict`, `writer_unsupported` | Adapter flags; block the figure and mark the cell `needsReview`, together with every requested cell the flagged revision's chain touched (its predecessors' legs, a legless withdrawal's included)                                                                                               |
-| `breakdown_attribution`, `correspondence_link`                               | A breakdown or correspondence of a movement: never added                                                                                                                                                                                                                                         |
-| `state_no_effect`                                                            | `canceled`, `returned`, `unknown`                                                                                                                                                                                                                                                                |
-| `unknown_effect`                                                             | A state the policy does not map or a leg on the `unknown` basis (`leg_effect_unknown`), movements on two own accounts (`own_transfer_held`), no time of the basis's role (`event_time_unknown`), an inexact value (`leg_value_not_exact`), a negative movement or breakdown (`leg_sign_unknown`) |
-| `outside_range`                                                              | Before the start capture or after the end capture                                                                                                                                                                                                                                                |
-| `boundary_same_day`                                                          | On a capture's Tokyo day: a candidate, never adopted                                                                                                                                                                                                                                             |
-| `applied`, `pending_shown_apart`                                             | `captured`/`debited`/`credited`/`confirmed`; `authorized`/`requested`/`in-transit`/`proposed`                                                                                                                                                                                                    |
+| #   | Disposition (gap)                                                            | Rule                                                                                                                                                                                         |
+| --- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `recorded_after_knowledge_time`, `superseded_at_knowledge_time`              | From the selection                                                                                                                                                                           |
+| 2   | `other_basis`                                                                | The leg's basis is not the request's (cash → `cash-movement`, and so on); no fallback                                                                                                        |
+| 3   | `knowledge_unlogged` (`knowledge_unlogged`)                                  | From the selection, whatever the date                                                                                                                                                        |
+| 4   | `unknown_effect` (`revision_chain_inconsistent`)                             | From the selection, whatever the date                                                                                                                                                        |
+| 5   | `identity_changed`, `alias_conflict`, `claim_conflict`, `writer_unsupported` | Adapter flags, whatever the date; also reach every requested cell the flagged revision's chain touched (its predecessors' legs, a legless withdrawal's included) and mark them `needsReview` |
+| 6   | `unknown_effect` (`leg_effect_unknown`)                                      | A leg on the `unknown` basis: not even its time role is known                                                                                                                                |
+| —   | —                                                                            | The leg is placed by the time of the basis's role (below)                                                                                                                                    |
+| 7   | `correspondence_link`                                                        | A correspondence of a movement: never added                                                                                                                                                  |
+| 8   | `breakdown_attribution`, or `unknown_effect` (`leg_sign_unknown`)            | A breakdown of a movement: never added; a negative one not outside the window is refused                                                                                                     |
+| 9   | `state_no_effect`                                                            | `canceled`, `returned`, `unknown`                                                                                                                                                            |
+| 10  | `outside_range`                                                              | Before the start capture or after the end capture                                                                                                                                            |
+| 11  | `unknown_effect` (`leg_effect_unknown`)                                      | A state the policy does not map                                                                                                                                                              |
+| 12  | `unknown_effect` (`leg_subject_unrecognized`)                                | A movement no account resolves                                                                                                                                                               |
+| 13  | `unknown_effect` (`own_transfer_held`)                                       | Movements on two own accounts in one revision                                                                                                                                                |
+| 14  | `unknown_effect` (`event_time_unknown`)                                      | No time to place it by                                                                                                                                                                       |
+| 15  | `unknown_effect` (`leg_value_not_exact`)                                     | An inexact value                                                                                                                                                                             |
+| 16  | `unknown_effect` (`leg_sign_unknown`)                                        | A negative value: the direction is the role, the value a magnitude                                                                                                                           |
+| 17  | `boundary_same_day`                                                          | On a capture's boundary: a candidate, never adopted                                                                                                                                          |
+| 18  | `applied`, `pending_shown_apart`                                             | `captured`/`debited`/`credited`/`confirmed`; `authorized`/`requested`/`in-transit`/`proposed`                                                                                                |
 
-Legs outside every cell are recorded once as `other_basis`, `other_account`
-or, for a movement no account resolves, `unknown_effect` with
-`leg_subject_unrecognized` on every requested cell of its unit.
+A movement no account resolves is classified against every requested cell of
+its unit (with rule 12 in place of being counted) and recorded once, with its
+most severe outcome in closed-code order; when no requested cell has its unit
+it is classified against the requested range. Legs of no cell are recorded
+once as `recorded_after_knowledge_time`, `superseded_at_knowledge_time`,
+`other_basis` or `other_account`. A revision without legs gets one record:
+`recorded_after_knowledge_time`, `superseded_at_knowledge_time`,
+`knowledge_unlogged`, `unknown_effect` (an inconsistent chain, or an unmapped
+state with `leg_effect_unknown`), its adapter flag, or `state_no_effect`.
 
-Time is placed in Asia/Tokyo: capture instants are rewritten with `+09:00`
-before `compareTemporal`, so a capture at `16:00Z` belongs to the next Tokyo
-day. The window runs from the start capture to the end capture (a stale start
-capture counts the events between its day and the start date); without a
-start it begins after the start date, without an end it ends with the end
-date.
+Time is placed in Asia/Tokyo: capture instants (and event instants) are
+rewritten with `+09:00` before `compareTemporal`, so a capture at `16:00Z`
+belongs to the next Tokyo day. An event instant is ordered against a capture
+instant exactly: before it is outside or in the start, after it is inside,
+and only an equal instant is a boundary candidate. An event date on a
+capture's Tokyo day is a boundary candidate; a period overlapping that day, a
+date or period in another zone than Asia/Tokyo, an unknown time, no time of
+the basis's role or two of them is `event_time_unknown`. The window runs from
+the start capture to the end capture (a stale start capture counts the events
+between its day and the start date; a stale end capture leaves the later
+events outside); without a start it begins after the start date, without an
+end it ends with the end date.
 
 The start is one stock balance whose sign meaning is `asset-positive` or
 `liability-positive` (negated, so every cell is asset-positive), or one
@@ -119,7 +141,7 @@ gap makes it `not-computable`. Nothing is totalled across accounts:
 
 | Status                               | When                                                                                                    |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `unavailable`                        | `no_reported_container`: the account has no reported container (card accounts)                          |
+| `unavailable`                        | `no_reported_container`: a cell of an account no reported container lists                               |
 | `not_comparable`                     | `reported_end_missing`, `snapshot_basis_unknown`, `reported_end_not_exact`, `reconstruction_incomplete` |
 | `reconciled`                         | Complete cell, no boundary candidate, remainder zero                                                    |
 | `consistent_with_boundary_exclusion` | Complete cell with boundary candidates, remainder zero                                                  |
@@ -133,7 +155,10 @@ reflects (ADR 0004). The remainder `reported − reconstructed` is exact wheneve
 both are, an incomplete cell included, and is never written or absorbed. The
 components shown beside it: late-recorded movements (`explainLate`, a diff of
 the selection at the end capture's cut and at the asked cut, when the caller
-supplies that baseline), pending movements and boundary candidates.
+supplies that baseline), pending movements and boundary candidates. Boundary
+candidates are tried all in or all out; a subset is never tried, so start and
+end candidates that only partly explain the remainder leave it
+`difference_unexplained`.
 
 ## Step 8: the manifest
 
@@ -156,9 +181,11 @@ Any input order gives the same output and the same id.
   questions it must answer are listed in ADR 0052.
 - No stored revision has a commit sequence yet; until the common guard
   assigns one, the adapter cannot place today's rows at a cut.
-- Card accounts have no reported container, so their reconstruction is
-  `unavailable`; bank accounts' only events are reviewed card settlements, so
-  their families are not evented.
+- Card accounts have no reported container and their movements are on the
+  purchase-recognition basis, so on the cash basis a card account produces no
+  cell at all: its purchases are listed as `other_basis` and its account row
+  shows no start or end container. Bank accounts' only events are reviewed
+  card settlements, so their families are not evented.
 - No parser emits transaction-history coverage, so every family's history
   coverage is `unknown`: no real account can be `complete` today.
 - Own transfers are held, never applied; trade and settlement bases are never
