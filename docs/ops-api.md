@@ -296,10 +296,14 @@ drift. Reaching `/mcp` still needs an `AGENT_API_GRANTS` grant (that is the MCP
 endpoint's own gate) _and_ the operator capability above, so a read-only agent
 principal sees the tools refuse exactly as the routes do.
 
-`kogane.ops.operation.get` calls the same service as the read route, so it
-returns the same record, `execution` block included. No MCP tool, schema or
-grant was added for collector execution, and no MCP client has connected;
-client access is the work of #559.
+`kogane.ops.operation.get` calls the same service as the read route, so on
+this code it returns the same record, `execution` block included. No MCP tool,
+schema or grant was added for collector execution, and no MCP client has
+connected. The HTTP read route is the surface for following an operation. MCP
+client access is the work of #559/#565, whose design stops publishing the
+operations tools on `/mcp`; tracking an operation over MCP would be a separate
+follow-up: a read tool graded by an agent capability under the `/mcp` tool
+contract of [agent API](agent-api.md), never by the operator role.
 
 ## Session refresh and human-required states
 

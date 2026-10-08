@@ -192,8 +192,11 @@ Open limits, written down rather than guessed:
   collector has served `runOperation`.
 - The requested window is not applied by any collector.
 - READ projection of a run is not traced; `projected` stays pending.
-- The operator UI has no operations view; the trail is read over HTTP (and the
-  same record over the existing MCP tool, whose client access is #559's).
+- The operator UI has no operations view; the trail is read over HTTP. The
+  existing `kogane.ops.operation.get` returns the same record on this code, but
+  MCP client access (#559/#565) is designed to stop publishing operations tools
+  on `/mcp`; operation tracking over MCP is a follow-up read tool graded by an
+  agent capability, never the operator role.
 - Session refresh is unattended only for SBI VC's keepalive; every other source
   ends `session_refresh_unsupported` when its policy is unattended, and
   `waiting_for_human` otherwise.
