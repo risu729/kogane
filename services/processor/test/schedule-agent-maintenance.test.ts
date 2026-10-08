@@ -439,6 +439,85 @@ test("an operator's longer window does not block an agent's unrelated revision",
   expect(lengthening.body).toEqual({ error: "maintenance_deferral_too_long" });
 });
 
+test("an operator's longer window does not admit a separate long agent window", async () => {
+  // Noon UTC, so no seeded window can touch either end of the operator's.
+  const start = Math.floor(Date.now() / DAY) * DAY + 3 * DAY + DAY / 2;
+  const operator = await post(
+    "/internal/schedules/maintenance",
+    {
+      id: "synthetic-operator-long-window",
+      revision: 0,
+      source: "mobile-suica",
+      timezone: "UTC",
+      pattern: { kind: "once", from: iso(start), to: iso(start + 10 * DAY) },
+      enabled: true,
+      referenceUrl: REFERENCE,
+      verifiedAt: verified(),
+      scope: "collection",
+    },
+    { "x-kogane-operator": OPERATOR },
+  );
+  expect(operator.body).toEqual({ saved: true, revision: 1, reservation: "armed" });
+  const count = await ruleCount();
+  // A separate eight-day window is a new long deferral, whatever else exists.
+  const separate = await write(
+    rule("mobile-suica", {
+      pattern: { kind: "once", from: iso(start + 30 * DAY), to: iso(start + 38 * DAY) },
+    }),
+  );
+  expect(separate).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+  // Moving the operator's window is a long deferral where there was none.
+  const moved = await write(
+    rule("mobile-suica", {
+      ruleId: "synthetic-operator-long-window",
+      revision: 1,
+      timezone: "UTC",
+      pattern: { kind: "once", from: iso(start + DAY), to: iso(start + 11 * DAY) },
+    }),
+  );
+  expect(moved).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+  expect(await ruleCount()).toBe(count);
+  // Shortening it inside its old span is not.
+  const shortened = await write(
+    rule("mobile-suica", {
+      ruleId: "synthetic-operator-long-window",
+      revision: 1,
+      timezone: "UTC",
+      pattern: { kind: "once", from: iso(start + DAY), to: iso(start + 9 * DAY) },
+    }),
+  );
+  expect(shortened.status).toBe(200);
+});
+
+test("a running window counts its spent part, so extending it cannot outlast the bound", async () => {
+  const now = Date.now();
+  const running = await write(
+    rule("prestia-globalpass", {
+      pattern: { kind: "once", from: iso(now - 5 * DAY), to: iso(now + DAY) },
+    }),
+  );
+  expect(running.status).toBe(200);
+  const id = running.body.ruleId as string;
+  // Five days spent and three more is eight: refused, though only three remain.
+  const extended = await write(
+    rule("prestia-globalpass", {
+      ruleId: id,
+      revision: 1,
+      pattern: { kind: "once", from: iso(now - 5 * DAY), to: iso(now + 3 * DAY) },
+    }),
+  );
+  expect(extended).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+  // Ending it sooner is always possible.
+  const shortened = await write(
+    rule("prestia-globalpass", {
+      ruleId: id,
+      revision: 1,
+      pattern: { kind: "once", from: iso(now - 5 * DAY), to: iso(now + 3_600_000) },
+    }),
+  );
+  expect(shortened.status).toBe(200);
+});
+
 test("the daily write budget is per principal and refuses before writing", async () => {
   const at = new Date().toISOString();
   const statements = Array.from({ length: 30 }, (_, i) =>

@@ -230,20 +230,27 @@ export function afterMaintenance(t: number, rules: readonly MaintenanceRule[]): 
   throw new Error("maintenance_unavailable");
 }
 
+/** One joined deferral: the union's start, and where collection may run again. */
+export interface DeferralUnion {
+  start: number;
+  end: number;
+}
+
 /**
- * The longest joined deferral these rules cause from `from` onward, measured
- * from the start of each union: the remaining deferral at `from`, every dated
- * window starting after it, and every recurring window starting within
- * `horizon` milliseconds. A chain is followed for at most `cap` milliseconds,
- * so the answer is exact up to `cap` and otherwise only "more than `cap`" —
- * windows that chain without end are just that, not an error.
+ * The joined deferrals these rules cause from `from` onward, in order, each
+ * measured from the start of its union: the remaining deferral at `from`,
+ * every dated window starting after it, and every recurring window starting
+ * within `horizon` milliseconds. A chain is followed for at most `cap`
+ * milliseconds, so a union's end is exact up to `cap` past its start and
+ * otherwise only "more than `cap`" — windows that chain without end are just
+ * that, not an error.
  */
-export function longestDeferral(
+function* joinedDeferrals(
   rules: readonly MaintenanceRule[],
   from: number,
   horizon: number,
   cap: number,
-): number {
+): Generator<DeferralUnion> {
   const starts = new Set<number>([from]);
   for (const rule of rules) {
     if (!rule.enabled || rule.scope === "feature-only") continue;
@@ -259,8 +266,7 @@ export function longestDeferral(
       if (start !== null && start > from && start < from + horizon) starts.add(start);
     }
   }
-  let longest = 0,
-    reach = Number.NEGATIVE_INFINITY;
+  let reach = Number.NEGATIVE_INFINITY;
   for (const start of [...starts].sort((a, b) => a - b)) {
     // A start inside a union already followed defers less than the union's own start.
     if (start < reach) continue;
@@ -273,7 +279,33 @@ export function longestDeferral(
       t = end;
     }
     reach = t;
-    longest = Math.max(longest, t - start);
+    if (t > start) yield { start, end: t };
+  }
+}
+
+/** Every joined deferral these rules cause (see `joinedDeferrals`). */
+export function deferralUnions(
+  rules: readonly MaintenanceRule[],
+  from: number,
+  horizon: number,
+  cap: number,
+): DeferralUnion[] {
+  return [...joinedDeferrals(rules, from, horizon, cap)];
+}
+
+/**
+ * The longest joined deferral these rules cause from `from` onward (see
+ * `joinedDeferrals`): exact up to `cap`, otherwise only "more than `cap`".
+ */
+export function longestDeferral(
+  rules: readonly MaintenanceRule[],
+  from: number,
+  horizon: number,
+  cap: number,
+): number {
+  let longest = 0;
+  for (const union of joinedDeferrals(rules, from, horizon, cap)) {
+    longest = Math.max(longest, union.end - union.start);
     if (longest > cap) break;
   }
   return longest;

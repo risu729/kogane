@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   afterMaintenance,
+  deferralUnions,
   longestDeferral,
   nextNominal,
   validMaintenance,
@@ -161,4 +162,25 @@ test("the longest joined deferral is measured from each union's own start", () =
       92 * day,
     ),
   ).toBe(0);
+});
+test("each joined deferral is reported with its own start and end", () => {
+  const hour = 3_600_000,
+    day = 24 * hour,
+    from = ms("2026-11-01T00:00:00.000Z");
+  const dated = (start: number, end: number) =>
+    rule({ kind: "once", from: new Date(start).toISOString(), to: new Date(end).toISOString() });
+  // Separate unions stay separate, so a long one never hides another.
+  const rules = [
+    dated(from - day, from + hour),
+    dated(from + day, from + 11 * day),
+    dated(from + 30 * day, from + 38 * day),
+    dated(from + 38 * day, from + 39 * day),
+  ];
+  expect(deferralUnions(rules, from, 92 * day, 92 * day)).toEqual([
+    { start: from, end: from + hour },
+    { start: from + day, end: from + 11 * day },
+    { start: from + 30 * day, end: from + 39 * day },
+  ]);
+  expect(longestDeferral(rules, from, 92 * day, 92 * day)).toBe(10 * day);
+  expect(deferralUnions([], from, 92 * day, 92 * day)).toEqual([]);
 });

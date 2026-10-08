@@ -2,6 +2,7 @@ import jobs from "../../../config/alarm-jobs.json";
 import { ACTOR_PATTERN } from "../../../packages/application/src/command/grants.ts";
 import {
   afterMaintenance,
+  deferralUnions,
   longestDeferral,
   nextNominal,
   validPattern,
@@ -356,25 +357,48 @@ function validReason(value: unknown): string {
 function deferringRules(rules: readonly MaintenanceRule[]): MaintenanceRule[] {
   return rules.filter((rule) => rule.enabled && rule.scope !== "feature-only");
 }
-/** Refuses an agent revision that lengthens the joined deferral past the bound. */
+/**
+ * Refuses an agent revision that leaves a joined deferral longer than the
+ * bound which the source's current rules do not already cause.
+ */
 function checkAgentDeferral(current: readonly MaintenanceRule[], candidate: MaintenanceRule) {
-  const now = Date.now();
+  // Measured from up to the bound before now, so a running union counts the
+  // part already spent: an agent cannot keep a window going by extending it.
+  // A union that ended before now is at most the bound long, so it never counts.
+  const since = Date.now() - AGENT_MAX_DEFERRAL_MS,
+    horizon = AGENT_MAX_DEFERRAL_MS + DEFERRAL_HORIZON_MS;
   const before = deferringRules(current),
     after = deferringRules([...current.filter((rule) => rule.id !== candidate.id), candidate]);
-  const deferral = (rules: MaintenanceRule[], cap: number) => {
+  try {
+    if (longestDeferral(after, since, horizon, AGENT_MAX_DEFERRAL_MS) <= AGENT_MAX_DEFERRAL_MS)
+      return;
+  } catch {
+    /* An unmeasurable chain is judged below. */
+  }
+  // A long union after the revision must lie within one the source already
+  // had: a revision that leaves an operator's longer window as it was, or
+  // shortens it, passes; one that creates, moves or lengthens a long union
+  // anywhere — even while a longer one exists elsewhere — is refused. Unions
+  // are followed to the horizon, so beyond it an unchanged chain compares
+  // equal.
+  const unions = (rules: MaintenanceRule[]) => {
     try {
-      return longestDeferral(rules, now, DEFERRAL_HORIZON_MS, cap);
+      return deferralUnions(rules, since, horizon, horizon);
     } catch {
-      return Number.POSITIVE_INFINITY;
+      return null;
     }
   };
-  if (deferral(after, AGENT_MAX_DEFERRAL_MS) <= AGENT_MAX_DEFERRAL_MS) return;
-  // Only a revision that lengthens deferral past the bound is refused; one
-  // that leaves an operator's longer window as it was, or shortens it, is
-  // not. Beyond the horizon both are "unbounded" and compare equal.
-  const existing = Math.min(deferral(before, DEFERRAL_HORIZON_MS), DEFERRAL_HORIZON_MS);
-  const lengthened = Math.min(deferral(after, DEFERRAL_HORIZON_MS), DEFERRAL_HORIZON_MS);
-  if (lengthened > existing) throw new ScheduleError("maintenance_deferral_too_long", 422);
+  const existing = unions(before) ?? [],
+    revised = unions(after);
+  if (
+    revised === null ||
+    revised.some(
+      (union) =>
+        union.end - union.start > AGENT_MAX_DEFERRAL_MS &&
+        !existing.some((known) => known.start <= union.start && union.end <= known.end),
+    )
+  )
+    throw new ScheduleError("maintenance_deferral_too_long", 422);
 }
 async function writeRevision(
   env: Env,
