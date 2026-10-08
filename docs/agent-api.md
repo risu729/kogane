@@ -7,10 +7,13 @@ the MCP adapter and the Overview page are adapters over it.
 
 This implements A08 and review findings AR13, AR14 and D14 (agent side).
 It is the MVP gate of `architecture-addendum/10_agent_api_and_permissions.md`
-§10: summary, query, explain and propose — and nothing else. There is no
-acceptance, no simulation, no commit, no calculation job, no collection
-request, no export, and no external money action in _this_ API. Those
-capabilities are not disabled by a flag; they have no name in the grant type.
+§10: summary, query, explain and propose — plus, under their own capabilities,
+reading and revising public maintenance windows
+([ADR 0046](adr/0046-agent-maintenance-windows.md), [below](#maintenance-windows))
+— and nothing else. There is no acceptance, no simulation, no commit, no
+calculation job, no collection request, no export, and no external money action
+in _this_ API. Those capabilities are not disabled by a flag; they have no name
+in the grant type.
 
 The operations API ([ops-api.md](ops-api.md)) shares this Worker's `/mcp`
 transport and nothing else: it is a different tool set, graded by the change
@@ -128,7 +131,7 @@ Three variables, two vocabularies, deliberately not merged:
 
 | Variable            | Shape                              | Means                                                                                                             |
 | ------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `AGENT_API_GRANTS`  | JSON **object**, principal → grant | what this API lets a principal _read_, and whether it may propose                                                 |
+| `AGENT_API_GRANTS`  | JSON **object**, principal → grant | what this API lets a principal _read_, whether it may propose, and whether it may revise maintenance windows      |
 | `AGENT_GRANTS`      | JSON **array** of subjects         | which subjects the change lifecycle treats as _agents_, so they may plan and simulate but never approve or commit |
 | `OPERATOR_SUBJECTS` | JSON **array** of subjects         | which subjects the change lifecycle treats as the _human operator_, so they may approve and commit                |
 

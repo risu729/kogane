@@ -1,9 +1,10 @@
 # Schedule administration
 
 Open `/schedules` from **取得履歴** or **収集スケジュール**. Only the configured
-Access operator can read or change these settings. The page shows the original
-next occurrence, maintenance-adjusted due time, actual alarm reservation and the
-latest scheduling receipt separately. All displayed timestamps use Japan time;
+Access operator can open this page; maintenance windows alone can also be read
+and revised by a granted agent ([below](#agent-maintenance-tools)). The page
+shows the original next occurrence, maintenance-adjusted due time, actual alarm
+reservation and the latest scheduling receipt separately. All displayed timestamps use Japan time;
 daily configuration defaults to Japan time and can use Sydney or UTC explicitly.
 
 Save a daily time/weekdays or an interval and enable/disable the job. A version
@@ -110,13 +111,18 @@ Both go through the Processor's single writer, `writeMaintenanceRevision`
 uses. It answers a closed code: `invalid_request`, `invalid_reference`,
 `reason_required`, `maintenance_rule_not_found` (another source's rule answers
 like a missing one), `revision_conflict`, `maintenance_deferral_too_long`
-(an agent revision may not lengthen a source's longest joined deferral past
-seven days) or `maintenance_write_budget_exceeded` (30 agent revisions per
-principal per rolling day). CORE 0067 records each revision's actor kind,
-reason and optional decision reference; older revisions show them as unknown.
+(after an agent revision, every joined deferral of the source longer than seven
+days must lie within one its rules already caused; a running one counts its
+part before the revision, up to seven days back) or
+`maintenance_write_budget_exceeded` (30 agent revisions per principal per
+rolling day). CORE 0067 records each revision's actor kind, reason and optional
+decision reference; older revisions show them as unknown.
 A source with no registered reference (PRESTIA bank) takes no rule. A
 collection deferred by any window still runs once after it and resumes its
-nominal schedule.
+nominal schedule. An agent revision is in effect once saved; no one accepts it
+first (ADR 0046). The `/schedules` page shows each rule's current revision but
+not who wrote it or why: the actor kind and reason are on the read tool and in
+the table.
 
 Not verified in production: no grant names a maintenance principal, CORE 0067
 is not applied, and no Claude or Codex client has called these tools.

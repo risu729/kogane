@@ -75,13 +75,40 @@ operator header, and nothing else is reachable under the agent prefix.
 **Agent-only limits.** For an `agent` actor the writer also requires a one-line
 reason of 1-500 characters; lets it revise only an existing rule of the named
 source (another source's rule is `maintenance_rule_not_found`, exactly like a
-missing one) or create one under a writer-chosen id; refuses a revision that
-lengthens the source's longest joined deferral past seven days
-(`maintenance_deferral_too_long`, measured over dated windows at any date and
-recurring windows within 92 days, so windows that chain without end are
-refused; a revision that leaves an operator's longer window as it was is not);
+missing one) or create one under a writer-chosen id; refuses a revision after
+which the source has a joined deferral longer than seven days that its rules
+did not already cause (`maintenance_deferral_too_long`, measured per union from
+up to seven days before the revision, over dated windows at any date and
+recurring windows up to 92 days ahead, so windows that chain without end are
+refused and a running window cannot be kept going by extending it; a revision
+that leaves an operator's longer window as it was, or shortens it within its
+span, is not refused, but a separate long window is, even while a longer one
+exists elsewhere);
 and caps each principal at 30 revisions per rolling day
 (`maintenance_write_budget_exceeded`, checked inside the INSERT).
+
+**Adopted when saved, not proposed.** An agent revision takes effect when it
+is saved: it becomes the rule's current revision, which the alarm code reads at
+the reconcile that follows, exactly like an operator's. Nothing proposes it
+first and nothing accepts it afterwards; the agent tool has no `decisionRef`
+argument, so `decision_ref` is `NULL` on every agent revision. That is this
+decision, taken because #560, the owner's issue, sets as its completion
+condition that the permitted AI client itself updates the target maintenance
+time and reads back the saved state and the rescheduling; Option 2 is the
+proposal flow it does not take. It supersedes ADR 0039's "agents and service
+tokens cannot edit settings" for maintenance rules only: job settings,
+enable/disable and lease release stay operator-only.
+
+It is not an exception to the agent invariants as this repository states them.
+INV07 (ADR 0001) concerns adopted economic state; a maintenance window decides
+when a collector may contact a provider and changes no observation, relation,
+decision or figure. "Agents never approve or commit a change" concerns the
+change lifecycle: this path plans, approves and commits nothing, consults
+neither `AGENT_GRANTS` nor `OPERATOR_SUBJECTS`, and `kogane.capabilities` still
+reports `writes.adoption: false`. What bounds the write instead is the
+capability and its source scope, the limits above, the provenance columns and
+the append-only history; an operator undoes an agent revision with a further
+revision.
 
 **Provenance.** CORE 0067 adds `actor_kind`, `change_reason` and
 `decision_ref` to `provider_maintenance_rules`. Revisions written before it
@@ -125,8 +152,15 @@ monthly rule) are not part of the bound, and the bound reads the source's
 rules before the INSERT, so two concurrent revisions of different rules of
 one source can each pass it; the budget limits how often, and both show on
 the read tool. The bound and budget are constants,
-not grant fields. The schedule model keeps its own Intl-based calendar
-arithmetic; this change only caches its formatters.
+not grant fields. A running union is measured from its start, at most seven days
+back, so a window an agent records after it began counts the time before the
+revision too, although it deferred nothing then. The operator's management page
+shows each rule's current revision but not its actor kind or reason; those are
+on the read tool and in the table. A principal named in `AGENT_API_GRANTS` is
+recorded as `agent` whoever it is: that the principal is an agent and not a
+person is the identity contract of #559, which this change does not check.
+The schedule model keeps its own Intl-based calendar arithmetic; this change
+only caches its formatters.
 
 Nothing changes in production until the owner adds a grant: `AGENT_API_GRANTS`
 ships `""`. CORE 0067 must be applied before the Processor that writes the new
@@ -137,17 +171,21 @@ columns, which is the existing migration-first deploy order.
 Synthetic tests only. `packages/application/test/grants.test.ts`: vocabulary,
 scope parsing and that no financial grant implies a schedule capability.
 `packages/collection/test/schedule-review.test.ts`: the joined-deferral
-measure, including windows that never end.
+measure and its unions, including windows that never end.
 `services/processor/test/schedule-agent-maintenance.test.ts`, through the real
 Processor under workerd with native Durable Object alarms: revisions with
 actor and reason, readback of next run and armed reservation, a three-day
 window followed by exactly one collection and no replay, stale revisions,
 invalid timezone/pattern/period/reference/reason, cross-source rule ids, the
-deferral bound, the budget, header separation, the store CHECK and the
-importable writer's closed codes. `services/app/test/schedule-tools.test.ts`,
-through the real App Worker wired to the Processor's route and alarm code:
+deferral bound (including a separate or moved long window beside an
+operator's longer one, and the extension of a running window), the budget,
+header separation, the store CHECK and the importable writer's closed codes.
+`services/app/test/schedule-tools.test.ts`, through the real App Worker wired
+to the Processor's route and alarm code:
 publication by capability and flag, closed schemas, scope isolation without
-leakage, refusals for read-only, financial and out-of-scope callers, a saved
+leakage, refusals for read-only, financial and out-of-scope callers, for an
+empty or absent grant table, for the human operator (with operations on) and
+for malformed arguments, none of which relays or writes anything, a saved
 revision with the verified principal and its readback, and the operator routes
 still refusing agents and serving the operator. No production client, grant
 or deployment was exercised.
