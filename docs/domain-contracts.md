@@ -195,6 +195,20 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
   `unauthorized` and `invalid_query`. Messages carry no provider content,
   tokens or raw exceptions.
 
+## `reconstruction.ts` — reconstructed state from adopted events
+
+- [Reconstructed state](reconstructed-state.md), [ADR 0052](adr/0052-reconstructed-state-fold.md):
+  `selectKnowledge` resolves every event's active revision at a commit-sequence
+  cut over the whole chains before any filter; `reconstructState` folds a
+  start snapshot plus the selected movements per (account, unit) and
+  (account, instrument) in exact decimals and explains the difference against
+  the reported end with closed codes; `explainLate` diffs two selections.
+- The event input (`provisional-adopted-events-v1`) is provisional and is
+  replaced by the hand-off contract. The policy `reconstruction-fold-v1` is a
+  required parameter and any other content under its id is refused. Absent
+  stays absent, nothing is totalled across accounts, and an input over the
+  budget is refused, never cut. No read path uses it yet.
+
 ## Fixtures
 
 `packages/domain/fixtures/` holds the synthetic inputs and expected adopted
