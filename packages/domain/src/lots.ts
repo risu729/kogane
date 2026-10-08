@@ -352,7 +352,11 @@ export type LotBook =
       disposals: LotDisposal[];
       /** Null once the book is indeterminate: what is left is then not known. */
       remainingLots: LotState[] | null;
-      indeterminateFrom: { ref: string; reasonCode: LotReasonCode } | null;
+      /**
+       * The input, or the group of inputs that time does not order among
+       * themselves, from which the book stops; refs sorted.
+       */
+      indeterminateFrom: { refs: string[]; reasonCode: LotReasonCode } | null;
     }
   | {
       status: "refused";
@@ -695,6 +699,8 @@ interface Lot {
   fees: Amount | null;
   remainingFees: Amount | null;
   fxBasis: LotFxRate[];
+  /** Units the cost entered in, known value or not; a pool stops on a second one. */
+  costUnits: string[];
   lineage: LotLineage;
 }
 
@@ -702,7 +708,7 @@ interface BookState {
   lots: Lot[];
   /** True once any input has been applied: a snapshot after that is a check, not a seed. */
   history: boolean;
-  indeterminate: { ref: string; reasonCode: LotReasonCode } | null;
+  indeterminate: { refs: string[]; reasonCode: LotReasonCode } | null;
   disposals: LotDisposal[];
 }
 
@@ -719,6 +725,7 @@ function cloneState(state: BookState): BookState {
       ...lot,
       acquisitionRefs: [...lot.acquisitionRefs],
       fxBasis: [...lot.fxBasis],
+      costUnits: [...lot.costUnits],
       lineage: { ...lot.lineage, splits: [...lot.lineage.splits] },
     })),
     history: state.history,
@@ -757,8 +764,28 @@ function originLineage(ref: string, acquiredAt: TemporalValue | null, cost: Amou
   };
 }
 
-function markIndeterminate(state: BookState, ref: string, reasonCode: LotReasonCode): void {
-  if (state.indeterminate === null) state.indeterminate = { ref, reasonCode };
+function markIndeterminate(
+  state: BookState,
+  refs: readonly string[],
+  reasonCode: LotReasonCode,
+): void {
+  if (state.indeterminate === null) state.indeterminate = { refs: [...refs].sort(), reasonCode };
+}
+
+function unionSorted(a: readonly string[], b: readonly string[]): string[] {
+  return [...new Set([...a, ...b])].sort();
+}
+
+/**
+ * Every unit an acquisition's cost is stated in, whether or not its value is
+ * known: the consideration's and, when fees are capitalized, the fees'. Under
+ * `convert-at-input-rate` that is the policy's cost unit.
+ */
+function costUnitsOf(input: LotInput, policy: LotPolicy): string[] {
+  if (policy.fx === "convert-at-input-rate") return [policy.costUnitRef!];
+  const units = input.consideration === null ? [] : [input.consideration.unitRef];
+  const fees = policy.acquisitionFee === "capitalize" ? input.fees.map((fee) => fee.unitRef) : [];
+  return unionSorted(units, fees);
 }
 
 function addFxBasis(list: LotFxRate[], fx: LotFxRate | null): LotFxRate[] {
@@ -785,6 +812,13 @@ function applyAcquisition(
       ? combine(amounts.consideration, amounts.fees, 1)
       : amounts.consideration;
   const fxBasis = amounts.fxUsed === null ? [] : [amounts.fxUsed];
+  // A pool holds one cost unit. Units are tracked even while the cost itself
+  // is unknown, so a second unit stops the book whatever order it arrived in.
+  const costUnits = unionSorted(state.lots[0]?.costUnits ?? [], costUnitsOf(entry.input, policy));
+  if (policy.method === "moving-average" && costUnits.length > 1) {
+    markIndeterminate(state, [entry.ref], "unit_mismatch");
+    return;
+  }
   if (policy.method !== "moving-average" || state.lots.length === 0) {
     const acquiredAt = policy.method === "moving-average" ? null : entry.time;
     state.lots.push({
@@ -798,16 +832,13 @@ function applyAcquisition(
       fees: amounts.fees,
       remainingFees: amounts.fees,
       fxBasis,
+      costUnits: costUnitsOf(entry.input, policy),
       lineage: originLineage(entry.ref, acquiredAt, cost),
     });
     return;
   }
   const pool = state.lots[0]!;
-  // A pool holds one cost unit; two known costs in different units cannot be averaged.
-  if (pool.remainingCost.known && cost.known && pool.remainingCost.unitRef !== cost.unitRef) {
-    markIndeterminate(state, entry.ref, "unit_mismatch");
-    return;
-  }
+  pool.costUnits = costUnits;
   const addFees = (a: Amount | null, b: Amount | null): Amount | null =>
     a === null ? b : b === null ? a : combine(a, b, 1);
   pool.acquisitionRefs = [...pool.acquisitionRefs, entry.ref].sort();
@@ -927,7 +958,7 @@ function applyDisposal(
   policy: LotPolicy,
 ): void {
   const fail = (reasonCode: LotReasonCode) => {
-    markIndeterminate(state, entry.ref, reasonCode);
+    markIndeterminate(state, [entry.ref], reasonCode);
     state.disposals.push(indeterminateDisposal(entry, policy, reasonCode));
   };
   if (compareDecimals(holding(state), quantity) < 0) return fail("negative_holding");
@@ -1021,14 +1052,14 @@ function applySplit(state: BookState, entry: Entry, stated: ExactDecimal): void 
     // A split that does not scale every lot exactly is a different corporate
     // action (cash in lieu of fractions, for one); it is not modelled here.
     if (!quantity.ok || !remaining.ok) {
-      markIndeterminate(state, entry.ref, "corporate_action_unsupported");
+      markIndeterminate(state, [entry.ref], "corporate_action_unsupported");
       return;
     }
     scaled.push({ lot, quantity: quantity.value, remaining: remaining.value });
   }
   const after = scaled.reduce((total, step) => addDecimals(total, step.remaining), ZERO);
   if (!decimalEquals(after, stated)) {
-    markIndeterminate(state, entry.ref, "corporate_action_unsupported");
+    markIndeterminate(state, [entry.ref], "corporate_action_unsupported");
     return;
   }
   for (const step of scaled) {
@@ -1041,7 +1072,7 @@ function applySplit(state: BookState, entry: Entry, stated: ExactDecimal): void 
 function applySnapshot(state: BookState, entry: Entry, stated: ExactDecimal, policy: LotPolicy) {
   if (state.history) {
     if (!decimalEquals(holding(state), stated))
-      markIndeterminate(state, entry.ref, "snapshot_mismatch");
+      markIndeterminate(state, [entry.ref], "snapshot_mismatch");
     return;
   }
   if (isZeroDecimal(stated)) return;
@@ -1061,6 +1092,7 @@ function applySnapshot(state: BookState, entry: Entry, stated: ExactDecimal, pol
     fees: null,
     remainingFees: null,
     fxBasis: [],
+    costUnits: [],
     lineage: originLineage(entry.ref, acquiredAt, unknownCost),
   });
 }
@@ -1074,7 +1106,7 @@ function applyEntry(state: BookState, entry: Entry, policy: LotPolicy): void {
   }
   const quantity = exactValue(input.quantity);
   if (quantity === null) {
-    markIndeterminate(state, entry.ref, "value_not_exact");
+    markIndeterminate(state, [entry.ref], "value_not_exact");
     if (input.kind === "disposal")
       state.disposals.push(indeterminateDisposal(entry, policy, "value_not_exact"));
     return;
@@ -1094,7 +1126,7 @@ function applyEntry(state: BookState, entry: Entry, policy: LotPolicy): void {
       break;
     case "transfer":
       // Unreachable: a book with a transfer is refused before it is computed.
-      markIndeterminate(state, entry.ref, "upstream_indeterminate");
+      markIndeterminate(state, [entry.ref], "upstream_indeterminate");
       break;
   }
   state.history = true;
@@ -1212,13 +1244,50 @@ function commutes(group: readonly Entry[], policy: LotPolicy): boolean {
   return policy.rounding === null && group.every(({ input }) => input.kind === "disposal");
 }
 
+/**
+ * Why a commuting moving-average group cannot apply, checked on the group as
+ * a whole in a fixed precedence: an inexact quantity, a second cost unit in
+ * the pool, more disposed than held, a share that is not exact.
+ */
+function groupFailure(
+  state: BookState,
+  group: readonly Entry[],
+  policy: LotPolicy,
+): LotReasonCode | null {
+  const quantities = group.map(({ input }) => exactValue(input.quantity));
+  if (quantities.some((quantity) => quantity === null)) return "value_not_exact";
+  const pool = state.lots[0];
+  if (group.every(({ input }) => input.kind === "acquisition")) {
+    const units = group.reduce(
+      (all, { input }) => unionSorted(all, costUnitsOf(input, policy)),
+      pool?.costUnits ?? [],
+    );
+    return units.length > 1 ? "unit_mismatch" : null;
+  }
+  const disposed = quantities.reduce<ExactDecimal>((total, q) => addDecimals(total, q!), ZERO);
+  if (pool === undefined || compareDecimals(pool.remaining, disposed) < 0)
+    return "negative_holding";
+  // Each disposal takes cost × q / Q of the pool as it stands, in any order.
+  const inexact = quantities.some(
+    (quantity) =>
+      !shareOf(pool.remainingCost, quantity!, pool.remaining, null).ok ||
+      (pool.remainingFees !== null &&
+        !shareOf(pool.remainingFees, quantity!, pool.remaining, null).ok),
+  );
+  return inexact ? "inexact_allocation" : null;
+}
+
 function failAll(
   state: BookState,
   entries: readonly Entry[],
   reasonCode: LotReasonCode,
   policy: LotPolicy,
 ): void {
-  markIndeterminate(state, entries[0]!.ref, reasonCode);
+  markIndeterminate(
+    state,
+    entries.map(({ ref }) => ref),
+    reasonCode,
+  );
   for (const entry of entries)
     if (entry.input.kind === "disposal")
       state.disposals.push(indeterminateDisposal(entry, policy, reasonCode));
@@ -1231,9 +1300,13 @@ function computeBook(
   const state: BookState = { lots: [], history: false, indeterminate: null, disposals: [] };
   const byRef = [...entries].sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
   // An input with no known time could sit anywhere in the history.
-  const unknown = byRef.find(({ time }) => time.kind === "unknown");
-  if (unknown) {
-    markIndeterminate(state, unknown.ref, "unknown_time");
+  const unknown = byRef.filter(({ time }) => time.kind === "unknown");
+  if (unknown.length > 0) {
+    markIndeterminate(
+      state,
+      unknown.map(({ ref }) => ref),
+      "unknown_time",
+    );
     failAll(state, byRef, "unknown_time", policy);
     return { disposals: state.disposals, lots: null, indeterminateFrom: state.indeterminate };
   }
@@ -1253,8 +1326,14 @@ function computeBook(
       failAll(state, group, "order_tie", policy);
       continue;
     }
-    // A commuting group either applies as a whole or fails as a whole, so
-    // which member is reported never depends on an order the evidence lacks.
+    // A commuting group either applies as a whole or fails as a whole, and
+    // its failure is decided on the group, so neither the reason nor the
+    // reported refs depend on an order the evidence lacks.
+    const failure = groupFailure(state, group, policy);
+    if (failure !== null) {
+      failAll(state, group, failure, policy);
+      continue;
+    }
     const trial = cloneState(state);
     for (const entry of group) applyEntry(trial, entry, policy);
     if (trial.indeterminate === null) Object.assign(state, trial);

@@ -252,7 +252,10 @@ describe("partial allocation: exact, refused, or rounded with the remainder carr
   test("100 / 3 without a rounding policy is inexact_allocation, not a guess", () => {
     for (const method of ["fifo", "moving-average"] as const) {
       const book = onlyBook(computeLots(thirds, policy({ method })));
-      expect(book.indeterminateFrom).toEqual({ ref: ref("s1"), reasonCode: "inexact_allocation" });
+      expect(book.indeterminateFrom).toEqual({
+        refs: [ref("s1")],
+        reasonCode: "inexact_allocation",
+      });
       expect(book.disposals.map((d) => [d.outcome, d.reasonCodes])).toEqual([
         ["indeterminate", ["inexact_allocation"]],
         ["indeterminate", ["upstream_indeterminate"]],
@@ -379,7 +382,7 @@ describe("FX", () => {
     expect(disposal.outcome).toBe("limited");
     expect(disposal.reasonCodes).toEqual(["unit_mismatch"]);
     const pooled = onlyBook(computeLots(inputs, policy({ method: "moving-average" })));
-    expect(pooled.indeterminateFrom).toEqual({ ref: ref("b"), reasonCode: "unit_mismatch" });
+    expect(pooled.indeterminateFrom).toEqual({ refs: [ref("b")], reasonCode: "unit_mismatch" });
   });
 
   test("convert-at-input-rate converts with the input's rate and records its ref", () => {
@@ -457,7 +460,7 @@ describe("splits keep cost and acquisition time and record the quantity lineage"
       ),
     );
     expect(inexact.indeterminateFrom).toEqual({
-      ref: ref("x"),
+      refs: [ref("x")],
       reasonCode: "corporate_action_unsupported",
     });
     const cashInLieu = onlyBook(
@@ -467,7 +470,7 @@ describe("splits keep cost and acquisition time and record the quantity lineage"
       ),
     );
     expect(cashInLieu.indeterminateFrom).toEqual({
-      ref: ref("x"),
+      refs: [ref("x")],
       reasonCode: "corporate_action_unsupported",
     });
     expect(cashInLieu.remainingLots).toBeNull();
@@ -522,7 +525,10 @@ describe("snapshots are checks or unknown-cost seeds, never cost", () => {
         policy(),
       ),
     );
-    expect(disagree.indeterminateFrom).toEqual({ ref: ref("p"), reasonCode: "snapshot_mismatch" });
+    expect(disagree.indeterminateFrom).toEqual({
+      refs: [ref("p")],
+      reasonCode: "snapshot_mismatch",
+    });
     expect(disagree.disposals[0]!.reasonCodes).toEqual(["upstream_indeterminate"]);
     expect(disagree.remainingLots).toBeNull();
   });
@@ -547,7 +553,7 @@ describe("holdings never go short and stale selections are never reassigned", ()
         policy(),
       ),
     );
-    expect(book.indeterminateFrom).toEqual({ ref: ref("s1"), reasonCode: "negative_holding" });
+    expect(book.indeterminateFrom).toEqual({ refs: [ref("s1")], reasonCode: "negative_holding" });
     expect(book.disposals.map((d) => [d.outcome, d.reasonCodes])).toEqual([
       ["indeterminate", ["negative_holding"]],
       ["indeterminate", ["upstream_indeterminate"]],
@@ -584,7 +590,7 @@ describe("holdings never go short and stale selections are never reassigned", ()
     );
     expect(stale.disposals[0]!.outcome).toBe("allocated");
     expect(stale.indeterminateFrom).toEqual({
-      ref: ref("s2"),
+      refs: [ref("s2")],
       reasonCode: "lot_selection_mismatch",
     });
   });
@@ -790,7 +796,7 @@ describe("ordering: economic time only; anything it does not order is indetermin
     ];
     expect(onlyBook(computeLots(inputs, policy())).disposals[0]!.outcome).toBe("allocated");
     const settled = onlyBook(computeLots(inputs, policy({ timeBasis: "settlement-date" })));
-    expect(settled.indeterminateFrom).toEqual({ ref: ref("s"), reasonCode: "unknown_time" });
+    expect(settled.indeterminateFrom).toEqual({ refs: [ref("s")], reasonCode: "unknown_time" });
     expect(settled.disposals[0]!.reasonCodes).toEqual(["unknown_time"]);
     expect(settled.remainingLots).toBeNull();
   });
@@ -995,6 +1001,89 @@ describe("review finding 1: grouping is closed over every member, instants laid 
       ),
     );
     // z (19:00Z) comes before y (20:00Z): only x is held when z disposes of 15.
-    expect(book.indeterminateFrom).toEqual({ ref: ref("z"), reasonCode: "negative_holding" });
+    expect(book.indeterminateFrom).toEqual({ refs: [ref("z")], reasonCode: "negative_holding" });
+  });
+});
+
+describe("review finding 3: a moving-average group's outcome does not depend on ref names", () => {
+  const ma = policy({ method: "moving-average" });
+
+  test("same-date acquisitions in two cost units stop the book whatever their names", () => {
+    for (const names of [
+      ["a", "b", "c"],
+      ["z", "b", "c"],
+    ]) {
+      const [unknownCost, dollars, yen] = names as [string, string, string];
+      const book = onlyBook(
+        computeLots(
+          [
+            input(unknownCost, { kind: "acquisition", consideration: null }),
+            input(dollars, { kind: "acquisition", consideration: usd("100") }),
+            input(yen, { kind: "acquisition", consideration: jpy("100") }),
+          ],
+          ma,
+        ),
+      );
+      expect(book.indeterminateFrom).toEqual({
+        refs: names.map((name) => ref(name)).sort(),
+        reasonCode: "unit_mismatch",
+      });
+    }
+  });
+
+  test("a cost unit is tracked even while the pool's cost is unknown", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          input("a", {
+            kind: "acquisition",
+            consideration: absentQuantity("USD", "missing", "not_stated"),
+          }),
+          buy("b", "2030-01-07", "10", "100"),
+        ],
+        ma,
+      ),
+    );
+    expect(book.indeterminateFrom).toEqual({ refs: [ref("b")], reasonCode: "unit_mismatch" });
+  });
+
+  test("a failing same-date disposal group is reported as a whole", () => {
+    for (const [first, second] of [
+      ["s1", "s2"],
+      ["s2", "s1"],
+    ] as const) {
+      const short = onlyBook(
+        computeLots(
+          [
+            buy("a", "2030-01-06", "10", "1000"),
+            sell(first, "2030-01-07", "6", "1"),
+            sell(second, "2030-01-07", "6", "1"),
+          ],
+          ma,
+        ),
+      );
+      expect(short.indeterminateFrom).toEqual({
+        refs: [ref("s1"), ref("s2")],
+        reasonCode: "negative_holding",
+      });
+      expect(short.disposals.map((d) => d.reasonCodes)).toEqual([
+        ["negative_holding"],
+        ["negative_holding"],
+      ]);
+      const inexact = onlyBook(
+        computeLots(
+          [
+            buy("a", "2030-01-06", "3", "100"),
+            sell(first, "2030-01-07", "1", "1"),
+            sell(second, "2030-01-07", "1.5", "1"),
+          ],
+          ma,
+        ),
+      );
+      expect(inexact.indeterminateFrom).toEqual({
+        refs: [ref("s1"), ref("s2")],
+        reasonCode: "inexact_allocation",
+      });
+    }
   });
 });

@@ -174,10 +174,12 @@ specific-identification`), scope, time basis, ordering rule, fee and FX
   treatment, `fxPolicyRef`, `costUnitRef` and an optional `leg`/`carry`
   `RoundingPolicy`. No policy is `policy_missing`; a `tax` purpose is refused
   through the unchanged `costBasis()` gate.
-- Whole-run refusals (`invalid_input`, `duplicate_ref`,
-  `same_event_revisions`) and per-book refusals (`transfer_contract_pending`,
-  `unsupported_instrument`) are typed results. Inside a book the first
-  ambiguous or inconsistent input is `indeterminateFrom` and later disposals
+- Whole-run refusals (`invalid_input`, `duplicate_ref` for one ref in two
+  books of one instrument, `same_event_revisions`,
+  `same_observation_parse_runs`) and per-book refusals
+  (`transfer_contract_pending`, `unsupported_instrument`) are typed results.
+  Inside a book the first ambiguous or inconsistent input, or group of inputs
+  the time does not order, is `indeterminateFrom` and later disposals
   are `upstream_indeterminate`; amounts that are not known are typed reasons,
   never zero, and costs in different units are never summed.
 - Output: disposals with allocations, allocated cost, proceeds and disposal

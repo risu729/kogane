@@ -73,8 +73,11 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   `carry`, or null). A null policy is `policy_missing`; a `tax` purpose is
   refused `tax_rules_unverified` by calling the unchanged `costBasis()` gate.
 - **Gates.** Whole-run refusals: `policy_missing`, `tax_rules_unverified`,
-  `invalid_input`, `duplicate_ref` (one ref twice in one book) and
-  `same_event_revisions` (two revisions of one event). Per book:
+  `invalid_input`, `duplicate_ref` (one ref in one book twice, or in two
+  books of the same instrument unless every occurrence is a transfer),
+  `same_event_revisions` (two revisions of one event) and
+  `same_observation_parse_runs` (one observation and JSON path under two
+  parse runs). Per book:
   `unsupported_instrument` (only listed equity, fund units and crypto assets,
   long spot) and `transfer_contract_pending` (any transfer input).
 - **Ordering.** Inputs are ordered by `compareTemporal` on the policy's basis.
@@ -102,7 +105,9 @@ Add [`packages/domain/src/lots.ts`](../../packages/domain/src/lots.ts):
   (`negative_holding`, `order_tie`, `snapshot_mismatch`,
   `lot_selection_missing`, `unknown_lot`, `lot_selection_mismatch`,
   `inexact_allocation`, `value_not_exact`, `unit_mismatch` in a pool,
-  `corporate_action_unsupported`) is `indeterminateFrom`; later disposals are
+  `corporate_action_unsupported`) is `indeterminateFrom` (its refs; a group of
+  inputs the time does not order is reported as a whole, decided on the
+  group, never on ref order); later disposals are
   `upstream_indeterminate` and remaining lots are not reported. A disposal is
   never filled by a synthetic short, and a stale specific-identification
   selection is never reassigned to another lot.
