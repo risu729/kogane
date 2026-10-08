@@ -1102,61 +1102,90 @@ function applyEntry(state: BookState, entry: Entry, policy: LotPolicy): void {
 // ---------------------------------------------------------------------------
 // Ordering
 
-interface TimeKey {
-  day: number;
-  rank: number;
-  seconds: number;
-  nanos: number;
-  endDay: number;
+/**
+ * Where a time sits on one absolute line, in seconds: an instant is a point
+ * (its epoch), a date or a period is the span of its civil days read as UTC.
+ * Used only to lay inputs out and to skip comparisons that cannot fail; every
+ * decision about order is `compareTemporal`'s.
+ */
+interface TimeSpan {
+  lo: number;
+  loNanos: number;
+  hi: number;
 }
 
+const DAY_SECONDS = 86_400;
 /**
- * A total order used only to lay inputs out; whether two neighbours are really
- * ordered is decided by `compareTemporal` afterwards. Instants sort by their
- * own calendar day first, so a date and an instant on that day are neighbours
- * and their incomparability is found.
+ * Two spans further apart than this are ordered whatever the offsets: an
+ * instant's own calendar day is at most 18 hours from its UTC day, so a gap of
+ * two days settles every instant/date/period pair in a compatible zone.
  */
-function timeKey(time: TemporalValue): TimeKey {
+const ORDERED_GAP_SECONDS = 2 * DAY_SECONDS;
+
+function timeSpan(time: TemporalValue): TimeSpan {
   switch (time.kind) {
     case "instant": {
       const parsed = parseInstant(time.value)!;
-      const day = daysFromCivil(parseLocalDate(parsed.localDate)!);
-      return {
-        day,
-        rank: 1,
-        seconds: parsed.epochSeconds,
-        nanos: parsed.nanoseconds,
-        endDay: day + 1,
-      };
+      return { lo: parsed.epochSeconds, loNanos: parsed.nanoseconds, hi: parsed.epochSeconds };
     }
     case "local-date": {
       const day = daysFromCivil(parseLocalDate(time.value)!);
-      return { day, rank: 0, seconds: 0, nanos: 0, endDay: day + 1 };
+      return { lo: day * DAY_SECONDS, loNanos: 0, hi: (day + 1) * DAY_SECONDS };
     }
     case "period": {
       const bounds = periodBounds(time)!;
       return {
-        day: daysFromCivil(bounds.start),
-        rank: 0,
-        seconds: 0,
-        nanos: 0,
-        endDay: daysFromCivil(bounds.endExclusive),
+        lo: daysFromCivil(bounds.start) * DAY_SECONDS,
+        loNanos: 0,
+        hi: daysFromCivil(bounds.endExclusive) * DAY_SECONDS,
       };
     }
     case "unknown":
-      return { day: 0, rank: 2, seconds: 0, nanos: 0, endDay: 0 };
+      return { lo: 0, loNanos: 0, hi: 0 };
   }
 }
 
-function compareEntries(a: Entry & { key: TimeKey }, b: Entry & { key: TimeKey }): number {
+type LaidOut = Entry & { span: TimeSpan };
+
+function compareLaidOut(a: LaidOut, b: LaidOut): number {
   return (
-    a.key.day - b.key.day ||
-    a.key.rank - b.key.rank ||
-    a.key.seconds - b.key.seconds ||
-    a.key.nanos - b.key.nanos ||
-    a.key.endDay - b.key.endDay ||
+    a.span.lo - b.span.lo ||
+    a.span.loNanos - b.span.loNanos ||
+    a.span.hi - b.span.hi ||
     (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0)
   );
+}
+
+/**
+ * Cut the laid-out inputs into groups such that every input of a later group
+ * is strictly after every input of every earlier group by `compareTemporal`.
+ * An input joins the current group as soon as one earlier input is not
+ * strictly before it, so "not ordered" is closed over the whole group rather
+ * than checked between neighbours only.
+ */
+function timeGroups(ordered: readonly LaidOut[]): LaidOut[][] {
+  const reach = ordered.map((_, index) => index);
+  let active: number[] = [];
+  ordered.forEach((entry, index) => {
+    active = active.filter((j) => ordered[j]!.span.hi + ORDERED_GAP_SECONDS > entry.span.lo);
+    for (const j of active) {
+      const order = compareTemporal(ordered[j]!.time, entry.time);
+      if (order.kind !== "ordered" || order.order >= 0) reach[j] = index;
+    }
+    active.push(index);
+  });
+  const groups: LaidOut[][] = [];
+  let start = 0;
+  let furthest = 0;
+  ordered.forEach((_, index) => {
+    furthest = Math.max(furthest, reach[index]!);
+    if (index === furthest) {
+      groups.push(ordered.slice(start, index + 1));
+      start = index + 1;
+      furthest = index + 1;
+    }
+  });
+  return groups;
 }
 
 /** Dates and periods in two named zones cannot be laid out on one line. */
@@ -1208,22 +1237,13 @@ function computeBook(
     return { disposals: state.disposals, lots: null, indeterminateFrom: state.indeterminate };
   }
   const ordered = entries
-    .map((entry) => ({ ...entry, key: timeKey(entry.time) }))
-    .sort(compareEntries);
+    .map((entry) => ({ ...entry, span: timeSpan(entry.time) }))
+    .sort(compareLaidOut);
   if (zonesConflict(ordered)) {
     failAll(state, ordered, "order_tie", policy);
     return { disposals: state.disposals, lots: null, indeterminateFrom: state.indeterminate };
   }
-  let start = 0;
-  while (start < ordered.length) {
-    let end = start + 1;
-    while (end < ordered.length) {
-      const order = compareTemporal(ordered[end - 1]!.time, ordered[end]!.time);
-      if (order.kind === "ordered" && order.order < 0) break;
-      end += 1;
-    }
-    const group = ordered.slice(start, end);
-    start = end;
+  for (const group of timeGroups(ordered)) {
     if (state.indeterminate !== null || group.length === 1) {
       for (const entry of group) applyEntry(state, entry, policy);
       continue;

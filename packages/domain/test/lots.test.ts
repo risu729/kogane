@@ -879,3 +879,67 @@ describe("validators reject unknown keys and broken shapes", () => {
     expect(computeLots([wrongUnit], policy())).toMatchObject({ reasonCode: "invalid_input" });
   });
 });
+
+describe("review finding 1: grouping is closed over every member, instants laid out by epoch", () => {
+  const ma = policy({ method: "moving-average" });
+  const instant = (value: string, zone = "Asia/Tokyo"): TemporalValue => ({
+    kind: "instant",
+    value,
+    zone,
+    basis: "provider",
+  });
+  const at = (time: TemporalValue) => ({ time: { trade: time, settlement: time } });
+
+  test("A: a dated acquisition is not ordered against a same-day disposal through its neighbour", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("a", "2030-01-06", "10", "1000"),
+          buy("b", "2030-01-06", "10", "2000", at(instant("2030-01-06T10:00:00+09:00"))),
+          sell("d", "2030-01-06", "15", "3000", at(instant("2030-01-06T11:00:00+09:00"))),
+        ],
+        ma,
+      ),
+    );
+    expect(book.indeterminateFrom!.reasonCode).toBe("order_tie");
+    expect(book.disposals[0]!.outcome).toBe("indeterminate");
+  });
+
+  test("B: a period overlapping a later date ties every input it overlaps", () => {
+    const period: TemporalValue = {
+      kind: "period",
+      start: "2030-01-01",
+      end: "2030-01-10",
+      endExclusive: false,
+      zone: "Asia/Tokyo",
+      granularity: "day",
+    };
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("p", "2030-01-01", "10", "1000", at(period)),
+          buy("b", "2030-01-02", "10", "2000"),
+          sell("d", "2030-01-05", "15", "3000"),
+        ],
+        ma,
+      ),
+    );
+    expect(book.indeterminateFrom!.reasonCode).toBe("order_tie");
+    expect(book.disposals[0]!.reasonCodes).toEqual(["order_tie"]);
+  });
+
+  test("C: instants with different offsets are laid out by absolute time", () => {
+    const book = onlyBook(
+      computeLots(
+        [
+          buy("x", "2030-01-02", "10", "1000", at(instant("2030-01-02T01:00:00+09:00"))),
+          buy("y", "2030-01-01", "10", "2000", at(instant("2030-01-01T20:00:00Z", "UTC"))),
+          sell("z", "2030-01-02", "15", "3000", at(instant("2030-01-02T04:00:00+09:00"))),
+        ],
+        ma,
+      ),
+    );
+    // z (19:00Z) comes before y (20:00Z): only x is held when z disposes of 15.
+    expect(book.indeterminateFrom).toEqual({ ref: ref("z"), reasonCode: "negative_holding" });
+  });
+});
