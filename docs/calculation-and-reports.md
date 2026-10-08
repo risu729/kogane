@@ -127,7 +127,7 @@ instant before it and every row SQL cannot place, and refuses more than 500
 keys or 2,000 rows rather than cutting. A key may be narrowed to one parse run
 (`same-snapshot`). The domain's `selectPrice`
 (`packages/domain/src/market-data.ts`) then filters, counting each removed row
-by a closed code (`recorded_after_known_at`, `rule_not_admitted`, `kind_not_admitted`,
+by a closed code (`recorded_after_known_at`, `rule_not_admitted`, `kind_not_admitted`, `price_not_positive`,
 `basis_not_admitted`, `date_only_excluded`, `effective_at_or_after_bound`,
 `invalid_effective_time`), and selects one price or refuses with `missing`,
 `sources_overlap`, `time_incomparable`, `calendar_missing`, `stale` (ids and
@@ -213,7 +213,9 @@ value kept as `RoundingInputs`; a policy without one refuses with
 policy's currencies (CHF, an instrument code) is `unsupported_pair`, and a
 missing, stale or disagreeing rate is that refusal for the FX leg. A holding
 of another instrument than the price's is `instrument_mismatch`, and a
-quantity that is not exact is `quantity_not_exact`.
+quantity that is not exact is `quantity_not_exact`. A zero or negative
+stored price (the table's CHECK allows one) is never a candidate, and a
+selection that holds one converts nothing (`price_not_positive`).
 
 **Refusal mapping.** ADR 0056 maps these codes onto the seven reasons above
 for the change that writes valuation cells: `stale` → `stale-price`,

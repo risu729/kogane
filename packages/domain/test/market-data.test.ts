@@ -172,6 +172,7 @@ describe("filter and counts", () => {
       recorded_after_known_at: 0,
       rule_not_admitted: 1,
       kind_not_admitted: 0,
+      price_not_positive: 0,
       basis_not_admitted: 1,
       date_only_excluded: 1,
       effective_at_or_after_bound: 1,
@@ -201,6 +202,17 @@ describe("filter and counts", () => {
     expect(selected(selectPrice(USD, [unreadable], BOUND, POLICY, null))).toBeTruthy();
     expect(validSelectionBound(at("2026-09-10T02:00:00.123Z"))).toBe(true);
     expect(validSelectionBound(at("2026-09-10T02:00:00.1234Z"))).toBe(false);
+  });
+
+  test("a zero or negative stored price is never a candidate", () => {
+    const zero = candidate({ id: "zero", amount: "0" });
+    const negative = candidate({ id: "negative", amount: "-146" });
+    const result = refused(selectPrice(USD, [zero, negative], BOUND, POLICY, null));
+    expect([result.reason, result.excluded.price_not_positive]).toEqual(["missing", 2]);
+    // An older positive price is selected past them.
+    const older = candidate({ id: "older", amount: "146", at: "2026-09-09T10:00:00+09:00" });
+    const later = candidate({ id: "later", amount: "0", at: "2026-09-10T11:00:00+09:00" });
+    expect(selected(selectPrice(USD, [older, later], BOUND, POLICY, null)).candidate).toBe(older);
   });
 
   test("a kind the policy does not admit is counted for every candidate", () => {
@@ -657,6 +669,45 @@ describe("FX path and conversion", () => {
     const even = convertToBase(q("JPY", "973"), "AUD", fxMap(usd, aud), inverse);
     if (!even.ok) throw new Error(even.reason);
     expect(even.roundingInputs?.preRounding).toEqual(decimalLiteral("10"));
+  });
+
+  test("a selection holding a non-positive price converts nothing", () => {
+    const withAmount = (selection: PriceSelection, amount: string): PriceSelection => {
+      const chosen = selected(selection);
+      return {
+        ...chosen,
+        candidate: {
+          ...chosen.candidate,
+          price: { ...chosen.candidate.price, quoteAmount: decimalLiteral(amount) },
+        },
+      };
+    };
+    const usd = withAmount(
+      selectPrice(USD, [candidate({ amount: "146" })], BOUND, POLICY, null),
+      "0",
+    );
+    expect(convertToBase(q("USD", "10"), "JPY", fxMap(usd), fxPolicy())).toEqual({
+      ok: false,
+      leg: "fx",
+      pair: { base: "USD", quote: "JPY" },
+      reason: "price_not_positive",
+    });
+    const aud = withAmount(
+      selectPrice(AUD, [candidate({ key: AUD, amount: "97.3" })], BOUND, POLICY, null),
+      "0",
+    );
+    const inverse = fxPolicy({ mode: "half-even", scaleByUnit: { AUD: 2 } });
+    expect(convertToBase(q("JPY", "1000"), "AUD", fxMap(aud), inverse)).toMatchObject({
+      ok: false,
+      reason: "price_not_positive",
+    });
+    const stock = withAmount(
+      selectPrice(ALPHA, [candidate({ key: ALPHA, amount: "130.70" })], BOUND, EQUITY, null),
+      "-1",
+    );
+    expect(
+      valueInBase(q(ALPHA.baseInstrumentRef, "12"), stock, "USD", new Map(), fxPolicy()),
+    ).toMatchObject({ ok: false, leg: "price", reason: "price_not_positive" });
   });
 
   test("a rate selected under another policy is refused, however fresh it claims to be", () => {

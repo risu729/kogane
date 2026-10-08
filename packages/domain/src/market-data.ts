@@ -10,8 +10,9 @@
 // fallback (INV05):
 //
 //   1. filter, counting every candidate it removes by a closed exclusion code
-//      (recorded after a known-at instant, rule, kind, effective-time shape,
-//      basis, date-only policy, not strictly before the bound);
+//      (recorded after a known-at instant, rule, kind, a zero or negative
+//      amount, effective-time shape, basis, date-only policy, not strictly
+//      before the bound);
 //   2. nothing left                                   → `missing`;
 //   3. more than one admitted rule with a candidate that could still be fresh
 //      (on or after the freshness window's first day), and the policy
@@ -66,6 +67,7 @@ import {
   type TemporalValue,
 } from "./time.ts";
 import {
+  compareDecimals,
   decimalEquals,
   divideDecimals,
   exactQuantity,
@@ -94,6 +96,7 @@ export const CANDIDATE_EXCLUSIONS = [
   "recorded_after_known_at",
   "rule_not_admitted",
   "kind_not_admitted",
+  "price_not_positive",
   "basis_not_admitted",
   "date_only_excluded",
   "effective_at_or_after_bound",
@@ -107,6 +110,7 @@ export const CONVERSION_REFUSALS = [
   ...PRICE_SELECTION_REFUSALS,
   "unsupported_pair",
   "rounding_policy_missing",
+  "price_not_positive",
   "instrument_mismatch",
   "quantity_not_exact",
 ] as const;
@@ -527,6 +531,8 @@ function exclusionOf(
   if (!(policy.admittedRules as readonly string[]).includes(candidate.claim.ruleId))
     return "rule_not_admitted";
   if (!policy.priceKinds.includes(price.priceKind)) return "kind_not_admitted";
+  // The table's CHECK allows a zero or negative amount; neither is a price.
+  if (!positivePrice(price)) return "price_not_positive";
   const time: TemporalValue = price.effectiveTime;
   if (!validTemporalValue(time) || (time.kind !== "instant" && time.kind !== "local-date"))
     return "invalid_effective_time";
@@ -543,6 +549,15 @@ function exclusionOf(
   const order = instantOrder(time.value, bound.effectiveBefore);
   if (order === null) return "invalid_effective_time";
   return order < 0 ? null : "effective_at_or_after_bound";
+}
+
+const ZERO: ExactDecimal = { coefficient: "0", scale: 0 };
+
+/** A quote amount and a base quantity both above zero. */
+function positivePrice(price: PriceObservation): boolean {
+  return (
+    compareDecimals(price.quoteAmount, ZERO) > 0 && compareDecimals(price.baseQuantity, ZERO) > 0
+  );
 }
 
 /** `a.quote × b.baseQty = b.quote × a.baseQty`: the same price per unit of base, exactly. */
@@ -974,6 +989,13 @@ export function convertToBase(
         pair: { base: step.base, quote: step.quote },
         reason: selection.reason,
       };
+    if (!positivePrice(selection.candidate.price))
+      return {
+        ok: false,
+        leg: "fx",
+        pair: { base: step.base, quote: step.quote },
+        reason: "price_not_positive",
+      };
     rates.push(selection);
   }
   const legs = path.map((step, index) => legOf("fx", step, rates[index]!));
@@ -1038,6 +1060,8 @@ export function valueInBase(
     return { ok: false, leg: "price", pair: pricePair, reason: "instrument_mismatch" };
   if (price.status !== "selected")
     return { ok: false, leg: "price", pair: pricePair, reason: price.reason };
+  if (!positivePrice(price.candidate.price))
+    return { ok: false, leg: "price", pair: pricePair, reason: "price_not_positive" };
   const local = valueAtPrice(quantity, price.candidate.price);
   if (!local.ok)
     return { ok: false, leg: "price", pair: pricePair, reason: "rounding_policy_missing" };
