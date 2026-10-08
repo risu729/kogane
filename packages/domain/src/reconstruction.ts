@@ -304,15 +304,23 @@ export const LEG_EFFECT_RULES = [
   "link-never-added",
 ] as const;
 export type LegEffectRule = (typeof LEG_EFFECT_RULES)[number];
+/** A policy is data that never changes under its id: every level is read-only. */
 export interface FoldPolicy {
-  policyId: typeof RECONSTRUCTION_FOLD_POLICY_ID;
-  zone: typeof RECONSTRUCTION_ZONE;
+  readonly policyId: typeof RECONSTRUCTION_FOLD_POLICY_ID;
+  readonly zone: typeof RECONSTRUCTION_ZONE;
   /** Basis → the one leg basis and the one time role read. No fallback. */
-  bases: Record<ReconstructionBasis, { legBasis: RecognitionBasis; timeRole: ProvisionalTimeRole }>;
+  readonly bases: Readonly<
+    Record<
+      ReconstructionBasis,
+      Readonly<{ legBasis: RecognitionBasis; timeRole: ProvisionalTimeRole }>
+    >
+  >;
   /** Kind → state → effect. A state absent here has an unknown effect. */
-  stateEffects: Record<EconomicEventKind, Partial<Record<EventState, StateEffect>>>;
-  legEffects: Record<ProvisionalLegEffect, LegEffectRule>;
-  directions: { increase: "add"; decrease: "subtract" };
+  readonly stateEffects: Readonly<
+    Record<EconomicEventKind, Readonly<Partial<Record<EventState, StateEffect>>>>
+  >;
+  /** A movement adds when it is an `increase` and subtracts when a `decrease`. */
+  readonly legEffects: Readonly<Record<ProvisionalLegEffect, LegEffectRule>>;
 }
 
 const STATE_EFFECT_V1: Partial<Record<EventState, StateEffect>> = {
@@ -330,7 +338,7 @@ const STATE_EFFECT_V1: Partial<Record<EventState, StateEffect>> = {
 };
 
 function stateEffectsV1(): FoldPolicy["stateEffects"] {
-  const out = {} as FoldPolicy["stateEffects"];
+  const out = {} as Record<EconomicEventKind, Partial<Record<EventState, StateEffect>>>;
   for (const kind of ECONOMIC_EVENT_KINDS) {
     const row: Partial<Record<EventState, StateEffect>> = {};
     for (const state of EVENT_STATE_FAMILIES[kind] as readonly EventState[]) {
@@ -347,7 +355,15 @@ function stateEffectsV1(): FoldPolicy["stateEffects"] {
  * other content under this id. `observed`, `issued` and `revised` (charges)
  * have no entry, so their effect is unknown.
  */
-export const RECONSTRUCTION_FOLD_V1: FoldPolicy = {
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) deepFreeze(item);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+export const RECONSTRUCTION_FOLD_V1: FoldPolicy = deepFreeze({
   policyId: RECONSTRUCTION_FOLD_POLICY_ID,
   zone: RECONSTRUCTION_ZONE,
   bases: {
@@ -361,8 +377,9 @@ export const RECONSTRUCTION_FOLD_V1: FoldPolicy = {
     breakdown: "attribution-never-added",
     correspondence: "link-never-added",
   },
-  directions: { increase: "add", decrease: "subtract" },
-};
+} satisfies FoldPolicy);
+/** The canonical text of v1, captured when the module loads. */
+const FOLD_V1_TEXT = canonicalJson(RECONSTRUCTION_FOLD_V1);
 
 // ---------------------------------------------------------------------------
 // Closed codes
@@ -1012,7 +1029,11 @@ function sameCanonical(a: unknown, b: unknown): boolean {
 
 /** Only the exact `reconstruction-fold-v1` content is accepted. */
 export function validFoldPolicy(value: unknown): value is FoldPolicy {
-  return sameCanonical(value, RECONSTRUCTION_FOLD_V1);
+  try {
+    return canonicalJson(value) === FOLD_V1_TEXT;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -1212,7 +1212,7 @@ describe("refusals, determinism and the manifest", () => {
       baseline: null,
     };
     const changedPolicy = structuredClone(RECONSTRUCTION_FOLD_V1);
-    changedPolicy.stateEffects.purchase.authorized = "applied";
+    (changedPolicy.stateEffects.purchase as Record<string, string>).authorized = "applied";
     const policyRefusal = reconstructState({ ...base, policy: changedPolicy });
     expect(!policyRefusal.ok && policyRefusal.error.code).toBe("invalid_policy");
     const tampered = structuredClone(selection);
@@ -1504,5 +1504,40 @@ describe("the manifest pins coverage", () => {
       }),
     });
     expect(await canonicalDigest(reordered.manifest)).toBe(await canonicalDigest(ordered.manifest));
+  });
+});
+
+describe("the policy constant", () => {
+  test("is deeply frozen, and a mutated copy is refused", () => {
+    const effects = RECONSTRUCTION_FOLD_V1.stateEffects.purchase as Record<string, string>;
+    let threw = false;
+    try {
+      effects.authorized = "applied";
+    } catch {
+      threw = true;
+    } finally {
+      if (effects.authorized !== "pending-apart") effects.authorized = "pending-apart";
+    }
+    expect(threw).toBe(true);
+    expect(Object.isFrozen(RECONSTRUCTION_FOLD_V1.bases.cash)).toBe(true);
+    // The type refuses the assignment too; the closure is never called.
+    const typed = () => {
+      // @ts-expect-error every level of the policy is read-only
+      RECONSTRUCTION_FOLD_V1.bases.cash.timeRole = "usage";
+    };
+    expect(typeof typed).toBe("function");
+    const copy = structuredClone(RECONSTRUCTION_FOLD_V1) as {
+      bases: { cash: { timeRole: string } };
+    };
+    copy.bases.cash.timeRole = "usage";
+    const refused = reconstructState({
+      request: request(),
+      policy: copy as never,
+      start: side(START_DATE, [balance()]),
+      end: side(END_DATE, [endBalance("10000")]),
+      selection: select(eventSet([]), CUT),
+      baseline: null,
+    });
+    expect(!refused.ok && refused.error.code).toBe("invalid_policy");
   });
 });
