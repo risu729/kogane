@@ -55,7 +55,7 @@ test("the connection table is exactly the collector jobs of config/alarm-jobs.js
   const actual = OPERATION_CONNECTIONS.map(({ terminalSource: _terminal, ...rest }) => rest).sort(
     (a, b) => a.connectionId.localeCompare(b.connectionId),
   );
-  expect(actual).toEqual(expected);
+  expect(actual as unknown[]).toEqual(expected);
   // Unsupported sources (no unattended login, email-only) have no connection.
   expect(OPERATION_CONNECTIONS.map((entry) => entry.connectionId)).not.toContain("smbc-direct");
   expect(OPERATION_CONNECTIONS.map((entry) => entry.connectionId)).not.toContain("vpoint-pay");

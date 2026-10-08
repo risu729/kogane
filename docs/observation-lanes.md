@@ -343,7 +343,9 @@ so a row whose card was resolved this tick can be recognised on it.
 writes. `operation_dispatch` hands
 accepted operations to their executor, so it runs before the outbox — work
 accepted this tick can still reach it — while `decision_outbox` keeps its
-place at the end.
+place at the end. Its collector branch awaits at most one collector call per
+invocation ([ADR 0048](adr/0048-operation-collector-dispatch.md)), so a long
+collection delays `decision_outbox` on that tick by the same amount.
 
 Neither is a parse lane: they create no `observation_parse_jobs` rows and have
 no job budget. `collection_scan` is bounded by one R2 list page (25 keys), at

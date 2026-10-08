@@ -342,36 +342,36 @@ applied** (`execution.scope: "collector_default"`).
 
 **States.** `execution.state` is closed:
 
-| State               | Means                                                                                      | `status` of the request  |
-| ------------------- | ------------------------------------------------------------------------------------------ | ------------------------ |
-| `accepted`          | stored; no executor has looked at it                                                       | `accepted`               |
-| `waiting_for_human` | a refresh the source policy hands to a person; never dispatched, never expires             | `waiting_for_human`      |
-| `waiting`           | not started, nothing contacted; `reasonCode` says why                                      | `accepted`               |
-| `started`           | the collector was called; no answer recorded yet                                           | `running`                |
-| `collected`         | the collector reports its terminal(s) persisted; `runs` lists them                          | `running`                |
-| `refreshed`         | the collector reports the session renewed                                                  | `completed`              |
-| `published`         | every reported run settled and at least one has an adopted (published) parse              | `running` (see limits)   |
-| `unpublished`       | every run settled with nothing adopted, or nothing settled within 48 h; `reasonCode` says why | `failed`              |
-| `failed`            | the collector's own closed failure code                                                    | `failed`                 |
-| `uncertain`         | the call threw, answered outside the closed shape, or never recorded an outcome in an hour | `failed`                 |
-| `expired`           | not started within 24 h of acceptance                                                      | `blocked`                |
-| `unsupported`       | no connection (or no binding) serves the source and action                                 | `blocked`                |
+| State               | Means                                                                                         | `status` of the request |
+| ------------------- | --------------------------------------------------------------------------------------------- | ----------------------- |
+| `accepted`          | stored; no executor has looked at it                                                          | `accepted`              |
+| `waiting_for_human` | a refresh the source policy hands to a person; never dispatched, never expires                | `waiting_for_human`     |
+| `waiting`           | not started, nothing contacted; `reasonCode` says why                                         | `accepted`              |
+| `started`           | the collector was called; no answer recorded yet                                              | `running`               |
+| `collected`         | the collector reports its terminal(s) persisted; `runs` lists them                            | `running`               |
+| `refreshed`         | the collector reports the session renewed                                                     | `completed`             |
+| `published`         | every reported run settled and at least one has an adopted (published) parse                  | `running` (see limits)  |
+| `unpublished`       | every run settled with nothing adopted, or nothing settled within 48 h; `reasonCode` says why | `failed`                |
+| `failed`            | the collector's own closed failure code                                                       | `failed`                |
+| `uncertain`         | the call threw, answered outside the closed shape, or never recorded an outcome in an hour    | `failed`                |
+| `expired`           | not started within 24 h of acceptance                                                         | `blocked`               |
+| `unsupported`       | no connection (or no binding) serves the source and action                                    | `blocked`               |
 
 `startedAt`, `collectedAt`, `publishedAt` and `finishedAt` are set when the
 state is reached; `expiresAt` is acceptance + 24 h.
 
 **Before a start** (each check contacts nobody):
 
-| Reason code                   | When                                                            | Next look                |
-| ----------------------------- | --------------------------------------------------------------- | ------------------------ |
+| Reason code                   | When                                                              | Next look                |
+| ----------------------------- | ----------------------------------------------------------------- | ------------------------ |
 | `collection_unsupported`      | no `collect` connection for the source (SMBC Direct, V Point Pay) | terminal (`unsupported`) |
-| `session_refresh_unsupported` | no `refresh-session` connection for the source                  | terminal (`unsupported`) |
-| `collector_binding_missing`   | the connection has no Service Binding in this deployment        | terminal (`unsupported`) |
-| `operation_expired`           | 24 h after acceptance                                           | terminal (`expired`)     |
-| `collector_dispatch_disabled` | the connection is not in `OPS_COLLECTOR_DISPATCH_CONNECTIONS`   | 1 h                      |
-| `provider_maintenance`        | the source's collection/session maintenance window is open      | when it closes           |
-| `collection_lease_held`       | another execution (the alarm, a manual trigger) holds the lease | 5 min                    |
-| `dispatch_deferred`           | this Processor invocation already started a collector           | 5 min                    |
+| `session_refresh_unsupported` | no `refresh-session` connection for the source                    | terminal (`unsupported`) |
+| `collector_binding_missing`   | the connection has no Service Binding in this deployment          | terminal (`unsupported`) |
+| `operation_expired`           | 24 h after acceptance                                             | terminal (`expired`)     |
+| `collector_dispatch_disabled` | the connection is not in `OPS_COLLECTOR_DISPATCH_CONNECTIONS`     | 1 h                      |
+| `provider_maintenance`        | the source's collection/session maintenance window is open        | when it closes           |
+| `collection_lease_held`       | another execution (the alarm, a manual trigger) holds the lease   | 5 min                    |
+| `dispatch_deferred`           | this Processor invocation already started a collector             | 5 min                    |
 
 Waits never pass the expiry. **The lease is only read**: the operation path never
 takes, releases, replaces or expires `collection_execution_leases`; the collector
@@ -388,15 +388,15 @@ the same operation; a new key is a new request.
 **The trail.** For a `collected` execution, each tick reads (at most five
 executions, every five minutes each) and the record shows live, per reported run:
 
-| Field                                   | From                                                                  |
-| --------------------------------------- | --------------------------------------------------------------------- |
-| `state: not_registered` / `registering` | no `collection_runs` row yet / seen, not yet registered               |
-| `state: blocked`, `blockedCode`         | registration refused (`collection_runs.blocked_code`)                 |
-| `evidenceRunId`, `registeredAt`         | the registered fetch run (`r_<id>`, the 取得記録 link)                |
-| `state: parsing`                        | the sealed run's parse scheduling is unprocessed, or a job is pending |
-| `artifacts.total` / `parseSelected`     | the run's artifacts / those a parser job or parse run exists for      |
-| `artifacts.published`                   | selected artifacts with a CORE publication (`published_parse_runs`)   |
-| `artifacts.pending` / `parseFailed`     | still queued or parsing / settled with an error parse run             |
+| Field                                   | From                                                                                              |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `state: not_registered` / `registering` | no `collection_runs` row yet / seen, not yet registered                                           |
+| `state: blocked`, `blockedCode`         | registration refused (`collection_runs.blocked_code`)                                             |
+| `evidenceRunId`, `registeredAt`         | the registered fetch run (`r_<id>`, the 取得記録 link)                                            |
+| `state: parsing`                        | the sealed run's parse scheduling is unprocessed, or a job is pending                             |
+| `artifacts.total` / `parseSelected`     | the run's artifacts / those a parser job or parse run exists for                                  |
+| `artifacts.published`                   | selected artifacts with a CORE publication (`published_parse_runs`)                               |
+| `artifacts.pending` / `parseFailed`     | still queued or parsing / settled with an error parse run                                         |
 | `state: published` / `unpublished`      | settled; `reasonCode` is `provider_failed`, `no_parser_selected`, `parse_failed` or `not_adopted` |
 
 The stages `registered`, `parsed` and `adopted` are written from those rows
@@ -463,10 +463,10 @@ writing their own SQL against the tables above:
 | `recordDispatch({operationId, outcome, targetRef?})`                                                           | one dispatch; binds `target_ref` once, answers who holds it |
 | `recordOperationStage({operationId, stage, state})`                                                            | stage evidence; completes the operation when all stages are |
 
-`dispatch_state='dispatch_pending'` is the hook U09 replaces with a Service
-Binding call to the collector: the row stays pending until a dispatch
-succeeds, so the scheduled lane keeps re-dispatching and a failed notification never
-loses the request. Nothing in this change contacts a collector.
+`dispatch_state='dispatch_pending'` keeps a request in the scheduled lane's
+queue until a dispatch takes it, so a failed notification never loses the
+request. For a collection or refresh, "takes it" is the one guarded start of
+ADR 0048; a wait puts the request back with a retry time and a closed reason.
 
 U08 built the scheduled side of that contract: the `operation_dispatch` lane of
 `services/processor` (`docs/processor.md` §7), behind
@@ -484,20 +484,20 @@ The collector execution services are in
 `packages/application/src/operations/collector-dispatch.ts` (writes) and
 `collector-trail.ts` (reads):
 
-| Service                                                                     | For                                                                 |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `claimCollectorStart`                                                       | the one start of an operation, with the request row in the same batch |
-| `recordCollectorWait` / `recordCollectorDeclined`                           | a closed reason to wait, or to end before any start                 |
-| `recordCollectorOutcome`                                                    | what the collector answered: collected, refreshed, failed, uncertain |
-| `abandonStartedCollectorDispatches`                                         | a start nobody finished, after an hour: `uncertain`                 |
-| `collectedDispatchesDue` / `trackCollectorPublication`                      | the trail of a collected execution, until published or a reason     |
-| `collectorExecution` / `collectorRunTrails` / `trailOutcome`                | the `execution` block and the stage ladder it supports              |
+| Service                                                      | For                                                                   |
+| ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `claimCollectorStart`                                        | the one start of an operation, with the request row in the same batch |
+| `recordCollectorWait` / `recordCollectorDeclined`            | a closed reason to wait, or to end before any start                   |
+| `recordCollectorOutcome`                                     | what the collector answered: collected, refreshed, failed, uncertain  |
+| `abandonStartedCollectorDispatches`                          | a start nobody finished, after an hour: `uncertain`                   |
+| `collectedDispatchesDue` / `trackCollectorPublication`       | the trail of a collected execution, until published or a reason       |
+| `collectorExecution` / `collectorRunTrails` / `trailOutcome` | the `execution` block and the stage ladder it supports                |
 
 ## What was verified locally, and what was not
 
 Synthetic data only.
 
-- `services/app/test/ops-api.test.ts` (26 checks over the real
+- `services/app/test/ops-api.test.ts` (30 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
   record per request, re-send, idempotency conflict, per-principal scoping,
@@ -506,7 +506,8 @@ Synthetic data only.
   the unknown source or release either (G3-08), the four other routes, the
   replay plan written into the 0035 tables exactly once, `waiting_for_human`
   (G3-11), stage progress and completion, the MCP tool list pinned on both
-  flag states, and HTTP/MCP parity down to the stored row (G3-05).
+  flag states, HTTP/MCP parity down to the stored row (G3-05), and the
+  read route's `execution` block for an accepted and for a collected request.
 - `packages/application/test/operations.test.ts` (10 checks; the SQL half
   runs against the real migrations in `bun:sqlite`): request identity,
   principal binding, the stage table per kind, the session policy's safe
@@ -518,9 +519,28 @@ Synthetic data only.
 - `apps/web/test/api-schema.test.ts` and
   `services/app/test/conformance.test.ts` pin the new `opsApi`
   capability off in the shared contract.
+- Collector execution (ADR 0048), synthetic source and collector:
+  `services/processor/test/collector-dispatch.test.ts` (18 checks over the
+  real CORE schema and the real registration: success through `published`
+  with distinct timestamps, failure, uncertain, an unfinished start, re-send
+  with the same key before and after the run, a raced claim, a held lease and
+  a lease taken by the collector, unsupported and human-required and supported
+  refresh, expiry, maintenance, one start per tick, the 48-hour horizon, no
+  parser selected, the stored columns);
+  `packages/application/test/collector-trail.test.ts` (the 0068 guards, the
+  trail's outcomes and its keyed query plans without table statistics);
+  `packages/collection/test/operation-rpc.test.ts` (the connection table
+  against `config/alarm-jobs.json`, request refusals before any run, the
+  closed answer, the lease refusal mapped to `collection_busy`);
+  `tests/collector-operation-rpc.test.ts` (terminal sources, one connection
+  per CORE source and action, the shared binding name, every scheduled
+  collector's `runOperation`); and
+  `services/processor/test/schedule-native-runtime.test.ts` (a real workerd
+  Processor tick starting one request over a named service binding).
 
-Not verified: no deployed instance, no live Access policy, no collector, no
-Processor execution, no real provider or session. No MCP client has connected.
+Not verified: no deployed instance, no live Access policy, no real provider or
+session, and no deployed collector has served `runOperation`; no connection is
+enabled in the committed configuration. No MCP client has connected.
 
 Acceptance ids and the test that carries each:
 
@@ -538,10 +558,12 @@ Acceptance ids and the test that carries each:
 
 Flag defaults when absent (not the current committed settings):
 
-| Variable                 | Default | Effect                                                        |
-| ------------------------ | ------- | ------------------------------------------------------------- |
-| `OPS_API_ENABLED`        | `""`    | `"true"` serves the six routes and publishes the six tools    |
-| `SESSION_REFRESH_POLICY` | `""`    | Sources a collector may refresh unattended; absent = a person |
+| Variable                             | Worker    | Default | Effect                                                                                    |
+| ------------------------------------ | --------- | ------- | ----------------------------------------------------------------------------------------- |
+| `OPS_API_ENABLED`                    | app       | `""`    | `"true"` serves the six routes and publishes the six tools                                |
+| `SESSION_REFRESH_POLICY`             | app       | `""`    | Sources a collector may refresh unattended; absent = a person                             |
+| `OPS_DISPATCH_ENABLED`               | processor | `""`    | `"1"`/`"true"` runs the `operation_dispatch` lane                                         |
+| `OPS_COLLECTOR_DISPATCH_CONNECTIONS` | processor | `""`    | JSON array of connection ids whose collector the lane may call; empty or malformed = none |
 
 Historical initial activation procedure for migration 0040; current releases
 follow [rollout controls](rollout.md#4-deployment-order). Do not send a real
@@ -562,6 +584,27 @@ secret), or deploy a compatible Worker revision under the current rollback floor
 `ops_requests`; they are inert while nothing dispatches them, and turning the
 flag off does not need to remove them. The migration is not rolled back: its
 tables are unread by the previous revision.
+
+### Enabling collector execution (ADR 0048)
+
+Order: CORE `0068` is applied, the collectors (with `runOperation`) are
+uploaded, then the Processor, then the App ([rollout](rollout.md#4-deployment-order)).
+With the committed empty `OPS_COLLECTOR_DISPATCH_CONNECTIONS`, the first ticks
+only decline requests no connection serves, expire requests older than 24 hours
+and leave the rest waiting with `collector_dispatch_disabled`; no provider is
+contacted.
+
+To enable one connection, add its id (for example `["sony-bank"]`) to
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` in both `services/processor/wrangler.jsonc`
+and `services/processor/cloudflare.config.ts` in a reviewed change, refresh the
+resource ledger and deploy the Processor. Then send one collection request with
+a fresh idempotency key at a time the source's alarm is not due, and read
+`GET /api/ops/v1/operations/{id}` until `execution.state` is `published`,
+`unpublished`, `failed` or `uncertain`. Rollback: remove the id; a request
+already `started` is not interrupted, and nothing started is retried.
+`SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
+refresh of it is dispatched, and only once its unattended renewal has been
+demonstrated.
 
 ### Replay publication target
 
