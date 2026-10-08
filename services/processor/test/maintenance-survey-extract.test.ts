@@ -268,6 +268,14 @@ describe("the closed extraction grammar", () => {
     expect(reasons("毎週日曜日 13:00～18:00（終了時刻は前後する場合があります）")).toEqual([
       ["may_change"],
     ]);
+    // An approximate time is the same judgement as 前後, not a stated end.
+    for (const line of [
+      "毎週日曜日 13:00～18:00頃",
+      "10月10日（土）21:00～翌6:00ごろ",
+      "10月10日（土）21:00～翌6:00（終了時刻は目途です）",
+      "毎日 1:00～2:00（目安）",
+    ])
+      expect(reasons(line)).toEqual([["may_change"]]);
     expect(reasons("2026年10月10日（土）21:00～翌6:00のメンテナンスは中止します")).toEqual([
       ["cancellation_stated"],
     ]);

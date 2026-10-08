@@ -59,7 +59,7 @@ export interface Extraction {
 /** Wording on the same line that makes every window of that line need review. */
 const LINE_REASONS: [ProposalReason, RegExp][] = [
   ["exception_stated", /除く|除き|ただし|但し|祝日|祝休日|休日|年末年始|振替/u],
-  ["may_change", /延長|前後|変更|状況により|早まる|遅れる|予告なく/u],
+  ["may_change", /延長|前後|頃|ごろ|目途|めど|目安|変更|状況により|早まる|遅れる|予告なく/u],
   ["cancellation_stated", /中止|取りやめ|取り止め|延期|キャンセル/u],
   ["partial_service", /一部/u],
 ];
