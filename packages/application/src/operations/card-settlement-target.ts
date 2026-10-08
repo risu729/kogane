@@ -95,7 +95,7 @@ export async function cardSettlementDebitIdentity(
 }
 
 /** The settlement event an acceptance creates, or the one a withdrawal supersedes. */
-export async function cardSettlementEventId(
+async function cardSettlementEventId(
   proposalId: string,
   withdraw: boolean,
   acceptedEventId: string | null,

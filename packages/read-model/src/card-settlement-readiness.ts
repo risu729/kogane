@@ -84,7 +84,7 @@ const quoted = (text: string): string => {
  * the row's source id, parser name, source account and `extra_json`, and for
  * the resolved account id.
  */
-export function providerAliasClassSql(input: {
+function providerAliasClassSql(input: {
   sourceId: string;
   parserName: string;
   sourceAccount: string;
