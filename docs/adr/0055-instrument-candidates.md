@@ -153,7 +153,11 @@ and `packages/application/src/query/instrument-resolution.ts`:
     relations; a larger read is refused, never cut. A history read names at
     most 100 identifiers and is refused beyond that; the cap is on
     identifiers, not rows, so every entry of each named identifier is
-    returned.
+    returned. The group comparison of §3 (`instrumentConflicts`) has no
+    separate budget: it runs once per pair of instruments that share an
+    evidence pair, comparing every identifier of one with every identifier
+    of the other, so its work is bounded by those instrument pairs times
+    their group sizes, all within the 10,000-row facts bound.
 
 No migration, route or page is part of this decision.
 
