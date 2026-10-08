@@ -101,6 +101,20 @@ async function timed(run: () => unknown, runs = 3): Promise<number> {
 
 const guard = (sql: string): string => `SELECT ${sql} AS ok`;
 
+/**
+ * The columns the shipped reads had: the plan read adds `claim_available` and
+ * the review's `event_id` (ADR 0054, G1b), compared on their own below.
+ */
+function shippedColumns(found: unknown[]): unknown[] {
+  return found.map((row) =>
+    Object.fromEntries(
+      Object.entries(row as Record<string, unknown>).filter(
+        ([name]) => name !== "claim_available" && name !== "event_id",
+      ),
+    ),
+  );
+}
+
 describe("card settlement readiness reads on a scaled store without statistics", () => {
   test(
     "the list pages equal the ones the shipped read produced, ready and blocked",
@@ -139,7 +153,7 @@ describe("card settlement readiness reads on a scaled store without statistics",
           [CARD_SETTLEMENT_PLAN_SQL, LEGACY_CARD_SETTLEMENT_PLAN_SQL],
           [OWNERSHIP_REVIEW_CANDIDATE_SQL, LEGACY_OWNERSHIP_REVIEW_CANDIDATE_SQL],
         ] as const)
-          expect(rows(sql, [id])).toEqual(rows(legacy, [id]));
+          expect(shippedColumns(rows(sql, [id]))).toEqual(rows(legacy, [id]));
         expect(rows(guard(OWNERSHIP_REVIEW_CANDIDATE_GUARD_SQL), [id, revision])).toEqual(
           rows(guard(LEGACY_OWNERSHIP_REVIEW_CANDIDATE_GUARD_SQL), [id, revision]),
         );

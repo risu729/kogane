@@ -355,10 +355,11 @@ test("re-observing the same txnReferenceNo is one payment, not a second one", as
   );
 }, 60000);
 
-test("ownership is still required, and an accepted SBI Shinsei debit reserves the statement against an SMBC one", async () => {
+test("ownership is still required; an SBI Shinsei debit's identity is refused, and an accepted SMBC debit reserves the statement", async () => {
   await ownership(STATEMENT_PARSE, "liable_party");
   await ownership(jpyParse, "beneficial_owner");
-  // An SMBC debit of the same bill, in the old adapter's shape (card-settlement.test.ts).
+  // An SMBC debit of the same bill, as the SMBC parser stores it: its
+  // provider id kept in the row, with the origin the parser records.
   await seedArtifact(env, 1105, "smbc-bank", "transactions-normalized", "smbc-synthetic", {});
   await db
     .prepare(
@@ -368,7 +369,16 @@ test("ownership is still required, and an accepted SBI Shinsei debit reserves th
   await db
     .prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,as_of,raw_locator,extra_json)
      VALUES(1105,'smbc-bank:synthetic-sbi-test','synthetic-smbc-debit','posted',-1200,'-1200',0,'JPY','2026-09-07T00:00:00+09:00','synthetic',?)`)
-    .bind(JSON.stringify({ _kogane: { direction: "outflow", amountSignSource: "direction" } }))
+    .bind(
+      JSON.stringify({
+        id: "synthetic-smbc-debit",
+        _kogane: {
+          direction: "outflow",
+          amountSignSource: "direction",
+          identityOrigin: "provider-id",
+        },
+      }),
+    )
     .run();
   await publishParse(db, 1105);
   await identifyParse(
@@ -396,28 +406,35 @@ test("ownership is still required, and an accepted SBI Shinsei debit reserves th
     ownership_current: 1,
     allocation_available: 1,
   });
+  // ADR 0054: the parser records no origin for txnReferenceNo, so the
+  // human-adopted writer refuses the debit with a closed code, nothing written.
+  const before = await count("SELECT count(*) AS n FROM decision_revisions");
+  await expect(
+    command("card-settlement.accept", {
+      proposalId: sbi[0]!.id,
+      reason: "verified total and SBI Shinsei debit",
+    }),
+  ).rejects.toThrow(
+    '"unsupported_semantics","refs":["card-settlement:' +
+      sbi[0]!.id +
+      '","identity_origin_unrecorded"]',
+  );
+  expect(await count("SELECT count(*) AS n FROM decision_revisions")).toBe(before);
   const accepted = await command("card-settlement.accept", {
-    proposalId: sbi[0]!.id,
-    reason: "verified total and SBI Shinsei debit",
+    proposalId: smbc[0]!.id,
+    reason: "verified total and SMBC debit",
   });
   if (!accepted.ok) throw new Error(JSON.stringify(accepted));
   expect(await count("SELECT count(*) AS n FROM current_allocations")).toBe(1);
-  // Across adapters: the statement is reserved, so the SMBC debit is not available to it.
-  expect(await readiness(smbc[0]!.id)).toMatchObject({ allocation_available: 0 });
-  await expect(
-    command("card-settlement.accept", { proposalId: smbc[0]!.id, reason: "second payment" }),
-  ).rejects.toThrow();
-  // Every other candidate of the same provider id is reserved too.
-  for (const other of await candidates())
-    if (other.id !== sbi[0]!.id && bankSource(other) === "sbi-shinsei-bank")
-      expect(await readiness(other.id)).toMatchObject({ allocation_available: 0 });
-  // Withdrawal frees the statement for the SMBC review; the SBI Shinsei row stays as it was.
+  // Across adapters: the statement is reserved, so the SBI Shinsei debit is not available to it.
+  expect(await readiness(sbi[0]!.id)).toMatchObject({ allocation_available: 0 });
+  // Withdrawal frees the statement; the SBI Shinsei row stays as it was.
   const withdrawn = await command("card-settlement.withdraw", {
-    proposalId: sbi[0]!.id,
+    proposalId: smbc[0]!.id,
     reason: "correspondence judgement corrected",
   });
   if (!withdrawn.ok) throw new Error(JSON.stringify(withdrawn));
-  expect(await readiness(smbc[0]!.id)).toMatchObject({ allocation_available: 1 });
+  expect(await readiness(sbi[0]!.id)).toMatchObject({ allocation_available: 1 });
   expect(
     await count("SELECT count(*) AS n FROM card_bank_debit_facts WHERE adapter='sbi-shinsei-bank'"),
   ).toBe(1);

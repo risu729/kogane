@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { cardSettlementCandidate } from "../../domain/src/card-settlement.ts";
 import { exactQuantity, integerDecimal } from "../../domain/src/values.ts";
-import type { CommandStore } from "../src/command/contract.ts";
+import { CARD_SETTLEMENT_KEY_AVAILABLE_SQL } from "../../read-model/src/card-settlement-readiness.ts";
+import { commandKey, type CommandStore } from "../src/command/contract.ts";
+import { CARD_SETTLEMENT_BANK_ROW_SQL } from "../src/operations/card-settlement-target.ts";
 import { resolveAndSimulate } from "../src/operations/targets.ts";
 
 const amount = exactQuantity("JPY", integerDecimal(1234));
@@ -42,9 +44,35 @@ const row = {
   bank_current: 1,
   ownership_current: 1,
   allocation_available: 1,
+  claim_available: 1,
+  event_id: null,
 };
-function store(value: unknown): CommandStore {
-  return { first: async <T>() => value as T | null, all: async () => [], batch: async () => [] };
+/** The cited SMBC debit as the parser stores it: its provider id and recorded origin. */
+const bankRow = {
+  source_id: "smbc-bank",
+  parser_name: "smbc-direct-transactions",
+  source_account: "smbc-bank:ordinary-yen",
+  external_id: "synthetic-debit",
+  extra_json: JSON.stringify({
+    id: "synthetic-debit",
+    _kogane: { identityOrigin: "provider-id" },
+  }),
+};
+function store(
+  value: unknown,
+  bank: unknown = bankRow,
+  key: unknown = { key_available: 1 },
+): CommandStore {
+  return {
+    first: async <T>(sql: string) =>
+      (sql === CARD_SETTLEMENT_BANK_ROW_SQL
+        ? bank
+        : sql === CARD_SETTLEMENT_KEY_AVAILABLE_SQL
+          ? key
+          : value) as T | null,
+    all: async () => [],
+    batch: async () => [],
+  };
 }
 const payload = { proposalId: "candidate", reason: "Reviewed statement and debit" };
 
@@ -53,7 +81,11 @@ describe("card settlement plan pins server facts", () => {
     const result = await resolveAndSimulate(store(row), "card-settlement.accept", payload);
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("unreachable");
-    expect(result.resolved.expectedRevisions).toEqual({ "card-settlement:candidate": 0 });
+    // The review, and the settlement event's head: no revision yet (ADR 0054).
+    expect(result.resolved.expectedRevisions).toEqual({
+      "card-settlement:candidate": 0,
+      [`economic-event:${await commandKey("event", ["candidate"])}`]: 0,
+    });
     expect(result.resolved.simulation).toMatchObject({
       affectedScopes: ["myjcb", "smbc-bank"],
       affectedParseRuns: 2,
@@ -69,11 +101,84 @@ describe("card settlement plan pins server facts", () => {
       "bank_current",
       "ownership_current",
       "allocation_available",
+      "claim_available",
     ] as const) {
       expect(
         await resolveAndSimulate(store({ ...row, [flag]: 0 }), "card-settlement.accept", payload),
       ).toMatchObject({ ok: false, error: "stale_context" });
     }
+  });
+
+  test("a debit another writer consumes is refused with the guard's code (ADR 0054)", async () => {
+    expect(
+      await resolveAndSimulate(
+        store({ ...row, claim_available: 0 }, bankRow, { key_available: 0 }),
+        "card-settlement.accept",
+        payload,
+      ),
+    ).toEqual({
+      ok: false,
+      error: "stale_context",
+      refs: ["card-settlement:candidate", "economic_claim_held"],
+    });
+    // The key is free; the same fact is held under another key.
+    expect(
+      await resolveAndSimulate(
+        store({ ...row, claim_available: 0 }, bankRow, { key_available: 1 }),
+        "card-settlement.accept",
+        payload,
+      ),
+    ).toEqual({
+      ok: false,
+      error: "stale_context",
+      refs: ["card-settlement:candidate", "alias_conflict"],
+    });
+  });
+
+  test("the debit's identity must be admitted: a closed refusal, nothing adopted (ADR 0054)", async () => {
+    const refused = async (bank: unknown) =>
+      resolveAndSimulate(store(row, bank), "card-settlement.accept", payload);
+    // No recorded origin (SBI Shinsei's parser records none).
+    expect(
+      await refused({
+        source_id: "sbi-shinsei-bank",
+        parser_name: "sbi-shinsei-top-balances-and-activity",
+        source_account: "sbi-shinsei:synthetic",
+        external_id: "synthetic-ref",
+        extra_json: JSON.stringify({ txnReferenceNo: "synthetic-ref", _kogane: {} }),
+      }),
+    ).toEqual({
+      ok: false,
+      error: "unsupported_semantics",
+      refs: ["card-settlement:candidate", "identity_origin_unrecorded"],
+    });
+    // An SMBC row whose parser recorded no origin.
+    expect(
+      await refused({ ...bankRow, extra_json: JSON.stringify({ id: "synthetic-debit" }) }),
+    ).toEqual({
+      ok: false,
+      error: "unsupported_semantics",
+      refs: ["card-settlement:candidate", "identity_origin_unrecorded"],
+    });
+    // A fingerprint id.
+    expect(
+      await refused({
+        ...bankRow,
+        source_id: "mizuho-bank",
+        parser_name: "mizuho-ordinary-history",
+        extra_json: "{}",
+      }),
+    ).toEqual({
+      ok: false,
+      error: "unsupported_semantics",
+      refs: ["card-settlement:candidate", "identity_fingerprint_only"],
+    });
+    // An unreadable bank row is incomplete evidence.
+    expect(await refused(null)).toMatchObject({ ok: false, error: "incomplete_evidence" });
+    // A rejection reads no identity.
+    expect(
+      await resolveAndSimulate(store(row, null), "card-settlement.reject", payload),
+    ).toMatchObject({ ok: true });
   });
 
   test("missing and corrupt evidence cannot produce an approval plan", async () => {
@@ -107,14 +212,18 @@ describe("card settlement plan pins server facts", () => {
   });
   test("withdrawal pins the accepted revision; terminal or unaccepted decisions cannot be withdrawn", async () => {
     const accepted = await resolveAndSimulate(
-      store({ ...row, status: "accepted", revision: 1 }),
+      store({ ...row, status: "accepted", revision: 1, event_id: "settlement-event" }),
       "card-settlement.withdraw",
       payload,
     );
     expect(accepted).toMatchObject({
       ok: true,
       resolved: {
-        expectedRevisions: { "card-settlement:candidate": 1 },
+        expectedRevisions: {
+          "card-settlement:candidate": 1,
+          // The accepted event revision the withdrawal supersedes.
+          "economic-event:settlement-event": 1,
+        },
         targets: [{ proposedTargetRef: "withdrawn" }],
       },
     });

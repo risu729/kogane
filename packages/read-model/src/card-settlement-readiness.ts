@@ -117,6 +117,30 @@ export function providerAliasClassSql(input: {
 /** The event of the candidate's own accepted review, whose claims are not another holder. */
 const OWN_EVENT = `(SELECT self.event_id FROM card_settlement_reviews self WHERE self.id=ready_candidate.id AND self.status='accepted')`;
 
+/**
+ * The key half of `claim_available`, over a candidate row named
+ * `ready_candidate`: no live `economic_claims` row and no live accepted
+ * settlement of another event holds its bank_key.
+ */
+const KEY_AVAILABLE = ` NOT EXISTS(SELECT 1 FROM economic_claims held
+  JOIN economic_event_revisions held_revision ON held_revision.event_id=held.event_id AND held_revision.revision=held.revision
+  WHERE held.book='cash-movement' AND held.consumption_key=ready_candidate.bank_key AND held_revision.superseded_by IS NULL
+  AND held.event_id IS NOT ${OWN_EVENT})
+ AND NOT EXISTS(SELECT 1 FROM card_settlement_candidates holder_candidate
+  JOIN card_settlement_decisions holder ON holder.proposal_id=holder_candidate.id AND holder.status='accepted'
+  JOIN economic_event_revisions holder_revision ON holder_revision.event_id=holder.event_id AND holder_revision.revision=holder.revision
+  WHERE holder_candidate.bank_key=ready_candidate.bank_key AND holder_revision.superseded_by IS NULL
+  AND holder.event_id IS NOT ${OWN_EVENT})`;
+
+/**
+ * Whether one candidate's bank_key is free (?1 the candidate id): the key half
+ * of `claim_available`, the same text. A plan reads it to name why a claim is
+ * unavailable (`economic_claim_held` when the key is held, else
+ * `alias_conflict`).
+ */
+export const CARD_SETTLEMENT_KEY_AVAILABLE_SQL = `SELECT ${KEY_AVAILABLE} AS key_available
+FROM card_settlement_candidates ready_candidate WHERE ready_candidate.id=?1`;
+
 /** The 0044 period expression of a statement total, over `b.extra_json`. */
 const PERIOD = `coalesce(json_extract(b.extra_json,'$._kogane.period'),
   substr(json_extract(b.extra_json,'$._kogane.statementMonth'),1,4)||'-'||substr(json_extract(b.extra_json,'$._kogane.statementMonth'),5,2))`;
@@ -236,15 +260,7 @@ SELECT ready_candidate.id,
   AND t.source_account=CASE WHEN json_valid(ready_candidate.bank_key) THEN json_extract(ready_candidate.bank_key,'$[3]') END
   AND t.external_id IS CASE WHEN json_valid(ready_candidate.bank_key) THEN json_extract(ready_candidate.bank_key,'$[4]') END
   AND a.id IS NOT (SELECT settlement_id FROM card_settlement_reviews self WHERE self.id=ready_candidate.id)) AS allocation_available,
- NOT EXISTS(SELECT 1 FROM economic_claims held
-  JOIN economic_event_revisions held_revision ON held_revision.event_id=held.event_id AND held_revision.revision=held.revision
-  WHERE held.book='cash-movement' AND held.consumption_key=ready_candidate.bank_key AND held_revision.superseded_by IS NULL
-  AND held.event_id IS NOT ${OWN_EVENT})
- AND NOT EXISTS(SELECT 1 FROM card_settlement_candidates holder_candidate
-  JOIN card_settlement_decisions holder ON holder.proposal_id=holder_candidate.id AND holder.status='accepted'
-  JOIN economic_event_revisions holder_revision ON holder_revision.event_id=holder.event_id AND holder_revision.revision=holder.revision
-  WHERE holder_candidate.bank_key=ready_candidate.bank_key AND holder_revision.superseded_by IS NULL
-  AND holder.event_id IS NOT ${OWN_EVENT})
+${KEY_AVAILABLE}
  AND NOT EXISTS(SELECT 1 FROM transaction_observations debit
   JOIN parse_runs debit_run ON debit_run.id=debit.parse_run_id
   JOIN fetch_artifacts debit_artifact ON debit_artifact.id=debit_run.fetch_artifact_id

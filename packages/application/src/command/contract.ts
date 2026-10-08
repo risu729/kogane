@@ -430,6 +430,12 @@ export interface MutationInput {
   plan: ChangePlan;
   principal: Principal;
   operationId: string;
+  /**
+   * The digest the receipt reservation records for this operation: with the
+   * plan id it names this payload's receipt, so an economic writer's entry
+   * (`receiptEntry`, ADR 0054) is true only for the batch that reserved it.
+   */
+  payloadDigest: string;
   now: string;
   guard: CommitGuard;
 }
