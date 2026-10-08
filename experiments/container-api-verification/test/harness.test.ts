@@ -1,5 +1,14 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, symlinkSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  symlinkSync,
+  chmodSync,
+  statSync,
+  linkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
@@ -13,13 +22,18 @@ import {
   verifyPhase,
   verifyBackpressure,
   recoveryHold,
+  baselineRecord,
+  recoveryRecord,
+  readRecord,
+  writeRecord,
 } from "../driver.mjs";
 import { worker } from "../src/common";
+import { canonicalHex, canonicalUuid, canonicalImageRef } from "../identifiers.mjs";
 const appId = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
 const namespace = "b".repeat(32);
 const workerVersion = "cccccccc-cccc-4ccc-accc-cccccccccccc";
 const processIdentity = "dddddddd-dddd-4ddd-addd-dddddddddddd";
-const image = `registry.cloudflare.com/synthetic/kogane-container-api-verification-verificationcontainer@sha256:${"e".repeat(64)}`;
+const image = `registry.cloudflare.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/kogane-container-api-verification-verificationcontainer@sha256:${"e".repeat(64)}`;
 const app = {
   id: appId,
   account_id: "a".repeat(32),
@@ -127,10 +141,12 @@ test("native recovery validates persisted process and control-plane identity wit
     writeFileSync(
       resolve(temp, "container-api-verification-baseline.json"),
       JSON.stringify({ ...identity(app, version), workerVersion }),
+      { mode: 0o600 },
     );
     writeFileSync(
       resolve(temp, "container-api-verification-recovery.json"),
       JSON.stringify({ processIdentity }),
+      { mode: 0o600 },
     );
     const reports: string[] = [];
     const fetchImpl = async (input: string, init: RequestInit) => {
@@ -245,6 +261,7 @@ test("rollback requires exact baseline SDK Worker version before any application
     writeFileSync(
       resolve(temp, "container-api-verification-baseline.json"),
       JSON.stringify({ ...identity(app, version), workerVersion }),
+      { mode: 0o600 },
     );
     let posts = 0;
     await expect(
@@ -411,6 +428,77 @@ test("recovery hold fails closed when HTTP fails before a stream-open marker", a
     ).rejects.toThrow("verification_hold");
     expect(reports).toEqual([]);
   } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("persisted identities are exact canonical records with no arbitrary network text", () => {
+  const baseline = { ...identity(app, version), workerVersion };
+  expect(baselineRecord(baseline, app.account_id)).toEqual(baseline);
+  expect(recoveryRecord({ processIdentity })).toEqual({ processIdentity });
+  expect(canonicalHex("f".repeat(64), 64)).toBe("f".repeat(64));
+  expect(canonicalUuid(appId)).toBe(appId);
+  expect(canonicalImageRef(image, app.account_id)).toBe(image);
+  for (const value of [
+    null,
+    {},
+    [],
+    { ...baseline, provider: "untrusted" },
+    { ...baseline, appId: "../other" },
+    { ...baseline, namespace: "b".repeat(33) },
+    { ...baseline, workerVersion: workerVersion.toUpperCase() },
+    { ...baseline, image: image + "/payload" },
+  ]) {
+    expect(() => baselineRecord(value, app.account_id)).toThrow();
+  }
+  expect(() => canonicalImageRef(image, "f".repeat(32))).toThrow("verification_identity");
+  for (const value of [
+    null,
+    {},
+    { processIdentity, provider: "untrusted" },
+    { processIdentity: { toString: () => processIdentity } },
+    { processIdentity: "d".repeat(4096) },
+  ])
+    expect(() => recoveryRecord(value)).toThrow();
+  for (const value of ["f".repeat(31), "F".repeat(32), "f".repeat(32) + "\n", {}, null])
+    expect(() => canonicalHex(value, 32)).toThrow("verification_identity");
+});
+
+test("driver records use private owned directories, exclusive600 files and bounded single-link reads", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "synthetic-records-"));
+  const name = "container-api-verification-baseline.json";
+  const path = resolve(temp, name);
+  const baseline = baselineRecord({ ...identity(app, version), workerVersion }, app.account_id);
+  try {
+    writeRecord(temp, name, baseline);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readRecord(temp, name)).toEqual(baseline);
+    expect(() => writeRecord(temp, name, baseline)).toThrow();
+    expect(readRecord(temp, name)).toEqual(baseline);
+    chmodSync(path, 0o644);
+    expect(() => readRecord(temp, name)).toThrow("verification_record");
+    chmodSync(path, 0o600);
+    writeFileSync(path, "x".repeat(1025));
+    expect(() => readRecord(temp, name)).toThrow("verification_record");
+    rmSync(path);
+    const target = resolve(temp, "target");
+    writeFileSync(target, JSON.stringify(baseline), { mode: 0o600 });
+    symlinkSync(target, path);
+    expect(() => readRecord(temp, name)).toThrow();
+    expect(() => writeRecord(temp, name, baseline)).toThrow();
+    rmSync(path);
+    linkSync(target, path);
+    expect(() => readRecord(temp, name)).toThrow("verification_record");
+    rmSync(path);
+    chmodSync(temp, 0o755);
+    expect(() => writeRecord(temp, name, baseline)).toThrow("verification_record");
+    chmodSync(temp, 0o700);
+    expect(() => writeRecord(temp, "../outside.json", baseline)).toThrow("verification_record");
+    expect(() => writeRecord(temp, name, { payload: "x".repeat(1025) })).toThrow(
+      "verification_record",
+    );
+  } finally {
+    chmodSync(temp, 0o700);
     rmSync(temp, { recursive: true, force: true });
   }
 });

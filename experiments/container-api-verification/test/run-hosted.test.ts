@@ -1,5 +1,14 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  symlinkSync,
+  rmSync,
+  chmodSync,
+  linkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
@@ -18,6 +27,8 @@ import {
   execute,
   child,
   registryStatus,
+  canonicalApiPath,
+  privateDirectory,
   deleteRegistryTag,
   phaseCounts,
   waitMissing,
@@ -73,11 +84,16 @@ test("dedicated inputs have no production fallback and enforce fixed shapes", ()
     CONTAINER_VERIFICATION_API_TOKEN: token,
     CONTAINER_VERIFICATION_SUBDOMAIN: "synthetic",
     GITHUB_SHA: sha,
-    RUNNER_TEMP: "/tmp/synthetic",
+    RUNNER_TEMP: "/tmp",
+    CONTAINER_VERIFICATION_TEMP: "/tmp/container-api-verification.Abcd1234",
   };
-  expect(inputs(env)).toEqual(input());
+  expect(inputs(env)).toEqual(input("/tmp/container-api-verification.Abcd1234"));
   for (const name of Object.keys(env))
-    expect(() => inputs({ ...env, [name]: "" })).toThrow("verification_runner_inputs");
+    expect(() => inputs({ ...env, [name]: "" })).toThrow(
+      name === "CONTAINER_VERIFICATION_TEMP"
+        ? "verification_runner_private_directory"
+        : "verification_runner_inputs",
+    );
   expect(() => inputs({ CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: account })).toThrow();
   expect(() => inputs({ ...env, CONTAINER_VERIFICATION_SUBDOMAIN: "other.example.com" })).toThrow();
 });
@@ -174,9 +190,9 @@ test("API never follows redirects and discards provider failures", async () => {
     options = opts;
     return new Response(JSON.stringify({ success: true, result: [] }));
   });
-  await api("containers/applications");
+  await api(`containers/applications?name=${APP}`);
   expect(url).toBe(
-    `https://api.cloudflare.com/client/v4/accounts/${account}/containers/applications`,
+    `https://api.cloudflare.com/client/v4/accounts/${account}/containers/applications?name=${APP}`,
   );
   expect(options?.redirect).toBe("manual");
   expect(options?.headers).toEqual({ authorization: `Bearer ${token}` });
@@ -187,14 +203,17 @@ test("API never follows redirects and discards provider failures", async () => {
     new Response(JSON.stringify({ success: false, errors: [{ message: token }] })),
   ]) {
     const denied = apiClient(input(), async () => response);
-    await expect(denied("containers/applications")).rejects.toThrow(
+    await expect(denied(`containers/applications?name=${APP}`)).rejects.toThrow(
       /verification_runner_api_(http|response)/u,
     );
   }
   expect(
-    await apiClient(input(), async () => new Response("", { status: 404 }))("fixed", {
-      missing: true,
-    }),
+    await apiClient(input(), async () => new Response("", { status: 404 }))(
+      `workers/scripts/${WORKER}/settings`,
+      {
+        missing: true,
+      },
+    ),
   ).toBeUndefined();
 });
 
@@ -923,5 +942,163 @@ test("partial push deletion requires prior exact-tag absence claim and persists 
     } finally {
       rmSync(temp, { recursive: true });
     }
+  }
+});
+
+test("private state storage rejects public or symlink parents and multiply linked files before API", async () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "verification-test-"));
+  const sibling = mkdtempSync(resolve(tmpdir(), "verification-test-"));
+  try {
+    const path = resolve(temp, "owned.json");
+    protectedFile(path, state());
+    linkSync(path, resolve(sibling, "outside.json"));
+    expect(() => readProtected(path)).toThrow("verification_runner_state");
+    expect(readFileSync(resolve(sibling, "outside.json"), "utf8")).toBe(JSON.stringify(state()));
+    chmodSync(temp, 0o755);
+    expect(() => privateDirectory(temp)).toThrow("verification_runner_private_directory");
+    let requests = 0;
+    await expect(
+      execute(input(temp), {
+        api: async () => {
+          requests++;
+          throw new Error("forbidden");
+        },
+      }),
+    ).rejects.toThrow("verification_runner_private_directory");
+    expect(requests).toBe(0);
+    chmodSync(temp, 0o700);
+    const symbolic = resolve(sibling, "private-link");
+    symlinkSync(temp, symbolic);
+    expect(() => privateDirectory(symbolic)).toThrow("verification_runner_private_directory");
+  } finally {
+    rmSync(temp, { recursive: true });
+    rmSync(sibling, { recursive: true });
+  }
+});
+
+test("private directory selection requires explicit runner handoff and direct random child boundary", () => {
+  const env = {
+    CONTAINER_VERIFICATION_ACCOUNT_ID: account,
+    CONTAINER_VERIFICATION_API_TOKEN: token,
+    CONTAINER_VERIFICATION_SUBDOMAIN: "synthetic",
+    GITHUB_SHA: sha,
+    RUNNER_TEMP: "/tmp",
+  };
+  expect(() => inputs(env)).toThrow("verification_runner_private_directory");
+  expect(inputs(env, { tempFixture: "/tmp/explicit-fixture" }).temp).toBe("/tmp/explicit-fixture");
+  for (const temp of [
+    "/tmp",
+    "/other/container-api-verification.Abcd1234",
+    "/tmp/container-api-verification.Abcd1234/../escape",
+    "/tmp/container-api-verification.fixed",
+  ])
+    expect(() => inputs({ ...env, CONTAINER_VERIFICATION_TEMP: temp })).toThrow(
+      "verification_runner_private_directory",
+    );
+});
+
+test("outbound selectors admit only fixed Worker and canonical synthetic application/namespace identifiers", async () => {
+  expect(canonicalApiPath(`containers/applications/${appId}`, "DELETE")).toBe(
+    `containers/applications/${appId}`,
+  );
+  expect(canonicalApiPath(`workers/durable_objects/namespaces/${namespace}/objects`)).toBe(
+    `workers/durable_objects/namespaces/${namespace}/objects`,
+  );
+  expect(canonicalApiPath(`workers/scripts/${WORKER}/versions/${workerVersion}`)).toBe(
+    `workers/scripts/${WORKER}/versions/${workerVersion}`,
+  );
+  const bad = [
+    "https://untrusted.invalid/",
+    "../secrets",
+    "workers/scripts/production/settings",
+    `workers/durable_objects/namespaces/${namespace}/objects?redirect=foreign`,
+    "workers/durable_objects/namespaces?per_page=100&page=101",
+    `containers/applications/${appId}/../other`,
+    `containers/applications/${appId}?foreign`,
+    `workers/scripts/${WORKER}/versions/${workerVersion}%2fother`,
+  ];
+  let requests = 0;
+  const api = apiClient(input(), async () => {
+    requests++;
+    return new Response("");
+  });
+  for (const path of bad) await expect(api(path)).rejects.toThrow();
+  await expect(
+    api(`containers/applications/${appId}/versions`, { method: "DELETE" }),
+  ).rejects.toThrow("verification_runner_api_selector");
+  expect(requests).toBe(0);
+});
+
+test("owned state is projected into canonical primitives instead of retaining parsed response objects", () => {
+  const source = { ...state(), appId, namespace, image, workerVersion, imageAttempted: true };
+  const projected = validateState(source, input());
+  expect(projected).toEqual(source);
+  expect(projected).not.toBe(source);
+  source.appId = workerVersion;
+  expect(projected.appId).toBe(appId);
+});
+
+test("workflow mktemp handoff round-trips through GITHUB_ENV to a separate cleanup process without network", () => {
+  const parent = mkdtempSync(resolve(tmpdir(), "verification runner "));
+  const githubEnv = resolve(parent, "github env");
+  const workflow = readFileSync(
+    new URL("../../../.github/workflows/ci.yml", import.meta.url),
+    "utf8",
+  );
+  const block = workflow.match(
+    /      - name: Verify the synthetic runtime and exact SDK rollback\n[\s\S]*?        run: \|\n([\s\S]*?)        env:/u,
+  )?.[1];
+  expect(block).toBeDefined();
+  const lines = block!
+    .trimEnd()
+    .split("\n")
+    .map((line) => line.slice(10));
+  expect(lines.pop()).toBe(
+    "mise exec -- node experiments/container-api-verification/run-hosted.mjs",
+  );
+  const env = {
+    PATH: process.env.PATH!,
+    RUNNER_TEMP: parent,
+    GITHUB_ENV: githubEnv,
+    CONTAINER_VERIFICATION_ACCOUNT_ID: account,
+    CONTAINER_VERIFICATION_API_TOKEN: token,
+    CONTAINER_VERIFICATION_SUBDOMAIN: "synthetic",
+    GITHUB_SHA: sha,
+  };
+  try {
+    const selected = execFileSync(
+      "bash",
+      ["-eu", "-c", [...lines, 'printf "%s" "$CONTAINER_VERIFICATION_TEMP"'].join("\n")],
+      { env, encoding: "utf8", timeout: 5000 },
+    );
+    const handoff = readFileSync(githubEnv, "utf8");
+    expect(handoff).toBe(`CONTAINER_VERIFICATION_TEMP=${selected}\n`);
+    expect(inputs({ ...env, CONTAINER_VERIFICATION_TEMP: selected }).temp).toBe(selected);
+    expect(privateDirectory(selected)).toBe(selected);
+    // A distinct process consumes exactly the environment entry the Actions runner forwards.
+    // Importing the helpers performs no network calls or cleanup/deployment operations.
+    const moduleUrl = new URL("../run-hosted.mjs", import.meta.url).href;
+    const probe = `import { inputs, privateDirectory } from ${JSON.stringify(moduleUrl)};
+globalThis.fetch = () => { throw new Error("network_forbidden"); };
+process.stdout.write(privateDirectory(inputs(process.env).temp));`;
+    const forwarded = Object.fromEntries(
+      handoff
+        .trimEnd()
+        .split("\n")
+        .map((line) => {
+          const equals = line.indexOf("=");
+          return [line.slice(0, equals), line.slice(equals + 1)];
+        }),
+    );
+    expect(
+      execFileSync("node", ["--input-type=module", "-e", probe], {
+        env: { ...env, ...forwarded },
+        encoding: "utf8",
+        timeout: 5000,
+      }),
+    ).toBe(selected);
+    expect(() => inputs(env)).toThrow("verification_runner_private_directory");
+  } finally {
+    rmSync(parent, { recursive: true });
   }
 });

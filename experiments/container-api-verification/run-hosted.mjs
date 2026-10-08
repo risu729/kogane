@@ -8,11 +8,14 @@ import {
   writeFileSync,
   closeSync,
   fstatSync,
-  mkdirSync,
+  ftruncateSync,
+  lstatSync,
+  realpathSync,
 } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { identity } from "./driver.mjs";
+import { canonicalHex, canonicalUuid, canonicalImageRef } from "./identifiers.mjs";
 
 export const WORKER = "kogane-container-api-verification";
 export const APP = `${WORKER}-verificationcontainer`;
@@ -25,7 +28,7 @@ const fail = (code) => {
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const root = dirname(fileURLToPath(import.meta.url));
 
-export function inputs(env) {
+export function inputs(env, { tempFixture } = {}) {
   const account = env.CONTAINER_VERIFICATION_ACCOUNT_ID;
   const token = env.CONTAINER_VERIFICATION_API_TOKEN;
   const subdomain = env.CONTAINER_VERIFICATION_SUBDOMAIN;
@@ -37,7 +40,15 @@ export function inputs(env) {
     !env.RUNNER_TEMP
   )
     fail("inputs");
-  return { account, token, subdomain, sha: env.GITHUB_SHA, temp: resolve(env.RUNNER_TEMP) };
+  const directory = tempFixture ?? env.CONTAINER_VERIFICATION_TEMP;
+  if (
+    !directory ||
+    (tempFixture === undefined &&
+      (dirname(resolve(directory)) !== resolve(env.RUNNER_TEMP) ||
+        !/^container-api-verification\.[A-Za-z0-9]{8}$/u.test(basename(directory))))
+  )
+    fail("private_directory");
+  return { account, token, subdomain, sha: env.GITHUB_SHA, temp: resolve(directory) };
 }
 
 export function config(source, { account, image, phase }) {
@@ -90,7 +101,7 @@ export function config(source, { account, image, phase }) {
   delete result.$schema;
   result.account_id = account;
   result.main = resolve(root, source.main);
-  result.containers[0].image = image;
+  result.containers[0].image = canonicalImageRef(image, account);
   result.vars = {
     HARNESS_REVISION: phase,
     HARNESS_MONITOR: phase === "native_unmonitored" ? "disabled" : "enabled",
@@ -98,12 +109,52 @@ export function config(source, { account, image, phase }) {
   return result;
 }
 
+export function privateDirectory(path) {
+  const absolute = resolve(path);
+  let fd;
+  try {
+    if (realpathSync(absolute) !== absolute || lstatSync(absolute).isSymbolicLink())
+      fail("private_directory");
+    fd = openSync(
+      absolute,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      0o700,
+    );
+    const stat = fstatSync(fd);
+    if (
+      !stat.isDirectory() ||
+      (stat.mode & 0o777) !== 0o700 ||
+      typeof process.getuid !== "function" ||
+      stat.uid !== process.getuid()
+    )
+      fail("private_directory");
+    return absolute;
+  } catch {
+    fail("private_directory");
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+function protectedLocation(path) {
+  const absolute = resolve(path);
+  const parent = privateDirectory(dirname(absolute));
+  if (dirname(absolute) !== parent) fail("state");
+  return absolute;
+}
+
 export function readProtected(path) {
   let fd;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    fd = openSync(protectedLocation(path), constants.O_RDONLY | constants.O_NOFOLLOW, 0o600);
     const stat = fstatSync(fd);
-    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600 || stat.size > 16384) fail("state");
+    if (
+      !stat.isFile() ||
+      (stat.mode & 0o777) !== 0o600 ||
+      stat.size > 16384 ||
+      stat.nlink !== 1 ||
+      stat.uid !== process.getuid()
+    )
+      fail("state");
     return JSON.parse(readFileSync(fd, "utf8"));
   } catch (error) {
     if (error?.code === "ENOENT") return undefined;
@@ -117,14 +168,22 @@ function writeProtected(path, value, initial = false, raw = false) {
   let fd;
   try {
     fd = openSync(
-      path,
+      protectedLocation(path),
       constants.O_WRONLY |
         constants.O_CREAT |
         constants.O_NOFOLLOW |
-        (initial ? constants.O_EXCL : constants.O_TRUNC),
+        (initial ? constants.O_EXCL : 0),
       0o600,
     );
-    if (!fstatSync(fd).isFile() || (fstatSync(fd).mode & 0o777) !== 0o600) fail("state");
+    const stat = fstatSync(fd);
+    if (
+      !stat.isFile() ||
+      (stat.mode & 0o777) !== 0o600 ||
+      stat.nlink !== 1 ||
+      stat.uid !== process.getuid()
+    )
+      fail("state");
+    ftruncateSync(fd, 0);
     writeFileSync(fd, raw ? value : JSON.stringify(value));
   } catch {
     fail("state");
@@ -171,7 +230,23 @@ export function validateState(state, input) {
     )
   )
     fail("state");
-  return state;
+  // Reconstruct only the approved primitive schema. Never reuse a parsed
+  // object or arbitrary file property as an API selector or persisted value.
+  const result = {
+    account: input.account,
+    sha: input.sha,
+    worker: WORKER,
+    appName: APP,
+    claimed: true,
+    imagePreflightAbsent: true,
+  };
+  if (state.appId !== undefined) result.appId = canonicalUuid(state.appId);
+  if (state.namespace !== undefined) result.namespace = canonicalHex(state.namespace, 32);
+  if (state.workerVersion !== undefined) result.workerVersion = canonicalUuid(state.workerVersion);
+  if (state.image !== undefined) result.image = canonicalImageRef(state.image, input.account);
+  for (const key of ["imageAttempted", "completed", "cleaned"])
+    if (state[key] !== undefined) result[key] = state[key] === true;
+  return result;
 }
 
 // Retain closed driver codes and numeric counts only; arbitrary child text is never forwarded.
@@ -307,14 +382,45 @@ export function child(
   });
 }
 
+export function canonicalApiPath(path, method = "GET") {
+  if (typeof path !== "string") fail("api_selector");
+  for (const fixed of [
+    `workers/scripts/${WORKER}/settings`,
+    `workers/scripts/${WORKER}/deployments`,
+    `containers/applications?name=${APP}`,
+  ])
+    if (path === fixed && method === "GET") return fixed;
+  if (path === `workers/scripts/${WORKER}?force=false` && method === "DELETE")
+    return `workers/scripts/${WORKER}?force=false`;
+  if (path === "containers/registries/registry.cloudflare.com/credentials" && method === "POST")
+    return "containers/registries/registry.cloudflare.com/credentials";
+  const pages = /^workers\/durable_objects\/namespaces\?per_page=100&page=(\d+)$/u.exec(path);
+  if (pages && method === "GET") {
+    const page = Number(pages[1]);
+    if (!Number.isSafeInteger(page) || page < 1 || page > 100) fail("api_selector");
+    return `workers/durable_objects/namespaces?per_page=100&page=${page}`;
+  }
+  const namespace = /^workers\/durable_objects\/namespaces\/([a-f0-9]{32})\/objects$/u.exec(path);
+  if (namespace && method === "GET")
+    return `workers/durable_objects/namespaces/${canonicalHex(namespace[1], 32)}/objects`;
+  const app = /^containers\/applications\/([a-f0-9-]+)(\/versions)?$/u.exec(path);
+  if (app && (method === "GET" || (method === "DELETE" && app[2] === undefined)))
+    return `containers/applications/${canonicalUuid(app[1])}${app[2] ? "/versions" : ""}`;
+  const prefix = `workers/scripts/${WORKER}/versions/`;
+  if (path.startsWith(prefix) && method === "GET")
+    return `workers/scripts/${WORKER}/versions/${canonicalUuid(path.slice(prefix.length))}`;
+  fail("api_selector");
+}
+
 export function apiClient(input, fetchImpl = fetch) {
   return async (path, { method = "GET", body, missing = false, timeout = 30000 } = {}) => {
+    const selector = canonicalApiPath(path, method);
     const headers = { authorization: `Bearer ${input.token}` };
     if (body !== undefined) headers["content-type"] = "application/json";
     let response;
     try {
       response = await fetchImpl(
-        `https://api.cloudflare.com/client/v4/accounts/${input.account}/${path}`,
+        `https://api.cloudflare.com/client/v4/accounts/${canonicalHex(input.account, 32)}/${selector}`,
         {
           method,
           headers,
@@ -594,8 +700,8 @@ export async function cleanup(
       (state.image && app.configuration?.image !== state.image)
     )
       fail("cleanup_identity");
-    state.appId = app.id;
-    state.namespace = namespace;
+    state.appId = canonicalUuid(app.id);
+    state.namespace = canonicalHex(namespace, 32);
   }
   const settings = await api(`workers/scripts/${WORKER}/settings`, { missing: true });
   if (settings) {
@@ -619,7 +725,7 @@ export async function cleanup(
     )
       fail("cleanup_identity");
   }
-  if (namespace) state.namespace = namespace;
+  if (namespace) state.namespace = canonicalHex(namespace, 32);
   writeProtected(path, state);
   if (app) {
     await api(`containers/applications/${app.id}`, { method: "DELETE" });
@@ -677,7 +783,7 @@ export async function cleanup(
       // Capture and persist the validated digest before any DELETE, rather than
       // treating an expected name alone as ownership evidence.
       if (!state.imagePreflightAbsent || !state.claimed) fail("cleanup_image_identity");
-      state.image = remainingImage;
+      state.image = canonicalImageRef(remainingImage, input.account);
       writeProtected(path, state);
     }
     await deleteImage(state.image);
@@ -713,7 +819,7 @@ export async function execute(
     hold = recoveryHolder,
   } = {},
 ) {
-  mkdirSync(input.temp, { recursive: true, mode: 0o700 });
+  privateDirectory(input.temp);
   const statePath = resolve(input.temp, "container-api-verification-owned.json");
   if (readProtected(statePath) !== undefined) fail("state_exists");
   await preflight(input, api, registry);
@@ -769,7 +875,7 @@ export async function execute(
     );
     const image = await registry();
     if (!image) fail("image_missing");
-    state.image = image;
+    state.image = canonicalImageRef(image, input.account);
     writeProtected(statePath, state);
     const driverEnv = {
       ...env,
@@ -804,8 +910,8 @@ export async function execute(
         (state.namespace && current.namespace !== state.namespace)
       )
         fail("deployment_identity");
-      state.appId = current.appId;
-      state.namespace = current.namespace;
+      state.appId = canonicalUuid(current.appId);
+      state.namespace = canonicalHex(current.namespace, 32);
       driverEnv.HARNESS_APPLICATION_ID = current.appId;
       writeProtected(statePath, state);
     }
@@ -828,7 +934,7 @@ export async function execute(
       baseline.image !== image
     )
       fail("baseline");
-    state.workerVersion = baseline.workerVersion;
+    state.workerVersion = canonicalUuid(baseline.workerVersion);
     writeProtected(statePath, state);
     await deploy("native");
     await verify("native");
@@ -980,7 +1086,9 @@ export async function recoveryHolder(
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
+    if (!process.env.CONTAINER_VERIFICATION_TEMP) fail("private_directory");
     const input = inputs(process.env);
+    privateDirectory(input.temp);
     if (process.argv[2] === "cleanup") await cleanup(input);
     else if (process.argv.length === 2) await execute(input);
     else fail("command");

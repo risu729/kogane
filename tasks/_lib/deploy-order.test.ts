@@ -697,3 +697,19 @@ describe("the synthetic environment is an exact manual capability exception", ()
     ).toBeGreaterThan(0);
   });
 });
+
+test("manual synthetic setup cannot reuse a public temp directory or omit private-path handoff", () => {
+  const ci = readFileSync(`${REPO_ROOT}/.github/workflows/ci.yml`, "utf8");
+  for (const changed of [
+    ci.replace(
+      'private_temp="$(mktemp -d "${RUNNER_TEMP}/container-api-verification.XXXXXXXX")"',
+      'private_temp="${RUNNER_TEMP}"',
+    ),
+    ci.replace('          chmod 700 "${private_temp}"\n', ""),
+    ci.replace('          export CONTAINER_VERIFICATION_TEMP="${private_temp}"\n', ""),
+    ci.replace("CONTAINER_VERIFICATION_TEMP=%s", "UNRELATED_VARIABLE=%s"),
+  ])
+    expect(
+      automationViolations([{ file: ".github/workflows/ci.yml", text: changed }], []).length,
+    ).toBeGreaterThan(0);
+});

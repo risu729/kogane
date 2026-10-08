@@ -373,7 +373,14 @@ function syntheticEnvironmentAllowed(file: string, text: string): boolean {
       {
         name: "Verify the synthetic runtime and exact SDK rollback",
         "timeout-minutes": 32,
-        run: "mise exec -- node experiments/container-api-verification/run-hosted.mjs",
+        run: [
+          'private_temp="$(mktemp -d "${RUNNER_TEMP}/container-api-verification.XXXXXXXX")"',
+          'chmod 700 "${private_temp}"',
+          'printf \'CONTAINER_VERIFICATION_TEMP=%s\\n\' "${private_temp}" >> "${GITHUB_ENV}"',
+          'export CONTAINER_VERIFICATION_TEMP="${private_temp}"',
+          "mise exec -- node experiments/container-api-verification/run-hosted.mjs",
+          "",
+        ].join("\n"),
         env,
       },
       {

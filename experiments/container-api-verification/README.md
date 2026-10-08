@@ -41,8 +41,10 @@ After independent review and explicit temporary-resource approval, deploy SDK
 wrangler.sdk.jsonc, set HARNESS_KEY without exposing it, and record the synthetic
 app ID. Configure HARNESS_SUBDOMAIN, HARNESS_KEY, CLOUDFLARE_ACCOUNT_ID,
 HARNESS_API_TOKEN and HARNESS_APPLICATION_ID in a protected runner; never print
-them. The hosted runner invokes the driver once per HARNESS_PHASE, with
-RUNNER_TEMP selecting a protected ephemeral directory. baseline_sdk writes only
+them. The hosted job creates a unique mode-0700 temporary directory and shares its
+path with the always-run cleanup step. The runner requires that owned private
+directory, then invokes the driver once per HARNESS_PHASE with RUNNER_TEMP
+pointing to it. State files use mode 0600 and reject symlinks and multiple links. baseline_sdk writes only
 validated synthetic app ID, namespace ID and immutable image reference to
 container-api-verification-baseline.json (mode 0600); later stages compare this
 same baseline. It contains no credentials and is not printed or uploaded.

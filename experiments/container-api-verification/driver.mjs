@@ -1,6 +1,16 @@
 // The driver never deploys, deletes, expands permissions, reads secret stores or invokes banks.
 import { pathToFileURL } from "node:url";
-import { readFileSync, writeFileSync, openSync, fstatSync, closeSync, constants } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  openSync,
+  fstatSync,
+  closeSync,
+  constants,
+  lstatSync,
+  realpathSync,
+} from "node:fs";
+import { canonicalHex, canonicalUuid, canonicalImageRef } from "./identifiers.mjs";
 import { resolve } from "node:path";
 import { BACKPRESSURE_MAX_CHUNKS } from "./container/server.mjs";
 
@@ -10,6 +20,87 @@ const closed = (code) => {
   throw new Error(`verification_${code}`);
 };
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+function recordPath(temp, name) {
+  if (
+    ![
+      "container-api-verification-baseline.json",
+      "container-api-verification-recovery.json",
+    ].includes(name)
+  )
+    closed("record");
+  const directory = lstatSync(temp);
+  if (
+    !directory.isDirectory() ||
+    directory.isSymbolicLink() ||
+    (directory.mode & 0o777) !== 0o700 ||
+    directory.uid !== process.getuid() ||
+    realpathSync(temp) !== resolve(temp)
+  )
+    closed("record");
+  return resolve(temp, name);
+}
+function recordDescriptor(fd) {
+  const stat = fstatSync(fd);
+  if (
+    !stat.isFile() ||
+    stat.nlink !== 1 ||
+    (stat.mode & 0o777) !== 0o600 ||
+    stat.uid !== process.getuid() ||
+    stat.size > 1024
+  )
+    closed("record");
+}
+export function readRecord(temp, name) {
+  let fd;
+  try {
+    fd = openSync(recordPath(temp, name), constants.O_RDONLY | constants.O_NOFOLLOW, 0o600);
+    recordDescriptor(fd);
+    return JSON.parse(readFileSync(fd, "utf8"));
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+export function writeRecord(temp, name, value) {
+  const text = JSON.stringify(value);
+  if (Buffer.byteLength(text) > 1024) closed("record");
+  let fd;
+  try {
+    fd = openSync(
+      recordPath(temp, name),
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    recordDescriptor(fd);
+    writeFileSync(fd, text);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+export function baselineRecord(value, account) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "appId,image,namespace,workerVersion"
+  )
+    closed("baseline");
+  return {
+    appId: canonicalUuid(value.appId),
+    namespace: canonicalHex(value.namespace, 32),
+    image: canonicalImageRef(value.image, account),
+    workerVersion: canonicalUuid(value.workerVersion),
+  };
+}
+export function recoveryRecord(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).join(",") !== "processIdentity"
+  )
+    closed("recovery_baseline");
+  return { processIdentity: canonicalUuid(value.processIdentity) };
+}
 export function identity(app, version) {
   const binding = version.resources?.bindings?.filter(
     (entry) =>
@@ -35,7 +126,11 @@ export function identity(app, version) {
     )
   )
     closed("identity");
-  return { appId: app.id, namespace: binding[0].namespace_id, image: app.configuration.image };
+  return {
+    appId: canonicalUuid(app.id),
+    namespace: canonicalHex(binding[0].namespace_id, 32),
+    image: canonicalImageRef(app.configuration.image, app.account_id),
+  };
 }
 export function sameIdentity(before, after) {
   return (
@@ -96,7 +191,6 @@ export async function verifyPhase({
     !temp
   )
     closed("phase");
-  const baselinePath = resolve(temp, "container-api-verification-baseline.json");
   if (
     !/^[a-z0-9-]+$/u.test(subdomain ?? "") ||
     !key ||
@@ -202,7 +296,7 @@ export async function verifyPhase({
         app,
         await api(`workers/scripts/${workerName}/versions/${versions[0].version_id}`),
       ),
-      workerVersion: versions[0].version_id,
+      workerVersion: canonicalUuid(versions[0].version_id),
     };
   }
   async function waitState(predicate, timeout = 90_000) {
@@ -218,26 +312,14 @@ export async function verifyPhase({
   if (state.revision !== (phase === "rollback_sdk" ? "baseline_sdk" : phase)) closed("revision");
   let baseline;
   if (phase !== "baseline_sdk") {
-    let descriptor;
     try {
-      descriptor = openSync(baselinePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-      if (!fstatSync(descriptor).isFile()) closed("baseline");
-      baseline = JSON.parse(readFileSync(descriptor, "utf8"));
+      baseline = baselineRecord(
+        readRecord(temp, "container-api-verification-baseline.json"),
+        accountId,
+      );
     } catch {
       closed("baseline");
-    } finally {
-      if (descriptor !== undefined) closeSync(descriptor);
     }
-    if (
-      !baseline ||
-      !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(baseline.appId ?? "") ||
-      !/^[a-f0-9]{32}$/u.test(baseline.namespace ?? "") ||
-      !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(baseline.workerVersion ?? "") ||
-      !/^registry\.cloudflare\.com\/[a-z0-9_-]+\/kogane-container-api-verification-verificationcontainer@sha256:[a-f0-9]{64}$/u.test(
-        baseline.image ?? "",
-      )
-    )
-      closed("baseline");
   }
   if (phase === "baseline_sdk") await json("/initialize", "POST");
   const sentinel = await json("/state");
@@ -245,8 +327,8 @@ export async function verifyPhase({
   counts.sentinelMatches++;
   const current = await snapshot();
   if (!baseline) {
-    baseline = current;
-    writeFileSync(baselinePath, JSON.stringify(baseline), { mode: 0o600, flag: "wx" });
+    baseline = baselineRecord(current, accountId);
+    writeRecord(temp, "container-api-verification-baseline.json", baseline);
   }
   if (!sameIdentity(baseline, current)) closed("identity_changed");
   counts.identityMatches++;
@@ -254,21 +336,12 @@ export async function verifyPhase({
     closed("rollback_version");
   if (phase === "native_recovered") {
     // The previous phase deliberately leaves the process active before redeploy.
-    let recovery, descriptor;
+    let recovery;
     try {
-      descriptor = openSync(
-        resolve(temp, "container-api-verification-recovery.json"),
-        constants.O_RDONLY | constants.O_NOFOLLOW,
-      );
-      if (!fstatSync(descriptor).isFile()) closed("recovery_baseline");
-      recovery = JSON.parse(readFileSync(descriptor, "utf8"));
+      recovery = recoveryRecord(readRecord(temp, "container-api-verification-recovery.json"));
     } catch {
       closed("recovery_baseline");
-    } finally {
-      if (descriptor !== undefined) closeSync(descriptor);
     }
-    if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(recovery.processIdentity ?? ""))
-      closed("recovery_baseline");
     if (state.running !== 1 || (await json("/stats")).processIdentity !== recovery.processIdentity)
       closed("recovery");
     counts.recoveryChecks++;
@@ -375,13 +448,13 @@ export async function recoveryHold({
   } catch {
     closed("hold");
   }
-  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(statistics.processIdentity ?? ""))
+  let recovery;
+  try {
+    recovery = recoveryRecord({ processIdentity: statistics?.processIdentity });
+  } catch {
     closed("hold");
-  writeFileSync(
-    resolve(temp, "container-api-verification-recovery.json"),
-    JSON.stringify({ processIdentity: statistics.processIdentity }),
-    { mode: 0o600, flag: "wx" },
-  );
+  }
+  writeRecord(temp, "container-api-verification-recovery.json", recovery);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 300_000);
   const stop = () => controller.abort();
