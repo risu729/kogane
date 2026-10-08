@@ -18,6 +18,8 @@ import {
   syntheticServer,
   BACKPRESSURE_CHUNK_BYTES,
   BACKPRESSURE_MAX_CHUNKS,
+  startSyntheticServer,
+  SYNTHETIC_IDLE_TIMEOUT_SECONDS,
 } from "../container/server.mjs";
 import {
   identity,
@@ -682,3 +684,59 @@ test("malformed concurrency state or stats remain classified closed errors", asy
     ).rejects.toThrow(`verification_concurrency_${malformed === "stats" ? "posts" : "state"}`);
   }
 });
+
+test("real TCP synthetic server survives 35s quiet delay and paused backpressure consumer", async () => {
+  expect(SYNTHETIC_IDLE_TIMEOUT_SECONDS).toBe(60);
+  const server = startSyntheticServer({ hostname: "127.0.0.1", port: 0 });
+  const origin = `http://127.0.0.1:${server.port}`;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const statistics = async () => (await fetch(`${origin}/stats`)).json();
+  try {
+    await Promise.all([
+      (async () => {
+        const started = Date.now();
+        const response = await fetch(`${origin}/delay`, { signal: AbortSignal.timeout(120_000) });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ completed: 1 });
+        expect(Date.now() - started).toBeGreaterThanOrEqual(35_000);
+      })(),
+      (async () => {
+        const response = await fetch(`${origin}/backpressure`, {
+          signal: AbortSignal.timeout(120_000),
+        });
+        expect(response.status).toBe(200);
+        reader = response.body!.getReader();
+        const first = await reader.read();
+        expect(first.done).toBe(false);
+        expect(first.value!.byteLength).toBeGreaterThan(0);
+        await Bun.sleep(1000);
+        const stalled = await statistics();
+        expect(stalled.streams).toBe(1);
+        expect(stalled.backpressureChunks).toBeGreaterThan(0);
+        expect(stalled.backpressureChunks).toBeLessThan(BACKPRESSURE_MAX_CHUNKS);
+        const started = Date.now();
+        await Bun.sleep(35_000);
+        const after = await statistics();
+        expect(Date.now() - started).toBeGreaterThanOrEqual(35_000);
+        expect(after.streams).toBe(1);
+        expect(after.processIdentity).toBe(stalled.processIdentity);
+        expect(after.backpressureChunks).toBe(stalled.backpressureChunks);
+        const resumed = await reader.read();
+        expect(resumed.done).toBe(false);
+        expect(resumed.value!.byteLength).toBeGreaterThan(0);
+        await reader.cancel();
+        reader = undefined;
+        const deadline = Date.now() + 5000;
+        let state = await statistics();
+        while (state.streams !== 0 && Date.now() < deadline) {
+          await Bun.sleep(100);
+          state = await statistics();
+        }
+        expect(state.streams).toBe(0);
+      })(),
+    ]);
+  } finally {
+    await reader?.cancel().catch(() => {});
+    server.stop(true);
+  }
+}, 65_000);

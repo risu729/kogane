@@ -1,7 +1,9 @@
 # Container API synthetic verification
 
-Prepared source and driver only. No temporary Worker/application exists and no
-remote command has been run. This does not prove Cloudflare runtime behavior.
+Hosted SDK baseline attempts are in progress. Native and rollback phases have
+not completed, so runtime equivalence is still unverified. Cleanup runs after each
+attempt; failed or interrupted cleanup requires separate absence confirmation. The dedicated token and GitHub environment remain until
+the verification session closes.
 
 The SDK and native configs intentionally have the same Worker, exported class,
 SQLite migration, binding, explicit app name, basic/APAC/max1 configuration and
@@ -10,7 +12,11 @@ variant uses the actual shared ContainerController, with a thin adapter forcing
 Internet access off. The labelled unmonitored comparison omits native monitor()
 through that adapter; it does not represent the production monitor behavior.
 The SDK also disables Internet access. The synthetic image has no dependencies,
-outbound fetch, bank hostname, secrets or VPC binding.
+outbound fetch, bank hostname, secrets or VPC binding. Its HTTP server uses a
+finite 60-second socket idle timeout so the deliberate 35-second quiet windows
+can complete. This is separate from the 30-second Container idle policy and
+the driver's unchanged 120-second request deadline. Real loopback TCP tests
+cover the delayed response and paused consumer.
 
 The public Worker requires a separately approved HARNESS_KEY before any DO lookup.
 It strips headers before the fixed named DO reaches the image. Configuration
@@ -68,7 +74,8 @@ The driver performs no deployment:
    teardown Worker with a `deleted_classes` migration, confirms namespace
    absence, deletes the fixed Worker and unique image tag, and checks absence.
    The workflow runs a separate cleanup step even after verification failure.
-   Registry cleanup deletes only the owned image tag and verifies tag absence;
+   Registry cleanup deletes only the owned image tag and verifies tag absence
+   using the OCI manifest HEAD operation with a bounded 90-second wait;
    it does not run account-wide garbage collection or prove blob removal.
    Retire the temporary token and GitHub environment after resource readback.
 
@@ -100,3 +107,8 @@ The recovery helper records a synthetic process UUID in a protected ephemeral
 file, never stdout. A held HTTP stream may disconnect during Worker replacement;
 that alone is not failure. Recovery requires the same still-running synthetic
 process UUID after redeploy. This does not assume an old HTTP response survives.
+
+References:
+
+- [OCI manifest existence checks](https://specs.opencontainers.org/distribution-spec/#checking-if-content-exists-in-the-registry)
+- [Bun HTTP socket idle timeout](https://bun.sh/docs/runtime/http/server#idletimeout)

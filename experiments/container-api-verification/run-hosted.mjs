@@ -15,6 +15,7 @@ import {
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { identity } from "./driver.mjs";
+import { canonicalDriverHttpCode } from "./http-diagnostics.mjs";
 import { canonicalHex, canonicalUuid, canonicalImageRef } from "./identifiers.mjs";
 
 export const WORKER = "kogane-container-api-verification";
@@ -111,6 +112,7 @@ const RUNNER_CODES = new Set(
     "state",
     "state_exists",
     "worker_not_blank",
+    "wrangler_pin",
   ].map((code) => `verification_runner_${code}`),
 );
 const HTTP_CATEGORIES = [
@@ -142,12 +144,12 @@ export function diagnosticCode(error) {
   const code = error?.message;
   for (const known of RUNNER_CODES) if (known === code) return known;
   for (const known of DRIVER_CODES) if (known === code) return known;
-  return "verification_runner_failed";
+  return canonicalDriverHttpCode(code) ?? "verification_runner_failed";
 }
 export function driverFailure(text) {
   const code = text.trim();
   for (const known of DRIVER_CODES) if (known === code) return known;
-  return "verification_runner_child";
+  return canonicalDriverHttpCode(code) ?? "verification_runner_child";
 }
 function httpCategory(status) {
   if (status === 401) return "unauthorized";
@@ -163,7 +165,26 @@ export function registryHttpCode(operation, status) {
   return `registry_http_${operation}_${httpCategory(status)}`;
 }
 
+export function validateWranglerPin(installed, declared) {
+  if (
+    installed?.name !== "wrangler" ||
+    typeof declared !== "string" ||
+    !/^[0-9]+[.][0-9]+[.][0-9]+$/u.test(declared) ||
+    installed.version !== declared ||
+    installed.bin?.wrangler !== "./bin/wrangler.js"
+  )
+    fail("wrangler_pin");
+}
 export function wranglerArgs(...args) {
+  try {
+    const declared = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+    const installed = JSON.parse(
+      readFileSync(resolve(root, "node_modules/wrangler/package.json"), "utf8"),
+    );
+    validateWranglerPin(installed, declared.devDependencies?.wrangler);
+  } catch {
+    fail("wrangler_pin");
+  }
   return [resolve(root, "node_modules/wrangler/bin/wrangler.js"), ...args];
 }
 
@@ -745,10 +766,12 @@ function digestImage(input, response) {
   if (!/^sha256:[a-f0-9]{64}$/u.test(digest ?? "")) fail("registry_digest");
   return `registry.cloudflare.com/${input.account}/${APP}@${digest}`;
 }
+// OCI existence checks use HEAD, also used by pinned Wrangler's deleteTag.
+// https://github.com/opencontainers/distribution-spec/blob/main/spec.md#checking-if-content-exists-in-the-registry
 export async function registryStatus(input, api, fetchImpl = fetch) {
   const url = manifestUrl(input);
   const authorization = await registryAuth(api, ["pull"]);
-  const response = await registryRequest(url, authorization, "GET", fetchImpl);
+  const response = await registryRequest(url, authorization, "HEAD", fetchImpl);
   if (response.status !== 200 && response.status !== 404)
     fail(registryHttpCode("lookup", response.status));
   return response.status === 404 ? undefined : digestImage(input, response);
@@ -756,57 +779,30 @@ export async function registryStatus(input, api, fetchImpl = fetch) {
 export async function deleteRegistryTag(
   input,
   expectedImage,
-  {
-    api = apiClient(input),
-    fetchImpl = fetch,
-    now = Date.now,
-    sleep = pause,
-    report = console.log,
-  } = {},
+  { api = apiClient(input), fetchImpl = fetch, now = Date.now, sleep = pause } = {},
 ) {
   const url = manifestUrl(input);
   if (!validImage(input, expectedImage)) fail("registry_identity");
   // Exactly this account/repository/tag is addressed. No catalog, other tags,
   // digest-wide deletion, or account-wide /v2/gc/layers operation is performed.
   const authorization = await registryAuth(api, ["pull", "push"]);
-  const current = await registryRequest(url, authorization, "GET", fetchImpl);
+  const current = await registryRequest(url, authorization, "HEAD", fetchImpl);
   if (current.status === 404) return;
   if (current.status !== 200) fail(registryHttpCode("predelete", current.status));
   if (digestImage(input, current) !== expectedImage) fail("registry_identity");
   const deleted = await registryRequest(url, authorization, "DELETE", fetchImpl);
-  // A concurrent/eventually visible deletion can race the predelete GET.
-  // DELETE404 is not absence proof: require a separate exact-tag GET404 below.
+  // A concurrent/eventually visible deletion can race the predelete HEAD.
+  // DELETE404 is not absence proof: require a separate exact-tag HEAD404 below.
   if (![200, 202, 204, 404].includes(deleted.status))
     fail(registryHttpCode("delete", deleted.status));
   const deadline = now() + 90000;
-  let observed = false;
   while (true) {
     const remaining = deadline - now();
     if (remaining <= 0) fail("cleanup_image_readback_timeout");
-    const readback = await registryRequest(url, authorization, "GET", fetchImpl, remaining);
+    const readback = await registryRequest(url, authorization, "HEAD", fetchImpl, remaining);
     if (readback.status === 404) return;
     if (readback.status !== 200) fail(registryHttpCode("readback", readback.status));
     if (digestImage(input, readback) !== expectedImage) fail("registry_identity");
-    if (!observed) {
-      observed = true;
-      const remainingHead = deadline - now();
-      if (remainingHead <= 0) fail("cleanup_image_readback_timeout");
-      let headStatus = "transport";
-      try {
-        const head = await registryRequest(url, authorization, "HEAD", fetchImpl, remainingHead);
-        headStatus = head.status === 200 ? "present" : httpCategory(head.status);
-      } catch {
-        // Observation failure neither proves absence nor changes the GET gate.
-      }
-      report(
-        JSON.stringify({
-          code: "verification_registry_readback_observation",
-          delete: deleted.status === 404 ? "not_found" : "accepted",
-          get: "present",
-          head: headStatus,
-        }),
-      );
-    }
     const rest = deadline - now();
     if (rest <= 0) fail("cleanup_image_readback_timeout");
     await sleep(Math.min(2000, rest));
@@ -883,7 +879,7 @@ export async function cleanup(
     api = apiClient(input),
     run = child,
     registry = () => registryStatus(input, api),
-    deleteImage = (image) => deleteRegistryTag(input, image, { api, report }),
+    deleteImage = (image) => deleteRegistryTag(input, image, { api }),
     report = console.log,
   } = {},
 ) {
@@ -995,7 +991,7 @@ export async function cleanup(
       fail("cleanup_image_identity");
     if (!state.image) {
       // A failed push can have published the tag before returning a digest.
-      // Admission required GET404 for this exact immutable SHA tag; the
+      // Admission required HEAD404 for this exact immutable SHA tag; the
       // protected claim predates push and marks this run's attempted mutation.
       // Capture and persist the validated digest before any DELETE, rather than
       // treating an expected name alone as ownership evidence.
@@ -1031,7 +1027,7 @@ export async function execute(
     api = apiClient(input),
     run = child,
     registry = () => registryStatus(input, api),
-    deleteImage = (image) => deleteRegistryTag(input, image, { api, report }),
+    deleteImage = (image) => deleteRegistryTag(input, image, { api }),
     report = console.log,
     hold = recoveryHolder,
   } = {},
@@ -1040,6 +1036,9 @@ export async function execute(
   const statePath = resolve(input.temp, "container-api-verification-owned.json");
   if (readProtected(statePath) !== undefined) fail("state_exists");
   try {
+    // A manual workflow can run independently of normal CI: enforce the
+    // experiment's exact CLI pin before any ownership claim or mutation.
+    wranglerArgs();
     await preflight(input, api, registry);
   } catch (error) {
     const code = diagnosticCode(error);

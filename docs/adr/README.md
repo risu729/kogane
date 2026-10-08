@@ -53,4 +53,4 @@ for current behavior.
 - [ADR 0040: Deploy compatible Workers through prebuilt cf versions](0040-compatible-cf-version-deployment.md)
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — proposed; production verification pending
-- [ADR 0044: Use the direct Container API with existing applications](0044-container-direct-api.md) — proposed; native runtime verification pending
+- [ADR 0045: Use the direct Container API with existing applications](0045-container-direct-api.md) — proposed; native runtime verification pending

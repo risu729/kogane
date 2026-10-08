@@ -65,12 +65,29 @@ export function worker() {
           new Request(`http://container${path}`, { method: request.method }),
         );
         if (response.status !== 200) {
+          if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599)
+            throw new Error("invalid_synthetic_status");
           await response.body?.cancel();
-          return Response.json({ code: "operation_failed" }, { status: 502 });
+          return Response.json(
+            { code: "operation_failed" },
+            {
+              status: 502,
+              headers: {
+                "x-verification-failure": "upstream_http",
+                "x-verification-upstream-status": String(response.status),
+              },
+            },
+          );
         }
         return response;
       } catch {
-        return Response.json({ code: "operation_failed" }, { status: 502 });
+        return Response.json(
+          { code: "operation_failed" },
+          {
+            status: 502,
+            headers: { "x-verification-failure": "worker_exception" },
+          },
+        );
       }
     },
   };

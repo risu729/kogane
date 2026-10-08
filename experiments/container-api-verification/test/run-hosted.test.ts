@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   writeFileSync,
   symlinkSync,
@@ -25,6 +26,7 @@ import {
   driverFailure,
   registryHttpCode,
   wranglerArgs,
+  validateWranglerPin,
   preflight,
   namespaces,
   activeVersion,
@@ -231,6 +233,7 @@ test("registry preflight/readback uses memory-only five-minute pull credentials 
   const result = await registryStatus(input(), api, async (url: string, opts: RequestInit) => {
     expect(url).toBe(`https://registry.cloudflare.com/v2/${account}/${APP}/manifests/${sha}`);
     expect(opts.redirect).toBe("manual");
+    expect(opts.method).toBe("HEAD");
     return new Response("", { status: 404 });
   });
   expect(result).toBeUndefined();
@@ -776,7 +779,7 @@ test("holder tolerates a clean post-open disconnect only; recovery verification 
   expect(fake.killed()).toBe(false);
 });
 
-test("tag-only deletion uses one fixed URL, digest proof, five-minute pull+push credentials, and GET404", async () => {
+test("tag-only deletion uses one fixed URL, digest proof, five-minute pull+push credentials, and HEAD404", async () => {
   const calls: Array<[string, string]> = [],
     credentials: unknown[] = [];
   let time = 0,
@@ -794,7 +797,7 @@ test("tag-only deletion uses one fixed URL, digest proof, five-minute pull+push 
       expect(options.redirect).toBe("manual");
       expect((options.headers as Record<string, string>).authorization).toStartWith("Basic ");
       calls.push([url, options.method!]);
-      const status = calls.length === 2 ? 202 : calls.length === 5 ? 404 : 200;
+      const status = calls.length === 2 ? 202 : calls.length === 4 ? 404 : 200;
       return new Response(
         new ReadableStream({
           cancel() {
@@ -816,13 +819,12 @@ test("tag-only deletion uses one fixed URL, digest proof, five-minute pull+push 
   ]);
   const url = `https://registry.cloudflare.com/v2/${account}/${APP}/manifests/${sha}`;
   expect(calls).toEqual([
-    [url, "GET"],
-    [url, "DELETE"],
-    [url, "GET"],
     [url, "HEAD"],
-    [url, "GET"],
+    [url, "DELETE"],
+    [url, "HEAD"],
+    [url, "HEAD"],
   ]);
-  expect(cancelled).toBe(5);
+  expect(cancelled).toBe(4);
   expect(calls.every(([target, method]) => !target.includes("/gc/") && method !== "PUT")).toBe(
     true,
   );
@@ -866,7 +868,7 @@ test("tag deletion refuses redirects, missing/changed digests and malformed cred
         },
       }),
     ).rejects.toThrow(/verification_runner_registry_(http|digest|identity)/u);
-    expect(methods).toEqual(["GET"]);
+    expect(methods).toEqual(["HEAD"]);
   }
 });
 
@@ -895,7 +897,7 @@ test("redirects or changed tags during deletion/readback stay failures with no u
       }),
     ).rejects.toThrow(/verification_runner_registry_(http|identity)/u);
     expect(methods).toEqual(
-      badStage === "delete_redirect" ? ["GET", "DELETE"] : ["GET", "DELETE", "GET"],
+      badStage === "delete_redirect" ? ["HEAD", "DELETE"] : ["HEAD", "DELETE", "HEAD"],
     );
   }
 });
@@ -1499,10 +1501,10 @@ test("accepted exact-tag deletion still fails closed at the unchanged ninety-sec
     }),
   ).rejects.toThrow("verification_runner_cleanup_image_readback_timeout");
   expect(time).toBe(90000);
-  expect(requests).toBe(48);
+  expect(requests).toBe(47);
 });
 
-test("DELETE404 races still require independent GET404 and preserve identity, privacy and the ninety-second deadline", async () => {
+test("DELETE404 races still require independent HEAD404 and preserve identity, privacy and the ninety-second deadline", async () => {
   for (const result of [
     "absent",
     "stale_then_absent",
@@ -1563,7 +1565,7 @@ test("DELETE404 races still require independent GET404 and preserve identity, pr
     });
     if (["absent", "stale_then_absent"].includes(result)) {
       await check;
-      expect(requests).toBe(result === "absent" ? 3 : 5);
+      expect(requests).toBe(result === "absent" ? 3 : 4);
       expect(time).toBe(result === "absent" ? 0 : 2000);
     } else {
       const code =
@@ -1574,84 +1576,241 @@ test("DELETE404 races still require independent GET404 and preserve identity, pr
             : `verification_runner_registry_http_readback_${result}`;
       await expect(check).rejects.toThrow(code);
       expect(time).toBe(result === "stale" ? 90000 : 0);
-      expect(requests).toBe(result === "stale" ? 48 : 3);
+      expect(requests).toBe(result === "stale" ? 47 : 3);
     }
-    expect(methods.slice(0, 3)).toEqual(["GET", "DELETE", "GET"]);
+    expect(methods.slice(0, 3)).toEqual(["HEAD", "DELETE", "HEAD"]);
     expect(methods.filter((method) => method === "DELETE")).toHaveLength(1);
     expect(inspected).toBe(0);
   }
 });
 
-test("one bounded HEAD observation distinguishes stale GET without replacing GET404 or exposing metadata", async () => {
-  for (const head of [200, 404, 403, 302, "transport"]) {
+test("canonical HEAD existence ignores stale GET content while preserving exact-tag digest and absence gates", async () => {
+  for (const outcome of [
+    "absent",
+    "present",
+    "forbidden",
+    "redirect",
+    "changed",
+    "missing_digest",
+    "transport",
+  ]) {
     let time = 0,
-      get = 0,
-      headCalls = 0,
-      inspected = 0;
-    const reports: string[] = [];
-    await expect(
-      deleteRegistryTag(input(), image, {
-        api: async () => ({ result: { password: token } }),
-        now: () => time,
-        sleep: async (ms: number) => {
-          time += ms;
+      heads = 0,
+      bodyReads = 0;
+    const methods: string[] = [];
+    const fetchImpl = async (url: string, options: RequestInit) => {
+      expect(url).toBe(`https://registry.cloudflare.com/v2/${account}/${APP}/manifests/${sha}`);
+      expect(options.redirect).toBe("manual");
+      methods.push(options.method!);
+      // Actual regression: GET can still serve deleted manifest content.
+      if (options.method === "GET")
+        return new Response(token, {
+          status: 200,
+          headers: { "docker-content-digest": image.split("@")[1]! },
+        });
+      if (options.method === "DELETE") return new Response(null, { status: 202 });
+      expect(options.method).toBe("HEAD");
+      heads++;
+      if (heads === 1)
+        return new Response(null, {
+          status: 200,
+          headers: { "docker-content-digest": image.split("@")[1]! },
+        });
+      if (outcome === "transport") throw new Error(token);
+      const status =
+        outcome === "absent"
+          ? 404
+          : outcome === "forbidden"
+            ? 403
+            : outcome === "redirect"
+              ? 302
+              : 200;
+      return {
+        status,
+        body: { cancel: async () => {} },
+        headers: {
+          get: (name: string) => {
+            expect(name).toBe("docker-content-digest");
+            return outcome === "missing_digest"
+              ? null
+              : `sha256:${(outcome === "changed" ? "e" : "d").repeat(64)}`;
+          },
         },
-        report: (line: string) => reports.push(line),
-        fetchImpl: async (url: string, options: RequestInit) => {
-          expect(url).toBe(`https://registry.cloudflare.com/v2/${account}/${APP}/manifests/${sha}`);
-          expect(options.redirect).toBe("manual");
-          if (options.method === "HEAD") {
-            headCalls++;
-            // Consume part of the SAME deadline, never a new ninety-second budget.
-            time += 1000;
-            if (head === "transport") throw new Error(token);
-            return {
-              status: head,
-              body: { cancel: async () => {} },
-              get headers() {
-                inspected++;
-                throw new Error(token);
-              },
-              text: async () => {
-                inspected++;
-                throw new Error(token);
-              },
-              json: async () => {
-                inspected++;
-                throw new Error(token);
-              },
-            } as unknown as Response;
-          }
-          if (options.method === "GET") get++;
-          return new Response(null, {
-            status: options.method === "DELETE" ? 202 : 200,
-            headers: { "docker-content-digest": image.split("@")[1]! },
-          });
+        text: async () => {
+          bodyReads++;
+          throw new Error(token);
         },
-      }),
-    ).rejects.toThrow("verification_runner_cleanup_image_readback_timeout");
-    expect(time).toBe(90000);
-    expect(headCalls).toBe(1);
-    expect(get).toBeGreaterThan(1);
-    expect(inspected).toBe(0);
-    expect(reports.map((line) => JSON.parse(line))).toEqual([
-      {
-        code: "verification_registry_readback_observation",
-        delete: "accepted",
-        get: "present",
-        head:
-          head === 200
-            ? "present"
-            : head === 404
-              ? "not_found"
-              : head === 403
-                ? "forbidden"
-                : head === 302
-                  ? "redirect"
-                  : "transport",
+        json: async () => {
+          bodyReads++;
+          throw new Error(token);
+        },
+      } as unknown as Response;
+    };
+    const api = async () => ({ result: { password: token } });
+    const deletion = deleteRegistryTag(input(), image, {
+      api,
+      fetchImpl,
+      now: () => time,
+      sleep: async (ms: number) => {
+        time += ms;
       },
-    ]);
-    for (const secret of [token, account, sha, image])
-      expect(reports.join("")).not.toContain(secret);
+    });
+    if (outcome === "absent") {
+      await deletion;
+      expect(time).toBe(0);
+      expect(methods).toEqual(["HEAD", "DELETE", "HEAD"]);
+    } else {
+      const code =
+        outcome === "present"
+          ? "verification_runner_cleanup_image_readback_timeout"
+          : outcome === "changed"
+            ? "verification_runner_registry_identity"
+            : outcome === "missing_digest"
+              ? "verification_runner_registry_digest"
+              : outcome === "transport"
+                ? "verification_runner_registry_transport"
+                : `verification_runner_registry_http_readback_${outcome}`;
+      await expect(deletion).rejects.toThrow(code);
+      expect(time).toBe(outcome === "present" ? 90000 : 0);
+    }
+    expect(methods).not.toContain("GET");
+    expect(bodyReads).toBe(0);
+  }
+  for (const present of [false, true]) {
+    const methods: string[] = [];
+    const found = await registryStatus(
+      input(),
+      async () => ({ result: { password: token } }),
+      async (_url: string, options: RequestInit) => {
+        methods.push(options.method!);
+        return new Response(null, {
+          status: present || options.method === "GET" ? 200 : 404,
+          headers: { "docker-content-digest": image.split("@")[1]! },
+        });
+      },
+    );
+    expect(found).toBe(present ? image : undefined);
+    expect(methods).toEqual(["HEAD"]);
+  }
+});
+
+test("runner forwards only finite synthetic route/status driver codes and discards forged or provider-bearing text", () => {
+  for (const code of [
+    "verification_http_once_upstream_not_found",
+    "verification_http_initialize_worker_exception",
+    "verification_http_stream_error_metadata_invalid",
+    "verification_http_state_outer_forbidden",
+    "verification_http_route",
+  ]) {
+    expect(driverFailure(code)).toBe(code);
+    expect(diagnosticCode(new Error(code))).toBe(code);
+    expect(driverFailure(code + "\n" + token)).toBe("verification_runner_child");
+    expect(diagnosticCode(new Error(code + "\n" + token))).toBe("verification_runner_failed");
+  }
+  for (const code of [
+    "verification_http_secret_outer_forbidden",
+    "verification_http_once_upstream_" + token,
+    "verification_http_once_upstream_404",
+    "verification_http_once_outer_anything",
+    "verification_http_once_worker_exception_" + token,
+    "verification_http_route_" + account,
+  ]) {
+    expect(driverFailure(code)).toBe("verification_runner_child");
+    expect(diagnosticCode(new Error(code))).toBe("verification_runner_failed");
+  }
+});
+
+test("runtime CLI admission rejects a hoisted wrong version or altered launcher before accepting the exact experiment pin", () => {
+  const declared = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
+    .devDependencies.wrangler;
+  const installed = { name: "wrangler", version: declared, bin: { wrangler: "./bin/wrangler.js" } };
+  validateWranglerPin(installed, declared);
+  for (const [metadata, requested] of [
+    [{ ...installed, version: "4.147.0" }, declared],
+    [{ ...installed, name: "other" }, declared],
+    [{ ...installed, bin: { wrangler: "../../../foreign.js" } }, declared],
+    [{ ...installed, bin: undefined }, declared],
+    [installed, "^" + declared],
+    [installed, undefined],
+    [undefined, declared],
+  ])
+    expect(() => validateWranglerPin(metadata, requested)).toThrow(
+      "verification_runner_wrangler_pin",
+    );
+  expect(diagnosticCode(new Error("verification_runner_wrangler_pin"))).toBe(
+    "verification_runner_wrangler_pin",
+  );
+});
+
+test("a fresh runner with the wrong installed CLI fails before network, ownership claim or mutation", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "verification-cli-pin-"));
+  try {
+    for (const name of [
+      "run-hosted.mjs",
+      "identifiers.mjs",
+      "http-diagnostics.mjs",
+      "package.json",
+    ])
+      writeFileSync(resolve(temp, name), readFileSync(new URL("../" + name, import.meta.url)), {
+        mode: 0o600,
+        flag: "wx",
+      });
+    writeFileSync(
+      resolve(temp, "driver.mjs"),
+      'export function identity() { throw new Error("fixture_forbidden"); }',
+      { mode: 0o600, flag: "wx" },
+    );
+    mkdirSync(resolve(temp, "node_modules/wrangler"), { recursive: true, mode: 0o700 });
+    writeFileSync(
+      resolve(temp, "node_modules/wrangler/package.json"),
+      JSON.stringify({
+        name: "wrangler",
+        version: "4.147.0",
+        bin: { wrangler: "./bin/wrangler.js" },
+      }),
+      { mode: 0o600, flag: "wx" },
+    );
+    const owned = resolve(temp, "container-api-verification.abcdefgh");
+    mkdirSync(owned, { mode: 0o700 });
+    const block = resolve(temp, "block-network.cjs");
+    writeFileSync(
+      block,
+      'globalThis.fetch = () => { process.stdout.write("verification_test_network_attempted"); throw new Error("fixture_forbidden"); };',
+      { mode: 0o600, flag: "wx" },
+    );
+    let stdout = "",
+      stderr = "";
+    try {
+      execFileSync("node", [resolve(temp, "run-hosted.mjs")], {
+        timeout: 10000,
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH!,
+          RUNNER_TEMP: temp,
+          CONTAINER_VERIFICATION_TEMP: owned,
+          CONTAINER_VERIFICATION_ACCOUNT_ID: account,
+          CONTAINER_VERIFICATION_API_TOKEN: token,
+          CONTAINER_VERIFICATION_SUBDOMAIN: "synthetic",
+          GITHUB_SHA: sha,
+          NODE_OPTIONS: `--require=${block}`,
+        },
+      });
+      throw new Error("fixture unexpectedly succeeded");
+    } catch (error) {
+      stdout = String((error as { stdout?: string }).stdout ?? "");
+      stderr = String((error as { stderr?: string }).stderr ?? "");
+    }
+    expect(stdout.trim()).toBe(
+      JSON.stringify({
+        code: "verification_execution_failed",
+        stage: "preflight",
+        error: "verification_runner_wrangler_pin",
+      }),
+    );
+    expect(stderr.trim()).toBe("verification_runner_wrangler_pin");
+    expect(readProtected(resolve(owned, "container-api-verification-owned.json"))).toBeUndefined();
+    expect(stdout + stderr).not.toContain(token);
+  } finally {
+    rmSync(temp, { recursive: true });
   }
 });

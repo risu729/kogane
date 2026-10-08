@@ -13,6 +13,7 @@ import {
 import { canonicalHex, canonicalUuid, canonicalImageRef } from "./identifiers.mjs";
 import { resolve } from "node:path";
 import { BACKPRESSURE_MAX_CHUNKS } from "./container/server.mjs";
+import { createSyntheticRequest } from "./http-diagnostics.mjs";
 
 const workerName = "kogane-container-api-verification";
 const appName = `${workerName}-verificationcontainer`;
@@ -247,21 +248,7 @@ export async function verifyPhase({
     recoveryChecks: 0,
     sdkAlarmChecks: 0,
   };
-  async function request(path, method = "GET") {
-    let response;
-    try {
-      response = await fetchImpl(`${origin}${path}`, {
-        method,
-        redirect: "manual",
-        signal: AbortSignal.timeout(120_000),
-        headers: { authorization: `Bearer ${key}` },
-      });
-    } catch {
-      closed("transport");
-    }
-    if (response.status !== 200) closed("http");
-    return response;
-  }
+  const request = createSyntheticRequest({ origin, key, fetchImpl });
   async function json(path, method = "GET") {
     try {
       return await (await request(path, method)).json();

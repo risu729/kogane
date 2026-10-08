@@ -1,6 +1,17 @@
 // Synthetic only: there is no outbound fetch, bank hostname, credential or dependency.
 export const BACKPRESSURE_CHUNK_BYTES = 64 * 1024;
 export const BACKPRESSURE_MAX_CHUNKS = 4096;
+// Keep the synthetic HTTP socket alive through the deliberate 35s quiet window.
+// This does not change the Container's 30s idle policy or the driver's 120s request deadline.
+export const SYNTHETIC_IDLE_TIMEOUT_SECONDS = 60;
+export function startSyntheticServer({ hostname = "0.0.0.0", port = 8080 } = {}) {
+  return Bun.serve({
+    hostname,
+    port,
+    idleTimeout: SYNTHETIC_IDLE_TIMEOUT_SECONDS,
+    fetch: syntheticServer(),
+  });
+}
 export function syntheticServer() {
   const processIdentity = crypto.randomUUID();
   let posts = 0;
@@ -87,5 +98,5 @@ export function syntheticServer() {
 }
 if (import.meta.main) {
   process.on("SIGTERM", () => process.exit(0));
-  Bun.serve({ hostname: "0.0.0.0", port: 8080, fetch: syntheticServer() });
+  startSyntheticServer();
 }

@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-12
-- Status: prepared; temporary resource access and hosted execution are pending.
+- Status: hosted SDK baseline attempts in progress; native and rollback gates pending.
 
 ## Question
 

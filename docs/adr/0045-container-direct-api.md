@@ -1,4 +1,4 @@
-# ADR 0044: Use the direct Container API with existing applications
+# ADR 0045: Use the direct Container API with existing applications
 
 - Status: proposed
 - Date: 2026-10-05
@@ -113,8 +113,14 @@ controller, experiment and manual runner together.
 The main-integration head `89d3a3ee614c2ff91e2dee73b2f37d3698ff671e` passed
 [hosted CI](https://github.com/risu729/kogane/actions/runs/37259363263).
 That result predates the idle-alarm correction and synthetic harness; it does
-not validate those additions. Local Docker is unavailable. Hosted execution,
-final CI and the following runtime gates are still pending:
+not validate those additions. Local Docker is unavailable. Hosted attempts have deployed the SDK baseline
+and exposed harness defects; none has completed the native or rollback phases.
+The latest completed attempt at commit `6d92b9b` stopped in the SDK baseline
+with a closed HTTP error. Its application, namespace and Worker were removed;
+registry readback disagreed between GET and HEAD. The runner now uses the OCI
+manifest HEAD existence operation for both ownership and absence checks.
+These attempts do not establish runtime equivalence. Final CI and the following
+runtime gates are still pending:
 
 1. Deploy SDK 0.3.7 with a fixed class/migration/image; seed synthetic KV and SQL
    sentinels and record application, namespace and exact Worker version.
