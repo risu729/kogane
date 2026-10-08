@@ -1,5 +1,5 @@
 // @kogane/domain: pure contracts for values, time, metrics, scope, coverage,
-// rewards, context, decisions and results. No I/O, no clock, no runtime dependencies.
+// rewards, context, decisions, results and lots. No I/O, no clock, no runtime dependencies.
 export * from "./values.ts";
 export * from "./time.ts";
 export * from "./metrics.ts";
@@ -13,6 +13,7 @@ export * from "./reconcile.ts";
 export * from "./result.ts";
 export * from "./paging.ts";
 export * from "./calculation.ts";
+export * from "./lots.ts";
 export * from "./reports.ts";
 export {
   hasExactKeys,

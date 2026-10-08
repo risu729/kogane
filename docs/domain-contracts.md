@@ -158,6 +158,33 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
   `checkSourceAllocations` (sums never exceed the limit; negative allocations
   rejected).
 
+## `lots.ts` — lots and disposal allocation over a provisional input
+
+- `computeLots(inputs, policy)` is pure and deterministic: the same inputs in
+  any order give the same result. Inputs (`LotInput`) carry the provisional
+  tag `provisional-lot-input-v0`, a pinned `LotInputRef` (event at a
+  revision, or observation in a parse run, with `lotInputRefText`), a kind
+  (`acquisition | disposal | split | snapshot | transfer`), the book key
+  (holder, instrument, opaque wrapper key), trade and settlement times,
+  quantity, consideration, fees, an optional input FX rate, a split ratio and
+  lot selections. `validLotInput`, `validLotInputRef` and `validLotPolicy`
+  reject unknown keys.
+- `LotPolicy` pins purpose, method (`fifo | moving-average |
+specific-identification`), scope, time basis, ordering rule, fee and FX
+  treatment, `fxPolicyRef`, `costUnitRef` and an optional `leg`/`carry`
+  `RoundingPolicy`. No policy is `policy_missing`; a `tax` purpose is refused
+  through the unchanged `costBasis()` gate.
+- Whole-run refusals (`invalid_input`, `duplicate_ref`,
+  `same_event_revisions`) and per-book refusals (`transfer_contract_pending`,
+  `unsupported_instrument`) are typed results. Inside a book the first
+  ambiguous or inconsistent input is `indeterminateFrom` and later disposals
+  are `upstream_indeterminate`; amounts that are not known are typed reasons,
+  never zero, and costs in different units are never summed.
+- Output: disposals with allocations, allocated cost, proceeds and disposal
+  fees, outcome `allocated | limited | indeterminate`; remaining lots with a
+  `lineage`; a manifest for `canonicalDigest`. No gain, no tax conclusion. No
+  adapter produces these inputs yet ([ADR 0051](adr/0051-provisional-lot-engine.md)).
+
 ## `result.ts` — the shape UI and agents share
 
 - `QuerySpec` with the intents of addendum 09 §1 (holdings, reported-state,
