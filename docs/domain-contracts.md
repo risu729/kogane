@@ -170,7 +170,8 @@ described in [identity](identity.md#cross-identifier-instrument-candidates).
 - `compareIdentifierFacts` returns closed codes, never a score: `evidence`
   (`isin-equal`, `ric-equal`, `security-code-equal`), `conflicts` (kind, ISIN,
   RIC, country, market, currency, share class, product class), `agreements`
-  and `gaps` (a fact one side does not state).
+  and `gaps` (a fact one side or both sides do not state, so ISIN, share
+  class and product class are gaps on every pair while no rule records them).
 - `instrumentCandidates` pairs only identifiers that share an evidence value.
   A pair on two instruments counts every identifier that maps to either
   instrument now (`via` names the others whose facts conflict). A pair with a

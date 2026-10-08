@@ -102,7 +102,8 @@ describe("evidence-backed candidates", () => {
         subjectIdentifierId: "b-code",
         evidence: ["security-code-equal"],
         agreements: ["kind-agrees", "country-agrees", "market-agrees", "currency-agrees"],
-        gaps: [],
+        // No identity rule records an ISIN, share class or product class yet.
+        gaps: ["isin-unconfirmed", "share-class-unconfirmed", "product-class-unconfirmed"],
         crossSource: true,
         status: "proposed",
         hold: null,
@@ -124,7 +125,12 @@ describe("evidence-backed candidates", () => {
       anchorIdentifierId: "a-listing",
       subjectIdentifierId: "b-bare",
       evidence: ["security-code-equal"],
-      gaps: ["market-unconfirmed"],
+      gaps: [
+        "isin-unconfirmed",
+        "market-unconfirmed",
+        "share-class-unconfirmed",
+        "product-class-unconfirmed",
+      ],
       crossSource: false,
       status: "proposed",
     });
@@ -141,7 +147,7 @@ describe("evidence-backed candidates", () => {
     });
     expect(set([a, b]).candidates[0]).toMatchObject({
       evidence: ["isin-equal"],
-      gaps: [],
+      gaps: ["share-class-unconfirmed", "product-class-unconfirmed"],
       status: "proposed",
     });
     const codeOnly = compareIdentifierFacts(
@@ -631,6 +637,20 @@ describe("a decision binds every identifier that shares the decided instrument",
       ["r-listed", "s-shared", "proposed", "subject-shares-instrument"],
       ["r-listed", "t-shared", "proposed", "subject-shares-instrument"],
       ["s-shared", "t-shared", "adopted", null],
+    ]);
+  });
+});
+
+describe("a fact neither side states is still named", () => {
+  test("ISIN, share class and product class are gaps when both sides lack them", () => {
+    const gaps = compareIdentifierFacts(
+      facts("x", { countryCode: "ZZ", securityCode: "S1", mic: "XSYN", currencies: ["JPY"] }),
+      facts("y", { countryCode: "ZZ", securityCode: "S1", mic: "XSYN", currencies: ["JPY"] }),
+    ).gaps;
+    expect(gaps).toEqual([
+      "isin-unconfirmed",
+      "share-class-unconfirmed",
+      "product-class-unconfirmed",
     ]);
   });
 });

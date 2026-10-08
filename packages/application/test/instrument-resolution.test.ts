@@ -462,7 +462,12 @@ describe("candidates from the identifiers the identity rules stored", () => {
       anchorIdentifierId: id.listing9001,
       subjectIdentifierId: id.venue9001,
       evidence: ["security-code-equal"],
-      gaps: ["market-unconfirmed"],
+      gaps: [
+        "isin-unconfirmed",
+        "market-unconfirmed",
+        "share-class-unconfirmed",
+        "product-class-unconfirmed",
+      ],
       crossSource: false,
       status: "proposed",
     });

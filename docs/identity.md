@@ -81,10 +81,11 @@ product identifiers that current published observations use and answers,
 under policy `instrument-candidates-v1`:
 
 - **candidates**: pairs that share an equal ISIN, an equal RIC, or an equal
-  country and security code as the identity rule recorded them, and state no conflicting fact. Each names its evidence, the
-  facts that agree, the facts one side does not state (market, currency, share
-  class, product class, ISIN) and whether the two are used by different
-  sources;
+  country and security code as the identity rule recorded them, and state no
+  conflicting fact. Each names its evidence, the facts that agree, the facts
+  one side or both sides do not state (market, currency, share class, product
+  class, ISIN; no rule records the last three, so every pair names them) and
+  whether the two are used by different sources;
 - **separated** pairs: they share such a value but state a different
   instrument kind, ISIN, RIC, country, MIC, currency, share class or product
   class. Each side counts with every identifier that maps to its instrument

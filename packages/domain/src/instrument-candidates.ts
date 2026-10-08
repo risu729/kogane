@@ -108,7 +108,11 @@ export const CANDIDATE_AGREEMENTS = [
 ] as const;
 export type CandidateAgreement = (typeof CANDIDATE_AGREEMENTS)[number];
 
-/** Facts one side or both sides do not state, so they could not be compared. */
+/**
+ * Facts at least one side does not state (one side or both), so they could
+ * not be compared. A fact no identity rule records yet is therefore a gap on
+ * every pair: missing is a reason, never agreement (INV05).
+ */
 export const CANDIDATE_GAPS = [
   "isin-unconfirmed",
   "market-unconfirmed",
@@ -240,7 +244,7 @@ function compareOptional(
   if (a !== null && b !== null) {
     if (a === b) out.agreements.push(codes.agree);
     else out.conflicts.push(codes.differ);
-  } else if (a !== null || b !== null) out.gaps.push(codes.gap);
+  } else out.gaps.push(codes.gap);
 }
 
 /** Compares two identifiers' stated facts. Names are not read. */
@@ -255,7 +259,7 @@ export function compareIdentifierFacts(
   if (a.isin !== null && b.isin !== null) {
     if (a.isin === b.isin) out.evidence.push("isin-equal");
     else out.conflicts.push("isin-differs");
-  } else if (a.isin !== null || b.isin !== null) out.gaps.push("isin-unconfirmed");
+  } else out.gaps.push("isin-unconfirmed");
 
   // A RIC names one listing: two different RICs are two listings, whatever
   // else they share.

@@ -89,8 +89,10 @@ and `packages/application/src/query/instrument-resolution.ts`:
    code (`market-differs` via the first listing) instead of being offered as a
    place to move it. Two identifiers already on one instrument are a decision:
    only their own facts are reported against it (`sharedInstrument`).
-4. **Gaps** name what one side does not state (ISIN, market, currency, share
-   class, product class). A candidate with gaps is still only a proposal.
+4. **Gaps** name what at least one side does not state, one side or both
+   (ISIN, market, currency, share class, product class). Since no identity
+   rule records an ISIN, share class or product class today, every candidate
+   names those three gaps. A candidate with gaps is still only a proposal.
 5. **Market** is compared through MIC or RIC only. The provider's own market
    wording is shown to the reviewer and never compared: SBI's codes and labels
    already differ between its own datasets.
