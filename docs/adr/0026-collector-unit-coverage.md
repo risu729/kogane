@@ -1232,8 +1232,14 @@ The parser, its version and its code digest are unchanged.
   are both unmatched. The diagnostics read the tree with a copy of the
   parser's private helpers, held equal by tests on pages the parser accepts,
   not by construction. The comparisons have run on synthetic pages only;
-  none has run on production, and the meaning of the two-header table stays
-  unknown until the owner reports it.
+  the meaning of the two-header table stays unknown until the owner reports
+  it.
+- **`latestOkCapture` is unexercised on production data.** The owner's
+  read-only audit of this change's first commit found no other capture with
+  the refused page's artifact key that the parser accepted, so for that page
+  the lookup returns `found: false` and the row comparison does not run (the
+  lookup wrote nothing). The comparison itself is verified on synthetic pages
+  only.
 
 ### Verification
 
@@ -1264,4 +1270,7 @@ The parser, its version and its code digest are unchanged.
   unchanged.
 - The existing shape expectations hold with the new keys added.
 - No production data was read for this amendment; the counts in Context are
-  the owner's report.
+  the owner's report. The owner's audit of the first commit re-ran the replay
+  read-only: the target page is still refused as `unclassified_table`, and
+  `latestOkCapture` found no comparable capture (above), so its comparison
+  is unverified on real data.

@@ -66,7 +66,10 @@ mise exec -- bun services/processor/scripts/replay-diagnostics.ts globalpass-act
 and shares the `shape` and `latestOkCapture` of each refused page; a parser
 change, if any, follows from what they show. Limits: the comparisons have run
 only on synthetic pages; they match texts exactly as the parser normalises
-them, so a value the provider reformats between views is not matched. Tests:
+them, so a value the provider reformats between views is not matched. No
+other capture with this page's key was accepted, so `latestOkCapture` finds
+nothing to compare it with (owner's read-only audit); that comparison is
+unverified on real data. Tests:
 `services/processor/test/global-pass-rejection.test.ts`,
 `services/processor/test/parser-rejection.test.ts` (the lookup).
 
