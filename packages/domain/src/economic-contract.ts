@@ -439,8 +439,10 @@ export function validCommitMember(value: unknown): value is CommitMember {
 
 /**
  * The one commit kind CORE 0070 lets seal a member under an identity epoch
- * that is no longer current: a reviewed needs-review resolution. Reserved; no
- * planner exists for it.
+ * that is no longer current: a reviewed needs-review resolution, and only
+ * with an operation receipt of this kind for the commit's operation and
+ * principal. No receipt can carry it until a vocabulary migration adds it
+ * with its planner, so the exemption is closed today.
  */
 export const IDENTITY_RESOLUTION_KIND = "economic-event.resolve-identity";
 

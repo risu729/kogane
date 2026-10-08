@@ -135,7 +135,11 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   `identity-epoch-1`; a declared identity rewrite (as 0063 was) appends the
   next epoch. A commit whose member is sealed under a non-current epoch is
   refused (`identity_epoch_changed`) unless it is a reviewed identity
-  resolution (`economic-event.resolve-identity`, reserved; no planner). The
+  resolution: kind `economic-event.resolve-identity` **and** an operation
+  receipt of that kind for the commit's operation and principal. The
+  receipt kind CHECK (0051) admits no such kind, so the exemption is closed
+  until the vocabulary migration that adds it together with its planner; a
+  rule writer, or any writer that only names the kind, is refused. The
   holder stays held; nothing is moved automatically.
 - **Knowledge selector interface** (#550, ADR 0056): a cut is
   `{coreEpoch, commitSeq}` or `{coreEpoch, instant}` resolved to the largest
@@ -324,7 +328,8 @@ Synthetic data only. This PR tests:
   by the lane's batch plus a G1b-style seal and commit); leg effects in one
   unit only; cross-writer one live holder in both orders; the legacy purchase
   key trigger; T2c; a released key with another live holder; T1 in both
-  orders and its pinned legacy limit; T4; alias source; T9 and the reserved
+  orders and its pinned legacy limit; T4; alias source; T9 (also refused for a rule writer that names the resolution kind, and no
+  receipt of that kind can be stored) and the reserved
   resolution kind; epochs append-only; every 0070 table append-only.
 - `services/processor/test/lanes.test.ts`: the migration pin includes 0070;
   the whole processor suite runs against the new triggers.

@@ -1361,9 +1361,20 @@ describe("identity epochs", () => {
     await expect(run(db, correction())).rejects.toThrow("identity_epoch_changed");
     expect(snapshot(db)).toEqual(before);
     expect(liveHolders(db)).toEqual(holders);
-    // Only a reviewed identity resolution may (no planner exists for it yet).
-    await run(db, correction("economic-event.resolve-identity"));
-    expect(db.query("SELECT count(*) AS n FROM economic_commit_log").get()).toEqual({ n: 2 });
+    // The resolution kind is bound to a reviewed receipt of that kind: a rule
+    // writer naming it is refused like any other commit.
+    await expect(run(db, correction("economic-event.resolve-identity"))).rejects.toThrow(
+      "identity_epoch_changed",
+    );
+    expect(snapshot(db)).toEqual(before);
+    // And no receipt of that kind can exist until G2 adds it to the vocabulary.
+    expect(() =>
+      db.run(
+        `INSERT INTO operation_receipts(operation_id,principal,operation_kind,payload_digest,plan_id,status,result_json,created_at)
+         VALUES('op-1','owner','economic-event.resolve-identity',?,?,'accepted','{}',?)`,
+        ["e".repeat(64), "f".repeat(64), NOW],
+      ),
+    ).toThrow("CHECK constraint failed");
     db.close();
   });
 
