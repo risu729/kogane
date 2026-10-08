@@ -17,10 +17,19 @@ import {
   type TransactionFamilyEntry,
 } from "../../domain/src/event-families.ts";
 import { globalPassActivity } from "../src/parsers/global-pass-activity-parser.ts";
-import { mizuhoOrdinaryHistory } from "../src/parsers/mizuho.ts";
+import { mizuhoAccountList, mizuhoOrdinaryHistory } from "../src/parsers/mizuho.ts";
 import { mobileSuicaSfHistory } from "../src/parsers/mobile-suica-sf-history.ts";
-import { moneyForwardMonthlyTransactions } from "../src/parsers/moneyforward-parser.ts";
-import { myJcbCreditLedger } from "../src/parsers/myjcb.ts";
+import {
+  moneyForwardEvidenceOnly,
+  moneyForwardMonthlyTransactions,
+} from "../src/parsers/moneyforward-parser.ts";
+import {
+  myJcbCreditLedger,
+  myJcbCreditStatement,
+  myJcbEvidenceOnly,
+  myJcbPastMonthBalances,
+} from "../src/parsers/myjcb.ts";
+import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-schedule.ts";
 import { paypayCsv } from "../src/parsers/paypay-csv.ts";
 import { PARSERS } from "../src/parsers/registry.ts";
 import { sbiDomesticTradeRecords } from "../src/parsers/sbi-domestic-trade-records.ts";
@@ -35,14 +44,16 @@ import {
   sonyBankHistoryJson,
   sonyBankWalletHistory,
 } from "../src/parsers/sony-bank.ts";
+import { sbiShinseiBalanceSummaryAndStage } from "../src/parsers/sbi-shinsei-balance-summary-and-stage.ts";
 import { stGeorgeTransactions } from "../src/parsers/st-george.ts";
-import { vPointHistoryPage } from "../src/parsers/v-point.ts";
+import { vPointBalanceInfo, vPointHistoryPage, vPointSmfgPoint } from "../src/parsers/v-point.ts";
 import { vPointPayNotificationEvent } from "../src/parsers/v-point-pay.ts";
 import { vpassStatementPage } from "../src/parsers/vpass.ts";
 import type { ArtifactMeta, Observation, Parser } from "../src/types.ts";
 import { CONTRACT_PARSERS } from "./coverage-contract-cases.ts";
 import { FIXTURES_ROOT } from "./fixture-root.ts";
-import { mizuhoHistoryHtml, mizuhoHistoryRow } from "./mizuho-fixture.ts";
+import { mizuhoAccountHtml, mizuhoHistoryHtml, mizuhoHistoryRow } from "./mizuho-fixture.ts";
+import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 
 /** PARSERS entries whose rows are balances, valuations, scheduled payments or none. */
 const NOT_IN_REGISTRY = [
@@ -303,6 +314,28 @@ const CASES: Case[] = [
     meta("sony-bank", "wallet-history-202609", { mime: "text/html; charset=UTF-8" }),
     read("sony-bank-parser-boundaries", "wallet-history-2026-09.html"),
   ),
+  // The fixture row with a stated local fee (the shared fixture states none).
+  one(
+    sonyBankWalletHistory,
+    "wallet-fee",
+    meta("sony-bank", "wallet-history-202609", { mime: "text/html; charset=UTF-8" }),
+    encode(
+      new TextDecoder()
+        .decode(read("sony-bank-parser-boundaries", "wallet-history-2026-09.html"))
+        .replace("<td>JPY 1200</td><td>-</td>", "<td>JPY 1200</td><td>JPY 10</td>"),
+    ),
+  ),
+  // The same row before the provider confirmed it (確定日 未確定).
+  one(
+    sonyBankWalletHistory,
+    "wallet-pending",
+    meta("sony-bank", "wallet-history-202609", { mime: "text/html; charset=UTF-8" }),
+    encode(
+      new TextDecoder()
+        .decode(read("sony-bank-parser-boundaries", "wallet-history-2026-09.html"))
+        .replace("<td>2026/09/02</td>", "<td>未確定</td>"),
+    ),
+  ),
   one(
     stGeorgeTransactions,
     "snapshot",
@@ -338,43 +371,214 @@ const CASES: Case[] = [
 ];
 
 /**
+ * The parsers outside the registry that have no coverage-contract case, run on
+ * the fixtures their own tests use. With the contract cases, every parser of
+ * `NOT_IN_REGISTRY` is run at least once.
+ */
+const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
+const OUTSIDE_CASES: Case[] = [
+  one(
+    mizuhoAccountList,
+    "account-list",
+    meta("mizuho-bank", "mizuho-account-list-html", {
+      artifactKey: "account-list.html",
+      fetchUnitKey: "account-list",
+      mime: "text/html",
+    }),
+    encode(mizuhoAccountHtml()),
+  ),
+  one(
+    moneyForwardEvidenceOnly,
+    "accounts-index",
+    meta("moneyforward-me", "accounts-index", { artifactKey: "accounts.html", ...MF_EVIDENCE }),
+    read("moneyforward", "accounts.html"),
+  ),
+  one(
+    moneyForwardEvidenceOnly,
+    "account-detail",
+    meta("moneyforward-me", "account-detail", {
+      artifactKey: "account-detail-01.html",
+      ...MF_EVIDENCE,
+      fetchUnitKey: `moneyforward-account-v1-${"a".repeat(64)}`,
+    }),
+    read("moneyforward", "account-detail-01.html"),
+  ),
+  one(
+    myJcbEvidenceOnly,
+    "credit-menu",
+    meta("myjcb", "credit-menu", {
+      artifactKey: "connection-a/credit-menu.html",
+      mime: "text/html; charset=utf-8",
+      statementState: null,
+      period: null,
+    }),
+    read(...MYJCB_RUN, "credit-menu.html"),
+  ),
+  one(
+    myJcbEvidenceOnly,
+    "discovery",
+    meta("myjcb", "discovery", {
+      artifactKey: "connection-a/discovery.json",
+      statementState: null,
+      period: null,
+    }),
+    read(...MYJCB_RUN, "discovery.json"),
+  ),
+  one(
+    myJcbPastMonthBalances,
+    "credit-past-months",
+    meta("myjcb", "credit-past-months", {
+      artifactKey: "connection-a/credit-past-months.json",
+      statementState: null,
+      period: null,
+    }),
+    read(...MYJCB_RUN, "credit-past-months.json"),
+  ),
+  ...(
+    [
+      ["00", "unconfirmed"],
+      ["02", "confirmed"],
+    ] as const
+  ).map(([detailMonth, statementState]) =>
+    one(
+      myJcbCreditStatement,
+      `credit-detail-${detailMonth}`,
+      meta("myjcb", "credit-detail", {
+        artifactKey: `connection-a/credit-detail-${detailMonth}.html`,
+        statementState,
+        period: myJcbLedger(detailMonth).period,
+        mime: "text/html; charset=utf-8",
+      }),
+      read(...MYJCB_RUN, `credit-detail-${detailMonth}.html`),
+    ),
+  ),
+  one(myJcbSkipPaymentSchedule, "skip-payment", skipMeta(), encode(skipPage())),
+  one(
+    sbiShinseiBalanceSummaryAndStage,
+    "balance-summary-and-stage",
+    meta("sbi-shinsei-bank", "balance-summary-and-stage"),
+    read("sbi-shinsei-parser-boundaries", "balance-summary-and-stage.json"),
+  ),
+  one(
+    vPointBalanceInfo,
+    "balance-info",
+    meta("v-point", "balance-info"),
+    read("v-point", "balance-info.json"),
+  ),
+  one(
+    vPointSmfgPoint,
+    "smfg-point",
+    meta("v-point", "smfg-point"),
+    read("v-point", "smfg-point.json"),
+  ),
+];
+
+/**
  * Where a row states each provider link field, as a path into `extra`. The
  * test proves the field is on at least one fixture row of the parser.
  */
-const LINK_FIELDS: Record<string, Partial<Record<ProviderLinkCode, readonly string[]>>> = {
+const LINK_FIELDS: Record<
+  string,
+  Partial<Record<ProviderLinkCode, readonly (readonly string[])[]>>
+> = {
   "global-pass/global-pass-activity": {
-    settlement_amount: ["expandedFields", "Funded Currency and Amount"],
-    commission_stated: ["expandedFields", "Transaction Fee"],
-    exchange_rate_stated: ["expandedFields", "Applicable Rate"],
+    settlement_amount: [
+      ["expandedFields", "Funded Currency and Amount"],
+      ["expandedFields", "Local Currency and Amount"],
+      ["compactFields", "Funded Currency and Amount"],
+      ["compactFields", "Local Currency and Amount"],
+    ],
+    commission_stated: [
+      ["expandedFields", "Transaction Fee"],
+      ["expandedFields", "ATM Fee"],
+      ["expandedFields", "FX Fee"],
+    ],
+    exchange_rate_stated: [["expandedFields", "Applicable Rate"]],
   },
   "paypay/paypay-csv": {
-    settlement_amount: ["overseas", "amount"],
-    exchange_rate_stated: ["overseas", "conversionRateJpy"],
+    settlement_amount: [["overseas", "amount"]],
+    exchange_rate_stated: [["overseas", "conversionRateJpy"]],
   },
-  "sbi-securities/sbi-domestic-trade-records": { value_date: ["valueDate"] },
+  "sbi-securities/sbi-domestic-trade-records": { value_date: [["valueDate"]] },
   "sbi-securities/sbi-foreign-trade-records": {
-    value_date: ["_kogane", "valueDate"],
-    settlement_amount: ["settlementCurrencyCode"],
+    value_date: [["_kogane", "valueDate"], ["valueDate"]],
+    settlement_amount: [["settlementCurrencyCode"]],
   },
-  "sbi-vc-trade/sbi-vc-cashflows": { value_date: ["valueYmdDate"] },
+  "sbi-vc-trade/sbi-vc-cashflows": { value_date: [["valueYmdDate"]] },
+  "v-point/v-point-history-page": { value_date: [["date_reflect"], ["_kogane", "reflectedDate"]] },
   "sbi-vc-trade/sbi-vc-executions": {
-    execution_sub_number: ["CExecutionIdSubNo"],
-    value_date: ["valueYmdDate"],
-    commission_stated: ["commissionAmount"],
+    execution_sub_number: [["CExecutionIdSubNo"]],
+    value_date: [["valueYmdDate"]],
+    commission_stated: [["commissionAmount"], ["commissionCurrency"]],
   },
-  "sony-bank/sony-bank-history-csv": { exchange_rate_stated: ["為替レート"] },
-  "sony-bank/sony-bank-history-json": { exchange_rate_stated: ["applicationExchRt"] },
+  "sony-bank/sony-bank-history-csv": { exchange_rate_stated: [["為替レート"]] },
+  "sony-bank/sony-bank-history-json": { exchange_rate_stated: [["applicationExchRt"]] },
   "vpass/vpass-statement-page": {
-    settlement_amount: ["genchiKin"],
-    exchange_rate_stated: ["kanzanRate"],
+    settlement_amount: [["genchiKin"]],
+    exchange_rate_stated: [["kanzanRate"]],
   },
   "sony-bank/sony-bank-wallet-history": {
-    value_date: ["primary", "確定日"],
-    settlement_amount: ["primary", "お取引通貨 金額"],
-    commission_stated: ["primary", "現地手数料"],
-    exchange_rate_stated: ["supplement", "換算レート"],
+    value_date: [["primary", "確定日"]],
+    settlement_amount: [
+      ["primary", "お取引通貨 金額"],
+      ["supplement", "ご利用通貨 金額"],
+    ],
+    commission_stated: [
+      ["primary", "現地手数料"],
+      ["primary", "ATM手数料"],
+      ["primary", "海外取引経費"],
+      ["supplement", "現地手数料"],
+    ],
+    exchange_rate_stated: [["supplement", "換算レート"]],
   },
 };
+
+/**
+ * Key names that look like a provider link field. Every such key on a fixture
+ * row must be a declared link path of the entry or be listed in
+ * `NOT_LINK_FIELDS`, so an entry that declares `none` is proven to state none.
+ */
+const LINK_LIKE =
+  /rate|exch|fee|commission|tesu|kanzan|genchi|value_?(ymd)?_?date|subno|settle|stl$|funded|local currency|overseas|date_reflect|shiharai|手数料|レート|為替|換算|確定日|受渡|経費|ご利用通貨|お取引通貨/iu;
+/** Case-sensitive: a provider `…Rt` (rate) suffix, not every word ending in "rt". */
+const RATE_SUFFIX = /[a-z]Rt$/u;
+const NOT_LINK_FIELDS: Record<string, readonly string[]> = {
+  // A valuation percentage of a holding.
+  "sbi-securities/sbi-domestic-cash-positions": ["profitLossRateText"],
+  // Settled profit and loss of a position, not the trade's cash or fee.
+  "sbi-vc-trade/sbi-vc-executions": ["settlePl"],
+  // The parser's own disposition code: a notification does not settle.
+  "v-point-pay/v-point-pay-notification-event": ["_kogane.settlementDisposition"],
+  // Web rows: a payment-pattern flag. Customized rows: a conversion date, a
+  // per-row payment date and total that are empty on every fixture row, and
+  // `tesuWariKin`, equal to the usage amount on every fixture row (see the
+  // registry entry).
+  "vpass/vpass-statement-page": [
+    "shiharaiPatternFlag",
+    "kanzanDate",
+    "shiharaiDate",
+    "shiharaiTotal",
+    "tesuWariKin",
+  ],
+};
+function keyPaths(value: unknown, prefix: readonly string[] = []): string[][] {
+  const object = record(value);
+  if (object === undefined) return [];
+  return Object.entries(object).flatMap(([name, item]) => [
+    [...prefix, name],
+    ...keyPaths(item, [...prefix, name]),
+  ]);
+}
+
+/** A link field counts as stated only with a value: not absent, empty or a dash. */
+const stated = (value: unknown): boolean =>
+  (typeof value === "string" && !/^\s*-?\s*$/u.test(value)) ||
+  (typeof value === "number" && Number.isFinite(value));
+/**
+ * Closed status values the parser can emit that no shared fixture shows,
+ * each read off the parser source: `key: value`.
+ */
+const STATUS_WITHOUT_FIXTURE: string[] = [];
 
 const RECORDED_KEYS = ["identityOrigin", "externalIdOrigin"] as const;
 /**
@@ -425,26 +629,38 @@ describe("transaction-family registry against PARSERS", () => {
   });
 
   test("parsers outside the registry emit no transaction or position rows", () => {
-    let checked = 0;
-    for (const { parser, cases } of CONTRACT_PARSERS) {
-      if (!NOT_IN_REGISTRY.includes(parser.name)) continue;
-      for (const parse of cases) {
-        let rows: Row[];
-        try {
-          rows = rowsOf(one(parser, parse.name, parse.artifact, parse.bytes));
-        } catch {
-          continue;
-        }
-        expect(rows).toEqual([]);
-        checked += 1;
+    const parsed = new Set<string>();
+    const contract = CONTRACT_PARSERS.filter(({ parser }) =>
+      NOT_IN_REGISTRY.includes(parser.name),
+    ).flatMap(({ parser, cases }) =>
+      cases.map(({ name, artifact, bytes }) => ({
+        ...one(parser, name, artifact, bytes),
+        contract: true as const,
+      })),
+    );
+    for (const parse of [...OUTSIDE_CASES, ...contract]) {
+      expect(NOT_IN_REGISTRY).toContain(parse.parser.name);
+      expect(PARSERS.filter((parser) => parser.accepts(parse.meta))).toContain(parse.parser);
+      let rows: Row[];
+      try {
+        rows = rowsOf(parse);
+      } catch (error) {
+        // A coverage-contract case may be a refusal by design; a fixture case may not.
+        if ((parse as Case).contract) continue;
+        throw error;
       }
+      expect({ parser: parse.parser.name, rows }).toEqual({ parser: parse.parser.name, rows: [] });
+      parsed.add(parse.parser.name);
     }
-    expect(checked).toBeGreaterThanOrEqual(10);
+    // Every one of the 19 was parsed at least once.
+    expect([...parsed].sort()).toEqual([...NOT_IN_REGISTRY].sort());
   });
 
   test("the fixture rows record what each entry states", () => {
     const seenLinks = new Map<string, Set<ProviderLinkCode>>();
     const rowsByEntry = new Map<string, number>();
+    const unexplained = new Set<string>();
+    const seenStatuses = new Set<string>();
     let rowsChecked = 0;
     for (const parse of CASES) {
       const entry = transactionFamilyEntry(parse.meta.sourceId, parse.parser.name);
@@ -492,9 +708,23 @@ describe("transaction-family registry against PARSERS", () => {
         else if (entry.statuses.kind === "closed")
           expect(entry.statuses.values).toContain(status as string);
         else expect(typeof status === "string" && status.length > 0).toBe(true);
-        // Provider link fields stated on the row.
-        for (const [code, path] of Object.entries(LINK_FIELDS[key(entry)] ?? {}))
-          if (at(row.extra, path!) !== undefined) {
+        if (typeof status === "string") seenStatuses.add(`${key(entry)}: ${status}`);
+        // No link-like field outside the declared links and the listed non-links.
+        const declared = Object.values(LINK_FIELDS[key(entry)] ?? {}).flatMap((paths) =>
+          paths!.map((path) => path.join(".")),
+        );
+        for (const path of keyPaths(row.extra)) {
+          const name = path.join(".");
+          if (
+            (LINK_LIKE.test(path.at(-1)!) || RATE_SUFFIX.test(path.at(-1)!)) &&
+            !declared.some((link) => link === name || link.startsWith(`${name}.`)) &&
+            !(NOT_LINK_FIELDS[key(entry)] ?? []).includes(name)
+          )
+            unexplained.add(`${key(entry)}: ${name}`);
+        }
+        // Provider link fields stated, with a value, on the row.
+        for (const [code, paths] of Object.entries(LINK_FIELDS[key(entry)] ?? {}))
+          if (paths!.some((path) => stated(at(row.extra, path)))) {
             const seen = seenLinks.get(key(entry)) ?? new Set<ProviderLinkCode>();
             seen.add(code as ProviderLinkCode);
             seenLinks.set(key(entry), seen);
@@ -504,22 +734,33 @@ describe("transaction-family registry against PARSERS", () => {
       }
     }
     expect(rowsChecked).toBeGreaterThanOrEqual(50);
+    expect([...unexplained]).toEqual([]);
     // Every entry was proven on at least one row of its own parser.
     expect(TRANSACTION_FAMILY_REGISTRY.map(key).filter((name) => !rowsByEntry.has(name))).toEqual(
       [],
     );
+    // Every declared closed status value is seen on a fixture row, or listed
+    // as declared from the parser's closed vocabulary without a fixture.
+    const declaredStatuses = TRANSACTION_FAMILY_REGISTRY.flatMap((entry) =>
+      entry.statuses.kind === "closed"
+        ? entry.statuses.values.map((value) => `${key(entry)}: ${value}`)
+        : [],
+    );
+    expect(declaredStatuses.filter((status) => !seenStatuses.has(status))).toEqual(
+      STATUS_WITHOUT_FIXTURE,
+    );
     for (const entry of TRANSACTION_FAMILY_REGISTRY) {
-      const stated = entry.providerLinks.filter((code) => code !== "none");
+      const declaredLinks = entry.providerLinks.filter((code) => code !== "none");
       expect({
         entry: key(entry),
         links: Object.keys(LINK_FIELDS[key(entry)] ?? {}).sort(),
       }).toEqual({
         entry: key(entry),
-        links: [...stated].sort(),
+        links: [...declaredLinks].sort(),
       });
       expect({ entry: key(entry), seen: [...(seenLinks.get(key(entry)) ?? [])].sort() }).toEqual({
         entry: key(entry),
-        seen: [...stated].sort(),
+        seen: [...declaredLinks].sort(),
       });
     }
   });

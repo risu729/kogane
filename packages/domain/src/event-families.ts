@@ -538,13 +538,14 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
   },
   {
     // No external id (`providerStableId: unavailable`); point division and
-    // type are unmapped provider enums.
+    // type are unmapped provider enums. The date the points were reflected
+    // (`date_reflect`) is stated apart from the use date (`date_use`).
     sourceId: "v-point",
     parserName: "v-point-history-page",
     observationKinds: ["transaction"],
     identity: identity("none"),
     statuses: ABSENT,
-    providerLinks: NO_LINK,
+    providerLinks: ["value_date"],
     families: [unsupported("reward-exchange", "identity_absent", "semantics_unobserved")],
   },
   {

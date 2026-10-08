@@ -121,11 +121,18 @@ roadmap's phases 6–7, and a [domain contracts](../domain-contracts.md) entry.
 - The registry is not adoption. Nothing reads it to write, gate or display
   anything; `supported` names a writer that exists, not an event that was
   written. Changing an entry changes no stored or visible state.
-- A parser that starts or stops emitting transaction or position rows, or that
-  changes what it records as a row's identity origin, status or link fields,
-  fails `packages/parsers/test/event-families.test.ts` until the registry is
-  updated in the same change. A new family or reason is a reviewed contract
-  change.
+- `packages/parsers/test/event-families.test.ts` fails when, on the shared
+  synthetic fixtures (and the few synthetic variants built from them in the
+  test), a registry parser emits a row kind, records an origin key, is read by
+  stage A, carries an external id or a status value, or carries a link-like
+  field that its entry does not state, or when a declared status value or link
+  field is never seen with a value; and when a parser outside the registry
+  emits a transaction or position row on its fixtures, or a parser name is
+  added to or removed from PARSERS without a registry decision. It proves what
+  the fixtures exercise, not every shape a provider can send: a link field
+  whose key does not look like one (a name outside the test's pattern) or a
+  row shape no fixture carries is not caught. A new family or reason is a
+  reviewed contract change.
 - The writer/guard contract shared with #550 and #556 — where own-transfer
   candidates live, what adopts a transfer, the cross-family holder (INV06),
   release and withdrawal, and which view of a duplicated movement is the
@@ -151,14 +158,22 @@ Locally with synthetic data only:
   facts per entry, validator rejections, the three lookups, and that every
   family maps onto display kinds `classifyActivity` knows and every transaction
   entry's classified kind fits each of its families.
-- `packages/parsers/test/event-families.test.ts`: the registry names exactly the
-  PARSERS entries whose rows are transactions or positions (19 parsers
-  whose rows are balances, valuations, scheduled payments or none are listed as
-  outside, and those with
-  coverage-contract cases shown to emit no such row); every registry parser run
-  on the shared synthetic fixtures records the entry's observation kinds, origin
-  key and stage A reading (never the text or an id), external-id presence, status
-  vocabulary and every listed provider link field.
+- `packages/parsers/test/event-families.test.ts`:
+  - the registry names exactly the PARSERS entries whose rows are
+    transactions or positions; the other 19 are listed by name, and each of
+    them is run on at least one synthetic fixture (its own tests' fixtures, or
+    its coverage-contract cases) and emits no transaction or position row;
+  - every registry parser is run on the shared synthetic fixtures (plus
+    synthetic variants for a Sony foreign-currency CSV, a Sony WALLET fee and
+    a pending WALLET row), and every row records the entry's observation
+    kinds, origin key and stage A reading (never the text or an id), external
+    id presence and a status of the entry's vocabulary;
+  - every declared closed status value is seen on a fixture row;
+  - every declared link field is seen with a non-empty value on at least one
+    row, and no row carries a link-like key (fee, rate, value or settlement
+    date, settlement or local amount, execution sub-number, by key-name
+    pattern) that is neither a declared link of its entry nor listed as not a
+    link with its reason.
 - `mise run //packages/domain:ci`, `mise run //packages/parsers:ci` (parser
   digests unchanged), `mise run ci:root`, and oxlint, oxfmt and typos on the
   changed files.
