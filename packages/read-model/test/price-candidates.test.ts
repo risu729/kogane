@@ -491,9 +491,26 @@ describe("differential against selectPrices", () => {
     return `${new Date(ms + minutes * 60_000).toISOString().slice(0, 19)}${offset}`;
   };
 
+  /** Whether a selection agrees with the price an oracle expects at the top, or with none. */
+  const outcome = (selection: PriceSelection, expected: string | null): string => {
+    if (expected === null)
+      return selection.status === "refused" && selection.reason === "missing"
+        ? "agrees"
+        : `expected missing, got ${chosen(selection) ?? (selection as { reason: string }).reason}`;
+    if (selection.status === "selected")
+      return selection.candidate.price.id === expected
+        ? "agrees"
+        : `expected ${expected}, got ${selection.candidate.price.id}`;
+    return selection.reason === "stale" && selection.candidateIds.includes(expected)
+      ? "agrees"
+      : `expected ${expected}, got ${selection.reason} ${selection.candidateIds.join(",")}`;
+  };
+
   test("the same price per key on random tie-free stores, at random cutoffs", async () => {
     let compared = 0;
     let found = 0;
+    let staleSeen = 0;
+    let beforeWindowSeen = 0;
     for (let seed = 1; seed <= 30; seed += 1) {
       const next = random(seed);
       const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)]!;
@@ -585,11 +602,166 @@ describe("differential against selectPrices", () => {
           }
           compared += 1;
         });
+        // A short freshness (0-4 days) reads the newest row before the window:
+        // selectPrices' pick is either selected or the stale candidate.
+        const short: PriceSelectionPolicy = {
+          ...OPEN,
+          freshness: { unit: "calendar-days", maxAgeDays: Math.floor(next() * 5) },
+        };
+        const shortWindow = selectionReadWindow(short, at, null);
+        const shortRead = await selectPriceCandidates(executor(store.db), {
+          wants: KEYS.map((key) => ({ key, snapshotParseRunId: null, window: shortWindow })),
+          knowledge: CURRENT,
+        });
+        KEYS.forEach((key, index) => {
+          const expected =
+            shipped.get(JSON.stringify([key.baseInstrumentRef, key.quoteUnitRef, key.priceKind])) ??
+            null;
+          const selection = selectPrice(
+            key,
+            shortRead[index]!.map((row) => row.candidate),
+            at,
+            short,
+            null,
+          );
+          expect([seed, probe, outcome(selection, expected)]).toEqual([seed, probe, "agrees"]);
+          if (selection.status === "refused" && selection.reason === "stale") staleSeen += 1;
+          if (shortRead[index]!.some((row) => row.reach === "before-window")) beforeWindowSeen += 1;
+        });
       }
     }
     expect(compared).toBe(30 * 4 * KEYS.length);
+    // The before-window arm decided some keys.
+    expect(staleSeen).toBeGreaterThan(0);
+    expect(beforeWindowSeen).toBeGreaterThan(0);
     // Both outcomes are exercised: keys with a price and keys without one.
     expect(found).toBeGreaterThan(compared / 4);
+    expect(found).toBeLessThan(compared);
+  });
+
+  test("known-at on random publication histories agrees with an oracle over the events", async () => {
+    let compared = 0;
+    let found = 0;
+    for (let seed = 101; seed <= 130; seed += 1) {
+      const next = random(seed);
+      const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)]!;
+      const store = new PriceStore();
+      const base = Date.parse("2026-09-01T00:00:00Z");
+      const iso = (ms: number) => new Date(ms).toISOString();
+      // Each artifact gets two or three parse runs and a history of
+      // publications among them, rollbacks included, at increasing times.
+      const runsOf = new Map<number, number[]>();
+      const events: { artifact: number; run: number; at: number }[] = [];
+      let run = 0;
+      for (let artifact = 1; artifact <= 3; artifact += 1) {
+        const own: number[] = [];
+        for (let index = 0; index < 2 + Math.floor(next() * 2); index += 1) {
+          run += 1;
+          store.parse(run, artifact);
+          own.push(run);
+        }
+        runsOf.set(artifact, own);
+        let current: number | null = null;
+        let time = base + Math.floor(next() * 2e8);
+        for (let index = 0; index < 1 + Math.floor(next() * 4); index += 1) {
+          const choice = pick(own.filter((candidate) => candidate !== current));
+          store.publish(artifact, choice, iso(time), current === null ? "normal" : "rollback");
+          events.push({ artifact, run: choice, at: time });
+          current = choice;
+          time += 1 + Math.floor(next() * 3e8);
+        }
+      }
+      const artifactOf = (target: number): number =>
+        [...runsOf].find(([, runs]) => runs.includes(target))![0];
+      // Distinct effective instants: no ties anywhere.
+      const slots = Array.from({ length: 300 }, (_, index) => index);
+      for (let index = slots.length - 1; index > 0; index -= 1) {
+        const other = Math.floor(next() * (index + 1));
+        [slots[index], slots[other]] = [slots[other]!, slots[index]!];
+      }
+      const rows: { id: string; key: string; run: number; effective: number; recorded: number }[] =
+        [];
+      for (let index = 0; index < 10 + Math.floor(next() * 25); index += 1) {
+        const key = pick(KEYS);
+        const effective = base + slots[index]! * 2_503_000;
+        const recorded = effective + Math.floor(next() * 3 * 86_400_000);
+        const row = {
+          id: `k${seed}-${index}`,
+          key: JSON.stringify([key.baseInstrumentRef, key.quoteUnitRef, key.priceKind]),
+          run: pick([...runsOf.values()].flat()),
+          effective,
+          recorded,
+        };
+        rows.push(row);
+        store.price({
+          id: row.id,
+          run: row.run,
+          key,
+          rule:
+            key.quoteUnitRef === "JPY"
+              ? "fx-sbi-shinsei-board-v1"
+              : "sbi-domestic-current-price-v1",
+          amount: `${100 + Math.floor(next() * 100)}`,
+          at: render(effective, pick(OFFSETS)),
+          recordedAt: iso(recorded),
+        });
+      }
+      for (let probe = 0; probe < 4; probe += 1) {
+        const knownAtMs = base + Math.floor(next() * 12 * 86_400_000);
+        const cutoffMs = base + Math.floor(next() * 9 * 86_400_000);
+        const knownAtText = iso(knownAtMs);
+        const cutoff = iso(cutoffMs);
+        // The oracle: the run each artifact had adopted at K, by event order.
+        const adopted = new Map<number, number>();
+        for (const event of events)
+          if (event.at <= knownAtMs) adopted.set(event.artifact, event.run);
+        const policy: PriceSelectionPolicy = {
+          ...OPEN,
+          freshness: {
+            unit: "calendar-days",
+            maxAgeDays: pick([0, 1, 2, 3, 4, 36_600]),
+          },
+        };
+        const at: SelectionBound = {
+          effectiveBefore: cutoff.replace("Z", "000001Z"),
+          asOfDate: civilDateOfInstant(cutoff, "Asia/Tokyo")!,
+          knowledge: knownAt(knownAtText),
+        };
+        const window = selectionReadWindow(policy, at, null);
+        const read = await selectPriceCandidates(executor(store.db), {
+          wants: KEYS.map((key) => ({ key, snapshotParseRunId: null, window })),
+          knowledge: at.knowledge,
+        });
+        KEYS.forEach((key, index) => {
+          const text = JSON.stringify([key.baseInstrumentRef, key.quoteUnitRef, key.priceKind]);
+          const top = rows
+            .filter(
+              (row) =>
+                row.key === text &&
+                row.recorded <= knownAtMs &&
+                row.effective <= cutoffMs &&
+                adopted.get(artifactOf(row.run)) === row.run,
+            )
+            .sort((a, b) => b.effective - a.effective)[0];
+          const selection = selectPrice(
+            key,
+            read[index]!.map((row) => row.candidate),
+            at,
+            policy,
+            null,
+          );
+          expect([seed, probe, outcome(selection, top?.id ?? null)]).toEqual([
+            seed,
+            probe,
+            "agrees",
+          ]);
+          if (selection.status === "selected") found += 1;
+          compared += 1;
+        });
+      }
+    }
+    expect(compared).toBe(30 * 4 * KEYS.length);
+    expect(found).toBeGreaterThan(0);
     expect(found).toBeLessThan(compared);
   });
 });
