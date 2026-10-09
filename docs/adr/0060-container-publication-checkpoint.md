@@ -1,6 +1,6 @@
 # ADR 0060: Resume verification of an exact published Container
 
-- Status: proposed
+- Status: accepted (merged 2026-10-09 in #602)
 - Date: 2026-10-09
 
 ## Context
