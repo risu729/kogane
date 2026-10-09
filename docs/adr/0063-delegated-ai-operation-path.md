@@ -149,14 +149,23 @@ was not forwarded.
 **4. Closed capabilities and roles.** Read capabilities stay in
 `AGENT_API_GRANTS` (gaining `reviews.read` and `audit.read` beside #564's
 `schedules.read`). Operation capabilities exist only in `MCP_DELEGATIONS`:
-`commands.plan`, `commands.decide.card-settlement`, `commands.decide.relation`,
-`commands.decide.identity`, `schedules.maintenance.update` (moved from #564's
-agent-API vocabulary), `schedules.survey.decide`, `schedules.job.update`,
+`commands.plan`, `commands.decide.card-settlement`,
+`commands.decide.relation`, `commands.decide.identity`,
+`schedules.maintenance.update` (moved from #564's agent-API vocabulary),
+`schedules.survey.decide`, `schedules.job.update`,
 `operations.import.request`, `operations.replay.request`,
 `operations.projection.request`, `operations.collection.request`,
 `operations.session.refresh`, `operations.read`. Roles are closed bundles:
 `maintainer`, `reviewer`, `operator-delegate` (the plan, section 3.3, lists
-them). Nothing in the vocabulary names an R3 or R4 operation.
+them). Nothing in the vocabulary names an R3 or R4 operation. **Write scope:**
+an entry holding any `commands.*` capability or
+`operations.projection.request` is valid only with `"*"` on both `sources` and
+`accounts`, because plan targets and a projection rebuild span sources and
+accounts and no per-target scope check is proven yet; the source-bound
+operations requests (collection, import, replay, session refresh) check the
+requested source against `scopes.sources` before anything is stored, and
+schedule writes check `scopes.scheduleSources`. Narrower command scopes come
+with per-target checks in their own pull request.
 
 **5. Every operation has a risk class, and the class decides the
 confirmation.**
@@ -173,25 +182,29 @@ The assignment of every operation is the plan's mapping (section 5): plans,
 proposals, imports, replays, projection rebuilds, survey rejections and
 maintenance revisions inside the direct envelope are R1; job edits, survey
 acceptances, card-settlement, relation and identity decisions, collection
-requests and session refreshes are R2; stopped-execution lease release is R3;
-grants, Access, delegations, secrets, service tokens, deployment, migrations,
-feature flags, collector dispatch connections, session refresh policy,
-maintenance-survey page enablement, schedule bootstrap,
+requests and session refreshes are R2; stopped-execution lease release, and
+maintenance deferrals beyond the 7-day bound until the owner decides otherwise
+(item 8), are R3; grants, Access, delegations, secrets, service tokens,
+deployment, migrations, feature flags, collector dispatch connections, session
+refresh policy, maintenance-survey page enablement, schedule bootstrap,
 `economic-event.resolve-identity` and identity-epoch rewrites are R4.
 
 **6. Two-step confirmation.** For change-lifecycle commands the lifecycle is
 the confirmation, unchanged: the plan id is its digest, approve must present
 it and re-checks every expected revision, commit presents the approval and an
 `operationId` and verifies the revisions inside its batch. For settings and
-operations writes, `step: "prepare"` answers a preview and
-`cfm_` + `canonicalDigest({v: "kogane-confirm-v1", operation, principal,
+operations writes, `step: "prepare"` takes the caller's expected revision,
+refuses `revision_conflict` when the target has moved, and answers a preview
+and `cfm_` + `canonicalDigest({v: "kogane-confirm-v1", operation, principal,
 delegationRef, targetRef, expectedRevision, payloadDigest, idempotencyKey,
 expiresAt})`, valid at most 10 minutes, and records it (ADR 0064, `prepared`);
 `step: "confirm"` resends the identical payload, key and digest, and the
 `applied` record that cites the prepare is the last statement of the writer's
 batch under a unique index, so a confirm applies at most once. The digest is
 not a bearer credential: it only binds a confirm to a prepare the server
-recorded.
+recorded. A collection or session-refresh request targets a source, which has
+no revision: its prepare checks scope, policy and connection, and a repeat
+under the same key is the same operation.
 
 **7. Stale checks, idempotency, rollback.** Every versioned write carries the
 expected revision, and the writer's compare-and-set inside its batch decides.
@@ -210,8 +223,13 @@ write capability moves to `MCP_DELEGATIONS`; the actor kinds become
 CHECK, following #575's closed-reason pattern); a revision is R1 inside the
 direct envelope (granted source, rule of that source or new, no new joined
 deferral over 7 days, budget unspent, closed reason, registered https host,
-expected revision) and R2 only when it exceeds the 7-day bound; a spent
-budget, an unregistered host or an out-of-scope source never escalates.
+expected revision). Beyond the 7-day bound it is **R3 until the owner answers
+the plan's question 1**: the tool refuses it (`maintenance_deferral_too_long`)
+and the operator makes it in the UI. If the owner then allows it, it becomes
+R2 up to a hard ceiling of a 31-day joined deferral, and a longer one stays
+the operator's in every case. A spent budget, an unregistered host or an
+out-of-scope source never escalates. Rewriting 0067's CHECK also rewrites its
+partial index `maintenance_agent_writes` to `actor_kind='delegated'`.
 
 **9. One implementation per command.** `OPERATION_CATALOGUE` and
 `executeOperation` in `packages/application/src/operation-path/` are the only
@@ -280,6 +298,18 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
   never copies them.
 - Two concurrent writes can exceed `budget.writesPerDay` by the number in
   flight: the count is read before execution.
+- **Trade-off of `method = 'manual'`.** No migration is needed, and delegated
+  identity assignments keep the protection `active_manual_overrides` gives
+  manual ones. The price: `method` alone no longer separates the owner's own
+  decision from a delegated one. Every reader and page that presents `method`
+  must derive "delegated" from the `mcp-client:` actor prefix, and the
+  implementation slice tests each of them; a reader that does not would show
+  a delegated decision as the owner's own.
+- A delegation covers every MCP client the owner signs in with (claude.ai,
+  ChatGPT, Codex, Claude Code), because ADR 0047 makes them all the same
+  `mcp-client:<sub>`; neither the server nor the audit record can tell which
+  client acted. This is a limit the owner is asked to accept (plan,
+  question 2).
 - The ADRs of #564 and #565 are amended by reference here; those PRs should
   add a line pointing to this ADR when they next change.
 - Stopped-execution lease release stays the operator's until the server can
@@ -289,6 +319,6 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
 
 This ADR is a design record; its pull request changes documentation only.
 The slices are verified by the tests the plan lists (section 8, the delegation
-matrix of twelve items), on synthetic data, with an independent review per
+matrix of thirteen items), on synthetic data, with an independent review per
 slice. Not verified: anything in production; no delegation, grant or Access
 setting exists.

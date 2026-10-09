@@ -36,12 +36,13 @@ before merge. The PR body states what the review checked.
   above), and an agent without an explicit delegation only reads and
   proposes: it never approves, commits or changes a setting
   ([change lifecycle](docs/change-lifecycle.md#grants),
-  [agent API](docs/agent-api.md#card-purchase-explanation)). Only a principal
-  that Cloudflare Access verified on the dedicated MCP application, and that
-  the owner delegated by name, may apply an operation: within its delegated
-  capabilities, scope and expiry, under the operation's confirmation class,
-  through the common command layer, and with an audit record. Grants, Access,
-  delegations, secrets and deployment are never delegated
+  [agent API](docs/agent-api.md#card-purchase-explanation)). Besides the
+  human operator, only a principal that Cloudflare Access verified on the
+  dedicated MCP application, and that the owner delegated by name, may apply
+  an operation: within its delegated capabilities, scope and expiry, under
+  the operation's confirmation class, through the common command layer, and
+  with an audit record. Grants, Access, delegations, secrets and deployment
+  are never delegated
   ([ADR 0063](docs/adr/0063-delegated-ai-operation-path.md),
   [ADR 0064](docs/adr/0064-common-audit-log.md)). Effective when those ADRs
   merge; until the delegation resolver ships (slice S3 of the
