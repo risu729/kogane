@@ -725,6 +725,38 @@ test("the actor's kind and name are closed: no bare agent, no operator under an 
   expect(await ruleCount()).toBe(count);
 });
 
+test("a delegated principal gives only its own closed reasons, and no decision reference", async () => {
+  const base = rule("vpass");
+  const count = await ruleCount();
+  for (const [reason, decisionRef] of [
+    // A survey acceptance is the operator's (ADR 0050), even with its proposal reference.
+    [ACCEPTED_REASON, proposalRef(1)],
+    // A delegated revision's own decision reference is plan slice S3's.
+    ["correction", proposalRef(1)],
+  ] as const) {
+    const result = await writeMaintenanceRevision(
+      processorEnv,
+      {
+        source: "vpass",
+        ruleId: null,
+        expectedRevision: 0,
+        change: {
+          timezone: "Asia/Tokyo",
+          pattern: base.pattern,
+          enabled: true,
+          scope: "collection",
+        },
+        provenance: { referenceUrl: base.referenceUrl, verifiedAt: base.verifiedAt, decisionRef },
+        actor: { kind: "delegated", id: DELEGATE },
+        reason,
+      } as MaintenanceWrite,
+      NO_RECORD,
+    );
+    expect([reason, result]).toEqual([reason, { ok: false, code: "invalid_reason", status: 400 }]);
+  }
+  expect(await ruleCount()).toBe(count);
+});
+
 test("a read names only the requested sources and no revision's actor", async () => {
   const one = await read(["vpass"]);
   expect(one.status).toBe(200);

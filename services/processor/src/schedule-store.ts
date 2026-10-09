@@ -7,6 +7,7 @@ import {
   validPattern,
   validMaintenance,
   validInstant,
+  DELEGATED_MAINTENANCE_REASONS,
   MAINTENANCE_CHANGE_REASONS,
   ZONES,
   type MaintenanceChangeReason,
@@ -462,17 +463,21 @@ function validActor(value: unknown): MaintenanceActor {
 }
 /**
  * The reason and decision reference, refused unless both are closed values
- * this actor may give: `operator-edit` is the operator's own edit, and the
- * survey's acceptance reason comes with exactly its proposal reference.
+ * this actor may give: `operator-edit` is the operator's own edit, a delegated
+ * principal gives only `DELEGATED_MAINTENANCE_REASONS` (so no decision
+ * reference until plan slice S3 defines its own), and the survey's acceptance
+ * reason comes with exactly its proposal reference.
  */
 function validProvenance(
   actor: MaintenanceActor,
   reason: unknown,
   decisionRef: unknown,
 ): { reason: MaintenanceChangeReason; decisionRef: string | null } {
+  const allowed: readonly string[] =
+    actor.kind === "delegated" ? DELEGATED_MAINTENANCE_REASONS : MAINTENANCE_CHANGE_REASONS;
   if (
     typeof reason !== "string" ||
-    !(MAINTENANCE_CHANGE_REASONS as readonly string[]).includes(reason) ||
+    !allowed.includes(reason) ||
     (reason === "operator-edit" && actor.kind !== "operator")
   )
     throw new ScheduleError("invalid_reason");
