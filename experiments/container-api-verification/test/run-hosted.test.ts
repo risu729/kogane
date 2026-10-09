@@ -370,7 +370,8 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
     imageRemoved = false;
   const calls: Array<[string, string[], Record<string, any>]> = [],
     reports: string[] = [],
-    readyPhases: string[] = [];
+    readyPhases: string[] = [],
+    readyDeadlines: number[] = [];
   const api = async (path: string, options: { method?: string; missing?: boolean } = {}) => {
     if (options.method === "DELETE") {
       removed = true;
@@ -422,6 +423,7 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
         expect(options.deadline).toBeGreaterThan(Date.now());
         expect(options.deadline).toBeLessThanOrEqual(Date.now() + 180000);
         readyPhases.push(options.phase);
+        readyDeadlines.push(options.deadline);
       },
       api,
       registry: async () => (pushed && !imageRemoved ? image : undefined),
@@ -430,8 +432,9 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
         imageRemoved = true;
       },
       report: (text: string) => reports.push(text),
-      hold: async () => {
+      hold: async (holderEnv: Record<string, string>) => {
         expect(readyPhases.at(-1)).toBe("native_unmonitored");
+        expect(holderEnv.HARNESS_ROLLOUT_DEADLINE).toBeUndefined();
         return { stop: async () => {} };
       },
       run: async (command: string, args: string[], options: Record<string, any>) => {
@@ -446,6 +449,7 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
         if (command === "node" && args[0].endsWith("/driver.mjs")) {
           const phase = options.env.HARNESS_PHASE;
           expect(readyPhases.at(-1)).toBe(phase);
+          expect(options.env.HARNESS_ROLLOUT_DEADLINE).toBe(String(readyDeadlines.at(-1)));
           if (phase === "baseline_sdk")
             protectedFile(resolve(temp, "container-api-verification-baseline.json"), {
               appId,

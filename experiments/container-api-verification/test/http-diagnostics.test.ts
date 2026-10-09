@@ -276,6 +276,7 @@ test("phase verification uses route diagnostics before any success report or rec
     accountId: "a".repeat(32),
     apiToken: "private-api-token",
     appId: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+    rolloutDeadline: Date.now() + 180_000,
     report: (value: string) => reports.push(value),
   };
   let requests = 0;
@@ -297,7 +298,19 @@ test("phase verification uses route diagnostics before any success report or rec
       fetchImpl: async (input: string) => {
         const path = new URL(input).pathname;
         paths.push(path);
-        if (path === "/state") return Response.json({ revision: "baseline_sdk" });
+        if (path === "/state")
+          return Response.json({
+            kvSentinelMatch: 0,
+            sqlSentinelMatch: 0,
+            sdkAlarmPresent: 0,
+            revision: "baseline_sdk",
+            running: 0,
+            startCallbacks: 0,
+            stops: 0,
+            errors: 0,
+            signaled: 0,
+            exitSeven: 0,
+          });
         return new Response("private-provider-body", {
           status: 502,
           headers: {

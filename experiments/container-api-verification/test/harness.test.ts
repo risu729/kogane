@@ -40,6 +40,19 @@ const appId = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
 const namespace = "b".repeat(32);
 const workerVersion = "cccccccc-cccc-4ccc-accc-cccccccccccc";
 const processIdentity = "dddddddd-dddd-4ddd-addd-dddddddddddd";
+const readyState = (revision: string, values: Record<string, number> = {}) => ({
+  kvSentinelMatch: 1,
+  sqlSentinelMatch: 1,
+  sdkAlarmPresent: 0,
+  revision,
+  running: 0,
+  [revision.startsWith("native") ? "starts" : "startCallbacks"]: 0,
+  stops: 0,
+  errors: 0,
+  signaled: 0,
+  exitSeven: 0,
+  ...values,
+});
 const image = `registry.cloudflare.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/kogane-container-api-verification-verificationcontainer@sha256:${"e".repeat(64)}`;
 const app = {
   id: appId,
@@ -192,12 +205,7 @@ test("native recovery validates persisted process and control-plane identity wit
       if (url.host === "kogane-container-api-verification.synthetic.workers.dev") {
         expect(init.headers).toEqual({ authorization: "Bearer private-harness-key" });
         if (url.pathname === "/state")
-          return Response.json({
-            revision: "native_recovered",
-            running: 1,
-            kvSentinelMatch: 1,
-            sqlSentinelMatch: 1,
-          });
+          return Response.json(readyState("native_recovered", { running: 1 }));
         if (url.pathname === "/stats") return Response.json({ processIdentity, streams: 0 });
         throw new Error("unexpected");
       }
@@ -221,6 +229,7 @@ test("native recovery validates persisted process and control-plane identity wit
       accountId: "a".repeat(32),
       apiToken: "private-api-token",
       appId,
+      rolloutDeadline: Date.now() + 180_000,
       fetchImpl,
       report: (value: string) => reports.push(value),
     });
@@ -242,6 +251,7 @@ test("native recovery validates persisted process and control-plane identity wit
         accountId: "a".repeat(32),
         apiToken: "key",
         appId,
+        rolloutDeadline: Date.now() + 180_000,
         fetchImpl: async (input: string) =>
           fetchImpl(input, {
             method: "GET",
@@ -257,6 +267,170 @@ test("native recovery validates persisted process and control-plane identity wit
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
+});
+test("bootstrap retries a public state 404 before or after one initialize POST", async () => {
+  for (const missingAt of ["before", "after"]) {
+    let clock = Date.now(),
+      stateReads = 0,
+      initializes = 0;
+    const paths: string[] = [];
+    const start = clock;
+    await expect(
+      verifyPhase({
+        phase: "baseline_sdk",
+        temp: "/tmp",
+        subdomain: "synthetic",
+        key: "private-key",
+        accountId: "a".repeat(32),
+        apiToken: "private-api-token",
+        appId,
+        rolloutDeadline: start + 180_000,
+        now: () => clock,
+        bootstrapSleep: async (ms: number) => {
+          clock += ms;
+        },
+        report: () => {},
+        fetchImpl: async (input: string, init: RequestInit) => {
+          const url = new URL(input);
+          if (url.host === "api.cloudflare.com") return new Response(null, { status: 500 });
+          paths.push(`${init.method} ${url.pathname}`);
+          if (url.pathname === "/initialize") {
+            initializes++;
+            return Response.json({ accepted: 1 });
+          }
+          expect(url.pathname).toBe("/state");
+          stateReads++;
+          if (
+            (missingAt === "before" && stateReads === 1) ||
+            (missingAt === "after" && stateReads === 2)
+          )
+            return new Response("private edge body", { status: 404 });
+          return Response.json(
+            readyState("baseline_sdk", {
+              kvSentinelMatch: initializes,
+              sqlSentinelMatch: initializes,
+            }),
+          );
+        },
+      }),
+    ).rejects.toThrow("verification_identity_http");
+    expect(initializes).toBe(1);
+    expect(stateReads).toBe(3);
+    expect(clock - start).toBe(2000);
+    expect(paths.filter((path) => path === "POST /initialize")).toHaveLength(1);
+    expect(paths.filter((path) => path === "GET /state")).toHaveLength(3);
+  }
+});
+
+test("bootstrap rejects auth, redirect, upstream failure and malformed state before POST", async () => {
+  for (const [response, code] of [
+    [new Response("private", { status: 401 }), "verification_http_state_outer_unauthorized"],
+    [new Response("private", { status: 302 }), "verification_http_state_outer_redirect"],
+    [new Response("private", { status: 502 }), "verification_http_state_outer_bad_gateway"],
+    [Response.json({ ...readyState("baseline_sdk"), extra: 1 }), "verification_state_schema"],
+  ] as const) {
+    let calls = 0;
+    await expect(
+      verifyPhase({
+        phase: "baseline_sdk",
+        temp: "/tmp",
+        subdomain: "synthetic",
+        key: "private-key",
+        accountId: "a".repeat(32),
+        apiToken: "private-api-token",
+        appId,
+        rolloutDeadline: Date.now() + 180_000,
+        report: () => {},
+        fetchImpl: async (_input: string, init: RequestInit) => {
+          expect(init.method).toBe("GET");
+          calls++;
+          return response;
+        },
+      }),
+    ).rejects.toThrow(code);
+    expect(calls).toBe(1);
+  }
+});
+
+test("bootstrap never accepts a validated wrong revision before deadline", async () => {
+  let clock = Date.now(),
+    calls = 0,
+    posts = 0;
+  await expect(
+    verifyPhase({
+      phase: "baseline_sdk",
+      temp: "/tmp",
+      subdomain: "synthetic",
+      key: "private-key",
+      accountId: "a".repeat(32),
+      apiToken: "private-api-token",
+      appId,
+      rolloutDeadline: clock + 2500,
+      now: () => clock,
+      bootstrapSleep: async (ms: number) => {
+        clock += ms;
+      },
+      report: () => {},
+      fetchImpl: async (_input: string, init: RequestInit) => {
+        calls++;
+        if (init.method === "POST") posts++;
+        return Response.json(readyState("native"));
+      },
+    }),
+  ).rejects.toThrow("verification_state_timeout");
+  expect(calls).toBe(2);
+  expect(posts).toBe(0);
+});
+test("initialization consumes the original rollout deadline before sentinel read", async () => {
+  let clock = Date.now(),
+    stateReads = 0,
+    initializes = 0;
+  const deadline = clock + 2500;
+  await expect(
+    verifyPhase({
+      phase: "baseline_sdk",
+      temp: "/tmp",
+      subdomain: "synthetic",
+      key: "private-key",
+      accountId: "a".repeat(32),
+      apiToken: "private-api-token",
+      appId,
+      rolloutDeadline: deadline,
+      now: () => clock,
+      bootstrapSleep: async (ms: number) => {
+        clock += ms;
+      },
+      report: () => {},
+      fetchImpl: async (input: string) => {
+        const path = new URL(input).pathname;
+        if (path === "/state") {
+          stateReads++;
+          return Response.json(readyState("baseline_sdk"));
+        }
+        expect(path).toBe("/initialize");
+        initializes++;
+        clock = deadline + 1;
+        return Response.json({ accepted: 1 });
+      },
+    }),
+  ).rejects.toThrow("verification_state_timeout");
+  expect(stateReads).toBe(1);
+  expect(initializes).toBe(1);
+});
+
+test("later concurrency state 404 fails immediately without bootstrap retries", async () => {
+  let reads = 0;
+  await expect(
+    verifyConcurrency({
+      phase: "native",
+      json: async (path: string) => {
+        expect(path).toBe("/state");
+        reads++;
+        throw new Error("verification_http_state_outer_not_found");
+      },
+    }),
+  ).rejects.toThrow("verification_http_state_outer_not_found");
+  expect(reads).toBe(1);
 });
 test("config variants preserve namespace/app/image history and contain no bank/VPC/secret", () => {
   const sdk = JSON.parse(readFileSync(new URL("../wrangler.sdk.jsonc", import.meta.url), "utf8"));
@@ -282,6 +456,7 @@ test("driver rejects unknown endpoint selectors before any request", async () =>
       accountId: "a".repeat(32),
       apiToken: "key",
       appId,
+      rolloutDeadline: Date.now() + 180_000,
       fetchImpl: async () => {
         calls++;
         throw new Error("unexpected");
@@ -309,17 +484,12 @@ test("rollback requires exact baseline SDK Worker version before any application
         accountId: "a".repeat(32),
         apiToken: "private-token",
         appId,
+        rolloutDeadline: Date.now() + 180_000,
         report: () => {},
         fetchImpl: async (input: string, init: RequestInit) => {
           if (init.method !== "GET") posts++;
           const url = new URL(input);
-          if (url.host.endsWith(".workers.dev"))
-            return Response.json({
-              revision: "baseline_sdk",
-              running: 0,
-              kvSentinelMatch: 1,
-              sqlSentinelMatch: 1,
-            });
+          if (url.host.endsWith(".workers.dev")) return Response.json(readyState("baseline_sdk"));
           const result = url.pathname.includes("/containers/")
             ? url.pathname.endsWith("/versions")
               ? [{ version: 1, percentage: 100, configuration: { image } }]

@@ -14,6 +14,7 @@ import { canonicalHex, canonicalUuid, canonicalImageRef } from "./identifiers.mj
 import { resolve } from "node:path";
 import { BACKPRESSURE_MAX_CHUNKS } from "./container/server.mjs";
 import { createSyntheticRequest } from "./http-diagnostics.mjs";
+import { waitHttpReady } from "./http-readiness.mjs";
 
 const workerName = "kogane-container-api-verification";
 const appName = `${workerName}-verificationcontainer`;
@@ -250,7 +251,10 @@ export async function verifyPhase({
   accountId,
   apiToken,
   appId,
+  rolloutDeadline,
   fetchImpl = fetch,
+  now = Date.now,
+  bootstrapSleep = pause,
   report = console.log,
 }) {
   if (
@@ -265,7 +269,9 @@ export async function verifyPhase({
     !key ||
     !/^[a-f0-9]{32}$/u.test(accountId ?? "") ||
     !apiToken ||
-    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(appId ?? "")
+    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(appId ?? "") ||
+    !Number.isSafeInteger(rolloutDeadline) ||
+    rolloutDeadline - now() > 180_000
   )
     closed("inputs");
   const origin = `https://${workerName}.${subdomain}.workers.dev`;
@@ -363,8 +369,17 @@ export async function verifyPhase({
     } while (Date.now() < deadline);
     closed("state_timeout");
   }
-  const state = await json("/state");
-  if (state.revision !== (phase === "rollback_sdk" ? "baseline_sdk" : phase)) closed("revision");
+  const bootstrapState = () =>
+    waitHttpReady({
+      phase,
+      subdomain,
+      key,
+      deadline: rolloutDeadline,
+      fetchImpl,
+      now,
+      sleep: bootstrapSleep,
+    });
+  const state = await bootstrapState();
   let baseline;
   if (phase !== "baseline_sdk") {
     try {
@@ -377,7 +392,7 @@ export async function verifyPhase({
     }
   }
   if (phase === "baseline_sdk") await json("/initialize", "POST");
-  const sentinel = await json("/state");
+  const sentinel = await bootstrapState();
   if (sentinel.kvSentinelMatch !== 1 || sentinel.sqlSentinelMatch !== 1) closed("sentinel");
   counts.sentinelMatches++;
   const current = await snapshot();
@@ -548,6 +563,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
       apiToken: process.env.HARNESS_API_TOKEN,
       appId: process.env.HARNESS_APPLICATION_ID,
+      rolloutDeadline: Number(process.env.HARNESS_ROLLOUT_DEADLINE),
     };
     if (process.argv[2] === "recovery-hold") await recoveryHold(options);
     else await verifyPhase(options);

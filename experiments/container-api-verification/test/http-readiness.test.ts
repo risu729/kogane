@@ -31,7 +31,7 @@ function options(extra: Record<string, unknown> = {}) {
 }
 test("public readiness uses one exact authenticated GET and accepts validated state without starting a Container", async () => {
   let calls = 0;
-  await waitHttpReady(
+  const ready = await waitHttpReady(
     options({
       fetchImpl: async (url: string, init: RequestInit) => {
         calls++;
@@ -46,6 +46,7 @@ test("public readiness uses one exact authenticated GET and accepts validated st
     }),
   );
   expect(calls).toBe(1);
+  expect(ready).toEqual(state());
 });
 test("only bootstrap404/503 and strictly validated known old revisions retry within the same deadline", async () => {
   let clock = 170_000,

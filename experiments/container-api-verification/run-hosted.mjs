@@ -1261,19 +1261,23 @@ export async function execute(
       stage = `${phase}_http_ready`;
       await httpReady({ phase, subdomain: input.subdomain, key, deadline: rolloutDeadline });
       if (Date.now() >= rolloutDeadline) fail("rollout_timeout");
+      return rolloutDeadline;
     }
-    async function verify(phase) {
+    async function verify(phase, rolloutDeadline) {
       stage = `${phase}_verify`;
       const result = await boundedRun("node", [resolve(root, "driver.mjs")], {
-        env: { ...driverEnv, HARNESS_PHASE: phase },
+        env: {
+          ...driverEnv,
+          HARNESS_PHASE: phase,
+          HARNESS_ROLLOUT_DEADLINE: String(rolloutDeadline),
+        },
         timeout: 360000,
       });
       const lines = result.trim().split("\n");
       if (lines.length !== 1) fail("driver_output");
       report(JSON.stringify(driverReport(lines[0], phase)));
     }
-    await deploy("baseline_sdk");
-    await verify("baseline_sdk");
+    await verify("baseline_sdk", await deploy("baseline_sdk"));
     stage = "baseline_sdk_record";
     const baseline = readProtected(resolve(input.temp, "container-api-verification-baseline.json"));
     if (
@@ -1285,14 +1289,11 @@ export async function execute(
       fail("baseline");
     state.workerVersion = canonicalUuid(baseline.workerVersion);
     writeProtected(statePath, state);
-    await deploy("native");
-    await verify("native");
-    await deploy("native_unmonitored");
-    await verify("native_unmonitored");
+    await verify("native", await deploy("native"));
+    await verify("native_unmonitored", await deploy("native_unmonitored"));
     stage = "recovery_hold";
     holder = await hold({ ...driverEnv, HARNESS_PHASE: "native_unmonitored" });
-    await deploy("native_recovered");
-    await verify("native_recovered");
+    await verify("native_recovered", await deploy("native_recovered"));
     stage = "recovery_stop";
     await holder.stop();
     holder = undefined;
@@ -1321,7 +1322,7 @@ export async function execute(
       deadline: rollbackDeadline,
     });
     if (Date.now() >= rollbackDeadline) fail("rollout_timeout");
-    await verify("rollback_sdk");
+    await verify("rollback_sdk", rollbackDeadline);
     state.completed = true;
     writeProtected(statePath, state);
     report(JSON.stringify({ code: "verification_runner_complete", phases: 5 }));

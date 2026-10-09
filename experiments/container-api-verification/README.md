@@ -56,8 +56,14 @@ container-api-verification-baseline.json (mode 0600); later stages compare this
 same baseline. It contains no credentials and is not printed or uploaded.
 Before each phase, the runner verifies that the authenticated public state URL
 serves the expected revision. This shares the existing 180-second deployment
-readiness budget with control-plane rollout checks. It sends no application
-POST or Container request and does not change phase/startup timeouts.
+readiness budget with control-plane rollout checks. The driver receives that
+same absolute deadline for its first state read and bootstrap sentinel read.
+Those readiness probes retry only public 404/503 responses and known different
+revisions; each accepted state must pass the full schema and exact-revision
+checks. The baseline initialization POST runs exactly once between them and
+retains its existing 120-second request timeout; time spent there cannot reset
+the readiness deadline. Later runtime state reads and all application POSTs
+retain their single-request behavior. Readiness probes send no Container request.
 The driver performs no deployment:
 
 1. Deploy SDK with HARNESS_REVISION=baseline_sdk, then verify baseline_sdk.

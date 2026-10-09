@@ -115,7 +115,7 @@ The main-integration head `89d3a3ee614c2ff91e2dee73b2f37d3698ff671e` passed
 That result predates the idle-alarm correction and synthetic harness; it does
 not validate those additions. Local Docker is unavailable. Hosted attempts have deployed the SDK baseline
 and exposed harness defects; none has completed the native or rollback phases.
-The latest completed attempt at commit `7cbff2d2`
+An attempt at commit `7cbff2d2`
 ([run 37823165303](https://github.com/risu729/kogane/actions/runs/37823165303))
 passed SDK concurrent startup, a 35-second delayed response and a 40-second
 stream, then failed `verification_backpressure_exhausted`: the bounded 256 MiB
@@ -124,11 +124,16 @@ identity checks passed; the actual buffering or encoding cause remains unknown.
 The subsequent test-only hardening emits random chunks, asks the public client
 for identity encoding, sets origin `no-transform`, and rejects declared encoded
 responses. It preserves the cap, sample timing and existing assertions. This
-removes a compression confounder; it is not hosted evidence of a resolved cause. All four
-cleanup checks passed; separate API reads confirmed Worker, application and
-namespace absence. The runner uses canonical OCI manifest HEAD for registry
+removes a compression confounder; it is not hosted evidence of a resolved cause.
+A subsequent attempt at `5b902fe6`
+([run 37880738165](https://github.com/risu729/kogane/actions/runs/37880738165))
+failed a public state read with `verification_http_state_outer_not_found`
+after readiness had succeeded. The diagnostic did not identify which state check
+failed; this is not evidence of an SDK or Container failure. All four cleanup checks passed; separate API reads confirmed Worker,
+application and namespace absence. The runner uses canonical OCI manifest HEAD for registry
 ownership and absence, and shares the existing rollout deadline with public
-HTTP readiness checks. Normal CI and CodeQL passed on that published head.
+HTTP readiness checks. Normal CI and CodeQL passed on the earlier reviewed
+head `1f393a205`; current-head checks remain required.
 The diagnostic follow-up preserves the existing backpressure gates and observes
 DO-only process state before a stats request can auto-restart a stopped process.
 These attempts do not establish runtime equivalence. Final CI and the following

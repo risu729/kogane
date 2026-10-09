@@ -118,7 +118,7 @@ export async function waitHttpReady({
           }
           const revision = revisionState(state);
           remaining();
-          return revision === expected;
+          return revision === expected ? state : undefined;
         })(),
         new Promise((_, reject) => {
           timer = setTimeout(() => {
@@ -134,7 +134,7 @@ export async function waitHttpReady({
         }),
       ]);
       remaining();
-      if (ready) return;
+      if (ready) return ready;
     } catch (error) {
       if (controller.signal.aborted && deadline - now() <= 0) fail("timeout");
       const code = canonicalDriverHttpCode(error?.message);
