@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-12
-- Status: Run 37957689144 at becff3cc failed the SDK in-DO stream release gate; its current code does not distinguish before/after release failure. Runtime cleanup and independent absence checks passed. Earlier run 37915871908 reproduced public clean EOF while SDK/raw readers inside the DO raised the expected error. Reader-lifecycle parity, native, recovery and rollback remain unverified.
+- Status: Run 37963677064 at 430691a6 failed the initial SDK concurrent POST gate with upstream HTTP 503, before the revised stream-release gate. Runtime cleanup and independent absence checks passed. The 503 cause remains unclassified. Reader-lifecycle parity, native, recovery and rollback remain unverified.
 
 ## Question
 
@@ -47,6 +47,17 @@ identify the release boundary. All runtime cleanup checks and independent API
 absence checks passed at 2026-10-10 01:20 JST. The renewed temporary token and
 GitHub environment must be retired by 2026-10-10 02:45 JST; the experiment's
 longer research expiry does not extend that authorization.
+
+After reviewed release-condition hardening and integration of main `6e2fe858`,
+normal CI and CodeQL passed on `430691a6`. Run 37963677064 then failed the initial
+SDK concurrent POST gate at 2026-10-10 02:05:58 JST with
+`verification_http_once_concurrency_upstream_unavailable` (HTTP 503), before the
+stream-release gate. Control-plane observation showed one inactive instance,
+zero running instances and zero failed instances. All four runtime cleanup
+checks and the separate cleanup step passed; independent API reads at 02:09 JST
+confirmed Worker/application/namespace absence. SDK 0.3.7 has a fixed HTTP 503
+response for `NoInstanceError`, and also preserves a TCP fetch response status;
+status alone cannot identify the branch or establish a Cloudflare defect.
 
 A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy

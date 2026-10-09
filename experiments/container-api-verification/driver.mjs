@@ -33,6 +33,7 @@ function recordPath(temp, name) {
       "container-api-verification-recovery.json",
       "container-api-verification-stream-failure.json",
       "container-api-verification-stream-check-failure.json",
+      "container-api-verification-sdk-startup-failure.json",
     ].includes(name)
   )
     closed("record");
@@ -509,6 +510,19 @@ const streamCheckReasons = new Set([
   "partial",
   "timing",
 ]);
+export function sdkStartupFailureRecord(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "category,code,phase" ||
+    value.code !== "sdk_startup_failure_observation" ||
+    !["baseline_sdk", "rollback_sdk"].includes(value.phase) ||
+    !["sdk_no_instance_response", "other_503_response", "unavailable"].includes(value.category)
+  )
+    closed("record");
+  return { code: "sdk_startup_failure_observation", phase: value.phase, category: value.category };
+}
 export function streamCheckFailureRecord(value) {
   if (
     !value ||
@@ -759,7 +773,27 @@ export async function verifyPhase({
     recoveryChecks: 0,
     sdkAlarmChecks: 0,
   };
-  const request = createSyntheticRequest({ origin, key, fetchImpl });
+  const request = createSyntheticRequest({
+    origin,
+    key,
+    fetchImpl,
+    onFailure: ({ code, category }) => {
+      if (
+        !["baseline_sdk", "rollback_sdk"].includes(phase) ||
+        code !== "verification_http_once_concurrency_upstream_unavailable"
+      )
+        return;
+      try {
+        writeRecord(
+          temp,
+          "container-api-verification-sdk-startup-failure.json",
+          sdkStartupFailureRecord({ code: "sdk_startup_failure_observation", phase, category }),
+        );
+      } catch {
+        // O_EXCL retains the first failure; write failure cannot replace the HTTP error.
+      }
+    },
+  });
   async function json(path, method = "GET", substage) {
     try {
       return await (await request(path, method, substage)).json();

@@ -3,8 +3,21 @@ import {
   canonicalDriverHttpCode,
   createSyntheticRequest,
   syntheticHttpFailure,
+  sdkStartupCategory,
 } from "../http-diagnostics.mjs";
-import { worker } from "../src/common";
+import { worker, classifySdkStartupResponse, SDK_NO_INSTANCE_RESPONSE } from "../src/common";
+import {
+  readFileSync,
+  mkdtempSync,
+  chmodSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  mkdirSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import { sdkStartupFailureRecord, readRecord, writeRecord } from "../driver.mjs";
 import { verifyPhase, verifyConcurrency } from "../driver.mjs";
 
 const routes = [
@@ -508,4 +521,485 @@ test("both cold concurrent POSTs carry the exact concurrency substage without ex
   expect(
     calls.filter(([path]) => path !== "/once").every(([, , substage]) => substage === undefined),
   ).toBe(true);
+});
+
+const unavailableCode = "verification_http_once_concurrency_upstream_unavailable";
+const sdkStartupHeader = "x-verification-sdk-startup";
+function startupFailureResponse(
+  category: string,
+  extra: Record<string, string> = {},
+  status = 502,
+) {
+  return new Response("private-unread-error-body", {
+    status,
+    headers: {
+      "x-verification-failure": "upstream_http",
+      "x-verification-upstream-status": "503",
+      [sdkStartupHeader]: category,
+      ...extra,
+    },
+  });
+}
+const onceRequest = () =>
+  new Request("https://synthetic.invalid/once", {
+    method: "POST",
+    headers: { authorization: "Bearer private-key" },
+  });
+
+test("startup classifier matches the pinned SDK's entire 337 byte literal and EOF", async () => {
+  const sdk = readFileSync(
+    new URL("../node_modules/@cloudflare/containers/dist/lib/container.js", import.meta.url),
+    "utf8",
+  );
+  const pinned = JSON.parse(
+    readFileSync(
+      new URL("../node_modules/@cloudflare/containers/package.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  expect(pinned.version).toBe("0.3.7");
+  const literal = sdk.match(/new Response\('([^']*)', \{ status: 503 \}\)/u)?.[1];
+  expect(literal).toBeDefined();
+  expect(JSON.parse('"' + literal + '"')).toBe(SDK_NO_INSTANCE_RESPONSE);
+  expect(new TextEncoder().encode(SDK_NO_INSTANCE_RESPONSE).byteLength).toBe(337);
+  expect(await classifySdkStartupResponse(new Response(SDK_NO_INSTANCE_RESPONSE))).toBe(
+    "sdk_no_instance_response",
+  );
+  let index = 0;
+  const bytes = new TextEncoder().encode(SDK_NO_INSTANCE_RESPONSE);
+  expect(
+    await classifySdkStartupResponse(
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (index === bytes.length) controller.close();
+            else controller.enqueue(bytes.slice(index, ++index));
+          },
+        }),
+      ),
+    ),
+  ).toBe("sdk_no_instance_response"); // 337 data reads plus EOF = 338 total samples.
+});
+
+test("wrong, suffixed, truncated, oversized and non-UTF8 bodies never match the SDK literal", async () => {
+  for (const body of [
+    "private-body",
+    SDK_NO_INSTANCE_RESPONSE + "x",
+    SDK_NO_INSTANCE_RESPONSE.slice(0, -1),
+    SDK_NO_INSTANCE_RESPONSE + "x".repeat(4096),
+    new Uint8Array([255]),
+    "",
+  ])
+    expect(await classifySdkStartupResponse(new Response(body))).toBe("other_503_response");
+  expect(await classifySdkStartupResponse(new Response(null))).toBe("unavailable");
+});
+
+test("classification needs EOF and one deadline includes stalled reads and cleanup", async () => {
+  for (const mode of ["no_eof", "slow", "error", "cancel_stall", "late_cancel"] as const) {
+    let emitted = false,
+      canceled = 0,
+      rejectCancel!: (error: Error) => void;
+    const response = new Response(
+      new ReadableStream({
+        pull(controller) {
+          if (mode === "error") {
+            controller.error(new Error("private-read-error"));
+            return;
+          }
+          if (mode === "slow" || emitted) return;
+          emitted = true;
+          controller.enqueue(
+            new TextEncoder().encode(
+              mode === "cancel_stall" || mode === "late_cancel"
+                ? "wrong"
+                : SDK_NO_INSTANCE_RESPONSE,
+            ),
+          );
+        },
+        cancel() {
+          canceled++;
+          if (mode === "cancel_stall") return new Promise<void>(() => {});
+          if (mode === "late_cancel")
+            return new Promise<void>((_, reject) => {
+              rejectCancel = reject;
+            });
+        },
+      }),
+    );
+    const started = Date.now();
+    expect(await classifySdkStartupResponse(response, { timeoutMs: 15 })).toBe("unavailable");
+    expect(Date.now() - started).toBeLessThan(200);
+    expect(canceled).toBe(mode === "error" ? 0 : 1);
+    if (mode === "late_cancel") {
+      rejectCancel(new Error("private-late-cancel-error"));
+      await new Promise((done) => setTimeout(done, 0));
+    }
+  }
+});
+
+test("late read rejection is handled and zero-byte chunks consume the finite sample budget", async () => {
+  let rejectPull!: (error: Error) => void;
+  expect(
+    await classifySdkStartupResponse(
+      new Response(
+        new ReadableStream({
+          pull() {
+            return new Promise<void>((_, reject) => {
+              rejectPull = reject;
+            });
+          },
+          cancel() {},
+        }),
+      ),
+      { timeoutMs: 10 },
+    ),
+  ).toBe("unavailable");
+  rejectPull(new Error("private-late-read-error"));
+  await new Promise((done) => setTimeout(done, 0));
+  const empty = new Response(
+    new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(0));
+      },
+    }),
+  );
+  const reader = empty.body!.getReader();
+  let reads = 0;
+  const originalRead = reader.read.bind(reader);
+  spyOn(reader, "read").mockImplementation(() => {
+    reads++;
+    return originalRead();
+  });
+  spyOn(empty.body!, "getReader").mockReturnValue(reader);
+  expect(await classifySdkStartupResponse(empty)).toBe("unavailable");
+  expect(reads).toBe(338);
+});
+
+test("elapsed time rejects late matching EOF even before the timer callback runs", async () => {
+  let now = 0,
+    sent = false;
+  expect(
+    await classifySdkStartupResponse(
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (!sent) {
+              sent = true;
+              controller.enqueue(new TextEncoder().encode(SDK_NO_INSTANCE_RESPONSE));
+            } else {
+              now = 1001;
+              controller.close();
+            }
+          },
+        }),
+      ),
+      { now: () => now },
+    ),
+  ).toBe("unavailable");
+});
+
+test("Worker classifies only authenticated SDK POST once 503 responses without extra requests", async () => {
+  for (const revision of [
+    "baseline_sdk",
+    "rollback_sdk",
+    "native",
+    "native_unmonitored",
+    "native_recovered",
+  ]) {
+    for (const status of [503, 500, 200]) {
+      let calls = 0;
+      const env = {
+        ...environment(async (request) => {
+          calls++;
+          expect(new URL(request.url).pathname).toBe("/once");
+          expect(request.method).toBe("POST");
+          expect([...request.headers]).toEqual([]);
+          expect(request.body).toBeNull();
+          return new Response(SDK_NO_INSTANCE_RESPONSE, {
+            status,
+            headers: { [sdkStartupHeader]: "private-forged" },
+          });
+        }),
+        HARNESS_REVISION: revision,
+      };
+      const response = await worker().fetch(onceRequest(), env as never);
+      const classify = ["baseline_sdk", "rollback_sdk"].includes(revision) && status === 503;
+      expect(response.headers.get(sdkStartupHeader)).toBe(
+        classify ? "sdk_no_instance_response" : status === 200 ? "private-forged" : null,
+      );
+      expect(calls).toBe(1);
+      if (status !== 200) {
+        expect(response.status).toBe(502);
+        expect(response.headers.get("x-verification-upstream-status")).toBe(String(status));
+        expect(await response.json()).toEqual({ code: "operation_failed" });
+      }
+    }
+  }
+  let forwarded = 0;
+  const unauthorized = await worker().fetch(
+    new Request("https://synthetic.invalid/once", { method: "POST" }),
+    environment(async () => {
+      forwarded++;
+      return new Response(SDK_NO_INSTANCE_RESPONSE, { status: 503 });
+    }) as never,
+  );
+  expect(unauthorized.status).toBe(401);
+  expect(forwarded).toBe(0);
+  const wrongMethod = await worker().fetch(
+    new Request("https://synthetic.invalid/once", {
+      headers: { authorization: "Bearer private-key" },
+    }),
+    environment(async () => {
+      forwarded++;
+      return new Response(SDK_NO_INSTANCE_RESPONSE, { status: 503 });
+    }) as never,
+  );
+  expect(wrongMethod.status).toBe(404);
+  expect(forwarded).toBe(0);
+});
+
+test("a stalled classifier preserves the original Worker and driver upstream 503 error", async () => {
+  let canceled = 0;
+  const started = Date.now();
+  const response = await worker().fetch(
+    onceRequest(),
+    environment(
+      async () =>
+        new Response(
+          new ReadableStream({
+            pull() {},
+            cancel() {
+              canceled++;
+              return new Promise<void>(() => {});
+            },
+          }),
+          { status: 503 },
+        ),
+    ) as never,
+  );
+  expect(response.status).toBe(502);
+  expect(response.headers.get(sdkStartupHeader)).toBe("unavailable");
+  expect(response.headers.get("x-verification-upstream-status")).toBe("503");
+  expect(syntheticHttpFailure("/once", "POST", response, "concurrency")).toBe(unavailableCode);
+  expect(canceled).toBe(1);
+  expect(Date.now() - started).toBeLessThan(1300);
+});
+
+test("diagnostic headers require exact trusted status metadata, stage and category", async () => {
+  for (const category of ["sdk_no_instance_response", "other_503_response", "unavailable"]) {
+    const observations: unknown[] = [];
+    const response = startupFailureResponse(category);
+    const request = createSyntheticRequest({
+      origin: "https://synthetic.invalid",
+      key: "private-key",
+      fetchImpl: async () => response,
+      onFailure: (value: unknown) => observations.push(value),
+    });
+    await expect(request("/once", "POST", "concurrency")).rejects.toThrow(unavailableCode);
+    expect(observations).toEqual([{ code: unavailableCode, category }]);
+    expect(response.bodyUsed).toBe(false);
+    for (const stage of [
+      "idle_restart",
+      "reader_cancel_restart",
+      "destroy_restart",
+      "signal_restart",
+      "exit_restart",
+    ])
+      await expect(request("/once", "POST", stage)).rejects.toThrow(
+        `verification_http_once_${stage}_upstream_unavailable`,
+      );
+    expect(observations).toHaveLength(1);
+  }
+  for (const category of ["private", "sdk_no_instance_response_extra"]) {
+    const response = startupFailureResponse(category);
+    expect(sdkStartupCategory(response)).toBeUndefined();
+    let observed = 0;
+    await expect(
+      createSyntheticRequest({
+        origin: "https://synthetic.invalid",
+        key: "private-key",
+        fetchImpl: async () => response,
+        onFailure: () => {
+          observed++;
+        },
+      })("/once", "POST", "concurrency"),
+    ).rejects.toThrow(unavailableCode);
+    expect(observed).toBe(0);
+  }
+  for (const response of [
+    startupFailureResponse("sdk_no_instance_response", {
+      "x-verification-failure": "worker_exception",
+    }),
+    startupFailureResponse("sdk_no_instance_response", { "x-verification-upstream-status": "500" }),
+    startupFailureResponse("sdk_no_instance_response", {}, 503),
+    new Response(null, { headers: { [sdkStartupHeader]: "sdk_no_instance_response" } }),
+  ])
+    expect(sdkStartupCategory(response)).toBeUndefined();
+  for (const onFailure of [
+    () => {
+      throw new Error("private-write-error");
+    },
+    async () => {
+      throw new Error("private-late-write-error");
+    },
+  ])
+    await expect(
+      createSyntheticRequest({
+        origin: "https://synthetic.invalid",
+        key: "private-key",
+        fetchImpl: async () => startupFailureResponse("sdk_no_instance_response"),
+        onFailure,
+      })("/once", "POST", "concurrency"),
+    ).rejects.toThrow(unavailableCode);
+  await new Promise((done) => setTimeout(done, 0));
+});
+
+test("startup private record schema is closed and never carries SDK text", () => {
+  const valid = {
+    code: "sdk_startup_failure_observation",
+    phase: "baseline_sdk",
+    category: "sdk_no_instance_response",
+  };
+  expect(sdkStartupFailureRecord(valid)).toEqual(valid);
+  expect(sdkStartupFailureRecord(valid)).not.toBe(valid);
+  for (const change of [
+    { private: SDK_NO_INSTANCE_RESPONSE },
+    { phase: "native" },
+    { code: "private" },
+    { category: "provisioning" },
+  ])
+    expect(() => sdkStartupFailureRecord({ ...valid, ...change })).toThrow("verification_record");
+});
+
+test("driver privately persists only SDK concurrency diagnostics and preserves HTTP error on disk failure", async () => {
+  const account = "a".repeat(32),
+    namespace = "b".repeat(32);
+  const appId = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+    workerVersion = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+  const image = `registry.cloudflare.com/${account}/kogane-container-api-verification-verificationcontainer@sha256:${"c".repeat(64)}`;
+  for (const [phase, mode] of [
+    ["baseline_sdk", "normal"],
+    ["rollback_sdk", "normal"],
+    ["native", "normal"],
+    ["baseline_sdk", "existing"],
+    ["baseline_sdk", "directory"],
+    ["baseline_sdk", "unknown_header"],
+  ]) {
+    const temp = mkdtempSync(resolve(tmpdir(), "sdk-startup-"));
+    chmodSync(temp, 0o700);
+    const path = resolve(temp, "container-api-verification-sdk-startup-failure.json");
+    const existing = {
+      code: "sdk_startup_failure_observation",
+      phase,
+      category: "other_503_response",
+    };
+    if (mode === "existing") writeFileSync(path, JSON.stringify(existing), { mode: 0o600 });
+    if (mode === "directory") mkdirSync(path, { mode: 0o700 });
+    if (phase !== "baseline_sdk")
+      writeRecord(temp, "container-api-verification-baseline.json", {
+        appId,
+        namespace,
+        image,
+        workerVersion,
+      });
+    const calls: string[] = [],
+      reports: string[] = [];
+    const app = {
+      id: appId,
+      account_id: account,
+      name: "kogane-container-api-verification-verificationcontainer",
+      version: 1,
+      active_rollout_id: null,
+      scheduling_policy: "default",
+      max_instances: 1,
+      constraints: { regions: ["APAC"] },
+      durable_objects: { namespace_id: namespace },
+      configuration: { image, vcpu: 0.25, memory_mib: 1024, disk: { size_mb: 4000 } },
+    };
+    try {
+      await expect(
+        verifyPhase({
+          phase,
+          temp,
+          subdomain: "synthetic",
+          key: "private-key",
+          accountId: account,
+          apiToken: "private-api-token",
+          appId,
+          rolloutDeadline: Date.now() + 180_000,
+          report: (line: string) => reports.push(line),
+          fetchImpl: async (input: string, options: RequestInit) => {
+            const url = new URL(input);
+            calls.push(`${options.method} ${url.pathname}`);
+            if (url.host === "api.cloudflare.com") {
+              const result = url.pathname.endsWith("/deployments")
+                ? { deployments: [{ versions: [{ version_id: workerVersion, percentage: 100 }] }] }
+                : url.pathname.includes("/containers/") && url.pathname.endsWith("/versions")
+                  ? [{ version: 1, percentage: 100, configuration: { image } }]
+                  : url.pathname.includes("/containers/")
+                    ? app
+                    : {
+                        resources: {
+                          bindings: [
+                            {
+                              type: "durable_object_namespace",
+                              name: "HARNESS",
+                              class_name: "VerificationContainer",
+                              namespace_id: namespace,
+                            },
+                          ],
+                        },
+                      };
+              return Response.json({ success: true, result });
+            }
+            if (url.pathname === "/state")
+              return Response.json({
+                kvSentinelMatch: 1,
+                sqlSentinelMatch: 1,
+                sdkAlarmPresent: 0,
+                revision: phase === "rollback_sdk" ? "baseline_sdk" : phase,
+                running: 0,
+                ...(phase === "native" ? { starts: 0 } : { startCallbacks: 0 }),
+                stops: 0,
+                errors: 0,
+                signaled: 0,
+                exitSeven: 0,
+              });
+            if (url.pathname === "/initialize") return Response.json({ accepted: 1 });
+            if (url.pathname === "/destroy") return Response.json({ destroyed: 1 });
+            expect(url.pathname).toBe("/once");
+            return startupFailureResponse(
+              mode === "unknown_header" ? "private" : "sdk_no_instance_response",
+            );
+          },
+        }),
+      ).rejects.toThrow(unavailableCode);
+      expect(calls.filter((call) => call.endsWith(" /once"))).toEqual(["POST /once", "POST /once"]);
+      expect(calls.filter((call) => call.endsWith(" /state"))).toHaveLength(3);
+      expect(calls.some((call) => call.endsWith(" /stats"))).toBe(false);
+      expect(reports).toEqual([]);
+      if (phase === "native" || mode === "unknown_header") expect(existsSync(path)).toBe(false);
+      else if (mode !== "directory")
+        expect(readRecord(temp, "container-api-verification-sdk-startup-failure.json")).toEqual(
+          mode === "existing"
+            ? existing
+            : {
+                code: "sdk_startup_failure_observation",
+                phase,
+                category: "sdk_no_instance_response",
+              },
+        );
+    } finally {
+      rmSync(temp, { recursive: true });
+    }
+  }
+});
+
+test("startup classifier test budgets cannot loosen the fixed one-second bound", async () => {
+  for (const timeoutMs of [NaN, Infinity, -Infinity, -1, 0, 1001]) {
+    const response = new Response(SDK_NO_INSTANCE_RESPONSE);
+    expect(await classifySdkStartupResponse(response, { timeoutMs })).toBe("unavailable");
+    expect(response.bodyUsed).toBe(false);
+    await response.body?.cancel();
+  }
 });

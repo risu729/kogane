@@ -120,7 +120,22 @@ export function syntheticHttpFailure(path, method, response, substage) {
   return canonicalDriverHttpCode(`verification_http_${route}_${suffix}`);
 }
 /** The same bounded, single request used by phase verification, with no error-body reads. */
-export function createSyntheticRequest({ origin, key, fetchImpl = fetch }) {
+const sdkStartupCategories = Object.freeze([
+  "sdk_no_instance_response",
+  "other_503_response",
+  "unavailable",
+]);
+export function sdkStartupCategory(response) {
+  if (
+    response.status !== 502 ||
+    response.headers.get("x-verification-failure") !== "upstream_http" ||
+    response.headers.get("x-verification-upstream-status") !== "503"
+  )
+    return undefined;
+  const value = response.headers.get("x-verification-sdk-startup");
+  return sdkStartupCategories.find((category) => category === value);
+}
+export function createSyntheticRequest({ origin, key, fetchImpl = fetch, onFailure }) {
   return async function request(path, method = "GET", substage) {
     syntheticRoute(path, method, substage);
     let response;
@@ -137,8 +152,18 @@ export function createSyntheticRequest({ origin, key, fetchImpl = fetch }) {
     } catch {
       throw new Error("verification_transport");
     }
-    if (response.status !== 200)
-      throw new Error(syntheticHttpFailure(path, method, response, substage));
+    if (response.status !== 200) {
+      const code = syntheticHttpFailure(path, method, response, substage);
+      const category = sdkStartupCategory(response);
+      if (path === "/once" && method === "POST" && substage === "concurrency" && category) {
+        try {
+          void Promise.resolve(onFailure?.({ code, category })).catch(() => {});
+        } catch {
+          // Closed observations cannot alter the canonical primary error.
+        }
+      }
+      throw new Error(code);
+    }
     return response;
   };
 }

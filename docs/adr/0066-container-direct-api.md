@@ -310,8 +310,35 @@ separate cleanup step passed; independent API reads at 2026-10-10 01:20 JST
 confirmed Worker, application and namespace absence. The temporary token and
 dedicated environment remain bounded by the renewed 02:45 JST stop deadline.
 
-Neither attempt establishes runtime equivalence or a Cloudflare defect. The
-following hosted runtime gates remain pending:
+The reviewed release-condition hardening was published at `47f4da60`; its
+single-stream wait remains bounded by three seconds / 31 samples and requires
+unchanged running state, process identity and POST count on every sample. Main
+`6e2fe858` was integrated in signed head `430691a6`; exact-head normal CI and
+CodeQL passed. The hosted attempt at that head
+([run 37963677064](https://github.com/risu729/kogane/actions/runs/37963677064))
+failed the initial SDK concurrent POST gate at 2026-10-10 02:05:58 JST with
+`verification_http_once_concurrency_upstream_unavailable` (upstream HTTP 503),
+before the revised stream-release gate. Control-plane observation reported one
+inactive instance, zero running instances and zero failed instances. All four
+runtime cleanup checks and the separate cleanup step passed; independent API
+reads at 02:09 JST confirmed Worker/application/namespace absence.
+
+SDK 0.3.7 returns a fixed HTTP 503 response when its startup catches
+`NoInstanceError`; it can also preserve an HTTP 503 returned by TCP fetch. The
+recorded status cannot distinguish those branches or prove an allocation cause.
+No retry, warm-up, lease or diagnostic can promote these failed or unreached
+stages. The authorization deadline remains 02:45 JST unless renewed by explicit
+user confirmation.
+
+A failure-only diagnostic classifies the existing SDK `POST /once` HTTP 503
+response. It recognizes the pinned SDK's 337-byte literal only with complete
+EOF, within 338 bytes / 338 read samples and one shared 1-second read/cleanup
+budget. Only a closed category is retained; the primary upstream failure remains
+unchanged. No additional request, readiness assertion or success promotion is
+introduced. A literal match does not establish the underlying allocation cause.
+
+These attempts do not establish runtime equivalence or a Cloudflare defect.
+The following hosted runtime gates remain pending:
 
 1. Deploy SDK 0.3.7 with a fixed class/migration/image; seed synthetic KV and SQL
    sentinels and record application, namespace and exact Worker version.

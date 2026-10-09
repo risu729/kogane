@@ -1,13 +1,28 @@
 # Container API synthetic verification
 
-The latest completed SDK baseline attempt, [run 37957689144](https://github.com/risu729/kogane/actions/runs/37957689144)
-at `becff3cc`, failed the in-DO stream release gate with
-`verification_stream_check_streams`. Its error code does not distinguish a
-nonzero stream count before the error arm from one after it. One instance was
-running and none had failed; all four runtime cleanup checks, separate cleanup
-and independent Worker/application/namespace absence reads passed. Normal CI
-and CodeQL passed at that exact head. Reader-lifetime, native, recovery and
-rollback remain unverified.
+The latest completed SDK baseline attempt, [run 37963677064](https://github.com/risu729/kogane/actions/runs/37963677064)
+at reviewed head `430691a6`, failed its initial concurrent POST gate with
+`verification_http_once_concurrency_upstream_unavailable` (upstream HTTP 503).
+The revised stream-release check was not reached. The Container control plane
+reported one inactive instance, no running instance and no failed instance;
+this does not establish the cause of the response. All four runtime cleanup
+checks, separate cleanup and independent Worker/application/namespace absence
+reads passed. Exact-head normal CI and CodeQL passed. Reader-lifetime, native,
+recovery and rollback remain unverified.
+
+Earlier run 37957689144 at `becff3cc` failed the in-DO stream release gate with
+`verification_stream_check_streams`; that version did not distinguish its
+before/after release boundary. The reviewed successor permits a validated single
+stream to release within a finite three-second stage while preserving running
+state, process identity, POST count and the shared 46-second error-arm deadline.
+It has not yet completed hosted acceptance.
+
+A failure-only diagnostic classifies the existing SDK `POST /once` HTTP 503
+response. It recognizes the pinned SDK's 337-byte literal only with complete
+EOF, within 338 bytes / 338 read samples and one shared 1-second read/cleanup
+budget. Only a closed category is retained; the primary upstream failure remains
+unchanged. No additional request, readiness assertion or success promotion is
+introduced. A literal match does not establish the underlying allocation cause.
 
 The earlier run 37915871908 at `7d0e8bc6` failed the public stream-error gate
 with clean EOF. Its same-DO diagnostic observed the expected reader error in

@@ -12,6 +12,89 @@ export const revisions = new Set([
   "native_recovered",
   "rollback_sdk",
 ]);
+// Exact response literal emitted by the pinned @cloudflare/containers 0.3.7 startup catch.
+// This classifies the returned response only; it makes no claim about provisioning or cause.
+export const SDK_NO_INSTANCE_RESPONSE =
+  "There is no Container instance available at this time.\n" +
+  "This is likely because you have reached your max concurrent instance count (set in wrangler config) or are you currently provisioning the Container.\n" +
+  "If you are deploying your Container for the first time, check your dashboard to see provisioning status, this may take a few minutes.";
+export type SdkStartupCategory = "sdk_no_instance_response" | "other_503_response" | "unavailable";
+export async function classifySdkStartupResponse(
+  response: Response,
+  { timeoutMs = 1_000, now = Date.now }: { timeoutMs?: number; now?: () => number } = {},
+): Promise<SdkStartupCategory> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 1_000) return "unavailable";
+  const started = now();
+  const expected = new TextEncoder().encode(SDK_NO_INSTANCE_RESPONSE);
+  let category: SdkStartupCategory = "unavailable";
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let complete = false,
+    timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = () => {
+    const elapsed = now() - started;
+    return !Number.isFinite(elapsed) || elapsed < 0 || elapsed >= timeoutMs || timedOut;
+  };
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new Error("sdk_startup_observation_timeout"));
+    }, timeoutMs);
+  });
+  // All operation rejections, including those resolving after timeout, have a race handler.
+  const bounded = <T>(operation: Promise<T>) => Promise.race([operation, deadline]);
+  try {
+    reader = response.body?.getReader();
+    if (reader) {
+      let size = 0;
+      for (let samples = 0; samples < 338; samples++) {
+        if (expired()) break;
+        const part = await bounded(reader.read());
+        if (expired()) break;
+        if (part.done) {
+          complete = true;
+          category =
+            size === expected.byteLength ? "sdk_no_instance_response" : "other_503_response";
+          break;
+        }
+        if (!(part.value instanceof Uint8Array)) break;
+        if (part.value.byteLength > 338 - size) {
+          category = "other_503_response";
+          break;
+        }
+        let matches = true;
+        for (const byte of part.value) {
+          if (size >= expected.byteLength || byte !== expected[size]) matches = false;
+          size++;
+        }
+        if (!matches) {
+          category = "other_503_response";
+          break;
+        }
+      }
+    }
+  } catch {
+    category = "unavailable";
+  } finally {
+    if (reader && !complete) {
+      try {
+        const cancellation = reader.cancel();
+        if (expired()) void cancellation.catch(() => {});
+        else await bounded(cancellation);
+      } catch {
+        // Cleanup failure cannot replace the original HTTP failure.
+      }
+    }
+    if (expired()) category = "unavailable";
+    if (timer) clearTimeout(timer);
+    try {
+      reader?.releaseLock();
+    } catch {
+      // A pending source read is already guarded by its race handler.
+    }
+  }
+  return category;
+}
 const sentinel = "synthetic-sentinel-v1";
 export async function storageState(ctx: DurableObjectState, initialize = false) {
   ctx.storage.sql.exec(
@@ -90,7 +173,15 @@ export function worker() {
         if (response.status !== 200) {
           if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599)
             throw new Error("invalid_synthetic_status");
-          await response.body?.cancel();
+          let startupCategory: SdkStartupCategory | undefined;
+          if (
+            path === "/once" &&
+            request.method === "POST" &&
+            response.status === 503 &&
+            ["baseline_sdk", "rollback_sdk"].includes(env.HARNESS_REVISION)
+          )
+            startupCategory = await classifySdkStartupResponse(response);
+          else await response.body?.cancel();
           return Response.json(
             { code: "operation_failed" },
             {
@@ -98,6 +189,7 @@ export function worker() {
               headers: {
                 "x-verification-failure": "upstream_http",
                 "x-verification-upstream-status": String(response.status),
+                ...(startupCategory ? { "x-verification-sdk-startup": startupCategory } : {}),
               },
             },
           );

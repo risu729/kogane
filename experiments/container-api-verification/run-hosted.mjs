@@ -1750,6 +1750,25 @@ export async function execute(
     const code = diagnosticCode(error);
     failure = new Error(code);
     report(JSON.stringify({ code: "verification_execution_failed", stage, error: code }));
+    if (
+      ["baseline_sdk_verify", "rollback_sdk_verify"].includes(stage) &&
+      code === "verification_http_once_concurrency_upstream_unavailable"
+    ) {
+      try {
+        const { readRecord, sdkStartupFailureRecord } = await import("./driver.mjs");
+        const observation = sdkStartupFailureRecord(
+          readRecord(input.temp, "container-api-verification-sdk-startup-failure.json"),
+        );
+        if (stage !== `${observation.phase}_verify`) fail("driver_output");
+        report(
+          JSON.stringify({ ...observation, code: "verification_sdk_startup_failure_observation" }),
+        );
+      } catch {
+        report(
+          JSON.stringify({ code: "verification_sdk_startup_failure_observation_unavailable" }),
+        );
+      }
+    }
     if (stage.endsWith("_verify") && code.startsWith("verification_stream_check_")) {
       try {
         const { readRecord, streamCheckFailureRecord } = await import("./driver.mjs");
