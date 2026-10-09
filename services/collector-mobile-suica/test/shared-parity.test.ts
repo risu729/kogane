@@ -168,4 +168,34 @@ describe("mobile-suica: the shared target persists the legacy bytes (U09 parity,
     );
     expect(html.role).toBe("sanitized_provider_capture");
   });
+
+  test("keeps a successful transport partial when the history boundary is unproven", async () => {
+    const shared = new FakeR2Bucket();
+    const runId = crypto.randomUUID();
+    const result = await persistMobileSuicaRun(shared, {
+      runId,
+      producerVersion: PRODUCER_VERSION,
+      attemptId: `attempt-${runId}`,
+      startedAt: "2026-09-11T00:00:00.000Z",
+      completedAt: "2026-09-11T00:00:30.000Z",
+      status: "success",
+      asOfDateJst: "2026-09-11",
+      complete: false,
+      artifacts: [
+        {
+          dataset: "collection-summary",
+          filename: "collection-summary.json",
+          mediaType: "application/json",
+          body: JSON.stringify({ transactionCount: 100, complete: false }),
+        },
+      ],
+      failureCodes: [],
+    });
+    expect(result.outcome).toBe("persisted");
+    if (result.outcome !== "persisted") return;
+    expect(result.manifest.providerOutcome).toBe("success");
+    expect(result.manifest.coverageStatus).toBe("partial");
+    expect(result.manifest.safeErrorCode).toBeUndefined();
+    expect(result.manifest.units.map((unit) => unit.coverageStatus)).toEqual(["partial"]);
+  });
 });
