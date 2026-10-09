@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-12
-- Status: hosted SDK baseline attempts in progress; native and rollback gates pending.
+- Status: hosted SDK paused-reader gate failed; native and rollback gates pending.
 
 ## Question
 
@@ -19,8 +19,10 @@ variants deny outbound Internet access. The synthetic image has no bank code,
 credentials or VPC binding. Every endpoint authenticates before DO lookup.
 The paused-consumer gate observes the actual SDK/native response boundary inside
 the DO with the same capacity and timing limits. The earlier SDK public-client
-pause exhausted 256 MiB; public-path slow-consumer behavior remains unresolved
-and is not established by this narrower gate.
+pause exhausted 256 MiB, and the in-DO SDK pause subsequently exhausted the same
+cap in run 37884921868. Both observations remain unresolved; neither is a pass.
+Separate diagnostic comparisons may narrow the cause but cannot satisfy the
+existing acceptance gate.
 A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy
 this experiment. The manual verification job requires explicit selection.

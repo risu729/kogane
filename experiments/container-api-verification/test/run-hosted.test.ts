@@ -41,6 +41,8 @@ import {
   waitMissing,
   waitReady,
   observeBaselineInstances,
+  comparisonReport,
+  captureBackpressureComparison,
 } from "../run-hosted.mjs";
 
 const account = "a".repeat(32),
@@ -1359,14 +1361,18 @@ test("execution and cleanup errors are both reported without erasing the initial
     "baseline_sdk_deploy",
     "baseline_sdk_http_ready",
     "baseline_sdk_verify",
+    "baseline_sdk_verify_exhausted",
+    "baseline_sdk_verify_exhausted_valid",
   ]) {
     const temp = mkdtempSync(resolve(tmpdir(), "verification-dual-"));
     let pushed = false,
       deployed = false,
       removed = false;
     const reports: string[] = [];
-    const original =
-      failing === "baseline_sdk_verify"
+    let comparisonCalls = 0;
+    const original = failing.startsWith("baseline_sdk_verify_exhausted")
+      ? "verification_backpressure_exhausted_late"
+      : failing === "baseline_sdk_verify"
         ? "verification_sentinel"
         : failing === "baseline_sdk_http_ready"
           ? "verification_state_timeout"
@@ -1407,6 +1413,11 @@ test("execution and cleanup errors are both reported without erasing the initial
           },
           api,
           report: (line: string) => reports.push(line),
+          backpressureCompare: async () => {
+            comparisonCalls++;
+            if (failing === "baseline_sdk_verify_exhausted_valid") return comparisonFixture();
+            throw new Error(token);
+          },
           registry: async () => {
             if (removed && !pushed)
               throw new Error("verification_runner_registry_http_lookup_forbidden");
@@ -1426,7 +1437,12 @@ test("execution and cleanup errors are both reported without erasing the initial
                     : args.includes("deploy") && !args.some((a) => a.includes("teardown"))
                       ? "baseline_sdk_deploy"
                       : "";
-            if (current === failing) throw new Error(original);
+            if (
+              current === failing ||
+              (failing.startsWith("baseline_sdk_verify_exhausted") &&
+                current === "baseline_sdk_verify")
+            )
+              throw new Error(original);
             if (args.includes("push")) pushed = true;
             if (args.includes("deploy")) deployed = true;
             return "";
@@ -1435,8 +1451,24 @@ test("execution and cleanup errors are both reported without erasing the initial
       ).rejects.toThrow(original);
       const diagnostics = reports.map((line) => JSON.parse(line));
       expect(diagnostics).toEqual([
-        { code: "verification_execution_failed", stage: failing, error: original },
-        ...(failing === "baseline_sdk_verify"
+        {
+          code: "verification_execution_failed",
+          stage: failing.startsWith("baseline_sdk_verify_exhausted")
+            ? "baseline_sdk_verify"
+            : failing,
+          error: original,
+        },
+        ...(failing === "baseline_sdk_verify_exhausted"
+          ? [{ code: "verification_backpressure_compare_unavailable" }]
+          : []),
+        ...(failing === "baseline_sdk_verify_exhausted_valid"
+          ? [comparisonReport(comparisonFixture())]
+          : []),
+        ...([
+          "baseline_sdk_verify",
+          "baseline_sdk_verify_exhausted",
+          "baseline_sdk_verify_exhausted_valid",
+        ].includes(failing)
           ? [
               {
                 code: "verification_instance_observation_failed",
@@ -1453,6 +1485,7 @@ test("execution and cleanup errors are both reported without erasing the initial
               : "verification_runner_registry_http_delete_forbidden",
         },
       ]);
+      expect(comparisonCalls).toBe(failing.startsWith("baseline_sdk_verify_exhausted") ? 1 : 0);
       expect(reports.join("")).not.toContain(token);
       expect(reports.join("")).not.toContain(account);
       expect(reports.join("")).not.toContain(appId);
@@ -2207,4 +2240,147 @@ test("captured backpressure failures preserve only owned reasons without provide
     expect(driverFailure(forged)).toBe("verification_runner_child");
     expect(diagnosticCode(new Error(forged))).toBe("verification_runner_failed");
   }
+});
+
+const privateProcessIdentity = "dddddddd-dddd-4ddd-addd-dddddddddddd";
+const comparisonSnapshot = (running: 0 | 1, chunks: number, streams: number) => ({
+  running,
+  chunks,
+  streams,
+  posts: 2,
+});
+const comparisonArm = (code: string, lateChunks: number, lateStreams: number) => ({
+  code,
+  firstReadBytes: 65536,
+  elapsedMs: 35_000,
+  cancelled: 1,
+  baseline: comparisonSnapshot(1, 0, 0),
+  early: comparisonSnapshot(1, 32, 1),
+  late: comparisonSnapshot(1, lateChunks, lateStreams),
+});
+const comparisonFixture = () => ({
+  code: "backpressure_compare",
+  activityLease: 1,
+  sameProcess: 1,
+  conclusive: 1,
+  sdk: comparisonArm("exhausted_late", 4096, 0),
+  raw: comparisonArm("pass", 32, 1),
+});
+test("diagnostic report admits only a finite closed schema and one authenticated bounded GET", async () => {
+  const expected = comparisonFixture();
+  let calls = 0;
+  const actual = await captureBackpressureComparison({
+    subdomain: "synthetic",
+    key: "private-key",
+    fetchImpl: async (url: string, init: RequestInit) => {
+      calls++;
+      expect(url).toBe(`https://${WORKER}.synthetic.workers.dev/backpressure-compare`);
+      expect(init.method).toBe("GET");
+      expect(init.headers).toEqual({ authorization: "Bearer private-key" });
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      return Response.json(comparisonFixture());
+    },
+  });
+  expect(actual).toEqual(expected);
+  expect(calls).toBe(1);
+  expect(JSON.stringify(actual)).not.toContain("private-key");
+  expect(JSON.stringify(actual)).not.toContain(privateProcessIdentity);
+  for (const bad of [
+    { ...comparisonFixture(), processIdentity: privateProcessIdentity },
+    { ...comparisonFixture(), sameProcess: 2 },
+    { ...comparisonFixture(), sdk: { ...comparisonFixture().sdk, firstReadBytes: Infinity } },
+    {
+      ...comparisonFixture(),
+      raw: { ...comparisonFixture().raw, late: { ...comparisonFixture().raw.late, chunks: 4097 } },
+    },
+    { ...comparisonFixture(), conclusive: 1, raw: null },
+    {
+      ...comparisonFixture(),
+      sdk: {
+        ...comparisonFixture().sdk,
+        code: "timeout",
+        early: { running: null, chunks: null, streams: null, posts: null },
+      },
+    },
+    { ...comparisonFixture(), sdk: { ...comparisonFixture().sdk, code: "exhausted_early" } },
+    {
+      ...comparisonFixture(),
+      sdk: { ...comparisonFixture().sdk, early: { ...comparisonFixture().sdk.early, posts: 3 } },
+    },
+    { ...comparisonFixture(), sdk: { ...comparisonFixture().sdk, elapsedMs: 46_001 } },
+  ])
+    expect(() => comparisonReport(bad)).toThrow("comparison_invalid");
+});
+test("diagnostic response over 2KiB is canceled before any report", async () => {
+  let canceled = 0;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(2049));
+      },
+      cancel() {
+        canceled++;
+      },
+    }),
+  );
+  await expect(
+    captureBackpressureComparison({
+      subdomain: "synthetic",
+      key: "key",
+      fetchImpl: async () => response,
+    }),
+  ).rejects.toThrow("comparison_invalid");
+  expect(canceled).toBe(1);
+});
+
+test("diagnostic body stall obeys overall deadline and bounded cancellation", async () => {
+  let canceled = 0;
+  let releasePull: (() => void) | undefined;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      pull: () =>
+        new Promise<void>((resolve) => {
+          releasePull = resolve;
+        }),
+      cancel() {
+        canceled++;
+        releasePull?.();
+      },
+    }),
+  );
+  await expect(
+    captureBackpressureComparison({
+      subdomain: "synthetic",
+      key: "key",
+      timeoutMs: 10,
+      fetchImpl: async () => response,
+    }),
+  ).rejects.toThrow("comparison_timeout");
+  expect(canceled).toBe(1);
+});
+test("diagnostic cancels a response arriving after its deadline", async () => {
+  let resolveFetch!: (response: Response) => void;
+  let canceled = 0;
+  const operation = new Promise<Response>((resolve) => {
+    resolveFetch = resolve;
+  });
+  await expect(
+    captureBackpressureComparison({
+      subdomain: "synthetic",
+      key: "key",
+      timeoutMs: 10,
+      fetchImpl: async () => operation,
+    }),
+  ).rejects.toThrow("comparison_timeout");
+  resolveFetch(
+    new Response(
+      new ReadableStream<Uint8Array>({
+        cancel() {
+          canceled++;
+        },
+      }),
+    ),
+  );
+  await new Promise((done) => setTimeout(done, 0));
+  expect(canceled).toBe(1);
 });

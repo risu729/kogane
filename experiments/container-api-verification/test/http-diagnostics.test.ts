@@ -16,6 +16,7 @@ const routes = [
   ["/stream", "stream", "GET"],
   ["/backpressure", "backpressure", "GET"],
   ["/backpressure-check", "backpressure_check", "GET"],
+  ["/backpressure-compare", "backpressure_compare", "GET"],
   ["/stream-error", "stream_error", "GET"],
   ["/hold", "hold", "GET"],
   ["/destroy", "destroy", "POST"],

@@ -1,4 +1,4 @@
-# ADR 0060: Use the direct Container API with existing applications
+# ADR 0066: Use the direct Container API with existing applications
 
 - Status: proposed
 - Date: 2026-10-05
@@ -164,8 +164,23 @@ Attempt `a9cc3f6e`
 passed initialization, concurrent startup, long delay and long stream, then
 failed `verification_backpressure_exhausted_late` in the public-client pause.
 The process remained running. This confirms the cap was reached despite the
-compression controls; it does not establish a buffering cause. The revised
-controller-boundary check described above still requires hosted validation.
+compression controls; it does not establish a buffering cause.
+Attempt `e8bf5e050`
+([run 37884921868](https://github.com/risu729/kogane/actions/runs/37884921868))
+also failed `verification_backpressure_exhausted_late` with the SDK response
+reader paused inside the DO. The process was running, its identity matched,
+and the count was below the cap at the early sample but reached the cap at the
+late sample. The subsequent stream and POST assertions were not reached. This
+is a failed controller-boundary gate. It removes the outer client path as a
+sufficient explanation, but does not identify Bun, port transport, the SDK
+wrapper or another buffering layer. It does not establish unbounded buffering.
+The source, cap and timing remain unchanged; separate diagnostic observations
+must not convert this failure into a pass or satisfy native/rollback gates.
+The separate comparison repeats SDK and raw port reads under a diagnostic-only
+SDK activity lease. Renewing the existing SDK idle deadline without Container
+traffic makes raw transport observation possible across the 35-second pause;
+this lease is absent from acceptance checks and provides no idle or lifetime
+proof. Both comparisons retain the source, cap and timing limits.
 All four cleanup checks passed for these attempts; separate API reads confirmed
 Worker, application and namespace absence. The runner uses canonical OCI manifest HEAD for registry
 ownership and absence, and shares the existing rollout deadline with public

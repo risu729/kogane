@@ -57,6 +57,7 @@ export function worker() {
         "/stream": "GET",
         "/backpressure": "GET",
         "/backpressure-check": "GET",
+        "/backpressure-compare": "GET",
         "/stream-error": "GET",
         "/hold": "GET",
         "/destroy": "POST",
@@ -64,6 +65,11 @@ export function worker() {
         "/exit": "POST",
       };
       if (methods[path] !== request.method)
+        return Response.json(
+          { code: "route_missing" },
+          { status: 404, headers: { "x-verification-failure": "worker_route_missing" } },
+        );
+      if (path === "/backpressure-compare" && env.HARNESS_REVISION !== "baseline_sdk")
         return Response.json(
           { code: "route_missing" },
           { status: 404, headers: { "x-verification-failure": "worker_route_missing" } },

@@ -21,6 +21,12 @@ type Stats = {
   streams: number;
   backpressureChunks: number;
 };
+export type BackpressureEvent =
+  | { kind: "running"; sample: "baseline" | "early" | "late"; value: 0 | 1 }
+  | { kind: "stats"; sample: "baseline" | "early" | "late"; value: Readonly<Stats> }
+  | { kind: "first"; bytes: number }
+  | { kind: "elapsed"; ms: number }
+  | { kind: "cancel"; ok: 0 | 1 };
 type Dependencies = {
   fetchBoundary: (request: Request) => Promise<Response>;
   running: () => boolean;
@@ -29,6 +35,7 @@ type Dependencies = {
   timeoutMs?: number;
   cancelTimeoutMs?: number;
   outerSignal?: AbortSignal;
+  onEvent?: (event: Readonly<BackpressureEvent>) => void;
 };
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 // Matches the immutable random 64 KiB source's 4096-chunk cap.
@@ -66,7 +73,15 @@ export async function checkBackpressure({
   timeoutMs = 110_000,
   cancelTimeoutMs = 3_000,
   outerSignal,
+  onEvent,
 }: Dependencies): Promise<BackpressureReport> {
+  const emit = (event: BackpressureEvent) => {
+    try {
+      onEvent?.(Object.freeze(event));
+    } catch {
+      /* Diagnostics cannot alter the gate. */
+    }
+  };
   const aborter = new AbortController();
   let timedOut = false;
   let rejectDeadline!: (reason: CheckFailure) => void;
@@ -119,12 +134,16 @@ export async function checkBackpressure({
     return response;
   };
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let sampleIndex = 0;
   let result: BackpressureReport = { code: "stream" };
   try {
     if (outerSignal?.aborted) fail("timeout");
     const sample = async (): Promise<Stats> => {
+      const sampleName = (["baseline", "early", "late"] as const)[sampleIndex++];
       // Never auto-start a stopped process by requesting /stats.
-      if (!running()) fail("process");
+      const alive = running();
+      emit({ kind: "running", sample: sampleName, value: alive ? 1 : 0 });
+      if (!alive) fail("process");
       const response = await fetchOwned(
         new Request("http://container/stats", { signal: aborter.signal }),
       );
@@ -161,6 +180,16 @@ export async function checkBackpressure({
           !validCount(stats.backpressureChunks)
         )
           fail("chunks");
+        emit({
+          kind: "stats",
+          sample: sampleName,
+          value: Object.freeze({
+            processIdentity: stats.processIdentity as string,
+            posts: stats.posts as number,
+            streams: stats.streams as number,
+            backpressureChunks: stats.backpressureChunks as number,
+          }),
+        });
         return stats as Stats;
       } catch (error) {
         if (timedOut || error instanceof CheckFailure) throw error;
@@ -190,11 +219,13 @@ export async function checkBackpressure({
       fail("stream");
     }
     if (first.done || !first.value?.byteLength) fail("chunks");
+    emit({ kind: "first", bytes: first.value!.byteLength });
     await bounded(wait(1000, aborter.signal));
     const early = await sample();
     const started = now();
     await bounded(wait(35_000, aborter.signal));
     const elapsed = now() - started;
+    if (Number.isFinite(elapsed)) emit({ kind: "elapsed", ms: elapsed });
     if (!Number.isFinite(elapsed) || elapsed < 30_000) fail("timing");
     const late = await sample();
     if (now() - started < 30_000) fail("timing");
@@ -220,8 +251,11 @@ export async function checkBackpressure({
   } finally {
     clearTimeout(timer);
     outerSignal?.removeEventListener("abort", outerAbort);
-    if (reader && !(await cancelReader(reader)) && result.code === "pass")
-      result = { code: "stream" };
+    if (reader) {
+      const cancelled = await cancelReader(reader);
+      emit({ kind: "cancel", ok: cancelled ? 1 : 0 });
+      if (!cancelled && result.code === "pass") result = { code: "stream" };
+    } else emit({ kind: "cancel", ok: 0 });
     aborter.abort();
   }
   return result;

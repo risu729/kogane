@@ -15,7 +15,7 @@ import {
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { identity } from "./driver.mjs";
-import { canonicalDriverHttpCode } from "./http-diagnostics.mjs";
+import { canonicalDriverHttpCode, createSyntheticRequest } from "./http-diagnostics.mjs";
 import { waitHttpReady } from "./http-readiness.mjs";
 import { canonicalHex, canonicalUuid, canonicalImageRef } from "./identifiers.mjs";
 
@@ -474,6 +474,184 @@ export function driverReport(text, phase) {
   return item;
 }
 
+const comparisonCodes = new Set([
+  "pass",
+  "timing",
+  "process",
+  "stream",
+  "posts",
+  "chunks",
+  "encoding",
+  "exhausted_early",
+  "exhausted_late",
+  "progress",
+  "timeout",
+]);
+const exactKeys = (value, keys) =>
+  value &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+const flag = (value) => value === 0 || value === 1;
+const optionalCount = (value, max = Number.MAX_SAFE_INTEGER) =>
+  value === null || (Number.isSafeInteger(value) && value >= 0 && value <= max);
+function comparisonSnapshot(value) {
+  return (
+    exactKeys(value, ["running", "chunks", "streams", "posts"]) &&
+    (value.running === null || flag(value.running)) &&
+    optionalCount(value.chunks, 4096) &&
+    optionalCount(value.streams, 4096) &&
+    optionalCount(value.posts)
+  );
+}
+function comparisonArm(value) {
+  return (
+    exactKeys(value, [
+      "code",
+      "firstReadBytes",
+      "elapsedMs",
+      "baseline",
+      "early",
+      "late",
+      "cancelled",
+    ]) &&
+    comparisonCodes.has(value.code) &&
+    optionalCount(value.firstReadBytes, 4096 * 64 * 1024) &&
+    optionalCount(value.elapsedMs, 46_000) &&
+    flag(value.cancelled) &&
+    ["baseline", "early", "late"].every((name) => comparisonSnapshot(value[name]))
+  );
+}
+function fullComparisonArm(arm) {
+  if (
+    !arm ||
+    arm.cancelled !== 1 ||
+    arm.firstReadBytes === null ||
+    arm.firstReadBytes < 1 ||
+    arm.elapsedMs === null ||
+    arm.elapsedMs < 30_000 ||
+    ![arm.baseline, arm.early, arm.late].every(
+      (item) =>
+        item.running === 1 && item.chunks !== null && item.streams !== null && item.posts !== null,
+    )
+  )
+    return false;
+  return (
+    arm.baseline.streams === 0 &&
+    arm.early.streams === 1 &&
+    (arm.late.streams === 1 || (arm.code === "exhausted_late" && arm.late.streams === 0)) &&
+    arm.early.posts === arm.baseline.posts &&
+    arm.late.posts === arm.baseline.posts &&
+    arm.early.chunks >= 1 &&
+    arm.early.chunks < 4096 &&
+    arm.late.chunks >= arm.early.chunks &&
+    arm.late.chunks <= 4096
+  );
+}
+export function comparisonReport(value) {
+  if (
+    !exactKeys(value, ["code", "activityLease", "sdk", "raw", "sameProcess", "conclusive"]) ||
+    value.code !== "backpressure_compare" ||
+    !flag(value.activityLease) ||
+    !flag(value.conclusive) ||
+    !(value.sameProcess === null || flag(value.sameProcess)) ||
+    !(value.sdk === null || comparisonArm(value.sdk)) ||
+    !(value.raw === null || comparisonArm(value.raw)) ||
+    value.conclusive !==
+      Number(
+        value.activityLease === 1 &&
+          value.sameProcess === 1 &&
+          fullComparisonArm(value.sdk) &&
+          fullComparisonArm(value.raw) &&
+          ["pass", "progress", "exhausted_late"].includes(value.sdk.code) &&
+          ["pass", "progress", "exhausted_late"].includes(value.raw.code),
+      )
+  )
+    throw new Error("comparison_invalid");
+  return { ...value, code: "verification_backpressure_compare" };
+}
+/** A separate, diagnostic-only GET; no failure can replace the original gate result. */
+export async function captureBackpressureComparison({
+  subdomain,
+  key,
+  fetchImpl = fetch,
+  timeoutMs = 120_000,
+}) {
+  if (!/^[a-z0-9-]+$/u.test(subdomain ?? "") || !key) throw new Error("comparison_invalid");
+  const request = createSyntheticRequest({
+    origin: `https://${WORKER}.${subdomain}.workers.dev`,
+    key,
+    fetchImpl,
+  });
+  let timedOut = false,
+    rejectDeadline;
+  const deadline = new Promise((_, reject) => {
+    rejectDeadline = reject;
+  });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    rejectDeadline(new Error("comparison_timeout"));
+  }, timeoutMs);
+  const bounded = (operation) => Promise.race([operation, deadline]);
+  let reader,
+    complete = false;
+  try {
+    const operation = request("/backpressure-compare");
+    void operation.then(
+      async (late) => {
+        if (timedOut) {
+          try {
+            await late.body?.cancel();
+          } catch {
+            /* Late transport owns no report. */
+          }
+        }
+      },
+      () => {},
+    );
+    const response = await bounded(operation);
+    reader = response.body?.getReader();
+    if (!reader) throw new Error("comparison_invalid");
+    const parts = [];
+    let size = 0;
+    while (true) {
+      const part = await bounded(reader.read());
+      if (part.done) {
+        complete = true;
+        break;
+      }
+      size += part.value?.byteLength ?? 0;
+      if (size > 2048) throw new Error("comparison_invalid");
+      parts.push(part.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    comparisonReport(value);
+    return value;
+  } finally {
+    clearTimeout(timer);
+    if (reader && !complete) {
+      let cancelTimer;
+      try {
+        await Promise.race([
+          reader.cancel(),
+          new Promise((_, reject) => {
+            cancelTimer = setTimeout(() => reject(new Error("comparison_cancel_timeout")), 1000);
+          }),
+        ]);
+      } catch {
+        /* The primary diagnostic failure wins. */
+      } finally {
+        if (cancelTimer) clearTimeout(cancelTimer);
+      }
+    }
+  }
+}
 export function child(
   command,
   args,
@@ -1151,6 +1329,7 @@ export async function execute(
     report = console.log,
     hold = recoveryHolder,
     httpReady = waitHttpReady,
+    backpressureCompare = captureBackpressureComparison,
   } = {},
 ) {
   privateDirectory(input.temp);
@@ -1332,6 +1511,17 @@ export async function execute(
     const code = diagnosticCode(error);
     failure = new Error(code);
     report(JSON.stringify({ code: "verification_execution_failed", stage, error: code }));
+    if (stage === "baseline_sdk_verify" && code === "verification_backpressure_exhausted_late") {
+      try {
+        report(
+          JSON.stringify(
+            comparisonReport(await backpressureCompare({ subdomain: input.subdomain, key })),
+          ),
+        );
+      } catch {
+        report(JSON.stringify({ code: "verification_backpressure_compare_unavailable" }));
+      }
+    }
     if (stage === "baseline_sdk_verify")
       await observeBaselineInstances(input, state, { api, report });
   } finally {

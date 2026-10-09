@@ -1,6 +1,7 @@
 import { Container } from "@cloudflare/containers";
 import { storageState, worker, type HarnessEnv } from "./common";
 import { checkBackpressure } from "./backpressure-check";
+import { compareBackpressure } from "./backpressure-compare";
 
 export class VerificationContainer extends Container<HarnessEnv> {
   defaultPort = 8080;
@@ -36,6 +37,16 @@ export class VerificationContainer extends Container<HarnessEnv> {
         signaled: 0,
         exitSeven: 0,
       });
+    if (path === "/backpressure-compare")
+      return Response.json(
+        await compareBackpressure({
+          sdkFetch: (inner) => this.containerFetch(inner),
+          rawFetch: (inner) => this.ctx.container!.getTcpPort(8080).fetch(inner),
+          running: () => Boolean(this.ctx.container?.running),
+          renewActivityTimeout: () => this.renewActivityTimeout(),
+          outerSignal: request.signal,
+        }),
+      );
     if (path === "/backpressure-check")
       return Response.json(
         await checkBackpressure({

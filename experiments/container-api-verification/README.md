@@ -132,7 +132,22 @@ The in-DO check removes outer Worker, edge and client buffers from the measured
 boundary; it proves no end-to-end public backpressure, eviction or billing
 claim. Its active DO invocation may itself keep the DO resident, which is why
 separate Container running-state, idle, cancellation and recovery checks remain
-required.
+required. Run 37884921868 also exhausted the cap with the SDK response reader
+paused inside the DO. The controller-boundary gate therefore remains failed;
+this does not identify a buffering layer or establish unbounded buffering.
+Further diagnostic comparisons remain separate from acceptance results.
+After exactly this SDK baseline failure, the runner attempts one authenticated
+`/backpressure-compare` request. It repeats the unchanged SDK pause and compares
+it with direct `ctx.container.getTcpPort(8080).fetch()` using the same source,
+cap and timing. Both diagnostic observations receive an explicit SDK activity
+lease renewed every ten seconds, without Container traffic, so the raw port is
+not stopped merely because it bypasses SDK request tracking. The lease is
+cleared on exit and is never used by the acceptance check. Therefore this
+comparison can narrow transport behavior but cannot establish idle shutdown or
+wrapped-response lifetime. The closed report exposes bounded first-read bytes,
+source counts and boolean identity comparisons, never the process UUID or body.
+The original verification failure remains authoritative even if this separate
+diagnostic succeeds or fails; native/recovery/rollback do not proceed.
 
 Idle observations are bounded process-state checks. They do not establish
 billable runtime or DO eviction. Compare independently read aggregate billing
