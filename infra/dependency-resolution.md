@@ -109,7 +109,7 @@ each consumer is the requirement; where that is impossible the change must be ca
 
 | dependency | resolved versions | by package (declared range → resolved) |
 | --- | --- | --- |
-| `typescript` | 6.0.3, 7.0.2 | apps/web: `7.0.2` → 7.0.2<br>experiments/cloudflare-browser-run: `7.0.2` → 7.0.2<br>experiments/cloudflare-runtime-probe: `7.0.2` → 7.0.2<br>experiments/observation-pipeline-local: `7.0.2` → 7.0.2<br>experiments/st-george-automation: `7.0.2` → 7.0.2<br>experiments/tamia-tcp-bridge: `7.0.2` → 7.0.2<br>packages/application: `7.0.2` → 7.0.2<br>packages/collection: `7.0.2` → 7.0.2<br>packages/collector-diagnostics: `7.0.2` → 7.0.2<br>packages/domain: `7.0.2` → 7.0.2<br>packages/evidence-contract: `7.0.2` → 7.0.2<br>packages/identity: `7.0.2` → 7.0.2<br>packages/observation-shared: `7.0.2` → 7.0.2<br>packages/parsers: `7.0.2` → 7.0.2<br>packages/read-model: `7.0.2` → 7.0.2<br>packages/sbi-vc-trade-client: `7.0.2` → 7.0.2<br>packages/storage-d1: `7.0.2` → 7.0.2<br>services/app: `7.0.2` → 7.0.2<br>services/collector-globalpass: `6.0.3` → 6.0.3<br>services/collector-mizuho: `7.0.2` → 7.0.2<br>services/collector-mobile-suica: `7.0.2` → 7.0.2<br>services/collector-moneyforward: `7.0.2` → 7.0.2<br>services/collector-myjcb: `7.0.2` → 7.0.2<br>services/collector-prestia-bank: `7.0.2` → 7.0.2<br>services/collector-sbi-securities: `7.0.2` → 7.0.2<br>services/collector-sbi-shinsei: `7.0.2` → 7.0.2<br>services/collector-sbi-vc-trade: `7.0.2` → 7.0.2<br>services/collector-smbc-direct: `7.0.2` → 7.0.2<br>services/collector-sony-bank: `7.0.2` → 7.0.2<br>services/collector-st-george: `7.0.2` → 7.0.2<br>services/collector-vpass: `7.0.2` → 7.0.2<br>services/collector-vpoint: `7.0.2` → 7.0.2<br>services/collector-vpoint-pay: `7.0.2` → 7.0.2<br>services/processor: `7.0.2` → 7.0.2 |
+| `typescript` | 6.0.3, 7.0.2 | apps/web: `7.0.2` → 7.0.2<br>experiments/cloudflare-browser-run: `7.0.2` → 7.0.2<br>experiments/cloudflare-runtime-probe: `7.0.2` → 7.0.2<br>experiments/d1-conformance: `7.0.2` → 7.0.2<br>experiments/observation-pipeline-local: `7.0.2` → 7.0.2<br>experiments/st-george-automation: `7.0.2` → 7.0.2<br>experiments/tamia-tcp-bridge: `7.0.2` → 7.0.2<br>packages/application: `7.0.2` → 7.0.2<br>packages/collection: `7.0.2` → 7.0.2<br>packages/collector-diagnostics: `7.0.2` → 7.0.2<br>packages/domain: `7.0.2` → 7.0.2<br>packages/evidence-contract: `7.0.2` → 7.0.2<br>packages/identity: `7.0.2` → 7.0.2<br>packages/observation-shared: `7.0.2` → 7.0.2<br>packages/parsers: `7.0.2` → 7.0.2<br>packages/read-model: `7.0.2` → 7.0.2<br>packages/sbi-vc-trade-client: `7.0.2` → 7.0.2<br>packages/storage-d1: `7.0.2` → 7.0.2<br>services/app: `7.0.2` → 7.0.2<br>services/collector-globalpass: `6.0.3` → 6.0.3<br>services/collector-mizuho: `7.0.2` → 7.0.2<br>services/collector-mobile-suica: `7.0.2` → 7.0.2<br>services/collector-moneyforward: `7.0.2` → 7.0.2<br>services/collector-myjcb: `7.0.2` → 7.0.2<br>services/collector-prestia-bank: `7.0.2` → 7.0.2<br>services/collector-sbi-securities: `7.0.2` → 7.0.2<br>services/collector-sbi-shinsei: `7.0.2` → 7.0.2<br>services/collector-sbi-vc-trade: `7.0.2` → 7.0.2<br>services/collector-smbc-direct: `7.0.2` → 7.0.2<br>services/collector-sony-bank: `7.0.2` → 7.0.2<br>services/collector-st-george: `7.0.2` → 7.0.2<br>services/collector-vpass: `7.0.2` → 7.0.2<br>services/collector-vpoint: `7.0.2` → 7.0.2<br>services/collector-vpoint-pay: `7.0.2` → 7.0.2<br>services/processor: `7.0.2` → 7.0.2 |
 
 ## Declared dependencies and resolved versions
 
@@ -119,19 +119,19 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@tanstack/react-query` | dependencies | `5.104.0` | 5.104.0 |
-| `@tanstack/react-table` | dependencies | `9.2.4` | 9.2.4 |
+| `@tanstack/react-query` | dependencies | `5.104.1` | 5.104.1 |
+| `@tanstack/react-table` | dependencies | `9.2.6` | 9.2.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
 | `@types/react` | devDependencies | `19.3.0` | 19.3.0 |
 | `@types/react-dom` | devDependencies | `19.3.0` | 19.3.0 |
-| `@vitejs/plugin-react` | devDependencies | `6.1.1` | 6.1.1 |
+| `@vitejs/plugin-react` | devDependencies | `6.1.2` | 6.1.2 |
 | `jsonc-parser` | dependencies | `3.3.1` | 3.3.1 |
 | `playwright` | devDependencies | `1.63.0` | 1.63.0 |
 | `react` | dependencies | `19.3.0` | 19.3.0 |
 | `react-dom` | dependencies | `19.3.0` | 19.3.0 |
 | `shiki` | dependencies | `4.5.0` | 4.5.0 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
-| `vite` | devDependencies | `8.3.2` | 8.3.2 |
+| `vite` | devDependencies | `8.3.3` | 8.3.3 |
 
 ### `experiments/cloudflare-browser-run` — `@kogane/cloudflare-browser-run`
 
@@ -140,9 +140,9 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@cloudflare/puppeteer` | dependencies | `1.4.0` | 1.4.0 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `experiments/cloudflare-runtime-probe` — `@kogane/cloudflare-runtime-probe`
 
@@ -154,7 +154,18 @@ Lockfile: `bun.lock`.
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
 | `impit` | dependencies | `0.14.5` | 0.14.5 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
+
+### `experiments/d1-conformance` — `@kogane/d1-conformance`
+
+Lockfile: `bun.lock`.
+
+| dependency | kind | declared | resolved |
+| --- | --- | --- | --- |
+| `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
+| `miniflare` | devDependencies | `5.20260831.0-alpha` | 5.20260831.0-alpha |
+| `typescript` | devDependencies | `7.0.2` | 7.0.2 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `experiments/mizuho-direct` — `@kogane/mizuho-direct`
 
@@ -169,7 +180,7 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `hono` | dependencies | `4.13.12` | 4.13.12 |
+| `hono` | dependencies | `4.13.13` | 4.13.13 |
 | `playwright` | devDependencies | `1.63.0` | 1.63.0 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 
@@ -189,9 +200,9 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `packages/application` — `@kogane/application`
 
@@ -208,11 +219,12 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `packages/collector-diagnostics` — `@kogane/collector-diagnostics`
 
@@ -258,6 +270,7 @@ Lockfile: `bun.lock`.
 | --- | --- | --- | --- |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
+| `zod` | dependencies | `4.6.5` | 4.6.5 |
 
 ### `packages/parsers` — `@kogane/parsers`
 
@@ -303,14 +316,17 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
+| `@modelcontextprotocol/client` | devDependencies | `2.3.1` | 2.3.1 |
+| `@modelcontextprotocol/server` | dependencies | `2.3.1` | 2.3.1 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
-| `hono` | dependencies | `4.13.12` | 4.13.12 |
+| `hono` | dependencies | `4.13.13` | 4.13.13 |
 | `jose` | dependencies | `6.2.12` | 6.2.12 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 | `zod` | dependencies | `4.6.5` | 4.6.5 |
 
 ### `services/collector-globalpass` — `@kogane/poc-globalpass-worker`
@@ -321,12 +337,14 @@ Lockfile: `bun.lock`.
 | --- | --- | --- | --- |
 | `@cloudflare/containers` | dependencies | `0.3.7` | 0.3.7 |
 | `@cloudflare/puppeteer` | dependencies | `1.4.0` | 1.4.0 |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
+| `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `typescript` | devDependencies | `6.0.3` | 6.0.3 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 | `ws` | devDependencies | `8.22.0` | 8.22.0 |
 
 ### `services/collector-globalpass/container` — `@kogane/globalpass-collector-container`
@@ -345,15 +363,16 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `iconv-lite` | dependencies | `0.7.3` | 0.7.3 |
 | `parse5` | dependencies | `8.0.1` | 8.0.1 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-mobile-suica` — `@kogane/poc-mobile-suica-worker`
 
@@ -362,15 +381,16 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@cloudflare/puppeteer` | devDependencies | `1.4.0` | 1.4.0 |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
-| `devtools-protocol` | devDependencies | `0.0.1707781` | 0.0.1707781 |
+| `devtools-protocol` | devDependencies | `0.0.1710668` | 0.0.1710668 |
 | `iconv-lite` | dependencies | `0.7.3` | 0.7.3 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-moneyforward` — `@kogane/poc-moneyforward-worker`
 
@@ -379,11 +399,11 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `parse5` | dependencies | `8.0.1` | 8.0.1 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-myjcb` — `@kogane/poc-myjcb-worker`
 
@@ -393,11 +413,11 @@ Lockfile: `bun.lock`.
 | --- | --- | --- | --- |
 | `@cloudflare/puppeteer` | dependencies | `1.4.0` | 1.4.0 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `parse5` | dependencies | `8.0.1` | 8.0.1 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-prestia-bank` — `@kogane/collector-prestia-bank`
 
@@ -405,14 +425,15 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `parse5` | dependencies | `8.0.1` | 8.0.1 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-sbi-securities` — `@kogane/poc-sbi-securities-worker`
 
@@ -420,13 +441,14 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-sbi-shinsei` — `@kogane/poc-sbi-shinsei-worker`
 
@@ -435,12 +457,14 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@cloudflare/containers` | dependencies | `0.3.7` | 0.3.7 |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
+| `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 | `ws` | devDependencies | `8.22.0` | 8.22.0 |
 
 ### `services/collector-sbi-shinsei/container` — `@kogane/sbi-shinsei-collector-container`
@@ -458,13 +482,14 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-smbc-direct` — `@kogane/poc-smbc-direct-backfill-worker`
 
@@ -472,15 +497,16 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `iconv-lite` | dependencies | `0.7.3` | 0.7.3 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `uqr` | dependencies | `0.1.3` | 0.1.3 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-sony-bank` — `@kogane/poc-sony-bank-worker`
 
@@ -489,10 +515,10 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-st-george` — `@kogane/collector-st-george`
 
@@ -501,12 +527,14 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@cloudflare/containers` | dependencies | `0.3.7` | 0.3.7 |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
+| `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 | `ws` | devDependencies | `8.22.0` | 8.22.0 |
 
 ### `services/collector-st-george/container` — `@kogane/st-george-collector-container`
@@ -525,14 +553,14 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@clack/prompts` | dependencies | `1.8.1` | 1.8.1 |
-| `@cloudflare/workers-types` | devDependencies | `5.20261001.1` | 5.20261001.1 |
+| `@cloudflare/workers-types` | devDependencies | `5.20261006.1` | 5.20261006.1 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `impit` | dependencies | `0.14.5` | 0.14.5 |
 | `tough-cookie` | dependencies | `6.0.2` | 6.0.2 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-vpoint` — `@kogane/poc-vpoint-worker`
 
@@ -540,18 +568,19 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
 | `@types/set-cookie-parser` | devDependencies | `2.4.10` | 2.4.10 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `cheerio` | dependencies | `1.2.0` | 1.2.0 |
 | `iconv-lite` | dependencies | `0.7.3` | 0.7.3 |
-| `postal-mime` | dependencies | `4.0.2` | 4.0.2 |
+| `postal-mime` | dependencies | `4.0.4` | 4.0.4 |
 | `set-cookie-parser` | dependencies | `3.1.2` | 3.1.2 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/collector-vpoint-pay` — `@kogane/poc-vpoint-pay-worker`
 
@@ -559,13 +588,14 @@ Lockfile: `bun.lock`.
 
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
-| `@cloudflare/vitest-plugin` | devDependencies | `1.3.5` | 1.3.5 |
+| `@cloudflare/vitest-plugin` | devDependencies | `1.3.6` | 1.3.6 |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
+| `@vitest/coverage-istanbul` | devDependencies | `4.1.11` | 4.1.11 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
 
 ### `services/processor` — `@kogane/observation-pipeline`
 
@@ -574,13 +604,15 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
-| `@types/node` | devDependencies | `26.6.3` | 26.6.3 |
+| `@types/node` | devDependencies | `26.6.4` | 26.6.4 |
 | `cf` | devDependencies | `1.0.0-beta.12` | 1.0.0-beta.12 |
+| `chrono-node` | dependencies | `2.10.2` | 2.10.2 |
 | `miniflare` | devDependencies | `5.20260831.0-alpha` | 5.20260831.0-alpha |
 | `parse5` | dependencies | `8.0.1` | 8.0.1 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `undici` | devDependencies | `8.11.2` | 8.11.2 |
-| `wrangler` | devDependencies | `4.146.0` | 4.146.0 |
+| `wrangler` | devDependencies | `4.147.0` | 4.147.0 |
+| `zod` | dependencies | `4.6.5` | 4.6.5 |
 
 ## Transitive packages that resolve to more than one version
 
@@ -591,6 +623,7 @@ has to decide and record rather than absorb silently.
 | package | versions | resolved by |
 | --- | --- | --- |
 | `entities` | 6.0.1, 8.1.0 | packages/parsers: 8.1.0<br>services/collector-mizuho: 8.1.0<br>services/collector-moneyforward: 8.1.0<br>services/collector-myjcb: 8.1.0<br>services/collector-prestia-bank: 8.1.0<br>services/collector-vpoint: 6.0.1<br>services/processor: 8.1.0 |
+| `lru-cache` | 5.1.1, 7.18.3 | experiments/cloudflare-browser-run: 7.18.3<br>packages/collection: 5.1.1<br>services/app: 5.1.1<br>services/collector-globalpass: 5.1.1<br>services/collector-mizuho: 5.1.1<br>services/collector-mobile-suica: 5.1.1<br>services/collector-myjcb: 7.18.3<br>services/collector-prestia-bank: 5.1.1<br>services/collector-sbi-securities: 5.1.1<br>services/collector-sbi-shinsei: 5.1.1<br>services/collector-sbi-vc-trade: 5.1.1<br>services/collector-smbc-direct: 5.1.1<br>services/collector-st-george: 5.1.1<br>services/collector-vpoint: 5.1.1<br>services/collector-vpoint-pay: 5.1.1 |
 
 ## Closure digest per package
 
@@ -600,41 +633,42 @@ a changed digest has to be explained dependency by dependency.
 
 | package | lockfile | packages | closure sha256 |
 | --- | --- | --- | --- |
-| `apps/web` | bun.lock | 127 | `e738888ddc7faab2393d7028a721fa184d86229f80e4d6c7b55cec0598018bd8` |
-| `experiments/cloudflare-browser-run` | bun.lock | 189 | `48c507b94ee99de1f47ced00933364b3a717f29658838b78bf771b62d133d21a` |
-| `experiments/cloudflare-runtime-probe` | bun.lock | 126 | `a582dc2b3049433d6b209a56f71930299d04179c55e5954e24f3996bd34dab12` |
+| `apps/web` | bun.lock | 127 | `1f839a673f84211768f24dc59f8b35faaa310e61488aad3a32d050b3813410e2` |
+| `experiments/cloudflare-browser-run` | bun.lock | 189 | `737b0a679cc76ce5b64fd58254c2c783c55534db1daa6b7101f8b55633f41be9` |
+| `experiments/cloudflare-runtime-probe` | bun.lock | 126 | `dfbf42e5c1ac49d17edf670974afc2c39c9a1cb0898941bc92ddddd8bccbb0c1` |
+| `experiments/d1-conformance` | bun.lock | 116 | `7276f151f87192604f83bc0e6c5a7593e9d7a2ddff35b552f0a2f090b9f74a29` |
 | `experiments/mizuho-direct` | bun.lock | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
-| `experiments/observation-pipeline-local` | bun.lock | 28 | `3d627e016d0292b77a5fc9786fe86bbf074e0f402890cfef708fbd9989a1cd35` |
-| `experiments/st-george-automation` | bun.lock | 27 | `9ef1951a3c806cce31515cff553e05ba8786cffde890003214ca074d80482b6a` |
-| `experiments/tamia-tcp-bridge` | bun.lock | 114 | `546b788f2345d0ef465ae8b602de4c0938084ced6ef102be4e4357149781e537` |
-| `packages/application` | bun.lock | 25 | `dd1a06f3d9843134c95b9bf8ba4c5922cc6d8c06d166911b225d0a63e035ea90` |
-| `packages/collection` | bun.lock | 184 | `5e307e3a7481cd27058b7162d893e58dc2bdfc28d1d478d5c5363893294ead0c` |
-| `packages/collector-diagnostics` | bun.lock | 25 | `dd1a06f3d9843134c95b9bf8ba4c5922cc6d8c06d166911b225d0a63e035ea90` |
-| `packages/domain` | bun.lock | 25 | `dd1a06f3d9843134c95b9bf8ba4c5922cc6d8c06d166911b225d0a63e035ea90` |
-| `packages/evidence-contract` | bun.lock | 25 | `dd1a06f3d9843134c95b9bf8ba4c5922cc6d8c06d166911b225d0a63e035ea90` |
-| `packages/identity` | bun.lock | 25 | `dd1a06f3d9843134c95b9bf8ba4c5922cc6d8c06d166911b225d0a63e035ea90` |
-| `packages/observation-shared` | bun.lock | 25 | `dd1a06f3d9843134c95b9bf8ba4c5922cc6d8c06d166911b225d0a63e035ea90` |
-| `packages/parsers` | bun.lock | 27 | `9757715f02d96f236aca6589ae22f01ef7415e639bb2a55eff69335b0631d19c` |
-| `packages/read-model` | bun.lock | 25 | `dd1a06f3d9843134c95b9bf8ba4c5922cc6d8c06d166911b225d0a63e035ea90` |
-| `packages/sbi-vc-trade-client` | bun.lock | 25 | `dd1a06f3d9843134c95b9bf8ba4c5922cc6d8c06d166911b225d0a63e035ea90` |
-| `packages/storage-d1` | bun.lock | 26 | `e1957d94ed8f384ec58e3ccbf7f1f6577ddf208735e6fa78b2d968a7af25b3df` |
-| `services/app` | bun.lock | 190 | `f8e2164610cc3f2ba659754b669b5346d3cb233b035e9df00537b8d58ab49649` |
-| `services/collector-globalpass` | bun.lock | 240 | `9c779e670e674824299d14296543430402400e86d08d6b4eb93b374d93555dcd` |
+| `experiments/observation-pipeline-local` | bun.lock | 28 | `d398cfdf902336405d1a09181aff12dfdc144b5f2c0cc57a46a68be78ac7009d` |
+| `experiments/st-george-automation` | bun.lock | 27 | `d3880cd18c9fb9f8cbaa4595bc3a8ffd002141fadbddf4a00ae650e200869f62` |
+| `experiments/tamia-tcp-bridge` | bun.lock | 114 | `679d0a688228e5ea2e05684b3e39fa51a52515f17f8ff206a4b2bd982f3cfd31` |
+| `packages/application` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |
+| `packages/collection` | bun.lock | 226 | `52adcbe3539ea129eb6fd22707914a4c992d05451e83ad301f1c2036ea43f3f1` |
+| `packages/collector-diagnostics` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |
+| `packages/domain` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |
+| `packages/evidence-contract` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |
+| `packages/identity` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |
+| `packages/observation-shared` | bun.lock | 26 | `642c5ef675560e7a68b5526c350319cfcf015891311d5a9ceed443e4c5223d01` |
+| `packages/parsers` | bun.lock | 27 | `9e6257329afdb4a0ceadbffcb201560bf477a2d747103a4f3b4e59495647d9a3` |
+| `packages/read-model` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |
+| `packages/sbi-vc-trade-client` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |
+| `packages/storage-d1` | bun.lock | 26 | `3c184ccc90afe1e645f0e9ae6b7b0a76fe221cfaf3113449f80baf00b7e25c5b` |
+| `services/app` | bun.lock | 244 | `69e3880cc61f644982e529f1fd8de354837585f19f33a57ca187482ae5e67ca8` |
+| `services/collector-globalpass` | bun.lock | 284 | `d5d68b2fb2988497d10b76ae3d62e17d104f9b67997388d8db69fc4faa356d3a` |
 | `services/collector-globalpass/container` | package-lock.json | 5 | `bc5bbe1483b87ba685e9fd126df90d924af8925e4535eefb051af4ba47e80875` |
-| `services/collector-mizuho` | bun.lock | 194 | `9d10fda42f7158460152ea41cc18850cc9fd4519c7bb772f4ad7243a3fbd2d3a` |
-| `services/collector-mobile-suica` | bun.lock | 267 | `d8572f9cdcc482d78aaa5c753286ad2b8a4759bf4070b685b80b7ef5aa591e41` |
-| `services/collector-moneyforward` | bun.lock | 125 | `61cdb12b004bc7ac0c68906ea1eef454d2dbaccb3df29e64493f7d0e51e3cc5a` |
-| `services/collector-myjcb` | bun.lock | 200 | `4622ab1814d5fdf700ce5535e8f66093252ebf8ea4faa4abbe46d1a0d456f085` |
-| `services/collector-prestia-bank` | bun.lock | 192 | `450672d867703dd9526068a8705515b18b15fcdfd156ac56c311704dc88db0e5` |
-| `services/collector-sbi-securities` | bun.lock | 190 | `0d2c20437ee3ef62268fbc2f84fbc67a7f1675779a7a2c63fb51f52cfae0c968` |
-| `services/collector-sbi-shinsei` | bun.lock | 185 | `489adae8e1ead1f5c54dd732691c8b1d6a230c3d3f9dffbcfca1f6ee4e57068c` |
+| `services/collector-mizuho` | bun.lock | 236 | `4bb35fb8c3cf4f2b43ef6cda7ebb22a567cdcd9c3c580348cab3f19d7e78d6cc` |
+| `services/collector-mobile-suica` | bun.lock | 305 | `e4df94f90e11dabc38a1dd22baf34906131c4ea5465f4e967544207cc53f0567` |
+| `services/collector-moneyforward` | bun.lock | 125 | `b473e6b02514787897ff4b41a528f4378f632d786203db394149f41c8ec123d6` |
+| `services/collector-myjcb` | bun.lock | 200 | `156c776f1e8843a4fbbe50dfaf550256025df19b5fad62200f2b03bbf91ef3e9` |
+| `services/collector-prestia-bank` | bun.lock | 234 | `5fbffdaba3a1f39c36b787e0e7821ddbc71f824673c4694242c3b8b56c6dc4ee` |
+| `services/collector-sbi-securities` | bun.lock | 232 | `bf73203461e9ee0ee5c8e9436d4255914f81b0ae0d14d6564f170a686d01916e` |
+| `services/collector-sbi-shinsei` | bun.lock | 233 | `6d926ae91e905cfa498e7c442fe85dd4f52a46d4332409af7bd0bca353a017d4` |
 | `services/collector-sbi-shinsei/container` | package-lock.json | 3 | `5bd3e987babb0b368c6835a774487fc81f6cfaf2bedf2962ebf6608bac475c83` |
-| `services/collector-sbi-vc-trade` | bun.lock | 190 | `0d2c20437ee3ef62268fbc2f84fbc67a7f1675779a7a2c63fb51f52cfae0c968` |
-| `services/collector-smbc-direct` | bun.lock | 193 | `2c67187ea9141f13fc7ba1e56aa6b8d19637082a759625858fe6d0b4689f7e51` |
-| `services/collector-sony-bank` | bun.lock | 123 | `da2dc4e591f04eb9d1884aad4bcf9c47a3f1ae874e9cc124a75ff193fd972dcd` |
-| `services/collector-st-george` | bun.lock | 185 | `489adae8e1ead1f5c54dd732691c8b1d6a230c3d3f9dffbcfca1f6ee4e57068c` |
+| `services/collector-sbi-vc-trade` | bun.lock | 232 | `bf73203461e9ee0ee5c8e9436d4255914f81b0ae0d14d6564f170a686d01916e` |
+| `services/collector-smbc-direct` | bun.lock | 235 | `0266952cc1a818fccd932756f872770ca343ecf5133c3b46ac55b02d69f68465` |
+| `services/collector-sony-bank` | bun.lock | 123 | `339748b425b4997ddc03b383a3f56ecd7add397a820727960260abce4d50938a` |
+| `services/collector-st-george` | bun.lock | 233 | `6d926ae91e905cfa498e7c442fe85dd4f52a46d4332409af7bd0bca353a017d4` |
 | `services/collector-st-george/container` | package-lock.json | 3 | `5bd3e987babb0b368c6835a774487fc81f6cfaf2bedf2962ebf6608bac475c83` |
-| `services/collector-vpass` | bun.lock | 142 | `dc5752e0b40852d6a412b878a882881e92a74c22dcf4217a77ee56911baf82fa` |
-| `services/collector-vpoint` | bun.lock | 213 | `d6288e8b02f6f80f71211e9d009c2b0ab76ab5d07f358a74b3b6340f47faa51c` |
-| `services/collector-vpoint-pay` | bun.lock | 190 | `0d2c20437ee3ef62268fbc2f84fbc67a7f1675779a7a2c63fb51f52cfae0c968` |
-| `services/processor` | bun.lock | 125 | `bb4fd6eb47887a34fd4693d13e4e8549e5fa51b7902117228546549dba80d5f3` |
+| `services/collector-vpass` | bun.lock | 142 | `650e704f45d4db4144a896f46cd440bdf5add59706bba154fa1c2766a3d63427` |
+| `services/collector-vpoint` | bun.lock | 255 | `c9ff71c35987d6bac869d3a21a4e7b25637ad512f22fb767a5ef1883761c7e7c` |
+| `services/collector-vpoint-pay` | bun.lock | 232 | `bf73203461e9ee0ee5c8e9436d4255914f81b0ae0d14d6564f170a686d01916e` |
+| `services/processor` | bun.lock | 126 | `2d5de880a789d277c539689d978758894ebaaccff1adf3a0ba57fe4949bd8f2c` |
