@@ -9,7 +9,7 @@ run = "./node_modules/.bin/tsc --noEmit"
 # Selected only by the hosted remainder; standalone and local full checks stay complete.
 wait_for = ["//:ci:remainder:workspaces"]
 description = "Run the packages/storage-d1 tests: codecs, atomic commands and the migration parity."
-run = "bun test"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test"
 
 [tasks."ci"]
 description = "Every check CI runs for packages/storage-d1."
