@@ -256,6 +256,35 @@ export function verifyApplicationRollout(snapshot, versions) {
     fail("rollout_unverified");
 }
 
+/** Reject unstable or changed original targets before any new Container publication. */
+export function verifyApplicationBaseline(before, current, versions) {
+  verifyApplicationIdentity(before, current);
+  if (
+    current.workerVersion !== before.workerVersion ||
+    current.version !== before.version ||
+    current.image !== before.image
+  )
+    fail("baseline_changed");
+  if (
+    !Array.isArray(versions) ||
+    versions.some(
+      (entry) =>
+        !entry ||
+        typeof entry !== "object" ||
+        typeof entry.configuration?.image !== "string" ||
+        !entry.configuration.image ||
+        !Number.isSafeInteger(entry.version) ||
+        entry.version < 0 ||
+        !Number.isFinite(entry.percentage) ||
+        entry.percentage < 0 ||
+        entry.percentage > 100,
+    )
+  )
+    fail("version_shape");
+  if (versions.some((entry) => entry.version > before.version)) fail("baseline_changed");
+  verifyApplicationRollout(current, versions);
+}
+
 /** Keep the existing 180-second rollout window; an attempt cap must not shorten it. */
 export async function waitForApplicationRollout(
   readState,
@@ -322,6 +351,8 @@ export async function verifyRegistryImage({
   username,
   password,
   fetchImpl = fetch,
+  deadline,
+  now = Date.now,
 }) {
   if (
     !digestPattern.test(imageId) ||
@@ -335,13 +366,15 @@ export async function verifyRegistryImage({
   const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
   const manifest = async (digest) => {
     if (!digestPattern.test(digest)) fail("registry_digest_invalid");
+    const remaining = deadline === undefined ? 30000 : Math.min(30000, Math.ceil(deadline - now()));
+    if (remaining <= 0) fail("rollout_pending");
     let response;
     try {
       response = await fetchImpl(
         `https://registry.cloudflare.com/v2/${ref.repository}/manifests/${digest}`,
         {
           redirect: "manual",
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(remaining),
           headers: {
             Authorization: authorization,
             Accept:
@@ -350,8 +383,10 @@ export async function verifyRegistryImage({
         },
       );
     } catch {
+      if (deadline !== undefined && now() >= deadline) fail("rollout_pending");
       fail("registry_unavailable");
     }
+    if (deadline !== undefined && now() >= deadline) fail("rollout_pending");
     if (response.status !== 200) fail("registry_http");
     let bytes;
     try {
@@ -370,8 +405,10 @@ export async function verifyRegistryImage({
       }
       bytes = Buffer.concat(chunks);
     } catch {
+      if (deadline !== undefined && now() >= deadline) fail("rollout_pending");
       fail("registry_response");
     }
+    if (deadline !== undefined && now() >= deadline) fail("rollout_pending");
     if (
       bytes.length > 4 * 1024 * 1024 ||
       `sha256:${createHash("sha256").update(bytes).digest("hex")}` !== digest
@@ -752,7 +789,12 @@ async function main() {
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const api = cloudflareApi({ accountId, token: process.env.CLOUDFLARE_API_TOKEN });
     const snapshots = [];
-    for (const target of targets) snapshots.push(await readApplication(target, api, accountId));
+    for (const target of targets) {
+      const snapshot = await readApplication(target, api, accountId);
+      const versions = await api(`containers/applications/${target.appId}/versions`);
+      verifyApplicationBaseline(snapshot, snapshot, versions);
+      snapshots.push(snapshot);
+    }
     if (targets.length === 0) {
       writeFileSync(baseline, JSON.stringify({ registryNamespace: null, snapshots }));
       return;

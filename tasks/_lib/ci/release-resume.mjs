@@ -29,6 +29,7 @@ import {
   cloudflareApi,
   readApplication,
   verifyApplicationIdentity,
+  verifyApplicationBaseline,
   verifyRegistryImage,
   registryImage,
   dockerImageId,
@@ -267,6 +268,10 @@ export function publicationCandidate(before, versions, registryNamespace, target
     !Array.isArray(versions) ||
     versions.some(
       (entry) =>
+        !entry ||
+        typeof entry !== "object" ||
+        typeof entry.configuration?.image !== "string" ||
+        !entry.configuration.image ||
         !Number.isSafeInteger(entry.version) ||
         entry.version < 0 ||
         !Number.isFinite(entry.percentage) ||
@@ -276,10 +281,56 @@ export function publicationCandidate(before, versions, registryNamespace, target
   )
     fail("version_shape");
   const candidates = versions.filter((entry) => entry.version > before.version);
+  if (candidates.length === 0) fail("publication_pending");
   if (candidates.length !== 1) fail("publication_ambiguous");
   registryImage(target, candidates[0].configuration?.image, registryNamespace);
   return candidates[0];
 }
+/** Retry only an absent allocation target; all schema/identity/read errors are final. */
+export async function waitForPublicationCandidate(
+  readState,
+  {
+    before,
+    target,
+    publishedVersion,
+    deadline,
+    now = Date.now,
+    wait = (ms) => new Promise((done) => setTimeout(done, ms)),
+  },
+) {
+  while (now() < deadline) {
+    const state = await readState(deadline);
+    if (now() >= deadline) fail("publication_pending");
+    verifyApplicationIdentity(before, state.snapshot);
+    if (!uuid.test(publishedVersion) || state.snapshot.workerVersion !== publishedVersion)
+      fail("published_worker_mismatch");
+    if (
+      state.snapshot.version < before.version ||
+      (state.snapshot.version === before.version && state.snapshot.image !== before.image)
+    )
+      fail("application_superseded");
+    try {
+      const candidate = publicationCandidate(
+        before,
+        state.versions,
+        state.registryNamespace,
+        target,
+      );
+      verifyBoundPublication(
+        { ...state.snapshot, version: candidate.version, image: candidate.configuration.image },
+        state.snapshot,
+      );
+      return { ...state, candidate };
+    } catch (error) {
+      if (error.message !== "release_resume_publication_pending") throw error;
+    }
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
+    await wait(Math.min(5000, remaining));
+  }
+  fail("publication_pending");
+}
+
 export function verifyBoundPublication(bound, snapshot) {
   verifyApplicationIdentity(bound, snapshot);
   if (snapshot.workerVersion !== bound.workerVersion) fail("worker_superseded");
@@ -309,6 +360,7 @@ export function verifyResumeContainerState(before, bound, current, versions) {
     current.image !== before.image
   )
     fail("unpublished_target_changed");
+  if (!bound) verifyApplicationBaseline(before, current, versions);
 }
 
 export function validatePreparedPaths(paths) {
@@ -590,30 +642,57 @@ async function main() {
       );
     return;
   }
+  if (command === "verify-publication-baseline") {
+    const before = json(resolve(temp, "container-baseline.json"));
+    const target = CONTAINER_TARGETS.find((entry) => entry.name === argument);
+    const baseline = before.snapshots.find((entry) => entry.name === argument);
+    if (!target || !baseline) fail("prepared_binding");
+    const api = cloudflareApi({
+      accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+      token: process.env.CLOUDFLARE_API_TOKEN,
+      deadline: Date.now() + 30000,
+    });
+    const current = await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID);
+    const versions = await api(`containers/applications/${target.appId}/versions`);
+    await currentRegistryNamespace(api, before.registryNamespace);
+    verifyApplicationBaseline(baseline, current, versions);
+    return;
+  }
   if (command === "capture") {
     const record = json(recordPath),
       before = json(resolve(temp, "container-baseline.json"));
     const saved = existsSync(receiptPath) ? json(receiptPath) : null;
     const target = CONTAINER_TARGETS.find((t) => t.name === argument);
     const image = json(resolve(temp, "container-manifest.json")).find((i) => i.name === argument);
+    if (!target || !image || !before.snapshots.some((entry) => entry.name === argument))
+      fail("prepared_binding");
+    const deadline = Date.now() + 30000;
     const api = cloudflareApi({
       accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
       token: process.env.CLOUDFLARE_API_TOKEN,
+      deadline,
     });
-    const snapshot = await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID);
     const baseline = before.snapshots.find((s) => s.name === argument);
-    verifyApplicationIdentity(baseline, snapshot);
-    const publishedVersion =
-      process.env.PUBLISHED_WORKER_VERSION ||
-      (process.env.LEGACY_PUBLICATION === "true" &&
-      snapshot.workerVersion !== baseline.workerVersion
-        ? snapshot.workerVersion
-        : "");
-    if (!uuid.test(publishedVersion) || snapshot.workerVersion !== publishedVersion)
-      fail("published_worker_mismatch");
-    const versions = await api(`containers/applications/${target.appId}/versions`);
-    const registryNamespace = await currentRegistryNamespace(api, before.registryNamespace);
-    const candidate = publicationCandidate(baseline, versions, registryNamespace, target);
+    let publishedVersion = process.env.PUBLISHED_WORKER_VERSION;
+    if (!publishedVersion && process.env.LEGACY_PUBLICATION === "true") {
+      const first = await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID);
+      if (first.workerVersion !== baseline.workerVersion) publishedVersion = first.workerVersion;
+    }
+    if (!uuid.test(publishedVersion ?? "")) fail("published_worker_mismatch");
+    const readState = async () => ({
+      snapshot: await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID),
+      versions: await api(`containers/applications/${target.appId}/versions`),
+      registryNamespace: await currentRegistryNamespace(api, before.registryNamespace),
+    });
+    const { snapshot, candidate, registryNamespace } = await waitForPublicationCandidate(
+      readState,
+      {
+        before: baseline,
+        target,
+        publishedVersion,
+        deadline,
+      },
+    );
     const credentials = await api("containers/registries/registry.cloudflare.com/credentials", {
       expiration_minutes: 5,
       permissions: ["pull"],
@@ -624,10 +703,31 @@ async function main() {
       imageId: image.imageId,
       registryNamespace,
       ...credentials,
+      deadline,
     });
     if (image.legacy && image.registryImage !== candidate.configuration.image)
       fail("rollback_image_changed");
+    // Reconfirm the complete exact target after registry proof, before any receipt can be written.
+    const final = await readState();
+    if (Date.now() >= deadline) fail("publication_pending");
+    if (
+      final.snapshot.version < baseline.version ||
+      (final.snapshot.version === baseline.version && final.snapshot.image !== baseline.image)
+    )
+      fail("application_superseded");
+    const finalCandidate = publicationCandidate(
+      baseline,
+      final.versions,
+      final.registryNamespace,
+      target,
+    );
+    if (
+      finalCandidate.version !== candidate.version ||
+      finalCandidate.configuration.image !== candidate.configuration.image
+    )
+      fail("application_superseded");
     const bound = { ...snapshot, version: candidate.version, image: candidate.configuration.image };
+    verifyBoundPublication(bound, final.snapshot);
     const steps = mergePublicationSteps(saved?.steps, JSON.parse(process.env.STEPS_JSON));
     write(receiptPath, {
       version: "release-resume-v1",
@@ -666,9 +766,11 @@ if (fileURLToPath(import.meta.url) === resolve(process.argv[1] ?? "")) {
     await main();
   } catch (error) {
     console.error(
-      /^release_resume_[a-z_]+$/u.test(error.message)
-        ? error.message
-        : `release_resume_${process.argv[2] === "restore" ? "restore_failed" : "failed"}`,
+      process.argv[2] === "capture" && error.message === "cf_container_rollout_pending"
+        ? "release_resume_publication_pending"
+        : /^(?:release_resume|cf_container)_[a-z_]+$/u.test(error.message)
+          ? error.message
+          : `release_resume_${process.argv[2] === "restore" ? "restore_failed" : "failed"}`,
     );
     process.exitCode = 1;
   }

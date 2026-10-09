@@ -530,6 +530,16 @@ namespace identity in an immutable receipt. Its original deployment audit
 binds the receipt artifact ID/digest; the original payload binds prepared
 artifact ID/digest, run/original-attempt, target SHA and trusted workflow SHA.
 
+Original Container baselines must be fully stable before preparation can push
+legacy images or proceed to migrations. Each unpublished target is checked again
+against that same baseline immediately before its Action; unbound targets are
+also checked during restore before resumed migrations. Capture retries only an
+absent new allocation version within one absolute 30-second budget, including
+registry proof and final readback. Multiple candidates, malformed/read failures
+and identity changes are refused immediately. The native returned UUID, or the
+frozen first changed legacy UUID, stays exact. The final readback must retain the
+same candidate before any receipt is written.
+
 Rerunning the failed release job reacquires its own `production-deploy` lock,
 refuses any newer release record (including failed/pending releases), and verifies
 artifact metadata and incrementally computed whole-ZIP checksums before restoring original
