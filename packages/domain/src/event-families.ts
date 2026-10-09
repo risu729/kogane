@@ -17,8 +17,14 @@ import { hasExactKeys, isOneOf, isRecord, isText } from "./guards.ts";
  * v2 (ADR 0054, G1b): the provider identity functions below, and SBI Shinsei
  * rows no longer have a card settlement writer (their id's origin is not
  * recorded, so a human-adopted writer refuses them: identity_origin_unrecorded).
+ *
+ * v3 (ADR 0018, 2026-10-09): `sbi-shinsei-top-balances-and-activity` 0.1.3
+ * records `identityOrigin: provider-id` on every activity row, so its card
+ * settlement writer is back. The admission still reads each stored row: a row
+ * a 0.1.2 run stored carries no origin and stays refused
+ * (identity_origin_unrecorded, `rowOriginBasis`).
  */
-export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v2";
+export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v3";
 
 /**
  * The closed list of economic-event families.
@@ -420,26 +426,22 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     ],
   },
   {
-    // `txnReferenceNo`, no origin recorded, no status; debit/credit columns;
+    // `txnReferenceNo`, recorded as `identityOrigin: provider-id` from 0.1.3
+    // (0.1.2 recorded no origin); no status; debit/credit columns;
     // `tradeTypeCode` kept unmapped; one native currency per account. The card
-    // settlement writer is human-adopted and refuses an id whose origin the
-    // parser does not record (ADR 0054 rule 2), although its provider identity
-    // function is declared below: a parser release recording the origin admits it.
+    // settlement writer is human-adopted and admits a row through the provider
+    // identity function declared below only when the row itself records the
+    // origin (ADR 0054 rule 2): rows a 0.1.2 run stored stay refused.
     sourceId: "sbi-shinsei-bank",
     parserName: "sbi-shinsei-top-balances-and-activity",
     observationKinds: ["transaction"],
-    identity: identity("provider_id"),
+    identity: identity("provider_id", "identityOrigin", "provider"),
     statuses: ABSENT,
     providerLinks: NO_LINK,
     families: [
-      unsupported("bank-movement", "identity_origin_unrecorded", "counterpart_not_stated"),
-      unsupported(
-        "fx-exchange",
-        "identity_origin_unrecorded",
-        "counterpart_not_stated",
-        "semantics_unobserved",
-      ),
-      unsupported("card-settlement", "identity_origin_unrecorded"),
+      unsupported("bank-movement", "counterpart_not_stated"),
+      unsupported("fx-exchange", "counterpart_not_stated", "semantics_unobserved"),
+      supported("card-settlement"),
     ],
   },
   {
@@ -647,8 +649,9 @@ export interface ProviderIdentityFunction {
  *   `identityOrigin: provider-id` and as the external id.
  * - SBI Shinsei (`sbi-shinsei-top-balances-and-activity`): `txnReferenceNo`,
  *   which the parser requires to be unique within one activity page (ADR
- *   0018). The parser records no origin, so this function admits nothing
- *   until a parser release records it.
+ *   0018). From parser 0.1.3 the row records `identityOrigin: provider-id`;
+ *   a row stored by 0.1.2 records none, so this function admits only rows a
+ *   0.1.3 (or later) run stored.
  */
 export const PROVIDER_IDENTITY_FUNCTIONS: readonly ProviderIdentityFunction[] = [
   {

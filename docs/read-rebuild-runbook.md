@@ -128,8 +128,9 @@ until the pointer switches.
   `infra/schema/core-ledger.md` and the CORE tables are not part of this
   procedure at all.
 
-If the App feature gates were paused, re-enable `BALANCE_PROJECTION_ENABLED=1`
-and `REWARDS_V2_ENABLED=true` through the normal Actions release.
+The App does not have a balance or reward route flag to turn back on. With no
+published snapshot it keeps answering `503` on the v2 balance routes and on
+reward expiry and simulations.
 
 ## 5. What to tell people
 

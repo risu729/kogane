@@ -13,6 +13,7 @@ import {
 } from "../../../../packages/observation-shared/src/identity-contract.ts";
 import { AccountConnectionDetails, AccountConnectionInventory } from "../account-connection.tsx";
 import { IdentityStatusBadge } from "../organization.tsx";
+import { Link } from "../router.tsx";
 export function IdentitiesPage(): ReactNode {
   const [source, setSource] = useViewState("identity.source");
   const [draft, setDraft] = useViewState("identity.draft");
@@ -35,6 +36,11 @@ export function IdentitiesPage(): ReactNode {
           「取得元内で識別」は外部の銘柄台帳との照合完了を意味しません。この整理は重複除去や資産額の合算を行いません。
           ここや口座フィルターの名称は口座の識別用で、金融商品の正式名称ではありません。
           商品は時期によって変わるため、各記録の詳細でその記録に基づく判定を確認できます。
+        </p>
+        <p className="footnote">
+          <Link to="/identities/instrument-candidates">
+            同じ銘柄の可能性がある識別子の候補を確認する
+          </Link>
         </p>
       </div>
       <QueryBoundary query={connections} label="取得経路の対応">

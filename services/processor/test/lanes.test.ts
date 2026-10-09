@@ -45,10 +45,10 @@ const job = (id: number) =>
     .bind(id)
     .first<{ lane: string; status: string; replay_plan_id: number | null }>();
 
-test("harness applies every Layer B migration in order through 0071", () => {
+test("harness applies every Layer B migration in order through 0075", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
-  expect(names.at(-1)).toBe("0071_economic_event_command_kinds.sql");
+  expect(names.at(-1)).toBe("0075_audit_records.sql");
   expect(names).toEqual([
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
@@ -103,6 +103,8 @@ test("harness applies every Layer B migration in order through 0071", () => {
     "0069_maintenance_survey.sql",
     "0070_economic_commit_guard.sql",
     "0071_economic_event_command_kinds.sql",
+    "0072_own_transfer_proposals.sql",
+    "0075_audit_records.sql",
   ]);
   expect([...names].sort()).toEqual(names);
 });
@@ -472,6 +474,8 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     "price_promotion",
     "operation_dispatch",
     "decision_outbox",
+    // Unflagged (ADR 0064): writes only once a capped day has ended.
+    "audit_overflow",
   ]);
   expect(lines[4]).toEqual({
     event: "price_promotion",

@@ -8,7 +8,7 @@ explain down to the raw bytes.
 
 Nothing here rewrites Layer A or Layer B. No observation is updated or deleted,
 no parser version changes, and the existing visible result set is unchanged
-while both flags are off.
+while `RECONCILIATION_ENABLED` is off.
 
 ## Product delivery scope
 
@@ -23,16 +23,17 @@ produce the complete economic event or its balance effect.
 
 ## What is automatic and what is proposal-only
 
-| Step                                                      | Who does it                                               |
-| --------------------------------------------------------- | --------------------------------------------------------- |
-| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on     |
-| Accepting a candidate                                     | A decision in the decision log, through a guarded command |
-| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision       |
-| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision     |
-| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only        |
-| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)           |
-| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions |
-| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)  |
+| Step                                                      | Who does it                                                                               |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on                                     |
+| Accepting a candidate                                     | A decision in the decision log, through a guarded command                                 |
+| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision                                       |
+| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision                                     |
+| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only                                        |
+| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)                                           |
+| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions                                 |
+| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)                                  |
+| Pairing an own-account debit and credit (own transfer)    | Proposal only ([below](#own-transfer-proposals-migration-0072)); nothing adopts one today |
 
 [Card purchase recognition](#card-purchase-recognition) runs only while
 `PURCHASE_RECOGNITION_ENABLED` is on, and only for single-payment rows with an
@@ -97,11 +98,14 @@ family maps onto the display kinds `classifyActivity` knows.
 
 In the table, "Writer" is the family-level status (`FAMILY_SUPPORT`); "(writer)"
 marks the parsers whose rows a writer reads. For a supported family the reasons
-column lists why the sources its writer does not read have no event.
+column lists why the sources its writer does not read have no event. SBI
+Shinsei's writer admits a row only when that row records its origin (parser
+0.1.3); rows stored by 0.1.2 runs are refused per row
+(`identity_origin_unrecorded`).
 
 | Family                       | Writer      | Parsers whose rows belong to it                                                                                                                                                                                  | Why no event is written (`familyUnsupportedReasons`)                                                                                                                               |
 | ---------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bank-movement`              | unsupported | `mizuho-ordinary-history`, `moneyforward-monthly-transactions`, `sbi-shinsei-top-balances-and-activity`, `smbc-direct-transactions`, `sony-bank-history-csv`, `sony-bank-history-json`, `st-george-transactions` | `no_event_writer`, `identity_fingerprint_only`, `identity_origin_unrecorded`, `counterpart_not_stated`, `semantics_unobserved`, `writer_guard_pending`                             |
+| `bank-movement`              | unsupported | `mizuho-ordinary-history`, `moneyforward-monthly-transactions`, `sbi-shinsei-top-balances-and-activity`, `smbc-direct-transactions`, `sony-bank-history-csv`, `sony-bank-history-json`, `st-george-transactions` | `no_event_writer`, `identity_fingerprint_only`, `counterpart_not_stated`, `semantics_unobserved`, `writer_guard_pending`                                                           |
 | `stored-value-movement`      | unsupported | `mobile-suica-sf-history`, `paypay-csv`, `v-point-pay-notification-event`                                                                                                                                        | `no_event_writer`, `identity_fingerprint_only`, `identity_evidence_digest`, `identity_origin_unrecorded`, `semantics_unobserved`, `writer_guard_pending`                           |
 | `fx-exchange`                | unsupported | `global-pass-activity`, `paypay-csv`, `sbi-shinsei-top-balances-and-activity`, `sony-bank-history-csv`, `sony-bank-history-json`, `sony-bank-wallet-history`, `vpass-statement-page`                             | `no_event_writer`, `identity_fingerprint_only`, `identity_origin_unrecorded`, `counterpart_not_stated`, `semantics_unobserved`, `writer_guard_pending`                             |
 | `overseas-remittance`        | unsupported | none                                                                                                                                                                                                             | `no_event_writer`, `semantics_unobserved`, `writer_guard_pending`                                                                                                                  |
@@ -114,7 +118,7 @@ column lists why the sources its writer does not read have no event.
 | `prepaid-funding`            | unsupported | `mobile-suica-sf-history`, `paypay-csv`, `v-point-pay-notification-event`                                                                                                                                        | `no_event_writer`, `identity_fingerprint_only`, `identity_evidence_digest`, `identity_origin_unrecorded`, `counterpart_not_stated`, `semantics_unobserved`, `writer_guard_pending` |
 | `prepaid-notification`       | unsupported | `v-point-pay-notification-event`                                                                                                                                                                                 | `no_event_writer`, `identity_evidence_digest`, `semantics_unobserved`                                                                                                              |
 | `card-purchase`              | supported   | `global-pass-activity`, `myjcb-credit-ledger` (writer), `sony-bank-wallet-history`, `vpass-statement-page` (writer)                                                                                              | `no_event_writer`, `identity_fingerprint_only`, `counterpart_not_stated`, `semantics_unobserved`                                                                                   |
-| `card-settlement`            | supported   | `sbi-shinsei-top-balances-and-activity`, `smbc-direct-transactions` (writer)                                                                                                                                     | `no_event_writer`, `identity_origin_unrecorded`                                                                                                                                    |
+| `card-settlement`            | supported   | `sbi-shinsei-top-balances-and-activity` (writer), `smbc-direct-transactions` (writer)                                                                                                                            | —                                                                                                                                                                                  |
 
 The reasons, all closed:
 
@@ -319,8 +323,11 @@ admitted row's alias class is
 provider identity function (`PROVIDER_IDENTITY_FUNCTIONS`): SMBC's provider id
 (`smbc-meisai-id-v1`) and SBI Shinsei's `txnReferenceNo`
 (`sbi-shinsei-txn-reference-no-v1`), each unique within one resolved account.
-SBI Shinsei's parser records no identity origin, so its debits are refused
-(`identity_origin_unrecorded`) until a parser release records it.
+The admission reads the origin off each stored row. SBI Shinsei's parser
+records it from release 0.1.3 (2026-10-09,
+[ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin));
+a row a 0.1.2 run stored records none and is refused
+(`identity_origin_unrecorded`), and stays refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead.
 
 | Object                          | Role                                                                                                                                                                                                                                                                                |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -405,6 +412,50 @@ own-transfer-shaped writer, T1 across two producers, W2, W3, W4, W6, W7, W8 and
 W9 with every table compared) and the last test of
 `services/processor/test/card-purchase.test.ts` (the lane's seals under the
 epoch its tick read).
+
+### Own-transfer proposals (migration 0072)
+
+[ADR 0057](adr/0057-own-transfer-proposals.md), stage G3-a of ADR 0054.
+`proposeOwnTransfers` (`packages/domain/src/own-transfer-proposals.ts`) pairs
+a debit and a credit of two of the person's own deposit accounts
+(`bank-movement` rows) into a proposal, under an explicit, versioned policy
+(date window, `same-currency`, and `exact` or a per-currency `fee-within`
+difference). The module has no default policy: without one it refuses
+(`policy_missing`, `policy_unsupported`), and nothing in the repository
+supplies one, so no code path produces a proposal outside tests. Ownership is
+an input; an unresolved account is refused. Rows pass the identity rules of
+ADR 0054 through `humanAdoptedRowIdentity` (an SMBC row with a recorded
+`provider-id` origin is admitted; an SBI Shinsei row is refused
+`identity_origin_unrecorded` until a parser release records its origin), rows
+that may be one fact are `duplicate_unresolved`, and a row a live claim
+already holds is `alias_conflict` or `economic_claim_held`. Cross-currency and
+same-account pairs are refused; a row in more than one candidate makes each of
+them `needs_review`, never chosen. Amounts are compared as exact decimals and
+never stored or logged; a proposal names its rows and pins the policy
+version, engine release and identity epoch, and its run manifest the policy
+digest and the alias rule, registry, ownership, arithmetic and contract
+versions.
+
+| Object                              | Role                                                                                                                                                                                                                                                                      |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `own_transfer_proposals`            | One proposal: `status` (`proposed`, `needs_review`), closed `codes_json`, per side the observation, parse run, 5-tuple key, alias class and account, `policy_version`, `engine_release`, `identity_epoch`, `manifest_json`. Append-only; the current identity epoch only. |
+| `own_transfer_proposal_retirements` | A proposal no longer in force, once: `engine_superseded`, `evidence_changed` or `identity_epoch_changed`. Append-only.                                                                                                                                                    |
+
+No lane writes these tables. The four economic-event planners
+(`packages/application/src/operations/own-transfer-plan.ts`) read them and the
+guard's tables and refuse with closed codes (a proposal not in force, a stale
+identity epoch, an alias conflict or held key, a released key another holder
+keeps, a re-adoption of a withdrawn event, a move that restates other claims),
+but they are not registered in `ECONOMIC_EVENT_PLANNERS` and the writer slot
+answers null: every economic-event command is refused as before, because ADR
+0054's production gate (remote D1 conformance, the unlogged-revision check) is
+not met. Nothing adopts, corrects, withdraws or moves an own transfer today.
+
+Limits: the policy values, families beyond `bank-movement`, the SBI Shinsei
+origin route, enabling the planners and a writer, and cost carried by a
+transfer into lots are owner items (ADR 0057); the planners do not re-read the
+account mapping (only the alias class they recompute) or whether a cited row
+is still published.
 
 ### Where the decisions live
 
@@ -608,15 +659,15 @@ pinned per parser by the [transaction-family registry](#non-card-families-unsupp
 (`packages/parsers/test/event-families.test.ts` checks it on the synthetic
 fixtures):
 
-| Source                                                                                                                                                                                                             | What it exposes                                                                                                                                                     | Effect                                                                                                                                                                                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SMBC Direct (`id`)                                                                                                                                                                                                 | A provider row id, recorded as `_kogane.identityOrigin: "provider-id"`                                                                                              | Identifies one row (stage A). Does not link pending to posted.                                                                                                                                                                                                                                                               |
-| SBI Shinsei (`txnReferenceNo`), SBI Securities yen detail history (the provider `did`), SBI VC Trade cash flows (`cashflowID`) and executions (`CExecutionId` + `CExecutionIdSubNo`), PayPay (`transactionNumber`) | A provider row id; the parser records no `_kogane.identityOrigin`                                                                                                   | Stage A reads the origin as unknown and pairs nothing. Does not link pending to posted.                                                                                                                                                                                                                                      |
-| V Point Pay                                                                                                                                                                                                        | The SHA-256 of the stored notification message, recorded as `_kogane.identityOrigin: "normalized-event-id"`                                                         | One notification, not an id the provider issued; stage A currently reads that text as provider-issued, a limit until a parser release records its origin (no effect today: V Point Pay is in no reconciliation slice). No pending/posted link. A human-adopted writer refuses it (`identity_digest_not_provider`, ADR 0054). |
-| MyJCB                                                                                                                                                                                                              | A third-party column survey mentions an approval number on the debit sections                                                                                       | Not read by the deployed ledger parser.                                                                                                                                                                                                                                                                                      |
-| Vpass, MyJCB, Sony Bank (deposit JSON and CSV histories, WALLET), Mizuho, MoneyForward, Mobile Suica, GLOBAL PASS, St.George, SBI Securities foreign trade records                                                 | External ids derived from a fingerprint of the row's fields plus an occurrence, recorded in `_kogane.identityOrigin`                                                | Not a provider identifier at all.                                                                                                                                                                                                                                                                                            |
-| SBI Securities domestic trade records                                                                                                                                                                              | The collector's fingerprint of the table cells plus an occurrence, recorded under `_kogane.externalIdOrigin: "collector-fingerprint"`, not `_kogane.identityOrigin` | Not a provider identifier; stage A, which reads only `identityOrigin`, sees no origin.                                                                                                                                                                                                                                       |
-| V Point history                                                                                                                                                                                                    | No external id (`_kogane.providerStableId: "unavailable"`)                                                                                                          | Nothing to pair.                                                                                                                                                                                                                                                                                                             |
+| Source                                                                                                                                                                                                                                       | What it exposes                                                                                                                                                     | Effect                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SMBC Direct (`id`); SBI Shinsei (`txnReferenceNo`) from parser 0.1.3                                                                                                                                                                         | A provider row id, recorded as `_kogane.identityOrigin: "provider-id"`                                                                                              | Identifies one row (stage A; SBI Shinsei is in no reconciliation slice). Does not link pending to posted. Rows a 0.1.2 run stored record no origin (next row) and stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead.                                             |
+| SBI Shinsei (`txnReferenceNo`) as parser 0.1.2 stored it, SBI Securities yen detail history (the provider `did`), SBI VC Trade cash flows (`cashflowID`) and executions (`CExecutionId` + `CExecutionIdSubNo`), PayPay (`transactionNumber`) | A provider row id; the parser records no `_kogane.identityOrigin`                                                                                                   | Stage A reads the origin as unknown and pairs nothing. Does not link pending to posted.                                                                                                                                                                                                                                      |
+| V Point Pay                                                                                                                                                                                                                                  | The SHA-256 of the stored notification message, recorded as `_kogane.identityOrigin: "normalized-event-id"`                                                         | One notification, not an id the provider issued; stage A currently reads that text as provider-issued, a limit until a parser release records its origin (no effect today: V Point Pay is in no reconciliation slice). No pending/posted link. A human-adopted writer refuses it (`identity_digest_not_provider`, ADR 0054). |
+| MyJCB                                                                                                                                                                                                                                        | A third-party column survey mentions an approval number on the debit sections                                                                                       | Not read by the deployed ledger parser.                                                                                                                                                                                                                                                                                      |
+| Vpass, MyJCB, Sony Bank (deposit JSON and CSV histories, WALLET), Mizuho, MoneyForward, Mobile Suica, GLOBAL PASS, St.George, SBI Securities foreign trade records                                                                           | External ids derived from a fingerprint of the row's fields plus an occurrence, recorded in `_kogane.identityOrigin`                                                | Not a provider identifier at all.                                                                                                                                                                                                                                                                                            |
+| SBI Securities domestic trade records                                                                                                                                                                                                        | The collector's fingerprint of the table cells plus an occurrence, recorded under `_kogane.externalIdOrigin: "collector-fingerprint"`, not `_kogane.identityOrigin` | Not a provider identifier; stage A, which reads only `identityOrigin`, sees no origin.                                                                                                                                                                                                                                       |
+| V Point history                                                                                                                                                                                                                              | No external id (`_kogane.providerStableId: "unavailable"`)                                                                                                          | Nothing to pair.                                                                                                                                                                                                                                                                                                             |
 
 So **no source currently supplies a pending-to-posted link id**, and every
 proposal this job writes stays `proposed`. The automatic path exists, is
@@ -1217,12 +1268,12 @@ Both return the `Page<T>` envelope (`items`, `nextCursor`, `dataCoverage`) plus
 `apiVersion: 2`, and activity also echoes the `basis` it was read on. Values are
 `Quantity`-shaped (`unitRef` plus a decimal-v1 value state).
 
-The routes are served only when the `eventsV2` capability is true, which needs
-**both** `EVENTS_V2_ENABLED=1` and the `economic_event_revisions` table present
-in the store the Worker reads. Otherwise the paths 404 like any unknown route
-and `/api/meta` reports `eventsV2: false`. `eventsV2` was added to
+The routes are served only when the `eventsV2` capability is true, which is
+true when `economic_event_revisions` is present (`present === 1`) in the store
+the Worker reads. Otherwise the paths 404 like any unknown route and
+`/api/meta` reports `eventsV2: false`. `eventsV2` was added to
 `ApiCapabilities`; both stored capability constants default it to `false` and
-the server replaces it with what it can actually serve.
+the server replaces it with what the store has. `EVENTS_V2_ENABLED` is not read.
 
 `services/app/src/card-purchases-api.ts` serves one more read, to an operator
 only:
@@ -1289,10 +1340,10 @@ each target's recognition key by primary-key lookups
 of the page's relation triples.
 
 The route needs a human principal with `interpretation.accept` (the card
-settlement review's guard), is GET-only, and answers 404 unless
-`EVENTS_V2_ENABLED` is on **and** the 0047 table and views exist. `/api/meta`
-advertises the same fact as `cardPurchaseRecognition`, which both stored
-capability constants default to `false`. It writes nothing.
+settlement review's guard), is GET-only, and answers 404 unless the 0047
+table and views exist (`present === 3`). `/api/meta` advertises the same fact
+as `cardPurchaseRecognition`, which both stored capability constants default
+to `false`. It writes nothing.
 
 An agent reads the same page through the agent API instead:
 `POST /api/agent/v1/purchases.explain`, or the MCP tool
@@ -1310,16 +1361,18 @@ either.
 
 ## Flags
 
-| Flag                     | Where                     | Default | Effect when on                                                                |
-| ------------------------ | ------------------------- | ------- | ----------------------------------------------------------------------------- |
-| `RECONCILIATION_ENABLED` | `services/processor` vars | `"0"`   | The scheduled `reconciliation_sweep` lane runs and writes stage A candidates. |
-| `EVENTS_V2_ENABLED`      | `services/app` vars       | `"0"`   | `/api/v2/*` is served if the projection exists.                               |
+| Flag                     | Where                     | Default | Effect when on                                                                  |
+| ------------------------ | ------------------------- | ------- | ------------------------------------------------------------------------------- |
+| `RECONCILIATION_ENABLED` | `services/processor` vars | `"0"`   | The scheduled reconciliation, card-debit-account and card-settlement lanes run. |
 
-With both off, the scheduled worker logs no new event, writes nothing but the
-`skipped-by-flag` tick records of `reconciliation_sweep` and
-`card_settlement_sweep` (`processor_lane_ticks`, one day kept;
-[processor.md §6.1](processor.md#61-tick-records)), and the browser serves no
-new route.
+With `RECONCILIATION_ENABLED` off, `reconciliation_sweep`,
+`card_debit_account_sweep` and `card_settlement_sweep` are not run. Each records
+a `skipped-by-flag` tick (`processor_lane_ticks`, one day kept;
+[processor.md §6.1](processor.md#61-tick-records)). The browser still serves the
+event routes when `economic_event_revisions` is present (`present === 1`), the
+card-purchase route when the CORE 0047 table and views are present
+(`present === 3`), and the card-settlement routes when the two settlement views
+are present (`present === 2`). `EVENTS_V2_ENABLED` is not read.
 
 ## Deploy order and rollback
 
@@ -1335,12 +1388,15 @@ production Worker rollback.
 2. Deploy `services/processor` with `RECONCILIATION_ENABLED="0"`;
    turn it on when the candidates should start being produced.
 3. Deploy `services/app` with `EVENTS_V2_ENABLED="0"`; turn it on
-   to expose the read routes.
+   to expose the read routes. That is what this activation did. The App
+   does not read `EVENTS_V2_ENABLED` now.
 
-Rollback: set the flags back to `"0"`. The lane stops and the routes disappear;
-the tables stay. A build that predates this change never reads or writes the new
-tables, so it rolls back cleanly with the schema in place. Rows are never
-deleted to undo a decision — a new revision is appended instead.
+Current rollback: set Processor `RECONCILIATION_ENABLED` to `"0"`. The
+`reconciliation_sweep`, `card_debit_account_sweep` and `card_settlement_sweep`
+lanes stop. The read routes stay while the tables exist. The tables stay.
+A build that predates this change never reads or writes the new tables, so
+it rolls back cleanly with the schema in place. Rows are never deleted to
+undo a decision — a new revision is appended instead.
 
 ## Bounds
 
@@ -1532,8 +1588,9 @@ batch. Original source observations and historical decisions are preserved.
 Since G1b an acceptance and a withdrawal are writers of the
 [common consumption guard](#common-consumption-guard-migration-0070): an
 acceptance claims its bank debit in book `cash-movement` under the debit's
-alias class, after admitting the debit's identity (SMBC debits are admitted,
-SBI Shinsei debits are refused with `identity_origin_unrecorded`), and is
+alias class, after admitting the debit's identity (SMBC debits are admitted;
+an SBI Shinsei debit is admitted when a 0.1.3 run stored it and refused with
+`identity_origin_unrecorded` when a 0.1.2 run did, and stays refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead), and is
 refused while another writer holds the debit's key or alias class
 (`claim_available`); a withdrawal releases the claim. The event revision cites
 its statement and bank rows as `SourceFactRef` objects.

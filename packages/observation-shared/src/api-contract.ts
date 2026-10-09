@@ -169,7 +169,10 @@ export interface SharedQueryResponse<T = unknown> {
   };
 }
 
-/** `data` of the `coverage` intent: what the authorised perimeter covers. */
+/**
+ * `data` of the `coverage` intent: what the authorised perimeter covers. Each
+ * count is exact for its in-scope source, over the source's whole history.
+ */
 export interface CoverageSummaryData {
   intent: "coverage";
   scopes: {
@@ -177,6 +180,7 @@ export interface CoverageSummaryData {
     provider: string;
     ingestion: string;
     artifactCount: number;
+    /** Visible fetch runs of the source; not the overview's newest-runs window. */
     collectionRunCount: number;
   }[];
   sourceCount: number;

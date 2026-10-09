@@ -115,3 +115,22 @@ Verification covers concurrent duplicate releases, a later acquisition racing
 an old retry, the new reference and start time remaining intact, rejected input,
 confirmation cancellation, pending UI, successful and failed response readback,
 and existing Access/operator/same-origin boundaries.
+
+## Amendment: settings edits by a delegated principal (2026-10-09, ADR 0063)
+
+Status: proposed until the ADR 0063 pull request merges; accepted upon merge.
+Not implemented: until its delegation slice ships, "agents and service tokens
+cannot edit settings" holds as written.
+
+[ADR 0063](0063-delegated-ai-operation-path.md) replaces "Agents and service
+tokens cannot edit settings" with: settings are edited by the operator, or by
+the owner's own MCP principal when the owner delegated it the setting's
+capability (`schedules.job.update`, `schedules.maintenance.update`,
+`schedules.survey.decide`), within its schedule-source scope, under the
+operation's confirmation class, with an audit record
+([ADR 0064](0064-common-audit-log.md)). Service tokens still edit nothing; the
+bootstrap token still only reconciles reservations. Stopped-execution lease
+release stays the operator's alone (class R3): only a person who checked the
+execution can confirm it stopped. The operator routes keep their Access
+operator check, same-origin JSON, settings header and body bound; a delegated
+principal reaches the same writers through the MCP tools, never these routes.

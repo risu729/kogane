@@ -20,6 +20,7 @@ import {
 } from "../operations/sql.ts";
 import { resolveAndSimulate } from "../operations/targets.ts";
 import { planDigestOf } from "./plan.ts";
+import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
 
 export interface SimulationReport {
   planId: string;
@@ -49,6 +50,7 @@ export async function simulate(
   plan: ChangePlan,
   store: CommandStore,
 ): Promise<CommandResult<{ report: SimulationReport }>> {
+  if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
   const resolution = await resolveAndSimulate(store, plan.kind, plan.payload);
   if (!resolution.ok) return resolution;
   const { expectedRevisions, simulation, targets } = resolution.resolved;

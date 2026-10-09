@@ -2,9 +2,10 @@
 // stored instrument identifiers may denote the same instrument, on what
 // evidence, what keeps a pair apart, and where each identifier stands. A read
 // only: it never writes and never adopts. A candidate names the existing
-// commands a person would plan to decide it (`identity.assign` to adopt,
+// commands a plan would carry to decide it (`identity.assign` to adopt,
 // `relation.reject` of `listed_as` to keep apart); the change lifecycle
-// grants those to humans only.
+// grades who may plan, approve and commit them, and under today's grant lists
+// only `OPERATOR_SUBJECTS` may approve or commit.
 import {
   identifierResolutions,
   instrumentCandidates,
@@ -139,6 +140,7 @@ function identifierFacts(rows: readonly InstrumentFactsRow[]): {
 function commandsFor(
   candidate: InstrumentCandidate,
   byId: ReadonlyMap<string, InstrumentIdentifierFacts>,
+  revisions: ReadonlyMap<string, number>,
 ): CandidateCommands | null {
   if (candidate.status !== "proposed") return null;
   const anchor = byId.get(candidate.anchorIdentifierId)!;
@@ -155,6 +157,12 @@ function commandsFor(
               subject: "instrument",
               referenceId: subject.identifierId,
               targetId: anchor.instrumentId,
+              candidate: {
+                candidateId: candidate.candidateId,
+                anchorIdentifierId: anchor.identifierId,
+                anchorMappingRevision: revisions.get(anchor.identifierId)!,
+                subjectMappingRevision: revisions.get(subject.identifierId)!,
+              },
             },
           },
     keepApart: {
@@ -223,9 +231,10 @@ export async function queryInstrumentResolution(sql: SqlExecutor): Promise<Instr
       candidateIds: resolution.candidateIds,
     };
   });
+  const revisions = new Map(built.map(({ row }) => [row.identifierId, row.revision]));
   const candidates = result.set.candidates.map((candidate) => ({
     ...candidate,
-    commands: commandsFor(candidate, byId),
+    commands: commandsFor(candidate, byId, revisions),
   }));
   const count = (status: InstrumentCandidate["status"]) =>
     candidates.filter((candidate) => candidate.status === status).length;

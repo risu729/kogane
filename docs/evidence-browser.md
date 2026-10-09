@@ -809,11 +809,13 @@ should ever depend on it.
 `/api/v2/balances/latest` and `/api/v2/balances/history` serve the latest
 balances and their history as two separately budgeted, keyset-paged routes
 over one fixed snapshot, with adoption states, reason codes and typed
-quantities. They exist only when the Worker advertises `balancesV2`, which
-needs both the reader flag and a sealed snapshot. `/api/balances` is
-unchanged and, with the flag on, is served through a compatibility adapter
-over the same projection. See [Balance read model](balance-read-model.md) for
-the contract, the cursor rules, the budgets and the rollback.
+quantities. They exist when the READ binding is present. `/api/meta`
+advertises `balancesV2` only when a sealed snapshot can be served; until then
+the v2 paths answer `503 read_model_unavailable`. `/api/balances` stays on the
+request-time list until a snapshot is published, and then uses the
+compatibility adapter over the same projection. See
+[Balance read model](balance-read-model.md) for the contract, the cursor
+rules, the budgets and the rollback.
 
 ## Collection quality (`/api/collection-quality`)
 

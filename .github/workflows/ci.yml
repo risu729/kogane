@@ -17,6 +17,9 @@ defaults:
     shell: bash
 env:
   CI: "true"
+  KOGANE_TEST_COVERAGE: "true"
+  COVERAGE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  COVERAGE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
   # Public ubuntu-24.04 runners have four CPUs; avoid eight native tasks competing.
   MISE_JOBS: "4"
 jobs:
@@ -35,6 +38,9 @@ jobs:
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.10.5
+      - name: Verify bounded large-artifact restore
+        timeout-minutes: 2
+        run: mise exec -- node tasks/_lib/ci/release-resume.mjs resource-check
       - name: Run repository checks and linters
         # All lint steps plus the guarded native remainder. The two processor
         # shards on separate runners complete the same local hk check graph.
@@ -47,6 +53,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           WRANGLER_SEND_METRICS: "false"
+      - name: Validate and summarize native coverage
+        if: ${{ always() }}
+        run: mise exec --no-deps -- node tasks/_lib/coverage-summary.mjs checks
+      - name: Upload native coverage
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-checks-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            coverage/
+            apps/*/coverage/
+            experiments/*/coverage/
+            packages/*/coverage/
+            services/*/coverage/
+          if-no-files-found: error
+          retention-days: 14
   processor:
     name: Processor (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
@@ -71,6 +93,24 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
           WRANGLER_SEND_METRICS: "false"
+      - name: Validate and summarize native coverage
+        if: ${{ always() }}
+        run: mise exec --no-deps -- node tasks/_lib/coverage-summary.mjs "processor-${SHARD}"
+        env:
+          SHARD: ${{ matrix.shard }}
+      - name: Upload native coverage
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-processor-${{ matrix.shard }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            coverage/
+            apps/*/coverage/
+            experiments/*/coverage/
+            packages/*/coverage/
+            services/*/coverage/
+          if-no-files-found: error
+          retention-days: 14
   ci-check:
     name: CI Check
     needs:

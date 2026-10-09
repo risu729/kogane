@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { SortingState } from "@tanstack/react-table";
 import { EMPTY_FILTERS, type RecordFilters } from "./filters.ts";
+import type { ReconstructedStateQuery } from "./reconstructed-state-api.ts";
 
 interface ViewState {
   "transactions.filters": RecordFilters;
@@ -30,6 +31,7 @@ interface ViewState {
   "purchases.draft": string;
   "purchases.offset": number;
   "reportedState.date": string;
+  "reconstructedState.query": ReconstructedStateQuery | null;
 }
 const Context = createContext<{
   state: ViewState;
@@ -58,6 +60,7 @@ export function ViewStateProvider({ children }: { children: ReactNode }): ReactN
     "purchases.draft": "",
     "purchases.offset": 0,
     "reportedState.date": "",
+    "reconstructedState.query": null,
   }));
   return <Context.Provider value={{ state, setState }}>{children}</Context.Provider>;
 }

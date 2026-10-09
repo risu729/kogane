@@ -1,11 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { providerIdentityFunction } from "../../domain/src/event-families.ts";
+import {
+  declaredAliasClass,
+  humanAdoptedRowIdentity,
+  rowOriginBasis,
+  type HumanAdoptedRowInput,
+} from "../../domain/src/row-identity.ts";
 import { PARSERS } from "../src/parsers/registry.ts";
 import { sbiShinseiBalanceSummaryAndStage } from "../src/parsers/sbi-shinsei-balance-summary-and-stage.ts";
 import { sbiShinseiExchangeRate } from "../src/parsers/sbi-shinsei-exchange-rate.ts";
 import { sbiShinseiTopBalancesAndActivity } from "../src/parsers/sbi-shinsei-top-balances-and-activity.ts";
 import { sbiShinseiYenDepositAccount } from "../src/parsers/sbi-shinsei-yen-deposit-account.ts";
-import type { ArtifactMeta, Parser } from "../src/types.ts";
+import type { ArtifactMeta, Observation, Parser } from "../src/types.ts";
+import { CONTRACT_PARSERS } from "./coverage-contract-cases.ts";
+import { FIXTURES_ROOT } from "./fixture-root.ts";
 
 const ROOT = new URL(
   "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/",
@@ -899,5 +909,186 @@ describe("SBI Shinsei balance summary and stage (ADR 0031)", () => {
     const wrapped = value("balance-summary-and-stage") as Record<string, any>;
     wrapped["responseParam"]["mutualFundBalance"] = { requestParam: {}, responseParam: {} };
     expect(parse(wrapped).observations).toHaveLength(1);
+  });
+});
+
+describe("SBI Shinsei activity rows record the provider-id origin (0.1.3)", () => {
+  type Transaction = Extract<Observation, { kind: "transaction" }>;
+  const kogane = (entry: Observation) => entry.extra["_kogane"] as Record<string, unknown>;
+  // The 0.1.2 output of the synthetic contract cases, as frozen before this
+  // release (coverage-contract.test.ts compares the same bytes).
+  const frozen012 = (name: string): Observation[] => {
+    for (const file of ["expected.json", "sbi-shinsei-observed-shapes-expected.json"]) {
+      const cases = (
+        JSON.parse(readFileSync(join(FIXTURES_ROOT, "coverage-contract", file), "utf8")) as Record<
+          string,
+          Record<string, { observations?: Observation[] }>
+        >
+      )["sbi-shinsei-top-balances-and-activity"];
+      const observations = cases?.[name]?.observations;
+      if (observations) return observations;
+    }
+    throw new Error(`${name}: no frozen 0.1.2 output`);
+  };
+  const contractCases = CONTRACT_PARSERS.find(
+    ({ parser }) => parser === sbiShinseiTopBalancesAndActivity,
+  )!.cases.filter(({ name }) => ["complete-rows", "window-end-not-stated"].includes(name));
+  const row = (overrides: Partial<HumanAdoptedRowInput>, entry: Transaction) => ({
+    sourceId: "sbi-shinsei-bank",
+    parserName: sbiShinseiTopBalancesAndActivity.name,
+    sourceAccount: entry.sourceAccount,
+    externalId: entry.externalId ?? null,
+    // As the store hands it back: `transaction_observations.extra_json`, parsed.
+    extra: JSON.parse(JSON.stringify(entry.extra)) as unknown,
+    accountId: "acct-synthetic-shinsei",
+    ...overrides,
+  });
+
+  test("the release is 0.1.3 under the same name", () => {
+    expect(sbiShinseiTopBalancesAndActivity.name).toBe("sbi-shinsei-top-balances-and-activity");
+    expect(sbiShinseiTopBalancesAndActivity.version).toBe("0.1.3");
+  });
+
+  test("the output is 0.1.2's byte for byte, except the origin on every transaction row", () => {
+    expect(contractCases.map(({ name }) => name)).toEqual([
+      "complete-rows",
+      "window-end-not-stated",
+    ]);
+    let transactions = 0;
+    for (const { name, bytes, artifact: meta } of contractCases) {
+      const before = frozen012(name);
+      const after = sbiShinseiTopBalancesAndActivity.parse(bytes, meta).observations;
+      expect(after).toHaveLength(before.length);
+      after.forEach((entry, index) => {
+        const label = `${name}[${index}]`;
+        const previous = before[index]!;
+        expect(kogane(previous), label).not.toHaveProperty("identityOrigin");
+        if (entry.kind !== "transaction") {
+          // Balances and valuations: unchanged bytes, no origin.
+          expect(JSON.stringify(entry), label).toBe(JSON.stringify(previous));
+          return;
+        }
+        transactions += 1;
+        // The id is the provider's reference exactly as received.
+        expect(entry.externalId, label).toBe(entry.extra["txnReferenceNo"] as string);
+        expect(kogane(entry)["identityOrigin"], label).toBe("provider-id");
+        // Placed right after the sign source, as smbc-direct places it.
+        const keys = Object.keys(kogane(previous));
+        const at = keys.indexOf("amountSignSource") + 1;
+        expect(at, label).toBeGreaterThan(0);
+        expect(Object.keys(kogane(entry)), label).toEqual([
+          ...keys.slice(0, at),
+          "identityOrigin",
+          ...keys.slice(at),
+        ]);
+        // Without the key, the row is 0.1.2's byte for byte.
+        const stripped = structuredClone(entry);
+        delete (stripped.extra["_kogane"] as Record<string, unknown>)["identityOrigin"];
+        expect(JSON.stringify(stripped), label).toBe(JSON.stringify(previous));
+      });
+    }
+    expect(transactions).toBe(12);
+  });
+
+  test("credits, zero debits and foreign-currency rows record it too; nothing else does", () => {
+    const input = value("top-accounts-balance-and-activity");
+    const activity = topActivity(input);
+    (activity["activityDetails"] as Record<string, unknown>[]).push({
+      txnReferenceNo: "SYNTHETIC-TXN-ZERO",
+      description: "Synthetic zero debit",
+      debit: "0",
+      postingDate: "20260906",
+      balance: "125956",
+      tradeTypeCode: "SYNTHETIC",
+    });
+    const foreign = value("top-accounts-balance-and-activity");
+    Object.assign(topActivity(foreign), {
+      accountNo: "SYNTHETIC-002",
+      currency: "USD",
+      currentBalance: "12.34",
+      activityDetails: [
+        {
+          txnReferenceNo: "SYNTHETIC-TXN-USD-001",
+          description: "Synthetic foreign debit",
+          debit: "1.25",
+          postingDate: "20260906",
+          balance: "12.34",
+          tradeTypeCode: "SYNTHETIC",
+        },
+      ],
+    });
+    const parsed = [input, foreign].flatMap(
+      (payload) =>
+        sbiShinseiTopBalancesAndActivity.parse(
+          encode(payload),
+          artifact("top-accounts-balance-and-activity"),
+        ).observations,
+    );
+    const transactions = parsed.filter((entry) => entry.kind === "transaction");
+    expect(
+      transactions.map((entry) => [entry.externalId, kogane(entry)["amountSignSource"]]),
+    ).toEqual([
+      ["SYNTHETIC-TXN-001", "debit"],
+      ["SYNTHETIC-TXN-002", "credit"],
+      ["SYNTHETIC-TXN-ZERO", "debit"],
+      ["SYNTHETIC-TXN-USD-001", "debit"],
+    ]);
+    for (const entry of transactions) expect(kogane(entry)["identityOrigin"]).toBe("provider-id");
+    for (const entry of parsed.filter((item) => item.kind !== "transaction"))
+      expect(kogane(entry)).not.toHaveProperty("identityOrigin");
+  });
+
+  test("the guard admits a 0.1.3 debit through the declared function and still refuses a 0.1.2 one", () => {
+    const { bytes, artifact: meta } = contractCases[0]!;
+    const debit013 = sbiShinseiTopBalancesAndActivity
+      .parse(bytes, meta)
+      .observations.find(
+        (entry): entry is Transaction =>
+          entry.kind === "transaction" && entry.externalId === "SYNTHETIC-TXN-001",
+      )!;
+    const debit012 = frozen012("complete-rows").find(
+      (entry): entry is Transaction =>
+        entry.kind === "transaction" && entry.externalId === "SYNTHETIC-TXN-001",
+    )!;
+    expect(kogane(debit013)["amountSignSource"]).toBe("debit");
+    // The registry function is the one ADR 0054 declared, unchanged.
+    expect(
+      providerIdentityFunction(
+        "sbi-shinsei-bank",
+        sbiShinseiTopBalancesAndActivity.name,
+        debit013.sourceAccount,
+      ),
+    ).toEqual({
+      sourceId: "sbi-shinsei-bank",
+      parserName: "sbi-shinsei-top-balances-and-activity",
+      sourceAccounts: "any",
+      componentFields: ["txnReferenceNo"],
+      ruleVersion: "sbi-shinsei-txn-reference-no-v1",
+    });
+    const aliasClass = {
+      sourceId: "sbi-shinsei-bank",
+      components: ["SYNTHETIC-TXN-001"],
+      accountId: "acct-synthetic-shinsei",
+      ruleVersion: "sbi-shinsei-txn-reference-no-v1",
+    };
+    // 0.1.3: rule 2 no longer refuses; the class is the declared function's.
+    expect(rowOriginBasis(row({}, debit013))).toBe("provider-id");
+    expect(humanAdoptedRowIdentity(row({}, debit013))).toEqual({ admitted: true, aliasClass });
+    // 0.1.2 (the frozen output, no origin): still identity_origin_unrecorded.
+    expect(rowOriginBasis(row({}, debit012))).toBe("unrecorded");
+    expect(humanAdoptedRowIdentity(row({}, debit012))).toEqual({
+      admitted: false,
+      refusal: "identity_origin_unrecorded",
+    });
+    // Both releases compute one alias class for the same reference and account,
+    // so a holder under one is the other's alias, never a second fact.
+    expect(declaredAliasClass(row({}, debit012))).toEqual(aliasClass);
+    expect(declaredAliasClass(row({}, debit013))).toEqual(aliasClass);
+    // The registry entry is found by parser name: the same row under an
+    // unregistered parser is refused (no entry → unrecorded).
+    expect(humanAdoptedRowIdentity(row({ parserName: "synthetic-parser" }, debit013))).toEqual({
+      admitted: false,
+      refusal: "identity_origin_unrecorded",
+    });
   });
 });

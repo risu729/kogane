@@ -22,6 +22,8 @@ import {
   maintenanceSurveyEnabled,
   type SurveyConfig,
 } from "./config.ts";
+import type { OperationCall, RevisionField } from "../../../../packages/application/src/index.ts";
+import type { SqlWrite } from "../../../../packages/storage-d1/src/core/operations.ts";
 
 /**
  * The slice of a maintenance revision write an accepted proposal makes. It is
@@ -50,11 +52,39 @@ export interface RevisionWrite {
 export type RevisionResult =
   | { ok: true; ruleId: string; revision: number; reconciled: boolean }
   | { ok: false; code: string; status: number };
-/** The version-checked maintenance writer; the only path from a proposal to a rule. */
-export type MaintenanceRevisionWriter = (env: Env, write: RevisionWrite) => Promise<RevisionResult>;
+/** The revision a writer is about to send, as the decision that asked for it sees it. */
+export interface SavedRevision {
+  ruleId: string;
+  revision: number;
+  /** The revision the change was made against. */
+  previous: number;
+  /** The names of the rule's fields this revision changes; never their values. */
+  fields: RevisionField[];
+  /** The canonical digest of the revision as validated; never the values themselves. */
+  payloadDigest: string;
+  /** A boolean SQL guard that holds exactly when the batch wrote this revision. */
+  guard: SqlWrite;
+}
+/** Statements a decision appends to the revision's own batch, and what to do with their results. */
+export interface RevisionAppend {
+  statements: D1PreparedStatement[];
+  settle(results: readonly D1Result[]): void;
+}
+/**
+ * The version-checked maintenance writer; the only path from a proposal to a
+ * rule. `append` adds the decision's own statements to the revision's batch,
+ * so the revision and the decision are one write (ADR 0064).
+ */
+export type MaintenanceRevisionWriter = (
+  env: Env,
+  write: RevisionWrite,
+  append: (saved: SavedRevision) => RevisionAppend,
+) => Promise<RevisionResult>;
 
 /** The reason an accepted proposal's revision carries: a closed code, never page text. */
 export const ACCEPTED_REASON = "maintenance-survey-proposal-accepted";
+/** The reason code of a rejection's audit record. */
+export const REJECTED_REASON = "maintenance-survey-proposal-rejected";
 /** The decision reference of the revision a proposal's acceptance writes. */
 export function proposalRef(id: number): string {
   return `maintenance-survey:proposal:${id}`;
@@ -95,8 +125,10 @@ function refuse(code: string, status: number): Response {
  * Accepting asks the writer for the revision the proposal describes, against
  * the rule revision the proposal was read against; a rule that moved since
  * answers the writer's `revision_conflict`, and the proposal stays undecided.
- * Only after the writer saved the revision is the acceptance recorded, with
- * the revision it produced.
+ * The acceptance row, with the revision it produced, and the audit record
+ * are sent in the revision's own batch: the revision, the decision and the
+ * record exist together or not at all (ADR 0064), and a proposal decided by
+ * someone else in between rolls the revision back with them.
  */
 export async function decideSurveyProposal(
   env: Env,
@@ -104,6 +136,7 @@ export async function decideSurveyProposal(
   value: unknown,
   actor: string,
   writer: MaintenanceRevisionWriter,
+  audit: OperationCall,
 ): Promise<Response> {
   const parsed = decisionSchema.safeParse(value);
   if (!parsed.success) return refuse("invalid_request", 400);
@@ -117,49 +150,109 @@ export async function decideSurveyProposal(
   if (!row) return refuse("proposal_not_found", 404);
   if (row.decision !== null) return refuse("proposal_already_decided", 409);
   const decidedAt = new Date().toISOString();
+  const target = `maintenance-survey-proposal:${id}`;
   if (parsed.data.decision === "reject") {
-    const rejected = await env.DB.prepare(
-      `INSERT INTO maintenance_survey_decisions(proposal_id,decision,actor,decided_at)
+    // A rejection changes no rule: R1 (plan section 5, W5).
+    audit.setRisk("R1");
+    const record = audit.effect(
+      {
+        targetRef: target,
+        scope: { namespace: "schedule-source", source: row.source },
+        reasonCode: REJECTED_REASON,
+        diff: { kind: "none" },
+      },
+      {
+        sql: "EXISTS(SELECT 1 FROM maintenance_survey_decisions WHERE proposal_id=? AND decision='rejected' AND actor=? AND decided_at=?)",
+        binds: [id, actor, decidedAt],
+      },
+      { kind: "target" },
+    );
+    const [rejected, recorded] = await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO maintenance_survey_decisions(proposal_id,decision,actor,decided_at)
        SELECT ?,'rejected',?,? WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions WHERE proposal_id=?)`,
-    )
-      .bind(id, actor, decidedAt, id)
-      .run();
-    return rejected.meta.changes === 1
+      ).bind(id, actor, decidedAt, id),
+      env.DB.prepare(record.sql).bind(...record.binds),
+    ]);
+    audit.settle(recorded?.meta.changes);
+    return rejected?.meta.changes === 1
       ? Response.json({ decided: "rejected" })
       : refuse("proposal_already_decided", 409);
   }
-  const saved = await writer(env, {
-    source: row.source,
-    ruleId: row.rule_id ?? proposedRuleId(row.source, row.id),
-    expectedRevision: row.base_revision,
-    change: {
-      timezone: row.timezone,
-      pattern: JSON.parse(row.pattern_json) as MaintenancePattern,
-      enabled: row.enabled === 1,
-      scope: row.scope,
-    },
-    provenance: {
-      referenceUrl: row.url,
-      verifiedAt: row.fetched_at,
-      decisionRef: proposalRef(row.id),
-    },
-    actor: { kind: "operator", id: actor },
-    reason: ACCEPTED_REASON,
-  });
-  if (!saved.ok) return refuse(saved.code, saved.status);
-  let recorded: D1Result;
+  const append = (revision: SavedRevision): RevisionAppend => {
+    const ref = `maintenance-rule:${revision.ruleId}@${revision.revision}`;
+    const record = audit.effect(
+      {
+        targetRef: target,
+        refs: [ref],
+        scope: { namespace: "schedule-source", source: row.source },
+        reasonCode: ACCEPTED_REASON,
+        diff: {
+          kind: "revision",
+          from: revision.previous,
+          to: revision.revision,
+          fields: revision.fields,
+        },
+      },
+      {
+        sql: `EXISTS(SELECT 1 FROM maintenance_survey_decisions WHERE proposal_id=? AND decision='accepted'
+          AND actor=? AND decided_at=? AND rule_id=? AND rule_revision=?)`,
+        binds: [id, actor, decidedAt, revision.ruleId, revision.revision],
+      },
+      { kind: "target" },
+    );
+    return {
+      statements: [
+        // A plain INSERT: a proposal another decision reached first raises on
+        // the primary key and rolls the revision back with it.
+        env.DB.prepare(
+          `INSERT INTO maintenance_survey_decisions(proposal_id,decision,actor,decided_at,rule_id,rule_revision)
+           SELECT ?,'accepted',?,?,?,? WHERE ${revision.guard.sql}`,
+        ).bind(id, actor, decidedAt, revision.ruleId, revision.revision, ...revision.guard.binds),
+        env.DB.prepare(record.sql).bind(...record.binds),
+      ],
+      settle: (results) => audit.settle(results[1]?.meta.changes),
+    };
+  };
+  let saved: RevisionResult;
   try {
-    recorded = await env.DB.prepare(
-      `INSERT INTO maintenance_survey_decisions(proposal_id,decision,actor,decided_at,rule_id,rule_revision)
-       SELECT ?,'accepted',?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions WHERE proposal_id=?)`,
-    )
-      .bind(id, actor, decidedAt, saved.ruleId, saved.revision, id)
-      .run();
+    saved = await writer(
+      env,
+      {
+        source: row.source,
+        ruleId: row.rule_id ?? proposedRuleId(row.source, row.id),
+        expectedRevision: row.base_revision,
+        change: {
+          timezone: row.timezone,
+          pattern: JSON.parse(row.pattern_json) as MaintenancePattern,
+          enabled: row.enabled === 1,
+          scope: row.scope,
+        },
+        provenance: {
+          referenceUrl: row.url,
+          verifiedAt: row.fetched_at,
+          decisionRef: proposalRef(row.id),
+        },
+        actor: { kind: "operator", id: actor },
+        reason: ACCEPTED_REASON,
+      },
+      append,
+    );
   } catch {
-    // The revision stands; the proposal now reads as outdated and can be rejected.
-    return refuse("decision_record_failed", 503);
+    // The batch raised and wrote nothing: the revision, the decision and the
+    // record were rolled back together. A decision that now exists is the
+    // reason; otherwise the store failed.
+    const decided = await env.DB.prepare(
+      "SELECT 1 AS decided FROM maintenance_survey_decisions WHERE proposal_id=?",
+    )
+      .bind(id)
+      .first<{ decided: number }>()
+      .catch(() => null);
+    return decided
+      ? refuse("proposal_already_decided", 409)
+      : refuse("decision_record_failed", 503);
   }
-  if (recorded.meta.changes !== 1) return refuse("proposal_already_decided", 409);
+  if (!saved.ok) return refuse(saved.code, saved.status);
   return Response.json({
     decided: "accepted",
     ruleId: saved.ruleId,

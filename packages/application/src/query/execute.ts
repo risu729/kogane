@@ -45,14 +45,16 @@ import { INTENT_CAPABILITY, type QueryRequest, querySpecDigest, requestedLimit }
 /** The reader methods a query may use. Listing them keeps the surface auditable. */
 export type QueryReader = Pick<
   ObservationReader,
-  "overview" | "listLatestBalances" | "listTransactions"
+  "overview" | "fetchRunCounts" | "listLatestBalances" | "listTransactions"
 >;
 
 export interface CoverageScope {
   sourceRef: string;
   provider: string;
   ingestion: string;
+  /** Visible fetch artifacts of this source, over its whole history. */
   artifactCount: number;
+  /** Visible fetch runs of this source, over its whole history: exact, not a window. */
   collectionRunCount: number;
 }
 export interface CoverageSummary {
@@ -60,6 +62,7 @@ export interface CoverageSummary {
   scopes: CoverageScope[];
   sourceCount: number;
   artifactCount: number;
+  /** The sum of `scopes[].collectionRunCount`. */
   collectionRunCount: number;
 }
 export interface ReportedStateRow {
@@ -445,12 +448,14 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     );
     if (inScope.length > grant.budget.maxRows)
       return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
+    // Each in-scope source's runs are counted exactly, by a read restricted to
+    // the in-scope sources before it counts anything. The overview's run list
+    // is the newest runs across every source, so counting inside it let runs
+    // of a source outside the scope (a denied one included) push an in-scope
+    // source's runs out of the window and change its count.
     const runsBySource = new Map<string, number>();
-    for (const run of overview.fetchRuns) {
-      if (!grantAllowsSource(grant, run.source_id)) continue;
-      if (sourceScope.sources !== null && !sourceScope.sources.includes(run.source_id)) continue;
-      runsBySource.set(run.source_id, (runsBySource.get(run.source_id) ?? 0) + 1);
-    }
+    for (const row of await reader.fetchRunCounts(inScope.map((source) => source.id)))
+      runsBySource.set(row.source_id, row.run_count);
     const scopes: CoverageScope[] = inScope.map((source) => ({
       sourceRef: source.id,
       provider: source.provider,

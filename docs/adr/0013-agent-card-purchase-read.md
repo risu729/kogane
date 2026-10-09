@@ -60,3 +60,20 @@ grant gets no page rather than a page computed outside it (SC18)."
 
 Application, observation-shared and App tests on synthetic data, including
 that refusals read no store row and that the tool is absent with the flag off.
+
+## Amendment: a delegated principal may receive the review affordances (2026-10-09, ADR 0063)
+
+Status: proposed until the ADR 0063 pull request merges; accepted upon merge.
+Not implemented: until its delegation slice ships, this ADR's decision holds
+for every caller.
+
+[ADR 0063](0063-delegated-ai-operation-path.md) lets the owner delegate
+decisions to their own MCP principal (`mcp-client:<sub>`) through
+`MCP_DELEGATIONS`. For a caller holding the delegated capability
+`commands.decide.relation`, `kogane.purchases.explain` keeps each candidate's
+`actions` and `relation`, because that caller may plan and decide the link
+through the common command layer (plan, approve with the plan digest, commit;
+risk class R2). For every other caller — every agent without that delegation —
+the decision above is unchanged: the two fields are stripped and the answer
+says `decisions: "operator-only"`. The whole-store grant requirement is
+unchanged.

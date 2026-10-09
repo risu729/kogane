@@ -57,8 +57,8 @@ async function token() {
     .sign(keys.privateKey);
 }
 
-/** `read` switches the store the routes read; it never changes authentication. */
-async function call(path: string, options: { read?: boolean } = {}) {
+/** `retired` is the old App env name. It does not choose the store. */
+async function call(path: string, options: { read?: boolean; retired?: string } = {}) {
   return worker.fetch(
     new Request(`https://fixture.test${path}`, {
       headers: { "cf-access-jwt-assertion": await token() },
@@ -67,7 +67,7 @@ async function call(path: string, options: { read?: boolean } = {}) {
       ...env,
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: "fixture-audience",
-      BALANCE_PROJECTION_ENABLED: "1",
+      BALANCE_PROJECTION_ENABLED: options.retired ?? "0",
       READ_PROJECTION_ENABLED: options.read === false ? "false" : "true",
     } as Env,
   );
@@ -145,6 +145,8 @@ describe("the v2 balance routes over the READ database", () => {
     expect(empty.status).toBe(503);
     expect(((await empty.json()) as { error: string }).error).toBe("read_model_unavailable");
     expect((await call("/api/v2/balances/history")).status).toBe(503);
+    for (const retired of ["0", "1", "true"])
+      expect((await call("/api/v2/balances/latest", { retired })).status).toBe(503);
   });
 
   it("serves a page from READ and advertises which store answered", async () => {

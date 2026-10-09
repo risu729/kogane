@@ -44,7 +44,11 @@ import {
   sessionRefreshPolicy,
   type SessionRefreshRequest,
   statusForCommandError,
+  type AnswerOutcome,
+  type OperationCall,
+  type OperationName,
 } from "../../../packages/application/src/index";
+import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
@@ -201,13 +205,17 @@ export interface OpsContext extends OperationContext {
  * `403 subject_not_granted` before a schema is reached. A deployment whose
  * lists cannot be read refuses everyone with `503 grants_misconfigured`.
  */
-export function opsContext(env: Env, subject: string): OpsContext {
+export function opsContext(env: Env, subject: string, audit?: OperationCall): OpsContext {
   const principal = principalFor(env, subject);
+  // The audit record names the graded principal (ADR 0064); an accepted
+  // request's record is appended to the acceptance batch through `audit`.
+  audit?.grade(principal.id, principal.kind);
   if (!principalCan(principal, "interpretation.accept"))
     throw new HttpError(403, "approval_required");
   return {
     store: d1CommandStore(env.DB),
     principal,
+    ...(audit ? { audit } : {}),
     now: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
     nowMs: Date.now(),
     policy: sessionRefreshPolicy(env.SESSION_REFRESH_POLICY),
@@ -267,7 +275,27 @@ export const opsServices = {
  * The verified subject travels in the bindings object this module builds, not
  * in a header or a body: nothing a caller sends can name the actor.
  */
-type OpsBindings = Env & { VERIFIED_SUBJECT: string };
+type OpsBindings = Env & { VERIFIED_SUBJECT: string; AUDIT?: OpsAudit };
+
+/** The audit call of this request, and what its handler answered when it wrote no record. */
+interface OpsAudit {
+  call: OperationCall;
+  quiet: AnswerOutcome;
+}
+
+/** Records what a successful operations answer was when its writer recorded nothing. */
+function answered(audit: OpsAudit | undefined, outcome: OpsResponse, read: boolean): Response {
+  const operationId = (outcome.body as { operationId?: unknown }).operationId;
+  if (audit)
+    audit.quiet = read
+      ? { result: "read", rows: 1, truncated: false }
+      : // A re-sent request: the same operation, named by the id the service derived.
+        {
+          result: "replayed",
+          targetRef: typeof operationId === "string" ? operationId : null,
+        };
+  return json(outcome.body, outcome.status);
+}
 
 const app = new Hono<{ Bindings: OpsBindings }>().basePath(OPS_PREFIX);
 
@@ -282,35 +310,35 @@ app.notFound(() => {
 });
 
 app.post("/collections", async (context) => {
-  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT);
+  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT, context.env.AUDIT?.call);
   const request = parseRequest(collectionSchema, await boundedBody(context.req.raw));
   const outcome = await opsServices.collection(ops, request);
-  return json(outcome.body, outcome.status);
+  return answered(context.env.AUDIT, outcome, false);
 });
 
 app.post("/imports", async (context) => {
-  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT);
+  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT, context.env.AUDIT?.call);
   const request = parseRequest(importSchema, await boundedBody(context.req.raw));
   const outcome = await opsServices.import(ops, request);
-  return json(outcome.body, outcome.status);
+  return answered(context.env.AUDIT, outcome, false);
 });
 
 app.post("/replays", async (context) => {
-  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT);
+  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT, context.env.AUDIT?.call);
   const request = parseRequest(replaySchema, await boundedBody(context.req.raw));
   const outcome = await opsServices.replay(ops, request);
-  return json(outcome.body, outcome.status);
+  return answered(context.env.AUDIT, outcome, false);
 });
 
 app.post("/projections", async (context) => {
-  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT);
+  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT, context.env.AUDIT?.call);
   const request = parseRequest(projectionSchema, await boundedBody(context.req.raw));
   const outcome = await opsServices.projection(ops, request);
-  return json(outcome.body, outcome.status);
+  return answered(context.env.AUDIT, outcome, false);
 });
 
 app.post("/sessions/:source/refresh", async (context) => {
-  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT);
+  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT, context.env.AUDIT?.call);
   const body = parseRequest(sessionRefreshBodySchema, await boundedBody(context.req.raw));
   // The path segment is validated by the same schema the MCP tool uses, so a
   // source that is not a source id is refused identically on both transports.
@@ -319,15 +347,33 @@ app.post("/sessions/:source/refresh", async (context) => {
     source: context.req.param("source"),
   });
   const outcome = await opsServices.sessionRefresh(ops, request);
-  return json(outcome.body, outcome.status);
+  return answered(context.env.AUDIT, outcome, false);
 });
 
 app.get("/operations/:id", async (context) => {
-  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT);
+  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT, context.env.AUDIT?.call);
   const { operationId } = parseRequest(operationIdSchema, { operationId: context.req.param("id") });
   const outcome = await opsServices.operation(ops, operationId);
-  return json(outcome.body, outcome.status);
+  return answered(context.env.AUDIT, outcome, true);
 });
+
+/**
+ * The operation a request names, from its method and path alone, or null for
+ * one this API does not serve (which is not recorded: it is not an
+ * operation). The six routes above, nothing else.
+ */
+export function opsOperation(method: string, path: string): OperationName | null {
+  const rest = path.slice(OPS_PREFIX.length);
+  if (method === "POST") {
+    if (rest === "/collections") return "ops.collection.request";
+    if (rest === "/imports") return "ops.import.request";
+    if (rest === "/replays") return "ops.replay.request";
+    if (rest === "/projections") return "ops.projection.request";
+    if (/^\/sessions\/[^/]+\/refresh$/u.test(rest)) return "ops.session.refresh";
+  }
+  if (method === "GET" && /^\/operations\/[^/]+$/u.test(rest)) return "ops.operation.get";
+  return null;
+}
 
 /**
  * Entry point from `worker.ts`. Returns `null` when this Worker does not serve
@@ -349,6 +395,18 @@ export async function opsApi(
   // would suggest a different path might take it.
   if (request.method !== "POST" && request.method !== "GET")
     throw new HttpError(405, "method_not_allowed");
-  if (url.search) throw new HttpError(400, "invalid_query");
-  return app.fetch(request, { ...env, VERIFIED_SUBJECT: subject });
+  const operation = opsOperation(request.method, url.pathname);
+  if (operation === null) {
+    if (url.search) throw new HttpError(400, "invalid_query");
+    return app.fetch(request, { ...env, VERIFIED_SUBJECT: subject });
+  }
+  // One audit record per operations request (ADR 0064, path `ui`): the
+  // acceptance batch writes an accepted request's own, and every other
+  // answer — a re-send, a read, a refusal — is recorded after it.
+  return auditedRoute(auditContext(request, env, "ui", subject), operation, async (call) => {
+    if (url.search) throw new HttpError(400, "invalid_query");
+    const audit: OpsAudit = { call, quiet: { result: "skip" } };
+    const response = await app.fetch(request, { ...env, VERIFIED_SUBJECT: subject, AUDIT: audit });
+    return { response, outcome: audit.quiet };
+  });
 }

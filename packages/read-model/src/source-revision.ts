@@ -129,6 +129,12 @@ export const REVISION_EXCLUDED_TABLES = [
   // what a reader sees. The prices and their claims stay outside the ledger
   // like `price_observations` itself: valuation reads CORE per request.
   "price_promotion_cursor",
+  // The common audit record and its daily overflow counters (migration 0075,
+  // ADR 0064): who did what, through which path. An audit write never changes
+  // what a projection reads, and if it moved the revision every agent read
+  // (which writes one) would invalidate the read models.
+  "audit_records",
+  "audit_overflow_counters",
 ] as const;
 
 export type LedgerTable =

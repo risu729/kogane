@@ -108,6 +108,12 @@ const write = (body: unknown, headers?: Record<string, string>) =>
   post("/internal/schedules/agent/maintenance", body, headers);
 const read = (sources: unknown, headers?: Record<string, string>) =>
   post("/internal/schedules/agent/read", { sources }, headers);
+/** The operator header with the audit envelope the App forwards (ADR 0064). */
+const operatorHeaders = () => ({
+  "x-kogane-operator": OPERATOR,
+  "x-kogane-correlation-id": crypto.randomUUID(),
+  "x-kogane-audit-path": "ui",
+});
 const iso = (ms: number) => new Date(ms).toISOString();
 const verified = () => iso(Date.now() - 60_000);
 
@@ -418,7 +424,7 @@ test("an operator's longer window does not block an agent's unrelated revision",
       verifiedAt: verified(),
       scope: "collection",
     },
-    { "x-kogane-operator": OPERATOR },
+    operatorHeaders(),
   );
   expect(operator.body).toEqual({ saved: true, revision: 1, reservation: "armed" });
   // The operator path still records nothing it did not before but its kind.
@@ -455,7 +461,7 @@ test("an operator's longer window does not admit a separate long agent window", 
       verifiedAt: verified(),
       scope: "collection",
     },
-    { "x-kogane-operator": OPERATOR },
+    operatorHeaders(),
   );
   expect(operator.body).toEqual({ saved: true, revision: 1, reservation: "armed" });
   const count = await ruleCount();
@@ -628,7 +634,8 @@ test("the writer is importable and answers closed codes instead of throwing", as
     actor: { kind: "operator", id: OPERATOR },
     reason: "Synthetic reviewed proposal accepted",
   };
-  const created = await writeMaintenanceRevision(processorEnv, base);
+  const nothing = () => ({ statements: [], settle: () => undefined });
+  const created = await writeMaintenanceRevision(processorEnv, base, nothing);
   expect(created).toMatchObject({ ok: true, revision: 1, reconciled: true });
   if (!created.ok) throw new Error("unreachable");
   expect(created.ruleId).toMatch(/^sbi-securities-[0-9a-f]{12}$/u);
@@ -655,7 +662,7 @@ test("the writer is importable and answers closed codes instead of throwing", as
     [null, "invalid_request"],
   ];
   for (const [write, code] of refusals) {
-    const result = await writeMaintenanceRevision(processorEnv, write as MaintenanceWrite);
+    const result = await writeMaintenanceRevision(processorEnv, write as MaintenanceWrite, nothing);
     expect(result).toEqual({ ok: false, code, status: MAINTENANCE_WRITE_CODES[code] });
   }
 });

@@ -7,6 +7,11 @@
       "path": "services/app/demo-snapshot.json",
       "producedBy": "//experiments/observation-pipeline-local:export-demo",
       "reason": "Local API conformance tests use a synthetic snapshot exported from the local pipeline experiment. It is git-ignored and is not deployed or used by the production UI."
+    },
+    {
+      "path": "experiments/d1-conformance/src/corpus.generated.ts",
+      "producedBy": "//experiments/d1-conformance:corpus",
+      "reason": "Synthetic-only statements generated from the shipped builders and fixtures; no runtime disk or production data access."
     }
   ]
 }

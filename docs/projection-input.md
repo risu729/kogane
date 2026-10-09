@@ -267,10 +267,9 @@ READ (05 §5).
 This input-context contract adds no flag. The former
 `READ_PROJECTION_ENABLED` switch and CORE projection fallback were removed
 with [legacy retirement](legacy-retirement.md); readers and writers use READ.
-`BALANCE_PROJECTION_ENABLED` is enabled in the committed App and Processor
-configs; disabling it pauses the job/reader as described in
-[rollout controls](rollout.md). With the flag off the job returns `skipped(flag_off)`
-and its outbox rows stay pending, exactly as "nothing was updated" should read.
+Processor `BALANCE_PROJECTION_ENABLED` pauses the job. With it off the job
+returns `skipped(flag_off)` and its outbox rows stay pending. The App does not
+read that var.
 
 ## Deploy order and rollback
 

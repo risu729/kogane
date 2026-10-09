@@ -34,6 +34,7 @@ import { canonicalDigest } from "../../../domain/src/context.ts";
 import type { CommandStore, PreparedWrite, Principal } from "../command/contract.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
 import { collectorExecution, type CollectorExecutionReport } from "./collector-trail.ts";
+import type { OperationCall } from "../audit/call.ts";
 
 export const OPERATION_KINDS = [
   "collection",
@@ -325,6 +326,12 @@ export interface OperationContext {
   principal: Principal;
   /** ISO-8601 second precision, supplied by the adapter. */
   now: string;
+  /**
+   * The route's or tool's audit call (ADR 0064). An accepted request's
+   * `accepted` record is the last statement of the acceptance batch, joined
+   * to the request row this call inserted; a re-send records nothing here.
+   */
+  audit?: OperationCall;
 }
 
 interface AcceptInput extends OperationContext {
@@ -378,7 +385,30 @@ async function accept(input: AcceptInput): Promise<CommandResult<AcceptedOperati
         ],
       },
       ...(input.extraWrites?.(operationId) ?? []),
+      ...(input.audit
+        ? [
+            input.audit.effect(
+              {
+                targetRef: operationId,
+                scope:
+                  input.sourceId === null
+                    ? null
+                    : { namespace: "core-source", source: input.sourceId },
+                idempotencyKey: request.idempotencyKey ?? null,
+                payloadDigest,
+                diff: { kind: "request", status: input.status },
+              },
+              {
+                sql: `EXISTS(SELECT 1 FROM ops_requests
+                  WHERE operation_id=? AND principal=? AND created_at=? AND payload_digest=?)`,
+                binds: [operationId, principal.id, now, payloadDigest],
+              },
+              { kind: "target" },
+            ),
+          ]
+        : []),
     ]);
+    input.audit?.settle(outcomes.at(-1)?.changes);
     // The insert is guarded on the row not existing, so a request that lost a
     // race to another sender of the same key inserts nothing — and *that*, not
     // the earlier read, is what says whether this call created the record.

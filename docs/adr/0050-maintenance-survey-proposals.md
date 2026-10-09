@@ -231,3 +231,36 @@ whose decision row fails: the revision is written once, the proposal (new or
 changed) reads as not current, and a retry is `revision_conflict`.
 `services/app/test/schedules.test.ts` covers the relay, and
 `apps/web/test/schedules.browser.test.ts` the page section.
+
+## Amendment: the acceptance is one batch with its revision (ADR 0064)
+
+Status: proposed until the pull request of
+[ADR 0064](0064-common-audit-log.md)'s slice S1 merges; accepted upon merge
+Date: 2026-10-09
+
+Slice S1 of the [AI operation path plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)
+writes an `applied` audit record as the last statement of each settings
+writer's own batch, and requires the survey acceptance to be one write
+(plan, section 6.3). The Consequences paragraph above that says "the writer
+call and the acceptance row are not one transaction" and the last sentence of
+Verification no longer hold:
+
+- The writer takes a third argument, `append`, and sends the revision insert,
+  the provenance update, the acceptance row and the audit record in one D1
+  batch. The acceptance row is a plain `INSERT` guarded on the revision row
+  this batch wrote, so a proposal another decision reached first raises on the
+  primary key and the whole batch, the revision included, is rolled back
+  (`409 proposal_already_decided`); any other batch failure is
+  `503 decision_record_failed` with nothing written. The proposal stays
+  current, and a retry applies it once.
+- `MaintenanceRevisionWriter` is now `(env, write, append)`. #560's
+  `writeMaintenanceRevision(env, write)` therefore no longer satisfies it as it
+  is: when #560 merges, its writer has to send what `append` returns in its
+  own batch, as the operator route's adapter (`surveyRevisionWriter`) does.
+- A rejection's decision row and its audit record are one batch too.
+
+Verification: `maintenance-survey-decisions.test.ts` now shows that an
+acceptance whose decision row cannot be written leaves neither the revision,
+the decision nor an audit record, that the proposal stays current and a retry
+applies it once, and that a proposal decided by someone else while the
+acceptance was in flight rolls the revision back.

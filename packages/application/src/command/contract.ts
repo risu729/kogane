@@ -89,6 +89,13 @@ export interface IdentityAssignPayload {
   referenceId: string;
   targetId: string;
   reason: string;
+  /** Candidate provenance; direct manual assignments omit it. */
+  candidate?: {
+    candidateId: string;
+    anchorIdentifierId: string;
+    anchorMappingRevision: number;
+    subjectMappingRevision: number;
+  };
 }
 export interface IdentityReleasePayload {
   subject: IdentitySubject;
@@ -175,14 +182,31 @@ export function validPayload(kind: ChangeKind, value: unknown): value is ChangeP
   if (isEconomicEventKind(kind)) return validEconomicEventCommandPayload(kind, value);
   if (kind === "identity.assign" || kind === "identity.release-override") {
     const assign = kind === "identity.assign";
+    const candidate = assign && Object.hasOwn(value, "candidate");
     const keys = assign
-      ? ["subject", "referenceId", "targetId", "reason"]
+      ? ["subject", "referenceId", "targetId", "reason", ...(candidate ? ["candidate"] : [])]
       : ["subject", "referenceId", "reason"];
     return (
       exactKeys(value, keys) &&
       isOneOf(IDENTITY_SUBJECTS)(value.subject) &&
       isText(value.referenceId, 512) &&
       (!assign || isText(value.targetId, 512)) &&
+      (!candidate ||
+        (value.subject === "instrument" &&
+          isRecord(value.candidate) &&
+          exactKeys(value.candidate, [
+            "candidateId",
+            "anchorIdentifierId",
+            "anchorMappingRevision",
+            "subjectMappingRevision",
+          ]) &&
+          isText(value.candidate.candidateId, 512) &&
+          isText(value.candidate.anchorIdentifierId, 128) &&
+          value.candidate.anchorIdentifierId !== value.referenceId &&
+          Number.isSafeInteger(value.candidate.anchorMappingRevision) &&
+          (value.candidate.anchorMappingRevision as number) > 0 &&
+          Number.isSafeInteger(value.candidate.subjectMappingRevision) &&
+          (value.candidate.subjectMappingRevision as number) > 0)) &&
       reason
     );
   }

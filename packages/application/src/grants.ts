@@ -168,10 +168,19 @@ export function validGrant(value: unknown): value is Grant {
   );
 }
 
+/** The keys one configured entry carries; the principal is its map key, never a body field. */
+const GRANT_ENTRY_KEYS = ["scopes", "capabilities", "budget"] as const;
+
 /**
  * Read the deployment's grant table. Anything unreadable, unparsable or
  * outside the bounds above yields an empty table: the agent API is then off,
  * which is the configured default (`AGENT_API_GRANTS` absent).
+ *
+ * An entry is exactly `scopes`, `capabilities` and `budget`. Its principal is
+ * the key it is stored under, the verified identity a lookup is made with; an
+ * entry that carries any other key, a `principal` of its own included (equal
+ * to the key or not), rejects the whole table, so no grant can name a
+ * principal other than the one it is looked up by.
  *
  * The parsed text is configuration written by the operator, never a request
  * body, and it never names a capability outside `AGENT_CAPABILITIES`.
@@ -189,8 +198,14 @@ export function parseGrants(configured: string | undefined | null): Map<string, 
   const entries = Object.entries(parsed);
   if (entries.length > 64) return table;
   for (const [principal, body] of entries) {
-    if (!isText(principal, 256) || !isRecord(body)) return new Map();
-    const grant = { principal, ...body };
+    if (!isText(principal, 256) || !isRecord(body) || !hasExactKeys(body, GRANT_ENTRY_KEYS))
+      return new Map();
+    const grant = {
+      principal,
+      scopes: body["scopes"],
+      capabilities: body["capabilities"],
+      budget: body["budget"],
+    };
     if (!validGrant(grant)) return new Map();
     table.set(principal, grant);
   }

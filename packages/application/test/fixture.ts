@@ -129,18 +129,40 @@ export const BALANCES: BalanceRow[] = [
   },
 ];
 
+/** Visible fetch runs per source in the fixture store, over each source's whole history. */
+const FETCH_RUN_TOTALS: Readonly<Record<string, number>> = Object.fromEntries(
+  OVERVIEW.sources.map((source) => [
+    source.id,
+    OVERVIEW.fetchRuns.filter((run) => run.source_id === source.id).length,
+  ]),
+);
+
 /** Reader stub: filters the fixture rows exactly the way the SQL reader would. */
 export function reader(
-  rows: { transactions?: TransactionRow[]; balances?: BalanceRow[] } = {},
+  rows: {
+    transactions?: TransactionRow[];
+    balances?: BalanceRow[];
+    /** Whole-history run totals per source; `FETCH_RUN_TOTALS` when absent. */
+    runTotals?: Readonly<Record<string, number>>;
+  } = {},
 ): QueryReader & { calls: string[] } {
   const transactions = rows.transactions ?? TRANSACTIONS;
   const balances = rows.balances ?? BALANCES;
+  const runTotals = rows.runTotals ?? FETCH_RUN_TOTALS;
   const calls: string[] = [];
   return {
     calls,
     overview: async () => {
       calls.push("overview");
       return OVERVIEW;
+    },
+    // Like the SQL reader: only listed sources are read, and one with no run has no row.
+    fetchRunCounts: async (sources) => {
+      const listed = [...new Set(sources)].sort();
+      calls.push(`runCounts:${listed.join(",")}`);
+      return listed
+        .filter((source) => (runTotals[source] ?? 0) > 0)
+        .map((source) => ({ source_id: source, run_count: runTotals[source]! }));
     },
     listTransactions: async (query) => {
       calls.push(`transactions:${query.source ?? "*"}/${query.account ?? "*"}`);

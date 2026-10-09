@@ -19,6 +19,7 @@ import {
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
+import { auditOverflowStage } from "./audit-overflow.ts";
 import { scheduleRoute } from "./schedule-store";
 import { maintenanceSurveyLane } from "./maintenance-survey/lane.ts";
 import { maintenanceSurveyEnabled } from "./maintenance-survey/config.ts";
@@ -1780,6 +1781,12 @@ export interface ScheduledStages {
    * proposes: no rule changes until an operator accepts.
    */
   maintenanceSurvey?: (env: Env) => Promise<object>;
+  /**
+   * The audit log's daily overflow aggregate (ADR 0064): one `overflow`
+   * record per counter row of a UTC day that has ended. No flag: it writes
+   * only when an earlier day's cap was passed.
+   */
+  auditOverflow?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
@@ -1831,6 +1838,7 @@ const defaultStages: ScheduledStages = {
     }),
   maintenanceSurvey: (env) =>
     maintenanceSurveyLane(env, { transport: (url, init) => fetch(url, init) }),
+  auditOverflow: (env) => auditOverflowStage(env),
 };
 
 /**
@@ -1926,6 +1934,9 @@ export async function runScheduled(
     // A09: the decision outbox runs last, after the projections a decision may
     // have invalidated (docs/change-lifecycle.md).
     ["decision_outbox", stages.decisions, true],
+    // ADR 0064: the audit records of the reads and refusals a principal made
+    // past a day's cap, aggregated once that day has ended.
+    ["audit_overflow", stages.auditOverflow, true],
   ];
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;

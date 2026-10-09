@@ -77,7 +77,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-shinsei-exchange-rate.ts":
       "8f0f8ebb31da1aa2988d5f3db08ba2689caf4b78b2c021e6cb46a87b7be7dce4",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-top-balances-and-activity.ts":
-      "7611a672b8e867b08705dce71cf454f28c5db7b35d29bfeaa147ef9fcbd1b62c",
+      "727424ca956896bdb970d22b0cb2ba631ff004b9966c2b0d4eff5fa3a4d3ebc5",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-yen-deposit-account.ts":
       "86c4e7dca76273133fdd92ade7e95811303de54b74df27f5f8052ebb16dee44f",
     "poc/observation-pipeline/src/parsers/sbi-strict.ts":
@@ -438,8 +438,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-shinsei-top-balances-and-activity": {
-      version: "0.1.2",
-      codeDigest: "e5867a8c469ed0e9fa65a5475d8294c292271e362baa0e70192cdb3b8213850c",
+      version: "0.1.3",
+      codeDigest: "3bd85b58c0e7249866625fff2e2b779a8d9c7e62ffa1bbd6140475ef1a1bccb8",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

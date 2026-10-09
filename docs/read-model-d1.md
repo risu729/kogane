@@ -206,10 +206,10 @@ stopped working. Two details of its semantics:
 
 ## Flags
 
-| Flag                             | Where          | Default | Effect                                                                         |
-| -------------------------------- | -------------- | ------- | ------------------------------------------------------------------------------ |
-| `BALANCE_PROJECTION_ENABLED`     | processor, app | `0`     | The existing A07 gate: nothing builds or reads the projection while it is off. |
-| `REWARD_READ_PROJECTION_ENABLED` | processor      | `false` | The `reward_read_projection` lane runs and builds the reward snapshot (U16).   |
+| Flag                             | Where     | Default | Effect                                                                                      |
+| -------------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------- |
+| `BALANCE_PROJECTION_ENABLED`     | processor | `0`     | The writer gate. Anything but `"1"` skips the balance READ build. The App does not read it. |
+| `REWARD_READ_PROJECTION_ENABLED` | processor | `false` | The `reward_read_projection` lane runs and builds the reward snapshot (U16).                |
 
 Production enables the remaining flags. Both writers and App readers use READ
 exclusively; there is no storage-target switch.
@@ -246,8 +246,8 @@ writers enabled. CORE migration 0042 retires the old projection tables after a
 verified READ-only release.
 
 Pause the Processor with `BALANCE_PROJECTION_ENABLED=0` and
-`REWARD_READ_PROJECTION_ENABLED=false`. The App can hide balance or reward routes
-with its corresponding feature flag. No flag restores a CORE projection path.
+`REWARD_READ_PROJECTION_ENABLED=false`. The App keeps serving; a missing
+snapshot is `503`, not a hidden route. No flag restores a CORE projection path.
 Choose schema-compatible releases for code rollback; reconstruct READ using
 [the rebuild runbook](read-rebuild-runbook.md).
 
