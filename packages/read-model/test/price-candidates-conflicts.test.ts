@@ -264,7 +264,11 @@ describe("candidate conflicts the shipped reads leave open", () => {
     // this space-separated instant is a real SQLite time and wins RANK() on the
     // before-window arm, then the domain excludes it. ADR 0056: the newest old
     // row may be one the domain cannot read, and the key is missing rather than
-    // stale.
+    // stale. Both rows are stored; only the unreadable newer one is read.
+    const stored = store.db.query("SELECT id FROM price_observations ORDER BY id").all() as {
+      id: string;
+    }[];
+    expect(stored.map((row) => row.id)).toEqual(["masked", "older-valid"]);
     const read = await readAndSelect(store, key);
     expect(read.rows.map((row) => [row.candidate.price.id, row.reach])).toEqual([
       ["masked", "before-window"],
