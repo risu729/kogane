@@ -239,7 +239,10 @@ writer slot that would write (the processor's `economicEventMutation`
 returns null). The
 reserved `economic-event.resolve-identity` is not a kind here: CORE 0070
 refuses it outright, and whether it joins the vocabulary is an open owner
-question in the ADR. No screen offers or labels the four kinds.
+question in the ADR. No screen offers or labels the four kinds. Their
+own-transfer planners exist (`own-transfer-plan.ts`,
+[ADR 0057](adr/0057-own-transfer-proposals.md)) but are not registered while
+ADR 0054's production gate is not met.
 
 ## Tables (migration `0031_operations.sql`)
 

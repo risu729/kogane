@@ -37,3 +37,4 @@ export {
   isRefList,
 } from "./guards.ts";
 export type { Guard, UnknownRecord } from "./guards.ts";
+export * from "./own-transfer-proposals.ts";

@@ -4,10 +4,11 @@
 // one day ask the change lifecycle to do with an event: adopt a proposal,
 // correct an adopted revision, withdraw it, or move one consumed row from one
 // event to another in a single commit. CORE 0071 admits the kinds in the
-// command tables' kind CHECK constraints; no planner exists for any of them,
-// so the change lifecycle refuses every command of these kinds
+// command tables' kind CHECK constraints; no planner is registered for any of
+// them (ADR 0057's are written but unregistered), so the change lifecycle
+// refuses every command of these kinds
 // (`unsupported_semantics`) and nothing here is executable. The payload shapes below are the contract
-// a planner (G3) will read; today only validation tests use them.
+// the own-transfer planners read (`packages/application/src/operations/own-transfer-plan.ts`).
 //
 // A payload never states an amount. A restated leg cites the row it is read
 // from, and the value is the cited row's (INV03: amounts are added here from
