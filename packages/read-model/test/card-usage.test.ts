@@ -182,7 +182,7 @@ describe("the Transactions page composes the shared snapshot currentness", () =>
     // digest moved with the skip-payment reader (ADR 0005 amendment k).
     const pinned = [
       '[19,"myjcb","myjcb:conn-a:root","2026-06-02","-300","-300","JPY","架空","架空店舗J 1回払","myjcb-credit-ledger:unconfirmed:933c80ea937d61fe5f7ee1881f0119ba:0","unconfirmed","myjcb-credit-ledger@1.2.3"]',
-      '[7,"vpass","vpass:card-001","2026-06-02","-3300","-3300","JPY","0","架空店舗E","vpass:card-001:202606:customized:53574894370076d0ed47dada2a974f24:answer-001:0","unconfirmed","vpass-statement-page@1.2.0"]',
+      '[7,"vpass","vpass:card-001","2026-06-02","-3300","-3300","JPY","0","架空店舗E","vpass:card-001:202606:customized:53574894370073d0ed47dada2a974f24:answer-001:0","unconfirmed","vpass-statement-page@1.2.0"]',
       '[6,"vpass","vpass:card-001","2026-06-01","-1234","-1234","JPY","0","架空店舗D","vpass:card-001:202606:customized:0c9cf0b445aa57409e1debe6999b3fc4:0","unconfirmed","vpass-statement-page@1.2.0"]',
       '[22,"smbc-bank","smbc-bank:ordinary-yen","2026-05-20","-500","-500","JPY","synthetic",null,"synthetic-bank-1","posted","synthetic-bank-history@1"]',
       '[18,"myjcb","myjcb:conn-a:root","2026-05-10","-800","-800","JPY","架空","架空店舗I 1回払","myjcb-credit-ledger:unconfirmed:f32e4a3b0b17730ff548bed596f7bc8b:0","unconfirmed","myjcb-credit-ledger@1.2.3"]',

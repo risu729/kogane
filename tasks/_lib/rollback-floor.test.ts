@@ -18,7 +18,7 @@ const command = (gate?.body.split("        run: |\n")[1] ?? "")
   .join("\n");
 
 // #207 includes both the #206 CORE/ingestion retirement and demo retirement.
-const retirement = "87da571c7aa35dd76f9b00767a886ac41e6d3491";
+const retirement = "87da571c7aa35dd76f9b00737a886ac41e6d3491";
 
 describe("the trusted workflow enforces the production compatibility floor", () => {
   test("the floor is not supplied by an input or the target checkout", () => {

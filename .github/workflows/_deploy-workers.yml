@@ -111,7 +111,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ inputs.sha }}
-          COMPATIBILITY_FLOOR_SHA: 87da571c7aa35dd76f9b00767a886ac41e6d3491
+          COMPATIBILITY_FLOOR_SHA: 87da571c7aa35dd76f9b00737a886ac41e6d3491
         run: |
           status=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${COMPATIBILITY_FLOOR_SHA}...${SHA}" --jq '.status')
           case "${status}" in
