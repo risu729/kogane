@@ -1131,7 +1131,7 @@
       "sha256": "3e5a5c2ebce700b5914ca0dfefe2d55ddf49c75c2d2ec011677bff39b77e61ff"
     },
     {
-      "file": "0076_reward_bucket_claims_v2.sql",
+      "file": "0077_reward_bucket_claims_v2.sql",
       "statementCount": 10,
       "insertStatements": [],
       "sha256": "2f77d555e0f64215837e4f6e70addcfe018a17a184986aea5a3272500f7a5980"

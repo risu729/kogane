@@ -325,7 +325,7 @@ captureが読む各集合には上限があり、超えたら**切り詰めず�
 `claim_set_too_large`、`offer_set_too_large`、`simulation_set_too_large`）。
 
 CORE migration `0041_reward_revision_triggers.sql` が元の5表を0038の依存台帳へ追加し、
-`0076_reward_bucket_claims_v2.sql` が現在のclaim表とrevision triggerを追加する。これが
+`0077_reward_bucket_claims_v2.sql` が現在のclaim表とrevision triggerを追加する。これが
 ないと、ruleやclaimの変更をr0/r1 captureが検知できない。投影出力である `expiry_estimates` /
 `conversion_simulations` は台帳から**除外**したままである（自分の出力で自分を陳腐化させない）。
 副作用として、reward claimの昇格は残高投影のinputも「変わったかもしれない」側に倒す。これは
@@ -448,11 +448,11 @@ READは `reward_expiry_estimates_v2` を使う。旧表・旧claimは履歴と�
 snapshot/continuationを新しい確定値として返さない。通常migration、v2再promotion、
 READ再構築が必要で、その間expiryは503になる。promotionが未完なら
 `reward_promotion_incomplete` としてinputをsealしない。活動分類/window/規約移行の
-実入力接続は未実装で、#554は完了していない。詳細はADR0049のproposed amendment。
+実入力接続は未実装で、#554は完了していない。詳細はADR0049のamendment（#632のmergeでaccepted）。
 
 ### v2への通常復旧の適用条件
 
-CORE `0076` とREAD `0004` をそれぞれのDBへ適用した後に、同じreleaseのProcessor/Appを
+CORE `0077` とREAD `0004` をそれぞれのDBへ適用した後に、同じreleaseのProcessor/Appを
 通常のrelease経路で配布する。Processorの `REWARD_CLAIMS_ENABLED=true` と
 `REWARD_READ_PROJECTION_ENABLED=true`、DB/READ/DATA bindings、通常tickの稼働が必要。
 1 sweepは最大500候補を処理し、READは全候補のpromotion完了までpendingを返す。

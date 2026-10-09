@@ -270,7 +270,7 @@ this decision, not a defect: the inputs that would allow one are not confirmed.
 
 ## Amendment: current V Point snapshot and unclassified buckets
 
-- Status: proposed
+- Status: proposed; accepted upon merge of #632
 - Date: 2026-10-09
 - Issue: #554; current capture selection consumes #542's shared contract
 
@@ -300,7 +300,7 @@ and estimate stores additively. There is one current API and promotion path.
    excludes it, and expiry computation refuses it with that same closed code,
    even if a synthetic rule attempts to cover the kind. Displayed expiry is
    still an observation and never becomes a computed expiry.
-2. CORE `0076_reward_bucket_claims_v2.sql` adds `reward_bucket_claims_v2` with
+2. CORE `0077_reward_bucket_claims_v2.sql` adds `reward_bucket_claims_v2` with
    the expanded kind CHECK, append-only and published-parse guards, the same
    source-fact references and revision triggers. `reward-promotion-v2` writes
    there. V Point common buckets are unclassified regardless of the expiry

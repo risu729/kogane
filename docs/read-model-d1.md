@@ -136,12 +136,12 @@ not carry as `offer_not_in_fixed_input`. Nothing recomputes a digest-only
 simulation against today's offers (G2-20).
 
 The CORE reference tables introduced in migration 0033 and the corrected
-claim table introduced in 0076 are read, never written by this lane, and
+claim table introduced in 0077 are read, never written by this lane, and
 `reward_programs`, `expiry_rules`, `conversion_offers`,
 `reward_bucket_claims_v2` and `membership_state_claims` stay in CORE as 04 §2
 requires — they are versioned reference claims and provider claims, not a
 projection. CORE migration 0041 adds the original tables to the dependency
-ledger of 0038; migration 0076 adds the corrected claim table and its triggers so
+ledger of 0038; migration 0077 adds the corrected claim table and its triggers so
 the r0/r1 capture can see a rule or claim change. Migration 0042 removes the
 two obsolete CORE projection tables. New reward inputs contain no legacy
 simulation cache; archived inputs retain their captured replay semantics.

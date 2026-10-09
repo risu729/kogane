@@ -423,7 +423,7 @@ test("migration 0033 applies on the earlier Layer B schema with rows already pre
 
     await applyMigration(upgrade.env.DB, "0033_reward_buckets.sql");
     await applyMigration(upgrade.env.DB, "0041_reward_revision_triggers.sql");
-    await applyMigration(upgrade.env.DB, "0076_reward_bucket_claims_v2.sql");
+    await applyMigration(upgrade.env.DB, "0077_reward_bucket_claims_v2.sql");
 
     // Existing evidence is untouched and the new tables start empty.
     expect(
@@ -445,9 +445,9 @@ test("migration 0033 applies on the earlier Layer B schema with rows already pre
   }
 }, 60000);
 
-test("migration 0076 preserves legacy claims and re-promotes their original evidence under v2", async () => {
+test("migration 0077 preserves legacy claims and re-promotes their original evidence under v2", async () => {
   const upgrade = await startPipeline(
-    layerBMigrations().filter((name) => !name.startsWith("0076_")),
+    layerBMigrations().filter((name) => !name.startsWith("0077_")),
   );
   try {
     await seedArtifact(upgrade.env, 11, "v-point", "balance-info", "balance-info.json", {
@@ -482,7 +482,7 @@ test("migration 0076 preserves legacy claims and re-promotes their original evid
     const revisionBefore = await upgrade.env.DB.prepare(
       "SELECT source_revision FROM core_source_revision WHERE id=1",
     ).first<number>("source_revision");
-    await applyMigration(upgrade.env.DB, "0076_reward_bucket_claims_v2.sql");
+    await applyMigration(upgrade.env.DB, "0077_reward_bucket_claims_v2.sql");
     expect(
       (await upgrade.env.DB.prepare("SELECT * FROM reward_bucket_claims").all()).results,
     ).toEqual(legacyBefore.results);
