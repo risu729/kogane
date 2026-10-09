@@ -2,8 +2,8 @@
 
 - Status: proposed (accepted when its pull request merges). Common auditing and
   delegation declarations are implemented on main; this S3 execution slice adds
-  delegated R1 operations and shared read adapters. Remaining R2/settings adapters
-  are not implemented in this slice. The slices are in the
+  delegated R1 operations and shared read adapters. A separate R2 slice adds
+  command decisions and provider-request confirmation; settings remain pending. The slices are in the
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
 - Date: 2026-10-09
 - Amends: [ADR 0013](0013-agent-card-purchase-read.md) (the read-only
@@ -172,13 +172,13 @@ with per-target checks in their own pull request.
 **5. Every operation has a risk class, and the class decides the
 confirmation.**
 
-| Class | Meaning                                                                                                                                            | Delegated                                                               |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| R0    | read                                                                                                                                               | allowed, no confirmation                                                |
-| R1    | bounded, reversible by a further operation, no adopted financial state, no provider contact                                                        | direct: one call with an idempotency key and the expected revision      |
-| R2    | changes adopted state or a collection schedule, or contacts a provider                                                                             | two-step: prepare → confirmation digest → confirm with the same payload |
-| R3    | needs a runtime judgement the server cannot verify, with no reverting operation; or held for the owner's decision (deferral beyond 7 days, item 8) | not delegable now; the operator in the UI                               |
-| R4    | authority, secrets, deployment                                                                                                                     | never; no tool and no route                                             |
+| Class | Meaning                                                                                                                              | Delegated                                                               |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| R0    | read                                                                                                                                 | allowed, no confirmation                                                |
+| R1    | bounded, reversible by a further operation, no adopted financial state, no provider contact                                          | direct: one call with an idempotency key and the expected revision      |
+| R2    | changes adopted state or a collection schedule, or contacts a provider                                                               | two-step: prepare → confirmation digest → confirm with the same payload |
+| R3    | needs a runtime judgement the server cannot verify, with no reverting operation; or a maintenance deferral beyond the 31-day ceiling | not delegable now; the operator in the UI                               |
+| R4    | authority, secrets, deployment                                                                                                       | never; no tool and no route                                             |
 
 The assignment of every operation is the plan's mapping (section 5): plans,
 proposals, imports, replays, projection rebuilds, survey rejections and
@@ -186,25 +186,21 @@ maintenance revisions inside the direct envelope are R1; job edits, survey
 acceptances, card-settlement, relation and identity decisions, collection
 requests and session refreshes are R2, the target class the owner's direction
 sets (「基本的に人間ができることはすべてAIができてほしい。AI経由で使うのがメインになる予定なので」); the
-plan's question 1 asks only at which stage financial adoption, provider
-contact and long deferrals become delegable at R2, and until the owner answers
-they stay R3 (no delegation entry is proposed with those capabilities;
-deferrals as item 8 states). Stopped-execution lease release, and maintenance
-deferrals beyond the 7-day bound until the owner answers that question (item
-8), are R3; grants, Access, delegations, secrets, service tokens,
+owner approved these R2 classes from the first delegated stage on
+2026-10-10. Only installed, reviewed adapters are available. Stopped-execution
+lease release and maintenance deferrals beyond 31 days are R3; grants, Access, delegations, secrets, service tokens,
 deployment, migrations, feature flags, collector dispatch connections, session
 refresh policy, maintenance-survey page enablement, schedule bootstrap,
 `economic-event.resolve-identity` and identity-epoch rewrites are R4.
 
-**6. Two-step confirmation.** For change-lifecycle commands the lifecycle is
-the confirmation, unchanged: the plan id is its digest, approve must present
-it and re-checks every expected revision, commit presents the approval and an
-`operationId` and verifies the revisions inside its batch. For settings and
-operations writes, `step: "prepare"` takes the caller's expected revision,
+**6. Two-step confirmation.** Both command approval and commit require the generic
+prepare/confirm in addition to their unchanged native plan/approval/receipt
+lifecycle. Approval INSERT and commit receipt reservation check the pinned
+revisions inside their batches. For every R2 adapter, `step: "prepare"` takes the caller's expected revision,
 refuses `revision_conflict` when the target has moved, and answers a preview
 and `cfm_` + `canonicalDigest({v: "kogane-confirm-v1", operation, principal,
-delegationRef, targetRef, expectedRevision, payloadDigest, idempotencyKey,
-expiresAt})`, valid at most 10 minutes, and records it (ADR 0064, `prepared`);
+delegationRef, targetRef, scope, expectedRevision, payloadDigest, idempotencyKey,
+revertsAuditId?, expiresAt})`, valid at most 10 minutes, and records it (ADR 0064, `prepared`);
 `step: "confirm"` resends the identical payload, key and digest, and the
 `applied` record that cites the prepare is the last statement of the writer's
 batch under a unique index, so a confirm applies at most once. The digest is
@@ -226,18 +222,17 @@ Provider contact cannot be rolled back, which is why it is R2.
 **8. #564 is re-shaped, not replaced.** Its one writer and bounds stay. The
 write capability moves to `MCP_DELEGATIONS`; the actor kinds become `operator`
 and `delegated`; the free-text reason becomes a closed code
-(`MAINTENANCE_CHANGE_REASONS`, enforced by #564's own unmerged CORE 0067
+(`MAINTENANCE_CHANGE_REASONS`, enforced by #564's own unmerged CORE 0076
 CHECK, following #575's closed-reason pattern); a revision is R1 inside the
 direct envelope (granted source, rule of that source or new, no new joined
 deferral over 7 days, budget unspent, closed reason, registered https host,
 expected revision). Beyond the 7-day bound the target is R2 up to a hard
-ceiling of a 31-day joined deferral; the plan's question 1 asks only whether
-that applies from the first delegated stage or after earlier audit records
-exist and have been read. Until the owner answers, it is **R3**: the tool
-refuses it (`maintenance_deferral_too_long`) and the operator makes it in the
-UI. A deferral longer than 31 days stays the operator's in every case. A spent
+ceiling of a 31-day joined deferral; the owner approved this from the first delegated stage on 2026-10-10.
+The writer still needs its trusted confirmation contract and fresh review;
+current refusal is an implementation limit, not a pending owner-stage decision.
+A deferral longer than 31 days stays the operator's in every case. A spent
 budget, an unregistered host or an out-of-scope source never escalates.
-Rewriting 0067's CHECK also rewrites its partial index
+Rewriting 0076's CHECK also rewrites its partial index
 `maintenance_agent_writes` to `actor_kind='delegated'`.
 
 **9. One implementation per command.** `OPERATION_CATALOGUE` and
@@ -399,3 +394,45 @@ boundary, altered preparations and single-use confirmations. Real Worker
 transport tests cover import/replay, revocation, receipt scope, HTTP/MCP history
 and audit parity, and unchanged browser audience separation. This does not
 prove a real MCP client's authentication, a production grant, or deployment.
+
+## R2 adapter amendment — 2026-10-10 (proposed)
+
+A separate slice exposes command approve/commit for the three closed delegated
+families and collection/session-refresh requests. Every adapter uses the common
+preparation/confirmation helper and existing application service/native writer.
+Processor routes independently verify family, canonical payload, key and prepare.
+Approval INSERT now checks pinned revisions atomically for human and delegated
+calls, closing the pre-read race. An exactly matching completed-confirm retry
+reads the native own receipt without another effect or budget charge, while
+still resolving the current delegation.
+
+Optional `revertsAuditId` on command commit is bound to the confirmation and
+immutable audit record. The shared validator requires an applied prior commit
+for the same verified subject, owned by that subject or the current MCP principal,
+its immutable stored plan/native commit receipt and the still-current original
+effect, not merely a compatible historical intent. The original produced revision,
+matching decision, target and verified actor are checked in the native receipt
+reservation as well as during preparation. A later reassignment, later relation
+judgement, changed settlement head or already released override cannot be cited
+as the original still-current effect. Completed exact retries read their prior
+receipt before this current-effect check. Identity release
+names the same subject/reference, relation rejection the same kind/endpoints/
+validity interval, and settlement withdrawal the same proposal. The native
+inverse writer still checks current eligibility/revisions. The original audit
+and decision remain; the new applied record links them.
+
+Provider preparations bind the current server session-refresh policy and preview
+`externalEffect: true`, `revertAvailable: false`. Confirmation only enqueues
+the existing request; acceptance is not completed contact. Human session policy,
+credentials and provider financial approvals are not bypassed.
+
+The owner approved first-stage R2 and separately authorized concrete client setup.
+This code activates no credentials, grant or delegation. Cloudflare MCP Portal
+documentation says Device Posture selectors are enforced; refresh and actual
+client-path semantics need connection tests. Forwarded `clientInfo` and
+User-Agent are diagnostics, not trusted client identity. Authority remains
+keyed to the verified Access subject, not inferred from those headers.
+
+Remaining implementation: maintenance/job/survey adapters through #564's sole
+shared writer, including audit-linked provenance and bounded long-deferral
+confirmation. No settings write is advertised before that integration is reviewed.

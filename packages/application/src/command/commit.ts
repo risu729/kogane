@@ -17,6 +17,8 @@
 // writes nothing at all — not the receipt, not the decision, not the outbox.
 // Expected revisions are therefore a condition of the write, never a preceding
 // SELECT that a concurrent commit could invalidate.
+import { delegatedCommandFamilyAllowed, DelegatedOperationError } from "../delegation/execution.ts";
+import { assertDelegatedReversal } from "../delegation/reversal.ts";
 import { ownershipReviewRequested } from "../../../domain/src/ownership-review.ts";
 import {
   PENDING_POSTED_RELATION_KIND,
@@ -156,11 +158,21 @@ export async function commit(
   // Committing is `interpretation.accept`, the same capability approving needs.
   // An agent holding only `interpretation.propose` is told to hand the plan to
   // an authenticated approval path instead.
-  if (principal.kind !== "human" || !principalCan(principal, "interpretation.accept"))
+  if (
+    (principal.kind !== "human" &&
+      !(
+        principal.kind === "delegated" &&
+        input.audit?.actor.principal === principal.id &&
+        input.audit.delegatedExecution?.confirmsAuditId
+      )) ||
+    !principalCan(principal, "interpretation.accept")
+  )
     return commandError("approval_required");
 
   const plan = await loadPlan(store, input.planId);
   if (!plan) return commandError("plan_not_found");
+  if (principal.kind === "delegated" && !delegatedCommandFamilyAllowed(input.audit, plan.kind))
+    return commandError("approval_required");
   if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
   const payloadDigest = await canonicalDigest({
     planId: plan.planId,
@@ -196,8 +208,7 @@ export async function commit(
   if (!approval) return commandError("approval_not_found");
   if (approval.plan_id !== plan.planId || approval.plan_digest !== plan.planDigest)
     return commandError("stale_context", [plan.planId]);
-  // No delegation model yet: the principal that commits is the one that
-  // approved. A wider model is a reviewed change, not a configuration value.
+  // The same principal must approve and commit, including delegated callers.
   if (approval.approver_actor !== principal.id) return commandError("approval_required");
   if (Date.parse(approval.expires_at) <= Date.parse(input.now))
     return commandError("approval_expired", [approval.approval_id]);
@@ -216,6 +227,24 @@ export async function commit(
   }
   const planner = input.planners[plan.kind];
   if (!planner) return commandError("unsupported_semantics", [plan.kind]);
+
+  let reversal: CommitGuard | undefined;
+  const revertsAuditId = input.audit?.delegatedExecution?.revertsAuditId;
+  if (revertsAuditId) {
+    try {
+      reversal = await assertDelegatedReversal(
+        store,
+        input.audit!.actor.subject!,
+        principal.id,
+        plan,
+        revertsAuditId,
+      );
+    } catch (error) {
+      if (error instanceof DelegatedOperationError)
+        return commandError("stale_context", [plan.planId, "revert_invalid"]);
+      throw error;
+    }
+  }
 
   const expectedJson = expectedRevisionsJson(plan.expectedRevisions);
   const guard: CommitGuard = receiptExistsGuard(operationId, principal.id);
@@ -238,6 +267,14 @@ export async function commit(
       payloadDigest,
       input.now,
     );
+
+  const precondition =
+    reversal && mutation.precondition
+      ? {
+          sql: `(${mutation.precondition.sql}) AND (${reversal.sql})`,
+          binds: [...mutation.precondition.binds, ...reversal.binds],
+        }
+      : (reversal ?? mutation.precondition);
 
   const outboxTargets = plan.simulation.outboxTargets ?? ["identity-projection"];
   const receipt: CommandReceipt = {
@@ -267,7 +304,7 @@ export async function commit(
       now: input.now,
       approvalId: approval.approval_id,
       expectedRevisionsJson: expectedJson,
-      ...(mutation.precondition ? { precondition: mutation.precondition } : {}),
+      ...(precondition ? { precondition } : {}),
     }),
     ...mutation.writes,
     approvalConsumptionWrite(approval.approval_id, operationId, principal.id),
@@ -318,7 +355,7 @@ export async function commit(
   }
   if (input.audit) input.audit.settle(results.at(-1)?.changes);
   if (results[0]?.changes === 1) return { ok: true, replayed: false, receipt };
-  return failureReason(
+  const failure = await failureReason(
     store,
     plan,
     approval.approval_id,
@@ -327,6 +364,14 @@ export async function commit(
     payloadDigest,
     input.now,
   );
+  // A raced exact receipt is still a replay; a changed original effect is stale.
+  if (
+    !failure.ok &&
+    reversal &&
+    !(await store.first("SELECT 1 AS valid WHERE " + reversal.sql, reversal.binds))
+  )
+    return commandError("stale_context", [plan.planId, "revert_invalid"]);
+  return failure;
 }
 
 /** Nothing was written. Name the precondition that failed without guessing. */

@@ -104,6 +104,12 @@ async function recordAnswer(
           ? {
               idempotencyKey: call.delegatedExecution.idempotencyKey,
               payloadDigest: call.delegatedExecution.payloadDigest,
+              ...(call.delegatedExecution.revertsAuditId
+                ? { revertsAuditId: call.delegatedExecution.revertsAuditId }
+                : {}),
+              ...(call.step === "confirm" && call.delegatedExecution.confirmsAuditId
+                ? { confirmsAuditId: call.delegatedExecution.confirmsAuditId }
+                : {}),
             }
           : {}),
         ...(refused

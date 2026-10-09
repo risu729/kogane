@@ -150,6 +150,9 @@ export class OperationCall {
               idempotencyKey: this.#execution.idempotencyKey,
               payloadDigest: this.#execution.payloadDigest,
               confirmsAuditId: this.#execution.confirmsAuditId,
+              ...(this.#execution.revertsAuditId
+                ? { revertsAuditId: this.#execution.revertsAuditId }
+                : {}),
             }
           : {}),
       },
@@ -256,6 +259,7 @@ export function processorCall(
       },
       envelope.delegatedExecution,
     );
+    if (envelope.delegatedExecution.confirmsAuditId) call.setStep("confirm");
   } else if (envelope.delegatedExecution) throw new Error("unexpected delegation envelope");
   return call;
 }

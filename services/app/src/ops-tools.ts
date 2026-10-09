@@ -23,6 +23,11 @@ import {
   delegatedBatchFailure,
   executionFor,
   sessionRefreshPolicy,
+  prepareDelegatedOperation,
+  confirmDelegatedOperation,
+  replayDelegatedConfirmation,
+  previewProviderOperation,
+  statusForCommandError,
 } from "../../../packages/application/src/index";
 
 import { z } from "zod";
@@ -195,8 +200,25 @@ export const EXECUTABLE_OPS_CAPABILITIES = [
   "operations.replay.request",
   "operations.projection.request",
   "operations.read",
+  "operations.collection.request",
+  "operations.session.refresh",
 ] as const satisfies readonly DelegationCapability[];
 
+const R2_CONTROLS = {
+  step: z.enum(["prepare", "confirm"]),
+  confirmationDigest: z
+    .string()
+    .regex(/^cfm_[0-9a-f]{64}$/u)
+    .optional(),
+};
+const delegatedCollectionSchema = collectionSchema.extend({
+  ...R2_CONTROLS,
+  idempotencyKey: collectionSchema.shape.idempotencyKey.unwrap(),
+});
+const delegatedSessionSchema = sessionRefreshSchema.extend({
+  ...R2_CONTROLS,
+  idempotencyKey: sessionRefreshSchema.shape.idempotencyKey.unwrap(),
+});
 export function delegatedOpsTools(resolution: DelegationResolution) {
   return resolution.ok
     ? OPS_MCP_TOOLS.filter(
@@ -205,6 +227,24 @@ export function delegatedOpsTools(resolution: DelegationResolution) {
           (EXECUTABLE_OPS_CAPABILITIES as readonly string[]).includes(
             DELEGATED_OPS_CAPABILITIES[tool.name],
           ),
+      ).map((tool) =>
+        tool.name === "kogane.ops.collection.request"
+          ? {
+              ...tool,
+              inputSchema: inputSchema(delegatedCollectionSchema),
+              description:
+                tool.description +
+                " Requires prepare then exact confirmation; external collection cannot be undone.",
+            }
+          : tool.name === "kogane.ops.session.refresh"
+            ? {
+                ...tool,
+                inputSchema: inputSchema(delegatedSessionSchema),
+                description:
+                  tool.description +
+                  " Requires prepare then exact confirmation; human session policy and MFA boundary remain unchanged.",
+              }
+            : tool,
       )
     : [];
 }
@@ -254,6 +294,89 @@ export async function callDelegatedOpsTool(
       !(EXECUTABLE_OPS_CAPABILITIES as readonly string[]).includes(DELEGATED_OPS_CAPABILITIES[name])
     )
       throw new DelegatedOperationError("operation_not_delegable");
+    if (name === "kogane.ops.collection.request" || name === "kogane.ops.session.refresh") {
+      const parsed = parseRequest<
+        z.infer<typeof delegatedCollectionSchema> | z.infer<typeof delegatedSessionSchema>
+      >(
+        name === "kogane.ops.collection.request"
+          ? delegatedCollectionSchema
+          : delegatedSessionSchema,
+        body ?? {},
+      );
+      if (!sourceAllowed(principal, parsed.source))
+        throw new HttpError(400, "target_missing", ["source"]);
+      const { step, confirmationDigest, ...request } = parsed;
+      if (step === "prepare" && confirmationDigest) throw new HttpError(400, "invalid_request");
+      const kind = name === "kogane.ops.collection.request" ? "collection" : "session-refresh";
+      const preview = await previewProviderOperation({ ...context, request }, kind, context.policy);
+      if (!preview.ok)
+        throw new HttpError(
+          statusForCommandError(preview.error),
+          preview.error,
+          preview.refs ?? [],
+        );
+      // Bind the current server-selected session policy as well as the wire request.
+      const intent = {
+        idempotencyKey: request.idempotencyKey,
+        payload: { request, policy: preview.policy },
+        targetRef: preview.operationId,
+        scope: { namespace: "core-source" as const, source: request.source },
+      };
+      if (step === "prepare") {
+        const prepared = await prepareDelegatedOperation(
+          context.store,
+          audit,
+          principal,
+          DELEGATED_OPS_CAPABILITIES[name],
+          intent,
+          undefined,
+        );
+        return {
+          status: 200,
+          body: {
+            ...prepared,
+            preview: {
+              ...prepared.preview,
+              status: preview.status,
+              policy: preview.policy,
+              externalEffect: true,
+              revertAvailable: false,
+            },
+          },
+        };
+      }
+      if (!confirmationDigest) throw new DelegatedOperationError("confirmation_required");
+      const replay = await replayDelegatedConfirmation(
+        context.store,
+        audit,
+        principal,
+        DELEGATED_OPS_CAPABILITIES[name],
+        intent,
+        confirmationDigest,
+      );
+      if (replay) {
+        const receipt = await opsServices.operation(context, preview.operationId);
+        return {
+          status: 202,
+          body: {
+            operationId: preview.operationId,
+            status: (receipt.body as { status: string }).status,
+          },
+          auditOutcome: { result: "replayed", targetRef: preview.operationId, scope: intent.scope },
+        };
+      }
+      await confirmDelegatedOperation(
+        context.store,
+        audit,
+        principal,
+        DELEGATED_OPS_CAPABILITIES[name],
+        intent,
+        confirmationDigest,
+      );
+      return await (name === "kogane.ops.collection.request"
+        ? opsServices.collection(context, request as z.infer<typeof collectionSchema>)
+        : opsServices.sessionRefresh(context, request));
+    }
     if (name === "kogane.ops.operation.get") {
       const input = parseRequest(operationIdSchema, body ?? {});
       // Resolve the caller's own row before reading progress; denied and absent are identical.

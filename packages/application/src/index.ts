@@ -18,7 +18,12 @@ export { delegationCapabilities, delegationExecutionReadiness } from "./delegati
 export * from "./delegation/contract.ts";
 
 // ── command services (A09) ───────────────────────────────────────────
-export { APPROVAL_TTL_SECONDS_DEFAULT, approve, type ApproveInput } from "./command/approve.ts";
+export {
+  APPROVAL_TTL_SECONDS_DEFAULT,
+  approve,
+  readOwnApproval,
+  type ApproveInput,
+} from "./command/approve.ts";
 export {
   commandKey,
   CARD_REVIEW_KINDS,
@@ -163,6 +168,7 @@ export {
   recordOperationStage,
   type ReplayRequest,
   requestCollection,
+  previewProviderOperation,
   requestImport,
   requestProjectionRebuild,
   requestReplay,
@@ -417,5 +423,9 @@ export {
   type ConfirmationInput,
   prepareDelegatedOperation,
   confirmDelegatedOperation,
+  replayDelegatedConfirmation,
   delegatedBatchFailure,
+  delegatedCommandFamilyAllowed,
 } from "./delegation/execution.ts";
+
+export { assertDelegatedReversal } from "./delegation/reversal.ts";

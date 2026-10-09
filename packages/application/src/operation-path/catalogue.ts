@@ -58,14 +58,14 @@ export const OPERATION_CATALOGUE = {
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.commit": {
     risk: ["R2"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.operation.get": {
     risk: ["R0"],

@@ -79,6 +79,12 @@ import {
 } from "./delegated-command-tools";
 
 import { readMcpTools } from "./read-tools";
+import {
+  callDelegatedDecisionTool,
+  delegatedDecisionTools,
+  EXECUTABLE_DECISION_CAPABILITIES,
+  isDelegatedDecisionTool,
+} from "./delegated-decision-tools";
 
 const AGENT_PREFIX = "/api/agent/v1/";
 export const MCP_PATH = "/mcp";
@@ -240,10 +246,17 @@ export async function agentApi(
                 ...(result.body as Record<string, unknown>),
                 delegation: await mcpDelegationCapabilities(env, caller, delegationNow, [
                   ...(ops ? EXECUTABLE_OPS_CAPABILITIES : []),
-                  ...(commandsEnabled(env) && env.PIPELINE ? EXECUTABLE_COMMAND_CAPABILITIES : []),
+                  ...(commandsEnabled(env) && env.PIPELINE
+                    ? [...EXECUTABLE_COMMAND_CAPABILITIES, ...EXECUTABLE_DECISION_CAPABILITIES]
+                    : []),
                 ]),
               },
             };
+          });
+        if (isDelegatedDecisionTool(name) && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedDecisionTool(name, body, env, await delegation(), audit);
           });
         if (isDelegatedCommandTool(name) && caller.kind === "mcp-client")
           return toolCall(request, env, caller, name, async (audit) => {
@@ -265,7 +278,12 @@ export async function agentApi(
       async () => [
         ...MCP_TOOLS,
         ...readMcpTools(grant),
-        ...(caller.kind === "mcp-client" ? delegatedCommandTools(env, await delegation()) : []),
+        ...(caller.kind === "mcp-client"
+          ? [
+              ...delegatedCommandTools(env, await delegation()),
+              ...delegatedDecisionTools(env, await delegation()),
+            ]
+          : []),
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
         ...((await reconstructed()) ? RECONSTRUCTED_STATE_MCP_TOOLS : []),
         ...(caller.kind === "mcp-client" && ops

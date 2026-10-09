@@ -187,7 +187,12 @@ function principalOf(request: Request, envelope: AuditEnvelope): Principal | nul
       id,
       kind,
       verification: "server",
-      capabilities: auth.commandFamilies.includes("plan") ? ["interpretation.propose"] : [],
+      capabilities: [
+        ...(auth.commandFamilies.includes("plan") ? ["interpretation.propose" as const] : []),
+        ...(auth.commandFamilies.some((family) => family !== "plan")
+          ? ["interpretation.accept" as const]
+          : []),
+      ],
     };
   }
   if (!ACTOR.test(id) || envelope.delegatedExecution || id.startsWith("mcp-client:")) return null;
@@ -252,24 +257,36 @@ export async function changeCommandRoute(
     const auth = envelope.delegatedExecution!;
     if (auth.notAfter <= new Date().toISOString())
       return Response.json({ error: "delegation_expired" }, { status: 403 });
-    // This core slice does not yet install the R2 financial adapters.
-    if (match[1] === "approve" || match[1] === "commit")
-      return Response.json({ error: "operation_not_delegable" }, { status: 403 });
-    if (!auth.commandFamilies.includes("plan"))
-      return Response.json({ error: "capability_not_delegated" }, { status: 403 });
-    if (match[1] === "plan") {
+    const decision = match[1] === "approve" || match[1] === "commit";
+    if (decision) {
+      if (!auth.confirmsAuditId || !auth.confirmationDigest)
+        return Response.json({ error: "confirmation_required" }, { status: 403 });
+      const plan = await loadPlan(d1CommandStore(env.DB), input.planId);
+      if (!plan) return fail("plan_not_found");
+      if (auth.revertsAuditId !== input.revertsAuditId) return fail("invalid_command");
+      const family = plan.kind.split(".")[0];
       if (
-        typeof input.kind !== "string" ||
-        !["identity", "relation", "card-settlement"].includes(input.kind.split(".")[0]!)
+        (family !== "identity" && family !== "relation" && family !== "card-settlement") ||
+        !auth.commandFamilies.includes(family)
+      )
+        return Response.json({ error: "capability_not_delegated" }, { status: 403 });
+    } else if (!auth.commandFamilies.includes("plan"))
+      return Response.json({ error: "capability_not_delegated" }, { status: 403 });
+    if (match[1] === "plan" || decision) {
+      if (
+        match[1] === "plan" &&
+        (typeof input.kind !== "string" ||
+          !["identity", "relation", "card-settlement"].includes(input.kind.split(".")[0]!))
       )
         return fail("unsupported_semantics");
       if (
-        auth.idempotencyKey !== input.idempotencyKey ||
+        auth.idempotencyKey !==
+          (match[1] === "commit" ? input.operationId : input.idempotencyKey) ||
         !auth.payloadDigest ||
         auth.payloadDigest !==
           (await canonicalDigest({
             v: "kogane-delegated-payload-v1",
-            operation: "command.plan",
+            operation: `command.${match[1]}`,
             payload: input,
           }))
       )
@@ -324,33 +341,55 @@ export async function changeCommandRoute(
     case "approve": {
       const scope = Array.isArray(input.scope) ? (input.scope as string[]) : [];
       const audit = writerCall(envelope, "command.approve", principal);
-      const result = await approve(store, {
-        planId: input.planId,
-        planDigest: input.planDigest,
-        actor: principal,
-        scope,
-        ttlSeconds: APPROVAL_TTL_SECONDS_DEFAULT,
-        now,
-        audit,
-      });
+      let result;
+      try {
+        result = await approve(store, {
+          planId: input.planId,
+          planDigest: input.planDigest,
+          actor: principal,
+          scope,
+          ttlSeconds: APPROVAL_TTL_SECONDS_DEFAULT,
+          now,
+          audit,
+        });
+      } catch (error) {
+        const refusal = await delegatedBatchFailure(store, audit);
+        if (refusal)
+          return Response.json(
+            { error: refusal.code },
+            { status: refusal.code === "delegation_budget_exceeded" ? 429 : 403 },
+          );
+        throw error;
+      }
       return result.ok
         ? answered({ approval: result.approval, plan: result.plan }, audit)
         : fail(result.error, result.refs);
     }
     case "commit": {
       const audit = writerCall(envelope, "command.commit", principal);
-      const result = await commit(store, {
-        operationId: input.operationId,
-        principal,
-        planId: input.planId,
-        approvalId: input.approvalId,
-        ...(input.idempotencyPayloadDigest === undefined
-          ? {}
-          : { idempotencyPayloadDigest: input.idempotencyPayloadDigest }),
-        planners: changeMutationPlanners(env.DB),
-        now,
-        audit,
-      });
+      let result;
+      try {
+        result = await commit(store, {
+          operationId: input.operationId,
+          principal,
+          planId: input.planId,
+          approvalId: input.approvalId,
+          ...(input.idempotencyPayloadDigest === undefined
+            ? {}
+            : { idempotencyPayloadDigest: input.idempotencyPayloadDigest }),
+          planners: changeMutationPlanners(env.DB),
+          now,
+          audit,
+        });
+      } catch (error) {
+        const refusal = await delegatedBatchFailure(store, audit);
+        if (refusal)
+          return Response.json(
+            { error: refusal.code },
+            { status: refusal.code === "delegation_budget_exceeded" ? 429 : 403 },
+          );
+        throw error;
+      }
       return result.ok
         ? answered({ receipt: result.receipt, replayed: result.replayed }, audit)
         : fail(result.error, result.refs);

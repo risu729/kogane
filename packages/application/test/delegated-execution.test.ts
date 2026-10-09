@@ -236,6 +236,7 @@ describe("two-step confirmation", () => {
       { ...confirmation, payload: { enabled: true } },
       { ...confirmation, expectedRevision: 1 },
       { ...confirmation, targetRef: "schedule:smbc" },
+      { ...confirmation, revertsAuditId: "aud_11111111-2222-4333-8444-555555555555" },
       { ...confirmation, scope: { namespace: "schedule-source" as const, source: "smbc" } },
     ])
       await expect(

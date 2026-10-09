@@ -3,7 +3,8 @@
 - Status: **in progress**. Slice S1 (section 8) and S3 declaration core (#628)
   are implemented on main. This S3 execution slice implements delegated R1
   operations, bounded preparation machinery and shared history/audit reads;
-  actual R2/settings adapters and real-client activation remain separate work.
+  a separate R2 slice adds command and provider-request adapters. Settings
+  integration and real-client activation remain distinct work.
   The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
   [ADR 0064](../adr/0064-common-audit-log.md) (common append-only audit log),
@@ -15,8 +16,8 @@
   Open PRs read: #564 (head `3b5c2c3`), #565 (head `9c25877`).
 - Nothing here changes a grant, an Access application, a policy, a secret or a
   Wrangler configuration. No production data was read.
-- Merging this pull request answers none of the owner questions 1–3 (section
-  10), grants nothing and enables nothing: no Access application or policy,
+- The owner answered the R2-stage question on 2026-10-10. Merging code alone
+  settles no authentication/session or concrete delegation choices (section 10), grants nothing and enables nothing: no Access application or policy,
   grant, `MCP_DELEGATIONS` entry, session length, authentication or
   production change.
 
@@ -116,10 +117,10 @@ and risk class in its own pull request, and until then no delegation names it.
 - The read-only connection test (#565's hand-off step 10) is the first stage,
   not the final capability limit.
 
-**Numbers.** CORE migrations on main reach 0071. CORE 0067 is #564's; 0072 is
+**Numbers.** CORE migrations on main reach 0071. CORE 0076 is #564's; 0072 is
 the financial G3 migration; 0073 and 0074 are UI candidates. This plan's audit
 migration is **"0075 or later (candidate; fixed after root coordination: CORE
-0072 is the financial G3 migration, 0073/0074 are UI candidates, 0067 is #564's;
+0072 is the financial G3 migration, 0073/0074 are UI candidates, 0076 is #564's;
 re-check latest main and every open PR before the implementation PR)"**.
 ADR numbers: 0057–0059 are reserved by another session, 0060 is the Container
 PR's (#436), and 0061 and 0062 are the financial transfer session's (#550,
@@ -267,7 +268,7 @@ capabilities exist only in `MCP_DELEGATIONS`:
 | `commands.decide.card-settlement` | approve and commit `card-settlement.accept` / `.reject` / `.withdraw` (W11, W12)                | R2    |
 | `commands.decide.relation`        | approve and commit `relation.accept` / `.reject`: pending-to-posted links, ownership (W11, W12) | R2    |
 | `commands.decide.identity`        | approve and commit `identity.assign` / `identity.release-override` (H1)                         | R2    |
-| `schedules.maintenance.update`    | maintenance revisions (W3); moved here from #564's agent-API vocabulary                         | R1/R3 |
+| `schedules.maintenance.update`    | maintenance revisions (W3); moved here from #564's agent-API vocabulary                         | R1/R2 |
 | `schedules.survey.decide`         | accept (R2) or reject (R1) a re-survey proposal (W4, W5)                                        | R1/R2 |
 | `schedules.job.update`            | job time, weekdays, interval, zone, enable/disable (W1, W2)                                     | R2    |
 | `operations.import.request`       | H3                                                                                              | R1    |
@@ -278,8 +279,8 @@ capabilities exist only in `MCP_DELEGATIONS`:
 | `operations.read`                 | H7, the principal's own operations                                                              | R0    |
 
 Every `commands.*` capability also needs `"*"` on both scope axes (3.2, write
-scope). `schedules.maintenance.update` is R1 inside the direct envelope and R3
-beyond the 7-day bound until question 1 is answered (4.6).
+scope). `schedules.maintenance.update` is R1 inside the direct envelope and R2
+beyond seven days up to the 31-day ceiling; the writer adapter remains pending.
 
 Roles are closed bundles in code: `maintainer` (`schedules.maintenance.update`,
 `schedules.survey.decide`, `operations.import.request`,
@@ -320,42 +321,35 @@ What was applied stays applied; it is undone by a reverting operation
 3. First delegated writes: the owner's concrete approval names the entry; the
    proposed first one is `maintainer` on one schedule source (R1 maintenance
    inside the direct envelope).
-4. Further capabilities, one per release, each after the audit of the previous
-   one has been read. No entry with a financial-adoption (`commands.decide.*`)
-   or provider-contact (`operations.collection.request`,
-   `operations.session.refresh`) capability is proposed before the owner
-   answers question 1 (section 10).
+4. On 2026-10-10 the owner approved financial adoption, provider requests and
+   maintenance deferrals up to 31 days as R2 in the first delegated stage.
+   Each still needs an installed, reviewed adapter and a concrete delegation.
+   This code creates neither authentication resources nor delegation entries.
 
 ## 4. Per-risk confirmation policy
 
 ### 4.1 Risk classes
 
-| Class | Meaning                                                                                                                                                                                | Delegated confirmation                                                                                  |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| R0    | Read; nothing changes                                                                                                                                                                  | none                                                                                                    |
-| R1    | Bounded and reversible by a further operation; changes no adopted financial state; contacts no provider                                                                                | **direct**: one call, with an idempotency key and, where the target is versioned, the expected revision |
-| R2    | Changes adopted state or a collection schedule, or contacts a provider                                                                                                                 | **two-step**: prepare returns a confirmation digest; confirm presents it with the identical payload     |
-| R3    | Needs a judgement about runtime state the server cannot verify, a wrong call having no reverting operation; or held for the owner's decision (maintenance deferral beyond 7 days, 4.6) | operator in the UI only; not delegable now                                                              |
-| R4    | Authority, secrets, deployment                                                                                                                                                         | no tool, no route; never delegable                                                                      |
+| Class | Meaning                                                                                                                                                       | Delegated confirmation                                                                                  |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| R0    | Read; nothing changes                                                                                                                                         | none                                                                                                    |
+| R1    | Bounded and reversible by a further operation; changes no adopted financial state; contacts no provider                                                       | **direct**: one call, with an idempotency key and, where the target is versioned, the expected revision |
+| R2    | Changes adopted state or a collection schedule, or contacts a provider                                                                                        | **two-step**: prepare returns a confirmation digest; confirm presents it with the identical payload     |
+| R3    | Needs a judgement about runtime state the server cannot verify, a wrong call having no reverting operation; or maintenance deferral beyond the 31-day ceiling | operator in the UI only; not delegable now                                                              |
+| R4    | Authority, secrets, deployment                                                                                                                                | no tool, no route; never delegable                                                                      |
 
 A delegation entry may make a class stricter for itself (never looser); that
 is the only per-entry override, and it is a later addition, not part of S3.
 
 ### 4.2 Two-step confirmation
 
-**Change-lifecycle commands (W11, W12, H1).** The lifecycle already is a
-two-step confirmation, and the delegated path uses it unchanged:
-`kogane.command.plan` returns the plan whose id **is** its digest
-(`canonicalDigest({kind, payload, expectedRevisions, baseContextId})`);
-`kogane.command.approve` must present that `planDigest`, re-checks every
-expected revision and marks a moved plan `stale`; `kogane.command.commit` must
-present the `approvalId` and an `operationId`, and the commit batch verifies
-every expected revision inside the receipt reservation
-([change lifecycle](../change-lifecycle.md#expected-revisions)). The approval
-row records `approver_actor = "mcp-client:<sub>"`. Nothing new is stored.
-
-**Settings and operations requests (W1–W4, H2, H6).** Their writers are single
-step. A generic confirmation, `packages/application/src/delegation/confirm.ts`:
+**Every R2 adapter.** The shared helper is
+`packages/application/src/delegation/execution.ts`. Command approval and commit
+each use prepare/confirm in addition to the existing immutable plan, own approval
+and native receipt. Preparation validates current revisions and eligibility
+without adopting a decision. Approval INSERT and commit receipt reservation
+check pinned revisions inside their existing batches. Settings still need
+#564's shared writer integration.
 
 1. `step: "prepare"` validates the payload with the route's own schema,
    takes the caller's `expectedRevision` (the revision it read), resolves the
@@ -371,7 +365,8 @@ step. A generic confirmation, `packages/application/src/delegation/confirm.ts`:
    ```
    digest = "cfm_" + canonicalDigest({
      v: "kogane-confirm-v1", operation, principal, delegationRef,
-     targetRef, expectedRevision, payloadDigest, idempotencyKey, expiresAt })
+     targetRef, scope, expectedRevision, payloadDigest, idempotencyKey,
+     revertsAuditId?, expiresAt })
    ```
 
    `expiresAt` is at most 10 minutes ahead. `preview` is the safe diff the
@@ -387,11 +382,13 @@ step. A generic confirmation, `packages/application/src/delegation/confirm.ts`:
    `confirms_audit_id`, **as the last statement of the writer's own D1
    batch**. A unique partial index allows one `applied`/`accepted` record per
    `confirms_audit_id`, so a second confirm — raced or replayed — rolls its
-   whole batch back.
+   whole batch back. An exactly matching completed-confirmation retry instead
+   reads the own native receipt with no second effect or budget charge; the
+   current delegation must still resolve.
 
 Refusals: `confirmation_required` (R2 called without `step`),
 `confirmation_invalid` (no matching prepare, other principal or delegation,
-payload changed), `confirmation_expired`, `confirmation_used`, and the
+payload, scope or reversal reference changed), `confirmation_expired`, `confirmation_used`, and the
 writer's own `revision_conflict` / `stale_context`. A client confirmation
 dialog is not relied on ([agent API](../agent-api.md#why-the-application-service-exists)).
 
@@ -455,9 +452,9 @@ its bounds, and changes in four ways:
 
 1. **Who.** The write capability moves from the agent-API vocabulary to
    `MCP_DELEGATIONS`; `schedules.read` stays a read capability. The writer's
-   actor kinds become `operator` and `delegated` (CORE 0067 is #564's and is
+   actor kinds become `operator` and `delegated` (CORE 0076 is #564's and is
    still unmerged, so its CHECK is rewritten before merge, not migrated
-   again). The same rewrite changes 0067's partial index
+   again). The same rewrite changes 0076's partial index
    `maintenance_agent_writes` from `WHERE actor_kind='agent'` to
    `WHERE actor_kind='delegated'`, so the daily budget check inside the
    `INSERT` keeps an index to read.
@@ -468,22 +465,21 @@ its bounds, and changes in four ways:
    `packages/collection/src/schedule-model.ts` — `official-notice-added`,
    `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`,
    `owner-instructed`, `correction`, `operator-edit` (the UI path) and the
-   existing `maintenance-survey-proposal-accepted` — enforced by 0067's CHECK.
-   `decision_ref` of a delegated revision is `audit:<audit_id>`.
-3. **Direct inside the envelope; beyond it, the operator for now.** Direct
+   existing `maintenance-survey-proposal-accepted` — enforced by 0076's CHECK.
+   `decision_ref` of a delegated revision must be `delegated-audit:<audit_id>`;
+   #564's shared validator supplies this contract.
+3. **Direct inside the envelope; confirmed beyond it once integrated.** Direct
    (R1) when all hold: the source is in `scopes.scheduleSources`; the rule is
    the named source's or new; after the revision the source has no joined
    deferral longer than 7 days that its rules did not already cause (#564's
    `deferralUnions` measure, unchanged); the principal's 30 revisions per
    rolling day are not spent; the reason is a closed code; the reference is
    https on the source's registered host; the expected revision matches. A
-   revision outside the 7-day bound, and only that condition, is **R3 until
-   the owner answers question 1** (section 10): the tool refuses it
-   (`maintenance_deferral_too_long`, as #564 does today) and the operator
-   makes it in the UI. Its target class is R2 (prepare/confirm) up to a hard
-   ceiling of a **31-day** joined deferral, which applies once the owner has
-   answered question 1 (it decides only the stage); a longer one stays the
-   operator's in every case. A spent budget, an
+   revision outside the 7-day bound, and only that condition, is R2 up to a
+   hard **31-day** joined-deferral ceiling, approved from the first stage on
+   2026-10-10. The current writer still refuses it until its trusted confirmation
+   contract is integrated and reviewed. A longer deferral stays the operator's
+   in every case. A spent budget, an
    unregistered host or an out-of-scope source is refused with its code;
    nothing escalates them.
 4. **Audited.** Each call writes one audit record; an applied revision's
@@ -503,21 +499,21 @@ tool name without it.
 The command rows (W7–W13) need `"*"` on both scope axes for a delegated
 principal (section 3.2, write scope).
 
-| #   | UI action (page → control)                                            | Existing command / API → writer                                                                                | Proposed MCP tool                                       | Capability                                    | Risk                                                                                                                                 | Confirmation                                                                | Audit target · diff · refs                                                                                       |
-| --- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| W1  | 収集スケジュール → schedule card → time/weekdays/interval/zone → 保存 | `POST /api/ops/v1/schedules/:id` → `updateSchedule` (`services/processor/src/schedule-store.ts`)               | `kogane.schedules.job.update`                           | `schedules.job.update`                        | R2                                                                                                                                   | two-step; expected `revision`                                               | `schedule:<id>` · revision from/to, changed field names · `collection_schedule_revisions` `<id>@<rev>`           |
-| W2  | same card → enable/disable → 保存                                     | same route and writer (`enabled`)                                                                              | same tool                                               | `schedules.job.update`                        | R2                                                                                                                                   | two-step; expected `revision`                                               | same, field `enabled`                                                                                            |
-| W3  | 停止時間を追加 / rule 編集 → 保存                                     | `POST /api/ops/v1/schedules/maintenance` → `updateMaintenance` (main); `writeMaintenanceRevision` (#564)       | `kogane.schedules.maintenance.update` (#564, re-shaped) | `schedules.maintenance.update`                | R1 inside the envelope (4.6); R3 beyond the 7-day bound until question 1 is answered, then R2 up to 31 days                          | direct with expected `revision` + key; beyond 7 days the operator in the UI | `maintenance-rule:<id>` · revision from/to, fields, reason code · rule `<id>@<rev>`                              |
-| W4  | 公式サイトの再調査 → 採用                                             | `POST /api/ops/v1/schedules/proposals/:id {"decision":"accept"}` → `decideSurveyProposal` → maintenance writer | `kogane.schedules.survey.decide`                        | `schedules.survey.decide`                     | R2                                                                                                                                   | two-step; the proposal's base revision                                      | `maintenance-survey-proposal:<id>` · decision, rule revision · rule `<id>@<rev>`, `maintenance_survey_decisions` |
-| W5  | 公式サイトの再調査 → 却下                                             | same route `{"decision":"reject"}`                                                                             | same tool                                               | `schedules.survey.decide`                     | R1                                                                                                                                   | direct + key                                                                | `maintenance-survey-proposal:<id>` · decision                                                                    |
-| W6  | 停止した実行を解除                                                    | `POST /api/ops/v1/schedules/leases/:source` → `releaseCollectionLease`                                         | none (R3)                                               | —                                             | R3                                                                                                                                   | operator in the UI only                                                     | `collection-lease:<source>` · `released` (the only durable record of a release; the lease row is mutable)        |
-| W7  | カード決済の照合 → 採用/却下/解除内容を確認                           | `POST /api/command/v1/plan` (`card-settlement.*`) → `createPlan`                                               | `kogane.command.plan`                                   | `commands.plan`                               | R1                                                                                                                                   | direct (a plan is inert; its id is its digest)                              | `plan:<planId>` · kind, target count · `card-settlement:<proposalId>@<rev>`                                      |
-| W8  | 保有者の確認 → 採用/却下内容を確認                                    | same route (`relation.accept` / `.reject`, ownership)                                                          | `kogane.command.plan`                                   | `commands.plan`                               | R1                                                                                                                                   | direct                                                                      | `plan:<planId>` · kind · pinned mapping and ownership revisions                                                  |
-| W9  | カード利用 → 候補 → 判断内容を確認                                    | same route (`relation.accept` / `.reject`, pending-to-posted link)                                             | `kogane.command.plan`                                   | `commands.plan`                               | R1                                                                                                                                   | direct                                                                      | `plan:<planId>` · kind · `card-purchase:<eventId>@<rev>`, `proposal:<id>`                                        |
-| W10 | 確認画面 → 再試算                                                     | `POST /api/command/v1/simulate` → `simulate`                                                                   | `kogane.command.simulate`                               | `commands.plan`                               | R0: `simulate` reports `stale` and writes nothing (only `approve` calls `markStale`, `packages/application/src/command/simulate.ts`) | none                                                                        | `plan:<planId>` · stale yes/no, re-simulated plan id                                                             |
-| W11 | 確認画面 → 承認                                                       | `POST /api/command/v1/approve` → `approve`                                                                     | `kogane.command.approve`                                | `commands.decide.<family>` of the plan's kind | R2                                                                                                                                   | the plan digest is the confirmation; revisions re-checked                   | `plan:<planId>` · approval expiry, uses · `approval:<id>`                                                        |
-| W12 | 確認画面 → 確定                                                       | `POST /api/command/v1/commit` → `commit` (one guarded D1 batch)                                                | `kogane.command.commit`                                 | `commands.decide.<family>`                    | R2                                                                                                                                   | approval + `operationId`; commit guard                                      | `plan:<planId>` · simulation counts · receipt `operationId`, decision revision ids, economic `commit_seq`        |
-| W13 | 確認画面 → 反映状況を再確認                                           | `POST /api/command/v1/operation` → receipt read                                                                | `kogane.command.operation.get`                          | `commands.plan`                               | R0                                                                                                                                   | none                                                                        | `operation:<operationId>` · receipt status                                                                       |
+| #   | UI action (page → control)                                            | Existing command / API → writer                                                                                | Proposed MCP tool                                       | Capability                                    | Risk                                                                                                                                 | Confirmation                                                                         | Audit target · diff · refs                                                                                       |
+| --- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| W1  | 収集スケジュール → schedule card → time/weekdays/interval/zone → 保存 | `POST /api/ops/v1/schedules/:id` → `updateSchedule` (`services/processor/src/schedule-store.ts`)               | `kogane.schedules.job.update`                           | `schedules.job.update`                        | R2                                                                                                                                   | two-step; expected `revision`                                                        | `schedule:<id>` · revision from/to, changed field names · `collection_schedule_revisions` `<id>@<rev>`           |
+| W2  | same card → enable/disable → 保存                                     | same route and writer (`enabled`)                                                                              | same tool                                               | `schedules.job.update`                        | R2                                                                                                                                   | two-step; expected `revision`                                                        | same, field `enabled`                                                                                            |
+| W3  | 停止時間を追加 / rule 編集 → 保存                                     | `POST /api/ops/v1/schedules/maintenance` → `updateMaintenance` (main); `writeMaintenanceRevision` (#564)       | `kogane.schedules.maintenance.update` (#564, re-shaped) | `schedules.maintenance.update`                | R1 inside the envelope (4.6); R2 beyond 7 days up to 31 days (writer integration pending)                                            | direct with expected `revision` + key; beyond 7 days prepare/confirm once integrated | `maintenance-rule:<id>` · revision from/to, fields, reason code · rule `<id>@<rev>`                              |
+| W4  | 公式サイトの再調査 → 採用                                             | `POST /api/ops/v1/schedules/proposals/:id {"decision":"accept"}` → `decideSurveyProposal` → maintenance writer | `kogane.schedules.survey.decide`                        | `schedules.survey.decide`                     | R2                                                                                                                                   | two-step; the proposal's base revision                                               | `maintenance-survey-proposal:<id>` · decision, rule revision · rule `<id>@<rev>`, `maintenance_survey_decisions` |
+| W5  | 公式サイトの再調査 → 却下                                             | same route `{"decision":"reject"}`                                                                             | same tool                                               | `schedules.survey.decide`                     | R1                                                                                                                                   | direct + key                                                                         | `maintenance-survey-proposal:<id>` · decision                                                                    |
+| W6  | 停止した実行を解除                                                    | `POST /api/ops/v1/schedules/leases/:source` → `releaseCollectionLease`                                         | none (R3)                                               | —                                             | R3                                                                                                                                   | operator in the UI only                                                              | `collection-lease:<source>` · `released` (the only durable record of a release; the lease row is mutable)        |
+| W7  | カード決済の照合 → 採用/却下/解除内容を確認                           | `POST /api/command/v1/plan` (`card-settlement.*`) → `createPlan`                                               | `kogane.command.plan`                                   | `commands.plan`                               | R1                                                                                                                                   | direct (a plan is inert; its id is its digest)                                       | `plan:<planId>` · kind, target count · `card-settlement:<proposalId>@<rev>`                                      |
+| W8  | 保有者の確認 → 採用/却下内容を確認                                    | same route (`relation.accept` / `.reject`, ownership)                                                          | `kogane.command.plan`                                   | `commands.plan`                               | R1                                                                                                                                   | direct                                                                               | `plan:<planId>` · kind · pinned mapping and ownership revisions                                                  |
+| W9  | カード利用 → 候補 → 判断内容を確認                                    | same route (`relation.accept` / `.reject`, pending-to-posted link)                                             | `kogane.command.plan`                                   | `commands.plan`                               | R1                                                                                                                                   | direct                                                                               | `plan:<planId>` · kind · `card-purchase:<eventId>@<rev>`, `proposal:<id>`                                        |
+| W10 | 確認画面 → 再試算                                                     | `POST /api/command/v1/simulate` → `simulate`                                                                   | `kogane.command.simulate`                               | `commands.plan`                               | R0: `simulate` reports `stale` and writes nothing (only `approve` calls `markStale`, `packages/application/src/command/simulate.ts`) | none                                                                                 | `plan:<planId>` · stale yes/no, re-simulated plan id                                                             |
+| W11 | 確認画面 → 承認                                                       | `POST /api/command/v1/approve` → `approve`                                                                     | `kogane.command.approve`                                | `commands.decide.<family>` of the plan's kind | R2                                                                                                                                   | the plan digest is the confirmation; revisions re-checked                            | `plan:<planId>` · approval expiry, uses · `approval:<id>`                                                        |
+| W12 | 確認画面 → 確定                                                       | `POST /api/command/v1/commit` → `commit` (one guarded D1 batch)                                                | `kogane.command.commit`                                 | `commands.decide.<family>`                    | R2                                                                                                                                   | approval + `operationId`; commit guard                                               | `plan:<planId>` · simulation counts · receipt `operationId`, decision revision ids, economic `commit_seq`        |
+| W13 | 確認画面 → 反映状況を再確認                                           | `POST /api/command/v1/operation` → receipt read                                                                | `kogane.command.operation.get`                          | `commands.plan`                               | R0                                                                                                                                   | none                                                                                 | `operation:<operationId>` · receipt status                                                                       |
 
 ### 5.2 Actions with no page (HTTP only today)
 
@@ -604,24 +600,24 @@ routes, H8 the agents' proposal route) and 20 reads (D1–D20). Operations with
 
 ### 6.1 Inventory of what is recorded today
 
-| Log (CORE migration)                                                                    | Records                                                        | Actor fields                                                      | Path fields                                | Append-only?                                | Readable by whom today                                         |
-| --------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------- | -------------------------------------------------------------- |
-| `decision_operations` (0029)                                                            | one decision operation: action, payload digest, result         | `actor_id`, `actor_verification`                                  | none                                       | yes                                         | no route; backs what the operator pages show                   |
-| `decision_revisions` (0029)                                                             | each judgement: subject, revision, kind, reason, evidence refs | `actor_id`, `method` (`manual`/`rule`/`ai`/…)                     | none (`method` is how, not where)          | yes, except `superseded_by` set once        | operator review pages; agent proposals write it                |
-| `change_plans`, `approvals`, `operation_receipts`, `decision_outbox` (0031, 0038)       | plan, approval, receipt, downstream delivery                   | `created_by`, `approver_actor`, `principal`                       | none                                       | no delete; status columns move forward only | command routes and the confirm page (operator)                 |
-| `economic_commit_log` (0070)                                                            | one economic commit: sequence, members, claims, kind           | `principal`, `operation_id`                                       | none                                       | yes                                         | no route; the knowledge selector reads it                      |
-| `ops_requests`, `ops_request_stages` (0040)                                             | an accepted operations request and its stage progress          | `principal`                                                       | none                                       | no delete; progress forward only            | `GET /api/ops/v1/operations/{id}`, own principal only          |
-| `ops_collector_dispatches` (0068)                                                       | the execution of a collection or refresh request               | none (by `operation_id`)                                          | none                                       | no (`operational-mutable`)                  | through the operation record                                   |
-| `collection_schedule_revisions` (0065)                                                  | each job setting revision                                      | `actor`                                                           | none                                       | yes                                         | no route (written, never read)                                 |
-| `collection_schedules` (0065)                                                           | current job settings                                           | `updated_by`                                                      | none                                       | no (`operational-mutable`)                  | schedules page                                                 |
-| `provider_maintenance_rules` (0065; +0067 on #564)                                      | maintenance rule revisions                                     | `actor` (+ `actor_kind`, `change_reason`, `decision_ref` on #564) | `actor_kind` (operator/agent) on #564 only | yes                                         | schedules page; #564's read tool                               |
-| `maintenance_survey_fetches`, `_proposals`, `_decisions` (0069)                         | page readings, proposals, the operator's decisions             | `maintenance_survey_decisions.actor`                              | none                                       | yes                                         | schedules page, operator only                                  |
-| `collection_schedule_occurrences` (0065)                                                | alarm occurrence receipts: status, run ids, failure code       | none                                                              | implicitly the alarm                       | no (`operational-mutable`)                  | schedules page                                                 |
-| `collection_execution_leases` (0065)                                                    | which lease holds a source now                                 | none                                                              | none                                       | no; a release leaves no trace               | schedules page                                                 |
-| `processor_lane_ticks` (0049)                                                           | one lane tick: outcome, closed error code, counts              | none                                                              | the lane                                   | no update, pruned to the latest day         | Processor `/internal/health`, relayed by the release postcheck |
-| `publication_events` (0026), `release_activation_events` (0028), `report_events` (0034) | parser publication and activation, report lifecycle            | `actor`, `reason`                                                 | none                                       | yes                                         | no agent route                                                 |
-| `account_connection_reviews`, `ingestion_attempts`, `raw_object_verification_events`    | rule-made reviews, ingest attempts, raw object checks          | verifier version, ingest client id                                | ingest client                              | yes                                         | identity and evidence pages, partly                            |
-| Worker request log (`evidence_request` JSON line)                                       | route label, status, request id, error code                    | none                                                              | route label                                | not durable (Workers Logs retention)        | the Cloudflare dashboard                                       |
+| Log (CORE migration)                                                                    | Records                                                        | Actor fields                                                      | Path fields                                    | Append-only?                                | Readable by whom today                                         |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------- |
+| `decision_operations` (0029)                                                            | one decision operation: action, payload digest, result         | `actor_id`, `actor_verification`                                  | none                                           | yes                                         | no route; backs what the operator pages show                   |
+| `decision_revisions` (0029)                                                             | each judgement: subject, revision, kind, reason, evidence refs | `actor_id`, `method` (`manual`/`rule`/`ai`/…)                     | none (`method` is how, not where)              | yes, except `superseded_by` set once        | operator review pages; agent proposals write it                |
+| `change_plans`, `approvals`, `operation_receipts`, `decision_outbox` (0031, 0038)       | plan, approval, receipt, downstream delivery                   | `created_by`, `approver_actor`, `principal`                       | none                                           | no delete; status columns move forward only | command routes and the confirm page (operator)                 |
+| `economic_commit_log` (0070)                                                            | one economic commit: sequence, members, claims, kind           | `principal`, `operation_id`                                       | none                                           | yes                                         | no route; the knowledge selector reads it                      |
+| `ops_requests`, `ops_request_stages` (0040)                                             | an accepted operations request and its stage progress          | `principal`                                                       | none                                           | no delete; progress forward only            | `GET /api/ops/v1/operations/{id}`, own principal only          |
+| `ops_collector_dispatches` (0068)                                                       | the execution of a collection or refresh request               | none (by `operation_id`)                                          | none                                           | no (`operational-mutable`)                  | through the operation record                                   |
+| `collection_schedule_revisions` (0065)                                                  | each job setting revision                                      | `actor`                                                           | none                                           | yes                                         | no route (written, never read)                                 |
+| `collection_schedules` (0065)                                                           | current job settings                                           | `updated_by`                                                      | none                                           | no (`operational-mutable`)                  | schedules page                                                 |
+| `provider_maintenance_rules` (0065; +0076 on #564)                                      | maintenance rule revisions                                     | `actor` (+ `actor_kind`, `change_reason`, `decision_ref` on #564) | `actor_kind` (operator/delegated) on #564 only | yes                                         | schedules page; #564's read tool                               |
+| `maintenance_survey_fetches`, `_proposals`, `_decisions` (0069)                         | page readings, proposals, the operator's decisions             | `maintenance_survey_decisions.actor`                              | none                                           | yes                                         | schedules page, operator only                                  |
+| `collection_schedule_occurrences` (0065)                                                | alarm occurrence receipts: status, run ids, failure code       | none                                                              | implicitly the alarm                           | no (`operational-mutable`)                  | schedules page                                                 |
+| `collection_execution_leases` (0065)                                                    | which lease holds a source now                                 | none                                                              | none                                           | no; a release leaves no trace               | schedules page                                                 |
+| `processor_lane_ticks` (0049)                                                           | one lane tick: outcome, closed error code, counts              | none                                                              | the lane                                       | no update, pruned to the latest day         | Processor `/internal/health`, relayed by the release postcheck |
+| `publication_events` (0026), `release_activation_events` (0028), `report_events` (0034) | parser publication and activation, report lifecycle            | `actor`, `reason`                                                 | none                                           | yes                                         | no agent route                                                 |
+| `account_connection_reviews`, `ingestion_attempts`, `raw_object_verification_events`    | rule-made reviews, ingest attempts, raw object checks          | verifier version, ingest client id                                | ingest client                                  | yes                                         | identity and evidence pages, partly                            |
+| Worker request log (`evidence_request` JSON line)                                       | route label, status, request id, error code                    | none                                                              | route label                                    | not durable (Workers Logs retention)        | the Cloudflare dashboard                                       |
 
 The effect tables those logs describe — `entity_relations`,
 `card_settlement_decisions`, `settlement_relations`, `account_mappings` and
@@ -653,7 +649,7 @@ page contents. The record holds their ids and revision numbers.
 
 CORE table `audit_records`, migration **0075 or later (candidate; fixed after
 root coordination: CORE 0072 is the financial G3 migration, 0073/0074 are UI
-candidates, 0067 is #564's; re-check latest main and every open PR before the
+candidates, 0076 is #564's; re-check latest main and every open PR before the
 implementation PR)**. `STRICT`, classified `core-keep`, listed in
 `REVISION_EXCLUDED_TABLES` (`packages/read-model/src/source-revision.ts`: an
 audit write must not move the CORE source revision, or every MCP read would
@@ -1007,9 +1003,17 @@ private Processor command envelopes and installed R1 operation adapters.
 History and scoped audit reads share their existing application services.
 The generic R2 helper is not a finished settings tool: #564's sole maintenance
 writer and the other schedule adapters still need integration and independent
-review. The owner approved first-stage R2 on 2026-10-10; financial adoption/provider
-contact still require their adapters. Actual client authentication, grant
-activation and production rollout remain unchanged and unverified.
+review. The owner approved first-stage R2 on 2026-10-10. A separate candidate slice adds
+command approval/commit and collection/session-refresh confirmation, with real
+Worker tests through existing Processor/native writers. Audit-linked reversals
+validate a same-owner prior applied commit/native receipt and compatible inverse
+plan against the still-current original effect. Its matching decision/target and
+produced revision are also guarded atomically by native receipt reservation;
+a historical audit cannot release a newer assignment. Exact completed reversal
+retries read the existing receipt first. Provider
+requests distinguish internal acceptance from irreversible contact and preserve
+human session policy. These adapters require their own fresh review; settings
+remain pending #564. Actual client setup is a separately authorized workflow.
 No configuration is activated by this work.
 
 **S4 — #564 re-shaped** (after S3; a rebase can be prepared now). Once the
@@ -1019,9 +1023,9 @@ contradicts it, so #564 lands as this slice, not before it.
 
 - What: section 4.6 — the capability moved to the delegation, closed
   `MAINTENANCE_CHANGE_REASONS`, the direct envelope, audit. Beyond the 7-day
-  bound the tool refuses (R3) until question 1 is answered; an R2 path up to
-  the 31-day ceiling is added only after that answer, in its own pull request.
-- ADR: 0046, amended by 0063. Migration: #564's own CORE 0067, rewritten
+  bound the approved target is R2 up to the 31-day ceiling; the current
+  writer still refuses until its confirmed adapter is integrated and reviewed.
+- ADR: 0046, amended by 0063. Migration: #564's own CORE 0076, rewritten
   before merge: the `actor_kind` CHECK (`operator`, `delegated`), the closed
   `change_reason` CHECK, and the partial index `maintenance_agent_writes`
   (`WHERE actor_kind='delegated'` instead of `'agent'`).
@@ -1171,31 +1175,16 @@ questions 1–3, grants nothing and enables nothing: no Access application or
 policy, grant, `MCP_DELEGATIONS` entry, session length, authentication or
 production change.
 
-1. **The stage at which the R2 target applies.** Following your direction
-   (「基本的に人間ができることはすべてAIができてほしい。AI経由で使うのがメインになる予定なので」),
-   R2 — the AI confirms its own prepared operation, bound by digest, revision
-   and idempotency key — is the stated target class for financial adoption
-   (card-settlement decisions, link and ownership decisions, identity
-   assignment), provider contact (collection requests, session refreshes) and
-   maintenance deferral beyond the 7-day bound (up to the 31-day
-   joined-deferral ceiling, which stays, and never beyond; section 4.6). That
-   target is not in question. The only judgment left to you is the stage
-   boundary: do these classes become R2 in the first delegated stage, or only
-   after earlier stages' audit records exist and you have read them? Until you
-   answer, the conservative default stays as written: R3 — the tool refuses a
-   deferral beyond 7 days (section 4.6), no delegation entry is proposed with
-   a financial-adoption or provider-contact capability (section 3.5), and you
-   perform these operations in the UI.
-2. **Device posture for write delegation.** The MCP Access application
-   cannot carry the browser application's device posture (the clients call
-   from their own clouds; ADR 0047). With writes delegated, the compensating
-   controls are the delegation's expiry (at most 90 days), the Access session
-   and token lifetime you set on the MCP application, two-step confirmation
-   and the audit log. A delegation also covers **every MCP client you sign in
-   with** (claude.ai, ChatGPT, Codex, Claude Code), not one specific AI: they
-   are all `mcp-client:<sub>`, and neither the server nor the audit record can
-   tell them apart (section 3.2). Is that acceptable, and which session length
-   do you want on the MCP application?
+1. **R2 stage — answered 2026-10-10.** The owner approved first-stage R2
+   for financial adoption, provider requests and maintenance deferral up to
+   31 days. This does not bypass provider approvals, human login, revisions
+   or audit. Each adapter still needs its independent review.
+2. **Device posture and client identity — connection evidence required.**
+   Cloudflare MCP Portal documentation says Device Posture selectors are enforced;
+   verify refresh and actual client-path semantics in the authorized setup.
+   Forwarded `clientInfo` and User-Agent are diagnostic, not trusted identity.
+   Authority remains the verified `mcp-client:<sub>`, not one AI product.
+   Concrete Access session and delegation settings belong to that setup.
 3. **The first delegation entry.** After the read-only connection test, which
    role, sources and expiry should the first `MCP_DELEGATIONS` entry carry?
    The proposal is `maintainer` on one schedule source for 30 days.

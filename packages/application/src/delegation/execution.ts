@@ -29,7 +29,8 @@ export type DelegatedErrorCode =
   | "confirmation_used"
   | "revision_conflict"
   | "audit_cap_reached"
-  | "operation_not_delegable";
+  | "operation_not_delegable"
+  | "revert_invalid";
 export class DelegatedOperationError extends Error {
   constructor(readonly code: DelegatedErrorCode) {
     super(code);
@@ -45,6 +46,7 @@ export interface DelegatedExecution {
   idempotencyKey?: string;
   payloadDigest?: string;
   confirmsAuditId?: string;
+  revertsAuditId?: string;
   confirmationDigest?: string;
   commandFamilies: readonly ("plan" | "card-settlement" | "relation" | "identity")[];
 }
@@ -62,6 +64,7 @@ export function validDelegatedExecution(value: unknown): value is DelegatedExecu
           "idempotencyKey",
           "payloadDigest",
           "confirmsAuditId",
+          "revertsAuditId",
           "confirmationDigest",
           "commandFamilies",
         ].includes(k),
@@ -83,6 +86,8 @@ export function validDelegatedExecution(value: unknown): value is DelegatedExecu
     (v.payloadDigest === undefined ||
       (typeof v.payloadDigest === "string" && AUDIT_DIGEST.test(v.payloadDigest))) &&
     (v.idempotencyKey === undefined) === (v.payloadDigest === undefined) &&
+    (v.revertsAuditId === undefined ||
+      (typeof v.revertsAuditId === "string" && AUDIT_ID.test(v.revertsAuditId))) &&
     (v.confirmsAuditId === undefined ||
       (typeof v.confirmsAuditId === "string" && AUDIT_ID.test(v.confirmsAuditId))) &&
     (v.confirmationDigest === undefined ||
@@ -147,7 +152,7 @@ export function guardDelegatedEffect(
   const binds: unknown[] = [auth.notAfter, row.principal, auth.writesPerDay];
   if (auth.confirmsAuditId) {
     conditions.push(
-      `EXISTS(SELECT 1 FROM audit_records p WHERE p.audit_id=? AND p.result='prepared' AND p.principal=? AND p.delegation_ref=? AND p.operation=? AND p.idempotency_key=? AND p.payload_digest=? AND p.confirmation_digest=? AND p.target_ref IS ? AND p.scope_namespace IS ? AND p.scope_source IS ? AND p.confirm_expires_at>${clock})`,
+      `EXISTS(SELECT 1 FROM audit_records p WHERE p.audit_id=? AND p.result='prepared' AND p.principal=? AND p.delegation_ref=? AND p.operation=? AND p.idempotency_key=? AND p.payload_digest=? AND p.confirmation_digest=? AND p.target_ref IS ? AND p.scope_namespace IS ? AND p.scope_source IS ? AND p.reverts_audit_id IS ? AND p.confirm_expires_at>${clock})`,
     );
     binds.push(
       auth.confirmsAuditId,
@@ -160,6 +165,7 @@ export function guardDelegatedEffect(
       row.target_ref,
       row.scope_namespace,
       row.scope_source,
+      auth.revertsAuditId ?? null,
     );
   }
   // auditEffectWrite always starts its SELECT with the audit_id placeholder.
@@ -220,6 +226,7 @@ export interface ConfirmationInput {
   targetRef: string;
   scope: AuditScope | null;
   expectedRevision?: number;
+  revertsAuditId?: string;
 }
 function confirmationBody(
   operation: OperationName,
@@ -235,6 +242,8 @@ function confirmationBody(
     principal,
     delegationRef,
     targetRef: input.targetRef,
+    scope: input.scope,
+    ...(input.revertsAuditId ? { revertsAuditId: input.revertsAuditId } : {}),
     ...(input.expectedRevision === undefined ? {} : { expectedRevision: input.expectedRevision }),
     payloadDigest,
     idempotencyKey: input.idempotencyKey,
@@ -290,6 +299,7 @@ export async function prepareDelegatedOperation(
       payloadDigest,
       confirmationDigest: digest,
       confirmExpiresAt: expiresAt,
+      ...(input.revertsAuditId ? { revertsAuditId: input.revertsAuditId } : {}),
       diff: { kind: "none" },
     },
     auditInstant(now),
@@ -341,6 +351,7 @@ export async function confirmDelegatedOperation(
     prepared.target_ref !== input.targetRef ||
     prepared.scope_namespace !== (input.scope?.namespace ?? null) ||
     prepared.scope_source !== (input.scope?.source ?? null) ||
+    prepared.reverts_audit_id !== (input.revertsAuditId ?? null) ||
     confirmationDigest !==
       `cfm_${await canonicalDigest(confirmationBody(call.operation, principal.id, principal.delegationRef, input, payloadDigest, prepared.confirm_expires_at!))}`
   )
@@ -352,6 +363,7 @@ export async function confirmDelegatedOperation(
     idempotencyKey: input.idempotencyKey,
     payloadDigest,
     confirmsAuditId: prepared.audit_id,
+    ...(input.revertsAuditId ? { revertsAuditId: input.revertsAuditId } : {}),
     confirmationDigest,
   });
 }
@@ -401,4 +413,72 @@ export async function delegatedBatchFailure(
       return new DelegatedOperationError("idempotency_conflict");
   }
   return null;
+}
+
+/** Family attenuation survives the private binding; a confirmed call is still not a blanket command grant. */
+export function delegatedCommandFamilyAllowed(
+  call: OperationCall | undefined,
+  kind: string,
+): boolean {
+  const family = kind.split(".")[0];
+  return (
+    call?.actor.principalKind === "delegated" &&
+    call.step === "confirm" &&
+    !!call.delegatedExecution?.confirmsAuditId &&
+    (family === "identity" || family === "relation" || family === "card-settlement") &&
+    call.delegatedExecution.commandFamilies.includes(family)
+  );
+}
+
+/** Completed confirmations are read-only retries, but still require the exact prior binding. */
+export async function replayDelegatedConfirmation(
+  store: CommandStore,
+  call: OperationCall,
+  principal: DelegatedPrincipal,
+  capability: DelegationCapability,
+  input: ConfirmationInput,
+  confirmationDigest: string,
+): Promise<AuditRow | null> {
+  delegatedCan(principal, capability);
+  const payloadDigest = await canonicalDigest({
+    v: "kogane-delegated-payload-v1",
+    operation: call.operation,
+    payload: input.payload,
+  });
+  call.delegate(principal, executionFor(principal));
+  const row = await delegatedReplay(store, call, input.idempotencyKey, payloadDigest);
+  if (!row) return null;
+  if (!row.confirms_audit_id) throw new DelegatedOperationError("confirmation_invalid");
+  const prepared = await store.first<AuditRow>(
+    "SELECT * FROM audit_records WHERE audit_id=? AND principal=? AND delegation_ref=? AND operation=? AND confirmation_digest=? AND result='prepared'",
+    [
+      row.confirms_audit_id,
+      principal.id,
+      principal.delegationRef,
+      call.operation,
+      confirmationDigest,
+    ],
+  );
+  if (
+    !prepared ||
+    prepared.payload_digest !== payloadDigest ||
+    prepared.idempotency_key !== input.idempotencyKey ||
+    prepared.target_ref !== input.targetRef ||
+    prepared.scope_namespace !== (input.scope?.namespace ?? null) ||
+    prepared.scope_source !== (input.scope?.source ?? null) ||
+    prepared.reverts_audit_id !== (input.revertsAuditId ?? null) ||
+    confirmationDigest !==
+      `cfm_${await canonicalDigest(confirmationBody(call.operation, principal.id, principal.delegationRef, input, payloadDigest, prepared.confirm_expires_at!))}`
+  )
+    throw new DelegatedOperationError("confirmation_invalid");
+  call.delegate(principal, {
+    ...executionFor(principal),
+    idempotencyKey: input.idempotencyKey,
+    payloadDigest,
+    confirmsAuditId: prepared.audit_id,
+    ...(input.revertsAuditId ? { revertsAuditId: input.revertsAuditId } : {}),
+    confirmationDigest,
+  });
+  call.setStep("confirm");
+  return row;
 }
