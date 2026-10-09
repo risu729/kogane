@@ -254,7 +254,18 @@ describe.if(runnable)("combined production client", () => {
   test("summary counts come from the shared query service, with its hand-off references", async () => {
     const page = await browser.newPage();
     const before = requests.length;
+    const coverageResponse = page.waitForResponse(
+      (response) =>
+        response.url() === origin + "/api/v2/query?intent=coverage" &&
+        response.request().method() === "GET",
+      { timeout: 10_000 },
+    );
     await page.goto(origin + "/", { waitUntil: "networkidle" });
+    const response = await coverageResponse;
+    expect(response.status()).toBe(200);
+    expect(await response.finished()).toBeNull();
+    await page.locator(".overview-stat-value").nth(2).waitFor({ timeout: 10_000 });
+    await page.getByText("この数字の出どころ").waitFor({ timeout: 10_000 });
     const observed = requests.slice(before);
     // The page asks the shared service, and only for the coverage intent.
     expect(observed).toContain("/api/v2/query?intent=coverage");
@@ -277,7 +288,7 @@ describe.if(runnable)("combined production client", () => {
     expect(text).toContain(`ctx_${"0".repeat(64)}`);
     expect(text).toContain(`result:${"1".repeat(64)}`);
     await page.close();
-  });
+  }, 15_000);
 
   test("evidence navigation preserves observation routes and does not deny available parsing", async () => {
     const page = await browser.newPage();
