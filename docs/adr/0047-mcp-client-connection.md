@@ -234,7 +234,8 @@ Coverage run counts (fact 5):
    (or an `HttpError`'s own code) and logs that code, as on every other
    route.
 
-The first grant is `summary.read` on one listed source for
+The original staged first grant, superseded by the activation amendment below,
+was `summary.read` on one listed source for
 `mcp-client:<owner sub>`; `records.read`, then `interpretation.propose`, one
 release at a time; `evidence.read` only by a separate decision. Revocation:
 remove the person from the MCP application's policy, unset
@@ -368,9 +369,11 @@ agent_api_not_configured` on the HTTP agent route and `/mcp`), and still
   `test/health.test.ts` pass with MCP requests signed for the MCP
   application.
 
-Not verified (matrix 10, owner-executed): no Access application, Managed
-OAuth setting, policy, client registration or MCP client against a
-deployment; the gaps above; and the JSON Schema 2020-12 meta-schema check
+Original implementation review did not verify matrix 10 (owner-executed):
+Access configuration, Managed OAuth, policy, client registration or a real
+MCP connection. The activation amendment separates their current live checks
+from the repository configuration; they must not be inferred from a deployed
+grant. The gaps above and the JSON Schema 2020-12 meta-schema check
 Claude Code also runs. The owner's ordered steps, live checks and what
 counts as evidence are in
 [agent-api.md](../agent-api.md#connecting-an-mcp-client).
