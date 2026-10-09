@@ -340,6 +340,25 @@ and the card settlement acceptance and withdrawal write through it since G1b
   holder-dependent `duplicate_unresolved`, `alias_conflict`,
   `identity_rekeyed` and `identity_epoch_changed`.
 
+## `economic-event-commands.ts` — the economic-event command vocabulary
+
+[ADR 0054, G2 amendment](adr/0054-economic-consumption-guard.md#amendment-g2-as-implemented-2026-10-09);
+admitted by CORE 0071, refused by the change lifecycle until a planner exists
+([change lifecycle](change-lifecycle.md#economic-event-kinds-migration-0071)).
+
+- `ECONOMIC_EVENT_COMMAND_KINDS`: `economic-event.adopt`, `correct`,
+  `withdraw`, `move`; not the reserved `economic-event.resolve-identity`.
+- `validEconomicEventCommandPayload`: exact keys per kind, a `family` from
+  `TRANSACTION_FAMILIES` and a non-blank reason; adopt names a proposal,
+  correct restates the whole revision and lists the claims it releases (none
+  of them restated), withdraw names the revision and its adopting decision,
+  move takes one claim off one restated member and onto another.
+- `validRestatedRevision`: kind, state in the kind's family, unknown reason
+  exactly when `unknown`, legs indexed 0..n−1 with `account:` subjects and a
+  cited transaction row each, distinct claims; an `unknown` revision holds
+  nothing and any other holds at least one leg and claim. No value is stated:
+  a leg's value is its cited row's.
+
 ## `row-identity.ts` — may a human-adopted writer consume this row
 
 [ADR 0054](adr/0054-economic-consumption-guard.md), identity rules.
